@@ -97,7 +97,7 @@ The cockpit lives in the application layer. Data, logic and observability belong
 ### 7.4 Open questions
 
 - `TR-UI-02` requires authoring "without leaving the cockpit" and has no milestone. Is 0.1 authoring by YAML import in the cockpit enough, or does `TR-UI-02` gate only from M2? Pending as [PD-013](decisions.md#pd-013-from-which-milestone-tr-ui-02-gates).
-- Standalone mode: one host per URL, or an environment switcher? (DESIGN open question, gate M1 start.)
+- Standalone mode: one host per URL, or an environment switcher? (DESIGN open question, gate M1 start; a proposed answer is pending in [PD-035](decisions.md#pd-035-multi-host-cockpit-model).)
 - Proposal: add the pulse strip to a milestone, or remove it from DESIGN. Pending as [PD-016](decisions.md#pd-016-cockpit-pulse-strip).
 
 ## 8. Release and scope
@@ -111,7 +111,7 @@ The cockpit lives in the application layer. Data, logic and observability belong
 
 M3: migration screen; simulation reports on publication requests. After 1.0 (candidate): hosted cockpit.
 
-Non-goals: a backend-for-frontend, database or user store ([ADR-0005](../adr/0005-cockpit-as-static-assets.md)); any authorisation decided in the browser; a BPMN diagram modeller; dashboards that replace the host's monitoring (metrics stay in Micrometer, `TR-OBS-02`); editing in 0.1.
+Non-goals: a backend-for-frontend, database or user store ([ADR-0005](../adr/0005-cockpit-as-static-assets.md)); any authorisation decided in the browser; a BPMN diagram modeller (under review in [PD-032](decisions.md#pd-032-diagrams-and-a-visual-modeller-in-scope) and [PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)); dashboards that replace the host's monitoring (metrics stay in Micrometer, `TR-OBS-02`); editing in 0.1.
 
 ## Red-team
 

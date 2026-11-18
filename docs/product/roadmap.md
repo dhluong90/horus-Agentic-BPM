@@ -8,7 +8,7 @@
 
 Design preview: nothing is released. This file owns milestones, dates and the order of work (PD-002). Feature scope and status are owned by the [feature map](feature-map.md); this roadmap names features by id. Reasons for scope choices are in the [decision log](decisions.md). The short public view is the wiki page [Roadmap](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Roadmap). Dates are targets, not commitments; [Release Notes](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Release-Notes) state what shipped.
 
-Pending decisions that would change this roadmap are marked "(PD-nnn, pending)". Until a pending entry is decided, the roadmap shows the scope before that decision, and cut candidates stay in their milestone.
+Pending decisions that would change this roadmap are marked "(PD-nnn, pending)". The cockpit direction (PD-032 to PD-042) is shown separately in [Scenario: Camunda-like cockpit](#scenario-camunda-like-cockpit). Until a pending entry is decided, the roadmap shows the scope before that decision, and cut candidates stay in their milestone.
 
 ## At a glance
 
@@ -267,6 +267,92 @@ Load-bearing assumptions behind this roadmap, each with the cheapest test and th
 - Team capacity per milestone: the dates assume full focus on the engines (PD-010) and no other commitments.
 - Adopter demand: no adopter conversations are recorded yet; K13 is the first test for that reason.
 
+## Scenario: Camunda-like cockpit
+
+Not adopted. This section shows the roadmap as it would be if the product owner accepts PD-032 to PD-038 as recommended and chooses option 2 of [PD-042](decisions.md#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted). The plan above stays in force until then. The proposed features are listed in the [feature map](feature-map.md#proposed-camunda-like-cockpit-pending-pd-032-to-pd-042).
+
+### What the scenario adds
+
+The product owner asked for Camunda-like tools on top of embedded engines. The scenario delivers diagrams, operations on the diagram, a task inbox across hosts and governed process change. It does not deliver fleet analytics or full BPMN 2.0 ([what is included](decisions.md#pending-cockpit-direction-camunda-like-cockpit)).
+
+| Decision | Recommendation | Where it lands |
+|---|---|---|
+| PD-032 Diagrams and modeller | Read-only diagrams in M2; modeller canvas in M3 as the first M3 cut, fallback 1.1; its engine APIs before the freeze | M2, M3 |
+| PD-033 Maker-checker for definitions | Lifecycle, permissions, events and graph diff in the engine in M2; screens in M3; `dev` may auto-approve | M2, M3 |
+| PD-034 Notation | Own JSON canonical; BPMN subset import protected, export added as a cut candidate | M3 |
+| PD-035 Multi-host cockpit | Option B with A supported, D documented, C rejected for now; registry and `/meta` and `/me` in M1, merged inbox and incidents in M2 | M1, M2 |
+| PD-036 Source of truth | Git and cockpit both; imports arrive as drafts; per-environment switch for cockpit authoring | M2 |
+| PD-037 Tenant switching | Header only within the token's allowed tenants; no cross-tenant view | M2 |
+| PD-038 Analytics | Live counts per node in M2; hourly rollup and heatmap in M3; no aggregator before a paying customer | M2, M3 |
+
+### Milestones under the scenario
+
+| Milestone | Dates (target) | Change | Outcome | Features |
+|---|---|---|---|---|
+| M0 Architecture | 18 Nov to 4 Dec 2026 (2 weeks) | Date unchanged. Adds PD-032 to PD-042 to the decisions that must be made, the two-day diagram spike, and ADR-0012 to ADR-0015 drafted | Contributors verify schema, transaction boundaries and module rules; the product design, including the cockpit direction, is decided | 3 |
+| M1 Rule Engine 0.1, Cockpit 0.1 | 7 Dec 2026 to 15 Jan 2027 (6 weeks) | Date unchanged. Adds CK-F-23 and X-F-22 | Business staff change governed rules without a deployment, from one cockpit that reaches every host | 48 |
+| M2 Process Engine 0.1 with `agentTask`, Cockpit 0.2 | 18 Jan to 26 Mar 2027 (10 weeks, was 12 Mar) | +2 weeks. Adds 14 features; CK-F-18, RE-F-22 and CK-F-11 move to M3 | Teams run approvals, sagas and guarded AI agent steps in their own service, and operators see and work every instance on its diagram from one inbox | 55 |
+| M3 Agentic depth, compatibility, 1.0 | 29 Mar to 21 May 2027 (8 weeks, was 15 Mar to 7 May) | +2 weeks. Adds 8 features and the 3 moved from M2; PE-F-41 leaves the cut list | Adopters run in production with evaluated agent changes, governed process changes and a frozen API | 30 |
+| After 1.0 | Candidates | Adds the modeller canvas if cut from M3; option C aggregator only with a paying customer | Unchanged | 6 |
+
+Scheduled features rise from 112 to 136 (M0 to M3). If PD-028 is accepted, M3 holds 29.
+
+### M1 under the scenario
+
+| Area | Features added |
+|---|---|
+| Cockpit 0.1 | CK-F-23 host registry, single sign-in with OIDC PKCE, host switching, screens hidden by `/meta` and `/me` |
+| Cross-cutting | X-F-22 `/api/bpm/meta` and `/api/bpm/me` |
+
+Sizing: a few days, not part of the architect's M2 estimate (assumption until the architect sizes it). The M1 date and the PD-031 M1 cut list are unchanged. The M0 gate "standalone cockpit host switching" is answered by PD-035.
+
+### M2 under the scenario
+
+| Area | Features added | Moved out |
+|---|---|---|
+| Definitions | PE-F-45 lifecycle with maker-checker, PE-F-46 graph diff | |
+| Read models | PE-F-47 activity history, PE-F-48 live node counts, X-F-24 bounded queries | |
+| Human tasks | PE-F-50 task query, PE-F-51 task forms | |
+| Tenancy | X-F-23 tenant switching | |
+| Cockpit 0.2 | CK-F-24 definition diagram, CK-F-25 instance diagram with tokens, CK-F-26 live node counts (cut candidate), CK-F-28 merged inbox, CK-F-29 merged incidents, CK-F-30 task forms | CK-F-18 calendar editor to M3 |
+| Rule Engine | | RE-F-22 and CK-F-11 replay simulation to M3 |
+
+Effort: about 3 weeks added (architect's estimate), about 1 week removed by the moves (assumption), about 2 weeks net, covered by the two-week date move. The remaining M2 cut list, in order: PE-F-30 migration execution (PD-017), CK-F-26 live node counts on the diagram, PE-F-12 `callProcess`. Checkpoint: end of week 7, 5 Mar 2027, trigger unchanged (fewer than 9 of 17 `PRE-*` green), plus the walking skeleton now includes one instance drawn with its token by week 4.
+
+Added sequencing: ADR-0012 before PE-F-45; ADR-0013 and the M0 spike before CK-F-24; ADR-0015 before PE-F-47 and PE-F-48; PE-F-50 before CK-F-28; the diagram views follow PE-F-15 history and PE-F-28 API, which are already early in M2.
+
+Added exit criteria: a process definition imported from Git arrives as a draft and is approved by a second identity before it runs (`TR-SEC-04` for processes); `examples/both` shows its instance as a diagram with the current token; a CI query-plan check proves the activity and task queries are bounded.
+
+### M3 under the scenario
+
+| Area | Features added |
+|---|---|
+| Moved from M2 | RE-F-22 and CK-F-11 replay simulation, CK-F-18 calendar editor (first M3 cut) |
+| Modeller | PE-F-44 layout storage, PE-F-52 step catalogue, CK-F-32 canvas (cut candidate, fallback 1.1) |
+| Governed change | CK-F-31 definition approval screens with graph diff |
+| Analytics | PE-F-49 hourly node rollup, CK-F-27 historical heatmap (cut candidate) |
+| Compatibility | PE-F-41 BPMN subset import (no longer a cut candidate), PE-F-53 BPMN subset export (cut candidate) |
+| Migration | CK-F-33 migration plan as two diagrams |
+
+Checkpoint: end of week 4, 23 Apr 2027. M3 cut list, in order: CK-F-18 calendar editor to after 1.0, CK-F-32 modeller canvas to 1.1, CK-F-27 historical heatmap to after 1.0, PE-F-53 BPMN export, RE-F-30 DMN import, RE-F-24 what-if, X-F-17 documentation site. Never cut in M3: the engine APIs that freeze at 1.0 (PE-F-44, PE-F-45, PE-F-46, PE-F-52), because adding them after the freeze would break the deprecation policy.
+
+The April and May public holidays leave about seven working weeks. M3 is not estimated yet; at 30 features it carries about 4.3 per working week against about 2.7 today, which is why four of the new or moved features are cut candidates.
+
+### Assumptions the scenario adds
+
+| Rank | Id | Claim | Fails if | Cheapest test | Kill criterion | Then |
+|---|---|---|---|---|---|---|
+| 1 | K16 | In banks, process owners or analysts, not only developers, change process definitions, so a modeller has users | Every process change goes through IT, so the canvas is used only by developers who prefer Git | Ask three process owners or operations leads who changes an approval flow today and how long it takes; during M1 | Two of three say only IT changes processes | Move CK-F-32 to after 1.0; keep diagrams, lifecycle and step catalogue |
+| 2 | K18 | The architect's estimate of about 3 weeks for M2 holds | The diagram views or the lifecycle take longer than planned | Two-day spike in M0: render `kyc-onboarding` with automatic layout and a token overlay in React Flow | The spike takes more than four days or needs a library that fails `TR-LIC-01` | Drop CK-F-26 from M2 and keep only the instance diagram; try maxGraph |
+| 3 | K15 | A read-only diagram is what evaluators and operators need first, more than the modeller | Evaluators reject the product without editing in the browser | Show spike screenshots in the three K5 architect conversations and two operations lead conversations in M1 | Two of five require browser editing to shortlist | Bring CK-F-32 forward to the start of M3 and protect it; cut replay instead |
+| 4 | K17 | Pilot banks run at most about 15 hosts and one IdP whose tokens every host accepts | A pilot cannot issue a token accepted across hosts, or runs more hosts | Ask the K13 pilot candidates for host count and IdP setup; during M1 | Either pilot cannot meet the condition | Run that pilot on option A, document option D through its gateway |
+
+K5 (evaluators accept definitions without a modeller) is no longer the whole bet if PD-032 is accepted; it becomes a test of whether import (PE-F-41) moves ahead of agentic depth.
+
+### Positioning under the scenario
+
+Say: diagrams for every process, operations on the diagram, one inbox across services, and process changes approved by a second person, all inside the team's own service. Do not say: a Camunda replacement, process analytics, or full BPMN. The comparison we can win is governed change on an embedded engine; the one we cannot win is modeller polish.
+
 ## Pending decisions that affect this roadmap
 
-PD-012 to PD-031 in the [decision log](decisions.md), summarised with recommendations in the [product design review](README.md).
+PD-012 to PD-031 in the [decision log](decisions.md), summarised with recommendations in the [product design review](README.md). PD-032 to PD-042 (cockpit direction) would change it as shown in [Scenario: Camunda-like cockpit](#scenario-camunda-like-cockpit).

@@ -50,7 +50,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | RE-F-19 | Authors write explanation templates per rule set | S2, S3 | M3 | RE 7.3, 8 | | TR-OBS-05 | spec gap | RE-F-18 | PD-027 |
 | RE-F-20 | A host evaluates and manages rules through the Java API and `/api/bpm/rules/v1`; every mutation and evaluate accepts an idempotency key, rejects a reused key with a different body and answers an in-flight duplicate with `409` | S1 | M1 | RE 7.2 API | RLE-014 | TR-IDEM-01, TR-IDEM-05, TR-SEC-08 | specified | X-F-05 | PD-021 |
 | RE-F-21 | An author simulates a draft over sample inputs next to the effective version; nothing is logged | S2 | M1 | RE 7.2 Logic | RLE-016 | TR-OBS-01, TR-DET-01 | specified | RE-F-02 | |
-| RE-F-22 | An author replays logged decisions through a draft and sees which outcomes change; nothing is logged | S2, S3 | M2 (cut candidate) | RE 8 | RLE-015 | TR-OBS-01 | specified | RE-F-17 | PD-018, PD-031 |
+| RE-F-22 | An author replays logged decisions through a draft and sees which outcomes change; nothing is logged | S2, S3 | M2 (cut candidate) | RE 8 | RLE-015 | TR-OBS-01 | specified | RE-F-17 | PD-018, PD-031, PD-042 |
 | RE-F-23 | A simulation report is attached to a publication request for the approver | S3 | M3 | RE 7.3 | | | spec gap | RE-F-21, RE-F-22 | PD-022 |
 | RE-F-24 | An author compares two versions over a past period (what-if) | S2 | M3 (cut candidate) | RE 7.3 | | | spec gap | RE-F-22 | PD-031 |
 | RE-F-25 | An author imports and exports rule sets as YAML or JSON | S2 | M1 | RE 7.3 | | | spec gap | RE-F-02 | |
@@ -66,7 +66,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 
 | Id | Feature | Persona | Milestone | PRD | SPEC | TR | Status | Depends on | Decisions |
 |---|---|---|---|---|---|---|---|---|---|
-| PE-F-01 | Definitions are versioned (JSON or YAML); a running instance stays on its version | S1 | M2 | PE 7.2 Data | PRE-001 | TR-DET-01, TR-TEN-02 | specified | | |
+| PE-F-01 | Definitions are versioned (JSON or YAML); a running instance stays on its version | S1 | M2 | PE 7.2 Data | PRE-001 | TR-DET-01, TR-TEN-02 | specified | | PD-033, PD-034 |
 | PE-F-02 | A retried start never creates a second instance; the business key is unique per tenant and definition | S1 | M2 | PE 7.2 Logic | PRE-002 | TR-IDEM-01, TR-IDEM-02, TR-IDEM-05 | specified | | |
 | PE-F-03 | A stale task or instance update is rejected with a conflict, never applied twice | S1, S2 | M2 | PE 7.2 Logic | PRE-003 | TR-IDEM-03 | specified | | |
 | PE-F-04 | An exclusive gateway routes to exactly one branch | S1 | M2 | PE 7.2 Logic | PRE-004 | TR-DET-01 | specified | | |
@@ -93,7 +93,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-25 | Operators retry or resolve an incident by API | S2 | M2 | PE 7.4 | | TR-OPS-03 | spec gap | PE-F-21 | |
 | PE-F-26 | A failed saga undoes completed steps in reverse order with attempt ids; a failed or manual compensation raises an incident | S1, S2 | M2 | PE 7.2 Logic | PRE-013 | TR-COMP-01, TR-COMP-02, TR-COMP-03, TR-IDEM-04 | specified | PE-F-08 | |
 | PE-F-27 | A `saga` block scopes compensation; `throwCompensation` starts it explicitly | S1 | M2 | PE 7.4 | | TR-COMP-01 | spec gap | PE-F-26 | |
-| PE-F-28 | Hosts manage definitions, instances, task queues, incidents and history through `/api/bpm/processes/v1` | S1, S2 | M2 | PE 7.2 API | | TR-SEC-08, TR-IDEM-01 | spec gap | X-F-05 | |
+| PE-F-28 | Hosts manage definitions, instances, task queues, incidents and history through `/api/bpm/processes/v1` | S1, S2 | M2 | PE 7.2 API | | TR-SEC-08, TR-IDEM-01 | spec gap | X-F-05 | PD-033 |
 | PE-F-29 | A migration plan is validated as a dry run that changes nothing | S2 | M2 | PE 7.2 Logic | PRE-014 | TR-MIG-01 | specified | PE-F-01 | PD-017 |
 | PE-F-30 | A migration executes in batches; one instance's failure affects only that instance | S2 | M2 (cut candidate) | PE 7.2 Logic | PRE-015 | TR-MIG-02 | specified | PE-F-29 | PD-017, PD-031 |
 | PE-F-31 | A migration maps renamed steps explicitly and cancels removed steps | S2 | M3 | PE 7.4, 8 | | TR-MIG-03 | spec gap | PE-F-30 | |
@@ -106,7 +106,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-38 | Adopters follow the autonomy ladder (rungs 1 to 3) and eval bar to raise agent autonomy one guardrail version at a time | S3 | M2 | PE 7.3 | PRD 7.3 (guidance, no engine behaviour) | | specified | PE-F-18 | |
 | PE-F-39 | An agent selects the next step among declared steps inside a bounded block, under the same guardrails | S3 | M3 (PD-028 proposes later) | PE 7.4, 8 | | | spec gap | PE-F-18 | PD-028 |
 | PE-F-40 | Processes correlate messages between instances | S1 | later | PE 8 | | | design preview | | |
-| PE-F-41 | An architect imports a BPMN subset into a definition | S1 | M3 (cut candidate) | PE 8 | | | spec gap | PE-F-01 | PD-031 |
+| PE-F-41 | An architect imports a BPMN subset into a definition | S1 | M3 (cut candidate) | PE 8 | | | spec gap | PE-F-01 | PD-031, PD-034 |
 | PE-F-42 | Several agents plan and coordinate steps | S3 | later | PE 8 | | | design preview | PE-F-39 | PD-028 |
 | PE-F-43 | Adopters run an agent in shadow (rung 0): output recorded, the process follows the human path | S3 | M3 if PD-015 | PE 7.5 | | | design preview | PE-F-37 | PD-015 |
 
@@ -114,7 +114,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 
 | Id | Feature | Persona | Milestone | PRD | SPEC | TR | Status | Depends on | Decisions |
 |---|---|---|---|---|---|---|---|---|---|
-| CK-F-01 | The cockpit runs embedded in the host or standalone from one base URL, with security headers and a CORS allowlist | All | M1 | CK 7.2 | CKP-001 | TR-UI-01, TR-SEC-09 | specified | Design question on standalone host switching (gate M1) | |
+| CK-F-01 | The cockpit runs embedded in the host or standalone from one base URL, with security headers and a CORS allowlist | All | M1 | CK 7.2 | CKP-001 | TR-UI-01, TR-SEC-09 | specified | Design question on standalone host switching (gate M1) | PD-035 |
 | CK-F-02 | An author lists rule sets, reads a version and imports or exports it | Author | M1 | CK 7.3, 8 | | TR-UI-02 | spec gap | RE-F-25 | PD-013 |
 | CK-F-03 | An approver sees added, changed and removed rows side by side | Approver | M1 | CK 7.2 | CKP-002 | TR-UI-02 | specified | RE-F-08 | |
 | CK-F-04 | An approver works the approvals queue; Approve is disabled for the requester; reject needs a comment | Approver | M1 | CK 7.2 | CKP-003 | TR-SEC-04, TR-UI-02 | specified | RE-F-06, RE-F-07 | PD-016 |
@@ -124,14 +124,14 @@ A PRD capability row that bundles several outcomes is split into several feature
 | CK-F-08 | Every screen is keyboard operable with WCAG 2.1 AA contrast in light and dark themes | All | M1 (re-run M2) | CK 7.2 | CKP-009 | TR-UI-03 | specified | | PD-026 |
 | CK-F-09 | Every screen is available in English and Vietnamese | All | M1 (re-run M2) | CK 7.2 | CKP-010 | TR-UI-04 | specified | | PD-026 |
 | CK-F-10 | An author edits a table in a grid with inline validation | Author | M2 | CK 7.2 | CKP-006 | TR-DET-02, TR-UI-02 | specified | RE-F-02 | PD-013 |
-| CK-F-11 | An author replays logged decisions through a draft in the cockpit | Author, Approver | M2 (cut candidate) | CK 7.2 | CKP-011 | TR-UI-02 | specified | RE-F-22 | PD-018, PD-031 |
-| CK-F-12 | An operator browses definitions and opens an instance with its current step and history timeline | Operator, Auditor | M2 | CK 7.3, 8 | | | spec gap | PE-F-15, PE-F-28 | |
+| CK-F-11 | An author replays logged decisions through a draft in the cockpit | Author, Approver | M2 (cut candidate) | CK 7.2 | CKP-011 | TR-UI-02 | specified | RE-F-22 | PD-018, PD-031, PD-042 |
+| CK-F-12 | An operator browses definitions and opens an instance with its current step and history timeline | Operator, Auditor | M2 | CK 7.3, 8 | | | spec gap | PE-F-15, PE-F-28 | PD-032 |
 | CK-F-13 | An operator works task queues: claim, complete, reassign | Operator | M2 | CK 7.3, 8 | | | spec gap | PE-F-07 | |
 | CK-F-14 | A reviewer inspects an escalated agent task and approves or overrides it with a reason | Approver | M2 | CK 7.2 | CKP-007 | TR-AGT-01, TR-AGT-02 | specified | PE-F-18, PE-F-22 | |
 | CK-F-15 | An operator works the incident queue and retries or resolves an incident | Operator | M2 | CK 7.2 | CKP-008 | TR-OPS-03 | specified | PE-F-25 | PD-016 |
 | CK-F-16 | An operator sees which compensation handlers ran, in which order, in the instance timeline | Operator | M2 | CK 7.3 | | TR-COMP-02 | spec gap | PE-F-26, CK-F-12 | PD-024 |
 | CK-F-17 | An operator filters the task queue to SLA breaches | Operator | M2 | CK 7.3 | | TR-CAL-01 | spec gap | PE-F-11, CK-F-13 | PD-024, PD-016 |
-| CK-F-18 | An operator edits business calendars per tenant | Operator | M2 (cut candidate) | CK 7.3, 8 | | TR-CAL-01 | spec gap | PE-F-11 | PD-031 |
+| CK-F-18 | An operator edits business calendars per tenant | Operator | M2 (cut candidate) | CK 7.3, 8 | | TR-CAL-01 | spec gap | PE-F-11 | PD-031, PD-042 |
 | CK-F-19 | An operator plans, validates and runs an instance migration from the cockpit | Operator | M3 | CK 7.3, 8 | | TR-MIG-03 | spec gap | PE-F-31 | PD-023 |
 | CK-F-20 | An approver reads the simulation report attached to a publication request | Approver | M3 | CK 7.3, 8 | | | spec gap | RE-F-23 | PD-022 |
 | CK-F-21 | Landing views show a strip of key counts and health | Operator | later (not scheduled) | CK 7.3 | | | design preview | | PD-016 |
@@ -162,6 +162,46 @@ A PRD capability row that bundles several outcomes is split into several feature
 | X-F-19 | The REST layer and cockpit are reviewed against OWASP ASVS level 2 per minor release | Auditor | M1 | V | | TR-SEC-07 | specified | | |
 | X-F-20 | Other databases through a storage SPI | Host developer | later | V; PE 8 | | | design preview | | |
 | X-F-21 | Jakarta EE integration | Host developer | later | V | | | design preview | | |
+
+## Proposed: Camunda-like cockpit (pending PD-032 to PD-042)
+
+These 24 features would be added if the product owner accepts the cockpit direction ([PD-032 to PD-042](decisions.md#pending-cockpit-direction-camunda-like-cockpit)). They are not in scope yet: they are excluded from the summary counts and from every milestone list until their decision is Decided. The Milestone column shows where each would go under the [roadmap scenario](roadmap.md#scenario-camunda-like-cockpit). None has a SPEC statement, so each becomes a spec gap when accepted.
+
+| Id | Feature | Persona | Milestone | PRD | SPEC | TR | Status | Depends on | Decisions |
+|---|---|---|---|---|---|---|---|---|---|
+| PE-F-44 | A definition's diagram layout is stored apart from the definition hash, append-only, with who changed it; moving a box needs no approval | S1, S2 | M3 if PD-032 | PE (to be added) | | TR-DET-01 | proposed, pending PD-032 | PE-F-01 | PD-032, PD-040 |
+| PE-F-45 | A process definition goes draft, pending approval, active, retired; a requester can never approve it; it takes effect on its effective date; an import arrives as a draft; the content hash shows whether it matches Git; a host can turn off draft creation from the cockpit per environment; `dev` may auto-approve | S1, S2 | M2 if PD-033 | PE 7.2 Logic (to be added) | | TR-SEC-04, TR-OBS-04 | proposed, pending PD-033 | PE-F-01, PE-F-28, X-F-06 | PD-033, PD-036, PD-040 |
+| PE-F-46 | The engine API returns the graph diff between two definition versions: nodes and edges added, removed or changed | S2 | M2 if PD-033 | PE (to be added) | | | proposed, pending PD-033 | PE-F-45 | PD-033 |
+| PE-F-47 | An instance's activity history (nodes run, when, how long, attempts, who acted) is read bounded by the instance start | S2 | M2 if PD-032 | PE 7.2 Data (to be added) | | TR-OBS-01 | proposed, pending PD-032 | PE-F-15 | PD-032 |
+| PE-F-48 | Live counts of active tokens per node of a definition version, from an index, never from history | S2 | M2 if PD-038 | PE (to be added) | | | proposed, pending PD-038 | PE-F-01 | PD-038 |
+| PE-F-49 | Hourly rollup of counts, incidents and p50 and p95 durations per node, filled by the scheduler with a watermark, a few minutes behind | S2 | M3 if PD-038 | PE (to be added) | | | proposed, pending PD-038 | PE-F-15, PE-F-48 | PD-038 |
+| PE-F-50 | Tasks are queried by assignee, role, group, due date and SLA breach; the caller resolver supplies roles and groups | S2 | M2 if PD-035 | PE 7.4 (to be added) | | TR-TEN-01 | proposed, pending PD-035 | PE-F-07 | PD-035 |
+| PE-F-51 | A `userTask` declares a form (JSON Schema with display hints) or a link to the host's own screen | S1, S2 | M2 if PD-032 | PE 7.4 (to be added) | | | proposed, pending PD-032 | PE-F-07 | PD-032 |
+| PE-F-52 | The host publishes a step catalogue: registered service and agent adapters with input schemas, rule sets that meet the guardrail contract, calendars and roles | S1, S3 | M3 if PD-032 | PE (to be added) | | TR-SEC-01 | proposed, pending PD-032 | PE-F-08, PE-F-24, PE-F-19 | PD-032 |
+| PE-F-53 | An architect exports a definition as a BPMN subset; elements outside the subset are named | S1 | M3 (cut candidate) if PD-034 | PE 8 (to be added) | | | proposed, pending PD-034 | PE-F-41 | PD-034 |
+| CK-F-23 | The standalone cockpit lists several hosts from its configuration, signs in once with OIDC PKCE, switches host, and hides screens a host or user cannot use | All | M1 if PD-035 | CK 7.2 (to be added) | | TR-UI-01, TR-SEC-09 | proposed, pending PD-035 | CK-F-01, X-F-22 | PD-035 |
+| CK-F-24 | An operator or auditor sees a definition version as a diagram, laid out automatically when it has no stored layout | Operator, Auditor | M2 if PD-032 | CK 7.3 (to be added) | | TR-UI-03 | proposed, pending PD-032 | PE-F-01 | PD-032 |
+| CK-F-25 | An operator sees an instance as a diagram with its current tokens and, per node, when it ran, how long, attempts and who acted | Operator, Auditor | M2 if PD-032 | CK 7.3 (to be added) | | TR-UI-03 | proposed, pending PD-032 | CK-F-24, PE-F-47, CK-F-12 | PD-032 |
+| CK-F-26 | An operator sees live active-token and incident counts on each node of a definition diagram | Operator | M2 (cut candidate) if PD-038 | CK 7.3 (to be added) | | | proposed, pending PD-038 | CK-F-24, PE-F-48 | PD-038, PD-016 |
+| CK-F-27 | A process owner sees a historical heatmap of counts and p50 and p95 durations per node for a chosen window | Operator | M3 (cut candidate) if PD-038 | CK 7.3 (to be added) | | | proposed, pending PD-038 | CK-F-24, PE-F-49 | PD-038 |
+| CK-F-28 | An operator works one task inbox merged across hosts, ordered by due date | Operator | M2 if PD-035 | CK 7.3 (to be added) | | | proposed, pending PD-035 | CK-F-23, CK-F-13, PE-F-50 | PD-035 |
+| CK-F-29 | An operator works one incident list merged across hosts | Operator | M2 if PD-035 | CK 7.3 (to be added) | | TR-OPS-03 | proposed, pending PD-035 | CK-F-23, CK-F-15 | PD-035 |
+| CK-F-30 | An operator completes a task through its declared form, or follows the link to the host's screen | Operator, Approver | M2 if PD-032 | CK 7.3 (to be added) | | TR-UI-03, TR-UI-04 | proposed, pending PD-032 | PE-F-51, CK-F-13 | PD-032 |
+| CK-F-31 | An approver reviews a process definition change as a graph diff and approves or rejects it; Approve is disabled for the requester | Approver | M3 if PD-033 | CK 7.2 (to be added) | | TR-SEC-04, TR-UI-02 | proposed, pending PD-033 | PE-F-45, PE-F-46, CK-F-24 | PD-033 |
+| CK-F-32 | An author changes a process on a canvas using only steps from the host's step catalogue; the engine validates on save and the result is a draft | Author | M3 (cut candidate, fallback 1.1) if PD-032 | CK 7.3 (to be added) | | TR-SEC-01, TR-UI-02 | proposed, pending PD-032 | PE-F-44, PE-F-45, PE-F-52 | PD-032, PD-036 |
+| CK-F-33 | An operator sees a migration plan as two diagrams side by side with the mapped steps | Operator | M3 if PD-032 | CK 7.3 (to be added) | | TR-MIG-03 | proposed, pending PD-032 | CK-F-19, CK-F-24 | PD-032, PD-023 |
+| X-F-22 | Each host answers `/api/bpm/meta` (engine and API versions, supported features) and `/api/bpm/me` (tenant, user, permissions); the cockpit supports the current and previous engine minor version | Host developer, all cockpit personas | M1 if PD-035 | CK 7.2 (to be added) | | TR-SEC-08 | proposed, pending PD-035 | X-F-06 | PD-035 |
+| X-F-23 | An operator switches tenant in the cockpit; the host accepts `X-Tenant-Id` only for a tenant in the token's allowed list; no screen combines tenants | Operator, Host developer | M2 if PD-037 | CK 5, PE 7.4 (to be added) | | TR-TEN-01, TR-SEC-03 | proposed, pending PD-037 | X-F-22 | PD-037 |
+| X-F-24 | Every list API needs a tenant plus a bounded index or time range, pages hold at most 200 items, and a CI query-plan check enforces it | Host developer | M2 if PD-038 | V (to be added) | | TR-PERF-05 | proposed, pending PD-038 | | PD-038, PD-032 |
+
+| Milestone if accepted | Process Engine | Cockpit | Cross-cutting | Total |
+|---|---|---|---|---|
+| M1 | 0 | 1 | 1 | 2 |
+| M2 | 6 | 6 | 2 | 14 |
+| M3 | 4 | 4 | 0 | 8 |
+| **All** | **10** | **11** | **3** | **24** |
+
+Existing rows the scenario would change, without changing them now: PE-F-41 leaves the cut list (PD-034); CK-F-18, RE-F-22 and CK-F-11 move from M2 to M3 (PD-042); CK-F-01's open design question is closed by PD-035; PE-F-01 and PE-F-28 change contract so that deploy creates a draft (PD-033); CK-F-12 gains the diagram through CK-F-25 (PD-032).
 
 ## SPEC statement to feature index
 
@@ -211,4 +251,6 @@ Each cell: features (specified / spec gap / design preview). Generated from the 
 
 Totals: 118 features; 54 specified, 56 spec gaps, 8 design previews.
 
-Cut candidates (PD-031): 11 features: RE-F-15, RE-F-22, RE-F-24, RE-F-26, RE-F-30, PE-F-12, PE-F-30, PE-F-41, CK-F-11, CK-F-18, X-F-17.
+Cut candidates (PD-031): 11 features: RE-F-15, RE-F-22, RE-F-24, RE-F-26, RE-F-30, PE-F-12, PE-F-30, PE-F-41, CK-F-11, CK-F-18, X-F-17. PD-034 (pending) would take PE-F-41 off this list.
+
+Proposed features (pending PD-032 to PD-042) are not counted above: 24 features, listed in [Proposed: Camunda-like cockpit](#proposed-camunda-like-cockpit-pending-pd-032-to-pd-042).

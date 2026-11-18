@@ -26,7 +26,7 @@ The usual answers each cost something the team cannot pay:
 | For | Not for |
 |---|---|
 | Java 21 or 25 teams on Spring Boot 4.x (3.5.x supported until 1.0, PD-007) and PostgreSQL 14+ | Other languages, frameworks or databases before 1.0 |
-| Services whose rules change under four-eyes approval with effective dates | Teams that need full BPMN 2.0, DMN FEEL, CMMN or a diagram modeller |
+| Services whose rules change under four-eyes approval with effective dates | Teams that need full BPMN 2.0, DMN FEEL, CMMN or a diagram modeller (the modeller part is under review in [PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)) |
 | Approval flows, task queues with SLAs and compensating service steps inside one service | One central orchestration platform shared by many teams |
 | AI agent steps that must pass rules a compliance team can read | Durable execution of arbitrary code across many services, or rule inference and chaining |
 

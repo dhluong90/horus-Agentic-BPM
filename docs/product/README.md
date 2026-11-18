@@ -45,7 +45,7 @@ All 44 SPEC statements map to a feature. 19 M1 features have no SPEC statement y
 
 ## Decisions waiting for the product owner
 
-Eleven decisions are already recorded as decided (PD-001 to PD-011). These twenty need a decision. Full options and consequences: [decisions.md](decisions.md).
+Eleven decisions are already recorded as decided (PD-001 to PD-011). These twenty need a decision; eleven more on the cockpit direction (PD-032 to PD-042) are summarised in the next section. Full options and consequences: [decisions.md](decisions.md).
 
 | Id | Question | Recommendation |
 |---|---|---|
@@ -69,6 +69,24 @@ Eleven decisions are already recorded as decided (PD-001 to PD-011). These twent
 | PD-029 | Accept ADR-0008 (async wait-state) | Accept now |
 | PD-030 | Accept ADR-0009 (cache coherence) | Accept now, before M1 code |
 | PD-031 | Can the dates hold? | Keep all four dates with the pre-approved cut list at fixed checkpoints |
+
+## Cockpit direction (pending)
+
+The product owner asked for Camunda-like tools while the engines stay embedded libraries. The architect's review answers that this fits the principles: replicas of one service share one database, so each host's REST layer already has the full picture for that service, and a static cockpit that calls several hosts covers the rest. It also found three gaps in today's plan: no diagrams, no maker-checker for process definitions, and no engine read APIs for a cockpit.
+
+| Id | Question | Architect | Product manager |
+|---|---|---|---|
+| PD-032 | Diagrams and a modeller? | Read-only diagrams with token overlay in M2, modeller in M3 | Agree; the modeller canvas is the first M3 cut (fallback 1.1), its engine APIs land before the freeze |
+| PD-033 | Maker-checker for process definitions? | Engine API in M2, screens in M3 | Agree; `dev` may auto-approve so Getting Started stays under 30 minutes |
+| PD-034 | Notation? | Own JSON canonical, BPMN subset import and export; PE-F-41 off the cut list | Agree; export added as a cut candidate |
+| PD-035 | One cockpit for several hosts? | B: standalone cockpit federating hosts; A supported, D documented, C after 1.0 with a paying customer | Agree; only registry, `/meta` and `/me` in M1, merged inbox and incidents in M2 |
+| PD-036 | Where do definitions live? | Git and cockpit both; imports arrive as drafts | Agree; host can turn off cockpit authoring per environment |
+| PD-037 | Tenant switching? | Header only within the token's allowed tenants; no cross-tenant view | Agree; in M2, not M1 |
+| PD-038 | Analytics? | In-host rollup only | Agree; live counts M2, history M3; pulse strip stays out (PD-016) |
+| PD-039 to PD-041 | Wording | Principle 9 reworded, principle 6 covers process definitions, vision modeller non-goal narrowed | Follow PD-032 and PD-033 |
+| PD-042 | Dates | About 3 extra weeks in M2; calendar editor and replay out of M2 | M2 to 26 Mar 2027, M3 to 21 May 2027; M0 and M1 unchanged |
+
+Effect if accepted: 24 new features (2 in M1, 14 in M2, 8 in M3), all spec gaps until `SPEC` statements exist; M2 grows from 44 to 55 features, M3 from 19 to 30. What "Camunda-like" means here: diagrams, operations on the diagram, one inbox across services, governed process change. Not included: fleet analytics or full BPMN 2.0. Details: [decision log](decisions.md#pending-cockpit-direction-camunda-like-cockpit), [proposed features](feature-map.md#proposed-camunda-like-cockpit-pending-pd-032-to-pd-042), [roadmap scenario](roadmap.md#scenario-camunda-like-cockpit).
 
 ## Product documents
 

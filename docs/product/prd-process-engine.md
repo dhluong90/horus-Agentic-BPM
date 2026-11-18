@@ -120,7 +120,7 @@ Recommended eval bar, measured by the adopter on 30 to 50 labelled cases includi
 | M3 (1.0) | MCP adapter and reference LLM adapters in `examples/`; bounded agent memory; agent-chosen steps under the same guardrails (after 1.0 if PD-028 is decided as recommended); offline runner; renamed-step migration; BPMN subset import; zero-downtime upgrade tests; API freeze |
 | After 1.0 (candidates) | Message correlation; multi-agent planning; other databases |
 
-Non-goals: full BPMN 2.0 or CMMN; a graphical modeller; two-phase commit ([ADR-0007](../adr/0007-compensation-instead-of-distributed-transactions.md)); a distributed job executor or broker; any model call inside a transaction ([ADR-0008](../adr/0008-async-wait-state-for-external-steps.md)); an embedded model or prompt store (`TR-AGT-03`).
+Non-goals: full BPMN 2.0 or CMMN; a graphical modeller (under review in [PD-032](decisions.md#pd-032-diagrams-and-a-visual-modeller-in-scope) and [PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)); two-phase commit ([ADR-0007](../adr/0007-compensation-instead-of-distributed-transactions.md)); a distributed job executor or broker; any model call inside a transaction ([ADR-0008](../adr/0008-async-wait-state-for-external-steps.md)); an embedded model or prompt store (`TR-AGT-03`).
 
 ## Red-team
 
