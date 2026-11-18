@@ -34,12 +34,12 @@ Rule Engine never depends on Process Engine. Process Engine depends only on the 
 ## Process Engine: instance lifecycle (milestone 2)
 ![Process instance states](images/process-instance-states.svg)
 
-- Steps run in the host's transaction; service side effects commit or roll back with engine state.
+- **Sync vs Async Wait-State steps:** Synchronous steps run in the host's transaction so local side effects commit or roll back with engine state; long-running external steps (`agentTask` and remote HTTP/MCP `serviceTask`) use an **Async Wait-State** protocol (claim lease → commit TX → execute adapter outside DB locks → complete/fail in a new TX) so LLM or network calls never hold database connections.
 - Mutating operations are idempotent by key; instances may carry a unique business key; stale task completions are rejected by optimistic locking (ADR-0006).
 - Steps with external effects declare `compensate` handlers; on failure the engine runs them in reverse order, each with retry and incidents (ADR-0007).
 - SLA deadlines are computed through a `BusinessCalendar` SPI (working hours and holidays), not by adding physical time.
 - Running instances can be migrated to a newer definition version through a validated plan, in batches, with history.
-- Timers and jobs are rows claimed with `SELECT … FOR UPDATE SKIP LOCKED`; correct across replicas without an external scheduler.
+- Timers and jobs are rows claimed with `SELECT … FOR UPDATE SKIP LOCKED`, and `parallelGateway` joins lock the parent `pre_instance` row; correct across replicas without an external scheduler.
 - A failed step becomes an **incident** with cause, retry count and resolution actions.
 - Agent steps: see [[Process Engine Overview]].
 
@@ -62,7 +62,7 @@ Every table carries `tenant_id` first in its indexes. Definitions are stored nor
 ## Deployment shapes
 ![Deployment shapes](images/deployment-shapes.svg)
 
-Engines are stateless beyond the database. Compiled versions are cached per replica and invalidated by version events.
+Engines are stateless beyond the database. Compiled rule and process versions are cached per replica and invalidated across replicas via PostgreSQL `LISTEN/NOTIFY` on version publish/retire events, backed by a lightweight version-epoch check for connection-pooler resilience.
 
 ## Deliberately absent
 Separate engine process · message broker requirement · search index · built-in identity provider · scripting engine · full BPMN 2.0 or DMN FEEL.

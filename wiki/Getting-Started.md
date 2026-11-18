@@ -10,7 +10,7 @@ Ten minutes from an empty Spring Boot service to a first decision. _Status: desi
   <version>0.1.0</version>
 </dependency>
 ```
-Requirements: Java 21, Spring Boot 3.3+, PostgreSQL 14+. The starter registers its Flyway migrations under the schema prefix `rle_` in your application's database. Nothing else to install.
+Requirements: Java 21, Spring Boot 3.4+, PostgreSQL 14+. The starter registers its Flyway migrations under the schema prefix `rle_` in your application's database. Nothing else to install.
 
 ## 2. Configure
 ```yaml
@@ -38,13 +38,17 @@ outputs:
   - { name: eligible, type: boolean }
   - { name: reason,   type: string }
 rules:
-  - when: { age: "< 18" }
+  - id: R1
+    when: { age: "< 18" }
     then: { eligible: false, reason: "UNDER_AGE" }
-  - when: { income: "< 5000000 VND" }
+  - id: R2
+    when: { income: "< 5000000 VND" }
     then: { eligible: false, reason: "LOW_INCOME" }
-  - when: { country: "not in ['VN', 'SG', 'ID']" }
+  - id: R3
+    when: { country: "not in ['VN', 'SG', 'ID']" }
     then: { eligible: false, reason: "UNSUPPORTED_COUNTRY" }
-  - when: {}
+  - id: R4
+    when: {}
     then: { eligible: true, reason: "OK" }
 ```
 
@@ -67,12 +71,12 @@ class LoanService {
 
 ## 5. Or evaluate over HTTP
 ```
-POST /api/bpm/rules/decisions/loan-eligibility:evaluate
+POST /api/bpm/rules/v1/decisions/loan-eligibility:evaluate
 { "inputs": { "age": 25, "income": { "currency": "VND", "amount": 8000000 }, "country": "VN" } }
 
 200 OK
 { "ruleSet": "loan-eligibility", "version": 1, "outputs": { "eligible": true, "reason": "OK" },
-  "matchedRules": [4], "decisionId": "01J...", "evaluatedAt": "2026-11-18T09:12:44Z" }
+  "matchedRuleIds": ["R4"], "decisionId": "01J...", "evaluatedAt": "2026-11-18T09:12:44Z" }
 ```
 
 ## 6. Look at it in the cockpit
