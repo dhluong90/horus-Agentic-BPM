@@ -89,6 +89,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-065](#pd-065-choreography-and-conversation-diagrams-not-targeted) | Choreography and conversation diagrams not targeted | Pending product owner |
 | [PD-066](#pd-066-feel-error-mode-default) | FEEL error mode default | Pending product owner |
 | [PD-067](#pd-067-product-roadmap-approved-sprint-planning-starts) | Product roadmap approved; sprint planning starts | Decided |
+| [PD-068](#pd-068-human-readable-issues-and-planning-artefacts) | Human-readable issues and planning artefacts | Decided |
 
 ---
 
@@ -1852,3 +1853,41 @@ Effort (assumption): S1 about 24 engineer-weeks (BPMN 12, DMN 8, cockpit 4), S2 
 - The roadmap changes from here only through a decided entry in this log.
 
 **Follow-ups.** Product manager: set up the project board and draft the first five issues for preview. Maintainers (engineering): size the first issues. Documentation: wiki Roadmap page states the roadmap is approved and links the board once it exists.
+
+## Decided: process
+
+### PD-068 Human-readable issues and planning artefacts
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | How are issues, sprint plan slices, PRD feature names, rule titles, decision issues and the public board written so a person can tell what is being built without knowing our internal ids? |
+| Raised by | Product owner, after reviewing the first issues and the M1 sprint plan |
+| Decision | Decided by the product owner, 2026-11-19: option 1. The rules below apply to every issue and planning artefact from now on, and to the issues already created |
+
+**What the review found.** Issue titles read like test descriptions of 15 to 20 words and are cut off on the board and the roadmap view. The opening paragraphs are full of internal ids (feature map, requirement, do-now and kill-assumption codes). Issue #1's definition of done asked for work that later slices deliver. The M0 prerequisite and the decisions that gate M1 code had no issue of their own. The public board used internal workflow status names, some referenced labels did not exist, and UI checks named only one screen size.
+
+**Options considered**
+
+1. Adopt writing and planning rules for every artefact the product owner and the public read (chosen). Consequence: titles and summaries are readable on the board; traceability stays complete, one section lower in each issue; existing issues are rewritten once.
+2. Keep the current format and add a plain summary only to the project board view. Consequence: no rewrite, but the issue page and the roadmap view stay unreadable, and two descriptions of the same work drift apart.
+
+**Recommendation (product manager).** Option 1. Traceability is not lost, only moved; the cost is a one-time rewrite of the first issues and the sprint plan slice table.
+
+**The rules.**
+
+1. Titles are at most 60 characters, 4 to 7 words after the colon, in the form `<Area>: <Clear Feature Name>`, with no ids. Example: `rule-engine: import a fee table, approve it as a second user and evaluate it with one logged decision` (101 characters) becomes `Rule Engine: End-to-End Rule Lifecycle & Evaluation (MVP)` (57 characters).
+2. Every issue opens with three plain-English bullets and no ids: What we're building, Why it matters, What the demo shows. Every traceability id moves to the Acceptance criteria and Technical reference sections. Rule titles are plain names, with the rule id in its own field; acceptance criteria keep their ids.
+3. A slice's definition of done covers only that slice; work that a later slice delivers is listed as out of scope for that slice. Every large slice has a dated mid-slice check.
+4. A blocking prerequisite exists as an issue before the issues that depend on it. A pending decision that gates work exists as a decision issue the product owner can formally approve, linked from every issue it blocks.
+5. Public boards use public-friendly status names (for example "Needs triage", "Ready"), never internal workflow names.
+6. A label exists for every module and every gate an issue references, before the issue is created.
+7. Every UI demo check runs at 1440x900, with an assertion that the primary action and its result are visible without scrolling, and at 1440x1200.
+
+**Consequences.**
+
+- Issues #1 to #5 are retitled and their summaries rewritten; #1's definition of done drops the items that later slices deliver.
+- Planned M1 work uses the new titles; the M0 prerequisite and the PD-058 and PD-060 decision issues are created before the issues they block.
+- The issue templates and contribution guide state the title and summary rules.
+
+**Follow-ups.** Product manager: apply the rules to the sprint plan slice titles, the feature names in the PRDs and the roadmap; draft the decision issues for PD-058 and PD-060. Maintainers (engineering): create the M0 prerequisite issue, retitle and rewrite issues #1 to #5, add the missing labels and the public status names. QA: add the two viewports to every UI demo check. Documentation: issue templates and contribution guide.
