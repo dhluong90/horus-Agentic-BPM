@@ -1,0 +1,11 @@
+stateDiagram-v2
+  direction LR
+  [*] --> Active: start
+  Active --> Waiting: user, agent or timer step
+  Waiting --> Active: complete or fire
+  Active --> Incident: step failed, retries exhausted
+  Incident --> Active: retry or resolve
+  Active --> Completed: end
+  Active --> Cancelled: cancel
+  Completed --> [*]
+  Cancelled --> [*]

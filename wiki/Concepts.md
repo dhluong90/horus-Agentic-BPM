@@ -15,12 +15,9 @@
 | **Process** (Process Engine) | A definition of steps (tasks, gateways, timers) through which an instance moves. Tasks can be performed by a person, a service or an AI agent. |
 
 ## Lifecycle of a rule set version
-```
-author draft ──simulate──▶ request publish ──approve (different user)──▶ published (effective from date)
-                                                                              │
-                                                              new version published ──▶ retired
-```
-Running decisions always record the version they used, so a retired version can still explain a past decision.
+![Version lifecycle](images/version-lifecycle.svg)
+
+Decisions record the version they used, so a retired version can still explain a past decision.
 
 ## What the engines are not
 Not a BPMN 2.0 or DMN FEEL implementation, not a server you deploy separately, not a workflow for infrastructure (use a CI system for that).

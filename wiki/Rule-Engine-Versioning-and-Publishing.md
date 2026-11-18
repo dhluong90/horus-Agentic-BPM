@@ -3,11 +3,7 @@
 Business users change rules without a deployment; the engine keeps it safe. _Design preview._
 
 ## States
-```
-draft ──request publish──▶ pending approval ──approve──▶ published ──(newer version published)──▶ retired
-  ▲                              │ reject
-  └──────────────────────────────┘
-```
+![Version lifecycle](images/version-lifecycle.svg)
 - **draft**: editable; evaluable only through simulation.
 - **pending approval**: frozen; waits for a second identity.
 - **published**: immutable; effective from `effectiveFrom` (default: approval time). At most one published version is effective per tenant at a time; a future-dated version is scheduled and becomes effective automatically.

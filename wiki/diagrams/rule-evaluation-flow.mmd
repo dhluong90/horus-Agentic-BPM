@@ -1,0 +1,13 @@
+flowchart LR
+  subgraph Authoring[Authoring, once per version]
+    D[Definition<br/>YAML, JSON or cockpit] --> V[Validate<br/>types, names, overlaps]
+    V --> C[Compile<br/>expressions to tree]
+    C --> S[(Versions)]
+  end
+  subgraph Evaluation[Evaluation, every call]
+    I[DecisionInput<br/>values, clock, tenant] --> R[Resolve version<br/>effective at clock]
+    S --> R
+    R --> E[Evaluate<br/>pure, no I/O]
+    E --> O[DecisionResult<br/>outputs, matched rules]
+    E --> L[(Decision log<br/>append-only)]
+  end

@@ -1,34 +1,32 @@
 # HORUS Agentic BPM
 
-**Lightweight, embeddable Process Engine and Rule Engine for Java and Spring Boot, where humans, services and AI agents are first-class participants.** Source-available: free for noncommercial use under the PolyForm Noncommercial License 1.0.0; commercial use under a HORUS commercial licence.
+**Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockpit. Humans, services and AI agents are first-class participants.**
 
-> **Design preview.** This wiki describes the 0.1 target. It is written before the code so that the public API is reviewed first. Anything may change until 1.0; each page says what is implemented.
+> Design preview. This wiki is the public specification, written before the code. APIs may change until 1.0. Licence: free for noncommercial use (PolyForm Noncommercial 1.0.0); commercial use under a HORUS licence.
 
-## Start here
-- [[Getting Started]] — add the Rule Engine starter, write a decision table, evaluate it in ten minutes.
-- [[Concepts]] — decisions, rule sets, versions, hit policies, the decision log.
-- [[Principles]] — the twelve rules that decide trade-offs.
-- [[Architecture]] — libraries not servers, host database, cockpit, how the two engines relate.
-- [[Technical Requirements]] — numbered, testable requirements that gate releases.
-- [[Technical Stack]] — what the engines and cockpit are built with, and what was rejected.
+![System context](images/system-context.svg)
+
+Two libraries inside your service, your PostgreSQL, one static cockpit. No engine cluster, no search index, no separate identity.
+
+## Read in this order
+| Page | Answers |
+|---|---|
+| [[Getting Started]] | How do I evaluate my first decision table in ten minutes? |
+| [[Concepts]] | What are rule sets, versions, hit policies, decisions, processes? |
+| [[Principles]] | What rules decide the design trade-offs? |
+| [[Architecture]] | How is it built, where does state live, how does it deploy? |
+| [[Technical Requirements]] | What must be true before a release ships? |
+| [[Technical Stack]] | What is it built with, and what was rejected? |
+| [[Roadmap]] | What ships when, up to 1.0? |
 
 ## Rule Engine guide
-1. [[Rule Engine Authoring Decision Tables]]
-2. [[Rule Engine Expression Language]]
-3. [[Rule Engine Decision API]]
-4. [[Rule Engine Versioning and Publishing]]
-5. [[Rule Engine Simulation and Testing]]
-6. [[Rule Engine Decision Log and Audit]]
-7. [[Rule Engine Configuration]]
+[[Authoring|Rule Engine Authoring Decision Tables]] · [[Expression Language|Rule Engine Expression Language]] · [[Decision API|Rule Engine Decision API]] · [[Versioning|Rule Engine Versioning and Publishing]] · [[Simulation|Rule Engine Simulation and Testing]] · [[Decision Log|Rule Engine Decision Log and Audit]] · [[Configuration|Rule Engine Configuration]]
 
 ## Process Engine
-- [[Process Engine Overview]] — scope and the `agentTask` node (planned for block 2).
+[[Process Engine Overview]] — scope and the `agentTask` step (milestone 2 and 3).
 
-## Operate and integrate
-- [[Cockpit]] · [[Multi Tenancy and Security]] · [[FAQ]]
-
-## Project
-- [[Roadmap]] (milestones to 1.0) · [[Contributing]] · [[Release Notes]]
+## Operate and contribute
+[[Cockpit]] · [[Multi Tenancy and Security]] · [[FAQ]] · [[Contributing]] · [[Release Notes]]
 
 ## Why "Agentic"
-Classic BPM assigns tasks to people and systems. Agentic BPM adds a third participant: an AI agent that can pick up a task, reason over bounded inputs, and return a structured result, while the Rule Engine provides deterministic guardrails (limits, eligibility, pricing) and the Process Engine provides maker-checker approvals and a complete audit trail. Agents get autonomy inside rails that risk and compliance teams can read.
+Classic BPM assigns steps to people and systems. Here an AI agent can take a step too, with bounded inputs, a schema for its output, a rule set that checks that output deterministically, and a human approval when the rules say so. Autonomy inside rails that compliance can read.

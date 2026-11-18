@@ -1,0 +1,18 @@
+flowchart LR
+  People([People]) -->|tasks, approvals| Cockpit
+  Cockpit[Cockpit<br/>static web app] -->|REST| REST
+  subgraph Host[Your Spring Boot service]
+    direction TB
+    App[Business code]
+    REST[Engine REST<br/>optional]
+    RE[[Rule Engine<br/>library]]
+    PE[[Process Engine<br/>library]]
+    App --> RE
+    App --> PE
+    REST --> RE
+    REST --> PE
+    PE -.->|decision step| RE
+  end
+  Host --> DB[(Your PostgreSQL<br/>rle_* and pre_* schemas)]
+  PE <-->|agentTask via adapter| Agent[AI agent]
+  PE <-->|serviceTask| Svc[Other services]

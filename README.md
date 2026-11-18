@@ -4,6 +4,8 @@ Lightweight, embeddable **Process Engine** and **Rule Engine** for Java and Spri
 
 **Documentation: see the [project wiki](../../wiki)** (source in [`wiki/`](wiki/)).
 
+![System context](wiki/images/system-context.svg)
+
 > Status: design preview. The public API is being reviewed in the wiki before the code is written. Nothing here is production-ready yet.
 
 ## Why

@@ -1,0 +1,22 @@
+flowchart TB
+  subgraph RuleEngine[Rule Engine]
+    direction TB
+    RT[rule-engine-test] --> RC
+    RR[rule-engine-rest] --> RS[rule-engine-spring-boot-starter]
+    RS --> RP[rule-engine-postgres]
+    RS --> RC[rule-engine-core<br/>no framework dependency]
+    RP --> RC
+  end
+  subgraph ProcessEngine[Process Engine]
+    direction TB
+    PT[process-engine-test] --> PC
+    PR[process-engine-rest] --> PS[process-engine-spring-boot-starter]
+    PS --> PP[process-engine-postgres]
+    PS --> PC[process-engine-core<br/>no framework dependency]
+    PP --> PC
+  end
+  PC -.->|API interface only| RC
+  CK[cockpit<br/>static assets] --> RR
+  CK --> PR
+  BOM[bpm-bom] -.- RuleEngine
+  BOM -.- ProcessEngine

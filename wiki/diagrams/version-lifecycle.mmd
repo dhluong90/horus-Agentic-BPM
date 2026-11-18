@@ -1,0 +1,11 @@
+stateDiagram-v2
+  direction LR
+  [*] --> Draft: create or import
+  Draft --> Draft: edit, validate, simulate
+  Draft --> Pending: request publish
+  Pending --> Draft: reject
+  Pending --> Published: approve by a different identity
+  Published --> Retired: newer version becomes effective
+  Retired --> Draft: restore as draft
+  Published --> [*]
+  Retired --> [*]

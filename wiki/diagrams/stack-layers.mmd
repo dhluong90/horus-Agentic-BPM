@@ -1,0 +1,9 @@
+flowchart TB
+  H[Your service<br/>Java 21+, Spring Boot 3.4+] --> ST[spring-boot-starter<br/>auto-config, transactions, security context, metrics]
+  ST --> CO[core<br/>model, parser, evaluator, lifecycle, SPIs<br/>Java 21 + Jackson only]
+  ST --> PG[postgres<br/>Spring JDBC, Flyway migrations, SKIP LOCKED timers]
+  PG --> CO
+  PG --> DB[(PostgreSQL 14+)]
+  RE[rest<br/>Spring Web, OpenAPI] --> ST
+  CK[cockpit<br/>React 18, TypeScript, Vite, TanStack] --> RE
+  TE[test<br/>JUnit 5, in-memory storage, fixed clock] --> CO
