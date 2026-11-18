@@ -4,7 +4,7 @@
 |---|---|
 | Type | Reference (decision record) |
 | Owner area | Product |
-| Last reviewed | 2026-11-18 |
+| Last reviewed | 2026-11-19 |
 
 This log records every product decision about the engines: scope, milestones, priorities, product rules and the acceptance of architecture decisions that change what ships. The product manager writes the question and a recommendation first; the product owner decides (PD-001). A decision is never applied to the roadmap, the feature map, a PRD or a SPEC before its status here is Decided.
 
@@ -88,6 +88,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-064](#pd-064-bpmn-miwg-test-data-licence) | BPMN MIWG test data licence | Pending product owner |
 | [PD-065](#pd-065-choreography-and-conversation-diagrams-not-targeted) | Choreography and conversation diagrams not targeted | Pending product owner |
 | [PD-066](#pd-066-feel-error-mode-default) | FEEL error mode default | Pending product owner |
+| [PD-067](#pd-067-product-roadmap-approved-sprint-planning-starts) | Product roadmap approved; sprint planning starts | Decided |
 
 ---
 
@@ -1816,3 +1817,38 @@ Effort (assumption): S1 about 24 engineer-weeks (BPMN 12, DMN 8, cockpit 4), S2 
 **Consequences if accepted.** `TR-STD-23` wording; cockpit decision view shows the mode.
 
 **Follow-ups.** Architect: rule engine DESIGN.
+
+## Decided: product roadmap approval
+
+### PD-067 Product roadmap approved; sprint planning starts
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Is the product roadmap ready to plan work against, and do sprint planning and the public project board start now? |
+| Raised by | Product manager |
+| Decision | Decided by the product owner, 2026-11-19: option 1. The roadmap is approved as it stands; sprint planning and the public project board start now, with the first five issues for the product owner's preview |
+
+**What was approved.** [roadmap.md](roadmap.md) as of commit `54a7e95`: milestones M0 to M3 with their outcomes, exit criteria, gates and checkpoints; the standards track 1.1 to 1.3 (S1 to S3) with order and exit criteria, dates still pending PD-062; the do-now items DN-01 to DN-11; and the pre-approved cut lists for each milestone. Feature scope stays owned by the [feature map](feature-map.md) (PD-002).
+
+**Options considered**
+
+1. Approve the roadmap now and start sprint planning, leaving the pending entries to gate the code they affect (chosen). Consequence: work is planned against a fixed order of milestones; the pending entries are decided on their own gates, and a decision that changes scope updates the roadmap through a new entry.
+2. Hold approval until every pending entry is decided. Consequence: forty-three open entries block planning; M0 (4 Dec 2026) and the M1 start slip.
+3. Approve M0 and M1 only. Consequence: less to revisit if M2 scope changes, but the dependency order across M1 to M3 and the standards foundations in M2 are not fixed when the M1 contracts are designed.
+
+**Recommendation (product manager).** Option 1. The order of work and the outcomes are stable; what remains open changes scope inside a milestone, not the order between milestones, and each open entry already names the gate it must be decided by.
+
+**What starts now.**
+
+- Sprint planning against M0 and M1, five sprints at a time, each sprint ending with a demonstrable result.
+- A public GitHub project board for this repository, using the issue templates in `.github/ISSUE_TEMPLATE/` and the labels in `.github/labels.json`.
+- The first five issues are drafted for the product owner's preview before more are created.
+
+**Consequences.**
+
+- This approval does not decide any pending entry. PD-058 and PD-060 still gate M1 code (7 Dec 2026); PD-059 still gates M2 code (18 Jan 2027). Sprints that start before those gates plan design, contracts and tests, not the code those entries change.
+- PD-031 (M1 date and cut list), PD-043 (business-user authoring) and PD-056 (rule management UX) stay pending; the roadmap keeps showing the scope before each decision, as stated in its header.
+- The roadmap changes from here only through a decided entry in this log.
+
+**Follow-ups.** Product manager: set up the project board and draft the first five issues for preview. Maintainers (engineering): size the first issues. Documentation: wiki Roadmap page states the roadmap is approved and links the board once it exists.

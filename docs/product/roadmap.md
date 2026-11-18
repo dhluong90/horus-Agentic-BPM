@@ -4,11 +4,11 @@
 |---|---|
 | Type | Explanation and plan |
 | Owner area | Product |
-| Last reviewed | 2026-11-18 |
+| Last reviewed | 2026-11-19 |
 
 Design preview: nothing is released. This file owns milestones, dates and the order of work (PD-002). Feature scope and status are owned by the [feature map](feature-map.md); this roadmap names features by id. Reasons for scope choices are in the [decision log](decisions.md). The short public view is the wiki page [Roadmap](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Roadmap). Dates are targets, not commitments; [Release Notes](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Release-Notes) state what shipped.
 
-Pending decisions that would change this roadmap are marked "(PD-nnn, pending)". Until a pending entry is decided, the roadmap shows the scope before that decision, and cut candidates stay in their milestone. The cockpit direction (PD-032 to PD-042) was decided by the product owner on 2026-11-18 and is part of this plan. The standards direction (PD-057, decided 2026-11-18: full BPMN 2.0 and DMN on the roadmap after 1.0, designed now, not in M1 or M2; no CMMN) adds foundation work to M1 and M2 and the [standards track](#standards-track-after-10-s1-to-s3) after 1.0. Business-user authoring (PD-043) is pending; its effect is stated in each milestone.
+Pending decisions that would change this roadmap are marked "(PD-nnn, pending)". Until a pending entry is decided, the roadmap shows the scope before that decision, and cut candidates stay in their milestone. The cockpit direction (PD-032 to PD-042) was decided by the product owner on 2026-11-18 and is part of this plan. The standards direction (PD-057, decided 2026-11-18: full BPMN 2.0 and DMN on the roadmap after 1.0, designed now, not in M1 or M2; no CMMN) adds foundation work to M1 and M2 and the [standards track](#standards-track-after-10-s1-to-s3) after 1.0. Business-user authoring (PD-043) is pending; its effect is stated in each milestone. The product owner approved this roadmap on 2026-11-19 (PD-067); sprint planning and the public project board start now. The approval does not decide any pending entry: PD-058 and PD-060 still gate M1 code, and PD-059 gates M2 code.
 
 ## At a glance
 

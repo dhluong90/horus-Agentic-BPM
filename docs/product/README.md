@@ -4,7 +4,7 @@
 |---|---|
 | Type | Review summary |
 | Owner area | Product |
-| Last reviewed | 2026-11-18 |
+| Last reviewed | 2026-11-19 |
 | Status | Ready for product owner review, before implementation planning starts |
 
 ## What the engine is
@@ -50,7 +50,7 @@ The standards direction (PD-057) added 27 features: 10 foundations before 1.0 (8
 
 ## Decisions waiting for the product owner
 
-Twenty-three decisions are recorded as decided (PD-001 to PD-011, PD-032 to PD-042 on the cockpit direction, and PD-057 on the standards direction, summarised below). Forty-three need a decision: the twenty-two below; twelve from the requirements review (PD-044 to PD-055) in [Requirements review (pending)](#requirements-review-pending); and nine on the standards foundations and track (PD-058 to PD-066) in [Standards direction](#standards-direction-decided-2026-11-18). Full options and consequences: [decisions.md](decisions.md).
+Twenty-four decisions are recorded as decided (PD-001 to PD-011, PD-032 to PD-042 on the cockpit direction, PD-057 on the standards direction, and PD-067 approving the roadmap, summarised below). Forty-three need a decision: the twenty-two below; twelve from the requirements review (PD-044 to PD-055) in [Requirements review (pending)](#requirements-review-pending); and nine on the standards foundations and track (PD-058 to PD-066) in [Standards direction](#standards-direction-decided-2026-11-18). Full options and consequences: [decisions.md](decisions.md).
 
 | Id | Question | Recommendation |
 |---|---|---|
@@ -123,6 +123,10 @@ Dates for S1 to S3 are pending (PD-062). The roadmap keeps M1 to M3 dates unchan
 | PD-066 | FEEL error mode default | `strict` for v1 rule sets, `spec` for imported DMN; guardrails fail closed in both | Before S2 |
 
 Applied with PD-057: roadmap standards track and do-now items, feature map rows, vision and PRD non-goals (full BPMN 2.0 and DMN after 1.0, CMMN never), cockpit PRD BPMN-typed node rendering. Wiki wording that follows (Principles row 9, Concepts, FAQ, Roadmap) is with documentation, after PD-063.
+
+## Roadmap approval (decided 2026-11-19)
+
+The product owner approved the [roadmap](roadmap.md) as of commit `54a7e95`: M0 to M3, the standards track 1.1 to 1.3, the do-now items and the cut lists ([PD-067](decisions.md#pd-067-product-roadmap-approved-sprint-planning-starts)). Sprint planning and the public project board start now, with the first five issues for the product owner's preview. The approval decides no pending entry: PD-058 and PD-060 still gate M1 code, and PD-059 gates M2 code.
 
 ## Who uses the Rule Engine and how
 
