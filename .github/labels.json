@@ -14,6 +14,8 @@
   {"name":"status:in-progress","color":"bfd4f2","description":"Someone is working on it"},
   {"name":"status:blocked","color":"000000","description":"Waiting on something else"},
   {"name":"status:needs-info","color":"fef2c0","description":"Waiting for the reporter"},
+  {"name":"gate:pd-058","color":"b60205","description":"Blocked until decision PD-058 (FEEL null semantics) is made"},
+  {"name":"gate:pd-060","color":"b60205","description":"Blocked until decision PD-060 (canonical BPMN and DMN model) is made"},
   {"name":"help wanted","color":"008672","description":"Maintainers welcome a contribution"},
   {"name":"good first issue","color":"7057ff","description":"Small, well-scoped, good for newcomers"},
   {"name":"priority:p0","color":"b60205","description":"Blocks a release or breaks users"},
