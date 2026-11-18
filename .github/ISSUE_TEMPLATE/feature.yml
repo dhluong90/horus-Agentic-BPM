@@ -1,13 +1,23 @@
 name: Feature request
 description: Propose a capability for the Process Engine, Rule Engine or Cockpit.
-title: "<module>: <outcome in plain words>"
+title: "<Area>: <Clear Feature Name>"
 labels: ["type:feature", "status:needs-triage"]
 body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Three one-sentence bullets in plain English, no ids or jargon. Feature ids, specification ids and requirement ids go in Proposed behaviour (acceptance criteria) and Technical reference.
+      value: |
+        - **What we're building:** 
+        - **Why it matters:** 
+        - **What the demo shows:** 
+    validations: { required: true }
   - type: dropdown
     id: module
     attributes:
       label: Module
-      options: [process-engine, rule-engine, cockpit, examples, docs]
+      options: [process-engine, rule-engine, cockpit, cross-cutting, examples, docs]
     validations: { required: true }
   - type: textarea
     id: problem
@@ -25,6 +35,11 @@ body:
     id: alternatives
     attributes:
       label: Alternatives considered
+  - type: textarea
+    id: technical-reference
+    attributes:
+      label: Technical reference
+      description: "Ids this touches, with links: feature ids, specification ids (RLE-, PRE-, CKP-), requirement ids (TR-), decisions, ADRs. Optional for outside contributors; maintainers complete it."
   - type: checkboxes
     id: scope
     attributes:
