@@ -1,0 +1,30 @@
+flowchart LR
+  subgraph D1 ["1. Inside the host service and its transaction"]
+    D1A["Business write and decision record"] --> D1B[("One PostgreSQL transaction<br/>rollback removes both")]
+    D1C["No engine cluster, no broker,<br/>no separate identity"]
+  end
+  subgraph D2 ["2. Governed change by business users"]
+    D2A["Draft"] --> D2B["Simulate<br/>graph diff for processes"] --> D2C["Request with effective date"] --> D2D["Approve by another identity<br/>enforced in the service layer"]
+  end
+  subgraph D3 ["3. Agent output checked before the process moves"]
+    D3A["Agent output"] --> D3B["JSON Schema"] --> D3C["Guardrail rule set"]
+    D3C -- "allow" --> D3D["Process continues"]
+    D3C -- "violation" --> D3E["A person decides, or the step fails"]
+  end
+  D2D -. "rule sets also act as guardrails" .-> D3C
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F;
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F;
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F;
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F;
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F;
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F;
+  class D1A,D2A,D2B,D2C host;
+  class D2D,D3B,D3C,D1C engine;
+  class D1B db;
+  class D3A external;
+  class D3D host;
+  class D3E client;
+  style D1 fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style D2 fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style D3 fill:none,stroke:#1565C0,stroke-dasharray:5 5

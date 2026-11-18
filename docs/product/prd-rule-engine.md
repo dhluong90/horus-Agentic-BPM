@@ -63,6 +63,10 @@ Author imports draft v2 (YAML) → validation rejects ill-typed rows → author 
 
 Failure paths: self-approval refused (`403 SELF_APPROVAL_FORBIDDEN`); `unique` with zero or two matches returns an error and no outputs; a currency mismatch fails, never coerces; a retried request with the same idempotency key has no second effect.
 
+![Rule governance from author to explanation, across roles](images/re-governance-flow.svg)
+
+The shaded block is the host's business transaction: the decision log insert commits or rolls back with the business write. Source: [diagrams/re-governance-flow.mmd](diagrams/re-governance-flow.mmd).
+
 ### 7.2 Must-have capabilities by platform layer
 
 | Layer | Capability | SPEC | TR |

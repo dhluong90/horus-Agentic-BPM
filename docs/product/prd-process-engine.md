@@ -56,6 +56,10 @@ Statement: for Java teams whose processes include people, external systems and A
 
 Developer deploys `kyc-onboarding` v1; deploy rejects a guardrail that breaks the contract → client starts an instance with a business key; a retry returns the same instance → `decision` step runs in the host transaction → `agentTask` calls the adapter with no connection held, validates the output, evaluates the guardrail → on violation, an approval task goes to the compliance role → reviewer corrects a field; the override is recorded → a later remote step fails after retries; completed steps compensate in reverse order → operator retries the incident from the cockpit.
 
+![Sync in-transaction steps and async wait-state steps](images/pe-sync-async-steps.svg)
+
+Green: sync steps in the host transaction. Amber: TX1 claims the job and commits. The adapter call holds no database connection. Teal: TX2 validates, evaluates the guardrail and advances or escalates. Purple: compensation in reverse order. Source: [diagrams/pe-sync-async-steps.mmd](diagrams/pe-sync-async-steps.mmd).
+
 ### 7.2 Must-have capabilities by platform layer
 
 | Layer | Capability | SPEC | TR |
@@ -89,6 +93,10 @@ Adopters set autonomy through guardrail versions, each needing a second approver
 | 3 Act and report | Complete most cases | As rung 2; the host samples completed steps from history | Failure modes known and covered by regression cases |
 
 For rungs 0 (observe) and 4 (end to end), see open questions. When inputs, model or regulation change, move down one rung.
+
+![Autonomy ladder and the deterministic guardrail gate](images/pe-autonomy-ladder.svg)
+
+The ladder is guidance; the gate is enforced by the engine at every rung. Rungs 0 and 4 are grey because they wait for PD-015. Source: [diagrams/pe-autonomy-ladder.mmd](diagrams/pe-autonomy-ladder.mmd).
 
 Recommended eval bar, measured by the adopter on 30 to 50 labelled cases including malformed and adversarial inputs: rung 1 needs full review, not accuracy; rung 2 needs 95 percent correct and every seeded critical error caught by schema or guardrail; rung 3 needs 99.5 percent and zero critical bypasses. The engine's own bar, tested in CI with stub adapters: no output that fails the schema or the guardrail ever advances a process (`TR-AGT-01`, PRE-010, PRE-011, PRE-016). The M2 signal is the human override rate read from history; the M3 offline runner replays recorded traces and overrides against a changed prompt or guardrail.
 

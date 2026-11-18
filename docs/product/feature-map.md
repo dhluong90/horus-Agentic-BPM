@@ -244,6 +244,10 @@ Each cell: features (specified / spec gap / design preview). Generated from the 
 | Cross-cutting | 3 (3 / 0 / 0) | 12 (7 / 5 / 0) | 3 (1 / 2 / 0) | 4 (1 / 3 / 0) | 2 (0 / 0 / 2) | 24 (12 / 10 / 2) |
 | **All** | 3 (3 / 0 / 0) | 48 (27 / 21 / 0) | 55 (21 / 33 / 1) | 30 (3 / 26 / 1) | 10 (0 / 0 / 10) | 146 (54 / 80 / 12) |
 
+![Features per module per milestone](images/fm-features-per-module.svg)
+
+The same counts as the table. Teal: engines; blue: cockpit; green: cross-cutting. Source: [diagrams/fm-features-per-module.mmd](diagrams/fm-features-per-module.mmd).
+
 Totals: 146 features; 54 specified, 80 spec gaps, 12 design previews. The cockpit direction (PD-032 to PD-042, decided 2026-11-18) added 24 features, all spec gaps: 2 in M1, 14 in M2 and 8 in M3. It moved RE-F-22, CK-F-11 and CK-F-18 from M2 to M3 and took PE-F-41 off the cut list.
 
 Pending PD-043 (not counted): 7 features, all spec gaps. RE-F-33, CK-F-34 and CK-F-35 would join M1; RE-F-34, CK-F-36 and CK-F-37 M2; CK-F-38 M3. PD-043 also moves RE-F-26 from M1 to M2. If accepted as recommended, M1 holds 50, M2 59 and M3 31.

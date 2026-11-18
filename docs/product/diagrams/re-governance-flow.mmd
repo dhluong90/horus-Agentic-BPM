@@ -1,0 +1,64 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) People and cockpit
+    actor AU as Author (pricing manager or analyst)
+    participant CK as Cockpit
+    actor AP as Approver (compliance officer)
+    actor AD as Auditor or support staff
+  end
+  box rgb(232,245,233) Host service
+    participant HS as Host business code
+    participant RE as Rule Engine
+    participant DB as Host PostgreSQL
+  end
+
+  Note over AU,RE: Author
+  AU->>CK: Import draft v2 (YAML or JSON)
+  CK->>RE: Create version v2, Idempotency-Key
+  RE->>RE: Validate rows and types
+  alt Ill-typed row
+    RE-->>CK: 422 with row id, v2 stays DRAFT
+  else Valid
+    RE->>DB: Store v2 as DRAFT
+  end
+
+  Note over AU,RE: Simulate
+  AU->>CK: Paste sample inputs
+  CK->>RE: Simulate v2 next to effective v1
+  RE-->>CK: Outcomes per row, changed outcomes marked, no log writes
+
+  Note over AU,AP: Request
+  AU->>CK: Request publication, effectiveFrom 1 Feb 2027
+  CK->>RE: Request publication
+  RE->>DB: v2 to PENDING_APPROVAL, event publish-requested
+  RE-->>AP: Pending approval (cockpit queue or event)
+
+  Note over AP,RE: Approve
+  AP->>CK: Open diff of v1 and v2
+  alt Approver is the author
+    CK->>RE: Approve
+    RE-->>CK: 403 SELF_APPROVAL_FORBIDDEN, v2 stays PENDING_APPROVAL
+  else Different identity
+    CK->>RE: Approve
+    RE->>DB: v2 PUBLISHED with effectiveFrom
+  else Reject with comment
+    CK->>RE: Reject
+    RE->>DB: Draft returned to the author
+  end
+
+  Note over RE,DB: Effective date
+  RE->>RE: Every replica serves v2 from effectiveFrom, cache coherent within 5 s
+
+  rect rgba(232,245,233,0.6)
+    Note over HS,DB: Evaluate in the business transaction (one TX)
+    HS->>RE: evaluate(card-fee, inputs, clock)
+    RE-->>HS: Outputs, version v2, matched row R2
+    HS->>DB: Business write
+    RE->>DB: Decision log insert (masked inputs as keyed hash)
+    Note over HS,DB: Commit, or rollback removes both
+  end
+
+  Note over AD,RE: Explain
+  AD->>CK: Open decision by id or filter
+  CK->>RE: Get decision and explanation
+  RE-->>CK: Version, clock, matched row, explanation, masked fields as hash

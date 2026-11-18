@@ -109,6 +109,22 @@ The cockpit lives in the application layer. Data, logic and observability belong
 - Pending: a path for business users without YAML in 0.1, and what "user-friendly" means ([PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml)).
 - Proposal: add the pulse strip to a milestone, or remove it from DESIGN. Pending as [PD-016](decisions.md#pd-016-cockpit-pulse-strip).
 
+### 7.5 Diagrams
+
+Screen map in three tiers: the shell, the areas (each opens on a ranked queue or list), and the detail and action screens. Version labels follow section 8.
+
+![Cockpit screen map in three tiers](images/ck-screen-map.svg)
+
+One standalone cockpit across several hosts with no server of its own ([PD-035](decisions.md#pd-035-multi-host-cockpit-model)). The browser signs in once with OIDC and PKCE as a public client, calls each host directly, and merges tasks and incidents. Tenant switching sends `X-Tenant-Id` only within the token's allowed tenants ([PD-037](decisions.md#pd-037-tenant-switching-for-multi-tenant-operators)).
+
+![Multi-host federation with OIDC PKCE](images/ck-multi-host-federation.svg)
+
+The instance diagram with its token overlay (0.2), and the governed change of a process definition: Git import or canvas draft, validation, request, graph diff, approval by a different identity ([PD-033](decisions.md#pd-033-maker-checker-for-process-definitions), [PD-036](decisions.md#pd-036-source-of-truth-for-process-definitions)).
+
+![Token overlay and graph-diff approval](images/ck-diagram-overlay-approval.svg)
+
+Sources: [ck-screen-map.mmd](diagrams/ck-screen-map.mmd), [ck-multi-host-federation.mmd](diagrams/ck-multi-host-federation.mmd), [ck-diagram-overlay-approval.mmd](diagrams/ck-diagram-overlay-approval.mmd).
+
 ## 8. Release and scope
 
 | Cockpit 0.1 (M1): viewer and approver | Cockpit 0.2 (M2): editor and operations |

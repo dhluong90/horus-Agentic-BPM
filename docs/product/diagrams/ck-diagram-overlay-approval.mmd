@@ -1,0 +1,49 @@
+flowchart LR
+  subgraph Overlay ["Instance diagram with token overlay, Cockpit 0.2"]
+    direction TB
+    O1["1. Definition graph, own JSON notation"]
+    O2["2. Automatic layout, stored layout from M3"]
+    O3["3. Activity history and current tokens<br/>for one instance"]
+    O4["4. Live counts per node, cut candidate"]
+    O5["5. Diagram: active node marked,<br/>node history on click"]
+    O1 --> O2 --> O5
+    O3 --> O5
+    O4 -.-> O5
+  end
+
+  subgraph Approval ["Process definition change, engine lifecycle M2, approval screens M3"]
+    direction TB
+    P1["1a. Git import<br/>arrives as DRAFT, content hash"]
+    P2["1b. Modeller canvas draft, M3<br/>registered steps only; host may turn off per environment"]
+    P3{"2. Validate"}
+    P4["3. Request approval, effective date<br/>state PENDING_APPROVAL"]
+    P5["4. Approver reads graph diff:<br/>nodes and edges added, removed, changed"]
+    P6{"5. Approver is a<br/>different identity?"}
+    P7["6. ACTIVE on effective date;<br/>new instances pin this version"]
+    P8["Refused, stays PENDING_APPROVAL"]
+    P9["Rejected with comment,<br/>back to the author"]
+    P1 --> P3
+    P2 --> P3
+    P3 -- "errors" --> P10["Errors shown, stays DRAFT"]
+    P3 -- "valid" --> P4 --> P5 --> P6
+    P6 -- "yes, approve" --> P7
+    P6 -- "no" --> P8
+    P5 -- "reject" --> P9
+  end
+
+  P7 -. "running instances keep their version;<br/>migration is a separate step" .-> O1
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F;
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F;
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F;
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F;
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F;
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F;
+  class O1,O2,O3,O4 engine;
+  class O5 client;
+  class P1 host;
+  class P2,P5 client;
+  class P3,P4,P6,P7 engine;
+  class P8,P9,P10 obs;
+  style Overlay fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style Approval fill:none,stroke:#00796B,stroke-dasharray:5 5

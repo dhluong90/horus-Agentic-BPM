@@ -20,6 +20,10 @@ Pending decisions that would change this roadmap are marked "(PD-nnn, pending)".
 | M3 Agentic depth, compatibility, 1.0 | 29 Mar to 21 May 2027 (8 weeks) | Adopters run in production with evaluated agent changes, governed process changes and a frozen API | 30 |
 | After 1.0 | Candidates | Broader reach: message correlation, multi-agent planning, more databases | 10 |
 
+![Milestones M0 to M3 with gates and cut checkpoints](images/rm-milestones.svg)
+
+Gates (green hexagons) must hold before the next milestone's code starts; checkpoints (grey) trigger the pre-approved cut list. Source: [diagrams/rm-milestones.mmd](diagrams/rm-milestones.mmd).
+
 Counts come from the [feature map summary](feature-map.md#summary). PD-042 (decided) moved M2 and M3 by two weeks each to absorb the cockpit direction; M0 and M1 dates are unchanged. Whether M1 holds is PD-031 (pending), which recommends keeping 15 Jan 2027 with a pre-approved cut list. If PD-043 is accepted as recommended, M1 holds 50 features, M2 59 and M3 31, with no date change.
 
 ## Strategic context
@@ -40,6 +44,10 @@ Java and Spring Boot teams, in banking and elsewhere, that need governed busines
 | Maker-checker for process definitions in the M2 engine | The deploy contract changes shape; changing it after M2 adopters use it would cost more. Approval screens follow in M3 (PD-033) |
 | Host registry in M1, merged inbox in M2 | One cockpit reaches every host without a server (PD-035); there is nothing to merge until processes exist |
 | Agentic depth and compatibility in M3 | MCP and model adapters, the offline runner and import formats build on a stable core; the API freezes only after they have been used |
+
+![Cross-module feature dependencies by milestone](images/rm-feature-dependencies.svg)
+
+Thick edges cross module boundaries: Rule Engine evaluation feeds the `decision` step and `agentTask` guardrails, and the M1 host registry feeds the M2 merged inbox. Edges come from the dependency tables in each milestone below and the "Depends on" column of the [feature map](feature-map.md). Source: [diagrams/rm-feature-dependencies.mmd](diagrams/rm-feature-dependencies.mmd).
 
 ### How scope is cut
 

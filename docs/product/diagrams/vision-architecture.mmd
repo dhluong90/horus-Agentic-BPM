@@ -1,0 +1,62 @@
+flowchart LR
+  subgraph Public_Zone ["Public Zone"]
+    BR["Browser<br/>Cockpit static assets"]
+    CH["Channel or client app"]
+  end
+  subgraph DMZ_Zone ["Banking DMZ"]
+    GW["Host's API gateway or reverse proxy"]
+  end
+  subgraph Internal_Zone ["Internal Trusted Zone"]
+    IDP["Host's OIDC identity provider"]
+    subgraph HOST ["Host Spring Boot service"]
+      APP["Host business code"]
+      REST["Optional REST layer<br/>/api/bpm/rules/v1, /api/bpm/processes/v1"]
+      RE["Rule Engine<br/>decision tables, versions, decision log"]
+      PE["Process Engine<br/>human, service, decision, agent steps"]
+    end
+    DB[("Host PostgreSQL<br/>app tables, rle_*, pre_*")]
+  end
+  subgraph Core_Zone ["Core and External"]
+    CORE["Core banking, rails, partners"]
+    AI["AI model behind an AgentAdapter"]
+  end
+  subgraph Obs_Zone ["Observability"]
+    OBS["Micrometer metrics, engine events,<br/>host logs and monitoring"]
+  end
+
+  BR -- "1. HTTPS with bearer token" --> GW
+  CH -- "1. HTTPS business request" --> GW
+  GW -- "2. Verified request" --> REST
+  GW -- "2. Verified request" --> APP
+  BR -. "sign-in" .-> IDP
+  REST -- "3. Java API" --> RE
+  REST -- "3. Java API" --> PE
+  APP -- "3. evaluate or start, in process" --> RE
+  APP -- "3. evaluate or start, in process" --> PE
+  PE -- "4. decision steps and guardrails" --> RE
+  RE -- "5. same transaction as the business write" --> DB
+  PE -- "5. same transaction as the business write" --> DB
+  APP -- "5. business write" --> DB
+  PE -- "6. service and agent calls, outside any transaction" --> CORE
+  PE -- "6. agent call, outside any transaction" --> AI
+  RE -. "metrics and events" .-> OBS
+  PE -. "metrics and events" .-> OBS
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F;
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F;
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F;
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F;
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F;
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F;
+  class BR,CH client;
+  class GW,APP,REST,IDP host;
+  class RE,PE engine;
+  class DB db;
+  class CORE,AI external;
+  class OBS obs;
+  style Public_Zone fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style DMZ_Zone fill:none,stroke:#EF6C00,stroke-dasharray:5 5
+  style Internal_Zone fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style Core_Zone fill:none,stroke:#6A1B9A,stroke-dasharray:5 5
+  style Obs_Zone fill:none,stroke:#546E7A,stroke-dasharray:5 5
+  style HOST fill:none,stroke:#2E7D32

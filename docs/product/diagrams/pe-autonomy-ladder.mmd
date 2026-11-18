@@ -1,0 +1,53 @@
+flowchart TB
+  subgraph Ladder ["Autonomy ladder: adoption guidance; moving a rung means a new guardrail version approved by a second person"]
+    direction LR
+    R0["Rung 0 Observe<br/>shadow pattern, pending PD-015"]
+    R1["Rung 1 Suggest<br/>default row allow: false, every case to a person<br/>eval: full review, not accuracy"]
+    R2["Rung 2 Act with risk gate<br/>rules flag low confidence,<br/>high value, mismatches"]
+    R3["Rung 3 Act and report<br/>host samples completed steps"]
+    R4["Rung 4 End to end<br/>pending PD-015"]
+    R0 -. "pattern documented with the M3 offline runner" .-> R1
+    R1 -- "override rate low and stable for about 4 weeks;<br/>rung 2 bar: 95% correct, every seeded critical error caught" --> R2
+    R2 -- "no critical bypass, escalation rules stable;<br/>rung 3 bar: 99.5% correct, zero critical bypasses" --> R3
+    R3 -. "not before 1.0" .-> R4
+    DOWN["Inputs, model or regulation change:<br/>move down one rung"]
+  end
+
+  subgraph Gate ["Deterministic gate on every agentTask, enforced by the engine at every rung; rungs change only the guardrail rule set in step 4"]
+    direction LR
+    G1["1. Bounded inputs, flagged fields masked"]
+    G2["2. AgentAdapter call, outside any transaction,<br/>timeout and retry"]
+    G3{"3. Output valid against<br/>JSON Schema?"}
+    G4{"4. Guardrail rule set<br/>allow?"}
+    G5["5a. Process continues,<br/>output and decision id in history"]
+    G6["5b. route-to-human: approval task,<br/>triggering identity excluded"]
+    G7["5c. fail: incident or compensation"]
+    G1 --> G2 --> G3
+    G3 -- "yes" --> G4
+    G3 -- "no, retries left" --> G2
+    G3 -- "no, retries spent" --> G7
+    G4 -- "allow" --> G5
+    G4 -- "violation, or guardrail error (fail closed)" --> G6
+    G4 -- "violation, onViolation fail" --> G7
+    G6 -- "approve or correct, override recorded" --> G5
+    G6 -- "reject" --> G7
+  end
+
+  Ladder ~~~ Gate
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F;
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F;
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F;
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F;
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F;
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F;
+  class R0,R4 obs;
+  class R1,R2,R3 client;
+  class G1,G5 host;
+  class G3,G4 engine;
+  class G2 external;
+  class G6 client;
+  class G7 obs;
+  class DOWN obs;
+  style Ladder fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style Gate fill:none,stroke:#00796B,stroke-dasharray:5 5

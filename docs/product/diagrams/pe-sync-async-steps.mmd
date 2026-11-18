@@ -1,0 +1,60 @@
+sequenceDiagram
+  autonumber
+  participant CL as Client
+  participant HS as Host service
+  participant PE as Process Engine
+  participant RE as Rule Engine
+  participant DB as Host PostgreSQL
+  participant AG as AgentAdapter (model)
+  participant RM as Remote system
+
+  rect rgba(232,245,233,0.6)
+    Note over HS,DB: Sync in-transaction steps (one host TX)
+    CL->>HS: Start kyc-onboarding, business key APP-1042, Idempotency-Key
+    HS->>PE: start(definition v1, businessKey)
+    alt Same Idempotency-Key retried
+      PE-->>HS: Same instance id, no second start
+    else First request
+      PE->>DB: Insert instance, history
+      PE->>RE: decision step: evaluate(risk-rating)
+      RE->>DB: Decision log insert
+      PE->>DB: Token reaches agentTask, job queued
+    end
+    Note over HS,DB: Commit
+  end
+
+  rect rgba(255,248,225,0.7)
+    Note over PE,DB: TX1 claim
+    PE->>DB: Claim job with lease (SKIP LOCKED), commit
+  end
+
+  Note over PE,AG: Async wait-state: no connection held
+  PE->>AG: Call with bounded inputs, timeout from the definition
+  alt Timeout or adapter error
+    AG-->>PE: Error
+    PE->>DB: New TX: retry later, or incident when retries are spent
+  else Output returned
+    AG-->>PE: Structured output
+  end
+
+  rect rgba(224,242,241,0.7)
+    Note over PE,DB: TX2 complete
+    PE->>PE: Validate output against JSON Schema
+    PE->>RE: Evaluate guardrail rule set
+    alt allow
+      PE->>DB: History (output, guardrail decision id), advance token
+    else violation, route-to-human
+      PE->>DB: Approval task for the compliance role
+    end
+    Note over PE,DB: Commit. A result after lease expiry is discarded
+  end
+
+  Note over PE,RM: Later service step, also outside any transaction
+  PE->>RM: Remote call with attempt id
+  RM-->>PE: Fails after retries
+  rect rgba(243,229,245,0.6)
+    Note over PE,RM: Compensation in reverse order, each attempt recorded
+    PE->>RM: compensate step 2
+    PE->>RM: compensate step 1
+    PE->>DB: Incident visible in the cockpit
+  end

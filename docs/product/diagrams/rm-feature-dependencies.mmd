@@ -1,0 +1,76 @@
+flowchart LR
+  subgraph S1 ["M1"]
+    direction TB
+    RE01["RE-F-01, RE-F-20<br/>decision tables, evaluate"]
+    RE02["RE-F-02 validation"]
+    RE06["RE-F-06, RE-F-07<br/>version lifecycle, maker-checker"]
+    RE14["RE-F-14 decision log"]
+    RE21["RE-F-21, RE-F-25<br/>simulation, import"]
+    RE05["RE-F-05, RE-F-17, RE-F-18<br/>replay, query, explain"]
+    CK04["CK-F-02, CK-F-04<br/>version view, approvals"]
+    CK23["CK-F-23 host registry<br/>X-F-22 meta and me"]
+  end
+  subgraph S2 ["M2"]
+    direction TB
+    PE09["PE-F-09 decision step"]
+    PE16["PE-F-16, PE-F-17<br/>async wait-state, leases"]
+    PE18["PE-F-18 to PE-F-24<br/>agentTask, guardrail, adapter SPI"]
+    PE15["PE-F-15 history"]
+    PE45["PE-F-45, PE-F-46<br/>definition lifecycle, graph diff"]
+    PE47["PE-F-47, PE-F-48, X-F-24<br/>activity history, live counts, bounded queries"]
+    PE50["PE-F-50 task query"]
+    PE30["PE-F-30 migration execution"]
+    CK24["CK-F-24, CK-F-25<br/>definition and instance diagrams"]
+    CK28["CK-F-28, CK-F-29<br/>merged inbox and incidents"]
+    CK12["CK-F-12, CK-F-16<br/>timeline, agent task inspector"]
+  end
+  subgraph S3 ["M3"]
+    direction TB
+    PE34["PE-F-34, PE-F-35<br/>MCP and model adapters"]
+    PE37["PE-F-36, PE-F-37<br/>agent memory, offline runner"]
+    PE44["PE-F-44, PE-F-52<br/>layout storage, step catalogue"]
+    CK32["CK-F-32 modeller canvas"]
+    CK31["CK-F-31 definition approval screens"]
+    PE49["PE-F-49, CK-F-27<br/>hourly rollup, heatmap"]
+    PE31["PE-F-31, CK-F-19, CK-F-33<br/>renamed-step migration, screens"]
+    XF18["X-F-18 API freeze"]
+  end
+
+  RE02 --> RE21
+  RE02 --> CK04
+  RE06 --> CK04
+  RE14 --> RE05
+  RE01 ==> PE09
+  RE01 ==> PE18
+  PE16 --> PE18
+  PE15 --> PE18
+  PE15 --> CK12
+  PE15 --> PE47
+  PE47 --> CK24
+  PE50 --> CK28
+  CK23 ==> CK28
+  PE18 --> PE34
+  PE18 --> PE37
+  PE45 --> CK31
+  CK24 --> CK31
+  CK12 --> CK24
+  PE18 --> PE44
+  PE45 --> CK32
+  PE44 --> CK32
+  PE47 --> PE49
+  PE30 --> PE31
+  S3 -. "all features in, then freeze" .-> XF18
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class RE01,RE02,RE06,RE14,RE21,RE05 engine;
+  class PE09,PE16,PE18,PE15,PE45,PE47,PE50,PE30,PE34,PE37,PE44,PE49,PE31 engine;
+  class CK04,CK23,CK24,CK28,CK12,CK32,CK31 client;
+  class XF18 host;
+  style S1 fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style S2 fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style S3 fill:none,stroke:#1565C0,stroke-dasharray:5 5

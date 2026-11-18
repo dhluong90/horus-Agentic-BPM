@@ -44,6 +44,10 @@ The first sentence alone is true of other embeddable engines. The line depends o
 | 2 | Rule and process changes by business users with maker-checker, effective dates and simulation (validation and graph diff for processes) enforced in the service layer, not only in a UI | Principles 5 and 6, `TR-SEC-04`, [PD-033](decisions.md#pd-033-maker-checker-for-process-definitions), [PD-040](decisions.md#pd-040-principle-6-extended-to-process-definitions) |
 | 3 | Agent output validated by a JSON Schema and a guardrail rule set before the process continues; on violation, a human approves or the step fails | Principle 7, `TR-AGT-01`, [ADR-0008](../adr/0008-async-wait-state-for-external-steps.md) |
 
+![The three differentiators: in-transaction evaluation, governed change, checked agent output](images/vision-differentiators.svg)
+
+Source: [diagrams/vision-differentiators.mmd](diagrams/vision-differentiators.mmd).
+
 ## What the engine will never be
 
 | Never | Why |
@@ -59,6 +63,10 @@ The first sentence alone is true of other embeddable engines. The line depends o
 ## Product shape
 
 Two libraries and one cockpit. The Rule Engine is useful alone and is also the guardrail mechanism for `agentTask`. The Process Engine depends on the Rule Engine API; the Rule Engine never depends on the Process Engine. The cockpit is static assets that talk only to the REST layers the host exposes.
+
+![Product architecture: the engines inside the host service, by security zone](images/vision-architecture.svg)
+
+Numbered edges follow one request: the channel or cockpit reaches the host through its gateway (1, 2), the host calls the engines in process (3, 4), engine state is written in the host's transaction (5), and external and agent calls run outside any transaction (6). Source: [diagrams/vision-architecture.mmd](diagrams/vision-architecture.mmd).
 
 ## How the pieces fit
 

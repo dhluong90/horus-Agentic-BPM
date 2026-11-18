@@ -1,0 +1,42 @@
+flowchart LR
+  subgraph Public_Zone ["Public Zone"]
+    BR["Operator browser<br/>standalone Cockpit, static bundle"]
+    CFG["Host registry in the bundle's configuration"]
+  end
+  subgraph DMZ_Zone ["Banking DMZ"]
+    GW["Bank's existing API gateway<br/>option D, documented, not built"]
+  end
+  subgraph Internal_Zone ["Internal Trusted Zone"]
+    IDP["One OIDC identity provider<br/>tokens accepted by every host"]
+    H1["Host A: loans service<br/>engines and REST layer"]
+    H2["Host B: onboarding service<br/>engines and REST layer"]
+    D1[("Host A PostgreSQL")]
+    D2[("Host B PostgreSQL")]
+  end
+
+  CFG -- "1. Read host list" --> BR
+  BR -- "2. Authorization code with PKCE, public client" --> IDP
+  IDP -- "3. Tokens with allowed tenants claim" --> BR
+  BR -- "4. GET /api/bpm/meta and /me on each host, CORS allowlisted" --> H1
+  BR -- "4. GET /api/bpm/meta and /me on each host" --> H2
+  BR -- "5. Tasks and incidents per host, ETag and 304,<br/>X-Tenant-Id only within allowed tenants" --> H1
+  BR -- "5. Tasks and incidents per host" --> H2
+  H1 -- "6. Reads its own database" --> D1
+  H2 -- "6. Reads its own database" --> D2
+  BR -. "7. Merge one inbox and one incident list;<br/>hide screens a host version or a user cannot use" .-> BR
+  BR -. "option D: same calls through the bank's gateway" .-> GW
+  GW -.-> H1
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F;
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F;
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F;
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F;
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F;
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F;
+  class BR,CFG client;
+  class GW,IDP host;
+  class H1,H2 engine;
+  class D1,D2 db;
+  style Public_Zone fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style DMZ_Zone fill:none,stroke:#EF6C00,stroke-dasharray:5 5
+  style Internal_Zone fill:none,stroke:#1565C0,stroke-dasharray:5 5
