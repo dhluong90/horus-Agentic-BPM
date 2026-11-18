@@ -1,6 +1,6 @@
-# Rule Engine — Design
+# Rule Engine: Design
 
-Status: architecture baseline (M0). Conforms to `ADR-0001` through `ADR-0006` and `wiki/Technical-Requirements.md`.
+Status: architecture baseline (M0). Conforms to `ADR-0001` through `ADR-0006`, the proposed `ADR-0009` and `wiki/Technical-Requirements.md`.
 
 ## 1. Context, Boundaries & Explicit Non-Goals
 
@@ -30,7 +30,7 @@ rule-engine-spring-boot-starter   (@AutoConfiguration composition root, Micromet
 ## 3. Domain Model & Expression Compiler (`rule-engine-core`)
 
 ### 3.1 Immutable Rule Set & AST
-- `RuleSetDefinition` (`record`): `ruleSetName`, `version`, `hitPolicy` (`FIRST | UNIQUE | COLLECT`), `collectAggregate` (`NONE | SUM | MIN | MAX | COUNT`), `effectiveFrom`, `inputs` (`List<InputSchema>`), `outputs` (`List<OutputSchema>`), `rules` (`List<RuleRow>`), `canonicalHash` (SHA-256).
+- `RuleSetDefinition` (`record`): `schemaVersion`, `ruleSetName`, `version` (the rule set version number, 1, 2, 3; never the optimistic lock), `hitPolicy` (`FIRST | UNIQUE | COLLECT`), `collectAggregate` (`NONE | SUM | MIN | MAX | COUNT`), `moneyRounding` (default `HALF_EVEN`), `effectiveFrom` (`Instant`), `inputs` (`List<InputSchema>`), `outputs` (`List<OutputSchema>`), `rules` (`List<RuleRow>`), `canonicalHash` (SHA-256).
 - `Expr` (`sealed interface`):
   - `LiteralExpr(ValueType type, Object value)`
   - `VarRefExpr(int slotIndex, String name, ValueType type)` *(bound to slot index at compile time)*
@@ -40,7 +40,8 @@ rule-engine-spring-boot-starter   (@AutoConfiguration composition root, Micromet
   - `BetweenExpr(Expr target, Expr low, Expr high)`
   - `IsNullExpr(Expr target, boolean negated)`
   - `CallExpr(String functionName, List<Expr> args, PureFunction impl)`
-- `Money` (`record(String currency, long minorUnits, int scale)`): currency comparisons reject mismatched ISO codes (`TR-DET-03`); `money * decimal` uses `RoundingMode.HALF_EVEN`; `money / money` is rejected at publish time.
+- `Money` (`record(String currency, long minorUnits)`, scale derived from the currency): the canonical contract is section 3.4.
+- The definition document format is owned by `rule-engine/api/schema/rule-set.v1.schema.json` (JSON Schema 2020-12). `tools/validate-examples.sh` checks every YAML example in `wiki/` against it.
 
 ### 3.2 Two-Phase Compilation & Slot-Indexed Evaluation
 1. **Compile & Static Type-Check (Save / Publish):**
@@ -57,12 +58,28 @@ rule-engine-spring-boot-starter   (@AutoConfiguration composition root, Micromet
 | From State | Command / Trigger | Guard | To State | Side Effect / Event |
 |---|---|---|---|---|
 | *(none)* | `createDraft` / `importYaml` | Valid schema & tenant | `DRAFT` | Assign sequential `version`, store canonical JSON + hash |
-| `DRAFT` | `updateDraft` | `version` matches optimistic lock | `DRAFT` | Re-validate AST; reject if parse/type errors on publish prep |
-| `DRAFT` | `requestPublish(effectiveFrom)` | Zero validation errors; valid `Idempotency-Key` | `PENDING_APPROVAL` | Freeze snapshot; record `requested_by` |
-| `PENDING_APPROVAL` | `approve(comment)` | `approverId != requestedBy` (`TR-SEC-04`); `rules:approve` | `PUBLISHED` | Set `published_at`, `approved_by`; emit `rules.version.published` + `pg_notify` + increment `cache_epoch` |
-| `PENDING_APPROVAL` | `reject(reason)` | `rules:approve` | `DRAFT` | Record rejection comment; allow edits |
-| `PUBLISHED` | Newer version becomes effective | `new.effectiveFrom <= now` | `RETIRED` | Emit `rules.version.retired`; keep readable forever for explain/replay |
-| `PUBLISHED` | `retire` | `rules:approve` (if maker-checker enabled) | `RETIRED` | Emit `rules.version.retired` + invalidate cache |
+| `DRAFT` | `updateDraft` | `lockVersion` matches (`If-Match`) | `DRAFT` | Re-validate AST; reject if parse/type errors on publish prep |
+| `DRAFT` | `requestPublish(effectiveFrom)` | Zero validation errors; valid `Idempotency-Key` | `PENDING_APPROVAL` | Freeze snapshot; record `requested_by`; emit `rules.version.publish-requested.v1` |
+| `PENDING_APPROVAL` | `approve(comment)` | `approverId != requestedBy` (`TR-SEC-04`); `rules:approve`; `lockVersion` matches | `PUBLISHED` | Set `published_at`, `approved_by`; emit `rules.version.published.v1` + `pg_notify` + increment `cache_epoch` |
+| `PENDING_APPROVAL` | `reject(reason)` | `rules:approve`; `lockVersion` matches | `DRAFT` | Record rejection comment; allow edits; emit `rules.version.rejected.v1` |
+| `PUBLISHED` | Newer version becomes effective | `new.effectiveFrom <= now` | `RETIRED` | Emit `rules.version.retired.v1`; keep readable forever for explain/replay |
+| `PUBLISHED` | `retire` | `rules:approve` (if maker-checker enabled) | `RETIRED` | Emit `rules.version.retired.v1` + invalidate cache |
+
+Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` for this engine and `processes` for the Process Engine. The Rule Engine emits exactly these types: `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`, `rules.version.retired.v1`, and `rules.decision.evaluated.v1` (off by default, `events.decision-evaluated`). A breaking payload change publishes a `.v2` type alongside `.v1`; additive fields stay in `.v1`.
+
+Optimistic locking uses `lockVersion` (column `lock_version`), sent as `If-Match: "<lockVersion>"` or a `lockVersion` body field and returned as `ETag: "<lockVersion>"`. It is unrelated to `version`, the rule set version number.
+
+### 3.4 Money contract (canonical)
+
+This section is the single statement of how money is represented; the Process Engine and the cockpit use the same contract.
+
+| Surface | Unit | Example | Rule |
+|---|---|---|---|
+| Java factories | Named in the method | `Money.ofMinor("VND", 5000000)`, `Money.ofMinor("USD", 1250)`, `Money.ofMajor("USD", "12.50")` | `ofMinor(String currency, long minorUnits)`; `ofMajor(String currency, String amount)` takes a decimal string, never a `double`. `ofMajor` rejects more fraction digits than the currency scale (`"12.505"` USD, `"10.5"` VND) with `IllegalArgumentException`; construction never rounds. There is no constructor without a unit in its name |
+| JSON (REST, events, decision log, canonical definition JSON) | Minor units | `{ "currency": "USD", "amount": 1250 }` is 12.50 USD; `{ "currency": "VND", "amount": 5000000 }` is 5 000 000 VND | Always the object `{currency, amount}`. `currency` is an ISO 4217 alphabetic code; `amount` is a JSON integer in minor units within plus or minus 2^53 - 1 so JavaScript clients read it exactly. A float, a string amount or a value outside that range is `400 INPUT_INVALID` |
+| Expression literals (`when`, `then`, gateway conditions) | Major units with the currency scale | `12.50 USD` (1 250 minor), `5000000 VND` (5 000 000 minor, VND has scale 0) | More fraction digits than the currency scale (`12.505 USD`, `10.5 VND`) is a publish-time validation error. The literal is converted to minor units at compile time |
+| Currency scale | ISO 4217 minor unit | USD 2, VND 0, JPY 0, KWD 3 | From `java.util.Currency#getDefaultFractionDigits`; a currency without a defined minor unit (for example `XAU`) is rejected unless the host registers a scale |
+| Arithmetic | Exact in minor units | `money + money`, `money - money` (same currency), `money * number`, `money / number` | Mixed currencies are `EVALUATION_ERROR` at run time and a validation error when both sides are literals (`TR-DET-03`). `money / money` is rejected at publish time. Results of `*` and `/` round to the currency scale with the rule set's `moneyRounding`, default `HALF_EVEN`; the mode is part of the versioned definition, so replay is deterministic |
 
 ## 4. Public Java SPI & REST Contract Summary
 
@@ -84,12 +101,14 @@ Outbound SPIs (`@ConditionalOnMissingBean` in starter): `TenantResolver`, `Calle
 | `POST /decisions/{ruleSet}/versions/{v}:evaluate` | `rules:simulate` (if draft or custom `clock`) / `rules:evaluate` | Optional `Idempotency-Key` | `403`, `404`, `409`, `422` |
 | `POST /decisions/{ruleSet}:evaluate-batch` | `rules:evaluate` | Max 1,000 items; `Idempotency-Key` | `400`, `404`, `422` |
 | `GET /rule-sets`, `GET /rule-sets/{name}` | `rules:read` | Cursor/bounded pagination | `404 RULE_SET_NOT_FOUND` |
-| `POST /rule-sets`, `POST /rule-sets/{name}/versions`, `PUT /rule-sets/{name}/versions/{v}` | `rules:author` | `Idempotency-Key` on POST; `version` lock on PUT | `400`, `409 VERSION_CONFLICT` |
-| `POST /rule-sets/{name}/versions/{v}:request-publish` | `rules:author` | `Idempotency-Key` | `422 VALIDATION_FAILED` |
-| `POST /rule-sets/{name}/versions/{v}:approve` / `:reject` / `:retire` | `rules:approve` | `Idempotency-Key`; enforces `approver != requester` | `403 SELF_APPROVAL_FORBIDDEN`, `409 INVALID_STATE` |
+| `POST /rule-sets`, `POST /rule-sets/{name}/versions`, `PUT /rule-sets/{name}/versions/{v}` | `rules:author` | `Idempotency-Key` on POST; `If-Match: "<lockVersion>"` on PUT | `400`, `409 VERSION_CONFLICT` |
+| `POST /rule-sets/{name}/versions/{v}:request-publish` | `rules:author` | `Idempotency-Key`; `If-Match: "<lockVersion>"` | `409 VERSION_CONFLICT`, `422 VALIDATION_FAILED` |
+| `POST /rule-sets/{name}/versions/{v}:approve` / `:reject` / `:retire` | `rules:approve` | `Idempotency-Key`; `If-Match: "<lockVersion>"`; enforces `approver != requester` | `403 SELF_APPROVAL_FORBIDDEN`, `409 INVALID_STATE`, `409 VERSION_CONFLICT` |
 | `GET /decisions/{id}`, `GET /decisions/{id}/explain`, `GET /decisions` | `rules:log:read` | Cursor pagination; masked inputs remain hashed | `404 DECISION_NOT_FOUND` |
 
 All errors return RFC 9457 `application/problem+json` with `code`, `detail`, and `correlationId`.
+
+Every endpoint that accepts `Idempotency-Key` also returns: `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` when the key was used before with a different request hash (a client bug; never retried), and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` while the first request with that key is still running (`ADR-0006`, `RLE-014`).
 
 ## 5. Storage Model (`rule-engine-postgres`)
 
@@ -190,7 +209,7 @@ CREATE INDEX idx_rle_idempotency_expiry ON rle_idempotency (expires_at);
 - **Multi-Replica Cache Invalidation:** On `approve` / `retire`, increment `rle_rule_set.cache_epoch` in the same TX and emit `pg_notify('horus_rle_cache', ...)`. A background listener invalidates local `Caffeine` cache immediately; as a PgBouncer-safe fallback, replicas verify `cache_epoch` periodically (default 5s TTL) or when an explicit version pin misses locally.
 - **10x Latency & Pool Budget (`TR-PERF-01`, `TR-PERF-03`):**
   - Compiled AST evaluation of 200 rows: ~15–40 µs in-JVM (target `< 100 µs` p99), zero DB round-trips during evaluation once cached.
-  - Transactional log write adds exactly `1 INSERT` into `rle_decision` (~0.5–1.5 ms inside host TX). At 2,000 decisions/sec per pod with 1.5 ms log insert, DB connection concurrency is ~3 active connections — comfortably within a standard 20-conn HikariCP pool.
+  - Transactional log write adds exactly `1 INSERT` into `rle_decision` (~0.5–1.5 ms inside host TX). At 2,000 decisions/sec per pod with 1.5 ms log insert, DB connection concurrency is ~3 active connections, comfortably within a standard 20-conn HikariCP pool.
   - `rle_decision` is range-partitioned monthly (`TR-OPS-04`) so retention purges are instant `DROP TABLE` metadata operations without vacuum bloat.
 
 ## 7. Open Questions

@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:rule-set:v1",
+  "title": "HORUS Rule Engine rule set definition, schema version 1",
+  "description": "A decision table as authored in YAML or JSON and imported as a draft version. The same document is returned by export. Static checks that need the whole document (expression parsing, types, unknown identifiers, overlap) run in the engine at save and publish time; this schema checks structure only.",
+  "type": "object",
+  "required": ["schemaVersion", "ruleSet", "hitPolicy", "inputs", "outputs", "rules"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "description": "Version of this definition format. Documents written for an older schema version import forever.",
+      "const": 1
+    },
+    "ruleSet": {
+      "description": "Rule set name, unique within a tenant, kebab-case.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "maxLength": 100
+    },
+    "description": { "type": "string", "maxLength": 2000 },
+    "hitPolicy": { "enum": ["first", "unique", "collect"] },
+    "effectiveFrom": {
+      "description": "Optional. The instant the version becomes effective, ISO 8601 with Z or an offset (RFC 3339 date-time), for example 2027-01-01T00:00:00+07:00. A bare date is rejected because it does not name an instant. Without it the version is effective when approved.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "moneyRounding": {
+      "description": "Rounding applied when money * number or money / number produces more fraction digits than the currency scale. Versioned with the rule set so replay is deterministic.",
+      "enum": ["HALF_EVEN", "HALF_UP", "DOWN", "UP", "FLOOR", "CEILING"],
+      "default": "HALF_EVEN"
+    },
+    "inputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/input" }
+    },
+    "outputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/output" }
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "maxLength": 64
+    },
+    "valueType": {
+      "description": "Scalar types, or list<T> of a scalar type.",
+      "type": "string",
+      "pattern": "^(string|integer|decimal|boolean|date|datetime|money|list<(string|integer|decimal|boolean|date|datetime|money)>)$"
+    },
+    "input": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "type": { "$ref": "#/$defs/valueType" },
+        "description": { "type": "string" },
+        "allowed": {
+          "description": "Closed set of values for a string input; enables unreachable-row and overlap detection.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": ["string", "integer"] }
+        },
+        "mask": {
+          "description": "Store the value in the decision log as a keyed HMAC-SHA256 token, never in plain text.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "type": { "$ref": "#/$defs/valueType" },
+        "description": { "type": "string" },
+        "default": {
+          "description": "Value used when a matching row omits this output. Same encoding as a then cell.",
+          "$ref": "#/$defs/thenValue"
+        },
+        "collect": {
+          "description": "Only with hitPolicy collect. Aggregate over matched rows; without it the output becomes a list in row order.",
+          "enum": ["sum", "min", "max", "count"]
+        }
+      }
+    },
+    "condition": {
+      "description": "Expression-language text. Either shorthand starting with an operator for the keyed input (\"< 18\", \"in ['VN', 'SG']\", \"is null\") or a full boolean expression that may refer to any input.",
+      "type": "string",
+      "minLength": 1
+    },
+    "when": {
+      "description": "Map from input name to condition, combined with AND. An omitted input matches anything; {} matches everything. any and all take nested when maps for OR and explicit AND.",
+      "type": "object",
+      "properties": {
+        "any": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/when" } },
+        "all": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/when" } }
+      },
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/condition" }
+    },
+    "thenValue": {
+      "description": "A YAML or JSON boolean or number is a literal. A string is always parsed as an expression of the output's type: a money literal in major units (\"30000 VND\", \"12.50 USD\"), an expression over inputs (\"balance * 0.01\"), or a string literal, which must carry expression-language quotes inside the YAML string (\"'UNDER_AGE'\"). A bare word such as \"UNDER_AGE\" is an identifier and fails validation unless an input has that name.",
+      "type": ["string", "boolean", "number", "null"]
+    },
+    "rule": {
+      "type": "object",
+      "required": ["id", "when", "then"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Stable row id, unique within the rule set; referenced by tests, the decision log and diffs.",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+          "maxLength": 64
+        },
+        "description": { "type": "string" },
+        "when": { "$ref": "#/$defs/when" },
+        "then": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/thenValue" }
+        }
+      }
+    }
+  }
+}

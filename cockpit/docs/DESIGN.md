@@ -1,6 +1,6 @@
-# Cockpit — Design
+# Cockpit: Design
 
-Status: architecture baseline (M0). Conforms to `ADR-0005` and `wiki/Cockpit.md`.
+Status: architecture baseline (M0). Conforms to `ADR-0005` and `wiki/Cockpit.md`. Release scope follows `wiki/Roadmap.md`; spec statements carry the matching milestone.
 
 ## 1. Context, Boundaries & Explicit Non-Goals
 
@@ -27,24 +27,26 @@ cockpit/
 ## 3. Information Hierarchy (3-Tier Operational Cockpit Pattern)
 
 Every operational landing view follows a strict 3-tier decision hierarchy:
-1. **Tier 1 — Pulse (Top Strip):** 3–5 high-signal KPIs with period delta and health status (`Green / Amber / Red` paired with text label & icon, never color alone): e.g., *Pending Approvals*, *Open Incidents*, *SLA Breaches*, *Rule Error Rate (24h)*. Conditional alert strip appears only when a threshold is breached.
-2. **Tier 2 — Trends (Middle):** Time-series charts (decision throughput & error rate, step transition lag) and outcome comparison bars (simulation delta before/after version change).
-3. **Tier 3 — Actionable Breakdown (Bottom):** Ranked queues & tables with immediate inline actions (`Approve / Reject`, `Retry / Resolve Incident`, `Claim / Complete Task`, `Inspect Decision Explain`).
+1. **Tier 1: Pulse (Top Strip):** 3–5 high-signal KPIs with period delta and health status (`Green / Amber / Red` paired with text label & icon, never color alone): e.g., *Pending Approvals*, *Open Incidents*, *SLA Breaches*, *Rule Error Rate (24h)*. Conditional alert strip appears only when a threshold is breached.
+2. **Tier 2: Trends (Middle):** Time-series charts (decision throughput & error rate, step transition lag) and outcome comparison bars (simulation delta before/after version change).
+3. **Tier 3: Actionable Breakdown (Bottom):** Ranked queues & tables with immediate inline actions (`Approve / Reject`, `Retry / Resolve Incident`, `Claim / Complete Task`, `Inspect Decision Explain`).
 
 ## 4. Phased Delivery Scope (Cockpit 0.1 vs Cockpit 0.2)
 
-- **Cockpit 0.1 (M1 — Rule Governance & Audit):**
+- **Cockpit 0.1 (M1: Rule Governance & Audit):**
   - Rule set browser (effective version, pending approvals, last change).
   - Read-only Table & YAML Viewer + **Side-by-Side Version Diff** (`added`, `removed`, `modified` rows).
-  - **Simulation Runner** (paste/CSV sample inputs or replay last N production decisions against draft; summary of changed outcomes).
-  - **Maker-Checker Approval Queue** (shows diff + attached simulation report; disables Approve button when `currentUser == requestedBy`, complementing the API's `403` guard).
+  - **Simulation Runner** (paste/CSV sample inputs against a draft; summary of changed outcomes). Replay against logged decisions is Cockpit 0.2.
+  - **Maker-Checker Approval Queue** (shows the version diff; simulation reports attached to the request are M3; disables Approve button when `currentUser == requestedBy`, complementing the API's `403` guard).
   - **Decision Log Explorer & Explain View** (cursor-paginated filter by ruleSet/time/outcome/matchedRuleId; masked fields shown as `*** (hmac)`).
-- **Cockpit 0.2 (M2 — Process Operations, `agentTask` & Interactive Rule Authoring):**
+- **Cockpit 0.2 (M2: Process Operations, `agentTask` & Interactive Rule Authoring):**
   - **Interactive Decision-Table Grid Editor** (typed cell inputs, inline expression syntax validation via `:validate`, YAML sync).
+  - **Replay Simulation** (replay the last N logged decisions against a draft; changed-outcome counts).
   - Process Definitions, Running Instances (active `pre_token` branches, variables, compensation history), and Human Task Queues (claim, complete, delegate, SLA countdown).
   - **`agentTask` Inspector:** Displays bounded inputs (masked), raw structured agent output, schema validation status, Rule Engine guardrail verdict & matched rules, and human-override diff.
   - **Incidents Queue:** Root cause, retry count, stack/context, single or batch Retry / Resolve.
-  - **Business Calendar Editor** (working hours & holidays) and **M3 Instance Migration Wizard** (validate dry-run conflicts → execute batch).
+  - **Business Calendar Editor** (working hours & holidays).
+- **Deferred to M3:** **Instance Migration Wizard** (validate dry-run conflicts → execute batch) and simulation reports attached to publication requests.
 
 ## 5. State Management, Validation & Accessibility
 

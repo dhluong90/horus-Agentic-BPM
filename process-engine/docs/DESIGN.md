@@ -1,6 +1,6 @@
-# Process Engine — Design
+# Process Engine: Design
 
-Status: architecture baseline (M0). Conforms to `ADR-0001` through `ADR-0007` and `wiki/Technical-Requirements.md`.
+Status: architecture baseline (M0). Conforms to `ADR-0001` through `ADR-0007`, the proposed `ADR-0008` and `ADR-0009`, and `wiki/Technical-Requirements.md`. Money values follow the canonical contract in `rule-engine/docs/DESIGN.md` section 3.4.
 
 ## 1. Context, Boundaries & Explicit Non-Goals
 
@@ -34,15 +34,15 @@ To guarantee zero lost state on local DB commits AND zero HikariCP pool exhausti
    │                   └── Run inline in TX 1, commit business + engine state together
    │
    └──► Async Wait-State (agentTask / remote serviceTask)?
-           └── Create/Lock pre_job (status=CLAIMED, locked_until=now+lease), COMMIT TX 1!
+           └── Claim pre_timer job (status=CLAIMED, locked_until=now()+timeout+lease-margin), COMMIT TX 1!
                   │
                   ▼  OUTSIDE ANY DB TRANSACTION OR ROW LOCK
-           [Invoke AgentAdapter / ServiceAdapter with strict timeout]
+           [Invoke AgentAdapter / ServiceAdapter, cancelled at the step timeout]
                   │
                   ▼  TX 2 (Fresh ACID TX)
-           [Verify lease/version] ─► [Validate JSON Schema] ─► [RuleEngine.evaluate(guardrail)]
-                  ├── allow          ──► Complete step, advance token
-                  ├── route-to-human ──► Create maker-checker userTask with output + matched rules
+           [Verify lease/version] ─► [Validate JSON Schema] ─► [RuleEngine.evaluate(guardrails.decision)]
+                  ├── allow == true                     ──► Complete step, advance token
+                  ├── allow == false, route-to-human    ──► Create maker-checker userTask with output, reasons + matched rules
                   └── fail / timeout ──► Retry with backoff or open pre_incident / run Saga compensate
 ```
 
@@ -50,16 +50,18 @@ To guarantee zero lost state on local DB commits AND zero HikariCP pool exhausti
 Processes fork via `parallelGateway`; therefore active positions live in **`pre_token`** rows rather than a single column on `pre_instance`:
 - `pre_instance.status`: `RUNNING | COMPLETED | COMPENSATING | CANCELLED | FAILED`
 - `pre_token.status`: `ACTIVE | WAITING_USER | WAITING_ASYNC | WAITING_TIMER | JOINED | COMPLETED | COMPENSATED`
+- **Events** (`<module>.<aggregate>.<pastTense>.v<N>`, module `processes`): `processes.definition.deployed.v1`, `processes.instance.started.v1`, `processes.step.completed.v1`, `processes.task.created.v1`, `processes.task.completed.v1`, `processes.incident.raised.v1`, `processes.incident.resolved.v1`, `processes.compensation.started.v1`, `processes.instance.failed.v1`, `processes.instance.completed.v1`, `processes.instance.cancelled.v1`. Each is handed to the host event publisher inside the transaction of the state change it reports. A breaking payload change publishes a `.v2` type alongside `.v1`.
 - **Concurrency rule for `parallelGateway` join:** When a branch arrives at a converging `parallelGateway`, the engine locks `SELECT ... FROM pre_instance WHERE tenant_id = ? AND id = ? FOR UPDATE`, transitions the arriving token to `JOINED`, checks if all incoming sequence branches in that `scope_id` are `JOINED`, and only then emits the post-join `ACTIVE` token (`TR-PERF-05`).
 
 ### 3.3 `agentTask` Execution & Guardrail Pipeline (`TR-AGT-01..03`)
-1. **Bounded Inputs:** Resolve `${instance.*}` variables into an explicit input DTO; apply PII masking flags before audit logging.
+1. **Bounded Inputs:** Resolve `${instance.<path>}` references (syntax defined in `process-engine/api/schema/process-definition.v1.schema.json`, `$defs/variableRef`) into an explicit input DTO; apply PII masking flags before audit logging.
 2. **Adapter SPI (Outside TX):** Call `AgentAdapter.execute(AgentInvocation)` (in-process bean, HTTP, or M3 MCP tool) under `timeout` (`PT5M` etc.). Engine never embeds LLM SDKs (`TR-AGT-03`).
 3. **Output Schema Gate (In TX 2):** Validate adapter JSON payload against declared `outputSchema`. Schema violation → retry up to `retry.max`, then `pre_incident` (or `onViolation` policy).
-4. **Deterministic Guardrail Gate (In TX 2):** Call `RuleEngine.evaluate(guardrail.decision, agentOutput)`.
+4. **Deterministic Guardrail Gate (In TX 2):** Call `RuleEngine.evaluate(guardrails.decision, agentOutput)`.
+   - **Guardrail contract:** the rule set must have hit policy `first` or `unique` and declare the output `allow: boolean`, and may declare `reasons: list<string>`; no other output is read. `POST /definitions` checks the rule set's effective version against this contract at deploy time and rejects the definition with `422 GUARDRAIL_CONTRACT_INVALID` if the rule set is missing or does not comply. At run time the engine fails closed: a decision error (`UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`) or a later version that no longer complies counts as `allow == false` with reason `GUARDRAIL_EVALUATION_ERROR` and follows `onViolation`.
    - `allow == true` → advance process, record `guardrailDecisionId` in `pre_history`.
-   - Violation + `onViolation: route-to-human` → create a `userTask` (maker-checker) carrying inputs, agent output, and matched guardrail rule IDs (`TR-AGT-01`).
-   - Violation + `onViolation: fail` → open `pre_incident` (or trigger `compensate`).
+   - `allow == false` + `onViolation: route-to-human` → create a `userTask` (maker-checker) carrying inputs, agent output, `reasons`, and matched guardrail rule IDs (`TR-AGT-01`).
+   - `allow == false` + `onViolation: fail` → open `pre_incident` (or trigger `compensate`).
 5. **Eval Feedback Loop:** Whenever a human edits or overrides an `agentTask` recommendation on the escalated `userTask`, persist `human_override` metadata in `pre_history` for offline/CI Eval replay.
 
 ### 3.4 Saga Reverse Compensation (`ADR-0007`, `TR-COMP-01..03`)
@@ -69,18 +71,20 @@ Processes fork via `parallelGateway`; therefore active positions live in **`pre_
 
 ### 3.5 Business Calendar SPI & Batched Instance Migration
 - `BusinessCalendar` (`add`, `isBusinessTime`) computes `userTask` SLA `due_at` using tenant-configured working hours, time zones, and holidays (`pre_calendar`, `pre_holiday`) (`TR-CAL-01/02`).
-- `MigrationService` validates `(sourceVersion -> targetVersion, stepMappings)` as a read-only dry run (`:validate`), then executes in batches of 100 instances (`:execute`), locking one `pre_instance` at a time (`TR-MIG-01/02`).
+- `MigrationService` validates `(sourceVersion -> targetVersion)` as a read-only dry run (`:validate`), then executes in batches of 100 instances (`:execute`), locking one `pre_instance` at a time (`TR-MIG-01/02`). M2 maps steps with the same id implicitly and reports every instance on a step that has no same-id target. Explicit `stepMappings` for renamed steps and cancellation of instances on removed steps are M3 (`TR-MIG-03`).
 
 ## 4. Public Java SPI & REST Contract Summary (`/api/bpm/processes/v1`)
 
 | Endpoint | Purpose | Idempotency / Concurrency |
 |---|---|---|
-| `POST /definitions` | Deploy JSON/YAML versioned definition | `Idempotency-Key` |
+| `POST /definitions` | Deploy JSON/YAML versioned definition; validated against `process-definition.v1.schema.json` and the guardrail contract (section 3.3) | `Idempotency-Key`; `422 VALIDATION_FAILED`, `422 GUARDRAIL_CONTRACT_INVALID` |
 | `POST /instances` | Start instance (`businessKey` unique per tenant+def) | `Idempotency-Key` + `business_key` upsert (`ADR-0006`) |
 | `GET /instances/{id}`, `GET /instances` | Inspect state, tokens, variables, history | Cursor pagination |
-| `POST /tasks/{id}:claim`, `:complete`, `:delegate`, `:reassign` | Human task lifecycle & four-eyes check | `Idempotency-Key` + optimistic `lock_version` (`409 CONFLICT`) |
-| `POST /incidents/{id}:retry`, `:resolve` | Retry failed service/agent/comp step or mark resolved | `Idempotency-Key` + `lock_version` |
+| `POST /tasks/{id}:claim`, `:complete`, `:delegate`, `:reassign` | Human task lifecycle & four-eyes check | `Idempotency-Key` + `If-Match: "<lockVersion>"` (`409 VERSION_CONFLICT`) |
+| `POST /incidents/{id}:retry`, `:resolve` | Retry failed service/agent/comp step or mark resolved | `Idempotency-Key` + `If-Match: "<lockVersion>"` |
 | `POST /migrations`, `/{id}:validate`, `/{id}:execute` | Plan, dry-run, and execute instance version migration | `Idempotency-Key` |
+
+Optimistic locking uses `lockVersion` (column `lock_version`), sent as `If-Match: "<lockVersion>"` or a `lockVersion` body field and returned as `ETag`; `version` always means the definition version number. Every endpoint that accepts `Idempotency-Key` returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` when the key was used with a different request hash and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` while the first request is still running (`ADR-0006`).
 
 ## 5. Storage Model (`process-engine-postgres`)
 
@@ -125,7 +129,7 @@ CREATE TABLE pre_token (
   parent_token_id VARCHAR(26),
   scope_id        TEXT NOT NULL,
   current_node_id TEXT NOT NULL,
-  status          TEXT NOT NULL, -- ACTIVE | WAITING_USER | WAITING_ASYNC | WAITING_TIMER | JOINED | COMPLETED
+  status          TEXT NOT NULL, -- ACTIVE | WAITING_USER | WAITING_ASYNC | WAITING_TIMER | JOINED | COMPLETED | COMPENSATED
   created_at      TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX idx_pre_token_instance ON pre_token (tenant_id, instance_id, status);
@@ -233,7 +237,10 @@ CREATE TABLE pre_holiday (
 
 ## 6. Runtime Mechanics & 10x Capacity Math
 
-- **Timer & Async Job Poller (`TR-PERF-04`, `TR-PERF-05`):** Each host replica runs a single scheduler thread polling `pre_timer` in batches (e.g. 50 rows) using `SELECT ... FOR UPDATE SKIP LOCKED` with a `60s` lease (`locked_until`).
+- **Timer & Async Job Poller (`TR-PERF-04`, `TR-PERF-05`):** Each host replica runs a single scheduler thread polling `pre_timer` in batches (e.g. 50 rows) using `SELECT ... FOR UPDATE SKIP LOCKED`. Lease length (`locked_until`, always computed with the database `now()`) depends on the job kind (`ADR-0008`):
+  - `ASYNC_AGENT`, `ASYNC_SERVICE` and remote compensation: step `timeout` plus `jobs.lease-margin` (default `30 s`). A `PT5M` agent step holds a 5 min 30 s lease; the worker cancels the adapter call at 5 min, so a live attempt always finishes or fails before its lease ends and is never taken over. The margin covers TX2 (about 5 ms), a GC pause and scheduling delay. Steps without a declared timeout use `adapters.default-timeout` (default `PT30S`), giving a 60 s lease.
+  - `TIMER` and `SLA_ESCALATION`: fixed `jobs.timer-lease` (default `60 s`); they run no external call (`PRE-006`).
+  - Cost: a crashed replica's async job is reclaimed after `timeout + 30 s` rather than a fixed 60 s. For a `PT5M` step recovery takes 5 min 30 s instead of 60 s, which is acceptable because the same step legitimately takes up to 5 min.
 - **Connection Pool Protection:** Because `agentTask` and remote `serviceTask` release their claim TX *before* calling external HTTP/MCP/LLM endpoints, **100 concurrent 10-second LLM agent calls consume 0 DB connections while waiting**, keeping a 20-connection HikariCP pool below 10% utilization.
 - **Throughput Target (`TR-PERF-04`):** Batching sync transitions + single `INSERT` history writes limits per-step DB time to ~1 ms, sustaining >1,000 transitions/sec on a 4-vCPU PostgreSQL instance.
 

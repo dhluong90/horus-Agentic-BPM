@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:process-definition:v1",
+  "title": "HORUS Process Engine process definition, schema version 1",
+  "description": "A process as authored in YAML or JSON and deployed with POST /api/bpm/processes/v1/definitions. Steps run in list order unless next says otherwise. Checks that need the whole document or other data (every next target exists, every non-end path reaches an end, rule sets and adapters exist, the guardrail contract) run in the engine at deploy time; this schema checks structure only.",
+  "type": "object",
+  "required": ["schemaVersion", "process", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "description": "Version of this definition format. Documents written for an older schema version deploy forever.",
+      "const": 1
+    },
+    "process": {
+      "description": "Definition key, unique within a tenant, kebab-case. Deploying the same key again creates the next version.",
+      "$ref": "#/$defs/kebabId"
+    },
+    "name": { "type": "string", "maxLength": 200 },
+    "description": { "type": "string", "maxLength": 2000 },
+    "variables": {
+      "description": "Optional declaration of instance variables and their types, used for deploy-time checks of ${instance.x} references.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/valueType" }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "maxLength": 64 },
+    "kebabId": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 100 },
+    "valueType": {
+      "type": "string",
+      "pattern": "^(string|integer|decimal|boolean|date|datetime|money|object|list<(string|integer|decimal|boolean|date|datetime|money|object)>)$"
+    },
+    "duration": {
+      "description": "ISO 8601 duration, for example PT30S, PT5M, PT4H, P1D.",
+      "type": "string",
+      "format": "duration"
+    },
+    "beanMethod": {
+      "description": "Host bean and method, bean.method.",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "variableRef": {
+      "description": "Reference to an instance variable: ${instance.<path>}, where path is one or more identifiers separated by dots (${instance.customer.segment}). The reference must be the whole string, so the value keeps its type (a money object stays a money object); there is no interpolation inside a longer string and no escape. The root instance is the only root in schema version 1; other roots are reserved. The value is read when the step starts; a missing variable fails the step with INPUT_VARIABLE_MISSING and opens an incident.",
+      "type": "string",
+      "pattern": "^\\$\\{instance\\.[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*\\}$"
+    },
+    "inputValue": {
+      "description": "A variable reference, or a literal. A string containing ${ that is not exactly one reference is rejected.",
+      "anyOf": [
+        { "$ref": "#/$defs/variableRef" },
+        { "type": "string", "not": { "pattern": "\\$\\{" } },
+        { "type": ["number", "boolean", "null", "array"] },
+        { "type": "object", "required": ["currency", "amount"], "additionalProperties": false,
+          "properties": { "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }, "amount": { "type": "integer" } } }
+      ]
+    },
+    "inputs": {
+      "description": "Bounded input map passed to the step; only these values reach a rule set, a handler or an agent.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/inputValue" }
+    },
+    "next": {
+      "description": "Id of the following step. Defaults to the next step in the list.",
+      "$ref": "#/$defs/kebabId"
+    },
+    "retry": {
+      "description": "max is the number of retries after the first attempt, so max 2 gives 3 attempts in total. backoff is the delay before each retry.",
+      "type": "object",
+      "required": ["max"],
+      "additionalProperties": false,
+      "properties": {
+        "max": { "type": "integer", "minimum": 0, "maximum": 20 },
+        "backoff": { "$ref": "#/$defs/duration" }
+      }
+    },
+    "assignee": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "user": { "type": "string" },
+        "role": { "type": "string" },
+        "group": { "type": "string" }
+      }
+    },
+    "common": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/kebabId" },
+        "type": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "type": {
+          "enum": ["start", "end", "userTask", "serviceTask", "agentTask", "decision", "exclusiveGateway", "parallelGateway", "timer", "callProcess", "saga", "throwCompensation"]
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "start" } } }, "then": { "$ref": "#/$defs/startStep" } },
+        { "if": { "properties": { "type": { "const": "end" } } }, "then": { "$ref": "#/$defs/endStep" } },
+        { "if": { "properties": { "type": { "const": "userTask" } } }, "then": { "$ref": "#/$defs/userTaskStep" } },
+        { "if": { "properties": { "type": { "const": "serviceTask" } } }, "then": { "$ref": "#/$defs/serviceTaskStep" } },
+        { "if": { "properties": { "type": { "const": "agentTask" } } }, "then": { "$ref": "#/$defs/agentTaskStep" } },
+        { "if": { "properties": { "type": { "const": "decision" } } }, "then": { "$ref": "#/$defs/decisionStep" } },
+        { "if": { "properties": { "type": { "const": "exclusiveGateway" } } }, "then": { "$ref": "#/$defs/exclusiveGatewayStep" } },
+        { "if": { "properties": { "type": { "const": "parallelGateway" } } }, "then": { "$ref": "#/$defs/parallelGatewayStep" } },
+        { "if": { "properties": { "type": { "const": "timer" } } }, "then": { "$ref": "#/$defs/timerStep" } },
+        { "if": { "properties": { "type": { "const": "callProcess" } } }, "then": { "$ref": "#/$defs/callProcessStep" } },
+        { "if": { "properties": { "type": { "const": "saga" } } }, "then": { "$ref": "#/$defs/sagaStep" } },
+        { "if": { "properties": { "type": { "const": "throwCompensation" } } }, "then": { "$ref": "#/$defs/throwCompensationStep" } }
+      ]
+    },
+    "startStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "properties": { "next": { "$ref": "#/$defs/next" } }
+    },
+    "endStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false
+    },
+    "userTaskStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["assignee"],
+      "properties": {
+        "assignee": { "$ref": "#/$defs/assignee" },
+        "fourEyes": {
+          "description": "The identities that started the instance or completed earlier steps of it cannot complete this task.",
+          "type": "boolean",
+          "default": false
+        },
+        "form": { "type": "string" },
+        "sla": {
+          "type": "object",
+          "required": ["duration"],
+          "additionalProperties": false,
+          "properties": {
+            "duration": { "$ref": "#/$defs/duration" },
+            "calendar": { "type": "string" },
+            "escalateTo": { "$ref": "#/$defs/assignee" }
+          }
+        },
+        "resultVariable": { "$ref": "#/$defs/identifier" },
+        "next": { "$ref": "#/$defs/next" }
+      }
+    },
+    "serviceTaskStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["handler"],
+      "properties": {
+        "mode": {
+          "description": "local runs inside the current transaction and may write only to the host database; remote runs as an Async Wait-State (ADR-0008).",
+          "enum": ["local", "remote"],
+          "default": "local"
+        },
+        "handler": { "$ref": "#/$defs/beanMethod" },
+        "inputs": { "$ref": "#/$defs/inputs" },
+        "resultVariable": { "$ref": "#/$defs/identifier" },
+        "timeout": {
+          "description": "Remote mode only. Bounds the call and sets the lease (timeout plus jobs.lease-margin). Defaults to adapters.default-timeout (PT30S).",
+          "$ref": "#/$defs/duration"
+        },
+        "retry": { "$ref": "#/$defs/retry" },
+        "compensate": {
+          "description": "Handler that undoes this step, idempotent by attemptId, or manual to raise an incident instead.",
+          "anyOf": [ { "$ref": "#/$defs/beanMethod" }, { "const": "manual" } ]
+        },
+        "onFailure": { "enum": ["incident", "compensate"], "default": "incident" },
+        "next": { "$ref": "#/$defs/next" }
+      }
+    },
+    "agentTaskStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["agent", "outputSchema", "guardrails"],
+      "properties": {
+        "agent": { "description": "Adapter registered in the host.", "type": "string", "minLength": 1 },
+        "inputs": { "$ref": "#/$defs/inputs" },
+        "outputSchema": { "description": "Path of the JSON Schema the agent output must satisfy.", "type": "string", "minLength": 1 },
+        "guardrails": {
+          "type": "object",
+          "required": ["decision", "onViolation"],
+          "additionalProperties": false,
+          "properties": {
+            "decision": {
+              "description": "Rule set evaluated on the agent output. It must have hitPolicy first or unique, output allow: boolean and may output reasons: list<string>; checked at deploy time.",
+              "$ref": "#/$defs/kebabId"
+            },
+            "onViolation": { "enum": ["route-to-human", "fail"] },
+            "reviewer": { "$ref": "#/$defs/assignee" }
+          }
+        },
+        "resultVariable": { "$ref": "#/$defs/identifier" },
+        "timeout": { "$ref": "#/$defs/duration" },
+        "retry": { "$ref": "#/$defs/retry" },
+        "compensate": { "anyOf": [ { "$ref": "#/$defs/beanMethod" }, { "const": "manual" } ] },
+        "onFailure": { "enum": ["incident", "compensate"], "default": "incident" },
+        "next": { "$ref": "#/$defs/next" }
+      }
+    },
+    "decisionStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["ruleSet"],
+      "properties": {
+        "ruleSet": { "$ref": "#/$defs/kebabId" },
+        "inputs": { "$ref": "#/$defs/inputs" },
+        "resultVariable": { "$ref": "#/$defs/identifier" },
+        "next": { "$ref": "#/$defs/next" }
+      }
+    },
+    "exclusiveGatewayStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["branches", "default"],
+      "properties": {
+        "branches": {
+          "description": "Checked in order; the first true condition wins. Conditions use the Rule Engine expression language over instance variables.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["when", "next"],
+            "additionalProperties": false,
+            "properties": {
+              "when": { "type": "string", "minLength": 1 },
+              "next": { "$ref": "#/$defs/kebabId" }
+            }
+          }
+        },
+        "default": { "description": "Step taken when no branch matches.", "$ref": "#/$defs/kebabId" }
+      }
+    },
+    "parallelGatewayStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "properties": {
+        "next": {
+          "description": "A list forks one token per entry. A single id, or none, after a join.",
+          "anyOf": [
+            { "$ref": "#/$defs/kebabId" },
+            { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/kebabId" } }
+          ]
+        }
+      }
+    },
+    "timerStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "properties": {
+        "duration": { "$ref": "#/$defs/duration" },
+        "until": {
+          "description": "An instant (RFC 3339 date-time) or a reference to a datetime variable.",
+          "anyOf": [ { "type": "string", "format": "date-time" }, { "$ref": "#/$defs/variableRef" } ]
+        },
+        "calendar": { "description": "Business calendar for duration; omitted means elapsed time.", "type": "string" },
+        "next": { "$ref": "#/$defs/next" }
+      },
+      "oneOf": [ { "required": ["duration"] }, { "required": ["until"] } ]
+    },
+    "callProcessStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["process"],
+      "properties": {
+        "process": { "$ref": "#/$defs/kebabId" },
+        "version": { "description": "Pin a version; omitted means the latest at call time.", "type": "integer", "minimum": 1 },
+        "inputs": { "$ref": "#/$defs/inputs" },
+        "resultVariable": { "$ref": "#/$defs/identifier" },
+        "next": { "$ref": "#/$defs/next" }
+      }
+    },
+    "sagaStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" } },
+        "next": { "$ref": "#/$defs/next" }
+      }
+    },
+    "throwCompensationStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false
+    }
+  }
+}

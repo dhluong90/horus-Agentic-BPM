@@ -1,6 +1,6 @@
-# Process Engine — Behaviour Specification
+# Process Engine: Behaviour Specification
 
-Behaviour is specified as numbered, testable statements. Every statement maps 1:1 to an automated test named by its spec ID (`TR-QA-01`).
+Behaviour is specified as numbered, testable statements. Every statement maps 1:1 to an automated test named by its spec ID (`TR-QA-01`). Each statement carries the milestone that ships it, matching `wiki/Roadmap.md`. Money values use the contract in `rule-engine/docs/DESIGN.md` section 3.4.
 
 ---
 
@@ -8,6 +8,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-001 Starting a process pins its effective definition version
 - **Traces to:** `TR-DET-01`
+- **Milestone:** M2
 - **Given:** Process `loan-origination` has `v1` active; instance `I1` starts on `v1`, then `v2` is deployed.
 - **When:** Complete steps on `I1`, and start new instance `I2`.
 - **Then:** `I1` executes exclusively against `v1` until completion or explicit migration; `I2` pins `v2`.
@@ -16,6 +17,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-002 Business key enforces uniqueness and idempotent start returns existing instance
 - **Traces to:** `TR-IDEM-01`, `TR-IDEM-02`
+- **Milestone:** M2
 - **Given:** Tenant `bank-a`, process `loan-origination` v1.
 - **When:** Caller posts `POST /api/bpm/processes/v1/instances` with `businessKey: "LN-2027-000123"` and `Idempotency-Key: k1`, then repeats with `businessKey: "LN-2027-000123"` (with `k1` or new key `k2`).
 - **Then:** First call returns `201 Created` (`instanceId = I1`); replay returns the existing `I1` (`201` on same `k1`, `200` on new `k2`) with **only 1 instance row** in `pre_instance`.
@@ -24,10 +26,11 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-003 Stale task completion fails with optimistic locking conflict
 - **Traces to:** `TR-IDEM-03`
-- **Given:** `userTask` `T1` at `lock_version = 1`. Two operators fetch `T1` concurrently.
-- **When:** Operator A completes `T1` with `version = 1` (succeeds, `lock_version -> 2`), then Operator B attempts to complete `T1` with `version = 1`.
+- **Milestone:** M2
+- **Given:** `userTask` `T1` at `lockVersion = 1` (`ETag: "1"`). Two operators fetch `T1` concurrently.
+- **When:** Operator A completes `T1` with `If-Match: "1"` (succeeds, `lockVersion -> 2`), then Operator B attempts to complete `T1` with `If-Match: "1"`.
 - **Then:** Operator B receives `409 Conflict` (`VERSION_CONFLICT`) with no duplicate transition or history entry.
-- **Example:** `User A complete(T1, v=1) -> 200; User B complete(T1, v=1) -> 409`.
+- **Example:** `User A complete(T1, lockVersion=1) -> 200; User B complete(T1, lockVersion=1) -> 409 VERSION_CONFLICT`.
 - **Test ID:** `PRE_003_stale_task_completion_returns_conflict`
 
 ---
@@ -36,14 +39,16 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-004 Exclusive gateway routes deterministically without fallthrough ambiguity
 - **Traces to:** `TR-DET-01`
+- **Milestone:** M2
 - **Given:** `exclusiveGateway` with condition branches `amount >= 100000000 VND -> senior-approval`, `default -> auto-approve`.
-- **When:** Instance evaluates gateway with `amount = Money("VND", 150_000_000)`.
+- **When:** Instance evaluates gateway with `amount = Money.ofMinor("VND", 150000000)`.
 - **Then:** Single active token advances to `senior-approval`; `auto-approve` is not activated.
 - **Example:** `amount=150000000 VND -> senior-approval`.
 - **Test ID:** `PRE_004_exclusive_gateway_routes_single_matching_branch`
 
 ### PRE-005 Concurrent parallel gateway join prevents lost wakeup under multi-replica race
 - **Traces to:** `TR-PERF-05`
+- **Milestone:** M2
 - **Given:** `parallelGateway` forks into Branch A (`credit-bureau`) and Branch B (`fraud-check`) which converge at `join-checks`.
 - **When:** Pod 1 finishes Branch A and Pod 2 finishes Branch B **at the exact same millisecond**.
 - **Then:** Row-level lock on `pre_instance` serializes the two join evaluations so exactly **one** post-join token advances to `underwrite` (never zero lost wakeups, never two duplicate advances).
@@ -52,6 +57,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-006 Replica-safe timer claims via SKIP LOCKED and recovers crashed leases
 - **Traces to:** `TR-PERF-05`
+- **Milestone:** M2
 - **Given:** `pre_timer` row due at `T0`. Pod 1 claims it (`status = CLAIMED`, `locked_until = T0 + 60s`) and crashes before completing.
 - **When:** Pod 2 polls at `T0 + 10s` (still leased), and again at `T0 + 65s` (lease expired).
 - **Then:** At `T0 + 10s`, Pod 2 skips the locked timer; at `T0 + 65s`, Pod 2 reclaims the expired lease and fires the timer once.
@@ -64,6 +70,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-007 Four-eyes approval blocks requester or previous actor from completing approval task
 - **Traces to:** `TR-SEC-04`
+- **Milestone:** M2
 - **Given:** Process started or prior `submit-application` step completed by `alice`; next `userTask` has `fourEyes: true` (or lists `alice` in `forbidden_users`).
 - **When:** `alice` tries to claim or complete the approval task via Java API or REST.
 - **Then:** Engine rejects with `403 SELF_APPROVAL_FORBIDDEN`; only another authorized user (`bob`) can complete it.
@@ -72,6 +79,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-008 BusinessCalendar SPI computes SLA deadlines across weekends and holidays
 - **Traces to:** `TR-CAL-01`, `TR-CAL-02`
+- **Milestone:** M2
 - **Given:** Tenant calendar `vn-banking-hours` (`Mon-Fri 08:00-17:00 Asia/Ho_Chi_Minh`, holiday `2027-01-01`). Task created `2026-12-31T15:00:00+07:00` with `sla: PT4H`.
 - **When:** Engine creates the `userTask` and computes `due_at`.
 - **Then:** Consumes 2 hours (`15:00-17:00` on Dec 31), skips Jan 1 holiday + weekend (Jan 2–3), and sets `due_at = 2027-01-04T10:00:00+07:00`. Later calendar edits do not mutate this already-computed `due_at`.
@@ -84,6 +92,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-009 `agentTask` releases DB connections before invoking adapter (Async Wait-State)
 - **Traces to:** `TR-AGT-03`, `TR-EMB-04`
+- **Milestone:** M2
 - **Given:** Host configured with a 2-connection HikariCP pool; `agentTask` calls a mock adapter sleeping `2 seconds`.
 - **When:** Start 10 concurrent process instances reaching `agentTask` while another thread executes normal DB queries.
 - **Then:** All 10 adapters run concurrently without exhausting the 2-connection pool (`TX 1` commits claim lease `< 10 ms` before adapter sleep; `TX 2` commits output after adapter returns).
@@ -92,14 +101,16 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-010 `agentTask` validates JSON Schema and evaluates Rule Engine guardrail before advancing
 - **Traces to:** `TR-AGT-01`
-- **Given:** `assess-documents` `agentTask` with `outputSchema` requiring `{ riskScore: number, recommendation: string }` and guardrail rule set `agent-output-guardrails` (`riskScore >= 70 -> decision: "route-to-human"`).
+- **Milestone:** M2
+- **Given:** `assess-documents` `agentTask` with `outputSchema` requiring `{ riskScore: number, recommendation: string }`, `guardrails: { decision: agent-output-guardrails, onViolation: route-to-human }`, and guardrail rule set `agent-output-guardrails` (`hitPolicy: first`; `R2`: `riskScore >= 70 -> allow: false, reasons: ['HIGH_RISK_SCORE']`; default row `allow: true`).
 - **When:** Adapter returns `{ riskScore: 85, recommendation: "APPROVE" }`.
-- **Then:** Output passes schema validation, Rule Engine returns `route-to-human` with matched rule ID, and engine creates a maker-checker `userTask` carrying inputs, agent output, and matched rule IDs instead of auto-advancing.
-- **Example:** `riskScore=85 -> guardrail matched R2 -> userTask created for compliance-reviewer`.
+- **Then:** Output passes schema validation, Rule Engine returns `allow = false`, `reasons = ["HIGH_RISK_SCORE"]` and matched rule `R2`, and engine creates a maker-checker `userTask` carrying inputs, agent output, `reasons`, and matched rule IDs instead of auto-advancing.
+- **Example:** `riskScore=85 -> allow=false, R2, HIGH_RISK_SCORE -> userTask created for compliance-reviewer`.
 - **Test ID:** `PRE_010_agent_task_guardrail_violation_routes_to_human`
 
 ### PRE-011 `agentTask` invalid JSON output or timeout retries with backoff then raises incident
 - **Traces to:** `TR-AGT-01`, `TR-AGT-03`, `TR-OPS-03`
+- **Milestone:** M2
 - **Given:** `agentTask` with `timeout: PT1S`, `retry: { max: 2, backoff: PT1S }`. Adapter exceeds timeout or returns malformed JSON failing `outputSchema`.
 - **When:** Initial attempt and 2 retries fail.
 - **Then:** Engine retries twice and on the 3rd failure opens a `pre_incident` with `error_code = AGENT_SCHEMA_INVALID` or `AGENT_TIMEOUT`, `retry_count = 2`, pausing the token for ops retry/resolve.
@@ -108,6 +119,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-012 `agentTask` logs masked inputs, output, guardrail decision ID, and human override
 - **Traces to:** `TR-AGT-02`, `TR-OBS-01`
+- **Milestone:** M2
 - **Given:** `agentTask` with `nationalId` marked `mask: true` routes to human `userTask`; reviewer changes `recommendation` from `"APPROVE"` to `"REJECT"`.
 - **When:** Reviewer completes the `userTask`.
 - **Then:** `pre_history` records hashed `nationalId` (no plaintext), raw agent output, `guardrailDecisionId`, adapter latency, and `human_override` diff for Eval replay.
@@ -120,6 +132,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-013 Failed step triggers reverse LIFO compensation and propagates attempt ID
 - **Traces to:** `TR-COMP-01`, `TR-COMP-02`, `TR-COMP-03`, `TR-IDEM-04`
+- **Milestone:** M2
 - **Given:** Process runs `reserve-funds` (comp: `releaseFunds`) → `open-account` (comp: `closeAccount`) → `notify-partner` (`onFailure: compensate`).
 - **When:** `notify-partner` exhausts retries and fails.
 - **Then:** Engine executes `closeAccount` first, then `releaseFunds` second (strict reverse order), passing unique `attemptId` to each compensate handler. If `compensate: manual` is reached, engine opens an incident instead of skipping.
@@ -128,16 +141,40 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### PRE-014 Migration validate dry-run detects unmapped steps without mutating instances
 - **Traces to:** `TR-MIG-01`
+- **Milestone:** M2
 - **Given:** 500 instances running on `v1`, including 50 paused on `legacy-review` which was removed in `v2`.
 - **When:** Call `POST /api/bpm/processes/v1/migrations/{id}:validate` without mapping `legacy-review`.
-- **Then:** Returns dry-run report listing 50 unmapped instances at `legacy-review` and marks plan invalid; 0 rows in `pre_instance` are modified.
+- **Then:** Returns dry-run report listing 50 unmapped instances at `legacy-review` and marks plan invalid; 0 rows in `pre_instance` are modified. Resolving them by an explicit mapping for a renamed step or by cancellation is M3 (`TR-MIG-03`) and is not part of this statement.
 - **Example:** `Validate v1->v2 missing legacy-review -> conflict report, 0 instances mutated`.
 - **Test ID:** `PRE_014_migration_validate_reports_unmapped_steps_without_mutation`
 
 ### PRE-015 Batched migration isolates per-instance failures without stalling healthy instances
 - **Traces to:** `TR-MIG-02`
+- **Milestone:** M2
 - **Given:** Validated migration plan `v1 -> v2` across 250 running instances where instance `#120` hits a transient lock conflict or mapping invariant error.
 - **When:** Execute `POST /api/bpm/processes/v1/migrations/{id}:execute`.
 - **Then:** 249 healthy instances pin to `v2` with `MIGRATED` `pre_history` rows; instance `#120` gets an incident without rolling back the other 249 instances.
 - **Example:** `250 instances (1 corrupt) -> 249 migrated to v2, 1 incident raised`.
 - **Test ID:** `PRE_015_migration_execute_isolates_instance_failure`
+
+---
+
+## Deploy-Time Contracts & Leases
+
+### PRE-016 Deploy rejects an `agentTask` whose guardrail rule set breaks the guardrail contract
+- **Traces to:** `TR-AGT-01`
+- **Milestone:** M2
+- **Given:** Definition `kyc-onboarding` v1 with `agentTask` `assess-documents` and `guardrails.decision: agent-output-guardrails`. Case A: the rule set's effective version declares outputs `allow: boolean` and `reasons: list<string>` with `hitPolicy: first`. Case B: it declares `decision: string` and no `allow`. Case C: it declares `allow: boolean` with `hitPolicy: collect`. Case D: no rule set of that name exists in the tenant.
+- **When:** Caller posts the definition to `POST /api/bpm/processes/v1/definitions`.
+- **Then:** Case A deploys (`201`). Cases B, C and D return `422 GUARDRAIL_CONTRACT_INVALID` naming the step id and the failed check; no `pre_definition` row is written.
+- **Example:** `outputs [decision: string] -> 422 GUARDRAIL_CONTRACT_INVALID at step assess-documents`.
+- **Test ID:** `PRE_016_deploy_rejects_guardrail_rule_set_breaking_contract`
+
+### PRE-017 Async job lease is the step timeout plus the lease margin, so a live attempt is never taken over
+- **Traces to:** `TR-AGT-03`, `TR-PERF-05`
+- **Milestone:** M2
+- **Given:** `agentTask` with `timeout: PT2S`, `jobs.lease-margin = 30s`; the adapter on Pod 1 returns after 1.9 s. In a second run Pod 1 crashes right after TX1.
+- **When:** Pod 2 polls continuously from the claim instant `T0`.
+- **Then:** TX1 sets `locked_until = T0 + 32s`. In the first run Pod 2 never claims the job, and Pod 1's TX2 records the result once. In the crash run Pod 2 skips the job until `T0 + 32s`, then reclaims it with `attempt = 2` and a new `attemptId`.
+- **Example:** `timeout PT2S -> lease 32s; live attempt completes at 1.9s untouched; after crash reclaimed at T0+32s`.
+- **Test ID:** `PRE_017_async_lease_is_timeout_plus_margin`
