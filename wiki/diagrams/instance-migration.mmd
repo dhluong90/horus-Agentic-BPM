@@ -1,8 +1,8 @@
 flowchart LR
-  V1[(definition v1<br/>5 000 running instances)] --> P[migration plan<br/>v1 → v2<br/>step mapping]
-  P --> D[dry run<br/>instances per step,<br/>unmapped steps, conflicts]
-  D -->|plan valid| X[execute in batches<br/>each instance: lock, remap step,<br/>pin v2, write history row]
-  D -->|conflicts| F[fix mapping<br/>or cancel instances]
+  V1[("definition v1\n5 000 running instances")] --> P["migration plan\nv1 to v2, step mapping"]
+  P --> D["dry run (:validate)\ninstances per step,\nunmapped steps, conflicts"]
+  D -->|"plan valid"| X["execute (:execute)\nbatches of 100; per instance: lock row,\nremap tokens, pin v2, history row"]
+  D -->|"conflicts"| F["fix mapping\nor cancel instances"]
   F --> D
-  X --> V2[(definition v2<br/>all instances migrated)]
-  X -. per-instance failure .-> I[[incident on that instance<br/>others continue]]
+  X --> V2[("definition v2\nall instances migrated")]
+  X -. "per-instance failure" .-> I[["incident on that instance\nothers continue"]]

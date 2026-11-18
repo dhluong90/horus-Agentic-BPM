@@ -1,14 +1,21 @@
 # Contributing
 
-Thank you for your interest. Until the first release the maintainers drive the roadmap; issues and small pull requests are welcome.
+Thank you for your interest. Until the first release the maintainers drive the roadmap; issues and small pull requests are welcome. The full process is on the wiki page [Contributing](../../wiki/Contributing); this file is the short form.
 
-## Ground rules
-- Discuss before building: open an issue from the templates (Feature request, Bug report, Design proposal) and wait for a maintainer to label it `status:accepted`.
+## Before you write code
+- Open an issue from the templates (Bug report, Feature request, Design proposal) and wait for a maintainer to label it `status:accepted`.
+- Security vulnerabilities go to the address in `SECURITY.md`, never to a public issue.
+
+## While you work
 - One pull request per issue, from a `feat/<module>/<issue>-<slug>` branch, with Conventional Commits (`feat(rule-engine): add collect hit policy (#12)`).
-- Tests are required and are named by the specification id they prove (`docs/SPEC.md` in each module).
-- No arbitrary code execution paths in rule expressions or definitions. Pull requests that add reflection, scripting engines or I/O to the expression language are declined.
-- Third-party dependencies must be permissively licensed (Apache 2.0, MIT, BSD).
-- Documentation changes (wiki/ and module docs) ship in the same pull request as the code.
+- Tests are required and named by the specification id they prove (`<module>/docs/SPEC.md`).
+- No reflection, scripting engines or I/O in rule expressions or definitions. Such pull requests are declined.
+- Third-party dependencies must be Apache 2.0, MIT or BSD licensed.
+
+## Documentation ships with the code
+- Any change to a REST path, configuration key, error code, metric name or architectural invariant updates the owning wiki page (`wiki/`) and the module docs in the same pull request.
+- Diagram sources live in `wiki/diagrams/*.mmd`; render them to `wiki/images/*.svg` with `tools/render-diagrams.sh` and embed the SVG. Never add an image without its source.
+- Each fact has one owning page; link to it instead of restating it.
 
 ## Contributor licence agreement
 The project is public under a noncommercial licence and licensed commercially by HORUS, so contributions require the CLA in `CLA.md`. Add `I agree to the CLA in CLA.md` to your first pull request.

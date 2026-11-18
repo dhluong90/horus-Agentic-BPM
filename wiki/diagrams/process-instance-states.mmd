@@ -1,11 +1,17 @@
 stateDiagram-v2
   direction LR
-  [*] --> Active: start
-  Active --> Waiting: user, agent or timer step
-  Waiting --> Active: complete or fire
-  Active --> Incident: step failed, retries exhausted
-  Incident --> Active: retry or resolve
-  Active --> Completed: end
-  Active --> Cancelled: cancel
-  Completed --> [*]
-  Cancelled --> [*]
+  [*] --> RUNNING: start (idempotency key, business key)
+  RUNNING --> RUNNING: token advances; waits on user, async or timer step; incident opened or resolved
+  RUNNING --> COMPLETED: last token reaches end
+  RUNNING --> CANCELLED: cancel
+  RUNNING --> COMPENSATING: retries exhausted with onFailure compensate, or throwCompensation
+  COMPENSATING --> FAILED: all compensations done, or manual compensation incident resolved
+  COMPLETED --> [*]
+  CANCELLED --> [*]
+  FAILED --> [*]
+  note right of RUNNING
+    Positions live in pre_token rows:
+    ACTIVE, WAITING_USER, WAITING_ASYNC,
+    WAITING_TIMER, JOINED, COMPLETED.
+    An incident pauses one token, not the instance.
+  end note

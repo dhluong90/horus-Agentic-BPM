@@ -1,18 +1,18 @@
 flowchart TB
-  subgraph One[Single service]
+  subgraph One["Single service"]
     direction LR
-    S1[Service + engines<br/>serves cockpit at /bpm/cockpit] --> D1[(PostgreSQL)]
+    S1["Service + engines\nserves cockpit at /bpm/cockpit"] --> D1[("PostgreSQL")]
   end
-  subgraph Many[Several services, one cockpit]
+  subgraph Many["Several services, one cockpit"]
     direction LR
-    C2[Standalone cockpit] --> S2a[Service A + Rule Engine]
-    C2 --> S2b[Service B + both engines]
-    S2a --> D2a[(DB A)]
-    S2b --> D2b[(DB B)]
+    C2["Standalone cockpit\nCORS allowlist on each host"] --> S2a["Service A + Rule Engine"]
+    C2 --> S2b["Service B + both engines"]
+    S2a --> D2a[("DB A")]
+    S2b --> D2b[("DB B")]
   end
-  subgraph Replicas[Multiple replicas of one service]
+  subgraph Replicas["Multiple replicas of one service"]
     direction LR
-    R1[Replica 1] --> D3[(Shared PostgreSQL<br/>timers claimed with SKIP LOCKED)]
-    R2[Replica 2] --> D3
-    R3[Replica 3] --> D3
+    R1["Replica 1"] --> D3[("Shared PostgreSQL\ntimers claimed with SKIP LOCKED\ncache epoch per rule set")]
+    R2["Replica 2"] --> D3
+    R3["Replica 3"] --> D3
   end

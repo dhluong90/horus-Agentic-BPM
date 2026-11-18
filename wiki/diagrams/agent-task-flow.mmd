@@ -1,20 +1,14 @@
-sequenceDiagram
-  autonumber
-  participant P as Process Engine
-  participant A as Agent adapter (host)
-  participant R as Rule Engine
-  participant H as Human task
-  P->>A: bounded inputs, output schema, timeout
-  A-->>P: structured output
-  P->>P: validate output against schema
-  P->>R: evaluate guardrail rule set on output
-  R-->>P: allow / route to human / fail
-  alt allow
-    P->>P: continue to next step
-  else route to human
-    P->>H: approval task with agent output and rule reasons
-    H-->>P: approve or reject
-  else fail or timeout
-    P->>P: retry, then incident
-  end
-  Note over P,R: every step recorded in history and decision log
+flowchart TB
+  I["agentTask reached\nresolve bounded inputs, mask flagged fields"] --> W["Async Wait-State\nTX1 claim lease, commit, call adapter"]
+  W --> O{"Output received\nwithin timeout?"}
+  O -->|"no: timeout or adapter error"| R{"attempt < retry.max?"}
+  O -->|"yes"| V{"Validates against\noutputSchema?"}
+  V -->|"no: AGENT_SCHEMA_INVALID"| R
+  V -->|"yes"| G["RuleEngine.evaluate\n(guardrail rule set, output)"]
+  G -->|"allow"| N["Advance token\nhistory: output, guardrailDecisionId, latency"]
+  G -->|"violation, onViolation route-to-human"| H["Approval userTask\ncarries output and matched rule ids\nmaker-checker: agent requester excluded"]
+  G -->|"violation, onViolation fail"| F["Incident AGENT_GUARDRAIL_FAILED\nor compensation"]
+  R -->|"yes"| W
+  R -->|"no"| F
+  H -->|"approve or edit"| N
+  H -->|"reject"| F

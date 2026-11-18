@@ -1,18 +1,28 @@
 flowchart LR
-  People([People]) -->|tasks, approvals| Cockpit
-  Cockpit[Cockpit<br/>static web app] -->|REST| REST
-  subgraph Host[Your Spring Boot service]
+  Ops(["Operators and approvers\n(people)"])
+  Dev(["Host developers\n(Java API)"])
+  Cockpit["Cockpit\nReact 18 static assets"]
+  subgraph Host["Your Spring Boot service (one JVM)"]
     direction TB
-    App[Business code]
-    REST[Engine REST<br/>optional]
-    RE[[Rule Engine<br/>library]]
-    PE[[Process Engine<br/>library]]
-    App --> RE
-    App --> PE
-    REST --> RE
-    REST --> PE
-    PE -.->|decision step| RE
+    App["Business code"]
+    RE[["Rule Engine\nJava 21 library"]]
+    PE[["Process Engine\nJava 21 library"]]
+    REST["Engine REST layer (optional)\n/api/bpm/rules/v1, /api/bpm/processes/v1"]
   end
-  Host --> DB[(Your PostgreSQL<br/>rle_* and pre_* schemas)]
-  PE <-->|agentTask via adapter| Agent[AI agent]
-  PE <-->|serviceTask| Svc[Other services]
+  DB[("Your PostgreSQL 14+\nrle_* and pre_* tables")]
+  IdP["Identity provider\n(host Spring Security, OIDC)"]
+  Agent["AI agent or model API\n(via host adapter)"]
+  Svc["Other services\n(core banking, partners)"]
+
+  Ops -->|"HTTPS"| Cockpit
+  Cockpit -->|"JSON over HTTPS\nbearer token"| REST
+  Dev -->|"in-process calls"| App
+  App -->|"in-process"| RE
+  App -->|"in-process"| PE
+  REST --> RE
+  REST --> PE
+  PE -.->|"decision step\nRuleEngine API only"| RE
+  Host -->|"Spring JDBC, host DataSource\nTCP 5432"| DB
+  REST -.->|"token validation"| IdP
+  PE -->|"agentTask adapter\nHTTP or MCP, outside any DB transaction"| Agent
+  PE -->|"serviceTask adapter\nHTTP, outside any DB transaction"| Svc

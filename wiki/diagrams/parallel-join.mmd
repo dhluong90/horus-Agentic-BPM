@@ -1,0 +1,17 @@
+sequenceDiagram
+  autonumber
+  participant A as Replica A (branch credit-bureau)
+  participant B as Replica B (branch fraud-check)
+  participant DB as PostgreSQL (pre_instance, pre_token)
+
+  par both branches finish within the same millisecond
+    A->>DB: SELECT ... FROM pre_instance WHERE tenant_id=? AND id=? FOR UPDATE
+    B->>DB: SELECT ... FROM pre_instance WHERE tenant_id=? AND id=? FOR UPDATE (blocks)
+  end
+  A->>DB: UPDATE token A status=JOINED at join-checks
+  A->>DB: COUNT tokens in scope not yet JOINED -> 1 (B still ACTIVE)
+  A->>DB: COMMIT (lock released, A does not advance)
+  B->>DB: lock acquired, UPDATE token B status=JOINED
+  B->>DB: COUNT tokens in scope not yet JOINED -> 0
+  B->>DB: INSERT one ACTIVE token at underwrite, mark A and B COMPLETED, COMMIT
+  Note over A,DB: Without the row lock both replicas could count 1 and neither would advance (lost wakeup), or both could count 0 and create two tokens.

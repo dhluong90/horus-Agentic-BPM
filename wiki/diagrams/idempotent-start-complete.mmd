@@ -1,0 +1,33 @@
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant API as process-engine-rest
+  participant DB as PostgreSQL (pre_idempotency, pre_instance, pre_task)
+
+  C->>API: POST /instances, Idempotency-Key k1, businessKey LN-123
+  API->>DB: INSERT pre_idempotency (tenant, op, k1, hash(body), IN_FLIGHT)
+  alt first request
+    API->>DB: INSERT pre_instance (tenant, definition, LN-123)
+    alt business key unique
+      API->>DB: UPDATE pre_idempotency status 201 + body, COMMIT
+      API-->>C: 201 Created {instanceId}
+    else unique index (tenant_id, definition_key, business_key) violated
+      API->>DB: read existing instance, store 200 + body, COMMIT
+      API-->>C: 200 OK existing instance
+    end
+  else key exists, same payload hash, finished
+    API-->>C: original status and body (201 or 200), no second effect
+  else key exists, different payload hash
+    API-->>C: 422 IDEMPOTENCY_KEY_REUSE_MISMATCH
+  else key exists, still IN_FLIGHT
+    API-->>C: 409 IDEMPOTENCY_IN_FLIGHT, Retry-After: 1
+  end
+
+  C->>API: POST /tasks/{id}:complete, If-Match "3", body {version 3, outputs}
+  API->>DB: UPDATE pre_task SET status=COMPLETED, lock_version=4 WHERE id=? AND tenant_id=? AND lock_version=3
+  alt 1 row updated
+    API->>DB: advance token, INSERT pre_history, COMMIT
+    API-->>C: 200 OK, ETag "4"
+  else 0 rows updated (stale version)
+    API-->>C: 409 VERSION_CONFLICT, current version in detail
+  end

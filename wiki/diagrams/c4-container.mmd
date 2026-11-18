@@ -1,0 +1,23 @@
+flowchart TB
+  Browser["Operator browser\nCockpit: React 18, TypeScript 5, Vite"]
+  subgraph JVM["Host service: Java 21, Spring Boot 3.4+"]
+    direction TB
+    Starter["rule-engine / process-engine\nspring-boot-starter\n@AutoConfiguration, TenantResolver, Micrometer"]
+    Core["*-core\nparser, evaluator, token runtime\nJava 21 + Jackson only"]
+    PG["*-postgres\nJdbcClient, Flyway (rle_/pre_ history tables)\nSKIP LOCKED poller, LISTEN/NOTIFY"]
+    RESTc["*-rest\nSpring WebMvc, RFC 9457 problem+json\nOpenAPI 3.1"]
+    CockpitStarter["cockpit-spring-boot-starter\nserves static assets at /bpm/cockpit"]
+    Adapters["Host adapters\nAgentAdapter, ServiceAdapter beans"]
+  end
+  DB[("PostgreSQL 14+\nhost schema with rle_* and pre_*")]
+  Ext["External agent or service\nHTTP / MCP"]
+
+  Browser -->|"HTTPS, JSON\nAuthorization: Bearer"| RESTc
+  Browser -->|"HTTPS, static files"| CockpitStarter
+  RESTc --> Starter
+  Starter --> Core
+  Starter --> PG
+  PG --> Core
+  PG -->|"JDBC, host DataSource and transactions"| DB
+  Core -->|"SPI call after TX1 commit"| Adapters
+  Adapters -->|"HTTP or MCP, bounded timeout\nno DB connection held"| Ext

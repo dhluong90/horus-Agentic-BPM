@@ -1,0 +1,12 @@
+flowchart LR
+  subgraph Sim["Simulation (rules:simulate)"]
+    SI["POST /rule-sets/card-fee/versions/3:simulate\nsample inputs or logged decisions, explicit clock"] --> SR["Resolve draft v3\ncompile in memory"]
+    SR --> SE["Evaluate\npure, same engine"]
+    SE --> SO["Simulation report\nper-input outcome, diff against v2\n0 rows in rle_decision"]
+  end
+  subgraph Eval["Evaluate (rules:evaluate)"]
+    EI["POST /decisions/card-fee:evaluate\ninputs, correlationId"] --> ER["Resolve effective version\neffective_from <= clock"]
+    ER --> EE["Evaluate\npure, same engine"]
+    EE --> EO["DecisionResult\ndecisionId, outputs, matched rules"]
+    EE --> EL[("rle_decision\nexactly 1 INSERT")]
+  end

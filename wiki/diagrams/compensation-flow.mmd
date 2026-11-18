@@ -1,8 +1,8 @@
 flowchart LR
-  S([start]) --> A[reserve funds<br/>compensate: release funds]
-  A --> B[create account in core<br/>compensate: close account]
-  B --> C[notify partner<br/>compensate: send cancellation]
-  C --> E([end])
-  C -. fails after retries .-> X{{compensation<br/>runs completed steps<br/>in reverse order}}
-  X --> C2[send cancellation] --> B2[close account] --> A2[release funds] --> F([ended: compensated])
-  X -. a compensate handler fails .-> I[[incident<br/>retry or resolve by hand]]
+  S(["start"]) --> A["reserve funds\ncompensate: release funds"]
+  A --> B["create account in core\ncompensate: close account"]
+  B --> C["notify partner\ncompensate: manual"]
+  C --> E(["end"])
+  C -. "fails after retries" .-> X{{"compensate completed steps\nin reverse order (LIFO)"}}
+  X --> B2["close account\nattemptId as idempotency key"] --> A2["release funds\nattemptId as idempotency key"] --> F(["FAILED: compensated"])
+  X -. "a compensate handler fails\nor is manual" .-> I[["incident\nretry or resolve by hand"]]

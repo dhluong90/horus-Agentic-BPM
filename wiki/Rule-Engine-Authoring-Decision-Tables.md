@@ -1,21 +1,58 @@
-# Authoring Decision Tables
+# How to author a decision table
 
-A rule set is a YAML (or JSON) document kept in your repository and imported, or, from Cockpit 0.2, the same structure edited in a grid. _Design preview._
+Write a rule set as a YAML (or JSON) document, validate it, and load it into the engine. The same structure is what the cockpit grid editor edits from Cockpit 0.2.
 
-## Document structure
+Design preview: describes the 0.1 target.
+
+## Before you start
+
+- You know the terms rule set, rule, hit policy and version: [[Concepts]].
+- You have a service with the starter configured: [[Getting Started]].
+
+## 1. Name the rule set and choose the hit policy
+
 ```yaml
-ruleSet: card-fee            # unique name within a tenant, kebab-case
-version: 2                   # assigned by the engine when created through the API; informational in files
+ruleSet: card-fee               # unique within a tenant, kebab-case
 description: Monthly fee by card tier and balance
-hitPolicy: first             # first | unique | collect
-effectiveFrom: 2026-12-01    # optional; otherwise effective when published
+hitPolicy: first                # first | unique | collect
+effectiveFrom: 2026-12-01       # optional; otherwise effective when approved
+```
+
+| Policy | Behaviour | Use it for |
+|---|---|---|
+| `first` | Rows are checked top to bottom; the first match wins | Eligibility, routing, tiered fees with a default row |
+| `unique` | Exactly one row must match; zero or several matches fail the decision with `UNIQUE_HIT_VIOLATION` | Pricing tables that must be complete and non-overlapping |
+| `collect` | Every matching row contributes; each output becomes a list or an aggregate (`collect: sum`, `min`, `max`, `count`) | Accumulating fees, collecting reason codes or risk flags |
+
+## 2. Declare inputs and outputs
+
+```yaml
 inputs:
-  - { name: tier,    type: string,  allowed: [CLASSIC, GOLD, PLATINUM] }
-  - { name: balance, type: money }
-  - { name: txCount, type: integer, description: transactions in the month }
+  - { name: tier,       type: string,  allowed: [CLASSIC, GOLD, PLATINUM] }
+  - { name: balance,    type: money }
+  - { name: txCount,    type: integer, description: transactions in the month }
+  - { name: nationalId, type: string,  mask: true }      # stored as a keyed hash in the decision log
 outputs:
-  - { name: fee,     type: money }
-  - { name: waived,  type: boolean, default: false }
+  - { name: fee,    type: money }
+  - { name: waived, type: boolean, default: false }
+```
+
+| Type | Example value in a condition | Note |
+|---|---|---|
+| `string` | `'GOLD'` | `allowed:` restricts the values and lets the validator detect unreachable rows |
+| `integer` | `10` | |
+| `decimal` | `0.015` | |
+| `boolean` | `true` | |
+| `date` | `date('2026-12-01')` | |
+| `datetime` | `datetime('2026-12-01T00:00:00Z')` | |
+| `money` | `50000000 VND` | Currency plus amount; stored in minor units; never compared across currencies |
+| `list<T>` | `['VN', 'SG']` | |
+
+Inputs are validated against their type before evaluation. A wrong type is a `400 INPUT_INVALID` over REST or a `DecisionInputException` in Java, never a silent conversion.
+
+## 3. Write the rows
+
+```yaml
 rules:
   - id: R1
     when: { tier: "== 'PLATINUM'" }
@@ -34,33 +71,67 @@ rules:
     then: { fee: "50000 VND" }
 ```
 
-## Types
-`string`, `integer`, `decimal`, `boolean`, `date`, `datetime`, `money` (currency + amount in minor units), `list<T>`. Inputs are validated against the type before evaluation; a wrong type is a `400` or `DecisionInputException`, never a silent coercion.
+| Element | Rule |
+|---|---|
+| `when` | A map from input name to a condition. Conditions on one row are combined with AND. An input that is not mentioned matches anything. |
+| `when: {}` | Matches everything. Under `first`, put it last as the default row. |
+| `then` | One value per output: a literal (`true`, `30000 VND`, `'OK'`) or an expression over the inputs (`balance * 0.01`). An output you omit takes its `default`; without a default the row fails validation. |
+| `id` | Stable and unique within the rule set. Tests, the decision log and the diff view refer to it. |
 
-## Conditions (`when`)
-- A map from input name to a condition expression. An input not mentioned matches anything.
-- An empty `when: {}` matches everything; use it as the last rule under `first`.
-- Conditions on the same row are combined with AND. For OR across inputs, write two rows or use the `any:` form:
-  ```yaml
-  when:
-    any:
-      - { tier: "== 'GOLD'" }
-      - { balance: ">= 50000000 VND" }
-  ```
+Condition syntax is in [[Rule Engine Expression Language]]. A condition may omit the input name (`balance: ">= 50000000 VND"`) or spell it out (`balance: "balance >= 50000000 VND and tier == 'GOLD'"`).
 
-## Outputs (`then`)
-- A value per output: a literal (`true`, `30000 VND`, `'OK'`) or an expression over inputs (`balance * 0.01`).
-- Missing outputs take the output's `default`; if there is none, the rule fails validation.
+### OR across inputs
 
-## Hit policies
-| Policy | Behaviour | Typical use |
+Write two rows, or use `any:`:
+
+```yaml
+when:
+  any:
+    - { tier: "== 'GOLD'" }
+    - { balance: ">= 50000000 VND" }
+```
+
+### Aggregating with `collect`
+
+```yaml
+hitPolicy: collect
+outputs:
+  - { name: flags,   type: list<string> }
+  - { name: penalty, type: integer, collect: sum }
+```
+
+With rows R1 (`penalty: 10`) and R3 (`penalty: 5`) both matching, `penalty` is `15` and `flags` lists both rows' values in row order.
+
+## 4. Validate
+
+Validation runs on every save and on every publication request. It reports each problem with the row id.
+
+| Check | Severity |
+|---|---|
+| Unknown input or output name, type mismatch, unparsable expression | Error; the version cannot be published |
+| `unique` table with two rows that provably overlap (for `allowed` enumerations) | Error |
+| Missing output without a `default` | Error |
+| `first` table with a row that can never be reached | Warning; shown in the cockpit |
+
+To validate without saving: `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:validate` with the document as the body. Expected: `200` with an empty `errors` list, or `422 VALIDATION_FAILED` with `errors: [{ "ruleId": "R2", "message": "..." }]`.
+
+## 5. Load it into the engine
+
+| Method | When to use it | How |
 |---|---|---|
-| `first` | Rows evaluated top to bottom; first match wins | Eligibility, routing, tiered fees |
-| `unique` | Exactly one row must match; zero or more than one is an error reported in the log | Pricing tables that must be complete and non-overlapping |
-| `collect` | All matching rows; outputs become lists, or are aggregated with `collect: sum|min|max|count` per output | Accumulating fees, collecting reasons |
+| Files at start-up | Rule sets live in Git next to the service | Set `horus.bpm.rules.definitions: classpath:rules/**/*.yaml`. Files load as drafts; publish them as in [[Rule Engine Versioning and Publishing]] |
+| Import by API | A business user or a pipeline proposes a change | `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/import` with the YAML as the body creates a new draft |
+| Export | Review or back up a version | `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/2/export` returns this document |
+| Cockpit grid editor | Interactive editing | Cockpit 0.2 target; see [[Cockpit]] |
 
-## Validation at save and publish
-Unknown input names, type mismatches, unparsable expressions, `unique` tables with provably overlapping rows (for enumerated inputs), and `first` tables with unreachable rows are reported with row ids. A version cannot be published with errors; warnings are allowed and shown in the cockpit.
+Endpoint details, headers and error codes are in [[Rule Engine Decision API]].
 
-## Importing and exporting
-`GET /api/bpm/rules/rule-sets/{name}/versions/{v}/export` returns this YAML; `POST …/import` creates a draft from it. Keep rule sets in Git next to the service that owns them, and let the cockpit be the place business users propose changes.
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `422 VALIDATION_FAILED` at row `R2`, "unknown identifier" | A condition refers to an input that is not declared | Add the input in `inputs` or fix the spelling |
+| `422 VALIDATION_FAILED`, "money + integer" | Arithmetic mixes money and a plain number | Multiply money by a number (`balance * 0.01`) or add money to money of the same currency |
+| `409 UNIQUE_HIT_VIOLATION` at run time | A `unique` table had zero or several matches for real inputs | Add the missing row, or switch to `first` with a default row if order is intended |
+| Default row never matches | It is not the last row under `first` | Move `when: {}` to the end |
+| Validation warns about an unreachable row | An earlier row under `first` already covers it | Delete the row or reorder |

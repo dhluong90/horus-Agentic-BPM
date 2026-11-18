@@ -1,0 +1,38 @@
+sequenceDiagram
+  autonumber
+  participant S as Scheduler thread (replica A)
+  participant DB as PostgreSQL (pre_timer, pre_token)
+  participant AD as Host adapter (AgentAdapter or ServiceAdapter)
+  participant X as External agent or service
+
+  rect rgb(230, 242, 241)
+    Note over S,DB: TX1: claim with lease (target under 5 ms)
+    S->>DB: SELECT ... FROM pre_timer WHERE next_fire_at <= now AND (locked_until IS NULL OR locked_until < now) FOR UPDATE SKIP LOCKED
+    S->>DB: UPDATE status=CLAIMED, locked_by=A, locked_until=now+60s, attempt+1
+    S->>DB: COMMIT
+  end
+
+  Note over S,X: Outside any transaction: no DB connection, no row lock
+  S->>AD: execute(invocation, attemptId, timeout)
+  AD->>X: HTTP or MCP call (bounded by timeout)
+  X-->>AD: structured output, or timeout
+  AD-->>S: result or failure
+
+  rect rgb(230, 242, 241)
+    Note over S,DB: TX2: complete or fail (fresh transaction)
+    S->>DB: SELECT ... FROM pre_timer WHERE id=? AND locked_by=A AND locked_until > now FOR UPDATE
+    alt lease still held by A
+      alt output valid and guardrail allows
+        S->>DB: write pre_history, advance token, mark job DONE
+      else guardrail route-to-human
+        S->>DB: create approval pre_task with output and matched rules
+      else failure, attempt < max
+        S->>DB: status=DUE, next_fire_at=now+backoff, unlock
+      else failure, attempts exhausted
+        S->>DB: open pre_incident, token paused (or start compensation)
+      end
+      S->>DB: COMMIT
+    else lease expired or taken by replica B
+      S->>DB: ROLLBACK (result discarded, B's attempt owns the step)
+    end
+  end

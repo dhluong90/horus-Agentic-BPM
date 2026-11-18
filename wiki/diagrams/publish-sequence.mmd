@@ -1,0 +1,34 @@
+sequenceDiagram
+  autonumber
+  actor Alice as alice (rules:author)
+  actor Bob as bob (rules:approve)
+  participant API as rule-engine-rest
+  participant SVC as VersionService
+  participant DB as PostgreSQL (rle_version)
+  participant SCH as Scheduler thread (any replica)
+
+  Alice->>API: PUT /rule-sets/card-fee/versions/2 (If-Match "4")
+  API->>SVC: updateDraft
+  SVC->>DB: UPDATE ... WHERE status='DRAFT' AND lock_version=4
+  Alice->>API: POST /rule-sets/card-fee/versions/2:request-publish {effectiveFrom 2027-01-01}
+  SVC->>DB: validate, status=PENDING_APPROVAL, requested_by=alice, COMMIT
+  SVC-->>Alice: 200, event rules.version.publish-requested.v1
+
+  Alice->>API: POST .../versions/2:approve
+  API->>SVC: approve(approver=alice)
+  SVC-->>Alice: 403 SELF_APPROVAL_FORBIDDEN (requested_by == approver)
+
+  Bob->>API: GET /rule-sets/card-fee/versions/1/diff/2
+  API-->>Bob: added, removed, changed rows
+  Bob->>API: POST .../versions/2:approve (Idempotency-Key, If-Match "5")
+  API->>SVC: approve(approver=bob)
+  alt bob != requested_by and status PENDING_APPROVAL
+    SVC->>DB: status=PUBLISHED, approved_by=bob, cache_epoch+1, COMMIT, pg_notify
+    SVC-->>Bob: 200, event rules.version.published.v1
+  else stale If-Match or already approved
+    SVC-->>Bob: 409 VERSION_CONFLICT or 409 INVALID_STATE
+  end
+
+  Note over DB,SCH: Evaluation picks the version whose effective_from <= clock, so v2 applies from 2027-01-01 without any wake-up
+  SCH->>DB: at 2027-01-01: UPDATE v1 status=RETIRED, COMMIT
+  SCH-->>SCH: event rules.version.retired.v1

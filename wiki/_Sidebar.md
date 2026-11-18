@@ -1,31 +1,29 @@
 **[[Home]]**
 
-**Start**
+**Tutorials**
 - [[Getting Started]]
+
+**How-to guides**
+- [[Author a decision table|Rule Engine Authoring Decision Tables]]
+- [[Publish a version|Rule Engine Versioning and Publishing]]
+- [[Simulate and test|Rule Engine Simulation and Testing]]
+- [[Use the decision log|Rule Engine Decision Log and Audit]]
+- [[Cockpit tasks|Cockpit]]
+- [[Contribute|Contributing]]
+
+**Reference**
+- [[Expression Language|Rule Engine Expression Language]]
+- [[Decision API|Rule Engine Decision API]]
+- [[Configuration|Rule Engine Configuration]]
+- [[Technical Requirements]]
+- [[Technical Stack]]
+- [[Release Notes]]
+
+**Explanation**
 - [[Concepts]]
 - [[Principles]]
 - [[Architecture]]
-- [[Technical Requirements]]
-- [[Technical Stack]]
-
-**Rule Engine**
-- [[Authoring|Rule Engine Authoring Decision Tables]]
-- [[Expression Language|Rule Engine Expression Language]]
-- [[Decision API|Rule Engine Decision API]]
-- [[Versioning and Publishing|Rule Engine Versioning and Publishing]]
-- [[Simulation and Testing|Rule Engine Simulation and Testing]]
-- [[Decision Log and Audit|Rule Engine Decision Log and Audit]]
-- [[Configuration|Rule Engine Configuration]]
-
-**Process Engine**
-- [[Overview|Process Engine Overview]]
-
-**Operate**
-- [[Cockpit]]
-- [[Multi Tenancy and Security]]
-- [[FAQ]]
-
-**Project**
+- [[Process Engine Overview]]
+- [[Multi-Tenancy and Security]]
 - [[Roadmap]]
-- [[Contributing]]
-- [[Release Notes]]
+- [[FAQ]]

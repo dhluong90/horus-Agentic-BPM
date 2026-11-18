@@ -1,22 +1,22 @@
 flowchart TB
-  subgraph RuleEngine[Rule Engine]
+  subgraph RuleEngine["Rule Engine"]
     direction TB
-    RT[rule-engine-test] --> RC
-    RR[rule-engine-rest] --> RS[rule-engine-spring-boot-starter]
-    RS --> RP[rule-engine-postgres]
-    RS --> RC[rule-engine-core<br/>no framework dependency]
+    RT["rule-engine-test"] --> RC
+    RR["rule-engine-rest"] --> RS["rule-engine-spring-boot-starter"]
+    RS --> RP["rule-engine-postgres"]
+    RS --> RC["rule-engine-core\nJava 21 + Jackson only"]
     RP --> RC
   end
-  subgraph ProcessEngine[Process Engine]
+  subgraph ProcessEngine["Process Engine"]
     direction TB
-    PT[process-engine-test] --> PC
-    PR[process-engine-rest] --> PS[process-engine-spring-boot-starter]
-    PS --> PP[process-engine-postgres]
-    PS --> PC[process-engine-core<br/>no framework dependency]
+    PT["process-engine-test"] --> PC
+    PR["process-engine-rest"] --> PS["process-engine-spring-boot-starter"]
+    PS --> PP["process-engine-postgres"]
+    PS --> PC["process-engine-core\nJava 21 + Jackson only"]
     PP --> PC
   end
-  PC -.->|API interface only| RC
-  CK[cockpit<br/>static assets] --> RR
+  PC -.->|"RuleEngine API interface only"| RC
+  CK["cockpit\nstatic assets"] --> RR
   CK --> PR
-  BOM[bpm-bom] -.- RuleEngine
+  BOM["bpm-bom\npins every module version"] -.- RuleEngine
   BOM -.- ProcessEngine

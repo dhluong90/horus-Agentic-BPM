@@ -1,6 +1,6 @@
 # Technical Requirements
 
-Numbered, testable, and tied to a verification method. "Must" requirements gate a release; "should" requirements are targets reported in release notes. IDs are stable.
+Reference list of the numbered, testable requirements that gate a release. "Must" requirements block a release; "should" requirements are targets reported in release notes. IDs are stable; new requirements get new IDs. Module specifications (`RLE-*`, `PRE-*`, `CKP-*`) trace to these IDs.
 
 ## Embedding and compatibility
 | ID | Requirement | Verification |
@@ -10,6 +10,7 @@ Numbered, testable, and tied to a verification method. "Must" requirements gate 
 | TR-EMB-03 | `*-core` artifacts have no Spring dependency. Must. | ArchUnit rule and dependency analysis in CI |
 | TR-EMB-04 | The engine never opens its own database connections; it uses the host's `DataSource` and participates in the host's transactions. Must. | Integration test with transaction rollback |
 | TR-EMB-05 | No engine code path performs network I/O. Must. | ArchUnit rule forbidding `java.net` and HTTP clients in core and postgres modules |
+| TR-EMB-06 | Engine migrations run in their own Flyway history table (`rle_schema_history`, `pre_schema_history`) and never read or write the host's `flyway_schema_history`. Must. | Boot test with a host that has its own Flyway history; both histories unchanged by the other |
 
 ## Determinism and correctness
 | ID | Requirement | Verification |
@@ -30,6 +31,9 @@ Numbered, testable, and tied to a verification method. "Must" requirements gate 
 | TR-SEC-05 | Inputs marked for masking are stored as keyed hashes and rendered masked in the cockpit and the REST API. Must. | Integration tests |
 | TR-SEC-06 | Every release ships an SBOM; dependencies with high or critical vulnerabilities block the release. Must. | CI scan |
 | TR-SEC-07 | OWASP ASVS level 2 for the REST layer and cockpit. Should. | Checklist review per minor release |
+| TR-SEC-08 | Every REST error is an RFC 9457 `application/problem+json` body with a stable `code` and a `correlationId`; no response contains a stack trace or SQL. Must. | WebMvc tests for every code in the error matrix; injected-failure test on `500` |
+| TR-SEC-09 | The embedded cockpit is served only to authenticated sessions with `Content-Security-Policy`, `X-Content-Type-Options: nosniff` and `Cache-Control: no-store` on API responses; standalone hosting requires an explicit CORS origin allowlist and CORS is off by default. Must. | Header assertions in starter tests; CORS preflight test with an unlisted origin |
+| TR-SEC-10 | Masking uses HMAC-SHA256 with a host-provided key of at least 32 bytes; start-up fails when a loaded definition masks a field and no key is configured; the key never appears in logs, responses or the cockpit. Must. | Start-up test without a key; log capture test |
 
 ## Reliability under retries
 | ID | Requirement | Verification |
@@ -38,6 +42,15 @@ Numbered, testable, and tied to a verification method. "Must" requirements gate 
 | TR-IDEM-02 | Business key unique per tenant and definition; a second start returns the existing instance. Must (M2). | Integration tests |
 | TR-IDEM-03 | Task and instance mutations use optimistic locking; a stale completion is rejected with a conflict. Must (M2). | Concurrency tests |
 | TR-IDEM-04 | Compensate handlers and service handlers receive the step attempt id so hosts can make them idempotent. Must (M2). | API tests |
+| TR-IDEM-05 | A replay of an idempotency key with a different request hash is rejected with `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; a duplicate that arrives while the first request is in flight gets `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After`; a replay with the same hash returns the original status code and body. Must (M1 for rules, M2 for processes). | Two-thread test with a paused first request; mismatch test |
+
+## Concurrency and asynchronous steps
+| ID | Requirement | Verification |
+|---|---|---|
+| TR-ASY-01 | No adapter, HTTP, MCP or model call runs inside an open engine database transaction or while a row lock is held. Async steps claim with a lease in one transaction, call the adapter with no connection, and complete in a second transaction. Must (M2). | Testcontainers test with a 2-connection pool and 10 concurrent 2 s stub adapters: zero pool timeouts; ArchUnit rule that adapter ports are not invoked from classes annotated or wrapped by a transaction |
+| TR-ASY-02 | A job whose lease expired is reclaimed by another replica exactly once; a completion from the original claimant after expiry is rejected and leaves no state change; each attempt carries a new attempt id. Must (M2). | Two-replica fault-injection test with a paused claimant |
+| TR-ASY-03 | Concurrent arrivals at a `parallelGateway` join from different replicas produce exactly one outgoing token: never zero (lost wakeup), never two. Must (M2). | Two-replica test with synchronised branch completion, 1 000 iterations |
+| TR-ASY-04 | After a publish or retire commits, every replica serves the new effective version within `cache.epoch-check-interval` (default 5 s) with or without `LISTEN/NOTIFY` delivery, including behind a transaction-mode connection pooler. Must (M1). | Two-replica test run twice: direct connection, and through PgBouncer in transaction mode with `cache.listen-notify=false` |
 
 ## Compensation
 | ID | Requirement | Verification |
@@ -81,6 +94,7 @@ Numbered, testable, and tied to a verification method. "Must" requirements gate 
 | TR-OBS-03 | OpenTelemetry spans for evaluation and step execution when a tracer is present. Should. | Integration test with an in-memory exporter |
 | TR-OBS-04 | Events for version published and retired, instance started, completed, incident raised. Must. | Unit tests on publisher |
 | TR-OBS-05 | A decision can be explained in plain language from the log alone. Should. | Explain endpoint tests |
+| TR-OBS-06 | Every event carries the envelope `eventId` (ULID), `eventType` with a version suffix, `occurredAt`, `tenantId`, `correlationId`, `causationId`, `producer`, `schemaVersion`, `payload`; changes within an event type version are additive; the event is published inside the transaction that changes state. Must. | JSON schema test per event type; compatibility test against the previous release's schemas |
 
 ## Performance and scalability
 | ID | Requirement | Verification |
@@ -90,6 +104,7 @@ Numbered, testable, and tied to a verification method. "Must" requirements gate 
 | TR-PERF-03 | Decision log write adds exactly one insert in transactional mode. Must. | SQL capture test |
 | TR-PERF-04 | Process engine: 1 000 step transitions per second per host replica on a 4-vCPU database, with timers and history. Should (milestone 2). | Load test |
 | TR-PERF-05 | Multiple host replicas share timers and jobs without duplicate execution. Must (milestone 2). | Multi-replica integration test |
+| TR-PERF-06 | The compiled-version cache is bounded by `cache.max-entries`; heap use stays flat when more versions than the bound are evaluated in rotation. Must (M1). | Heap test evaluating 2 x `cache.max-entries` versions; eviction counter asserted |
 
 ## Operability
 | ID | Requirement | Verification |
@@ -98,6 +113,7 @@ Numbered, testable, and tied to a verification method. "Must" requirements gate 
 | TR-OPS-02 | Zero-downtime upgrade within a major version: old and new module versions tolerate each other's schema for one minor release. Should. | Upgrade test in CI |
 | TR-OPS-03 | Incidents list cause, retry count, next action; retry and resolve are available by API and cockpit. Must (milestone 2). | Tests |
 | TR-OPS-04 | Partitioning of append-only tables by month is available by configuration. Should. | Migration test |
+| TR-OPS-05 | The engines work behind a transaction-mode connection pooler: no session state, no prepared-statement names, no advisory locks across transactions; `LISTEN` is optional. Must. | CI job with PgBouncer in transaction mode running the integration suite |
 
 ## Cockpit
 | ID | Requirement | Verification |

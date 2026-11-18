@@ -1,32 +1,49 @@
 # HORUS Agentic BPM
 
-**Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockpit. Humans, services and AI agents are first-class participants.**
+Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockpit. Humans, services and AI agents take steps in the same process.
 
-> Design preview. This wiki is the public specification, written before the code. APIs may change until 1.0. Licence: free for noncommercial use (PolyForm Noncommercial 1.0.0); commercial use under a HORUS licence.
+Design preview: this wiki describes the 0.1 target. Nothing is released yet and the API may change until 1.0. Licence: PolyForm Noncommercial 1.0.0 for noncommercial use, commercial licence from HORUS otherwise (see [[FAQ]]).
 
 ![System context](images/system-context.svg)
 
-Two libraries inside your service, your PostgreSQL, one static cockpit. No engine cluster, no search index, no separate identity.
+Two libraries inside your service, your PostgreSQL, one static cockpit. No engine cluster, no search index, no separate identity. The [[Architecture]] page explains how.
 
-## Read in this order
+## Tutorials: learn by doing
+
+| Page | You will |
+|---|---|
+| [[Getting Started]] | Add the starter to a Spring Boot service, load a loan-eligibility table, evaluate it from a test, over HTTP and from Java |
+
+## How-to guides: get a task done
+
+| Page | Task |
+|---|---|
+| [[Rule Engine Authoring Decision Tables]] | Write a decision table in YAML: inputs, outputs, rows, hit policy |
+| [[Rule Engine Versioning and Publishing]] | Change rules without a deployment: draft, request, approve, schedule, roll back |
+| [[Rule Engine Simulation and Testing]] | Check a draft before publishing and unit-test rule sets in CI |
+| [[Rule Engine Decision Log and Audit]] | Find a decision, explain it, mask personal data, manage retention |
+| [[Cockpit]] | Embed or host the cockpit and perform operator tasks in it |
+| [[Contributing]] | Propose a change and get it merged |
+
+## Reference: look something up
+
+| Page | Contents |
+|---|---|
+| [[Rule Engine Expression Language]] | Literals, operators, functions, grammar, error codes |
+| [[Rule Engine Decision API]] | Java API, REST endpoints, request and response schemas, error codes |
+| [[Rule Engine Configuration]] | Every `horus.bpm.rules.*` property and the REST permissions |
+| [[Technical Requirements]] | Numbered requirements (`TR-*`) with their verification method |
+| [[Technical Stack]] | Libraries and tools chosen, and what was rejected |
+| [[Release Notes]] | What shipped in each module version |
+
+## Explanation: understand the design
+
 | Page | Answers |
 |---|---|
-| [[Getting Started]] | How do I evaluate my first decision table in ten minutes? |
-| [[Concepts]] | What are rule sets, versions, hit policies, decisions, processes? |
-| [[Principles]] | What rules decide the design trade-offs? |
-| [[Architecture]] | How is it built, where does state live, how does it deploy? |
-| [[Technical Requirements]] | What must be true before a release ships? |
-| [[Technical Stack]] | What is it built with, and what was rejected? |
-| [[Roadmap]] | What ships when, up to 1.0? |
-
-## Rule Engine guide
-[[Authoring|Rule Engine Authoring Decision Tables]] · [[Expression Language|Rule Engine Expression Language]] · [[Decision API|Rule Engine Decision API]] · [[Versioning|Rule Engine Versioning and Publishing]] · [[Simulation|Rule Engine Simulation and Testing]] · [[Decision Log|Rule Engine Decision Log and Audit]] · [[Configuration|Rule Engine Configuration]]
-
-## Process Engine
-[[Process Engine Overview]] — scope and the `agentTask` step (milestone 2; adapters and planning depth in milestone 3).
-
-## Operate and contribute
-[[Cockpit]] · [[Multi Tenancy and Security]] · [[FAQ]] · [[Contributing]] · [[Release Notes]]
-
-## Why "Agentic"
-Classic BPM assigns steps to people and systems. Here an AI agent can take a step too, with bounded inputs, a schema for its output, a rule set that checks that output deterministically, and a human approval when the rules say so. Autonomy inside rails that compliance can read.
+| [[Concepts]] | What do rule set, version, hit policy, decision, tenant and agent task mean? |
+| [[Principles]] | Which twelve rules decide every trade-off? |
+| [[Architecture]] | Where does state live, how do the modules depend on each other, how does it deploy? |
+| [[Process Engine Overview]] | What will the Process Engine and the `agentTask` step do? |
+| [[Multi-Tenancy and Security]] | How are tenants isolated and what can expressions never do? |
+| [[Roadmap]] | What ships when, and what would make the maintainers change course? |
+| [[FAQ]] | Why not Drools or Camunda, is it open source, what does "agentic" mean here? |

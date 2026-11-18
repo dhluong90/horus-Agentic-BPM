@@ -1,40 +1,77 @@
 # HORUS Agentic BPM
 
-Lightweight, embeddable **Process Engine** and **Rule Engine** for Java and Spring Boot, with an operations cockpit, where **humans, services and AI agents are first-class process participants**. Source-available and free for noncommercial use. Built by HORUS for banking and financial-services systems, usable anywhere a service needs approvals, journeys, decisions or limits without a heavyweight BPM suite.
+Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockpit, in which humans, services and AI agents take steps in the same governed process.
 
-**Documentation: see the [project wiki](../../wiki)** (source in [`wiki/`](wiki/)).
+**Documentation: the [project wiki](../../wiki)** (source in [`wiki/`](wiki/)).
 
 ![System context](wiki/images/system-context.svg)
 
-> Status: design preview. The public API is being reviewed in the wiki before the code is written. Nothing here is production-ready yet.
+> Status: design preview. The wiki describes the 0.1 target and is reviewed before the code is written. No artifact is published yet.
 
-## Why
+## What it looks like
 
-Most teams need a fraction of what a full BPMN or DMN platform offers, but they need it inside their own service, under their own licence, with their own database. HORUS Engines are libraries, not servers:
+A decision table in `src/main/resources/rules/loan-eligibility.yaml`:
 
-- **Embeddable**: add a Spring Boot starter, run a migration, done. State lives in your PostgreSQL under a prefixed schema (`pre_`, `rle_`).
-- **Small and readable**: process and rule definitions in JSON/YAML you can diff and review.
-- **Operable**: a cockpit to see instances, tasks, rule versions and decision logs, with maker-checker on publishing.
-- **Independent**: Rule Engine never depends on Process Engine. Use one or both.
-- **Agentic**: an `agentTask` lets an AI agent perform a step with bounded inputs, a structured output schema, rule-based guardrails and maker-checker approval where the rules require it. The engine never embeds a model; adapters live in your service.
+```yaml
+ruleSet: loan-eligibility
+hitPolicy: first
+inputs:
+  - { name: age,    type: integer }
+  - { name: income, type: money }
+outputs:
+  - { name: eligible, type: boolean }
+  - { name: reason,   type: string }
+rules:
+  - id: R1
+    when: { age: "< 18" }
+    then: { eligible: false, reason: "UNDER_AGE" }
+  - id: R2
+    when: { income: "< 5000000 VND" }
+    then: { eligible: false, reason: "LOW_INCOME" }
+  - id: R3
+    when: {}
+    then: { eligible: true, reason: "OK" }
+```
+
+Evaluated from your service:
+
+```java
+DecisionResult r = rules.evaluate("loan-eligibility",
+    DecisionInput.of("age", 25, "income", Money.of("VND", 8_000_000)));
+r.matchedRuleIds();                   // ["R3"]
+r.output("eligible", Boolean.class);  // true
+```
+
+The decision, its inputs and the matched row are written to the decision log in your transaction. A second person must approve every rule change before it takes effect. The full walkthrough is in [Getting Started](../../wiki/Getting-Started).
 
 ## Modules
 
 | Module | What it does | Artifact |
 |---|---|---|
-| [`process-engine/`](process-engine/) | Process definitions (start, end, user task, service task, agent task, decision, exclusive and parallel gateways, timers, sub-process), human tasks with claim/complete/delegate/reassign, SLA timers and escalation, maker-checker, history and retry | `com.horus.bpm:process-engine-spring-boot-starter` |
-| [`rule-engine/`](rule-engine/) | Decision tables (first, unique, collect), versioned rule sets with draft/published/retired and effective dates, a safe expression language, decision API, decision log, simulation | `com.horus.bpm:rule-engine-spring-boot-starter` |
-| [`cockpit/`](cockpit/) | React dashboard for both engines, embeddable in a host admin UI or served standalone for the examples | `com.horus.bpm:cockpit` |
+| [`rule-engine/`](rule-engine/) | Decision tables (`first`, `unique`, `collect`), versioned rule sets with maker-checker and effective dates, a safe expression language, decision API, append-only decision log, simulation | `com.horus.bpm:rule-engine-spring-boot-starter` |
+| [`process-engine/`](process-engine/) | Versioned process definitions with user, service and agent tasks, gateways and timers; human task queues with SLA and escalation; idempotent starts, saga compensation, instance migration | `com.horus.bpm:process-engine-spring-boot-starter` |
+| [`cockpit/`](cockpit/) | React dashboard for both engines, served by the host or hosted standalone as static assets | `com.horus.bpm:cockpit-spring-boot-starter` |
 | [`examples/`](examples/) | Minimal host services showing each engine alone and both together | |
 
-## Out of scope (for now)
-Full BPMN 2.0 or DMN FEEL compliance, CMMN, a distributed job executor, a standalone server mode.
+The engines are libraries, not servers. State lives in your PostgreSQL under the `rle_` and `pre_` prefixes, in your transactions. The Rule Engine never depends on the Process Engine. Decisions behind this are in [`docs/adr/`](docs/adr/).
 
-## Roadmap
-See [`docs/roadmap.md`](docs/roadmap.md). Decisions are recorded in [`docs/adr/`](docs/adr/).
+## Where to read next
+
+| You want to | Read |
+|---|---|
+| Try it | [Getting Started](../../wiki/Getting-Started) |
+| Do a task: author a table, publish a version, simulate, read the log, use the cockpit | How-to guides listed on the wiki [Home](../../wiki) |
+| Look up an endpoint, a property, an operator | [Decision API](../../wiki/Rule-Engine-Decision-API), [Configuration](../../wiki/Rule-Engine-Configuration), [Expression Language](../../wiki/Rule-Engine-Expression-Language) |
+| Understand the design | [Concepts](../../wiki/Concepts), [Principles](../../wiki/Principles), [Architecture](../../wiki/Architecture), [Roadmap](../../wiki/Roadmap) |
+
+## Out of scope
+
+Full BPMN 2.0 or DMN FEEL compliance, CMMN, a distributed job executor, a standalone server mode. See [FAQ](../../wiki/FAQ).
 
 ## Contributing
+
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECURITY.md`](SECURITY.md).
 
 ## Licence
-**PolyForm Noncommercial License 1.0.0.** Free to use, modify and share for noncommercial purposes. Commercial use of any kind requires a commercial licence from HORUS: see [`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md). Contributions are accepted under the [`CLA.md`](CLA.md). Full text in [`LICENSE`](LICENSE).
+
+PolyForm Noncommercial License 1.0.0: free to use, modify and share for noncommercial purposes. Any commercial use requires a commercial licence from HORUS; see [`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md). Contributions are accepted under [`CLA.md`](CLA.md). Full text in [`LICENSE`](LICENSE).

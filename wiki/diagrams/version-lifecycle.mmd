@@ -1,11 +1,14 @@
 stateDiagram-v2
   direction LR
-  [*] --> Draft: create or import
-  Draft --> Draft: edit, validate, simulate
-  Draft --> Pending: request publish
-  Pending --> Draft: reject
-  Pending --> Published: approve by a different identity
-  Published --> Retired: newer version becomes effective
-  Retired --> Draft: restore as draft
-  Published --> [*]
-  Retired --> [*]
+  [*] --> DRAFT: create, import, or copy from a retired version
+  DRAFT --> DRAFT: edit (lock version), validate, simulate
+  DRAFT --> PENDING_APPROVAL: request-publish (zero validation errors)
+  PENDING_APPROVAL --> DRAFT: reject
+  PENDING_APPROVAL --> PUBLISHED: approve by a different identity
+  PUBLISHED --> RETIRED: newer version becomes effective, or retire
+  PUBLISHED --> [*]
+  RETIRED --> [*]
+  note right of RETIRED
+    Immutable. Still readable for
+    explain and replay of old decisions.
+  end note

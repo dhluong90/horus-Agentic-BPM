@@ -1,42 +1,50 @@
 # Technical Stack
 
-Chosen for small footprint, long support and permissive licences. Decisions are ADRs in the repository (`docs/adr/`).
+Reference for the libraries and tools the project uses, what each one is for, and what was rejected. Chosen for small footprint, long support and permissive licences; the decisions are ADRs in `docs/adr/`.
 
-![Stack layers](images/stack-layers.svg)
+![Containers](images/c4-container.svg)
 
 ## Engines
-| Area | Choice | Rejected, and why |
-|---|---|---|
-| Language | Java 21 baseline, Java 25 in CI | Kotlin: a runtime in every host |
-| Integration | Spring Boot 3.4+ starters; `core` is framework-free | Quarkus, Micronaut, Jakarta EE: later if asked |
-| Data access | Spring JDBC `JdbcClient` | JPA/Hibernate: hidden queries and entity lifecycle inside a library; jOOQ: code generation and dual licence |
-| Database | PostgreSQL 14+ behind a storage SPI | Multi-database in 0.x: doubles the matrix before the design is proven |
-| Migrations | Flyway community edition, one history table per engine | Liquibase: heavier |
-| JSON | Jackson | Already in every Spring host |
-| Expression language | Hand-written recursive-descent parser, typed tree, zero dependencies | ANTLR: fine licence, more machinery than the grammar needs; SpEL, MVEL, JEXL: allow method calls and reflection |
-| Identifiers | ULID | UUIDv4: index churn; sequences: not replica-safe |
-| Observability | Micrometer; OpenTelemetry API optional | Vendor SDKs |
-| Scheduling | Database timers with `SKIP LOCKED`, one scheduler thread per host instance | Quartz: own tables and clustering; brokers: a new dependency |
-| Testing | JUnit 5, AssertJ, Testcontainers, jqwik, ArchUnit, JMH | Mockito for the evaluator: pure functions need no mocks |
-| Build and supply chain | Maven reactors plus `bpm-bom`; Error Prone, Checkstyle, SpotBugs, Dependency-Check, CycloneDX SBOM, licence allowlist | Gradle: fine, Maven's rigidity suits a library |
+| Area | Choice | Licence | Rejected, and why |
+|---|---|---|---|
+| Language | Java 21 baseline, Java 25 in CI | | Kotlin: a runtime in every host |
+| Integration | Spring Boot 3.4+ starters with `@AutoConfiguration`; `*-core` is framework-free | Apache 2.0 | Quarkus, Micronaut, Jakarta EE: later if asked |
+| Data access | Spring JDBC `JdbcClient` | Apache 2.0 | JPA/Hibernate: hidden queries and entity lifecycle inside a library; jOOQ: code generation and dual licence |
+| Database | PostgreSQL 14+ behind a storage port | | Multi-database in 0.x: doubles the matrix before the design is proven |
+| Migrations | Flyway community edition, one history table per engine | Apache 2.0 | Liquibase: heavier |
+| JSON | Jackson | Apache 2.0 | Already in every Spring host |
+| JSON Schema (agentTask output) | `networknt/json-schema-validator` behind an `OutputSchemaValidator` port in the Process Engine starter; `*-core` sees only the port | Apache 2.0 | Writing a validator: Draft 2020-12 is large; `everit`: older drafts, less active |
+| Expression language | Hand-written recursive-descent parser, sealed typed tree, zero dependencies (ADR-0003) | | ANTLR: fine licence, more machinery than the grammar needs; SpEL, MVEL, JEXL: allow method calls and reflection |
+| Identifiers | ULID, generated in `*-core` (Crockford base32, monotonic within a millisecond) | | UUIDv4: index churn; sequences: not replica-safe; a ULID library: 60 lines are not worth a dependency |
+| Compiled cache | Caffeine in the starter behind a `CompiledCache` port; bounded LRU default in `*-core` | Apache 2.0 | Guava cache: larger artifact; unbounded maps: heap growth with tenant count |
+| Masking | JDK `javax.crypto.Mac` HMAC-SHA256 with a host-provided key | | Plain SHA-256: enumerable inputs such as national ids |
+| Errors | Spring `ProblemDetail` (RFC 9457) | Apache 2.0 | Custom envelopes: one more thing for clients to learn |
+| Observability | Micrometer; OpenTelemetry API optional | Apache 2.0 | Vendor SDKs |
+| Scheduling | Database timers and jobs with `SKIP LOCKED` leases, one scheduler thread per host replica | | Quartz: own tables and clustering; brokers: a new dependency |
+| Cache coherence | PostgreSQL `LISTEN/NOTIFY` plus a `cache_epoch` sweep (ADR-0009) | | Broker topic: new infrastructure; TTL only: stale for the whole TTL |
+| Testing | JUnit 5, AssertJ, Testcontainers (PostgreSQL, PgBouncer), jqwik, ArchUnit, JMH | EPL 2.0 (JUnit), Apache 2.0, MIT | Mockito for the evaluator: pure functions need no mocks. Test-scope licences do not ship |
+| Build and supply chain | Maven reactors plus `bpm-bom`; Error Prone, Checkstyle, SpotBugs, Dependency-Check, CycloneDX SBOM, licence allowlist | | Gradle: fine, Maven's rigidity suits a library |
+
+New runtime dependencies need a one-paragraph justification in the pull request and a permissive licence (`TR-LIC-01`).
 
 ## Cockpit
 | Area | Choice |
 |---|---|
 | UI | React 18, TypeScript 5, Vite |
 | Data | TanStack Query and Table |
-| Forms | React Hook Form, Zod schemas generated from OpenAPI |
+| Forms | React Hook Form, Zod schemas generated from OpenAPI 3.1 |
 | Styling | CSS variables, small internal component set, light and dark |
-| Testing | Vitest, Testing Library, Playwright against an example host |
+| Testing | Vitest, Testing Library, Playwright with axe-core against an example host |
 | Packaging | Jar served by `cockpit-spring-boot-starter`, and a plain archive for standalone hosting |
 
 ## Delivery
 | Area | Choice |
 |---|---|
-| CI | GitHub Actions: Java 21/25 × PostgreSQL 14/16/17, ArchUnit, benchmark trend, SBOM, licence check, wiki publish |
+| CI | GitHub Actions: Java 21/25 x PostgreSQL 14/16/17, one job through PgBouncer in transaction mode, ArchUnit, benchmark trend, SBOM, licence check, wiki publish |
 | Versioning | Semver per module; tags `<module>/vX.Y.Z`; `bpm-bom` with every release |
 | Distribution | Maven Central via the Sonatype Central Portal |
 
 ## Open decisions
 - **Maven groupId.** `com.horus.bpm` needs verified ownership of `horus.com`; otherwise a domain the project controls, or `io.github.<owner>.bpm`. Decided before the first published artifact.
 - **Java 25 as baseline** once host adoption allows.
+- **JSON Schema validator.** `networknt/json-schema-validator` is the proposed default; the port keeps the choice reversible. Decided before M2 starts.

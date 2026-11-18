@@ -1,25 +1,66 @@
-# Versioning and Publishing
+# How to publish, schedule and roll back a version
 
-Business users change rules without a deployment; the engine keeps it safe. _Design preview._
+Change rules without a deployment while the engine enforces maker-checker and keeps every version.
 
-## States
+Design preview: describes the 0.1 target.
+
+## Before you start
+
+- States and the meaning of maker-checker: [[Concepts]].
+- Two identities: one with `rules:author` (the maker, `alice` below) and a different one with `rules:approve` (the checker, `bob`). Permissions are listed in [[Rule Engine Configuration]].
+- Every mutating call below accepts an `Idempotency-Key` header; replaying the same key returns the original response (ADR-0006).
+
 ![Version lifecycle](images/version-lifecycle.svg)
-- **draft**: editable; evaluable only through simulation.
-- **pending approval**: frozen; waits for a second identity.
-- **published**: immutable; effective from `effectiveFrom` (default: approval time). At most one published version is effective per tenant at a time; a future-dated version is scheduled and becomes effective automatically.
-- **retired**: no longer effective; still readable, still able to explain old decisions.
 
-## Maker-checker
-The identity that requested publication cannot approve it. The check is in the engine (`VersionService`), not only in the cockpit, so it also holds for API callers. Approval records approver, time and an optional comment, and emits an `rules.version.published` event for the host's audit system.
+## Publish a change
 
-## Effective dating
-Set `effectiveFrom` to schedule a change (for example a fee change from the first of next month). The scheduler is the engine's own database-backed timer; no external job runner is needed. A decision logs the version that was effective at its `clock`.
+![Publish sequence](images/publish-sequence.svg)
 
-## Rollback
-Publishing a new version from the retired version's content (the cockpit has "Restore as draft"). History is never rewritten.
+| Step | Who | Call | Expected |
+|---|---|---|---|
+| 1. Create a draft from the current version | alice | `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` | `201`, body contains `"version": 3, "status": "DRAFT"` |
+| 2. Edit the draft | alice | `PUT /api/bpm/rules/v1/rule-sets/card-fee/versions/3` with the full document | `200`; validation errors come back as `422 VALIDATION_FAILED` with row ids |
+| 3. Check it | alice | Simulate as in [[Rule Engine Simulation and Testing]] | Report of outputs per sample row |
+| 4. Request publication | alice | `POST .../versions/3:request-publish` | `200`, `"status": "PENDING_APPROVAL"`; the draft is now frozen |
+| 5. Review the diff | bob | `GET .../versions/2/diff/3`, or the Approvals screen in the [[Cockpit]] | Added, removed and changed rows and columns |
+| 6. Approve | bob | `POST .../versions/3:approve` with `{ "comment": "Fee change agreed with product" }` | `200`, `"status": "PUBLISHED"`; event `rules.version.published` emitted |
 
-## Per-tenant overrides
-A rule set is defined per tenant. A shared default can be copied into a tenant ("Fork from tenant default") and then diverge. There is no inheritance at evaluation time; this keeps evaluation deterministic and explainable.
+From step 6 the new version is effective immediately, unless it carries a future `effectiveFrom`. The previous version stays readable and still explains its past decisions.
 
-## Diffing versions
-`GET /rule-sets/{name}/versions/{a}/diff/{b}` returns added, removed and changed rows and columns; the cockpit renders it side by side. Use with [[Rule Engine Simulation and Testing]] before approving.
+To reject instead of approve: `POST .../versions/3:reject` with a comment. The version returns to draft.
+
+## Schedule a change for a date
+
+Set `effectiveFrom` in the document before requesting publication:
+
+```yaml
+effectiveFrom: 2027-01-01T00:00:00+07:00
+```
+
+After approval the version is published but not yet effective. Evaluation always selects the version with the latest `effectiveFrom` at or before the decision's clock, so the change takes effect at that instant on every replica without a wake-up. The engine's scheduler thread only retires the superseded version and emits `rules.version.retired` at that time. A decision made at 23:59 on 31 Dec 2026 logs version 2; one made at 00:00 on 1 Jan 2027 logs version 3.
+
+## Roll back
+
+History is never rewritten, so a rollback is a new version with old content.
+
+1. Open the retired version in the cockpit and choose "Restore as draft", or export it (`GET .../versions/2/export`) and import it as a new draft.
+2. Request publication and approve as above.
+
+## Retire a rule set
+
+`POST .../versions/3:retire` by an identity with `rules:approve`. Callers then receive `404 NO_EFFECTIVE_VERSION`. Decisions already logged keep pointing at version 3.
+
+## Give one tenant different rules
+
+A rule set is defined per tenant. Copy a shared default into a tenant ("Fork from tenant default" in the cockpit, or export and import under the other tenant) and let it diverge. There is no inheritance at evaluation time; evaluation stays deterministic and explainable.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `403 SELF_APPROVAL_FORBIDDEN` | The approver is the identity that requested publication | A different identity with `rules:approve` must approve (TR-SEC-04). The check is in the engine, so the API refuses it even when the cockpit button is bypassed |
+| `422 VALIDATION_FAILED` on `:request-publish` | The draft has errors | Fix the rows named in the response; warnings do not block |
+| `409 INVALID_STATE` | The call does not fit the current state, for example `:approve` on a draft | Follow the order in the table above |
+| `409 VERSION_CONFLICT` on `PUT` | Someone saved the draft after you loaded it | Reload the draft and apply your change again |
+| New version not used after approval | `effectiveFrom` is in the future, or the caller pins a version | Check `effectiveFrom`; check for `evaluate(ruleSet, version, input)` calls |
+| Replica still answers with the old version | Cache invalidation lag | The engine invalidates compiled caches on publication across replicas (see [[Architecture]]); if it persists, open a bug with both replicas' logs |

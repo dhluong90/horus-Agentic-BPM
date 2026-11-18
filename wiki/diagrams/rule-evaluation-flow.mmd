@@ -1,13 +1,13 @@
 flowchart LR
-  subgraph Authoring[Authoring, once per version]
-    D[Definition<br/>YAML, JSON or cockpit] --> V[Validate<br/>types, names, overlaps]
-    V --> C[Compile<br/>expressions to tree]
-    C --> S[(Versions)]
+  subgraph Authoring["Authoring: once per version"]
+    D["Definition\nYAML, JSON or cockpit"] --> V["Validate\ntypes, names, overlaps"]
+    V --> C["Compile\nexpressions to typed tree, slot indices"]
+    C --> S[("rle_version\ncanonical JSON + hash")]
   end
-  subgraph Evaluation[Evaluation, every call]
-    I[DecisionInput<br/>values, clock, tenant] --> R[Resolve version<br/>effective at clock]
-    S --> R
-    R --> E[Evaluate<br/>pure, no I/O]
-    E --> O[DecisionResult<br/>outputs, matched rules]
-    E --> L[(Decision log<br/>append-only)]
+  subgraph Evaluation["Evaluation: every call, no I/O"]
+    I["DecisionInput\nvalues, clock, tenant"] --> R["Resolve version\neffective at clock"]
+    S -->|"compiled cache per replica\ninvalidated by NOTIFY + epoch"| R
+    R --> E["Evaluate\npure, p99 target under 100 us"]
+    E --> O["DecisionResult\noutputs, matched rules"]
+    E --> L[("rle_decision\nappend-only, one INSERT")]
   end
