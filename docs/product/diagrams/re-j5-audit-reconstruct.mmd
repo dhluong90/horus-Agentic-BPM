@@ -1,0 +1,23 @@
+sequenceDiagram
+  autonumber
+  actor AU as Internal auditor
+  participant CK as Cockpit
+  participant ENG as Rule Engine
+  participant LOG as Decision log (monthly partitions)
+  AU->>CK: Decisions, rule set credit-card-eligibility, 12 Jan 2027
+  CK->>ENG: GET /decisions?ruleSet=...&from=...&to=...
+  ENG->>LOG: read partition 2027-01
+  alt partition older than retention was dropped
+    LOG-->>ENG: no rows
+    ENG-->>CK: empty result, retention setting explains why
+  else found
+    LOG-->>ENG: entry
+    ENG-->>CK: version 3, clock, inputs (masked), matched R4, outputs, caller
+  end
+  AU->>CK: open version 3
+  CK->>ENG: GET version 3 with requester, approver, dates
+  ENG-->>CK: rows as approved, approval record
+  AU->>CK: Simulation of published v3 with the logged inputs and clock
+  CK->>ENG: simulate pinned v3, clock 2027-01-12T09:14Z (nothing logged)
+  ENG-->>CK: same outputs, same matched row R4
+  AU->>CK: export evidence (REST JSON in M1, export screen in M3)

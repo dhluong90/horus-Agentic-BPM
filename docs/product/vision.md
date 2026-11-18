@@ -26,7 +26,7 @@ The usual answers each cost something the team cannot pay:
 | For | Not for |
 |---|---|
 | Java 21 or 25 teams on Spring Boot 4.x (3.5.x supported until 1.0, PD-007) and PostgreSQL 14+ | Other languages, frameworks or databases before 1.0 |
-| Services whose rules change under four-eyes approval with effective dates | Teams that need full BPMN 2.0, DMN FEEL, CMMN or a diagram modeller (the modeller part is under review in [PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)) |
+| Services whose rules and process definitions change under four-eyes approval with effective dates | Teams that need full BPMN 2.0, DMN FEEL or CMMN, or a general-purpose diagram tool ([PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)) |
 | Approval flows, task queues with SLAs and compensating service steps inside one service | One central orchestration platform shared by many teams |
 | AI agent steps that must pass rules a compliance team can read | Durable execution of arbitrary code across many services, or rule inference and chaining |
 
@@ -41,7 +41,7 @@ The first sentence alone is true of other embeddable engines. The line depends o
 | # | Differentiator | Rests on |
 |---|---|---|
 | 1 | Runs inside the host service and its PostgreSQL transaction: no engine cluster, no broker, no separate identity | Principles 1 and 2, [ADR-0002](../adr/0002-state-in-host-database.md), [ADR-0004](../adr/0004-no-standalone-server.md) |
-| 2 | Rule changes by business users with maker-checker, effective dates and simulation enforced in the service layer, not only in a UI | Principles 5 and 6, `TR-SEC-04` |
+| 2 | Rule and process changes by business users with maker-checker, effective dates and simulation (validation and graph diff for processes) enforced in the service layer, not only in a UI | Principles 5 and 6, `TR-SEC-04`, [PD-033](decisions.md#pd-033-maker-checker-for-process-definitions), [PD-040](decisions.md#pd-040-principle-6-extended-to-process-definitions) |
 | 3 | Agent output validated by a JSON Schema and a guardrail rule set before the process continues; on violation, a human approves or the step fails | Principle 7, `TR-AGT-01`, [ADR-0008](../adr/0008-async-wait-state-for-external-steps.md) |
 
 ## What the engine will never be
@@ -52,7 +52,7 @@ The first sentence alone is true of other embeddable engines. The line depends o
 | The owner of a separate data store | Principle 2, [ADR-0002](../adr/0002-state-in-host-database.md) |
 | A host for scripts or arbitrary code in definitions | Principle 4, [ADR-0003](../adr/0003-own-expression-language.md), `TR-SEC-01` |
 | A model runtime: it never embeds or calls a model | Principle 7, `TR-AGT-03`, `TR-EMB-05` |
-| A full BPMN 2.0, DMN FEEL or CMMN implementation | Principle 9. Supported is what is documented |
+| A full BPMN 2.0, DMN FEEL or CMMN implementation | Principle 9 ([PD-039](decisions.md#pd-039-principle-9-wording)): our own graph notation is the source of truth and always has a diagram; a BPMN subset is for import and export. Supported is what is documented |
 | A distributed transaction coordinator | [ADR-0007](../adr/0007-compensation-instead-of-distributed-transactions.md). Compensation, not two-phase commit |
 | A cockpit with its own backend, database or login | [ADR-0005](../adr/0005-cockpit-as-static-assets.md) |
 
@@ -66,9 +66,9 @@ Two libraries and one cockpit. The Rule Engine is useful alone and is also the g
 |---|---|---|---|---|
 | Rule Engine | Evaluate governed decision tables in process; change them without a deployment | 0.1 in M1 | `rule-engine-spring-boot-starter` | [prd-rule-engine.md](prd-rule-engine.md) |
 | Process Engine | Run human, service, decision and agent steps with idempotency, compensation and SLAs | 0.1 in M2 | `process-engine-spring-boot-starter` | [prd-process-engine.md](prd-process-engine.md) |
-| Cockpit | Let authors, approvers, operators and auditors act on both engines | 0.1 in M1, 0.2 in M2 | `cockpit-spring-boot-starter` and a static archive | [prd-cockpit.md](prd-cockpit.md) |
+| Cockpit | Let authors, approvers, operators and auditors act on both engines, see processes as diagrams and work one inbox across services | 0.1 in M1, 0.2 in M2 | `cockpit-spring-boot-starter` and a static archive | [prd-cockpit.md](prd-cockpit.md) |
 
-Release requirements are in [requirements.md](requirements.md); system design is in [architecture/overview.md](../architecture/overview.md).
+Who uses the Rule Engine, through which surface, and the use cases per milestone: [rule-engine-users-and-journeys.md](rule-engine-users-and-journeys.md). Release requirements are in [requirements.md](requirements.md); system design is in [architecture/overview.md](../architecture/overview.md).
 
 ## Success measures for 1.0
 

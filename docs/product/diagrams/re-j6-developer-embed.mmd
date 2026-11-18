@@ -1,0 +1,27 @@
+sequenceDiagram
+  autonumber
+  actor DV as Developer
+  participant SVC as Host service (Spring Boot)
+  participant ENG as Rule Engine (in process)
+  participant DB as Host PostgreSQL
+  DV->>SVC: add starter and configuration block
+  SVC->>DB: Flyway creates rle_* tables in the engine's own history
+  alt a rule set masks an input and no masking key is set
+    SVC-->>DV: start-up fails, key name in the message
+  end
+  DV->>ENG: import card-fee.yaml and publish (a single identity may publish only in the dev profile)
+  DV->>SVC: JUnit with rule-engine-test, row coverage in CI
+  rect rgba(14,111,104,0.08)
+    Note over SVC,DB: One business transaction
+    SVC->>ENG: evaluate(card-fee, inputs, correlationId=APP-7781, idempotency key)
+    ENG->>DB: insert one decision row
+    ENG-->>SVC: outputs, matched R2, decisionId
+    SVC->>DB: store fee and decisionId on the account
+  end
+  alt business write fails
+    SVC->>DB: rollback, the decision row rolls back with it
+  else unique table with zero or two matches
+    ENG-->>SVC: UNIQUE_HIT_VIOLATION, no outputs
+  else same idempotency key, different body
+    ENG-->>SVC: rejected
+  end

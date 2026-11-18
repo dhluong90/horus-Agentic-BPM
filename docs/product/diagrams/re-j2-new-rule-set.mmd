@@ -1,0 +1,30 @@
+sequenceDiagram
+  autonumber
+  actor RA as Credit risk analyst
+  participant CK as Cockpit (development)
+  participant ENG as Rule Engine
+  actor DV as Developer
+  participant GIT as Git and CI
+  actor CO as Compliance officer
+  RA->>CK: New rule set from template "Eligibility with reason codes"
+  RA->>CK: Inputs age, monthlyIncome, employmentMonths, dti, outputs eligible, reasonCode
+  RA->>CK: Rows in shorthand: age "< 21", monthlyIncome "< 8000000 VND"
+  CK->>ENG: validate draft
+  ENG-->>CK: plain-language messages per row and column
+  RA->>CK: Simulation with 30 sample applicants
+  RA->>DV: Ticket: rule set name, inputs, outputs, launch date
+  alt an input is not available in the service
+    DV-->>RA: dti is not computed today
+    DV->>ENG: register function dti(debt, income), or compute it before the call
+  end
+  DV->>GIT: export draft as YAML, add JUnit tests, wire evaluate in the loan service
+  GIT-->>DV: tests green, row coverage report
+  GIT->>ENG: UAT: release the service, import rule set as draft
+  RA->>ENG: UAT checks, request approval
+  CO->>ENG: approve in UAT
+  GIT->>ENG: Production: release the service, import rule set as draft
+  RA->>ENG: request publication, effective on launch date
+  CO->>ENG: approve (journey 3)
+  alt service calls before the rule set is effective
+    ENG-->>DV: 404 NO_EFFECTIVE_VERSION, the service must keep the product switched off
+  end

@@ -1,0 +1,35 @@
+sequenceDiagram
+  autonumber
+  actor PM as Pricing manager
+  participant XL as Excel
+  participant CK as Cockpit
+  participant ENG as Rule Engine (host REST)
+  actor CO as Compliance officer
+  PM->>CK: Rule sets, card-fee, Export rows as CSV
+  CK->>ENG: GET version 2 rows
+  ENG-->>CK: rows R1 to R5
+  CK-->>PM: card-fee-v2.csv
+  PM->>XL: R3 fee 30000 VND to 35000 VND, save as CSV
+  PM->>CK: Import CSV as draft
+  CK->>ENG: create draft v3 from v2 with changed rows (Idempotency-Key)
+  alt validation fails
+    ENG-->>CK: 422 VALIDATION_FAILED, row R3, column fee
+    CK-->>PM: Row R3, column fee: 35000 has no currency. Write 35000 VND.
+  else valid
+    ENG-->>CK: 201 DRAFT v3
+  end
+  PM->>CK: Simulation, upload 20 sample customers
+  CK->>ENG: simulate v3 next to v2 (nothing logged)
+  ENG-->>CK: 6 of 20 outcomes changed
+  PM->>CK: Request approval, effective 2027-01-01
+  CK->>ENG: request-publish
+  ENG-->>CO: publish-requested event, via the bank's email or chat
+  CO->>CK: Approvals, diff, approve (journey 3)
+  alt approver is the requester
+    ENG-->>CK: 403 SELF_APPROVAL_FORBIDDEN
+  else rejected with a comment
+    ENG-->>PM: v3 back to DRAFT with the comment
+  else approved
+    ENG-->>CK: PUBLISHED, effective 2027-01-01 00:00
+  end
+  Note over ENG: From 1 Jan every replica evaluates v3, v2 retires

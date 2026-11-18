@@ -53,17 +53,30 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-029](#pd-029-accept-adr-0008-async-wait-state-for-external-steps) | Accept ADR-0008 (async wait-state for external steps) | Pending product owner |
 | [PD-030](#pd-030-accept-adr-0009-cache-coherence) | Accept ADR-0009 (cache coherence) | Pending product owner |
 | [PD-031](#pd-031-milestone-dates-and-pre-approved-cuts) | Milestone dates and pre-approved cuts | Pending product owner |
-| [PD-032](#pd-032-diagrams-and-a-visual-modeller-in-scope) | Diagrams and a visual modeller in scope | Pending product owner |
-| [PD-033](#pd-033-maker-checker-for-process-definitions) | Maker-checker for process definitions | Pending product owner |
-| [PD-034](#pd-034-process-notation-own-json-canonical-bpmn-subset-for-import-and-export) | Process notation: own JSON canonical, BPMN subset for import and export | Pending product owner |
-| [PD-035](#pd-035-multi-host-cockpit-model) | Multi-host cockpit model | Pending product owner |
-| [PD-036](#pd-036-source-of-truth-for-process-definitions) | Source of truth for process definitions | Pending product owner |
-| [PD-037](#pd-037-tenant-switching-for-multi-tenant-operators) | Tenant switching for multi-tenant operators | Pending product owner |
-| [PD-038](#pd-038-analytics-scope) | Analytics scope | Pending product owner |
-| [PD-039](#pd-039-principle-9-wording) | Principle 9 wording | Pending product owner |
-| [PD-040](#pd-040-principle-6-extended-to-process-definitions) | Principle 6 extended to process definitions | Pending product owner |
-| [PD-041](#pd-041-conflict-vision-non-goal-diagram-modeller) | Conflict: vision non-goal "diagram modeller" | Pending product owner |
-| [PD-042](#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted) | Milestone dates if the cockpit direction is accepted | Pending product owner |
+| [PD-032](#pd-032-diagrams-and-a-visual-modeller-in-scope) | Diagrams and a visual modeller in scope | Decided |
+| [PD-033](#pd-033-maker-checker-for-process-definitions) | Maker-checker for process definitions | Decided |
+| [PD-034](#pd-034-process-notation-own-json-canonical-bpmn-subset-for-import-and-export) | Process notation: own JSON canonical, BPMN subset for import and export | Decided |
+| [PD-035](#pd-035-multi-host-cockpit-model) | Multi-host cockpit model | Decided |
+| [PD-036](#pd-036-source-of-truth-for-process-definitions) | Source of truth for process definitions | Decided |
+| [PD-037](#pd-037-tenant-switching-for-multi-tenant-operators) | Tenant switching for multi-tenant operators | Decided |
+| [PD-038](#pd-038-analytics-scope) | Analytics scope | Decided |
+| [PD-039](#pd-039-principle-9-wording) | Principle 9 wording | Decided |
+| [PD-040](#pd-040-principle-6-extended-to-process-definitions) | Principle 6 extended to process definitions | Decided |
+| [PD-041](#pd-041-conflict-vision-non-goal-diagram-modeller) | Conflict: vision non-goal "diagram modeller" | Decided |
+| [PD-042](#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted) | Milestone dates if the cockpit direction is accepted | Decided |
+| [PD-043](#pd-043-rule-authoring-for-business-users-without-yaml) | Rule authoring for business users without YAML | Pending product owner |
+| [PD-044](#pd-044-rpo-and-rto-responsibility-wording) | RPO and RTO responsibility wording | Pending product owner |
+| [PD-045](#pd-045-capacity-limits-we-publish) | Capacity limits we publish | Pending product owner |
+| [PD-046](#pd-046-federation-limits-we-support) | Federation limits we support | Pending product owner |
+| [PD-047](#pd-047-usability-targets) | Usability targets | Pending product owner |
+| [PD-048](#pd-048-diagram-accessibility) | Diagram accessibility | Pending product owner |
+| [PD-049](#pd-049-wcag-asvs-and-coverage-as-must-at-10) | WCAG, ASVS and coverage as Must at 1.0 | Pending product owner |
+| [PD-050](#pd-050-retention-default-for-the-decision-log-and-history) | Retention default for the decision log and history | Pending product owner |
+| [PD-051](#pd-051-tenant-exit-export-and-purge) | Tenant exit: export and purge | Pending product owner |
+| [PD-052](#pd-052-tamper-evidence-beyond-append-only) | Tamper evidence beyond append-only | Pending product owner |
+| [PD-053](#pd-053-licence-rule-for-test-and-build-tools) | Licence rule for test and build tools | Pending product owner |
+| [PD-054](#pd-054-deprecation-length) | Deprecation length | Pending product owner |
+| [PD-055](#pd-055-postgresql-version-range) | PostgreSQL version range | Pending product owner |
 
 ---
 
@@ -739,6 +752,8 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 | Question | Can M0 (4 Dec 2026), M1 (15 Jan 2027), M2 (12 Mar 2027) and M3 (7 May 2027) hold with the scope in the [feature map](feature-map.md)? |
 | Decision | Pending product owner |
 
+**Update, 2026-11-18.** [PD-042](#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted) (Decided) moves M2 to 26 Mar 2027 and M3 to 21 May 2027 and replaces the M2 and M3 rows of the cut list below; [PD-034](#pd-034-process-notation-own-json-canonical-bpmn-subset-for-import-and-export) (Decided) removes PE-F-41 from the M3 row. What stays open in this entry is the M1 row (date 15 Jan 2027 and its cut list) and the never-cut list. The analysis below is kept as written on 2026-11-18.
+
 **Analysis.**
 
 - M0 (2 weeks) holds if the pending decisions in this log are decided by 2 Dec 2026. Three design questions gate M1 code: the Jackson major (ADR-0011), the Maven `groupId`, and standalone cockpit host switching.
@@ -772,15 +787,15 @@ Never cut, in any milestone: tenant isolation, idempotency, maker-checker, appen
 
 ---
 
-## Pending: cockpit direction (Camunda-like cockpit)
+## Decided: cockpit direction (Camunda-like cockpit)
 
 The product owner asked for a cockpit that works like Camunda's tools (model, operate, work tasks, see where processes slow down) while the engines stay embedded libraries. The architect's review "Embedded engines with a Camunda-like cockpit" (18 Nov 2026) answers that this fits the principles: all replicas of one service share one PostgreSQL database, so each host's REST layer already gives the full picture for that service, and a static cockpit that calls several hosts covers the view across services. The review found three gaps in the current plan: no diagrams anywhere, no maker-checker for process definitions, and no engine read APIs built for a cockpit. It asks for seven decisions before M2 code starts (PD-032 to PD-038). PD-039 to PD-041 record the principle and vision wording those decisions would change. PD-042 records the effect on dates.
 
-Until these entries are decided, the roadmap and the feature map keep the scope before them. The proposed features are listed in the [feature map](feature-map.md#proposed-camunda-like-cockpit-pending-pd-032-to-pd-042) with status "proposed", and the adjusted milestones are in the [roadmap scenario](roadmap.md#scenario-camunda-like-cockpit).
+The product owner accepted the direction on 2026-11-18 ("add it into the product roadmap"), with the product manager's recommended variant of every entry. The [roadmap](roadmap.md) and the [feature map](feature-map.md) apply it: the 24 new features are in the feature map tables with status "spec gap", M2 ends on 26 Mar 2027 and M3 on 21 May 2027, and kill assumptions K15 to K18 are in the roadmap.
 
-What "Camunda-like" includes and excludes in all ten entries:
+What "Camunda-like" includes and excludes in all eleven entries:
 
-| Camunda tool | Included if accepted | Not included |
+| Camunda tool | Included | Not included |
 |---|---|---|
 | Modeler | A diagram for every definition (M2); a browser modeller limited to our step types and to steps the host has registered (M3) | Full BPMN 2.0 symbols, a desktop modeller, scripts or expressions typed into the canvas |
 | Operate | Definition and instance diagrams with token overlay, node history, live counts per node (M2); migration shown as two diagrams (M3) | Moving a token by hand inside a running instance (deferred; needs its own maker-checker if ever built) |
@@ -795,7 +810,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | Is a visual process modeller in scope before 1.0, and in which form? Today the vision and both PRDs list "a graphical modeller" as a non-goal, definitions carry no layout, and the Cockpit 0.2 instance view is a timeline |
 | Raised by | Product owner request; architect's review, decision 1 |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-18: option 2 as adjusted by the product manager. Read-only diagrams in M2; the modeller canvas (CK-F-32) in M3 as the first M3 cut, fallback 1.1; the engine APIs it needs (PE-F-44, PE-F-46, PE-F-52) before the 1.0 freeze |
 
 **Architect's recommendation.** Yes. Read-only diagrams with a token overlay in M2; a modeller in M3; full BPMN 2.0 stays out.
 
@@ -817,14 +832,14 @@ What "Camunda-like" includes and excludes in all ten entries:
 
 **Rationale.**
 
-- Personas. The Operator and Auditor (cockpit PRD section 5) get the most from the read-only diagram: "where is this instance and why is it stuck" is their daily question, and the token overlay answers it in one screen. The Author persona for processes does not exist yet; who changes a process in a bank today is unknown (new kill assumption K16 in the roadmap scenario). That makes the diagram certain value and the modeller a bet.
+- Personas. The Operator and Auditor (cockpit PRD section 5) get the most from the read-only diagram: "where is this instance and why is it stuck" is their daily question, and the token overlay answers it in one screen. The Author persona for processes does not exist yet; who changes a process in a bank today is unknown (kill assumption K16 in the roadmap). That makes the diagram certain value and the modeller a bet.
 - Positioning against Camunda. We will not out-draw a modeller with ten years of polish. We can win on what an embedded engine with governance does that Camunda's modeller does not: the canvas offers only steps the host has registered, validation runs on save, and every change goes through a second approver (PD-033). The modeller should be sold as "governed change to a running service", not as a drawing tool. A read-only diagram removes the most visible gap in an evaluation ("no diagrams") at the lowest cost.
 - Scope and dates. M2 is the largest milestone (44 features, about seven working weeks). A modeller in M2 would sink it. In M3 the modeller competes with the API freeze and the adopter exit; keeping the canvas cuttable, but the APIs fixed, protects 1.0 without closing the door.
 - The architect's two-day React Flow spike (render `kyc-onboarding` with automatic layout and a token overlay) should run in M0 and feed the K5 architect conversations in M1 with real screenshots.
 
-**Consequences if accepted.** New features PE-F-44, PE-F-47, PE-F-48, CK-F-24, CK-F-25, CK-F-26, CK-F-32, CK-F-33 (see the feature map). CK-F-12 keeps its timeline and gains the diagram through CK-F-25. Vision, process PRD and cockpit PRD non-goals change (PD-041). Principle 9 changes (PD-039). ADR-0013 (notation, layout storage, diagram library, bpmn-js licence finding) is needed before M2 code. React Flow and dagre each need a one-paragraph dependency justification and a licence re-check at adoption.
+**Consequences.** New features PE-F-44, PE-F-47, PE-F-48, CK-F-24, CK-F-25, CK-F-26, CK-F-32, CK-F-33 (see the feature map). CK-F-12 keeps its timeline and gains the diagram through CK-F-25. Vision, process PRD and cockpit PRD non-goals change (PD-041). Principle 9 changes (PD-039). ADR-0013 (notation, layout storage, diagram library, bpmn-js licence finding) is needed before M2 code. React Flow and dagre each need a one-paragraph dependency justification and a licence re-check at adoption.
 
-**Follow-ups.** Architect: ADR-0013 and the M0 spike. Product manager: CKP-level journeys for the diagram views in the cockpit PRD after the decision; add K15 to K18 from the roadmap scenario to the kill assumptions once decided. QA: licence gate test that rejects bpmn-js.
+**Follow-ups.** Architect: ADR-0013 and the M0 spike. Product manager: CKP-level journeys for the diagram views in the cockpit PRD after the decision; add K15 to K18 to the roadmap kill assumptions once decided (done 2026-11-18). QA: licence gate test that rejects bpmn-js.
 
 ### PD-033 Maker-checker for process definitions
 
@@ -833,7 +848,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | Do process definitions get the same governed lifecycle as rule sets (draft, request, approve by another identity, effective date, retire)? Today they are deployed directly with `processes:deploy` |
 | Raised by | Architect's review, decision 2 |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-18: option 2 with the product manager's addition. Lifecycle, permissions, events and graph diff in the engine in M2; approval screens in M3; the `dev` profile may auto-approve |
 
 **Architect's recommendation.** Yes. Engine API in M2, before the contract freezes; cockpit screens in M3.
 
@@ -859,7 +874,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 - Scope and dates. The lifecycle changes the deploy contract and the definition table (`status` gains `DRAFT` and `PENDING_APPROVAL`). Doing it in M2 costs less than changing a contract adopters already call. The graph diff is a pure function over two definitions and is what makes an API approval meaningful, so it stays in M2 with the lifecycle. The screens can wait for M3 because pilot approvers in M2 are few and technical.
 - The `dev` exception protects the 30-minute Getting Started measure (X-F-16): a newcomer should not need two identities to run a first process.
 
-**Consequences if accepted.** New features PE-F-45 (lifecycle, M2), PE-F-46 (graph diff, M2), CK-F-31 (approval screens, M3). PE-F-01 and PE-F-28 change contract: deploy creates a draft. Principle 6 is extended (PD-040). ADR-0012 and an ADR-0010 amendment are needed before M2 code. `TR-SEC-04` applies to process definitions as well as rule sets.
+**Consequences.** New features PE-F-45 (lifecycle, M2), PE-F-46 (graph diff, M2), CK-F-31 (approval screens, M3). PE-F-01 and PE-F-28 change contract: deploy creates a draft. Principle 6 is extended (PD-040). ADR-0012 and an ADR-0010 amendment are needed before M2 code. `TR-SEC-04` applies to process definitions as well as rule sets.
 
 **Follow-ups.** Architect: ADR-0012, ADR-0010 amendment, process OpenAPI changes, `PRE-*` statements for the lifecycle and the self-approval check. Product manager: update the process PRD and requirements after the decision. Security reviewer: confirm the `dev`-only relaxation rule.
 
@@ -870,7 +885,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | What is the source notation for process definitions once diagrams exist, and what is BPMN's role? |
 | Raised by | Architect's review, decision 3 |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-18: option 1. Own JSON canonical; BPMN subset import (PE-F-41) off the cut list; export (PE-F-53) in M3 as a cut candidate |
 
 **Architect's recommendation.** Our own definition JSON stays canonical, with an optional `diagram` part (node positions, edge waypoints, lanes). A BPMN subset is for import and export only, converted in Java with the JDK's StAX parser (no new dependency) and tested in CI against the schema; anything outside the subset is rejected and named in the error. Take PE-F-41 (BPMN subset import) off the cut list.
 
@@ -890,7 +905,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 - Personas. The host developer (process PRD S1) evaluates with an existing model; the agent step designer (S3) needs `agentTask` with its schema and guardrail, which only our JSON carries.
 - Scope. Keeping the subset documented and rejecting the rest by name keeps support bounded, which is the point of principle 9.
 
-**Consequences if accepted.** PE-F-41 is removed from the PD-031 M3 cut list (PD-031 is otherwise unchanged). New feature PE-F-53 (export, M3, cut candidate). The vision's "never a full BPMN 2.0 implementation" stays.
+**Consequences.** PE-F-41 is removed from the PD-031 M3 cut list (PD-031 is otherwise unchanged). New feature PE-F-53 (export, M3, cut candidate). The vision's "never a full BPMN 2.0 implementation" stays.
 
 **Follow-ups.** Architect: the subset definition and error codes in ADR-0013. Product manager: update PD-031's cut list wording once decided.
 
@@ -901,7 +916,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | How does one cockpit show work from several host services when there is no central engine server? This also answers the open M1 gate "standalone cockpit host switching" |
 | Raised by | Architect's review, decision 4 |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-18: option B, with A supported, D documented and C rejected for now. Host registry, `/meta` and `/me` in M1; merged inbox and incident list in M2 |
 
 **Architect's recommendation.** Option B (standalone cockpit federating hosts) as the product, with A (cockpit embedded in each host) still supported. D documented as a reference configuration for the bank's existing API gateway, not built. C after 1.0, and only if a customer pays for fleet analytics. Decide now, because host switching gates M1.
 
@@ -923,9 +938,9 @@ What "Camunda-like" includes and excludes in all ten entries:
 - Personas. The Operator persona works queues across several services in any bank that runs more than one process-bearing service. One bookmark per service (option A only) is the main reason operators would keep a vendor tool. B gives them one inbox without adding a server.
 - Positioning. "No engine cluster, no separate identity" is differentiator 1. Option C or D built by us would make it false. B keeps the claim and still answers "one view".
 - Scope and dates. M1's outcome is about rules, not processes; a merged inbox has nothing to merge until M2. Putting only the registry and the two small endpoints in M1 settles the gate question with a few days of work (an assumption to be sized by the architect) instead of a week.
-- Limits stated plainly. Federation above about 15 hosts or 2,000 active operators is outside what B is designed for. The scenario adds kill assumption K17 to test pilot topology early.
+- Limits stated plainly. Federation above about 15 hosts or 2,000 active operators is outside what B is designed for. The roadmap adds kill assumption K17 to test pilot topology early.
 
-**Consequences if accepted.** New features CK-F-23 (M1), X-F-22 (M1), CK-F-28 and CK-F-29 (M2). ADR-0014 amends ADR-0005 and `TR-UI-01` (host registry, sign-in across hosts with OIDC PKCE as a public client, version skew: the cockpit supports the current and previous engine minor version and turns off screens a host cannot serve). `oidc-client-ts` (Apache 2.0) needs a dependency justification. CK-F-01's open design question is closed by this decision.
+**Consequences.** New features CK-F-23 (M1), X-F-22 (M1), CK-F-28 and CK-F-29 (M2). ADR-0014 amends ADR-0005 and `TR-UI-01` (host registry, sign-in across hosts with OIDC PKCE as a public client, version skew: the cockpit supports the current and previous engine minor version and turns off screens a host cannot serve). `oidc-client-ts` (Apache 2.0) needs a dependency justification. CK-F-01's open design question is closed by this decision.
 
 **Follow-ups.** Architect: ADR-0014 and the `/meta` and `/me` contracts before M1 code; size the M1 part. Security reviewer: token audience per host, token lifetime, CORS off by default, ASVS L2 review of the federated mode. Documentation: reference gateway configuration for option D.
 
@@ -936,7 +951,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | Banks promote changes from development to UAT to production. If definitions can be changed both in Git and in the production cockpit, which one is the truth? |
 | Raised by | Architect's review, decision 5 |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-18: option 3, with a per-environment host setting that turns off draft creation from the cockpit (default on) |
 
 **Architect's recommendation.** Both paths are allowed. A Git import arrives as a `DRAFT`; only an approved draft becomes active. The content hash shows whether production matches Git.
 
@@ -955,7 +970,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 - Scope. The setting is one flag checked by the engine, not a new feature. A bank's change-management policy differs per environment; a fixed product rule would block some adopters.
 - Drift. Showing the hash is enough for 1.0. Blocking divergence would need a link to the bank's Git server, which a library should not hold.
 
-**Consequences if accepted.** Part of PE-F-45 (import arrives as draft, content hash exposed, per-environment setting). Approvers in each environment approve the promoted draft; this is stated in the process PRD.
+**Consequences.** Part of PE-F-45 (import arrives as draft, content hash exposed, per-environment setting). Approvers in each environment approve the promoted draft; this is stated in the process PRD.
 
 **Follow-ups.** Architect: the setting and the hash in ADR-0012. Product manager: the promotion journey in the process PRD.
 
@@ -966,7 +981,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | Today the tenant comes only from the token. How does an operator who serves several tenants work in the cockpit? |
 | Raised by | Architect's review, decision 6 |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-18: option 2, in M2 (X-F-23) |
 
 **Architect's recommendation.** The cockpit may send `X-Tenant-Id`; the host accepts it only if that tenant is in the token's list of allowed tenants. No combined view across tenants; each screen shows one tenant.
 
@@ -984,7 +999,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 - Positioning. Tenant isolation is a must-be quality in a regulated service. A cross-tenant view is the kind of feature that fails a bank's security review; we should say no to it plainly.
 - Scope and dates. The change is additive to the tenant resolver, so it can wait for M2 without breaking an M1 contract, and M1 has no slack.
 
-**Consequences if accepted.** New feature X-F-23 (M2): host check plus the cockpit tenant switcher. The allowed-tenants claim name is documented for host IdP configuration.
+**Consequences.** New feature X-F-23 (M2): host check plus the cockpit tenant switcher. The allowed-tenants claim name is documented for host IdP configuration.
 
 **Follow-ups.** Architect: claim name and resolver rule in ADR-0014. Security reviewer: tests that a header outside the allowed list is rejected and logged.
 
@@ -995,7 +1010,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | How much of Camunda Optimize does the product provide? |
 | Raised by | Architect's review, decision 7 |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-18: option 2. Live counts per node in M2; hourly rollup and heatmap in M3; no aggregator before a paying customer |
 
 **Architect's recommendation.** In-host rollup only: live counts per node, incidents per node, p50 and p95 duration per node from an hourly rollup table filled by the existing scheduler thread with a watermark, SLA breaches. Never `GROUP BY` over history online, and never update counters inside the step transaction. An aggregator after 1.0, and only with a paying customer. Hosts send engine events to their own data warehouse for anything else; the event schemas are the integration point.
 
@@ -1013,7 +1028,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 - Positioning. Saying no to Optimize keeps the claim "no data copied out of your service" true and avoids a comparison we would lose. The event schemas give BI teams a documented path.
 - Scope. The live count needs `definition_id` on `pre_token` and one index; adding the column before the M2 contract settles costs less than adding it later.
 
-**Consequences if accepted.** New features PE-F-48, PE-F-49, CK-F-26, CK-F-27. ADR-0015 (operational read models and query limits) and X-F-24 (bounded queries, CI query-plan check) apply. PD-016 is unchanged; if the product owner wants the pulse strip, PD-016 is the place to change it.
+**Consequences.** New features PE-F-48, PE-F-49, CK-F-26, CK-F-27. ADR-0015 (operational read models and query limits) and X-F-24 (bounded queries, CI query-plan check) apply. PD-016 is unchanged; if the product owner wants the pulse strip, PD-016 is the place to change it.
 
 **Follow-ups.** Architect: ADR-0015 with DDL, indexes, rollup job and query math. Documentation: event schemas page as the warehouse integration point.
 
@@ -1024,7 +1039,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | Principle 9 reads "Standards as vocabulary, not compliance. BPMN and DMN words, a documented subset of their semantics", which readers take as "no diagrams". Change it if PD-032 and PD-034 are accepted? |
 | Raised by | Architect's review, section 1 |
-| Decision | Pending product owner (depends on PD-032 and PD-034) |
+| Decision | Decided by the product owner, 2026-11-18: option 2 |
 
 **Options considered**
 
@@ -1037,6 +1052,8 @@ What "Camunda-like" includes and excludes in all ten entries:
 
 **Follow-ups.** Documentation: update the wiki in the same change that records the decision. Architect: reflect it in ADR-0013.
 
+**Applied, 2026-11-18.** Vision table "What the engine will never be", BPMN row. The wiki Principles row 9, Concepts and FAQ are with documentation.
+
 ### PD-040 Principle 6 extended to process definitions
 
 | Field | Value |
@@ -1044,7 +1061,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | Principle 6 ("Governance built in. Draft, simulate, request, approve by another identity, effective date, retire. The engine enforces each step.") is applied only to rule sets today. State that it covers process definitions? |
 | Raised by | Architect's review, section 1 |
-| Decision | Pending product owner (follows PD-033) |
+| Decision | Decided by the product owner, 2026-11-18: option 2 |
 
 **Options considered**
 
@@ -1057,6 +1074,8 @@ What "Camunda-like" includes and excludes in all ten entries:
 
 **Follow-ups.** Documentation: wiki update with the decision. Product manager: vision and PRD updates after the decision.
 
+**Applied, 2026-11-18.** Vision differentiator 2 and the cockpit PRD Approver permissions. The wiki Principles row 6 is with documentation.
+
 ### PD-041 Conflict: vision non-goal "diagram modeller"
 
 | Field | Value |
@@ -1064,7 +1083,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | The vision says the product is not for "teams that need full BPMN 2.0, DMN FEEL, CMMN or a diagram modeller"; the process PRD lists "a graphical modeller" and the cockpit PRD "a BPMN diagram modeller" as non-goals. PD-032 would make these false |
 | Raised by | Product manager, from the architect's review |
-| Decision | Pending product owner (follows PD-032) |
+| Decision | Decided by the product owner, 2026-11-18: option 2 |
 
 **Options considered**
 
@@ -1078,6 +1097,8 @@ What "Camunda-like" includes and excludes in all ten entries:
 
 **Follow-ups.** Product manager: apply the wording after the decision.
 
+**Applied, 2026-11-18.** [vision.md](vision.md) "Not for" row, [prd-process-engine.md](prd-process-engine.md) and [prd-cockpit.md](prd-cockpit.md) non-goals.
+
 ### PD-042 Milestone dates if the cockpit direction is accepted
 
 | Field | Value |
@@ -1085,7 +1106,7 @@ What "Camunda-like" includes and excludes in all ten entries:
 | Date | 2026-11-18 |
 | Question | If PD-032 to PD-038 are accepted as recommended, can M2 (12 Mar 2027) and M3 (7 May 2027) hold? |
 | Raised by | Product manager, from the architect's estimate |
-| Decision | Pending product owner (depends on PD-031 and PD-032 to PD-038) |
+| Decision | Decided by the product owner, 2026-11-18: option 2. M2 ends 26 Mar 2027, M3 ends 21 May 2027 |
 
 **Analysis.**
 
@@ -1106,6 +1127,407 @@ What "Camunda-like" includes and excludes in all ten entries:
 
 **Rationale.** PD-031 already says M2 does not hold as scoped without cuts. Adding about 2 net weeks with no date change would spend the whole cut list before the first line of code, which is the silent slippage PD-031 option 3 warns about. Two weeks on M2 and M3 keeps a buffer, keeps the order of work, and keeps 1.0 before mid-year. Option 3 spends adopter time on a canvas whose demand is unproven (K16); the APIs keep that option open for 1.1.
 
-**Consequences if accepted.** The roadmap adopts the [scenario](roadmap.md#scenario-camunda-like-cockpit): M2 18 Jan to 26 Mar 2027, M3 29 Mar to 21 May 2027, M2 checkpoint moves from 19 Feb to 5 Mar 2027 (end of week 7), M3 checkpoint from 9 Apr to 23 Apr 2027 (end of week 4). PD-031 is superseded in its M2 and M3 rows; its M1 row is unchanged. Wiki Roadmap dates change.
+**Consequences.** The roadmap adopts these dates: M2 18 Jan to 26 Mar 2027, M3 29 Mar to 21 May 2027, M2 checkpoint moves from 19 Feb to 5 Mar 2027 (end of week 7), M3 checkpoint from 9 Apr to 23 Apr 2027 (end of week 4). This entry replaces the M2 and M3 rows of PD-031, which stays pending for its M1 row. Wiki Roadmap dates change.
 
-**Follow-ups.** Maintainers: size the moved and new features before 2 Dec 2026 so the scenario rests on estimates, not assumptions. Product manager: record the outcome in PD-031 and apply the scenario to the roadmap and feature map.
+**Follow-ups.** Maintainers: size the moved and new features before 2 Dec 2026 so the plan rests on estimates, not assumptions. Product manager: record the outcome in PD-031 and apply the plan to the roadmap and feature map.
+
+**Applied, 2026-11-18.** Roadmap, wiki Roadmap page and timeline image, feature map (24 features moved into the module tables as spec gaps; CK-F-11, CK-F-18 and RE-F-22 moved to M3), product design review page, and a note in PD-031.
+
+---
+
+## Pending: business-user authoring
+
+### PD-043 Rule authoring for business users without YAML
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | Today a business user can only import YAML or JSON in Cockpit 0.1 (M1) and gets the grid editor in Cockpit 0.2 (M2). Which authoring path do pricing managers and credit risk analysts get in M1, and what must "user-friendly" mean in testable terms? |
+| Raised by | Product owner review of the Rule Engine product design ("who is the user, how do they interact, do we provide a user-friendly UI so the business user can create rules and rule sets?"); product manager, from the [Rule Engine users and journeys](rule-engine-users-and-journeys.md) catalogue |
+| Decision | Pending product owner |
+
+**What the users need.** From the [personas](rule-engine-users-and-journeys.md#users):
+
+| Persona | Reads YAML | Uses Excel | What they change | How often |
+|---|---|---|---|---|
+| Pricing manager (fees and pricing) | No | Every day | Values and rows in existing fee and rate tables | A few changes a month, around pricing committee dates |
+| Credit risk analyst | With help; does not write it | Every day, large workbooks | Thresholds and rows in eligibility and limit tables; a new rule set a few times a year | Monthly policy cycle |
+| Compliance officer (approver) | No | Yes | Nothing; reviews and approves | Per request, a few a week |
+| Business analyst (change team) | Yes | Yes | Anything, on behalf of the business | Weekly |
+
+Two facts shape the answer:
+
+- Most business changes are edits to an existing rule set: a value, a threshold, a new row. [ASSUMPTION A1] Test: ask two pricing and two credit risk contacts to list their rule changes of the last 12 months and classify them. Kill criterion: more than one third need a new rule set or a new input.
+- A new rule set always needs a developer, because the host service must send its inputs and use its outputs. The business user designs the table; a developer wires it ([journey 2](rule-engine-users-and-journeys.md#journey-2-a-credit-risk-analyst-creates-a-new-eligibility-rule-set)). An editor that creates rule sets helps less than one that changes them.
+
+**What "user-friendly" must mean.** Each criterion is testable in a moderated session or a CI test:
+
+| Id | Criterion | Test |
+|---|---|---|
+| U1 | No YAML or JSON on any business path: changing a value, adding a row, and (from M2) creating a rule set never show a YAML or JSON document | Moderated session; the screens under test have no YAML view in the path |
+| U2 | No expression syntax for common conditions. A cell accepts `GOLD` (equals), `GOLD, PLATINUM` (one of), `not GOLD, PLATINUM`, `>= 50000000 VND`, `< 18`, `18 to 65` (between, inclusive), `empty` (no value), and `-` or a blank cell (any). The product turns these into the expression language using the declared input type. The full language stays available and is marked "advanced" | Conversion tests per declared type; session task with no help text open |
+| U3 | Templates: a new rule set starts from a template (fee by tier, eligibility with reason codes, limit by segment, blank) with inputs, outputs and a default row filled in | Session: create from a template |
+| U4 | Plain-language validation messages that name the row and the column and say what to do, in English and Vietnamese. Example: "Row R4, column Balance: 50,000,000 has no currency. Write 50000000 VND." Never a parser message or a stack trace | Message catalogue test: every validation code has a text in both languages |
+| U5 | Preview with sample data before requesting approval: results for the draft next to the effective version, changed rows flagged | Exists in M1 (CK-F-05) |
+| U6 | Typed values: money needs a currency, dates are ISO dates, inputs with allowed values offer only those values (drop-down in the grid; checked on import) | Validation tests per type |
+| U7 | Request approval and pick the effective date from the same screen | Session |
+
+Target: an analyst who has not seen the product changes one value and adds one row in an existing rule set, previews it and reaches `PENDING_APPROVAL` in under 15 minutes without help. This replaces the YAML task in kill assumption K3.
+
+**Options considered**
+
+| # | Option | M1 | M2 | Extra cost (assumption, to be sized by the maintainers) | Criteria met in M1 | Date risk |
+|---|---|---|---|---|---|---|
+| 1 | Keep as is | YAML or JSON import (CK-F-02) | Grid editor (CK-F-10) | None | U5, U7 | None |
+| 2 | Basic grid editor in M1: create from a template, add rows, typed cells, validation, request approval | Grid editor and templates | Replay, operations | 2 to 3 weeks of cockpit work | U1, U3 to U7; U2 partly | High. M1 has about 5 working weeks for 48 features; 15 Jan 2027 holds only by moving M1 2 to 3 weeks or cutting the decision explorer filters, batch evaluate and async logging and more |
+| 3 | Spreadsheet round-trip in M1; grid with templates and condition shorthand in M2 | Export a rule table as CSV, edit it in Excel, import it back as a draft; cells use the U2 shorthand; plain-language messages | Grid editor with templates, a "new rule set" flow and drop-downs | About 1 week in M1, about 1 week in M2 | U1 for changes to existing rule sets, U2, U4, U5, U6 (checked on import), U7 | Moderate. The M1 part fits if batch evaluate (RE-F-26) moves to M2 up front |
+| 4 | Guided "create rule set" wizard (name, hit policy, inputs, outputs, first rows) | Wizard | Grid editor | 1.5 to 2 weeks | U1 and U3 for new rule sets only | High, and it serves the rarest job, which still needs a developer to wire |
+
+Why CSV and not `.xlsx` in option 3: Excel opens and saves CSV; reading `.xlsx` in the browser needs a spreadsheet library that must pass the licence gate (`TR-LIC-01`) and adds bundle weight. Native `.xlsx` stays a later candidate (UC-RE-12).
+
+What a CSV round-trip must handle, because Excel changes data silently: comma or semicolon separators depending on locale, UTF-8 with or without a byte order mark, long numbers turned into scientific notation, leading zeros dropped, dates reformatted, and thousands separators. Each of these must be rejected with a U4 message, never accepted as a different value. [ASSUMPTION A3] Test: round-trip a 50-row `card-fee` table through Excel on Windows and macOS in English and Vietnamese locales, one day in week 1 of M1. Kill criterion: any changed value passes validation.
+
+**Competitors and what banks use today.**
+
+| Alternative | How business users author | What it lacks for this job |
+|---|---|---|
+| Camunda decision tables | DMN tables in Camunda's modeller; cells are FEEL expressions | Built for developers and technical analysts; a change is a deployment; approval is left to the customer's pipeline |
+| Drools | Decision tables written in spreadsheets | No enforced second approver and no decision log in the library |
+| Commercial rule management suites | Business rule editors with governance | Licence cost and a separate server to run |
+| Excel plus email, the common bank practice [ASSUMPTION A2] | The fee schedule or credit policy lives in a workbook, is approved by email or committee minutes, and IT re-keys it | No validation, no preview, no enforced second approver, no link from a decision to the row that made it |
+
+Test for A2: ask the three compliance contacts of K6 and two pricing contacts how a fee change travels today, during M1.
+
+The position this supports: meet business users in the spreadsheet they already use, and add what the spreadsheet lacks (validation, preview, an enforced second approver, an effective date and a decision log). Do not compete on editor polish in M1.
+
+**Recommendation (product manager).** Option 3.
+
+- M1: spreadsheet round-trip for existing rule sets (CK-F-35), with the U2 shorthand and U4 messages. The CSV changes rows only; inputs and outputs are not editable through it, because changing them breaks the host's call. Batch evaluate (RE-F-26) moves to M2 up front to make room; no business persona depends on it in M1.
+- M2: the grid editor (CK-F-10) gains templates and a "new rule set" flow (CK-F-36), which replaces option 4's wizard, and drop-downs plus a plain-language reading of each condition (CK-F-37).
+- No grid in M1. Option 2 puts the 15 Jan 2027 date at risk for a screen that option 3 covers for the most frequent job.
+- Journey gaps found by the use case catalogue, in the same decision: restore an earlier version as a draft (RE-F-33, M1, makes the documented rollback explicit); open one decision from a link in the bank's own screen (CK-F-34, M1); find decisions by correlation id or an exact input value (RE-F-34, M2, cut candidate); version history with approvers and evidence export (CK-F-38, M3, cut candidate).
+
+**Rationale.**
+
+- Personas. Pricing managers and risk analysts work in Excel every day and change existing tables a few times a month. The round-trip gives them a path without YAML in M1; the grid in M2 gives them typed cells and templates. Business analysts keep YAML and Git.
+- Positioning. The claim "business users change rules" is the M1 outcome. With option 1 the first business demo shows a YAML file and the claim is true only through a business analyst.
+- Scope and dates. M1 changes by +3 features and -1 moved (RE-F-26), from 48 to 50, at about 1 week of work against about 0.5 week removed. M2 gains 4 (RE-F-26, RE-F-34, CK-F-36, CK-F-37), from 55 to 59; RE-F-26 and RE-F-34 join the M2 cut list after PE-F-12. If the maintainers' sizing shows M2 cannot absorb CK-F-37, its drop-downs move to M3 and grid cells accept the U2 shorthand as typed text only, which still meets U2.
+- Where the shorthand conversion runs is an architecture question: in the cockpit (no engine contract change in M1) or in the engine import API (one rule for Git and cockpit). The stored version always holds the canonical expression, so the decision log, the diff and replay do not change.
+
+**Kill criteria if accepted.**
+
+| Id | Claim | Cheapest test | Kill criterion | Then |
+|---|---|---|---|---|
+| K3 (revised) | Analysts change an existing table through the spreadsheet round-trip without help | Two moderated sessions in week 2 of M1 with the CSV path | Neither analyst reaches `PENDING_APPROVAL` within 15 minutes without help | Move CK-F-10 and CK-F-37 to the start of M2 and protect them; restate the M1 outcome as analyst-mediated |
+| A1 | Most business changes edit an existing rule set | Classify 12 months of changes from four contacts | More than one third need a new rule set or input | Raise CK-F-36 (templates) above CK-F-37 in M2 |
+| A3 | Excel round-trips do not change values silently | One-day round-trip test, two operating systems, two locales | Any changed value passes validation | Require quoted text cells in the exported CSV and document the Excel import steps; reconsider `.xlsx` |
+
+**Consequences if accepted.** Feature map: CK-F-35, RE-F-33 and CK-F-34 in M1; RE-F-26 to M2; RE-F-34, CK-F-36 and CK-F-37 in M2; CK-F-38 in M3. Roadmap counts M1 50, M2 59, M3 31. Kill assumption K3 is rewritten; A1 and A3 join the roadmap. `TR-UI-02` (authoring in the cockpit) can gate M1 for changes to existing rule sets, which narrows PD-013. The wiki authoring page gains a "change a table in Excel" how-to. Option 1 needs no change; option 2 would also move M1, M2 and M3 by 2 to 3 weeks.
+
+**Follow-ups.** Maintainers: size CK-F-35, CK-F-36 and CK-F-37 before 2 Dec 2026. Architect: where the shorthand conversion runs, and the CSV header and quoting rules. QA: the Excel round-trip test (A3). Product manager: run the A1 and A2 conversations; rewrite K3. Documentation: the Excel how-to page after the decision.
+
+---
+
+## Pending: requirements review (non-functional and developer requirements)
+
+The architect reviewed the technical, non-functional and developer requirements on 18 Nov 2026. The gaps that are product choices are PD-044 to PD-055. The architect's proposals for the rest (availability, failover, read limits, alerts, log content, footprint, Java API, documentation and test kit standards) wait for the product owner's acceptance and are not recorded here. [requirements.md](requirements.md) is not changed until these entries are decided.
+
+### PD-044 RPO and RTO responsibility wording
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | The engines run inside the host's JVM and database and have no backup or failover of their own. What do we promise about recovery point (RPO) and recovery time (RTO), and in what words? |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** A published responsibility matrix. The bank owns backup, point-in-time recovery, replication, RPO and RTO. The engine guarantees three things: a restore needs no engine-specific step; engine start-up adds at most 5 s to the host's RTO; leases left from before the restore are reclaimed automatically. The host owns reconciliation after a restore, because a restore can repeat adapter calls whose second transaction was lost and downstream systems may hold events for state the restore removed. `TR-DR-01` and `TR-DR-02`, Must at 1.0.
+
+**Options considered**
+
+1. Say nothing. Consequence: every bank's architecture review asks, and each adopter gets a different answer.
+2. The architect's matrix, Must at 1.0. Consequence: a clear split; the three engine guarantees need a restore test.
+3. Publish engine RPO and RTO numbers. Consequence: a library cannot meet them; the numbers would be the host database's, restated as ours.
+
+**Recommendation (product manager).** Option 2, with the wording published with the M2 documentation, when the first pilots start, and the restore test gating 1.0. Proposed wording: "The engines have no recovery point or recovery time of their own; they inherit those of your PostgreSQL database. After a restore the engines need no extra step, add at most 5 seconds to your service's start-up, and reclaim unfinished work automatically. Your service reconciles side effects: adapters must be idempotent by `attemptId`, and consumers must tolerate events for state the restore removed."
+
+**Rationale.** "No separate data store" (principle 2) is a selling point only if the recovery story is as plain as the database's. Pilots in M2 will ask first; the wording costs nothing, the test can wait for 1.0.
+
+**Consequences if accepted.** New `TR-DR-01` (responsibility matrix and post-restore runbook) and `TR-DR-02` (start-up and lease bounds), Must at 1.0. Wiki: a recovery section in the operations documentation. Adapter documentation states the idempotency obligation.
+
+**Follow-ups.** Architect: the bounds and the restore test. Documentation: the wiki section. Product manager: requirements.md after the decision.
+
+### PD-045 Capacity limits we publish
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | Which capacity numbers per host do we publish to adopters, and as what: a limit, a tested envelope, or a design target? |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** Tested per release: 200 tenants, 100 rule sets per tenant, 1 million active instances, 50 million history rows per month, 1,000 transitions per second, 2,000 decisions per second. Design target 500 tenants. `TR-CAP-01`, Must at 1.0.
+
+**Options considered**
+
+1. Publish nothing until measured. Consequence: bank sizing reviews have no number to start from.
+2. Publish only the tested envelope, with the reference hardware stated, as "tested, not a limit", from the first release that measures it; keep design targets internal. Consequence: every published number is reproducible; the first numbers come after the M2 load test.
+3. Publish the design targets now. Consequence: unmeasured numbers become promises.
+
+**Recommendation (product manager).** Option 2. The numbers above become the 1.0 tested envelope. Until the M2 load test, the documentation says "design targets, not measured" and points to the published harness so a bank can measure its own hardware. The 500-tenant design target is not published.
+
+**Rationale.** A bank's architecture review needs a starting number, and the harness lets it verify one. A number we have not measured is a liability in a procurement answer. This matches the performance contract the architect proposed for the evaluator: state the conditions, publish the harness, promise nothing beyond them.
+
+**Consequences if accepted.** New `TR-CAP-01` (Must at 1.0) with the envelope above and the reference hardware. The capacity test runs per release on the dedicated runner. The roadmap M2 exit reports the first measured numbers.
+
+**Follow-ups.** Architect and QA: the capacity test design. Product manager: the published wording after the first measurement.
+
+### PD-046 Federation limits we support
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | PD-035 made the standalone cockpit federate hosts from the browser. What limit do we support and state to adopters? |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** At most 15 hosts and 2,000 active operators per standalone cockpit; merged inbox p95 300 ms. `TR-UI-05`, Must in M2.
+
+**Options considered**
+
+1. No stated limit. Consequence: a bank with 40 services finds the limit in production.
+2. State 15 hosts and 2,000 active operators as the supported envelope, tested in M2 with simulated hosts; above it, the documented answers are a cockpit per host (option A) or the bank's gateway (option D). Consequence: a clear boundary; the aggregator (option C) stays a paid-customer decision.
+3. State a higher limit to widen the market. Consequence: browser merging and approximate paging stop working well above about 15 hosts (PD-035 analysis).
+
+**Recommendation (product manager).** Option 2. Gate `TR-UI-05` in M2 with a test of 15 simulated hosts (stub hosts with p99 150 ms) and 2,000 operators' refresh load. Revisit the numbers when kill assumption K17 (pilot topology) is answered in M1.
+
+**Rationale.** The limit is the honest edge of a design with no server (differentiator 1). Saying it plainly is better than an evaluator finding it; and the two answers above the limit keep large banks in scope without building a control plane.
+
+**Consequences if accepted.** New `TR-UI-05` (Must, M2). Cockpit documentation states the envelope and the two options above it. K17 links to this entry.
+
+**Follow-ups.** Architect and QA: the simulated-host load test. Product manager: update after K17.
+
+### PD-047 Usability targets
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | The only usability number today is "first decision in under 30 minutes" (X-F-16), and it has no requirement id. Which usability targets gate or report a milestone? |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** `TR-UI-10` (Should, M2): an operator finds why an instance is stuck in 3 clicks or fewer; 4 of 5 pilot operators finish a task unaided.
+
+**Options considered**
+
+1. No usability targets. Consequence: the outcome claims ("business staff", "operators") have no measure.
+2. The architect's `TR-UI-10` only. Consequence: operators get a target; business users and developers do not.
+3. `TR-UI-10` as proposed, plus a business-user target and the newcomer target as requirements.
+
+**Recommendation (product manager).** Option 3, all Should and reported at milestone exit: `TR-UI-10` as proposed (M2; if no pilot operators exist by M2, five moderated sessions with stand-in operators); `TR-UI-11` (M1): two analysts who have not seen the product change an existing table and reach `PENDING_APPROVAL` in under 15 minutes unaided (the PD-043 target, on whichever authoring path PD-043 chooses); `TR-UI-12` (M1): a newcomer reaches a first logged decision in under 30 minutes (X-F-16).
+
+**Rationale.** Each milestone outcome names a person; each target measures that person. They are Should, not Must, because they are measured with people in moderated sessions, not in CI; a failure changes the next milestone's priorities, as kill assumption K3 already does.
+
+**Consequences if accepted.** New `TR-UI-10`, `TR-UI-11`, `TR-UI-12` (Should). X-F-16 gets a requirement id. The roadmap M1 and M2 exits report them.
+
+**Follow-ups.** Product manager: session scripts and recruiting. QA: timing protocol.
+
+### PD-048 Diagram accessibility
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | `TR-UI-03` (WCAG 2.1 AA) covers screens. How do the M2 diagrams and the M3 modeller canvas meet it? |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** Every diagram has a keyboard-usable node list; the modeller canvas is exempt in M3 and says so. Extend `TR-UI-03`.
+
+**Options considered**
+
+1. Exempt diagrams. Consequence: operators who use a keyboard or a screen reader cannot work instances.
+2. Node list for every diagram; canvas exempt, stated on screen. Consequence: read paths are accessible; editing on the canvas is not.
+3. Full keyboard editing on the canvas in M3. Consequence: canvas work grows in the most loaded milestone, where the canvas is already the first cut.
+
+**Recommendation (product manager).** Option 2 with two additions: token state, incidents and counts are conveyed in text as well as colour (WCAG 1.4.1), and the canvas exemption names an equivalent path, editing the definition as JSON or YAML and importing it as a draft, so no user is blocked from making a change.
+
+**Rationale.** The node list gives the same information as the diagram at small cost. An exemption is acceptable only when an equivalent path exists, which the import path already provides (PD-036).
+
+**Consequences if accepted.** `TR-UI-03` extended to diagrams in M2. Cockpit SPEC statements for the node list and the exemption notice.
+
+**Follow-ups.** Architect: CKP statements. QA: axe-core and keyboard tests on the diagram views.
+
+### PD-049 WCAG, ASVS and coverage as Must at 1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | `TR-UI-03` (WCAG 2.1 AA), `TR-SEC-07` (OWASP ASVS level 2 review per minor release) and `TR-QA-03` (coverage of 85 percent for core and 95 percent for the evaluator) are Should today. Do they become Must at 1.0? |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** Must from 1.0 for all three. The review also lists `TR-OPS-02` (zero-downtime upgrade between adjacent minors) for promotion.
+
+**Options considered**
+
+1. Keep them Should. Consequence: 1.0 can ship without evidence a bank's security and accessibility reviews ask for.
+2. Must at 1.0 for all three, and `TR-OPS-02` as well. Consequence: four more 1.0 gates.
+3. Must earlier, from M2. Consequence: gates before the API and screens are stable.
+
+**Recommendation (product manager).** Option 2. `TR-UI-03` may already gate earlier if [PD-026](#pd-026-conflict-should-requirements-used-as-release-gates) is decided as recommended (Must from M1); this entry sets the 1.0 floor either way. `TR-OPS-02` is included because the M3 outcome promises upgrades without downtime. Coverage counts line and branch coverage of the core and evaluator modules only, not examples or the cockpit.
+
+**Rationale.** These are the evidence items a bank's vendor review requests for a component in its payment or lending path. At 1.0 the API is frozen, so the cost of meeting them is known.
+
+**Consequences if accepted.** `TR-UI-03`, `TR-SEC-07`, `TR-QA-03` and `TR-OPS-02` become Must at 1.0. The roadmap M3 exit lists them.
+
+**Follow-ups.** QA: coverage scope in CI. Security reviewer: ASVS checklist ownership.
+
+### PD-050 Retention default for the decision log and history
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | The decision log and process history are partitioned monthly (PD-004), and retention drops whole partitions when configured (RE-F-31). With no configuration, what happens? Banks keep audit data for 5 to 10 years, often longer for credit decisions. |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** Choose between keeping everything by default and shipping a default period. Amend `TR-OPS-04`.
+
+**Options considered**
+
+1. Keep forever by default; purge only when configured. Consequence: no audit evidence lost by accident; storage grows (about 43 GB a day of history at a sustained 1,000 transitions per second).
+2. A default period, for example 10 years. Consequence: a bank that must keep longer loses data unless it changes a setting it may not know about.
+3. No default: outside the `dev` profile the starter refuses to start until retention is set. Consequence: an explicit choice, at the cost of one more required setting.
+
+**Recommendation (product manager).** Option 1, with a start-up warning outside the `dev` profile when retention is not set, the growth per row published (see PD-045), and retention configurable only in whole months, never below 12 months.
+
+**Rationale.** Deleting audit evidence must be a deliberate act by the bank, never a product default. A refusal to start (option 3) would also block the 30-minute Getting Started path in non-dev profiles used for demos. The warning and the published growth figures make the cost visible.
+
+**Consequences if accepted.** `TR-OPS-04` rewritten to match PD-004 and this default. RE-F-31 and the process history retention follow it.
+
+**Follow-ups.** Architect: the warning and the 12-month floor in DESIGN. Documentation: retention guidance in the decision log page.
+
+### PD-051 Tenant exit: export and purge
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | A shared service that hosts several tenants may need to hand one tenant all its data and then remove it. Purging rows conflicts with append-only storage. Do we support tenant exit, and when? |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** `TR-TEN-03` in 1.1: export and purge one tenant. Monthly partitions hold all tenants, so purge means row deletes, which conflicts with append-only. Product decides whether; architecture decides how.
+
+**Options considered**
+
+1. Not supported; a database administrator deletes rows by hand. Consequence: an unaudited bypass of append-only.
+2. In 1.1: export of all of one tenant's data (rule sets, versions, decision log, definitions, instances, history) in a documented format, and purge as a governed operation approved by a second identity, leaving a purge record outside the purged data. Consequence: the only exception to append-only is itself audited.
+3. Both in 1.0. Consequence: more scope in the most loaded milestone for a need no pilot has stated.
+
+**Recommendation (product manager).** Option 2, in 1.1. Until then the documentation states that tenant exit is not supported and that row deletes outside the engine break the audit guarantee.
+
+**Rationale.** Tenant exit matters for shared-service providers and fintech platforms, not for the single-bank pilots expected before 1.0. When it comes, it should follow the product's own rule: a destructive action needs a second approver and leaves a record.
+
+**Consequences if accepted.** New `TR-TEN-03` (1.1). `TR-OBS-01` gains one named exception: governed tenant purge.
+
+**Follow-ups.** Architect: the purge design against monthly partitions. Product manager: revisit if a pilot is a shared-service provider.
+
+### PD-052 Tamper evidence beyond append-only
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | Append-only holds against our code, not against a database administrator. Do we add tamper evidence? |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** A per-partition hash chain after 1.0 (`TR-OBS-09`, Should, 1.1).
+
+**Options considered**
+
+1. None; rely on the bank's database audit and privileged access controls. Consequence: no product work; auditors rely on database controls.
+2. Tamper evidence in 1.1. Consequence: a check an auditor can run without trusting the database administrator.
+3. In 1.0. Consequence: scope and a write-path change in M3.
+
+**Recommendation (product manager).** Option 2 in 1.1, with a preference to evaluate sealing each monthly partition when it closes (a hash manifest the bank can copy to its own write-once storage) rather than a per-row chain, because a chain orders every insert of a partition and could add contention at 2,000 decisions per second. From 1.0 the documentation states the boundary plainly: append-only protects against the engine's code; database audit and privileged access controls protect against administrators.
+
+**Rationale.** Auditors ask "could anyone change a past decision?" The honest 1.0 answer is the boundary statement; the 1.1 answer is a check they can run. Sealing closed months detects later changes without touching the hot insert path; the architect decides which mechanism.
+
+**Consequences if accepted.** New `TR-OBS-09` (Should, 1.1). Documentation of the 1.0 boundary.
+
+**Follow-ups.** Architect: chain or seal, with its cost at 2,000 inserts per second.
+
+### PD-053 Licence rule for test and build tools
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | `TR-LIC-01` allows only Apache 2.0, MIT and BSD and fails the build otherwise. Our own test stack fails it: JUnit 5 and jqwik are EPL-2.0, JMH is GPL-2.0 with the Classpath Exception. The rule must also cover the npm build. |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** Runtime artifacts stay strict. `*-test` artifacts may declare the JUnit Jupiter API (EPL-2.0) as `provided`. Named build-only tools (jqwik, JMH) are allowed and never shipped. Amend `TR-LIC-01`.
+
+**Options considered**
+
+1. Keep the rule as written. Consequence: `rule-engine-test` (RE-F-28) cannot be built; property tests and benchmarks cannot run.
+2. The architect's amendment, with an explicit allow-list. Consequence: runtime artifacts stay permissive; tests and benchmarks work.
+3. Allow weak copyleft (EPL, MPL) everywhere. Consequence: a runtime dependency under EPL could reach adopters' services, which some bank legal reviews reject.
+
+**Recommendation (product manager).** Option 2, with the allow-list written into `TR-LIC-01` by name (JUnit Jupiter API as `provided` in `*-test` artifacts only; jqwik and JMH in test and build scopes only); a CI check that inspects the dependency tree of every shipped artifact separately from build tools; and the same rule for npm: the shipped cockpit bundle is strict, and named development tools are allowed.
+
+**Rationale.** Adopters' legal reviews look at what ships into their service. JUnit is already on every Java team's test classpath, and `provided` means the host supplies it. Naming each exception keeps the list short and reviewable.
+
+**Consequences if accepted.** `TR-LIC-01` amended; `TR-LIC-02` notice unchanged. X-F-12 CI gate updated.
+
+**Follow-ups.** QA: CI licence check by scope. Architect: the allow-list in the build.
+
+### PD-054 Deprecation length
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | X-F-18 and the vision promise that deprecated APIs overlap one minor release. Is that long enough? |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** One minor release and at least six months; removal only in a major release. `TR-API-09`.
+
+**Options considered**
+
+1. One minor release (current). Consequence: with a minor every two to three months, an API can disappear before a bank upgrades once.
+2. One minor release and at least six months, removal only in a major release. Consequence: adopters on a semi-annual upgrade cycle never meet a removal by surprise; the maintainers carry deprecated code longer.
+3. Twelve months. Consequence: longer carrying cost, little gain over option 2 for semi-annual cycles.
+
+**Recommendation (product manager).** Option 2.
+
+**Rationale.** Banks upgrade libraries in their own release windows, often quarterly or semi-annually. The promise has to fit the slowest adopter we target, and removal in a major release only is the convention Java teams expect.
+
+**Consequences if accepted.** New `TR-API-09`. X-F-18 and the vision success measure "deprecations overlap one minor release" change wording.
+
+**Follow-ups.** Product manager: vision and feature map wording after the decision. Architect: deprecation annotations and the API compatibility check.
+
+### PD-055 PostgreSQL version range
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | The engines support PostgreSQL 14 and later. PostgreSQL 14 reaches the end of community support in November 2026 under the five-year policy (the date is to be confirmed on postgresql.org). Which range do we support at 1.0? |
+| Raised by | Architect's requirements review (18 Nov 2026), section 4 |
+| Decision | Pending product owner |
+
+**Architect's proposal.** PostgreSQL 15 or later from 1.0; 14 tested until 1.0. `TR-EMB-02`.
+
+**Options considered**
+
+1. Keep 14 or later after 1.0. Consequence: we support a version that gets no security fixes upstream.
+2. Test 14 until 1.0; 15 or later from 1.0. Consequence: pilots on 14 can start; production adopters move to 15 or later.
+3. Drop 14 now. Consequence: a pilot bank on 14 cannot start before it upgrades its database.
+
+**Recommendation (product manager).** Option 2, with two additions: ask the K13 pilot candidates for their PostgreSQL version during M1, and state in the documentation that on 14 we fix engine defects, not database ones.
+
+**Rationale.** Banks upgrade databases slowly, and some run 14 under a cloud provider's paid extended support. Dropping it before 1.0 could cost a pilot; keeping it after 1.0 would tie a frozen API to an unsupported database.
+
+**Consequences if accepted.** `TR-EMB-02` names the range and the CI matrix; X-F-02 and the vision "For" row change wording at 1.0.
+
+**Follow-ups.** Architect: confirm the end-of-life date and the CI matrix. Product manager: the pilot question in M1.

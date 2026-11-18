@@ -1,0 +1,30 @@
+flowchart LR
+  subgraph Business["Business users (cockpit, spreadsheet)"]
+    PM["Pricing manager<br/>fees and rates"]
+    RA["Credit risk analyst<br/>eligibility and limits"]
+  end
+  subgraph Change["Change and control"]
+    BA["Business analyst<br/>YAML in Git"]
+    CO["Compliance officer<br/>approver"]
+  end
+  subgraph Run["Run and explain"]
+    SU["Support staff<br/>bank case screen"]
+    AU["Internal auditor<br/>decision log"]
+  end
+  subgraph Tech["Technology"]
+    DV["Host-service developer<br/>Java API, REST, tests"]
+    AD["Platform administrator<br/>roles, keys, monitoring"]
+  end
+  ENG[("Rule Engine in the host service<br/>versions and decision log in PostgreSQL")]
+
+  PM -- "1. draft and request" --> ENG
+  RA -- "1. draft and request" --> ENG
+  BA -- "1. import YAML draft" --> ENG
+  RA -. "new rule set: inputs to wire" .-> DV
+  ENG -- "2. pending approval" --> CO
+  CO -- "3. approve or reject" --> ENG
+  DV -- "4. evaluate in the transaction" --> ENG
+  ENG -- "5. decision and explanation" --> SU
+  ENG -- "6. version and decision history" --> AU
+  SU -. "suspected wrong rule" .-> RA
+  AD -. "roles, masking key, retention" .-> ENG

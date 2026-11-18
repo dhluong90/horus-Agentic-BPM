@@ -105,6 +105,8 @@ Recommended eval bar, measured by the adopter on 30 to 50 labelled cases includi
 | Throughput of 1 000 transitions per second per replica | M2 | TR-PERF-04 |
 | MCP adapter, bounded agent memory, agent-chosen steps in a bounded block, offline runner | M3 | TR-AGT-04 |
 | Renamed-step mapping and cancellation | M3 | TR-MIG-03 |
+| Definition lifecycle, graph diff, activity history, live node counts, task query, task forms (decided 2026-11-18, PD-032 to PD-038; sections 5 to 7 to be revised with journeys for the diagram views) | M2 | TR-SEC-04, TR-OBS-01 |
+| Layout storage, step catalogue, hourly rollup, BPMN subset export | M3 | TR-DET-01 |
 
 ### 7.5 Open questions
 
@@ -116,11 +118,11 @@ Recommended eval bar, measured by the adopter on 30 to 50 labelled cases includi
 
 | Milestone | In scope |
 |---|---|
-| M2 (Process Engine 0.1) | Everything in 7.2; `agentTask` with in-process and HTTP adapters; same-id migration |
-| M3 (1.0) | MCP adapter and reference LLM adapters in `examples/`; bounded agent memory; agent-chosen steps under the same guardrails (after 1.0 if PD-028 is decided as recommended); offline runner; renamed-step migration; BPMN subset import; zero-downtime upgrade tests; API freeze |
+| M2 (Process Engine 0.1) | Everything in 7.2; `agentTask` with in-process and HTTP adapters; same-id migration; definition lifecycle with maker-checker, import as draft and content hash (PE-F-45), graph diff (PE-F-46), activity history and live node counts (PE-F-47, PE-F-48), task query and task forms (PE-F-50, PE-F-51) |
+| M3 (1.0) | MCP adapter and reference LLM adapters in `examples/`; bounded agent memory; agent-chosen steps under the same guardrails (after 1.0 if PD-028 is decided as recommended); offline runner; renamed-step migration; BPMN subset import (protected) and export (cut candidate); layout storage and step catalogue for the modeller (PE-F-44, PE-F-52); hourly node rollup (PE-F-49); zero-downtime upgrade tests; API freeze |
 | After 1.0 (candidates) | Message correlation; multi-agent planning; other databases |
 
-Non-goals: full BPMN 2.0 or CMMN; a graphical modeller (under review in [PD-032](decisions.md#pd-032-diagrams-and-a-visual-modeller-in-scope) and [PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)); two-phase commit ([ADR-0007](../adr/0007-compensation-instead-of-distributed-transactions.md)); a distributed job executor or broker; any model call inside a transaction ([ADR-0008](../adr/0008-async-wait-state-for-external-steps.md)); an embedded model or prompt store (`TR-AGT-03`).
+Non-goals: full BPMN 2.0 or CMMN; a full BPMN 2.0 modeller or any canvas element the engine cannot run ([PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)); two-phase commit ([ADR-0007](../adr/0007-compensation-instead-of-distributed-transactions.md)); a distributed job executor or broker; any model call inside a transaction ([ADR-0008](../adr/0008-async-wait-state-for-external-steps.md)); an embedded model or prompt store (`TR-AGT-03`).
 
 ## Red-team
 
@@ -128,4 +130,4 @@ Non-goals: full BPMN 2.0 or CMMN; a graphical modeller (under review in [PD-032]
 |---|---|---|---|---|---|
 | 1 | Guardrail rules over structured output catch the agent errors that matter | The costly errors (a misread date with high confidence) pass every rule, so rung 2 is unsafe | Run the KYC example with 30 labelled outputs, 10 with seeded critical errors | More than 2 of 10 seeded critical errors pass schema and guardrail | One day with a stub adapter. If killed, publish rung 1 as the only guidance until the M3 offline runner exists |
 | 2 | Evaluators accept a YAML or JSON definition subset without a modeller | Architects shortlist only engines with BPMN diagrams | Ask three architects evaluating BPM options | Two of three would not shortlist without a modeller | Three conversations during M1. If killed, move BPMN subset import ahead of agentic depth in M3 |
-| 3 | The M2 scope (ten areas) fits eight weeks | Async wait-state, compensation and migration slip together and `agentTask` lands late | Track the PRE statements green per week against plan | Fewer than half of PRE-001 to PRE-017 green by week 5 | Weekly count. If killed, move migration execution (PRE-015) to M3 and keep `agentTask` (PD-017, PD-031) |
+| 3 | The M2 scope fits ten weeks (PD-042) | Async wait-state, compensation, migration and the diagram views slip together and `agentTask` lands late | Track the PRE statements green per week against plan | Fewer than 9 of PRE-001 to PRE-017 green by the end of week 7 (5 Mar 2027) | Weekly count. If killed, apply the M2 cut list: migration execution (PRE-015), live counts on the diagram, `callProcess` (PD-017, PD-042) |

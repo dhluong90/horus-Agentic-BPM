@@ -32,10 +32,12 @@ Let a host service evaluate governed decisions in process, and let business staf
 
 ## 5. Segments by job
 
+The three segments below group eight roles found in a bank or fintech: pricing manager, credit risk analyst, business analyst (S2); compliance officer, support staff, internal auditor (S3); host-service developer and platform administrator (S1). Each role's skills, surface, permissions and use cases are in [Rule Engine users and journeys](rule-engine-users-and-journeys.md).
+
 | Segment | Job | Constraints |
 |---|---|---|
 | S1 Host developer | Call a decision from Java or REST, in the same transaction as the business write, and test rule sets in CI | Java 21+, Spring Boot 4.x or 3.5.x until 1.0 (PD-007), PostgreSQL 14+; shared connection pool |
-| S2 Rule author (product or risk analyst) | Change a fee, limit or eligibility table and see the effect before it goes live | Authors YAML or JSON in 0.1; grid editing arrives with Cockpit 0.2 |
+| S2 Rule author (product or risk analyst) | Change a fee, limit or eligibility table and see the effect before it goes live | Authors YAML or JSON in 0.1; grid editing arrives with Cockpit 0.2. Pricing managers and risk analysts work in Excel and do not write YAML; a spreadsheet round-trip in M1 is pending as [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml) |
 | S3 Approver and auditor (compliance, internal audit) | Approve changes made by someone else, and reconstruct any past decision | Four-eyes required; personal data must stay masked |
 
 ## 6. Value propositions
@@ -53,6 +55,9 @@ Statement: for Java teams whose rules must change under a second approver, the R
 ## 7. Solution
 
 ### 7.1 User journey
+
+Six journeys with screens, calls, handoffs and failure paths, and a catalogue of 69 use cases (UC-RE-01 to UC-RE-69) with their milestone, are in [Rule Engine users and journeys](rule-engine-users-and-journeys.md). The summary journey:
+
 
 Author imports draft v2 (YAML) → validation rejects ill-typed rows → author simulates v2 against sample inputs next to the effective v1 → author requests publication with `effectiveFrom` → a different identity reviews the diff and approves → every replica serves v2 from its effective date → host evaluates; each decision logs version, clock, matched rows → auditor opens a decision and reads the explanation, masked inputs stay masked.
 
@@ -100,14 +105,17 @@ Capabilities on the Roadmap or in TR with no `RLE-*` statement yet:
 - [ASSUMPTION] Analysts can author YAML in 0.1. Tested in the red-team below.
 - Open question: is an emergency change path (single approver, logged) ever allowed? Today none exists and principle 6 suggests none. Pending as [PD-012](decisions.md#pd-012-emergency-single-approver-path).
 - Resolved: `rle_decision` is partitioned monthly from the first migration ([PD-004](decisions.md#pd-004-the-decision-log-is-partitioned-monthly-from-the-first-migration)). When retention ships is pending as PD-020.
+- Pending: authoring without YAML for business users, and what "user-friendly" must mean (seven testable criteria U1 to U7), as [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml).
+- Open question for the architect (gap G3 in the journeys page): what happens when a version is approved after its requested effective date.
+- Open question for the architect (gap G4): a masked input used in a condition cannot be replayed from the log alone; should the validator warn?
 
 ## 8. Release and scope
 
 | Milestone | In scope |
 |---|---|
-| M1 (Rule Engine 0.1) | Everything in 7.2; sample-input simulation; YAML and JSON authoring; decision log partitioned monthly from the first migration |
-| M2 | Replay of logged decisions through a draft (RLE-015); grid editor in Cockpit 0.2 |
-| M3 (1.0) | Explain templates; simulation reports on publication requests; what-if comparison; decision log retention by configuration (PD-020, pending); OpenTelemetry spans; DMN decision-table import; API freeze |
+| M1 (Rule Engine 0.1) | Everything in 7.2; sample-input simulation; YAML and JSON authoring; decision log partitioned monthly from the first migration. If PD-043 is accepted: spreadsheet round-trip (CK-F-35), restore an earlier version as a draft (RE-F-33) |
+| M2 | Grid editor in Cockpit 0.2 |
+| M3 (1.0) | Replay of logged decisions through a draft (RLE-015), moved from M2 by [PD-042](decisions.md#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted); explain templates; simulation reports on publication requests; what-if comparison; decision log retention by configuration (PD-020, pending); OpenTelemetry spans; DMN decision-table import; API freeze |
 
 Non-goals: DMN FEEL compliance and decision requirement diagrams ([ADR-0003](../adr/0003-own-expression-language.md)); inference, rule chaining or complex event processing; scripting in expressions (principle 4); cross-tenant rule inheritance at evaluation time; any network I/O from the evaluator (`TR-EMB-05`); a standalone decision server ([ADR-0004](../adr/0004-no-standalone-server.md)).
 
@@ -115,6 +123,6 @@ Non-goals: DMN FEEL compliance and decision requirement diagrams ([ADR-0003](../
 
 | # | Assumption | Fails if | Evidence | Kill criterion | Cheapest test |
 |---|---|---|---|---|---|
-| 1 | Analysts author changes in YAML well enough for 0.1 | Every change still needs a developer, so the M1 outcome ("without a code deployment") is true only for developers | Two moderated sessions: an analyst changes one row of `loan-eligibility` and requests publication | Neither analyst reaches `PENDING_APPROVAL` without help | The two sessions in week 2 of M1. If killed, restate the M1 outcome as developer-mediated and raise the grid editor's priority in M2 |
+| 1 | Analysts author changes in YAML well enough for 0.1 (PD-043 would retarget this test to the spreadsheet round-trip) | Every change still needs a developer, so the M1 outcome ("without a code deployment") is true only for developers | Two moderated sessions: an analyst changes one row of `loan-eligibility` and requests publication | Neither analyst reaches `PENDING_APPROVAL` without help | The two sessions in week 2 of M1. If killed, restate the M1 outcome as developer-mediated and raise the grid editor's priority in M2 |
 | 2 | The closed expression language covers real bank tables | Common tables need constructs outside the grammar, so adopters ask for scripting | Rewrite ten public sample fee, limit and eligibility tables in the grammar | More than two of ten need a host function or cannot be expressed | One afternoon of rewriting; extend the built-in function list before M1 exit, never add scripting |
 | 3 | Mandatory four-eyes is a reason to adopt, not a blocker | Teams need same-day emergency changes and disable maker-checker, which the starter refuses outside `dev` | Ask three product or compliance contacts how an urgent fee change is approved today | Two of three require a single-person emergency path | Three conversations. If killed, decide by ADR between a logged emergency path and a documented non-goal (PD-012) |

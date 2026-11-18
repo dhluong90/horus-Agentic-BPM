@@ -32,10 +32,12 @@ Let non-developers perform the governance and operations tasks of both engines w
 
 ## 5. Segments by job (personas)
 
+For the Rule Engine, these four personas cover eight bank roles (pricing manager, credit risk analyst and business analyst as Author; compliance officer as Approver; support staff and internal auditor as Auditor; developers and administrators set the cockpit up). Roles, surfaces, use cases UC-RE-01 to UC-RE-69 and six journeys: [Rule Engine users and journeys](rule-engine-users-and-journeys.md).
+
 | Persona | Job | Permissions |
 |---|---|---|
-| Author | Prepare a rule change and show its effect | `rules:read`, `rules:author`, `rules:simulate` |
-| Approver | Decide whether someone else's change goes live | `rules:read`, `rules:approve`, `rules:simulate` to run a simulation; from 0.2 `processes:task:work` on approval tasks |
+| Author | Prepare a rule change and show its effect; from M3 change a process on the canvas | `rules:read`, `rules:author`, `rules:simulate`; `processes:author` for process definitions (PD-033) |
+| Approver | Decide whether someone else's change goes live, for rule sets and, from M2 in the engine and M3 in the cockpit, process definitions | `rules:read`, `rules:approve`, `rules:simulate` to run a simulation; from 0.2 `processes:task:work` on approval tasks; `processes:approve` for process definitions ([PD-033](decisions.md#pd-033-maker-checker-for-process-definitions), [PD-040](decisions.md#pd-040-principle-6-extended-to-process-definitions)) |
 | Operator | Keep instances moving: queues, SLAs, incidents, calendars | `processes:read`, `processes:task:manage`, `processes:incident:manage`, `processes:calendar:manage` (0.2); permission names per [PD-003](decisions.md#pd-003-permission-names-are-moduleaction) |
 | Auditor | Reconstruct a past decision or step and who acted | `rules:log:read`, `processes:read` |
 
@@ -54,6 +56,8 @@ Statement: for the people who govern and run the engines, the cockpit puts appro
 ## 7. Solution
 
 ### 7.1 User journeys
+
+The Rule Engine journeys in full, with failure paths and sequence diagrams, are in [Rule Engine users and journeys](rule-engine-users-and-journeys.md): a pricing manager changes a card fee (journey 1), a risk analyst creates a rule set (2), a compliance officer approves (3), a support agent explains a decision (4), an auditor reconstructs a decision (5). The table below is the short form.
 
 | Persona | Journey (0.1 unless marked) | Hand-off |
 |---|---|---|
@@ -77,7 +81,7 @@ The cockpit lives in the application layer. Data, logic and observability belong
 | Application | Grid editor with inline validation | 0.2 | CKP-006 | TR-DET-02, TR-UI-02 |
 | Application | Agent task inspector | 0.2 | CKP-007 | TR-AGT-01, TR-AGT-02 |
 | Application | Incident queue with retry and resolve | 0.2 | CKP-008 | TR-OPS-03 |
-| Application | Replay simulation | 0.2 | CKP-011 | TR-UI-02 |
+| Application | Replay simulation | M3 (moved by PD-042) | CKP-011 | TR-UI-02 |
 | Application | Accessibility; English and Vietnamese | 0.1, re-run 0.2 | CKP-009, CKP-010 | TR-UI-03, TR-UI-04 |
 | API (consumed) | Problem Details errors shown with `correlationId`; idempotency key and `If-Match` on every mutation | 0.1 | CKP-008 (0.2 only) | TR-SEC-08, TR-IDEM-01 |
 
@@ -89,7 +93,11 @@ The cockpit lives in the application layer. Data, logic and observability belong
 | Process definitions, instance view with history timeline | 0.2 | Roadmap M2 |
 | Human task queues: claim, complete, reassign | 0.2 | Roadmap M2 |
 | Compensation runs view and SLA breach list | 0.2 | wiki Cockpit page; scope pending as PD-024 |
-| Business calendar editor | 0.2 | Roadmap M2, `TR-CAL-01` |
+| Business calendar editor | M3 (moved by PD-042) | Roadmap M3, `TR-CAL-01` |
+| Host registry, single sign-in and host switching; `/meta` and `/me` | 0.1 | CK-F-23, X-F-22 ([PD-035](decisions.md#pd-035-multi-host-cockpit-model)) |
+| Definition and instance diagrams with tokens, live node counts, merged task inbox and incident list, task forms, tenant switcher | 0.2 | CK-F-24 to CK-F-26, CK-F-28 to CK-F-30, X-F-23 (PD-032, PD-035, PD-037, PD-038) |
+| Process definition approval with graph diff, modeller canvas, historical heatmap, migration plan as two diagrams | M3 | CK-F-31, CK-F-32, CK-F-27, CK-F-33 (PD-032, PD-033, PD-038) |
+| Spreadsheet round-trip, decision deep link (0.1); templates, condition drop-downs (0.2); version history and evidence export (M3) | If PD-043 | CK-F-34 to CK-F-38 ([PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml)) |
 | Instance migration screen | M3 | Roadmap M3, `TR-MIG-03`; wiki says 0.2, pending as PD-023 |
 | Simulation report attached to a publication request | M3 | Roadmap M3 |
 | Tier-1 pulse strip of KPIs on landing views | not scheduled | `cockpit/docs/DESIGN.md` section 3 only; pending as PD-016 |
@@ -97,7 +105,8 @@ The cockpit lives in the application layer. Data, logic and observability belong
 ### 7.4 Open questions
 
 - `TR-UI-02` requires authoring "without leaving the cockpit" and has no milestone. Is 0.1 authoring by YAML import in the cockpit enough, or does `TR-UI-02` gate only from M2? Pending as [PD-013](decisions.md#pd-013-from-which-milestone-tr-ui-02-gates).
-- Standalone mode: one host per URL, or an environment switcher? (DESIGN open question, gate M1 start; a proposed answer is pending in [PD-035](decisions.md#pd-035-multi-host-cockpit-model).)
+- Resolved: standalone mode lists several hosts and switches between them with one sign-in ([PD-035](decisions.md#pd-035-multi-host-cockpit-model), decided 2026-11-18).
+- Pending: a path for business users without YAML in 0.1, and what "user-friendly" means ([PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml)).
 - Proposal: add the pulse strip to a milestone, or remove it from DESIGN. Pending as [PD-016](decisions.md#pd-016-cockpit-pulse-strip).
 
 ## 8. Release and scope
@@ -105,13 +114,13 @@ The cockpit lives in the application layer. Data, logic and observability belong
 | Cockpit 0.1 (M1): viewer and approver | Cockpit 0.2 (M2): editor and operations |
 |---|---|
 | Rule sets, version view, import and export | Grid editor with type checks and expression validation |
-| Diff, sample simulation, approvals, decision explorer with explanation | Replay simulation |
-| Embedded and standalone hosting | Process definitions, instances, task queues, incidents, compensation runs, SLA breaches, calendar editor |
+| Diff, sample simulation, approvals, decision explorer with explanation | Process definitions, instances, task queues, incidents, compensation runs, SLA breaches |
+| Embedded and standalone hosting; host registry with one sign-in across hosts | Definition and instance diagrams with tokens; live counts per node; one task inbox and one incident list across hosts; task forms; tenant switcher |
 | | Agent task inspector with approve or override |
 
-M3: migration screen; simulation reports on publication requests. After 1.0 (candidate): hosted cockpit.
+M3: replay simulation and the calendar editor (moved from 0.2 by PD-042); migration screen and migration plan as two diagrams; simulation reports on publication requests; process definition approval with graph diff; historical heatmap; modeller canvas limited to registered steps (first M3 cut, fallback 1.1). After 1.0 (candidate): hosted cockpit.
 
-Non-goals: a backend-for-frontend, database or user store ([ADR-0005](../adr/0005-cockpit-as-static-assets.md)); any authorisation decided in the browser; a BPMN diagram modeller (under review in [PD-032](decisions.md#pd-032-diagrams-and-a-visual-modeller-in-scope) and [PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)); dashboards that replace the host's monitoring (metrics stay in Micrometer, `TR-OBS-02`); editing in 0.1.
+Non-goals: a backend-for-frontend, database or user store ([ADR-0005](../adr/0005-cockpit-as-static-assets.md)); any authorisation decided in the browser; a full BPMN 2.0 modeller or any canvas element the engine cannot run ([PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)); a form designer; dashboards that replace the host's monitoring (metrics stay in Micrometer, `TR-OBS-02`); grid editing in 0.1 (a spreadsheet round-trip is pending as PD-043).
 
 ## Red-team
 

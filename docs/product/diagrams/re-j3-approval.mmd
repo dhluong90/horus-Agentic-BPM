@@ -1,0 +1,28 @@
+sequenceDiagram
+  autonumber
+  participant ENG as Rule Engine
+  participant BANK as Bank email or chat
+  actor CO as Compliance officer
+  participant CK as Cockpit
+  ENG->>BANK: publish-requested event (host routes it)
+  BANK-->>CO: card-fee v3 waits for approval
+  CO->>CK: Approvals, open card-fee v3
+  CK->>ENG: GET diff v2 to v3
+  ENG-->>CK: R3 fee 30000 VND to 35000 VND, nothing else
+  CO->>CK: Simulation with 3 own edge cases
+  CK->>ENG: simulate v3 (needs rules:simulate, nothing logged)
+  ENG-->>CK: results next to v2
+  alt understood and correct
+    CO->>CK: Approve, comment "Pricing committee 10 Dec, item 14"
+    CK->>ENG: approve (If-Match, Idempotency-Key)
+    ENG-->>CK: PUBLISHED, published event
+  else wrong or unclear
+    CO->>CK: Reject, comment required
+    CK->>ENG: reject
+    ENG-->>CK: DRAFT, rejected event to the author
+  end
+  alt the approver is the requester
+    ENG-->>CK: Approve disabled, API refuses with 403 SELF_APPROVAL_FORBIDDEN
+  else a second approver acted first
+    ENG-->>CK: 409 or 412, reload shows the new status
+  end

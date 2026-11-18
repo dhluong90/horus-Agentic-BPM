@@ -1,0 +1,26 @@
+sequenceDiagram
+  autonumber
+  actor CU as Customer
+  actor SU as Support agent
+  participant HS as Bank case screen (host service)
+  participant ENG as Rule Engine
+  participant CK as Cockpit
+  actor RA as Credit risk analyst
+  CU->>SU: Why was application APP-7781 declined?
+  SU->>HS: open APP-7781
+  alt host stored the decisionId
+    HS->>ENG: GET /decisions/{id}/explain
+    ENG-->>HS: Declined. Rule R4: monthly income 6,500,000 VND is below 8,000,000 VND
+  else no decisionId stored
+    SU->>CK: Decisions, filter by correlation id APP-7781 (M2) or by rule set and day (M1)
+  end
+  HS-->>SU: explanation, inputs masked
+  SU-->>CU: reads the explanation
+  opt needs the matched row
+    SU->>CK: Open in cockpit link
+    CK->>ENG: GET /decisions/{id}
+    ENG-->>CK: version 3, row R4 highlighted, nationalId masked
+  end
+  opt customer disputes the outcome
+    SU->>RA: ticket with decision link and correlationId
+  end
