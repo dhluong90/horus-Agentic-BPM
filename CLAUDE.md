@@ -2,7 +2,7 @@
 
 Lightweight, embeddable **Process Engine** and **Rule Engine** for Java 21 / Spring Boot 3.4+, PostgreSQL 14+, and an embeddable React Operations Cockpit, where **humans, services, and AI agents are first-class process participants**.
 
-Source-available under **PolyForm Noncommercial License 1.0.0** (commercial use, including HORUS Banking Accelerators, under `COMMERCIAL-LICENSE.md`).
+Source-available under **PolyForm Noncommercial License 1.0.0**; commercial use under `COMMERCIAL-LICENSE.md`.
 
 Read these before doing product, design, or implementation work:
 - `README.md` and `wiki/Home.md` — product overview, positioning, and design principles
@@ -25,13 +25,6 @@ Read these before doing product, design, or implementation work:
 6. **Tenant & Maker-Checker enforcement at the service layer.** `tenant_id` comes only from the configured resolver (never request body); publication requester cannot approve their own version across Java or REST APIs.
 7. **Supply-chain & Spec-to-Test traceability.** Permissive third-party licences only (Apache 2.0, MIT, BSD); every `SPEC.md` statement has a named test (`TR-QA-01`).
 
-## Agent Team & Skills
-
-Agent definitions live in `.claude/agents/` and skills live in `.claude/skills/`.
-
-- **Product & Strategy (`product-manager`):** Leads positioning (`product-positioning`), strategy & moat testing (`product-strategy-and-moat`), outcome roadmaps (`outcome-roadmap`), Lean JTBD specs (`lean-jtbd-prd`), 5-layer platform & cockpit UX (`platform-product-design`), `agentTask` autonomy & evals (`ai-agent-product-and-evals`), prioritization (`opportunity-and-prioritization`), vertical slicing (`epic-vertical-slicing`), and competitive battlecards (`b2b-battlecard-and-pricing`). Runs `strategy-red-team` before any major plan or ADR approval.
-- **Architecture & Domain (`program-architect`, `banking-domain-expert`, `banking-analyst`):** Own module boundaries (`hexagonal-and-modulith-architecture`), blueprints & 10x math (`system-architecture-blueprint`), API/event contracts (`api-and-event-contracts`), PostgreSQL & migrations (`postgres-and-migration-architecture`), Async Wait-State & sagas (`distributed-tx-and-banking-ledger`), DSL compiler & token engine internals (`engine-internals-and-dsl`), starter & security arch (`springboot-starter-and-security-arch`), blast-radius reviews (`architecture-critic-and-review`), `SPEC.md`/`DESIGN.md` (`technical-spec-and-design-docs`), and ADRs (`adr-writing`).
-- **Delivery, Docs & Quality (`delivery-lead`, `backend-engineer`, `frontend-engineer`, `qa-engineer`, `devops-engineer`, `security-reviewer`, `tech-writer`):** Own vertical slice delivery, ArchUnit/JMH/jqwik/Testcontainers/Playwright verification, security review, C4/integration diagrams (`c4-and-banking-integration-diagrams`), Diátaxis living docs (`diataxis-living-documentation`), clear technical prose & runbooks (`clear-technical-prose-and-runbooks`), and wiki sync (`TR-QA-02`). All 30 shared skills live in `.claude/skills/`.
 
 ## Conventions
 - Branches: `feat/<module>/<slug>`, `fix/...`, `docs/...`, `chore/...`. Keep `main` buildable.

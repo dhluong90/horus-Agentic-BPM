@@ -6,7 +6,7 @@ Planned in weeks. Targets, not commitments; release notes state what shipped. Ea
 
 ## Strategic Positioning & Moat Summary
 
-- **Who this serves:** Java / Spring Boot engineering and banking product teams (including HORUS Banking Accelerators) needing governed business rules, human/service approvals, and bounded AI agents without deploying a separate Zeebe + Elasticsearch cluster or paying per-instance enterprise BPM fees.
+- **Who this serves:** Java / Spring Boot engineering and banking product teams needing governed business rules, human/service approvals, and bounded AI agents without deploying a separate Zeebe + Elasticsearch cluster or paying per-instance enterprise BPM fees.
 - **Why HORUS wins ("Can't or Won't" vs Camunda 8, Flowable, and raw LLM frameworks):**
   1. **Zero-cluster embedded footprint:** One Spring Boot starter + host PostgreSQL (`rle_`, `pre_`). In-process rule evaluation (`<100 µs` p99) and host business state commit in the same database.
   2. **Business-user rule governance out of the box:** Draft → simulate → diff → maker-checker approval → effective dating → explainable decision log without code redeployments.
@@ -22,7 +22,7 @@ This wiki as the public specification · storage model · expression grammar · 
 
 ## M1 — Rule Engine 0.1, Cockpit 0.1 (6 weeks, to 15 Jan 2027)
 
-**Outcome:** *Enable banking services (starting with Digital Wallet) and compliance/product teams to evaluate deterministic rules in under 100 µs and govern YAML-authored rule changes via simulation, diff, and maker-checker approval without redeploying application code.*
+**Outcome:** *Enable banking services and compliance/product teams to evaluate deterministic rules in under 100 µs and govern YAML-authored rule changes via simulation, diff, and maker-checker approval without redeploying application code.*
 
 Goal: the engine is usable in production from YAML-authored rule sets, with governance and audit in place. The interactive editor is deliberately deferred so the core ships early.
 | Area | Ships |
@@ -81,7 +81,7 @@ Exit: every "must" green; two adopters outside the maintainers in production or 
 |---|---|---|---|---|
 | 1 | **`agentTask` in an embedded Spring library won't exhaust host DB pools** | Synchronous transaction wraps slow LLM/HTTP calls, starving HikariCP under 20+ concurrent agents | Load test in M2 with 5s mock LLM latency and a 10-connection pool using Async Wait-State lease-commit-execute-complete | Reject any sync execution path for remote adapters; Async Wait-State is mandatory |
 | 2 | **Compiled rule caches stay coherent across pods without Kafka/Redis** | Pod 2 evaluates stale rule `v1` after Pod 1 publishes `v2`, violating `TR-DET-01` | Two-node Testcontainers integration test verifying `LISTEN/NOTIFY` + version-epoch fallback through connection pooling | Default to version-epoch check with short TTL if `LISTEN/NOTIFY` drops across customer PgBouncer setups |
-| 3 | **6-week M1 pace holds without delaying Digital Wallet** | YAML authoring / governance flows still hit UX friction or scope creeps back into Cockpit 0.1 | Run `examples/rule-engine-only` + Cockpit 0.1 approval flow end-to-end by Week 4 of M1 | Cut non-essential REST filters or defer async outbox batching rather than slipping Rule Engine 0.1 past 15 Jan 2027 |
+| 3 | **6-week M1 pace holds without delaying the first consuming service** | YAML authoring / governance flows still hit UX friction or scope creeps back into Cockpit 0.1 | Run `examples/rule-engine-only` + Cockpit 0.1 approval flow end-to-end by Week 4 of M1 | Cut non-essential REST filters or defer async outbox batching rather than slipping Rule Engine 0.1 past 15 Jan 2027 |
 | 4 | **Dual-licensing (PolyForm Noncommercial + HORUS Commercial) passes bank procurement** | Target banks reject source-available PolyForm dependencies vs Apache 2.0 Camunda 7 forks | Validate commercial license agreement & indemnification terms with 2 prospective bank/SI legal contacts during M0–M1 | Prepare OEM commercial packaging rider or evaluate Apache 2.0 core + commercial enterprise pack if 2+ deals block |
 | 5 | **Camunda 8 adding RDBMS support doesn't neutralize our moat** | Camunda ships an embeddable zero-cluster library mode with native maker-checker rule governance | Track Camunda 8 RDBMS releases quarterly; verify whether Zeebe cluster remains separate | Double down on deterministic `agentTask` guardrails + business-user rule replay + predictable non-metered pricing |
 
