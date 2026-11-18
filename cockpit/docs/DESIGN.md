@@ -54,4 +54,4 @@ Every operational landing view follows a strict 3-tier decision hierarchy:
 - **i18n & Accessibility (`TR-UI-03`, `TR-UI-04`):** Complete key-parity dictionaries for English (`en`) and Vietnamese (`vi`); full keyboard navigation (`Tab`, `Enter`, `Esc`), visible focus rings, and automated `axe-core` WCAG 2.1 AA verification in Playwright tests.
 
 ## 6. Open Questions
-- **Standalone multi-host switching UX:** Confirm whether standalone mode targets one host per browser tab/URL profile or includes a top-bar environment switcher (Owner: `product-manager` + `frontend-engineer`, Gate: M1 Cockpit 0.1 start).
+- **Standalone multi-host switching UX:** Confirm whether standalone mode targets one host per browser tab/URL profile or includes a top-bar environment switcher (Owner: maintainers, Gate: M1 Cockpit 0.1 start).

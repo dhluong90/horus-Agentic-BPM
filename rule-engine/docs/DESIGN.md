@@ -194,5 +194,5 @@ CREATE INDEX idx_rle_idempotency_expiry ON rle_idempotency (expires_at);
   - `rle_decision` is range-partitioned monthly (`TR-OPS-04`) so retention purges are instant `DROP TABLE` metadata operations without vacuum bloat.
 
 ## 7. Open Questions
-- **Maven `groupId`:** Confirm `com.horus.bpm` vs `io.github.dhluong90.bpm` before Sonatype Central Portal registration (Owner: Product Owner, Gate: before M1 publish).
-- **Default async outbox flush cadence:** Tune batch size (100 vs 500) during M1 JMH + Testcontainers load benchmarks (Owner: `backend-engineer`, Gate: M1 exit).
+- **Maven `groupId`:** Confirm `com.horus.bpm` vs `io.github.dhluong90.bpm` before Sonatype Central Portal registration (Owner: maintainers, Gate: before M1 publish).
+- **Default async outbox flush cadence:** Tune batch size (100 vs 500) during M1 JMH + Testcontainers load benchmarks (Owner: maintainers, Gate: M1 exit).

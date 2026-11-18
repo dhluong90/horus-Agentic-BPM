@@ -238,4 +238,4 @@ CREATE TABLE pre_holiday (
 - **Throughput Target (`TR-PERF-04`):** Batching sync transitions + single `INSERT` history writes limits per-step DB time to ~1 ms, sustaining >1,000 transitions/sec on a 4-vCPU PostgreSQL instance.
 
 ## 7. Open Questions
-- **Max compensation stack depth & nested `callProcess` propagation:** Confirm whether parent process failure triggers child process compensation automatically or via explicit `saga` handler (Owner: `program-architect`, Gate: M2 start).
+- **Max compensation stack depth & nested `callProcess` propagation:** Confirm whether parent process failure triggers child process compensation automatically or via explicit `saga` handler (Owner: maintainers, Gate: M2 start).
