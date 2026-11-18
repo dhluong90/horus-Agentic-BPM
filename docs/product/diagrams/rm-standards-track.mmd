@@ -1,0 +1,47 @@
+flowchart LR
+  subgraph S0 ["S0: before 1.0 (M1 to M3)"]
+    direction TB
+    F1["M1 rules: source document, time zone,<br/>FEEL-aligned semantics, DMN-shaped rule set<br/>RE-F-38 to RE-F-40, RE-F-42"]
+    F2["M2 processes: source document, BPMN ids,<br/>business errors, job cancel, BPMN-typed nodes<br/>PE-F-54 to PE-F-57, CK-F-40"]
+    F3["M3: ADR-0013 subset import and export;<br/>DMN single table; refused by name; no CMMN<br/>PE-F-41, PE-F-53, RE-F-30, X-F-25"]
+    F1 --> F2 --> F3
+  end
+  subgraph T1 ["S1: 1.1, scopes and errors"]
+    direction TB
+    B1["BPMN: subprocesses, boundary and event subprocesses,<br/>inclusive gateway, multi-instance, data objects<br/>PE-F-59 to PE-F-62"]
+    B2["Full BPMN import and display; MIWG round trip<br/>PE-F-63, CK-F-41"]
+    D1["DMN Level 2: every hit policy, DRDs, S-FEEL<br/>RE-F-43 to RE-F-45"]
+    R1["Deviation register, conformance evidence<br/>X-F-26, X-F-27"]
+  end
+  subgraph T2 ["S2: 1.2, events across instances"]
+    direction TB
+    B3["Messages, signals, conditional events,<br/>event-based gateway, full compensation<br/>PE-F-40, PE-F-64, PE-F-65, CK-F-42"]
+    D2["Full FEEL, boxed expressions, BKMs,<br/>decision services; TCK Level 3 at least 95 percent<br/>RE-F-46"]
+  end
+  subgraph T3 ["S3: 1.3, completeness"]
+    direction TB
+    B4["Complex gateway, ad-hoc subprocess,<br/>multiple events; conformance suite 100 percent<br/>PE-F-66"]
+    D3["DMN import, DMNDI; TCK Level 3 100 percent<br/>RE-F-47"]
+  end
+  P["Pending, not counted:<br/>RE-F-41 (PD-058), PE-F-58 (PD-059), X-F-28 (PD-060)"]
+  F3 -- "1. 1.0 API frozen" --> B1
+  B1 -- "2. scope tokens reused" --> B3
+  D1 -- "3. HORUS FEEL core (PD-061)" --> D2
+  B3 --> B4
+  D2 --> D3
+  P -.-> F1
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class F1,F2,F3,B1,B3,B4,D1,D2,D3 engine;
+  class B2 client;
+  class R1 host;
+  class P obs;
+  style S0 fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style T1 fill:none,stroke:#6A1B9A,stroke-dasharray:5 5
+  style T2 fill:none,stroke:#6A1B9A,stroke-dasharray:5 5
+  style T3 fill:none,stroke:#6A1B9A,stroke-dasharray:5 5

@@ -120,8 +120,13 @@ Capabilities on the Roadmap or in TR with no `RLE-*` statement yet:
 | M1 (Rule Engine 0.1) | Everything in 7.2; sample-input simulation; YAML and JSON authoring; decision log partitioned monthly from the first migration. If PD-043 is accepted: spreadsheet round-trip (CK-F-35), restore an earlier version as a draft (RE-F-33) |
 | M2 | Grid editor in Cockpit 0.2 |
 | M3 (1.0) | Replay of logged decisions through a draft (RLE-015), moved from M2 by [PD-042](decisions.md#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted); explain templates; simulation reports on publication requests; what-if comparison; decision log retention by configuration (PD-020, pending); OpenTelemetry spans; DMN decision-table import; API freeze |
+| 1.1 (S1, dates pending PD-062) | Every DMN hit policy; decision requirement graphs with input data and item definitions; DMN 1.2 to 1.5 import and export with DMNDI; S-FEEL in the HORUS FEEL engine; DMN TCK Level 2 at 100 percent (RE-F-43 to RE-F-45) |
+| 1.2 (S2) | Full FEEL, every boxed expression, business knowledge models and decision services; DMN TCK Level 3 at least 95 percent (RE-F-46) |
+| 1.3 (S3) | DMN `import` of other models, DMNDI for every element, TCK Level 3 at 100 percent except the policy exclusions (RE-F-47) |
 
-Non-goals: DMN FEEL compliance and decision requirement diagrams ([ADR-0003](../adr/0003-own-expression-language.md)); inference, rule chaining or complex event processing; scripting in expressions (principle 4); cross-tenant rule inheritance at evaluation time; any network I/O from the evaluator (`TR-EMB-05`); a standalone decision server ([ADR-0004](../adr/0004-no-standalone-server.md)).
+Standards foundations in M1 ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)): the imported file is kept as received with its hash (RE-F-38); the rule set time zone (RE-F-39); number, rounding, regex and string rules aligned with FEEL (RE-F-40); a rule set is a DMN model with one decision and names its expression language, and the decision request accepts an optional decision id before the 1.0 freeze (RE-F-42). Pending: FEEL null logic from M1 ([PD-058](decisions.md#pd-058-feel-null-semantics-in-the-expression-language-from-m1), RE-F-41) and the canonical model ([PD-060](decisions.md#pd-060-canonical-model-bpmn-and-dmn-semantic-models)); both gate M1 code.
+
+Non-goals: DMN conformance before 1.1 (it arrives in stages after 1.0, [PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)); DMN external Java and PMML functions, which are refused at import (principle 4); inference, rule chaining or complex event processing; scripting in expressions (principle 4); cross-tenant rule inheritance at evaluation time; any network I/O from the evaluator (`TR-EMB-05`); a standalone decision server ([ADR-0004](../adr/0004-no-standalone-server.md)).
 
 ## Red-team
 

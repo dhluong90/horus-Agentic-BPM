@@ -83,6 +83,7 @@ The cockpit lives in the application layer. Data, logic and observability belong
 | Application | Incident queue with retry and resolve | 0.2 | CKP-008 | TR-OPS-03 |
 | Application | Replay simulation | M3 (moved by PD-042) | CKP-011 | TR-UI-02 |
 | Application | Accessibility; English and Vietnamese | 0.1, re-run 0.2 | CKP-009, CKP-010 | TR-UI-03, TR-UI-04 |
+| Application | Diagram nodes drawn by BPMN element type plus HORUS subtype; unknown types as labelled generic nodes; standards stage per host shown | 0.2 | CKP-029 | TR-UI-07, TR-UI-08 |
 | API (consumed) | Problem Details errors shown with `correlationId`; idempotency key and `If-Match` on every mutation | 0.1 | CKP-008 (0.2 only) | TR-SEC-08, TR-IDEM-01 |
 
 ### 7.3 Specification gaps
@@ -102,14 +103,24 @@ The cockpit lives in the application layer. Data, logic and observability belong
 | Simulation report attached to a publication request | M3 | Roadmap M3 |
 | Tier-1 pulse strip of KPIs on landing views | not scheduled | `cockpit/docs/DESIGN.md` section 3 only; pending as PD-016 |
 
-### 7.4 Open questions
+### 7.4 BPMN-typed node rendering (0.2)
+
+The diagram views key every node by its BPMN element type plus a HORUS subtype, never by our step names: `startEvent`, `userTask`, `serviceTask:agentTask`, `businessRuleTask`, `exclusiveGateway`, `endEvent` (CK-F-40, DN-11 of the [standards compliance](../architecture/standards-compliance.md) page). This costs about a day in 0.2 (assumption) and avoids a rewrite of every diagram component when 1.1 adds the full symbol set. It also makes the federated cockpit safe across engine versions: a host on a newer engine may serve a node type an older cockpit build does not know. That node renders as a labelled generic node showing its type, and the rest of the diagram stays intact; it is never an error and never hidden. Each host reports what it executes in a `standards` object of `/api/bpm/meta`, shown in the host details.
+
+| Persona | What they see | Why it matters |
+|---|---|---|
+| Operator | The same diagram on every host, with unknown nodes labelled by type | Works an instance on a newer host without waiting for a cockpit upgrade |
+| Auditor | Element types named as in the BPMN standard | Reads a diagram the way the modelling tool drew it |
+| Author (1.1) | Every BPMN and DMN symbol (CK-F-41); editing limited to what the host can execute | Brings models from other tools without losing what the engine cannot run yet |
+
+### 7.5 Open questions
 
 - `TR-UI-02` requires authoring "without leaving the cockpit" and has no milestone. Is 0.1 authoring by YAML import in the cockpit enough, or does `TR-UI-02` gate only from M2? Pending as [PD-013](decisions.md#pd-013-from-which-milestone-tr-ui-02-gates).
 - Resolved: standalone mode lists several hosts and switches between them with one sign-in ([PD-035](decisions.md#pd-035-multi-host-cockpit-model), decided 2026-11-18).
 - Pending: a path for business users without YAML in 0.1, and what "user-friendly" means ([PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml)).
 - Proposal: add the pulse strip to a milestone, or remove it from DESIGN. Pending as [PD-016](decisions.md#pd-016-cockpit-pulse-strip).
 
-### 7.5 Diagrams
+### 7.6 Diagrams
 
 Screen map in three tiers: the shell, the areas (each opens on a ranked queue or list), and the detail and action screens. Version labels follow section 8.
 
@@ -134,9 +145,9 @@ Sources: [ck-screen-map.mmd](diagrams/ck-screen-map.mmd), [ck-multi-host-federat
 | Embedded and standalone hosting; host registry with one sign-in across hosts | Definition and instance diagrams with tokens; live counts per node; one task inbox and one incident list across hosts; task forms; tenant switcher |
 | | Agent task inspector with approve or override |
 
-M3: replay simulation and the calendar editor (moved from 0.2 by PD-042); migration screen and migration plan as two diagrams; simulation reports on publication requests; process definition approval with graph diff; historical heatmap; modeller canvas limited to registered steps (first M3 cut, fallback 1.1). After 1.0 (candidate): hosted cockpit.
+M3: replay simulation and the calendar editor (moved from 0.2 by PD-042); migration screen and migration plan as two diagrams; simulation reports on publication requests; process definition approval with graph diff; historical heatmap; modeller canvas limited to registered steps (first M3 cut, fallback 1.1). Standards track ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn), dates pending PD-062): every BPMN 2.0 and DMN symbol in 1.1 (CK-F-41); conversations across hosts by correlation key and message and signal waits on the diagram in 1.2 (CK-F-42). After 1.0 (candidate): hosted cockpit.
 
-Non-goals: a backend-for-frontend, database or user store ([ADR-0005](../adr/0005-cockpit-as-static-assets.md)); any authorisation decided in the browser; a full BPMN 2.0 modeller or any canvas element the engine cannot run ([PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)); a form designer; dashboards that replace the host's monitoring (metrics stay in Micrometer, `TR-OBS-02`); grid editing in 0.1 (a spreadsheet round-trip is pending as PD-043).
+Non-goals: a backend-for-frontend, database or user store ([ADR-0005](../adr/0005-cockpit-as-static-assets.md)); any authorisation decided in the browser; BPMN 2.0 and DMN symbols beyond the engine's subset before 1.1 ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)); any canvas element the engine cannot run, in any release ([PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)); CMMN; a form designer; dashboards that replace the host's monitoring (metrics stay in Micrometer, `TR-OBS-02`); grid editing in 0.1 (a spreadsheet round-trip is pending as PD-043).
 
 ## Red-team
 

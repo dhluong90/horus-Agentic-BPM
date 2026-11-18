@@ -26,7 +26,7 @@ The usual answers each cost something the team cannot pay:
 | For | Not for |
 |---|---|
 | Java 21 or 25 teams on Spring Boot 4.x (3.5.x supported until 1.0, PD-007) and PostgreSQL 14+ | Other languages, frameworks or databases before 1.0 |
-| Services whose rules and process definitions change under four-eyes approval with effective dates | Teams that need full BPMN 2.0, DMN FEEL or CMMN, or a general-purpose diagram tool ([PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)) |
+| Services whose rules and process definitions change under four-eyes approval with effective dates | Teams that need CMMN; teams that need full BPMN 2.0 and DMN execution before 1.1, since it arrives in stages after 1.0 ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)); a general-purpose diagram tool ([PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)) |
 | Approval flows, task queues with SLAs and compensating service steps inside one service | One central orchestration platform shared by many teams |
 | AI agent steps that must pass rules a compliance team can read | Durable execution of arbitrary code across many services, or rule inference and chaining |
 
@@ -54,11 +54,24 @@ Source: [diagrams/vision-differentiators.mmd](diagrams/vision-differentiators.mm
 |---|---|
 | A standalone server or shared engine service | Principle 1, [ADR-0004](../adr/0004-no-standalone-server.md). Remote access is the host's optional REST layer |
 | The owner of a separate data store | Principle 2, [ADR-0002](../adr/0002-state-in-host-database.md) |
-| A host for scripts or arbitrary code in definitions | Principle 4, [ADR-0003](../adr/0003-own-expression-language.md), `TR-SEC-01` |
+| A host for scripts or arbitrary code in definitions | Principle 4, [ADR-0003](../adr/0003-own-expression-language.md), `TR-SEC-01`. BPMN script tasks run only FEEL or our expression language, and service tasks bind only to handlers the host registered (`TR-STD-16`) |
 | A model runtime: it never embeds or calls a model | Principle 7, `TR-AGT-03`, `TR-EMB-05` |
-| A full BPMN 2.0, DMN FEEL or CMMN implementation | Principle 9 ([PD-039](decisions.md#pd-039-principle-9-wording)): our own graph notation is the source of truth and always has a diagram; a BPMN subset is for import and export. Supported is what is documented |
+| A CMMN implementation | [PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn), [ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md): case management would be a second execution model with little use in the target banks. A CMMN file is refused by name (`TR-STD-26`) |
 | A distributed transaction coordinator | [ADR-0007](../adr/0007-compensation-instead-of-distributed-transactions.md). Compensation, not two-phase commit |
 | A cockpit with its own backend, database or login | [ADR-0005](../adr/0005-cockpit-as-static-assets.md) |
+
+## Standards: BPMN 2.0 and DMN
+
+BPMN 2.0 and DMN are fully supported on the roadmap, and CMMN never is ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn), decided by the product owner on 2026-11-18). The target is BPMN 2.0.2 Process Modeling and Process Execution Conformance and DMN 1.5 Conformance Level 3, each with a published list of deviations ([standards compliance](../architecture/standards-compliance.md)).
+
+| When | What a team gets |
+|---|---|
+| M1 to M3 (before 1.0) | Rule sets and process definitions in JSON or YAML; a documented BPMN subset imported and exported in M3; DMN single decision tables imported in M3; anything else refused by name with the release that adds it. Foundations are built in now so that later stages need no rewrite and no data migration |
+| 1.1, 1.2, 1.3 (after 1.0) | Every BPMN element imported, displayed and exported; execution added in three stages; DMN Level 2, then full FEEL and Level 3. Dates are pending ([PD-062](decisions.md#pd-062-release-targets-for-the-standards-track)); content and exit criteria are in the [roadmap](roadmap.md#standards-track-after-10-s1-to-s3) |
+
+The standards are implemented inside the principles, not beside them: the engines stay libraries in the host JVM with no listener or broker client, state stays in the host database, evaluation stays deterministic, definitions contain no code, and every network call is an Async Wait-State. Where the standard and a principle collide, the deviation is published. What is supported is exactly what is published. The new wording of principle 9 is pending as [PD-063](decisions.md#pd-063-principle-9-wording-and-the-standards-non-goals).
+
+Conformance is not a differentiator: established BPM and decision engines already claim it. It removes a reason to lose an evaluation and lets a team take its models away. The three differentiators above are why a team chooses these engines.
 
 ## Product shape
 

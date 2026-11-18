@@ -26,28 +26,31 @@ HORUS Agentic BPM is two Java libraries and a static cockpit that run inside a t
 | Milestone | Target date | Outcome | Features |
 |---|---|---|---|
 | M0 Architecture | 4 Dec 2026 | Contracts verified against a live PostgreSQL; this review decided | 3 |
-| M1 Rule Engine 0.1, Cockpit 0.1 | 15 Jan 2027 | Business staff change governed rules without a deployment, from one cockpit that reaches every host | 48 |
-| M2 Process Engine 0.1 with `agentTask`, Cockpit 0.2 | 26 Mar 2027 | Approvals, sagas and guarded AI agent steps inside the team's own service; every instance on its diagram; one inbox across services | 55 |
-| M3 Agentic depth, compatibility, 1.0 | 21 May 2027 | Production use with offline evaluation of agent changes, governed process changes and a frozen API | 30 |
-| After 1.0 | Candidates | Message correlation, multi-agent planning, more databases | 10 |
+| M1 Rule Engine 0.1, Cockpit 0.1 | 15 Jan 2027 | Business staff change governed rules without a deployment, from one cockpit that reaches every host | 52 |
+| M2 Process Engine 0.1 with `agentTask`, Cockpit 0.2 | 26 Mar 2027 | Approvals, sagas and guarded AI agent steps inside the team's own service; every instance on its diagram; one inbox across services | 60 |
+| M3 Agentic depth, compatibility, 1.0 | 21 May 2027 | Production use with offline evaluation of agent changes, governed process changes and a frozen API | 31 |
+| S1 Standards 1.1 | Pending PD-062 | Any BPMN 2.0 model imported and shown in full; subprocesses, boundary events and multi-instance run; DMN Level 2 | 11 |
+| S2 Standards 1.2 | Pending PD-062 | Messages and signals across services; full FEEL and DMN Level 3 | 5 |
+| S3 Standards 1.3 | Pending PD-062 | BPMN 2.0.2 execution and DMN Level 3 conformance with published deviations | 2 |
+| After 1.0 | Candidates | Multi-agent planning, more databases, a hosted cockpit | 9 |
 
-Full plan: [roadmap.md](roadmap.md). M2 and M3 moved by two weeks each when the product owner accepted the cockpit direction on 2026-11-18 (PD-042). Date risk: M1 has about five working weeks after the year-end break and holds only with the pre-approved cuts in PD-031 (pending); M2 has about nine working weeks after the Lunar New Year break and keeps three cut candidates; M3 carries 30 features in about seven working weeks, with seven cut candidates, and depends on two outside adopters (kill assumption K13).
+Full plan: [roadmap.md](roadmap.md). M2 and M3 moved by two weeks each when the product owner accepted the cockpit direction on 2026-11-18 (PD-042). Date risk: M1 has about five working weeks after the year-end break and holds only with the pre-approved cuts in PD-031 (pending); M2 has about nine working weeks after the Lunar New Year break and keeps three cut candidates; M3 carries 31 features in about seven working weeks, with seven cut candidates, and depends on two outside adopters (kill assumption K13).
 
 ## Feature map in numbers
 
 | Module | Features | Specified | Spec gap | Design preview |
 |---|---|---|---|---|
-| Rule Engine | 35 | 14 | 18 | 3 |
-| Process Engine | 53 | 17 | 32 | 4 |
-| Cockpit | 34 | 11 | 20 | 3 |
-| Cross-cutting | 24 | 12 | 10 | 2 |
-| **Total** | **146** | **54** | **80** | **12** |
+| Rule Engine | 44 | 17 | 19 | 8 |
+| Process Engine | 65 | 21 | 32 | 12 |
+| Cockpit | 37 | 12 | 20 | 5 |
+| Cross-cutting | 27 | 12 | 11 | 4 |
+| **Total** | **173** | **62** | **82** | **29** |
 
-All 44 SPEC statements map to a feature. 21 M1 features have no SPEC statement yet; closing them is an M0 exit criterion. 12 features are cut candidates (2 in M1 if PD-031 is accepted, 3 in M2 and 7 in M3 under PD-042). Seven more features wait for PD-043 and are not counted. Details: [feature-map.md](feature-map.md).
+The standards direction (PD-057) added 27 features: 10 foundations before 1.0 (8 already specified) and 17 standards-track previews, with PE-F-40 moved into 1.2. 52 SPEC statements are indexed to a feature. The module SPECs hold 93; the 41 written since the last index (RLE-017 to RLE-019, PRE-018 to PRE-038, CKP-012 to CKP-028) are not yet mapped, so some features shown as spec gaps may already be specified. Mapping them is the next feature map update. 22 M1 features have no SPEC statement in the map; closing them is an M0 exit criterion. 12 features are cut candidates (2 in M1 if PD-031 is accepted, 3 in M2 and 7 in M3 under PD-042); no standards feature is one. Seven more features wait for PD-043 and three for PD-058 to PD-060, and are not counted. Details: [feature-map.md](feature-map.md).
 
 ## Decisions waiting for the product owner
 
-Twenty-two decisions are recorded as decided (PD-001 to PD-011, and PD-032 to PD-042 on the cockpit direction, summarised below). These twenty-one need a decision; twelve more from the requirements review (PD-044 to PD-055) are listed in [Requirements review (pending)](#requirements-review-pending). Full options and consequences: [decisions.md](decisions.md).
+Twenty-three decisions are recorded as decided (PD-001 to PD-011, PD-032 to PD-042 on the cockpit direction, and PD-057 on the standards direction, summarised below). Forty-three need a decision: the twenty-two below; twelve from the requirements review (PD-044 to PD-055) in [Requirements review (pending)](#requirements-review-pending); and nine on the standards foundations and track (PD-058 to PD-066) in [Standards direction](#standards-direction-decided-2026-11-18). Full options and consequences: [decisions.md](decisions.md).
 
 | Id | Question | Recommendation |
 |---|---|---|
@@ -72,6 +75,7 @@ Twenty-two decisions are recorded as decided (PD-001 to PD-011, and PD-032 to PD
 | PD-030 | Accept ADR-0009 (cache coherence) | Accept now, before M1 code |
 | PD-031 | Can the M1 date hold? (M2 and M3 rows replaced by PD-042) | Keep 15 Jan 2027 with the pre-approved M1 cut list |
 | PD-043 | Which authoring path do business users get in M1, and what does "user-friendly" mean? | Spreadsheet round-trip with plain conditions in M1; grid with templates and drop-downs in M2; no grid in M1. See the next section |
+| PD-056 | Rule management UX direction: grid, sentences, change request, or a hybrid? | Hybrid: change request page with CSV rows and engine readings in 0.1; editable grid with a sentence view in 0.2; replay, stored evidence and history in M3; assistant only after 1.0. Six sub-questions in the entry. Decide after the four-paradigm prototype the product owner requested, which is not yet delivered |
 
 ## Cockpit direction (decided 2026-11-18)
 
@@ -81,7 +85,7 @@ The product owner accepted the cockpit direction ("add it into the product roadm
 |---|---|
 | PD-032 | Read-only diagrams with token overlay in M2; modeller canvas in M3 as the first M3 cut (fallback 1.1); its engine APIs before the freeze |
 | PD-033 | Maker-checker for process definitions in the engine in M2, screens in M3; `dev` may auto-approve |
-| PD-034 | Own JSON canonical; BPMN subset import protected, export a cut candidate |
+| PD-034 | Own JSON canonical; BPMN subset import protected, export a cut candidate (superseded in part by PD-057: the subset is the M3 scope, not the end state) |
 | PD-035 | Standalone cockpit federating hosts; registry, `/meta` and `/me` in M1; merged inbox and incidents in M2 |
 | PD-036 | Git and cockpit both; imports arrive as drafts; cockpit authoring can be turned off per environment |
 | PD-037 | Tenant switching only within the token's allowed tenants, in M2 |
@@ -89,9 +93,36 @@ The product owner accepted the cockpit direction ("add it into the product roadm
 | PD-039 to PD-041 | Principle 9 reworded, principle 6 covers process definitions, vision and PRD modeller non-goals narrowed |
 | PD-042 | M2 ends 26 Mar 2027, M3 ends 21 May 2027; M0 and M1 unchanged |
 
-Effect: 24 new features, all spec gaps (2 in M1, 14 in M2, 8 in M3); calendar editor and replay simulation moved from M2 to M3. What "Camunda-like" means: diagrams, operations on the diagram, one inbox across services, governed process change. Not included: fleet analytics or full BPMN 2.0. Details: [decision log](decisions.md#decided-cockpit-direction-camunda-like-cockpit), [roadmap](roadmap.md#what-camunda-like-means-here).
+Effect: 24 new features, all spec gaps (2 in M1, 14 in M2, 8 in M3); calendar editor and replay simulation moved from M2 to M3. What "Camunda-like" means: diagrams, operations on the diagram, one inbox across services, governed process change. Not included: fleet analytics, and full BPMN 2.0 before the standards track. Details: [decision log](decisions.md#decided-cockpit-direction-camunda-like-cockpit), [roadmap](roadmap.md#what-camunda-like-means-here).
 
 Wiki wording that follows PD-039 and PD-040 (Principles rows 6 and 9, Concepts, FAQ, Cockpit page) is with documentation.
+
+## Standards direction (decided 2026-11-18)
+
+The product owner decided that BPMN 2.0 and DMN are fully supported on the roadmap, that the architecture is designed for it now, that full support is not part of the MVP (M1, M2), and that CMMN is out of scope ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn), [ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md)). Target: BPMN 2.0.2 Process Modeling and Process Execution Conformance and DMN 1.5 Conformance Level 3, each with a published deviation register. Architecture: [standards compliance](../architecture/standards-compliance.md); requirements `TR-STD-01` to `TR-STD-27`.
+
+| Stage | Release | Content | Effort (assumption) |
+|---|---|---|---|
+| S0 | M1 to M3 | Foundations DN-01 to DN-11 (source documents, stable hashes and ids, FEEL-aligned semantics, BPMN-typed cockpit nodes, job cancellation); BPMN subset and DMN single-table import in M3; CMMN and everything else refused by name | About 5.5 days in M1 and 6 in M2, plus 7 in M1 and 9 in M2 if PD-058 to PD-060 are accepted |
+| S1 | 1.1 | Subprocesses, boundary and event subprocesses, inclusive gateway, multi-instance; full BPMN display with the MIWG round trip; DMN Level 2 with S-FEEL | About 24 engineer-weeks |
+| S2 | 1.2 | Messages, signals, conditional events, full compensation; full FEEL, boxed expressions, decision services; TCK Level 3 at least 95 percent | About 28 engineer-weeks |
+| S3 | 1.3 | Complex gateway, ad-hoc subprocess, multiple events; conformance suite and TCK Level 3 at 100 percent | About 8 engineer-weeks |
+
+Dates for S1 to S3 are pending (PD-062). The roadmap keeps M1 to M3 dates unchanged and never cuts a foundation item; kill assumption K19 tests whether they fit, K20 whether evaluators ask for conformance before S2 starts, K21 whether the FEEL core estimate holds. Positioning: "standard BPMN 2.0 and DMN models in and out, with a published deviation register"; no conformance claim before that stage's suites are green. Conformance removes a reason to lose; governed change in the host transaction and guarded agent steps remain the reasons to choose us.
+
+| Id | Question | Recommendation | Gate |
+|---|---|---|---|
+| PD-058 | FEEL null semantics in our expression language from M1 (changes two cases of `RLE-006`) | Accept; about 4 days with a differential test harness | Before M1 code |
+| PD-059 | Execution tree with scope tokens in M2 (ADR-0020) | Accept; about 4 days, avoids migrating in-flight instances at 1.1 | Before M2 code |
+| PD-060 | BPMN and DMN semantic models as the canonical model (ADR-0018) | Accept; about 3 days in M1 and 5 in M2; users see no change | Before M1 code |
+| PD-061 | HORUS-built FEEL (ADR-0019) | Accept; an existing FEEL engine only as a test oracle | Before S1 planning |
+| PD-062 | Dates for S1 to S3 | Publish order and exit criteria now; fix dates at the M3 exit review from measured throughput | M3 exit |
+| PD-063 | Principle 9 wording | The ADR-0017 wording if PD-060 is accepted; otherwise a wording that holds either way | Now |
+| PD-064 | MIWG test data under CC BY 3.0 | Allow as build-time test data with attribution, never shipped, named in the PD-053 allow-list | Before S1 code |
+| PD-065 | Choreography and conversation diagrams | Not targeted; kept in the source document with a warning | Now |
+| PD-066 | FEEL error mode default | `strict` for v1 rule sets, `spec` for imported DMN; guardrails fail closed in both | Before S2 |
+
+Applied with PD-057: roadmap standards track and do-now items, feature map rows, vision and PRD non-goals (full BPMN 2.0 and DMN after 1.0, CMMN never), cockpit PRD BPMN-typed node rendering. Wiki wording that follows (Principles row 9, Concepts, FAQ, Roadmap) is with documentation, after PD-063.
 
 ## Who uses the Rule Engine and how
 

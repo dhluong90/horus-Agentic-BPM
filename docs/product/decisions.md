@@ -55,14 +55,14 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-031](#pd-031-milestone-dates-and-pre-approved-cuts) | Milestone dates and pre-approved cuts | Pending product owner |
 | [PD-032](#pd-032-diagrams-and-a-visual-modeller-in-scope) | Diagrams and a visual modeller in scope | Decided |
 | [PD-033](#pd-033-maker-checker-for-process-definitions) | Maker-checker for process definitions | Decided |
-| [PD-034](#pd-034-process-notation-own-json-canonical-bpmn-subset-for-import-and-export) | Process notation: own JSON canonical, BPMN subset for import and export | Decided |
+| [PD-034](#pd-034-process-notation-own-json-canonical-bpmn-subset-for-import-and-export) | Process notation: own JSON canonical, BPMN subset for import and export | Decided (superseded in part by PD-057) |
 | [PD-035](#pd-035-multi-host-cockpit-model) | Multi-host cockpit model | Decided |
 | [PD-036](#pd-036-source-of-truth-for-process-definitions) | Source of truth for process definitions | Decided |
 | [PD-037](#pd-037-tenant-switching-for-multi-tenant-operators) | Tenant switching for multi-tenant operators | Decided |
 | [PD-038](#pd-038-analytics-scope) | Analytics scope | Decided |
-| [PD-039](#pd-039-principle-9-wording) | Principle 9 wording | Decided |
+| [PD-039](#pd-039-principle-9-wording) | Principle 9 wording | Decided (superseded in part by PD-057) |
 | [PD-040](#pd-040-principle-6-extended-to-process-definitions) | Principle 6 extended to process definitions | Decided |
-| [PD-041](#pd-041-conflict-vision-non-goal-diagram-modeller) | Conflict: vision non-goal "diagram modeller" | Decided |
+| [PD-041](#pd-041-conflict-vision-non-goal-diagram-modeller) | Conflict: vision non-goal "diagram modeller" | Decided (superseded in part by PD-057) |
 | [PD-042](#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted) | Milestone dates if the cockpit direction is accepted | Decided |
 | [PD-043](#pd-043-rule-authoring-for-business-users-without-yaml) | Rule authoring for business users without YAML | Pending product owner |
 | [PD-044](#pd-044-rpo-and-rto-responsibility-wording) | RPO and RTO responsibility wording | Pending product owner |
@@ -77,6 +77,17 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-053](#pd-053-licence-rule-for-test-and-build-tools) | Licence rule for test and build tools | Pending product owner |
 | [PD-054](#pd-054-deprecation-length) | Deprecation length | Pending product owner |
 | [PD-055](#pd-055-postgresql-version-range) | PostgreSQL version range | Pending product owner |
+| [PD-056](#pd-056-rule-management-ux-direction) | Rule management UX direction | Pending product owner |
+| [PD-057](#pd-057-full-bpmn-20-and-dmn-support-no-cmmn) | Full BPMN 2.0 and DMN support, no CMMN | Decided |
+| [PD-058](#pd-058-feel-null-semantics-in-the-expression-language-from-m1) | FEEL null semantics in the expression language from M1 | Pending product owner |
+| [PD-059](#pd-059-execution-tree-with-scope-tokens-in-m2) | Execution tree with scope tokens in M2 | Pending product owner |
+| [PD-060](#pd-060-canonical-model-bpmn-and-dmn-semantic-models) | Canonical model: BPMN and DMN semantic models | Pending product owner |
+| [PD-061](#pd-061-horus-built-feel) | HORUS-built FEEL | Pending product owner |
+| [PD-062](#pd-062-release-targets-for-the-standards-track) | Release targets for the standards track | Pending product owner |
+| [PD-063](#pd-063-principle-9-wording-and-the-standards-non-goals) | Principle 9 wording and the standards non-goals | Pending product owner |
+| [PD-064](#pd-064-bpmn-miwg-test-data-licence) | BPMN MIWG test data licence | Pending product owner |
+| [PD-065](#pd-065-choreography-and-conversation-diagrams-not-targeted) | Choreography and conversation diagrams not targeted | Pending product owner |
+| [PD-066](#pd-066-feel-error-mode-default) | FEEL error mode default | Pending product owner |
 
 ---
 
@@ -885,7 +896,7 @@ What "Camunda-like" includes and excludes in all eleven entries:
 | Date | 2026-11-18 |
 | Question | What is the source notation for process definitions once diagrams exist, and what is BPMN's role? |
 | Raised by | Architect's review, decision 3 |
-| Decision | Decided by the product owner, 2026-11-18: option 1. Own JSON canonical; BPMN subset import (PE-F-41) off the cut list; export (PE-F-53) in M3 as a cut candidate |
+| Decision | Decided by the product owner, 2026-11-18: option 1. Own JSON canonical; BPMN subset import (PE-F-41) off the cut list; export (PE-F-53) in M3 as a cut candidate. Superseded in part by [PD-057](#pd-057-full-bpmn-20-and-dmn-support-no-cmmn) (2026-11-18): the subset is the M3 scope, not the end state; the canonical notation is pending as PD-060 |
 
 **Architect's recommendation.** Our own definition JSON stays canonical, with an optional `diagram` part (node positions, edge waypoints, lanes). A BPMN subset is for import and export only, converted in Java with the JDK's StAX parser (no new dependency) and tested in CI against the schema; anything outside the subset is rejected and named in the error. Take PE-F-41 (BPMN subset import) off the cut list.
 
@@ -1039,7 +1050,7 @@ What "Camunda-like" includes and excludes in all eleven entries:
 | Date | 2026-11-18 |
 | Question | Principle 9 reads "Standards as vocabulary, not compliance. BPMN and DMN words, a documented subset of their semantics", which readers take as "no diagrams". Change it if PD-032 and PD-034 are accepted? |
 | Raised by | Architect's review, section 1 |
-| Decision | Decided by the product owner, 2026-11-18: option 2 |
+| Decision | Decided by the product owner, 2026-11-18: option 2. Superseded in part by [PD-057](#pd-057-full-bpmn-20-and-dmn-support-no-cmmn) (2026-11-18): the limit on BPMN scope no longer holds; new wording pending as PD-063 |
 
 **Options considered**
 
@@ -1083,7 +1094,7 @@ What "Camunda-like" includes and excludes in all eleven entries:
 | Date | 2026-11-18 |
 | Question | The vision says the product is not for "teams that need full BPMN 2.0, DMN FEEL, CMMN or a diagram modeller"; the process PRD lists "a graphical modeller" and the cockpit PRD "a BPMN diagram modeller" as non-goals. PD-032 would make these false |
 | Raised by | Product manager, from the architect's review |
-| Decision | Decided by the product owner, 2026-11-18: option 2 |
+| Decision | Decided by the product owner, 2026-11-18: option 2. Superseded in part by [PD-057](#pd-057-full-bpmn-20-and-dmn-support-no-cmmn) (2026-11-18): full BPMN 2.0 and DMN are no longer non-goals; CMMN and the modeller limit stay |
 
 **Options considered**
 
@@ -1531,3 +1542,277 @@ The architect reviewed the technical, non-functional and developer requirements 
 **Consequences if accepted.** `TR-EMB-02` names the range and the CI matrix; X-F-02 and the vision "For" row change wording at 1.0.
 
 **Follow-ups.** Architect: confirm the end-of-life date and the CI matrix. Product manager: the pilot question in M1.
+
+## Pending: rule management UX
+
+### PD-056 Rule management UX direction
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | Three directions for rule management were published for review: A, a grid that works like a spreadsheet; B, rules read and edited as sentences; C, a change request page that carries the draft, checks, simulation, diff, approval and history, with an assistant that suggests. Which direction does the cockpit build, and in which release does each part land? |
+| Raised by | Product manager, from the published rule management directions and the [cockpit UX design](ux-design.md) |
+| Decision | Pending product owner. The product owner asked for a redesigned prototype that shows four paradigms side by side (a spatial canvas with a docked decision table, a quantitative backtest view, a four-eyes governance room, an agentic control tower for escalated agent steps) plus a synthesis view of what lands when. That prototype is not yet delivered; this entry should be decided after the product owner has reviewed it |
+
+**Options considered**
+
+1. Option A only: the grid is the editor, round-tripped through CSV in 0.1 and editable in the browser in 0.2. Consequence: fastest for pricing and risk staff who change many rows; approvers and support staff read cells, not sentences; the accessible editable grid is the hardest widget to build.
+2. Option B only: each row is a sentence edited through guided pickers. Consequence: lowest learning curve for approvers and occasional authors; does not scale past about 30 rows; Vietnamese needs its own sentence templates.
+3. Option C with the assistant early: the change request page in 0.1 and the assistant drafting rows by M3. Consequence: strongest evidence for approvers; the assistant needs an evaluation set, a hosting decision and compliance sign-off that cannot be done before 1.0; compliance may refuse AI on governed rules.
+4. Hybrid of A, B and C without the assistant before 1.0, split by release (recommended):
+
+| Release | Rules | Processes |
+|---|---|---|
+| Cockpit 0.1 (M1) | Every change lives on a change request page (C, without the assistant). Rows arrive through the CSV round-trip (A). Every row in the diff, the simulation and the explanation shows its plain-language reading (B), returned by the engine in English and Vietnamese | None (the Process Engine ships in M2) |
+| Cockpit 0.2 (M2) | The editable grid (A) opens inside the change request, with a "Read as sentences" switch for approvers, and templates for new rule sets | Definition and instance diagrams with the token overlay, one inbox and one incident list across hosts, task forms, agent task inspector, tenant switcher |
+| M3 | Replay of logged decisions in the Impact region, stored simulation report on the request, version history and evidence export | Process definition approval with a graph diff; modeller canvas limited to registered steps (first M3 cut, fallback 1.1); heatmap; migration plan as two diagrams |
+
+**Recommendation (product manager).** Option 4. Each part does the job of one persona: the grid for the author who changes many rows, the sentence for the approver and support staff who must understand one row, and the change request for the approver who needs all evidence on one page. Components are shared, so a later change of direction removes or swaps a region, not a screen ([ux-design.md](ux-design.md#what-is-proposed-and-how-it-adjusts)). It assumes PD-043 is accepted as recommended.
+
+**Sub-questions inside this decision**
+
+| # | Question | Recommendation |
+|---|---|---|
+| 1 | Plain-language readings in 0.1 or 0.2? The UX design shows them in 0.1; the feature map places the readings with the grid shorthand (CK-F-37) in 0.2 under PD-043 | Read-only readings in 0.1 in the diff, the simulation and the explanation, returned by the engine per language; the shorthand with drop-downs in the grid stays 0.2. The feature map splits CK-F-37 once decided. Effort about 3 to 4 days of front end if the engine returns a reading per row (assumption) |
+| 2 | One change request per rule set version, or one request that holds changes to several rule sets that go live together? | One request per version in 0.x, so the engine needs no request object; revisit in M3 with pilot evidence |
+| 3 | Is simulation evidence stored with the request in 0.1? | No. Stored evidence lands with the simulation report in M3 (RE-F-23, CK-F-20, PD-022); in 0.1 the Impact stage is skipped and the approver runs the samples |
+| 4 | What happens when the requested effective date passes while the request waits for approval (gap G3)? | The engine refuses the approval and the requester chooses a new date; a version is never made effective in the past. The page warns before Approve. The architect confirms the engine rule |
+| 5 | When, if ever, does the assistant come? | After 1.0 only, as suggestion only: it never applies a change, every suggestion passes the same checks and the same second approver, and it needs an evaluation set, a hosting decision and compliance sign-off first |
+| 6 | Who checks the Vietnamese wording? | A native writer from a bank reviews every Vietnamese message and sentence template before Cockpit 0.2 |
+
+**Kill criterion.** In the week 2 M1 sessions (K3), an approver who reads the change request page cannot say which customers are affected, or an author cannot reach `PENDING_APPROVAL` within 15 minutes: then fall back to option 1 for 0.1 and keep the request page for 0.2.
+
+**Consequences if accepted.** [ux-design.md](ux-design.md) status becomes decided; CK-F-37 splits into a 0.1 reading and a 0.2 editing feature; the cockpit SPEC adds the change request page statements.
+
+**Follow-ups.** Product manager: deliver the four-paradigm prototype for review, then the feature map split. Architect: engine readings per language (UX-API-01) and the G3 rule. Documentation: Vietnamese reviewer.
+
+## Decided: standards direction
+
+### PD-057 Full BPMN 2.0 and DMN support, no CMMN
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | Do the engines support BPMN 2.0 and DMN in full, or only the documented subset of PD-034 and principle 9? Is CMMN in scope? |
+| Raised by | Product owner |
+| Decision | Decided by the product owner, 2026-11-18: BPMN 2.0 and DMN are fully supported on the roadmap; full support is not required for the MVP (M1, M2); the architecture is designed now so the engines reach it without a rewrite; CMMN is out of scope. Recorded as [ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md) (accepted) |
+
+**What "full support" means.** BPMN 2.0.2 Process Modeling Conformance and Process Execution Conformance, and DMN 1.5 Conformance Level 3, each with a published deviation register ([standards compliance](../architecture/standards-compliance.md) sections 1 and 12). Proof is the BPMN MIWG round trip, a HORUS executable conformance suite and the DMN TCK (`TR-STD-10`, `TR-STD-11`, `TR-STD-20`, `TR-STD-21`).
+
+**Options considered** (from ADR-0017)
+
+1. Full BPMN 2.0 and DMN, staged after 1.0 in S1 (1.1), S2 (1.2) and S3 (1.3), with foundations in M1 and M2 (chosen). Consequence: standard models in and out; evaluations that require the standards become winnable; about 60 engineer-weeks after 1.0 (assumption) and a small cost in M1 and M2.
+2. Keep the subset permanently (PD-034 as decided). Consequence: smallest engines and support surface; every evaluation that requires BPMN or DMN conformance is lost and the lock-in objection stays half answered.
+3. Full support within M1 to M3. Consequence: not possible within the PD-042 dates; M2 and M3 are at capacity.
+4. Include CMMN. Consequence: a second execution model for little use in the target banks.
+
+**Product manager's view.** Agree, with three conditions that are applied in the roadmap. First, conformance is not a moat: every established BPM and decision vendor already claims it, so it removes a reason to lose rather than adding a reason to win. Positioning keeps leading with governed change inside the host transaction and guarded agent steps; the standards line is "standard models in and out, with a published deviation register". Second, no conformance claim is made before the evidence exists: "BPMN 2.0 and DMN conformance" is said only for the stage whose suites are green (`TR-STD-05`). Third, the demand behind S2 and S3 is tested before they start (kill assumption K20 in the [roadmap](roadmap.md#kill-assumptions)).
+
+**Rationale.**
+
+- Positioning. Bank architecture reviews often carry a checklist line for BPMN and DMN. A documented subset answered the switching path (PD-034) but not the checklist; full support answers both and lets a team take its models away, which is the strongest answer to lock-in.
+- Personas. The host developer (process PRD S1) brings BPMN files from existing engines; the rule author (rule PRD S2) may hold DMN models from a modeller. Both can now arrive without rewriting.
+- Principles. Full support is implemented inside the principles: library in the host JVM, host-owned data, determinism, no code in definitions, Async Wait-State for every network call, maker-checker. Script tasks run only FEEL or our expression language; service tasks bind only to registered handlers; the host owns every transport.
+
+**Consequences.**
+
+- Supersedes in part [PD-034](#pd-034-process-notation-own-json-canonical-bpmn-subset-for-import-and-export): the BPMN subset is the M3 scope, no longer the end state, and "the vision's 'never a full BPMN 2.0 implementation' stays" no longer holds. Whether the BPMN and DMN semantic models replace our JSON as the canonical model is pending as PD-060.
+- Supersedes in part [PD-039](#pd-039-principle-9-wording): the limit on BPMN scope in principle 9 no longer holds. The new wording is pending as PD-063.
+- Supersedes in part [PD-041](#pd-041-conflict-vision-non-goal-diagram-modeller): "Teams that need full BPMN 2.0, DMN FEEL or CMMN" is no longer a non-goal; CMMN stays one. The modeller non-goal ("any canvas element the engine cannot run") stays.
+- The PD-032 exclusion "full BPMN 2.0 symbols" holds until S1 (1.1), which adds the BPMN and DMN symbol sets to the cockpit.
+- New requirements `TR-STD-01` to `TR-STD-27` in [requirements.md](requirements.md). Do-now changes DN-01 to DN-11 are in the M1 and M2 designs; P1 to P9 of the standards compliance page are pending as PD-058 to PD-066.
+- Roadmap: a post-1.0 standards track S1 to S3, dates pending PD-062; feature map: 18 standards-track features (design preview), 10 foundation features in M1 to M3 and 3 more pending PD-058 to PD-060.
+
+**Follow-ups.** Product manager: roadmap, feature map, vision and PRDs (applied below). Documentation: wiki Principles row 9, Concepts, FAQ and Roadmap pages, after PD-063. Architect: ADR-0018 to ADR-0020 through PD-058 to PD-061. QA: plans for the MIWG, TCK and executable conformance suites.
+
+**Applied, 2026-11-18.** [roadmap.md](roadmap.md) (standards track, do-now items, gates), [feature-map.md](feature-map.md), [vision.md](vision.md), [prd-rule-engine.md](prd-rule-engine.md), [prd-process-engine.md](prd-process-engine.md), [prd-cockpit.md](prd-cockpit.md), [README.md](README.md).
+
+## Pending: standards foundations and track
+
+The architect's [standards compliance](../architecture/standards-compliance.md) page section 9.2 lists nine larger choices (P1 to P9) that follow from PD-057. Each is one entry below. Gates: PD-058 and PD-060 must be decided before M1 code (7 Dec 2026); PD-059 before M2 code (18 Jan 2027).
+
+### PD-058 FEEL null semantics in the expression language from M1
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | Should `horus-expr-v1` follow FEEL null logic from M1, so that every v1 expression has a FEEL equivalent with the same result? It changes two cases of `RLE-006`: `x != 'GOLD'` with `x` null becomes true, and `not(x < 5)` with `x` null becomes null (the condition does not match) |
+| Raised by | Architect, standards compliance P1 ([ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md), proposed) |
+| Decision | Pending product owner. Gate: before M1 code |
+
+**Options considered**
+
+1. Accept: FEEL three-valued logic from M1, with a differential test against a reference FEEL implementation in test scope (`TR-STD-02`, `RLE-021`). Consequence: about 1 day plus 3 days for the test harness in M1 (assumption); `RLE-006` and the wiki expression page change; every logged decision stays replayable under FEEL.
+2. Keep today's null rule and align later. Consequence: logged decisions depend on today's semantics after M1 ships; aligning later breaks replay (`TR-DET-05`) or leaves v1 forever different from FEEL.
+
+**Recommendation (product manager).** Option 1. The cost is four days before any adopter exists; afterwards it is a replay break in a product whose promise is replay. The author-facing change is small: `x != 'GOLD'` matching a missing tier is what FEEL users expect, and the validator can warn on a nullable input used with `!=`.
+
+**Consequences if accepted.** RE-F-41 joins M1; RE-F-03 wording changes; `RLE-006` changes; the wiki expression page changes with the same pull request.
+
+**Follow-ups.** Architect: `RLE-006` and the harness. Documentation: wiki expression page.
+
+### PD-059 Execution tree with scope tokens in M2
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | Should the M2 Process Engine store a root scope token per instance and one per `saga`, with joins and compensation keyed by scope token, instead of a flat text `scope_id`? |
+| Raised by | Architect, standards compliance P2 ([ADR-0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md), proposed for the M2 part) |
+| Decision | Pending product owner. Gate: before M2 code |
+
+**Options considered**
+
+1. Accept in M2. Consequence: about 4 days in M2 (assumption); subprocesses, event subprocesses and multi-instance in S1 add scopes without changing joins or compensation.
+2. Flat scopes in M2, scope tokens in S1. Consequence: joins and compensation are rewritten in S1 and every in-flight instance needs a data migration at 1.1.
+
+**Recommendation (product manager).** Option 1. A data migration of in-flight instances in banks' production databases is the kind of upgrade adopters refuse; four days in M2 avoid it. If M2 slips, this is not on the cut list; the existing cuts (PD-017, PD-042) apply first.
+
+**Consequences if accepted.** PE-F-58 joins M2; process engine DESIGN and the token DDL change before M2 code.
+
+**Follow-ups.** Architect: DESIGN and DDL.
+
+### PD-060 Canonical model: BPMN and DMN semantic models
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | Should the canonical internal model be the BPMN 2.0 and DMN semantic models, with our JSON as their canonical serialisation and BPMN and DMN XML as lossless serialisations of the same model? This replaces the notation part of PD-034 |
+| Raised by | Architect, standards compliance P3 ([ADR-0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md), proposed) |
+| Decision | Pending product owner. Gate: before M1 code (the M1 rule set model), and before M2 code (the process model) |
+
+**Options considered**
+
+1. Our model canonical, with a lossless BPMN round trip. Consequence: lowest cost now; every BPMN feature is designed twice, once in our model and once in the mapping, for the life of the product.
+2. BPMN and DMN semantic models canonical; our JSON as serialisation; v1 documents stay valid forever as a compact profile (recommended by the architect). Consequence: about 3 days in M1 and 5 days in M2 (assumption); one mapping per serialisation; hash and diff unchanged in kind.
+3. BPMN or DMN XML text canonical. Consequence: unstable hashes over XML and a rewrite of the M2 definition handling.
+
+**Recommendation (product manager).** Option 2. Users see no change: JSON and YAML authoring, our step types (`agentTask`, guardrails, async mode) as `horus` extensions, and hashes that never change (`TR-STD-03`). What changes is that the M3 BPMN reader and every later stage build on a model that can hold full BPMN, so S1 is not a rewrite of the definition layer.
+
+**Consequences if accepted.** PD-034 is superseded in its notation part; X-F-28 joins M1 and M2; `TR-DEF-01` drops its "if ADR-0018 is accepted" wording.
+
+**Follow-ups.** Architect: ADR-0018 to accepted; module DESIGN documents.
+
+### PD-061 HORUS-built FEEL
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | Is FEEL built here, deterministic and sandboxed, on the same typed tree and evaluator as today's language, rather than embedding an existing FEEL engine? |
+| Raised by | Architect, standards compliance P4 ([ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md), proposed) |
+| Decision | Pending product owner. Needed before S1 planning |
+
+**Options considered**
+
+1. HORUS-built FEEL (recommended by the architect). Consequence: about 22 engineer-weeks across S1 to S3 (S-FEEL core 6, full FEEL 12, TCK completion 4; assumption); determinism, money and the 100 us compiled path are designed in; no runtime dependency.
+2. Embed an existing Apache 2.0 FEEL engine. Consequence: mature and high TCK score; adds a large runtime to every host classpath, its own value model and clock, interpretation per call that puts the 100 us target at risk, no money type and no fail-closed error mode. It would be the product itself, since the evaluator is the Rule Engine.
+3. Keep only `horus-expr-v1` with a FEEL subset translated at import. Consequence: DMN Level 3 is unreachable; contradicts PD-057.
+
+**Recommendation (product manager).** Option 1, with the existing engine used only as a test oracle (`TR-STD-27`). Determinism and fail-closed behaviour are part of what we sell to banks; an evaluator we do not control cannot carry that promise. Kill assumption K21 tests the S-FEEL estimate before full FEEL starts.
+
+**Consequences if accepted.** RE-F-45 to RE-F-47 are built on it; ADR-0019 accepted.
+
+**Follow-ups.** Architect: ADR-0019 to accepted; S1 plan for the S-FEEL core.
+
+### PD-062 Release targets for the standards track
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | When do S1 (1.1), S2 (1.2) and S3 (1.3) ship, and with what capacity? |
+| Raised by | Architect, standards compliance P5 |
+| Decision | Pending product owner |
+
+Effort (assumption): S1 about 24 engineer-weeks (BPMN 12, DMN 8, cockpit 4), S2 about 28 (BPMN 14, DMN 12, cockpit 2), S3 about 8 (BPMN 6, DMN 2); about 60 in total.
+
+**Options considered**
+
+1. Fix dates now. Consequence: a public promise before the team's throughput in M1 to M3 is known.
+2. Publish order, content and exit criteria now; fix dates at the M3 exit review (21 May 2027) from measured throughput. Consequence: no dates on the public roadmap for six months.
+3. Fix only S1 now. Consequence: one promise to keep; S2 and S3 follow the K20 demand test.
+
+**Recommendation (product manager).** Option 2. Indicative only, at three engineers full time: S1 about 8 weeks, S2 about 9 to 10, S3 about 3, which would put 1.1 around August 2027, 1.2 around November 2027 and 1.3 around December 2027 (assumption, not a target). S2 and S3 start only if K20 holds.
+
+**Consequences if accepted.** The roadmap keeps "dates pending PD-062" until the M3 exit review.
+
+**Follow-ups.** Product manager: dates proposal at the M3 exit review.
+
+### PD-063 Principle 9 wording and the standards non-goals
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | Principle 9 (PD-039) still says a BPMN subset is for import and export; ADR-0017 proposes new wording. Which wording do the public documents use? |
+| Raised by | Architect, standards compliance P6 |
+| Decision | Pending product owner. The vision and PRD non-goals were changed under PD-057 to state the decided stance; only the principle wording waits |
+
+**Options considered**
+
+1. ADR-0017 wording: "BPMN 2.0 and DMN are the models. Our JSON is their canonical serialisation and always has a diagram. What each release executes is exactly what the standards compliance page lists." Therefore: "Teams bring and take standard models; the engines stay deterministic and code-free; every deviation is published." Consequence: assumes PD-060 option 2.
+2. Wording that holds whatever PD-060 decides: "Standard models in and out. BPMN 2.0 and DMN are imported, displayed and exported in full; what each release executes is exactly what the standards compliance page lists, with its deviations. No CMMN." Therefore unchanged in spirit: "Supported is what is published."
+
+**Recommendation (product manager).** Option 1 if PD-060 is accepted, option 2 otherwise. Both keep the useful half of the old principle: what is supported is exactly what is published.
+
+**Consequences if accepted.** Wiki Principles row 9, Concepts and FAQ; the vision table row that cites principle 9.
+
+**Follow-ups.** Documentation: wiki pages in the same change as the decision.
+
+### PD-064 BPMN MIWG test data licence
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | The BPMN MIWG reference models are published under CC BY 3.0, outside the Apache 2.0, MIT and BSD list of `TR-LIC-01`. May they be used as test data under the PD-053 rule for test and build tools? |
+| Raised by | Architect, standards compliance P7 |
+| Decision | Pending product owner, after PD-053 |
+
+**Options considered**
+
+1. Allow as test data: fetched at build time at a pinned commit, with attribution, never shipped in an artifact. Consequence: `TR-STD-10` can be verified; the licence allow-list of PD-053 names one data set.
+2. Refuse. Consequence: no MIWG evidence; the round-trip claim rests on our own models only, which evaluators will not accept as proof.
+
+**Recommendation (product manager).** Option 1, written into the PD-053 allow-list by name. Attribution is the only obligation of CC BY and nothing reaches adopters' services.
+
+**Consequences if accepted.** PD-053 allow-list gains the MIWG data set; X-F-27 can publish MIWG results.
+
+**Follow-ups.** QA: build-time fetch with attribution. Architect: allow-list entry.
+
+### PD-065 Choreography and conversation diagrams not targeted
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | BPMN choreography and conversation diagrams are part of BPMN 2.0.2 but not of the process conformance types we target. Are they out of scope? |
+| Raised by | Architect, standards compliance P8 |
+| Decision | Pending product owner |
+
+**Options considered**
+
+1. Not targeted: a file that contains them is imported with the choreography kept byte for byte in the stored source document and a warning; listed in the deviation register. Consequence: no work; the claim stays precise.
+2. Display them. Consequence: cockpit symbols with no execution meaning and no user we know of.
+
+**Recommendation (product manager).** Option 1. No target bank models choreographies for execution; the source document keeps them, so nothing is lost if a user ever asks.
+
+**Consequences if accepted.** Deviation register row confirmed.
+
+**Follow-ups.** None beyond the register.
+
+### PD-066 FEEL error mode default
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-18 |
+| Question | FEEL defines many errors as `null`. Which `errorMode` is the default: `spec` (FEEL semantics, the error recorded as a warning, outcome `OK_WITH_WARNINGS`) or `strict` (today's `EVALUATION_ERROR`)? |
+| Raised by | Architect, standards compliance P9 |
+| Decision | Pending product owner. Needed before S2 |
+
+**Options considered**
+
+1. `strict` for v1 rule sets, `spec` for imported DMN models; guardrails fail closed in both modes (recommended by the architect). Consequence: existing behaviour never changes; imported models behave as their authors expect; the TCK runs in `spec`.
+2. `strict` everywhere. Consequence: imported DMN models fail where other engines return `null`, which breaks the "bring your models" promise.
+3. `spec` everywhere. Consequence: v1 rule sets change behaviour silently, which breaks replay.
+
+**Recommendation (product manager).** Option 1, with the mode shown per decision model in the cockpit and recorded with each decision, so an auditor sees why a `null` was not an error.
+
+**Consequences if accepted.** `TR-STD-23` wording; cockpit decision view shows the mode.
+
+**Follow-ups.** Architect: rule engine DESIGN.
