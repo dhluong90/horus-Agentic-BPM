@@ -1,6 +1,6 @@
 # ADR-0001: Java 21, Spring Boot starters, PostgreSQL
 
-- Status: accepted
+- Status: accepted; superseded in part by ADR-0011 (Spring Boot version)
 - Date: 2026-11-18
 - Deciders: maintainers
 - Module: project
@@ -10,6 +10,8 @@ The engines are embedded libraries. The stack must match where adopters already 
 
 ## Decision
 Java 21 as the baseline with Java 25 in the CI matrix; framework-free `*-core` modules; Spring Boot 3.4+ starters for integration; PostgreSQL 14+ as the first and, for 0.x, only storage backend behind a storage SPI; Spring JDBC rather than JPA; Flyway for migrations.
+
+Superseded in part on 2026-11-18: the Spring Boot version is set by ADR-0011 (Spring Boot 4.x primary, 3.5.x tested until 1.0). The rest of this decision stands.
 
 ## Options considered
 1. Java and Spring Boot (chosen): largest overlap with target hosts; starters make one-dependency embedding possible.

@@ -1,0 +1,35 @@
+sequenceDiagram
+  autonumber
+  participant W as Engine worker (replica A)
+  participant DB as PostgreSQL (pre_timer, pre_token)
+  participant AD as Host adapter
+  participant X as External agent or service
+
+  rect rgb(230, 242, 241)
+    Note over W,DB: TX1: claim with lease, commit (target under 5 ms)
+    W->>DB: token reaches agentTask or remote serviceTask: token WAITING_ASYNC
+    W->>DB: job CLAIMED, locked_by=A, locked_until=now() + timeout + jobs.lease-margin, attempt+1
+    W->>DB: COMMIT
+  end
+  Note over W,X: Outside any transaction: no DB connection, no row lock
+  W->>AD: execute(invocation with attemptId, inputs, timeout)
+  AD->>X: HTTP or MCP call
+  X-->>AD: output, error, or nothing
+  AD-->>W: result, or cancelled by the worker at the step timeout
+  rect rgb(230, 242, 241)
+    Note over W,DB: TX2: fresh transaction
+    W->>DB: SELECT job WHERE id=? AND locked_by=A AND locked_until > now() FOR UPDATE
+    alt lease still held by A
+      alt success: output valid, guardrail allow
+        W->>DB: history row, advance token, job DONE, processes.step.completed.v1
+      else failure, retries left (retry.max)
+        W->>DB: job DUE, next_fire_at=now()+backoff, lease cleared
+      else failure, attempts exhausted
+        W->>DB: pre_incident OPEN and token paused, or start compensation
+      end
+      W->>DB: COMMIT
+    else lease expired and taken over
+      W->>DB: ROLLBACK: late result discarded, the newer attempt owns the step
+    end
+  end
+  Note over W,DB: Crash between TX1 and TX2: any replica's poller reclaims the job after locked_until with FOR UPDATE SKIP LOCKED and a new attemptId

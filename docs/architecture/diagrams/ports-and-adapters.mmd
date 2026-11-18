@@ -1,0 +1,27 @@
+flowchart LR
+  subgraph In["Inbound adapters"]
+    direction TB
+    J["Host Java code"]
+    R["*-rest controllers"]
+    S["Scheduler thread<br/>(starter)"]
+  end
+  subgraph Core["*-core: functional core"]
+    direction TB
+    IP["Inbound ports<br/>RuleEngine, VersionService<br/>ProcessEngine, TaskService,<br/>MigrationService"]
+    D["Domain<br/>sealed Expr tree, CompiledRuleSet,<br/>token runtime, state machines,<br/>Money, ULID"]
+    OP["Outbound ports<br/>storage, CompiledCache, Clock,<br/>TenantResolver, CallerResolver,<br/>event publisher, RuleFunctionRegistry,<br/>AgentAdapter, ServiceAdapter,<br/>BusinessCalendar, OutputSchemaValidator"]
+    IP --> D
+    D --> OP
+  end
+  subgraph Out["Outbound adapters"]
+    direction TB
+    P["*-postgres<br/>JdbcClient, Flyway, SKIP LOCKED,<br/>LISTEN/NOTIFY"]
+    H["Host beans<br/>security, events, adapters, calendar"]
+    T["*-test<br/>in-memory ports, fixed Clock"]
+  end
+  J --> IP
+  R --> IP
+  S --> IP
+  OP -.->|"implemented by"| P
+  OP -.->|"implemented by"| H
+  OP -.->|"implemented by"| T

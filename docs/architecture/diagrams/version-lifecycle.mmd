@@ -1,0 +1,13 @@
+stateDiagram-v2
+  direction LR
+  [*] --> DRAFT: create, import, or copy of a retired version
+  DRAFT --> DRAFT: edit (lockVersion), validate, simulate
+  DRAFT --> PENDING_APPROVAL: request-publish, zero validation errors
+  PENDING_APPROVAL --> DRAFT: reject
+  PENDING_APPROVAL --> PUBLISHED: approve by a different identity
+  PUBLISHED --> RETIRED: newer version effective, or retire
+  RETIRED --> [*]
+  note right of RETIRED
+    Immutable. Readable for
+    explain and replay forever.
+  end note

@@ -1,0 +1,18 @@
+stateDiagram-v2
+  direction LR
+  [*] --> RUNNING: start (idempotency key, business key)
+  RUNNING --> RUNNING: tokens advance, wait, fork, join; incident opened or resolved
+  RUNNING --> COMPLETED: last token reaches end
+  RUNNING --> CANCELLED: cancel
+  RUNNING --> COMPENSATING: retries exhausted with onFailure compensate, or throwCompensation
+  COMPENSATING --> FAILED: stack walked, or manual compensation resolved
+  COMPLETED --> [*]
+  CANCELLED --> [*]
+  FAILED --> [*]
+  note right of RUNNING
+    Positions are pre_token rows:
+    ACTIVE, WAITING_USER, WAITING_ASYNC,
+    WAITING_TIMER, JOINED, COMPLETED,
+    COMPENSATED. An incident pauses
+    one token, not the instance.
+  end note

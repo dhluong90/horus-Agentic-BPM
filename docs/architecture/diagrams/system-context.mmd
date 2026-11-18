@@ -1,0 +1,32 @@
+flowchart LR
+  Ops(["Operators and approvers<br/>(people)"])
+  Dev(["Host developers<br/>(Java API)"])
+  Cockpit["Cockpit<br/>React 18 static assets"]
+  subgraph Host["Host Spring Boot service (one JVM)"]
+    direction TB
+    App["Business code"]
+    RE[["Rule Engine<br/>Java 21 library"]]
+    PE[["Process Engine<br/>Java 21 library"]]
+    REST["Engine REST layer (optional)<br/>/api/bpm/rules/v1<br/>/api/bpm/processes/v1"]
+    Adp["Host adapters<br/>AgentAdapter, ServiceAdapter"]
+  end
+  DB[("Host PostgreSQL 14+<br/>host tables, rle_*, pre_*")]
+  IdP["Identity provider<br/>(host Spring Security, OIDC)"]
+  Agent["Model or agent API<br/>HTTP or MCP"]
+  Svc["Other systems<br/>core banking, partners"]
+  Bus["Host event sink<br/>audit, analytics"]
+
+  Ops -->|"HTTPS"| Cockpit
+  Cockpit -->|"JSON over HTTPS, bearer token"| REST
+  Dev -->|"in-process"| App
+  App -->|"RuleEngine API"| RE
+  App -->|"ProcessEngine API"| PE
+  REST --> RE
+  REST --> PE
+  PE -.->|"decision step, guardrail<br/>RuleEngine API only"| RE
+  PE -->|"after TX1 commit"| Adp
+  Adp -->|"bounded timeout,<br/>no DB connection held"| Agent
+  Adp -->|"bounded timeout,<br/>no DB connection held"| Svc
+  Host -->|"JDBC, host DataSource<br/>and transactions"| DB
+  REST -.->|"token validation"| IdP
+  Host -.->|"events .v1 through<br/>the host publisher"| Bus

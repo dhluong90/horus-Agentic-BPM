@@ -74,4 +74,4 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECURITY.md`](SECUR
 
 ## Licence
 
-PolyForm Noncommercial License 1.0.0: free to use, modify and share for noncommercial purposes. Any commercial use requires a commercial licence from HORUS; see [`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md). Contributions are accepted under [`CLA.md`](CLA.md). Full text in [`LICENSE`](LICENSE).
+Licensed under the PolyForm Noncommercial License 1.0.0. For any other use, contact HORUS. See [`LICENSE`](LICENSE) and [`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md). Contributions are accepted under [`CLA.md`](CLA.md).

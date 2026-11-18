@@ -2,7 +2,7 @@
 
 Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockpit. Humans, services and AI agents take steps in the same process.
 
-Design preview: this wiki describes the 0.1 target. Nothing is released yet and the API may change until 1.0. Licence: PolyForm Noncommercial 1.0.0 for noncommercial use, commercial licence from HORUS otherwise (see [[FAQ]]).
+Design preview: this wiki describes the 0.1 target. Nothing is released yet and the API may change until 1.0. Licensed under the PolyForm Noncommercial License 1.0.0. For any other use, contact HORUS. See [LICENSE](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/LICENSE).
 
 ![System context](images/system-context.svg)
 

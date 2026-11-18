@@ -1,0 +1,36 @@
+sequenceDiagram
+  autonumber
+  participant C as Client or host code
+  participant PE as ProcessEngine / TaskService
+  participant DB as PostgreSQL (pre_*)
+
+  C->>PE: start loan-origination, businessKey LN-123, Idempotency-Key k1
+  PE->>DB: look up pre_idempotency (tenant, start, k1)
+  alt key unknown
+    PE->>DB: INSERT pre_instance ... ON CONFLICT (tenant_id, definition_key, business_key) DO NOTHING
+    alt row inserted
+      PE->>DB: INSERT pre_token ACTIVE at start then run sync steps (decision, gateways, local serviceTask) until a wait state
+      PE->>DB: INSERT pre_history rows, pre_task OPEN at the first userTask then events processes.instance.started.v1, processes.task.created.v1
+      PE->>DB: INSERT pre_idempotency (request_hash, 201, body) then COMMIT
+      PE-->>C: 201 Created
+    else business key already used
+      PE->>DB: read existing instance then INSERT pre_idempotency (200, body) then COMMIT
+      PE-->>C: 200 OK, existing instance
+    end
+  else same key, same request hash
+    PE-->>C: stored status and body, no second effect
+  else same key, different request hash
+    PE-->>C: 422 IDEMPOTENCY_KEY_REUSE_MISMATCH
+  else first request with this key still running
+    PE-->>C: 409 IDEMPOTENCY_IN_FLIGHT, Retry-After: 1
+  end
+
+  C->>PE: complete task T1, If-Match "3", Idempotency-Key k2
+  PE->>PE: four-eyes: caller not in forbidden_users, else 403 SELF_APPROVAL_FORBIDDEN
+  PE->>DB: UPDATE pre_task SET status=COMPLETED, lock_version=4 WHERE tenant_id=? AND id=? AND lock_version=3
+  alt 1 row updated
+    PE->>DB: advance token through sync steps, INSERT pre_history, event processes.task.completed.v1, COMMIT
+    PE-->>C: 200 OK, ETag "4"
+  else 0 rows updated
+    PE-->>C: 409 VERSION_CONFLICT, nothing written
+  end

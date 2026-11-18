@@ -7,7 +7,7 @@ Design preview: answers describe the 0.1 target unless they say otherwise.
 ## Positioning
 
 **Why not Drools, Camunda or Flowable?**
-They are mature products with a far larger scope. HORUS Agentic BPM is for teams that need decision tables and approval flows inside their own service, with a licence and footprint they control, and that want AI agents as process participants with deterministic guardrails. The trade-offs are in [[Principles]].
+They are mature products with a far larger scope. HORUS Agentic BPM is for teams that need decision tables and approval flows inside their own service, with a footprint they control, and that want AI agents as process participants with deterministic guardrails. The trade-offs are in [[Principles]].
 
 **What does "agentic" mean here?**
 Classic BPM assigns steps to people and systems. Here an AI agent can take a step too, through an `agentTask`: it receives bounded inputs, must return output that matches a JSON Schema, that output is checked by a rule set, and a human approves when the rules say so. The engine never embeds or calls a model; the host registers an adapter. See [[Concepts]] and [[Process Engine Overview]].
@@ -37,11 +37,8 @@ It has none. The cockpit talks only to the REST layer of your service (ADR-0005)
 
 ## Licence
 
-**Can I use it commercially?**
-Not under the public licence. The PolyForm Noncommercial License 1.0.0 covers personal, research, educational, evaluation and non-profit use. Any commercial use, including internal business use and embedding in products, needs a commercial licence from HORUS. See `COMMERCIAL-LICENSE.md` in the repository.
-
-**Is it open source?**
-It is source-available. A noncommercial licence does not meet the Open Source Definition, so the maintainers do not call it open source. The code, the design and the issue tracker are public, and contributions are welcome under the CLA (`CLA.md`). See [[Contributing]].
+**What licence does it use?**
+Licensed under the PolyForm Noncommercial License 1.0.0. For any other use, contact HORUS. See [LICENSE](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/LICENSE) and [COMMERCIAL-LICENSE.md](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/COMMERCIAL-LICENSE.md). The licence text is the only authority.
 
 **Who decides what goes in?**
 The maintainers. Decisions are recorded as ADRs in `docs/adr/`; scope and dates are on the [[Roadmap]].

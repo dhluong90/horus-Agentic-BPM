@@ -1,0 +1,27 @@
+sequenceDiagram
+  autonumber
+  actor Alice as alice (rules:author)
+  actor Bob as bob (rules:approve)
+  participant SVC as VersionService (replica A)
+  participant DB as PostgreSQL (rle_version, rle_rule_set)
+  participant B as Replica B (compiled cache)
+
+  Alice->>SVC: :request-publish v2, effectiveFrom, If-Match "4", Idempotency-Key
+  SVC->>DB: type-check passes then UPDATE status=PENDING_APPROVAL, requested_by=alice WHERE status='DRAFT' AND lock_version=4
+  SVC-->>Alice: 200, ETag "5", event rules.version.publish-requested.v1
+  Alice->>SVC: :approve v2
+  SVC-->>Alice: 403 SELF_APPROVAL_FORBIDDEN (approver equals requested_by, checked before any write)
+  Bob->>SVC: :approve v2, If-Match "5", Idempotency-Key
+  alt bob differs from requested_by, status PENDING_APPROVAL, lockVersion 5
+    SVC->>DB: UPDATE status=PUBLISHED, approved_by=bob, lock_version=6 then cache_epoch+1 then event rules.version.published.v1 then COMMIT
+    SVC->>DB: pg_notify('horus_rle_cache', tenant, rule set, epoch) after commit
+    SVC-->>Bob: 200, ETag "6"
+  else stale If-Match or already decided
+    SVC-->>Bob: 409 VERSION_CONFLICT or 409 INVALID_STATE
+  end
+  alt LISTEN connection available
+    DB-->>B: NOTIFY: evict entry within milliseconds
+  else transaction-mode pooler or dropped listener
+    B->>DB: epoch sweep every cache.epoch-check-interval (5 s): cache_epoch moved, evict
+  end
+  Note over DB,B: Evaluation picks the latest effective_from <= clock, so v2 applies at effectiveFrom without a wake-up. The scheduler retires v1 then and emits rules.version.retired.v1

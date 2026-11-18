@@ -1,0 +1,34 @@
+sequenceDiagram
+  autonumber
+  participant W as Engine worker
+  participant AD as AgentAdapter (host)
+  participant V as OutputSchemaValidator
+  participant RE as RuleEngine (in-process)
+  participant DB as PostgreSQL (pre_*, rle_decision)
+
+  Note over W,DB: TX1 already committed: bounded inputs resolved, fields with mask true stored as HMAC in pre_history, lease held
+  W->>AD: execute(agent, inputs in clear, outputSchema id, attemptId, timeout)
+  AD-->>W: raw output and latency
+  rect rgb(230, 242, 241)
+    Note over W,DB: TX2, lease verified first
+    W->>V: validate output against outputSchema
+    alt schema invalid
+      V-->>W: AGENT_SCHEMA_INVALID: counts as a failed attempt (retry or incident)
+    else schema valid
+      W->>RE: evaluate(guardrails.decision, output)
+      RE->>DB: INSERT rle_decision (same transaction)
+      alt allow = true
+        RE-->>W: allow, decisionId
+        W->>DB: history: output, guardrailDecisionId, latency then advance token
+      else allow = false, or decision error (fail closed, reason GUARDRAIL_EVALUATION_ERROR)
+        RE-->>W: allow false, reasons, matched rule ids
+        alt onViolation route-to-human
+          W->>DB: approval pre_task carrying inputs, output, reasons, matched rules then triggering identity in forbidden_users
+        else onViolation fail
+          W->>DB: pre_incident OPEN, or compensation when onFailure is compensate
+        end
+      end
+    end
+    W->>DB: COMMIT
+  end
+  Note over W,DB: A reviewer edit or rejection on the approval task is stored as human_override in pre_history

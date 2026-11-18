@@ -1,0 +1,18 @@
+flowchart TB
+  subgraph One["Single service"]
+    direction LR
+    S1["Service with engines<br/>cockpit at /bpm/cockpit"] --> D1[("PostgreSQL")]
+  end
+  subgraph Many["Several services, one cockpit"]
+    direction LR
+    C2["Standalone cockpit<br/>CORS allowlist on each host"] --> S2a["Service A<br/>Rule Engine"]
+    C2 --> S2b["Service B<br/>both engines"]
+    S2a --> D2a[("Database A")]
+    S2b --> D2b[("Database B")]
+  end
+  subgraph Replicas["Replicas of one service"]
+    direction LR
+    R1["Replica 1"] --> D3[("Shared PostgreSQL<br/>jobs: SKIP LOCKED leases<br/>joins: instance row lock<br/>caches: cache_epoch and NOTIFY")]
+    R2["Replica 2"] --> D3
+    R3["Replica 3"] --> D3
+  end

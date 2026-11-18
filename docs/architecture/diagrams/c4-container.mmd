@@ -1,0 +1,23 @@
+flowchart TB
+  Browser["Operator browser<br/>Cockpit: React 18, TypeScript 5, Vite"]
+  subgraph JVM["Host service: Java 21, Spring Boot 4.x"]
+    direction TB
+    CockpitStarter["cockpit-spring-boot-starter<br/>static assets at /bpm/cockpit"]
+    RESTc["*-rest<br/>Spring WebMvc, RFC 9457, OpenAPI 3.1"]
+    Starter["*-spring-boot-starter<br/>@AutoConfiguration, TenantResolver,<br/>scheduler thread, Micrometer"]
+    Core["*-core<br/>parser, evaluator, token runtime<br/>Java 21 + Jackson only"]
+    PG["*-postgres<br/>JdbcClient, Flyway per engine,<br/>SKIP LOCKED poller, LISTEN/NOTIFY"]
+    Adapters["Host adapters<br/>AgentAdapter, ServiceAdapter beans"]
+  end
+  DB[("PostgreSQL 14+<br/>host schema with rle_* and pre_*")]
+  Ext["External agent or service<br/>HTTP or MCP"]
+
+  Browser -->|"HTTPS, JSON, bearer token"| RESTc
+  Browser -->|"HTTPS, static files"| CockpitStarter
+  RESTc --> Core
+  Starter -->|"wires"| Core
+  Starter -->|"wires"| PG
+  PG -->|"implements storage ports"| Core
+  PG -->|"JDBC, host DataSource"| DB
+  Core -->|"adapter port, called after TX1 commit"| Adapters
+  Adapters -->|"bounded timeout"| Ext

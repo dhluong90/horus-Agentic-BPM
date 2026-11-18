@@ -5,4 +5,4 @@ contact_links:
     about: Please do not report security issues publicly. See SECURITY.md.
   - name: Commercial licence
     url: https://github.com/dhluong90/horus-Agentic-BPM/blob/main/COMMERCIAL-LICENSE.md
-    about: Using the engines commercially requires a licence from HORUS.
+    about: Licensed under the PolyForm Noncommercial License 1.0.0. For any other use, contact HORUS.

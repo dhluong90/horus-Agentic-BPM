@@ -1,0 +1,30 @@
+sequenceDiagram
+  autonumber
+  participant H as Host service (@Transactional)
+  participant RE as RuleEngine (core)
+  participant C as Compiled cache (replica)
+  participant DB as PostgreSQL (rle_*)
+
+  H->>RE: evaluate("card-fee", input)
+  RE->>RE: resolve tenant from host security context, clock from Clock bean
+  RE->>C: get (tenant, card-fee)
+  alt cache hit
+    C-->>RE: published versions with effective_from, compiled trees
+  else cache miss
+    RE->>DB: SELECT published versions (tenant, rule set)
+    RE->>RE: compile to typed tree, bind slots
+    RE->>C: put, LRU bounded by cache.max-entries
+  end
+  RE->>RE: pick latest effective_from <= clock, bind inputs to slots, walk tree (no I/O)
+  alt decision-log.mode = transactional
+    RE->>DB: INSERT rle_decision (caller's connection and transaction)
+  else decision-log.mode = async
+    RE->>DB: INSERT rle_decision_outbox (caller's transaction, small row)
+  end
+  RE-->>H: DecisionResult (decisionId, version, outputs, matchedRuleIds)
+  alt host commits
+    H->>DB: COMMIT: business rows and decision row persist together
+  else host rolls back
+    H->>DB: ROLLBACK: no decision row, no orphan
+  end
+  Note over RE,DB: Errors (UNIQUE_HIT_VIOLATION, EVALUATION_ERROR) return no partial outputs and are logged with their outcome

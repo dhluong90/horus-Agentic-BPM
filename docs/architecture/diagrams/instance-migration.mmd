@@ -1,0 +1,8 @@
+flowchart LR
+  V1[("definition v1<br/>running instances")] --> P["POST /migrations<br/>plan: v1 to v2"]
+  P --> D["/{id}:validate (dry run)<br/>instances per step,<br/>steps without a same-id target<br/>0 rows changed"]
+  D -->|"plan valid"| X["/{id}:execute<br/>batches of 100; per instance:<br/>lock pre_instance, remap tokens,<br/>pin v2, MIGRATED history row"]
+  D -->|"conflicts"| F["M2: leave those instances on v1<br/>M3: explicit stepMappings,<br/>or cancel instances"]
+  F --> D
+  X --> V2[("definition v2<br/>migrated instances")]
+  X -.->|"one instance fails"| I[["incident on that instance<br/>batch continues"]]
