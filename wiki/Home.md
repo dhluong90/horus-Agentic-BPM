@@ -7,7 +7,10 @@
 ## Start here
 - [[Getting Started]] — add the Rule Engine starter, write a decision table, evaluate it in ten minutes.
 - [[Concepts]] — decisions, rule sets, versions, hit policies, the decision log.
+- [[Principles]] — the twelve rules that decide trade-offs.
 - [[Architecture]] — libraries not servers, host database, cockpit, how the two engines relate.
+- [[Technical Requirements]] — numbered, testable requirements that gate releases.
+- [[Technical Stack]] — what the engines and cockpit are built with, and what was rejected.
 
 ## Rule Engine guide
 1. [[Rule Engine Authoring Decision Tables]]
@@ -25,7 +28,7 @@
 - [[Cockpit]] · [[Multi Tenancy and Security]] · [[FAQ]]
 
 ## Project
-- [[Roadmap]] · [[Contributing]] · [[Release Notes]]
+- [[Roadmap]] (milestones to 1.0) · [[Contributing]] · [[Release Notes]]
 
 ## Why "Agentic"
 Classic BPM assigns tasks to people and systems. Agentic BPM adds a third participant: an AI agent that can pick up a task, reason over bounded inputs, and return a structured result, while the Rule Engine provides deterministic guardrails (limits, eligibility, pricing) and the Process Engine provides maker-checker approvals and a complete audit trail. Agents get autonomy inside rails that risk and compliance teams can read.
