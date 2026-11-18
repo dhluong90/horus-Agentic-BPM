@@ -43,7 +43,7 @@ After approval the version is published but not yet effective. Evaluation always
 
 History is never rewritten, so a rollback is a new version with old content.
 
-1. Open the retired version in the cockpit and choose "Restore as draft", or export it (`GET .../versions/2/export`) and import it as a new draft.
+1. Export the retired version (`GET .../versions/2/export`, or the export button in the cockpit editor) and import the file as a new draft.
 2. Request publication and approve as above.
 
 ## Retire a rule set
@@ -52,7 +52,7 @@ History is never rewritten, so a rollback is a new version with old content.
 
 ## Give one tenant different rules
 
-A rule set is defined per tenant. Copy a shared default into a tenant ("Fork from tenant default" in the cockpit, or export and import under the other tenant) and let it diverge. There is no inheritance at evaluation time; evaluation stays deterministic and explainable.
+A rule set is defined per tenant. Copy a shared default into a tenant by exporting it under one tenant and importing the file under the other, where it arrives as a new draft, and let it diverge. There is no inheritance at evaluation time; evaluation stays deterministic and explainable.
 
 ## Troubleshooting
 

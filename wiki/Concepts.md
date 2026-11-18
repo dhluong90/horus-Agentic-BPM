@@ -2,7 +2,7 @@
 
 This page defines the terms used everywhere else in the wiki. Other pages link here instead of redefining them.
 
-Design preview: describes the 0.1 target (Rule Engine) and the 0.2 target (Process Engine terms).
+Design preview: describes the 0.1 target (Rule Engine) and the Process Engine 0.1 target (Process Engine terms).
 
 ## Rule Engine terms
 
@@ -40,7 +40,9 @@ The decision log records the version each decision used, so a retired version ca
 
 | Term | Meaning |
 |---|---|
-| Process definition | A versioned description of steps (tasks, gateways, timers) that an instance moves through. Running instances pin the version they started with. |
+| Process definition | A versioned description of steps (tasks, gateways, timers) that an instance moves through. Running instances pin the version they started with. Every definition has a diagram view (see Diagram). |
+| Diagram | The graphical view of a process definition or instance. Every definition has one; when no layout is stored, the cockpit lays it out automatically. The layout is stored apart from the definition, so moving a box changes no behaviour and needs no approval. An instance's diagram shows its current tokens. |
+| Token | A marker for where an instance is in its definition. An instance has one token per active path, so parallel branches hold several tokens at once. |
 | Process instance | One execution of a definition, for example one loan application. |
 | Task | A step that waits for a participant. A user task waits for a person, a service task for host code, an agent task for an AI agent. |
 | Agent task (`agentTask`) | A step performed by an AI agent through an adapter the host registers. The agent receives bounded inputs and must return output that validates against a JSON Schema and passes a guardrail rule set; otherwise the engine routes the step to a human or fails it. The engine never embeds a model. |
@@ -56,4 +58,4 @@ Behaviour of these terms is described in [[Process Engine Overview]].
 
 ## What the engines are not
 
-Not a BPMN 2.0 or DMN FEEL implementation, not a server you deploy separately, not a workflow tool for infrastructure. The reasons are in [[Principles]] and [[FAQ]].
+Not a BPMN 2.0 or DMN FEEL implementation: processes use the engine's own notation, with a BPMN subset for import and export. Not a server you deploy separately, not a workflow tool for infrastructure. The reasons are in [[Principles]] and [[FAQ]].

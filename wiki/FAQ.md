@@ -24,7 +24,7 @@ Yes. Draft in the cockpit, simulate, request publication, a second person approv
 Yes. Same version, inputs and clock give the same outputs, and the decision log records all three (TR-DET-01, TR-DET-05 in [[Technical Requirements]]).
 
 **Does it read DMN or BPMN files?**
-Not in 0.1. Import of DMN decision tables and a BPMN subset is on the [[Roadmap]].
+Not in 0.1. Both are planned for M3, which ends on 21 May 2027: import and export of a BPMN subset for process definitions, and import of DMN decision tables. A BPMN file with elements outside the subset is rejected, and the error names those elements. The engine's own process notation stays the source of truth. BPMN export and DMN import can move after 1.0 if the M3 checkpoint fails; see [[Roadmap]].
 
 **Which databases?**
 See [[Technical Stack]]. The storage layer sits behind a small SPI so that others can follow.
@@ -33,7 +33,7 @@ See [[Technical Stack]]. The storage layer sits behind a small SPI so that other
 The `*-core` artifacts have no Spring dependency (TR-EMB-03). Wiring without Spring is possible but not documented yet (ADR-0001).
 
 **Where is the cockpit's state?**
-It has none. The cockpit talks only to the REST layer of your service (ADR-0005). See [[Cockpit]].
+It has none. The cockpit talks only to the REST layer of your services (ADR-0005). Hosted standalone, it reaches several services after one sign-in. See [[Cockpit]].
 
 ## Licence
 
