@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/dhluong90/horus-Agentic-BPM/blob/main/SECURITY.md
+    about: Please do not report security issues publicly. See SECURITY.md.
+  - name: Commercial licence
+    url: https://github.com/dhluong90/horus-Agentic-BPM/blob/main/COMMERCIAL-LICENSE.md
+    about: Using the engines commercially requires a licence from HORUS.

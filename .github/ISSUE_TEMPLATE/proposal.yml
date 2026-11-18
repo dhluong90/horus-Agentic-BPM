@@ -1,0 +1,26 @@
+name: Design proposal
+description: A design or API change that needs discussion before implementation. Accepted proposals become ADRs.
+title: "Proposal: <one line>"
+labels: ["type:proposal", "status:needs-triage"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+    validations: { required: true }
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+    validations: { required: true }
+  - type: textarea
+    id: design
+    attributes:
+      label: Detailed design
+      description: API, storage, compatibility, security considerations.
+    validations: { required: true }
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and trade-offs
+    validations: { required: true }

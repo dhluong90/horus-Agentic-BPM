@@ -1,0 +1,22 @@
+[
+  {"name":"module:process-engine","color":"3d8f88","description":"Process Engine"},
+  {"name":"module:rule-engine","color":"3d8f88","description":"Rule Engine"},
+  {"name":"module:cockpit","color":"3d8f88","description":"Cockpit dashboard"},
+  {"name":"module:examples","color":"6b7f7b","description":"Example host services"},
+  {"name":"module:docs","color":"6b7f7b","description":"Wiki and documentation"},
+  {"name":"type:feature","color":"0052cc","description":"New capability"},
+  {"name":"type:bug","color":"d73a4a","description":"Behaviour differs from documentation or specification"},
+  {"name":"type:proposal","color":"5319e7","description":"Design or API change needing discussion"},
+  {"name":"type:docs","color":"0075ca","description":"Documentation only"},
+  {"name":"type:chore","color":"7a7a7a","description":"Build, CI, housekeeping"},
+  {"name":"status:needs-triage","color":"ededed","description":"Not yet reviewed by a maintainer"},
+  {"name":"status:accepted","color":"c2e0c6","description":"Agreed; ready to be worked on"},
+  {"name":"status:in-progress","color":"bfd4f2","description":"Someone is working on it"},
+  {"name":"status:blocked","color":"000000","description":"Waiting on something else"},
+  {"name":"status:needs-info","color":"fef2c0","description":"Waiting for the reporter"},
+  {"name":"help wanted","color":"008672","description":"Maintainers welcome a contribution"},
+  {"name":"good first issue","color":"7057ff","description":"Small, well-scoped, good for newcomers"},
+  {"name":"priority:p0","color":"b60205","description":"Blocks a release or breaks users"},
+  {"name":"priority:p1","color":"d93f0b","description":"Next milestone"},
+  {"name":"priority:p2","color":"fbca04","description":"Later"}
+]

@@ -1,0 +1,35 @@
+name: Bug report
+description: Behaviour differs from the documentation or the specification.
+title: "<module>: <what is wrong, in one line>"
+labels: ["type:bug", "status:needs-triage"]
+body:
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      options: [process-engine, rule-engine, cockpit, examples, docs]
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "rule-engine 0.1.0, Java 21, Spring Boot 3.3.4, PostgreSQL 16"
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour and its source
+      description: Quote the wiki page or specification id that defines the correct behaviour.
+    validations: { required: true }
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A rule set or process definition plus the inputs, or a link to a small repository.
+      render: yaml
+    validations: { required: true }

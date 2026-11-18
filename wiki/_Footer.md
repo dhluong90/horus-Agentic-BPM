@@ -1,0 +1,1 @@
+HORUS Agentic BPM · PolyForm Noncommercial 1.0.0 · Commercial licence from HORUS · Design preview, APIs may change before 1.0 · Source of this wiki: the `wiki/` folder of the repository, edit it by pull request.

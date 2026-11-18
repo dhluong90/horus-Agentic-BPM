@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a capability for the Process Engine, Rule Engine or Cockpit.
+title: "<module>: <outcome in plain words>"
+labels: ["type:feature", "status:needs-triage"]
+body:
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      options: [process-engine, rule-engine, cockpit, examples, docs]
+    validations: { required: true }
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and why the current design does not allow it.
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: Describe the behaviour, ideally as Given / When / Then with a concrete example. Reference wiki pages where relevant.
+    validations: { required: true }
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This stays within the project's scope (embeddable library, deterministic evaluation, no arbitrary code execution)
+          required: true
