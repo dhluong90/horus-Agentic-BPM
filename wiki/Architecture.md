@@ -35,6 +35,10 @@ Rule Engine never depends on Process Engine. Process Engine depends only on the 
 ![Process instance states](images/process-instance-states.svg)
 
 - Steps run in the host's transaction; service side effects commit or roll back with engine state.
+- Mutating operations are idempotent by key; instances may carry a unique business key; stale task completions are rejected by optimistic locking (ADR-0006).
+- Steps with external effects declare `compensate` handlers; on failure the engine runs them in reverse order, each with retry and incidents (ADR-0007).
+- SLA deadlines are computed through a `BusinessCalendar` SPI (working hours and holidays), not by adding physical time.
+- Running instances can be migrated to a newer definition version through a validated plan, in batches, with history.
 - Timers and jobs are rows claimed with `SELECT … FOR UPDATE SKIP LOCKED`; correct across replicas without an external scheduler.
 - A failed step becomes an **incident** with cause, retry count and resolution actions.
 - Agent steps: see [[Process Engine Overview]].
@@ -42,8 +46,8 @@ Rule Engine never depends on Process Engine. Process Engine depends only on the 
 ## Storage
 | Engine | Tables (prefix in the host database) |
 |---|---|
-| Rule Engine | `rle_rule_set`, `rle_version`, `rle_rule`, `rle_decision`, `rle_decision_outbox` |
-| Process Engine | `pre_definition`, `pre_instance`, `pre_task`, `pre_timer`, `pre_history`, `pre_incident` |
+| Rule Engine | `rle_rule_set`, `rle_version`, `rle_rule`, `rle_decision`, `rle_decision_outbox`, `rle_idempotency` |
+| Process Engine | `pre_definition`, `pre_instance`, `pre_task`, `pre_timer`, `pre_history`, `pre_incident`, `pre_idempotency`, `pre_calendar`, `pre_holiday`, `pre_migration` |
 
 Every table carries `tenant_id` first in its indexes. Definitions are stored normalised and as a canonical JSON document whose hash is part of the version identity. Append-only tables can be partitioned by month. Migrations are forward-only and ship with the module.
 

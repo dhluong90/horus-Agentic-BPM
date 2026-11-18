@@ -46,6 +46,8 @@ Request and response schema are published as OpenAPI at `/api/bpm/rules/openapi.
 ```
 `clock` is accepted only from callers with the `rules:simulate` permission.
 
+All mutating endpoints (create, update, lifecycle) accept an `Idempotency-Key` header; a replay within 24 hours returns the original response (ADR-0006). Evaluation itself is pure and safe to retry; when the caller sends an `Idempotency-Key` on `:evaluate`, the engine returns the original decision instead of logging a second one.
+
 ### Evaluate response
 ```json
 { "decisionId": "01JD2X…", "ruleSet": "card-fee", "version": 2, "hitPolicy": "first",

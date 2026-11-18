@@ -31,6 +31,42 @@ Numbered, testable, and tied to a verification method. "Must" requirements gate 
 | TR-SEC-06 | Every release ships an SBOM; dependencies with high or critical vulnerabilities block the release. Must. | CI scan |
 | TR-SEC-07 | OWASP ASVS level 2 for the REST layer and cockpit. Should. | Checklist review per minor release |
 
+## Reliability under retries
+| ID | Requirement | Verification |
+|---|---|---|
+| TR-IDEM-01 | Every mutating operation accepts an idempotency key; a replay within the retention window returns the original result and performs no second effect. Must (M1 for rules, M2 for processes). | Concurrent replay tests |
+| TR-IDEM-02 | Business key unique per tenant and definition; a second start returns the existing instance. Must (M2). | Integration tests |
+| TR-IDEM-03 | Task and instance mutations use optimistic locking; a stale completion is rejected with a conflict. Must (M2). | Concurrency tests |
+| TR-IDEM-04 | Compensate handlers and service handlers receive the step attempt id so hosts can make them idempotent. Must (M2). | API tests |
+
+## Compensation
+| ID | Requirement | Verification |
+|---|---|---|
+| TR-COMP-01 | A step may declare a compensate handler; after retries are exhausted or on explicit throw, completed steps' handlers run in reverse order. Must (M2). | Integration tests with failing steps |
+| TR-COMP-02 | Each compensation has its own retry policy and raises an incident on failure without losing the record of what was compensated. Must (M2). | Fault-injection tests |
+| TR-COMP-03 | `compensate: manual` raises an incident with the step context instead of silently skipping. Must (M2). | Tests |
+
+## Business calendars
+| ID | Requirement | Verification |
+|---|---|---|
+| TR-CAL-01 | SLA durations are computed through the `BusinessCalendar` SPI; the built-in implementation supports weekly hours, holidays and time zone per tenant. Must (M2). | Unit tests across holiday and DST boundaries |
+| TR-CAL-02 | Calendar changes do not move deadlines already computed unless a recompute is requested explicitly. Must (M2). | Tests |
+
+## Instance migration
+| ID | Requirement | Verification |
+|---|---|---|
+| TR-MIG-01 | A migration plan between two versions can be validated as a dry run reporting instances per step, unmapped steps and conflicts, without changing anything. Must (M2). | Integration tests |
+| TR-MIG-02 | Execution is batched; each instance is locked, remapped, pinned to the target version and gets a history row; a failure affects only that instance. Must (M2). | Fault-injection tests with 10 000 instances |
+| TR-MIG-03 | Explicit step mapping for renamed steps and cancellation for removed steps; cockpit support. Should (M3). | End-to-end tests |
+
+## Agentic steps
+| ID | Requirement | Verification |
+|---|---|---|
+| TR-AGT-01 | An `agentTask` cannot continue the process until its output validates against the declared JSON Schema and the guardrail rule set returns `allow`; `route-to-human` creates an approval task carrying the output and the matched rules; `fail` raises an incident. Must (M2). | Integration tests with a stub adapter |
+| TR-AGT-02 | Agent inputs, outputs, schema result, guardrail decision id and adapter latency are recorded in history; inputs marked for masking are hashed. Must (M2). | History tests |
+| TR-AGT-03 | Adapters run under the declared timeout and retry policy; the engine never embeds or calls a model directly. Must (M2). | ArchUnit rule; timeout tests |
+| TR-AGT-04 | An MCP tool adapter and reference LLM adapters are provided as examples, outside the engine artifacts. Should (M3). | Example tests |
+
 ## Multi-tenancy
 | ID | Requirement | Verification |
 |---|---|---|

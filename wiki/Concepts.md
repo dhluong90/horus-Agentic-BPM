@@ -13,6 +13,11 @@
 | **Maker-checker** | Publishing a version requires a second identity to approve. Enforced in the engine, not only in the UI. |
 | **Tenant** | An isolation boundary. Rule sets, versions and decisions are always scoped to a tenant. |
 | **Process** (Process Engine) | A definition of steps (tasks, gateways, timers) through which an instance moves. Tasks can be performed by a person, a service or an AI agent. |
+| **Business key** | A caller-chosen identifier for an instance, unique per tenant and definition (for example a loan application number). Starting again with the same key returns the existing instance. |
+| **Idempotency key** | A caller-chosen key on any mutating call. A replay within the retention window returns the original result and has no second effect. |
+| **Compensation** | Declared undo handlers run in reverse order when a later step fails after earlier steps already committed effects in other systems. |
+| **Business calendar** | Working hours and holidays used to compute SLA deadlines (for example 4 business hours), supplied through an SPI. |
+| **Instance migration** | Moving running instances from one definition version to another with a validated step mapping. |
 
 ## Lifecycle of a rule set version
 ![Version lifecycle](images/version-lifecycle.svg)

@@ -23,7 +23,7 @@ Two libraries inside your service, your PostgreSQL, one static cockpit. No engin
 [[Authoring|Rule Engine Authoring Decision Tables]] · [[Expression Language|Rule Engine Expression Language]] · [[Decision API|Rule Engine Decision API]] · [[Versioning|Rule Engine Versioning and Publishing]] · [[Simulation|Rule Engine Simulation and Testing]] · [[Decision Log|Rule Engine Decision Log and Audit]] · [[Configuration|Rule Engine Configuration]]
 
 ## Process Engine
-[[Process Engine Overview]] — scope and the `agentTask` step (milestone 2 and 3).
+[[Process Engine Overview]] — scope and the `agentTask` step (milestone 2; adapters and planning depth in milestone 3).
 
 ## Operate and contribute
 [[Cockpit]] · [[Multi Tenancy and Security]] · [[FAQ]] · [[Contributing]] · [[Release Notes]]

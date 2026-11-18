@@ -1,0 +1,8 @@
+flowchart LR
+  S([start]) --> A[reserve funds<br/>compensate: release funds]
+  A --> B[create account in core<br/>compensate: close account]
+  B --> C[notify partner<br/>compensate: send cancellation]
+  C --> E([end])
+  C -. fails after retries .-> X{{compensation<br/>runs completed steps<br/>in reverse order}}
+  X --> C2[send cancellation] --> B2[close account] --> A2[release funds] --> F([ended: compensated])
+  X -. a compensate handler fails .-> I[[incident<br/>retry or resolve by hand]]

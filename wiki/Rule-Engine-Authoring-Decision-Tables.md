@@ -1,6 +1,6 @@
 # Authoring Decision Tables
 
-A rule set is a YAML (or JSON) document, or the same structure authored in the [[Cockpit]]. _Design preview._
+A rule set is a YAML (or JSON) document kept in your repository and imported, or, from Cockpit 0.2, the same structure edited in a grid. _Design preview._
 
 ## Document structure
 ```yaml
