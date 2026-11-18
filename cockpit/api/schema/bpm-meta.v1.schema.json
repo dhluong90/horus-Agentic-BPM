@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:bpm-meta:v1",
+  "title": "Response of GET /api/bpm/meta, schema version 1",
+  "description": "What this host's engines are and can do. Requires an authenticated caller; no permission beyond that. Changes are additive within v1. The cockpit turns screens on by feature, never by comparing versions, and supports the current and the previous engine minor version (ADR-0014).",
+  "type": "object",
+  "required": ["schemaVersion", "modules", "tenancy", "limits"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "hostId": { "description": "horus.bpm.host-id, if set.", "type": "string", "maxLength": 40 },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["module", "engineVersion", "apiVersion", "features"],
+        "additionalProperties": true,
+        "properties": {
+          "module": { "enum": ["rules", "processes"] },
+          "engineVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" },
+          "apiVersion": { "type": "string", "pattern": "^v[0-9]+$" },
+          "features": {
+            "description": "Feature flags such as rules.simulation, rules.grid-editor, processes.diagram, processes.node-stats.live, processes.node-stats.window, processes.forms, processes.definition-lifecycle, processes.layout, processes.step-catalogue, processes.bpmn-import.",
+            "type": "array", "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[a-z]+(\\.[a-z0-9-]+)+$" }
+          },
+          "settings": {
+            "description": "Host settings the cockpit must respect, for example { \"authoring.cockpit-drafts\": false }.",
+            "type": "object",
+            "additionalProperties": { "type": ["boolean", "integer", "string"] }
+          }
+        }
+      }
+    },
+    "tenancy": {
+      "type": "object",
+      "required": ["switching"],
+      "properties": { "switching": { "type": "boolean" } }
+    },
+    "limits": {
+      "type": "object",
+      "required": ["maxPageSize"],
+      "properties": { "maxPageSize": { "type": "integer", "maximum": 200 } }
+    }
+  }
+}

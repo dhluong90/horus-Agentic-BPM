@@ -1,0 +1,41 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant B as Cockpit incidents
+  end
+  box rgb(224,242,241) Host
+    participant R as REST and IncidentService
+    participant S as Scheduler and adapter executor
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as pre_incident, pre_timer
+  end
+  box rgb(243,229,245) Core and External
+    participant X as Agent or remote service
+  end
+  B->>R: POST /incidents/N3:retry, If-Match "1", Idempotency-Key
+  rect rgb(255,248,225)
+    Note over R,DB: TX0, sync: mark the job due, keep the incident open
+    R->>DB: UPDATE pre_timer SET status DUE, next_fire_at now(), attempt reset
+    R->>DB: UPDATE pre_incident lock_version 2, COMMIT
+  end
+  R-->>B: 200, incident OPEN, retryScheduled true
+  rect rgb(255,248,225)
+    Note over S,DB: TX1, claim with lease
+    S->>DB: SKIP LOCKED claim, COMMIT
+  end
+  rect rgb(243,229,245)
+    Note over S,X: No transaction while the call runs
+    S->>X: call with attemptId
+    X-->>S: result or failure
+  end
+  rect rgb(255,248,225)
+    Note over S,DB: TX2
+    alt success
+      S->>DB: advance token, resolve incident, COMMIT
+    else failure again
+      S->>DB: incident retry_count + 1, stays OPEN, COMMIT
+    end
+  end
+  B->>R: next refresh of the incident list, ETag changed
+  R-->>B: incident RESOLVED, or OPEN with a higher retry count

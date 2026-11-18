@@ -1,0 +1,49 @@
+flowchart LR
+  subgraph PZ["Public Zone"]
+    BR["Operator browser<br/>standalone cockpit, tokens in memory"]:::client
+  end
+  subgraph DMZ["Banking DMZ"]
+    WEB["Static web server<br/>bundle, cockpit-hosts.json, CSP"]:::host
+    GW["API gateway and WAF"]:::host
+  end
+  subgraph IZ["Internal Trusted Zone"]
+    IDP["Bank identity provider<br/>OIDC, public client with PKCE"]:::host
+    subgraph H1["Loan service, 3 replicas"]
+      R1["/api/bpm/* REST<br/>CORS allowlist, audience loans-bpm"]:::engine
+    end
+    subgraph H2["KYC service, 2 replicas"]
+      R2["/api/bpm/* REST<br/>CORS allowlist, audience kyc-bpm"]:::engine
+    end
+    D1[("Loan PostgreSQL<br/>rle_*, pre_*")]:::db
+    D2[("KYC PostgreSQL<br/>rle_*, pre_*")]:::db
+  end
+  subgraph CZ["Core and External"]
+    EXT["Systems the hosts call<br/>not reached by the cockpit"]:::external
+  end
+  subgraph OZ["Observability"]
+    LOG["Host security logs<br/>refused tenants, audience errors"]:::obs
+  end
+  BR -->|"1. GET bundle and cockpit-hosts.json"| WEB
+  BR -->|"2. authorization code with PKCE"| IDP
+  BR -->|"3. token per host scope, refresh grant"| IDP
+  BR -->|"4. meta, me, lists with bearer token and ETag"| GW
+  GW -->|"5a. loans host"| R1
+  GW -->|"5b. KYC host"| R2
+  R1 -->|"6a. bounded reads"| D1
+  R2 -->|"6b. bounded reads"| D2
+  R1 -.->|"7. host code only"| EXT
+  R1 -.->|"8. security events"| LOG
+  R2 -.->|"8. security events"| LOG
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  style PZ fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style DMZ fill:none,stroke:#EF6C00,stroke-dasharray:5 5
+  style IZ fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style CZ fill:none,stroke:#6A1B9A,stroke-dasharray:5 5
+  style OZ fill:none,stroke:#546E7A,stroke-dasharray:5 5
+  style H1 fill:none,stroke:#2E7D32
+  style H2 fill:none,stroke:#2E7D32

@@ -1,0 +1,47 @@
+flowchart TB
+  subgraph SHELL["app: shell and composition root"]
+    CFG["Config loader<br/>validates cockpit-hosts.json"]:::client
+    AUTH["Auth: oidc-client-ts<br/>one token store per host, memory only"]:::client
+    REG["Host registry and sessions<br/>state per host, version skew"]:::client
+    TEN["Tenant context<br/>X-Tenant-Id per host"]:::client
+  end
+  subgraph PORTS["api: ports"]
+    HC["HostClient port<br/>fetch, ETag cache, problem parsing"]:::client
+    GEN["Generated clients and zod schemas<br/>from the OpenAPI documents"]:::client
+  end
+  subgraph FEAT["features"]
+    RUL["rules: rule sets, diff, simulation,<br/>approvals, decision log"]:::client
+    PRO["processes: definitions, instances,<br/>agent inspector, migration"]:::client
+    INB["inbox and incidents<br/>k-way merge across hosts"]:::client
+    APR["process approvals and modeller<br/>M3"]:::client
+  end
+  subgraph DIA["diagram, loaded on demand"]
+    RF["React Flow canvas"]:::client
+    DG["dagre automatic layout"]:::client
+    OV["Overlay and node list<br/>tokens, counts, activities"]:::client
+  end
+  HOSTS["Host REST layers<br/>/api/bpm/*"]:::engine
+  CFG -->|"1. hosts and IdP"| AUTH
+  AUTH -->|"2. token per host"| REG
+  REG -->|"3. meta, me"| HC
+  TEN -->|"4. header"| HC
+  RUL --> GEN
+  PRO --> GEN
+  INB --> GEN
+  APR --> GEN
+  GEN -->|"5. typed calls"| HC
+  HC -->|"6. HTTPS"| HOSTS
+  PRO -->|"7. definition and layout"| DIA
+  APR -->|"7. definition and layout"| DIA
+  DG --> RF
+  OV --> RF
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  style SHELL fill:none,stroke:#1565C0
+  style PORTS fill:none,stroke:#1565C0
+  style FEAT fill:none,stroke:#1565C0
+  style DIA fill:none,stroke:#1565C0,stroke-dasharray:5 5

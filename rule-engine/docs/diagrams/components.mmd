@@ -1,0 +1,45 @@
+flowchart TB
+  subgraph STARTER["rule-engine-spring-boot-starter"]
+    AC["Auto-configuration<br/>profile guards, partition job, Micrometer"]:::host
+  end
+  subgraph RESTM["rule-engine-rest"]
+    CTRL["Controllers /api/bpm/rules/v1<br/>RFC 9457, ETag, Idempotency-Key"]:::engine
+  end
+  subgraph CORE["rule-engine-core, no Spring, SQL or network"]
+    direction TB
+    API["api: RuleEngine, VersionService,<br/>DecisionLogQuery, SimulationService"]:::engine
+    COMP["Parser, type checker, compiler<br/>sealed Expr tree, slot binding"]:::engine
+    EVAL["Evaluator: hit policies, Money,<br/>bounded regex, explicit Clock"]:::engine
+    PORTS["Driven ports: VersionStore, DecisionLog,<br/>IdempotencyStore, CompiledCache, CacheSignal"]:::engine
+    SPI["spi: TenantResolver, CallerResolver,<br/>RuleFunctionRegistry, RuleEventPublisher"]:::engine
+  end
+  subgraph PG["rule-engine-postgres"]
+    JDBC["JdbcClient adapters, Flyway rle_*,<br/>LISTEN and epoch, partition maintenance"]:::engine
+  end
+  subgraph TEST["rule-engine-test"]
+    MEM["In-memory adapters, TestClock,<br/>@RuleSetTest, row coverage"]:::engine
+  end
+  HOSTC["Host beans: resolvers, functions,<br/>event publisher"]:::host
+  DB[("Host PostgreSQL")]:::db
+  AC --> CTRL
+  AC --> JDBC
+  CTRL -->|"1. calls"| API
+  API -->|"2. compile on publish and first use"| COMP
+  API -->|"3. evaluate"| EVAL
+  API -->|"4. uses"| PORTS
+  API -->|"5. uses"| SPI
+  JDBC -.->|"6. implements"| PORTS
+  MEM -.->|"6. implements"| PORTS
+  HOSTC -.->|"7. implements"| SPI
+  JDBC -->|"8. JDBC"| DB
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  style STARTER fill:none,stroke:#2E7D32
+  style RESTM fill:none,stroke:#00796B
+  style CORE fill:none,stroke:#00796B,stroke-width:2px
+  style PG fill:none,stroke:#00796B
+  style TEST fill:none,stroke:#00796B

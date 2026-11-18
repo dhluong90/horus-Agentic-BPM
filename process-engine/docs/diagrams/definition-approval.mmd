@@ -1,0 +1,46 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant M as Maker (pipeline or cockpit)
+    participant K as Checker (approver)
+  end
+  box rgb(224,242,241) Host service
+    participant R as REST layer
+    participant D as DefinitionService
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as pre_definition, pre_timer, pre_idempotency
+  end
+  M->>R: POST /definitions/{key}/versions/3:request-approval, If-Match "4", effectiveFrom
+  R->>D: requestApproval(tenant from resolver, caller)
+  rect rgb(255,248,225)
+    Note over D,DB: TX1, sync: idempotency record, validate, change state
+    D->>DB: INSERT idempotency key or read stored result
+    D->>D: validate schema, graph, step registry, guardrail contract (CPU only)
+    D->>DB: UPDATE status PENDING_APPROVAL WHERE lock_version 4
+    D->>DB: publish-requested.v1 through the host publisher
+    D->>DB: COMMIT
+  end
+  R-->>M: 200, ETag "5"
+  K->>R: GET /definitions/{key}/versions/3/diff
+  R-->>K: nodes and edges added, removed, changed
+  K->>R: POST /definitions/{key}/versions/3:approve, If-Match "5"
+  R->>D: approve(caller)
+  alt caller is the requester
+    D-->>R: SelfApprovalForbiddenException
+    R-->>K: 403 SELF_APPROVAL_FORBIDDEN, nothing written
+  else a newer version is already active
+    R-->>K: 409 VERSION_SUPERSEDED
+  else other identity, lock version matches
+    rect rgb(255,248,225)
+      Note over D,DB: TX2, sync
+      D->>DB: UPDATE status ACTIVE, approved_by, approved_at
+      D->>DB: INSERT pre_timer DEFINITION_EFFECTIVE at effective_from
+      D->>DB: approved.v1 event, COMMIT
+    end
+    R-->>K: 200, ETag "6"
+  end
+  rect rgb(255,248,225)
+    Note over D,DB: TX3 at effective_from, scheduler: retire the previous version
+    D->>DB: UPDATE previous ACTIVE to RETIRED, retired.v1 event, COMMIT
+  end

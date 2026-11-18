@@ -1,6 +1,6 @@
 # Rule Engine: Behaviour Specification
 
-Behaviour is specified as numbered, testable statements. Every statement maps 1:1 to an automated test named by its spec ID (`TR-QA-01`). Each statement carries the milestone that ships it, matching `wiki/Roadmap.md`; a statement whose milestone has not been reached is not a release gate yet. Money values use the contract in `DESIGN.md` section 3.4.
+Behaviour is specified as numbered, testable statements. Every statement maps 1:1 to an automated test named by its spec ID (`TR-QA-01`). Each statement carries the milestone that ships it, matching [`docs/product/roadmap.md`](../../docs/product/roadmap.md); a statement whose milestone has not been reached is not a release gate yet. Money values use the contract in `DESIGN.md` section 3.4.
 
 ---
 
@@ -20,7 +20,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Rule set `loan-pricing` v1 with `hitPolicy: unique` where both `R1` (`score >= 700`) and `R2` (`income >= 20000000 VND`) overlap.
 - **When:** Evaluate `inputs = { score: 750, income: 25000000 VND }` (2 matches) or `{ score: 500, income: 5000000 VND }` (0 matches).
-- **Then:** Result fails with `UNIQUE_HIT_VIOLATION` (`409` over REST), returns **no partial outputs**, and records an audit entry with `outcome = UNIQUE_HIT_VIOLATION`.
+- **Then:** Result fails with `UNIQUE_HIT_VIOLATION` (`422` over REST, ADR-0010; never `409`, which is reserved for state conflicts), returns **no partial outputs**, and records an audit entry with `outcome = UNIQUE_HIT_VIOLATION`.
 - **Example:** `2 matched rules [R1, R2] -> error UNIQUE_HIT_VIOLATION, outputs = empty`.
 - **Test ID:** `RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches`
 
@@ -146,7 +146,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### RLE-015 Simulation evaluates draft against history without polluting decision log
 - **Traces to:** `TR-OBS-01`
-- **Milestone:** M2 (replay against history ships with Cockpit 0.2; simulation over sample inputs is M1)
+- **Milestone:** M3 (replay against history moved to M3 by PD-042; simulation over sample inputs is M1, `RLE-016`)
 - **Given:** `card-fee` has `v1` published with 100 logged decisions and `v2` in `DRAFT`.
 - **When:** Caller with `rules:simulate` runs historical simulation of `v2` over those 100 decisions.
 - **Then:** Engine returns diff summary (e.g. `18 outcomes changed`) and writes `0` rows to `rle_decision`. Attaching the simulation report to a publication request is M3 and is not part of this statement.
@@ -161,3 +161,34 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** Response lists, per input set, `matchedRuleIds` and outputs for `v2` and for the effective version `v1`, flags the input sets whose outcome changed, and `rle_decision` gains `0` rows.
 - **Example:** `5 samples -> 5 results, 2 marked changed, 0 rle_decision inserts`.
 - **Test ID:** `RLE_016_sample_simulation_leaves_decision_log_untouched`
+
+---
+
+## Decision Log Partitions, Tenancy and Host Metadata
+
+### RLE-017 The decision log is partitioned monthly from the first migration; retention drops whole partitions only
+- **Traces to:** `TR-OPS-04`, `TR-OBS-01`
+- **Milestone:** M1
+- **Given:** A clean database; `TestClock` at `2027-01-26T00:00:00Z`; `decision-log.partitions-ahead = P7D`. Second run: `decision-log.retention = P12M`, clock at `2028-02-03T00:00:00Z`, partitions `2027_01` to `2028_02` present. Third run: a decision row with `created_at = 2027-03-15T00:00:00Z` was inserted while no `2027_03` partition existed.
+- **When:** The engine migration runs and the partition job runs in each case, with SQL captured.
+- **Then:** After migration `rle_decision` is range-partitioned with `rle_decision_default`, `rle_decision_2027_01` and `rle_decision_2027_02` (7 days ahead reaches February). In the retention run only `rle_decision_2027_01` is dropped (its upper bound `2027-02-01` is before `2027-02-03`); no `DELETE` statement on `rle_decision` appears. In the third run the straggler is moved into the new `2027_03` partition before `ATTACH` and the default partition is empty afterwards. With `decision-log.retention` unset, no partition is ever dropped.
+- **Example:** `retention P12M at 2028-02-03 -> drop rle_decision_2027_01 only; 0 DELETE statements`.
+- **Test ID:** `RLE_017_decision_log_monthly_partitions_and_retention_by_drop`
+
+### RLE-018 `X-Tenant-Id` is accepted only for a tenant in the token's allowed list
+- **Traces to:** `TR-SEC-03`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:** `tenancy.switching.enabled = true`; `lan`'s token has `tenant_id: bank-a` and `allowed_tenants: [bank-a, bank-a-fin]`; rule set `card-fee` exists in `bank-a-fin` and `bank-b`. Second case: switching disabled.
+- **When:** `lan` calls `GET /api/bpm/rules/v1/rule-sets/card-fee` with `X-Tenant-Id: bank-a-fin`, then with `X-Tenant-Id: bank-b`; in the second case with `X-Tenant-Id: bank-a-fin`.
+- **Then:** The first call returns `bank-a-fin`'s rule set; the second returns `403 TENANT_NOT_ALLOWED` with no rule set data and a security log entry naming user, requested tenant and `correlationId`; with switching disabled, a header that differs from the token tenant also returns `403 TENANT_NOT_ALLOWED`.
+- **Example:** `X-Tenant-Id: bank-b -> 403 TENANT_NOT_ALLOWED, logged; bank-a-fin -> 200`.
+- **Test ID:** `RLE_018_tenant_header_accepted_only_within_allowed_tenants`
+
+### RLE-019 `/api/bpm/meta` and `/api/bpm/me` describe the host and the caller
+- **Traces to:** `TR-UI-08`, `TR-SEC-08`
+- **Milestone:** M1
+- **Given:** A host with the rule engine starter `0.1.3`; caller `lan` holds `rules:read` and `rules:author` in tenant `bank-a`; an unauthenticated request.
+- **When:** `GET /api/bpm/meta` and `GET /api/bpm/me` with `lan`'s token, and `GET /api/bpm/meta` without a token.
+- **Then:** `meta` returns `schemaVersion: 1`, `modules: [{ module: rules, apiVersion: v1, engineVersion: 0.1.3, features: [...] }]` and no process entry; `me` returns user `lan`, `tenant.current: bank-a`, `tenant.allowed: [bank-a]` and exactly the two permissions; the request without a token returns `401`. Both responses validate against `cockpit/api/schema/bpm-meta.v1.schema.json` and `bpm-me.v1.schema.json`.
+- **Example:** `GET /api/bpm/me -> {user: lan, tenant: {current: bank-a}, permissions: [rules:read, rules:author]}`.
+- **Test ID:** `RLE_019_meta_and_me_describe_host_and_caller`

@@ -1,0 +1,40 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant B as Cockpit task form
+  end
+  box rgb(224,242,241) Loans host
+    participant R as REST layer
+    participant T as TaskService
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as pre_task, pre_token, pre_history
+  end
+  B->>R: GET /tasks/T5/form
+  R-->>B: schema, hints, masked data, lockVersion 2
+  B->>B: client-side validation for feedback only
+  B->>R: POST /tasks/T5:complete, If-Match "2", Idempotency-Key k7, result
+  R->>T: complete(T5, 2, result)
+  alt result fails the form schema
+    T-->>R: 422 FORM_VALIDATION_FAILED with JSON Pointers, nothing written
+  else caller completed an earlier step and fourEyes is set
+    T-->>R: 403 SELF_APPROVAL_FORBIDDEN
+  else valid
+    rect rgb(255,248,225)
+      Note over T,DB: One sync transaction: task, token move, next step, history, events
+      T->>DB: UPDATE pre_task SET status COMPLETED WHERE lock_version 2
+      alt 0 rows updated
+        T->>DB: ROLLBACK
+        T-->>R: 409 VERSION_CONFLICT
+      else 1 row
+        T->>DB: advance token, create next task or job, history row, COMMIT
+        T-->>R: 200, ETag "3"
+      end
+    end
+  end
+  R-->>B: response
+  alt 409
+    B->>B: reload the task and show who completed it
+  else network error
+    B->>R: retry with the same Idempotency-Key k7, stored result returned
+  end

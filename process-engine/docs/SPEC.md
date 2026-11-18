@@ -1,6 +1,6 @@
 # Process Engine: Behaviour Specification
 
-Behaviour is specified as numbered, testable statements. Every statement maps 1:1 to an automated test named by its spec ID (`TR-QA-01`). Each statement carries the milestone that ships it, matching `wiki/Roadmap.md`. Money values use the contract in `rule-engine/docs/DESIGN.md` section 3.4.
+Behaviour is specified as numbered, testable statements. Every statement maps 1:1 to an automated test named by its spec ID (`TR-QA-01`). Each statement carries the milestone that ships it, matching [`docs/product/roadmap.md`](../../docs/product/roadmap.md); a statement whose milestone has not been reached is not a release gate yet. Money values use the contract in `rule-engine/docs/DESIGN.md` section 3.4.
 
 ---
 
@@ -9,10 +9,10 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-001 Starting a process pins its effective definition version
 - **Traces to:** `TR-DET-01`
 - **Milestone:** M2
-- **Given:** Process `loan-origination` has `v1` active; instance `I1` starts on `v1`, then `v2` is deployed.
+- **Given:** Process `loan-origination` has `v1` active; instance `I1` starts on `v1`, then `v2` is approved and becomes effective.
 - **When:** Complete steps on `I1`, and start new instance `I2`.
 - **Then:** `I1` executes exclusively against `v1` until completion or explicit migration; `I2` pins `v2`.
-- **Example:** `I1 starts on v1 -> deploy v2 -> I1 continues on v1; I2 runs on v2`.
+- **Example:** `I1 starts on v1 -> v2 approved and effective -> I1 continues on v1; I2 runs on v2`.
 - **Test ID:** `PRE_001_running_instance_pins_definition_version`
 
 ### PRE-002 Business key enforces uniqueness and idempotent start returns existing instance
@@ -166,7 +166,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M2
 - **Given:** Definition `kyc-onboarding` v1 with `agentTask` `assess-documents` and `guardrails.decision: agent-output-guardrails`. Case A: the rule set's effective version declares outputs `allow: boolean` and `reasons: list<string>` with `hitPolicy: first`. Case B: it declares `decision: string` and no `allow`. Case C: it declares `allow: boolean` with `hitPolicy: collect`. Case D: no rule set of that name exists in the tenant.
 - **When:** Caller posts the definition to `POST /api/bpm/processes/v1/definitions`.
-- **Then:** Case A deploys (`201`). Cases B, C and D return `422 GUARDRAIL_CONTRACT_INVALID` naming the step id and the failed check; no `pre_definition` row is written.
+- **Then:** Case A creates a draft (`201`, `status: DRAFT`). Cases B, C and D return `422 GUARDRAIL_CONTRACT_INVALID` naming the step id and the failed check; no `pre_definition` row is written. The same check runs again at `:request-approval` and `:approve`.
 - **Example:** `outputs [decision: string] -> 422 GUARDRAIL_CONTRACT_INVALID at step assess-documents`.
 - **Test ID:** `PRE_016_deploy_rejects_guardrail_rule_set_breaking_contract`
 
@@ -178,3 +178,212 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** TX1 sets `locked_until = T0 + 32s`. In the first run Pod 2 never claims the job, and Pod 1's TX2 records the result once. In the crash run Pod 2 skips the job until `T0 + 32s`, then reclaims it with `attempt = 2` and a new `attemptId`.
 - **Example:** `timeout PT2S -> lease 32s; live attempt completes at 1.9s untouched; after crash reclaimed at T0+32s`.
 - **Test ID:** `PRE_017_async_lease_is_timeout_plus_margin`
+
+---
+
+## Definition Lifecycle and Maker-Checker (ADR-0012)
+
+### PRE-018 Importing a definition creates a draft, never an active version
+- **Traces to:** `TR-DEF-03`, `TR-DEF-04`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a` has `kyc-onboarding` v1 `ACTIVE`; profile is not `dev`.
+- **When:** A pipeline identity with `processes:deploy` posts a valid document to `POST /api/bpm/processes/v1/definitions`.
+- **Then:** Response `201` with `version: 2`, `status: DRAFT`, `source: IMPORT` and `definitionHash`; v1 stays the effective version; `POST /instances` still starts on v1.
+- **Example:** `import kyc-onboarding -> 201 {version: 2, status: DRAFT}; start -> pinned to v1`.
+- **Test ID:** `PRE_018_import_creates_draft_not_active_version`
+
+### PRE-019 The requester of a definition version can never approve it
+- **Traces to:** `TR-SEC-04`, `TR-DEF-03`
+- **Milestone:** M2
+- **Given:** `kyc-onboarding` v2 is `PENDING_APPROVAL`, requested by `alice`; `alice` and `bob` both hold `processes:approve`.
+- **When:** `alice` calls `:approve` through REST, and separately through `DefinitionService.approve`; then `bob` calls `:approve` with `If-Match: "<lockVersion>"`.
+- **Then:** Both of `alice`'s calls fail with `403 SELF_APPROVAL_FORBIDDEN` (Java: `SelfApprovalForbiddenException`, `code()` the same) and write nothing; `bob`'s call returns `200`, `status: ACTIVE`, `approvedBy: bob`.
+- **Example:** `request=alice, approve=alice -> 403 SELF_APPROVAL_FORBIDDEN; approve=bob -> 200 ACTIVE`.
+- **Test ID:** `PRE_019_definition_requester_cannot_approve`
+
+### PRE-020 An approved version takes effect on its effective date and retires the previous one
+- **Traces to:** `TR-DEF-03`, `TR-DET-01`
+- **Milestone:** M2
+- **Given:** `kyc-onboarding` v1 `ACTIVE`; v2 requested with `effectiveFrom: 2027-04-01T00:00:00+07:00` and approved on 2027-03-28 by `bob`. Clock is a `TestClock`.
+- **When:** Instances are started on 2027-03-31 23:59 and on 2027-04-01 00:01 (`+07:00`).
+- **Then:** The first instance pins v1, the second pins v2. At the effective time v1 becomes `RETIRED` and `processes.definition.retired.v1` is published once with `supersededBy: 2`; instances already on v1 continue on v1.
+- **Example:** `start at 03-31 23:59 -> v1; start at 04-01 00:01 -> v2; v1 RETIRED once`.
+- **Test ID:** `PRE_020_effective_date_switches_version_and_retires_previous`
+
+### PRE-021 Reject returns a version to draft; an older draft cannot overtake a newer active version
+- **Traces to:** `TR-DEF-03`
+- **Milestone:** M2
+- **Given:** v3 `PENDING_APPROVAL` requested by `alice`; separately v4 is `ACTIVE` while v3 is still pending.
+- **When:** `bob` rejects v3 with reason "missing fraud check"; in the second case `bob` approves v3.
+- **Then:** The reject returns `200`, `status: DRAFT`, `decision_comment` stored, `processes.definition.rejected.v1` published; a reject without a reason is `400 INPUT_INVALID`. In the second case the approve returns `409 VERSION_SUPERSEDED` and v3 stays `PENDING_APPROVAL`.
+- **Example:** `reject v3 -> DRAFT; approve v3 while v4 ACTIVE -> 409 VERSION_SUPERSEDED`.
+- **Test ID:** `PRE_021_reject_returns_draft_and_superseded_approval_refused`
+
+### PRE-022 Outside the dev profile the starter refuses auto-approval and disabled maker-checker
+- **Traces to:** `TR-SEC-11`
+- **Milestone:** M2
+- **Given:** Three start-ups: (a) profile `prod`, `horus.bpm.processes.definitions-auto-approve=true`; (b) profile `prod`, `horus.bpm.processes.maker-checker.enabled=false`; (c) profile `dev`, `definitions-auto-approve=true` and one classpath definition.
+- **When:** The host starts.
+- **Then:** (a) and (b) fail to start with a message naming the property and the `dev`-only rule. (c) starts; the classpath definition is `ACTIVE` with `approvedBy: system:dev-auto-approve`.
+- **Example:** `prod + auto-approve -> start-up fails; dev + auto-approve -> ACTIVE by system:dev-auto-approve`.
+- **Test ID:** `PRE_022_dev_only_relaxations_refused_outside_dev`
+
+### PRE-023 Turning off cockpit drafts blocks authoring endpoints, not imports
+- **Traces to:** `TR-DEF-04`
+- **Milestone:** M2
+- **Given:** `horus.bpm.processes.authoring.cockpit-drafts=false`; `carol` holds `processes:author`; the pipeline identity holds `processes:deploy`.
+- **When:** `carol` calls `POST /definitions/kyc-onboarding/drafts` and `PUT /definitions/kyc-onboarding/versions/5`; the pipeline posts `POST /definitions`; `carol` saves a layout on v4.
+- **Then:** `carol`'s draft calls return `403 DRAFT_AUTHORING_DISABLED` and write nothing; the import returns `201 DRAFT`; the layout save returns `200` (layout is not a draft). `GET /api/bpm/meta` reports `processes.authoring.cockpit-drafts: false`.
+- **Example:** `cockpit-drafts=false -> author create 403 DRAFT_AUTHORING_DISABLED; deploy import 201 DRAFT`.
+- **Test ID:** `PRE_023_cockpit_drafts_setting_blocks_authoring_only`
+
+### PRE-024 The content hash ignores the diagram part and matches the hash of the Git file
+- **Traces to:** `TR-DEF-04`, `TR-DEF-02`
+- **Milestone:** M2
+- **Given:** File `kyc-onboarding.yaml` in Git, with a `diagram` part; the same file without `diagram` and with keys in another order, as JSON.
+- **When:** Both are imported as drafts, and the published hashing reference (RFC 8785 then SHA-256, `diagram` removed) is run on the file in CI.
+- **Then:** Both drafts carry the same `definitionHash`, equal to the hash computed in CI; the graph diff between them is empty.
+- **Example:** `hash(yaml with diagram) == hash(json reordered, no diagram) == ci_hash(file)`.
+- **Test ID:** `PRE_024_content_hash_excludes_diagram_and_matches_git`
+
+### PRE-025 Graph diff lists nodes and edges added, removed and changed
+- **Traces to:** `TR-DEF-03`
+- **Milestone:** M2
+- **Given:** v1 `start -> verify-docs -> approve -> end`; v2 adds `fraud-check` between `verify-docs` and `approve`, changes `approve.assignee.role` from `ops` to `credit-officer`, and moves every box.
+- **When:** `GET /definitions/kyc-onboarding/versions/2/diff?base=1`.
+- **Then:** `nodesAdded: [fraud-check]`; `nodesChanged: [{id: approve, path: /assignee/role, from: ops, to: credit-officer}]`; `edgesRemoved: [verify-docs->approve]`; `edgesAdded: [verify-docs->fraud-check, fraud-check->approve]`; nothing about positions.
+- **Example:** `diff v1..v2 -> +fraud-check, ~approve.assignee.role, -1 edge, +2 edges`.
+- **Test ID:** `PRE_025_graph_diff_reports_nodes_and_edges`
+
+### PRE-026 Layout revisions are append-only, need no approval and never change the definition
+- **Traces to:** `TR-DEF-02`
+- **Milestone:** M3
+- **Given:** `kyc-onboarding` v2 `ACTIVE` with layout revision 3; `carol` and `dave` hold `processes:author`.
+- **When:** `carol` saves a layout with `If-Match: "3"`; `dave` then saves with `If-Match: "3"`; `carol` saves a layout naming node `ghost-step`.
+- **Then:** `carol`'s first save returns `200` with revision 4, `createdBy: carol`; the definition status, hash and `lockVersion` are unchanged and no approval is requested. `dave` gets `409 VERSION_CONFLICT`. The `ghost-step` save gets `422 LAYOUT_INVALID`. Revisions 1 to 4 remain readable.
+- **Example:** `save layout If-Match 3 -> revision 4, hash unchanged; concurrent If-Match 3 -> 409`.
+- **Test ID:** `PRE_026_layout_revision_append_only_without_approval`
+
+### PRE-037 Definition lifecycle events are published inside the state transaction
+- **Traces to:** `TR-OBS-04`, `TR-OBS-06`
+- **Milestone:** M2
+- **Given:** A host event publisher that records events and a host transaction that can be rolled back.
+- **When:** v2 goes through request-approval, reject, request-approval, approve and is superseded; separately a host publisher throws during approve.
+- **Then:** Events `publish-requested.v1`, `rejected.v1`, `publish-requested.v1`, `approved.v1`, `retired.v1` are recorded in that order with the full envelope; when the publisher throws, the approval rolls back and the version stays `PENDING_APPROVAL`.
+- **Example:** `publisher throws on approve -> status still PENDING_APPROVAL, no approved.v1`.
+- **Test ID:** `PRE_037_definition_events_published_in_transaction`
+
+---
+
+## Definition Size, Notation and BPMN Interchange (ADR-0013)
+
+### PRE-035 Definitions above 500 nodes or 1 MB are rejected
+- **Traces to:** `TR-DEF-05`
+- **Milestone:** M2
+- **Given:** Document A with 500 steps (900 KB); document B with 501 steps; document C of 1.2 MB with 300 steps.
+- **When:** Each is imported with `POST /definitions`.
+- **Then:** A creates a draft; B and C return `422 DEFINITION_TOO_LARGE` naming the limit exceeded; no row is written.
+- **Example:** `501 steps -> 422 DEFINITION_TOO_LARGE {limit: max-nodes, value: 501}`.
+- **Test ID:** `PRE_035_definition_size_limits_enforced`
+
+### PRE-033 BPMN subset import creates a draft and names every unsupported element
+- **Traces to:** `TR-DEF-01`
+- **Milestone:** M3
+- **Given:** File A uses only the subset of ADR-0013 with BPMNDI shapes; file B adds a `boundaryEvent` `be-timeout` on line 42 and an `inclusiveGateway` `ig-1` on line 57; file C starts with a `DOCTYPE` declaring an external entity.
+- **When:** Each is posted to `POST /api/bpm/processes/v1/definitions:import-bpmn`.
+- **Then:** A returns `201` with `status: DRAFT`, `source: BPMN` and layout revision 1 from BPMNDI. B returns `422 BPMN_UNSUPPORTED_ELEMENT` listing both elements with id and line. C returns `422 BPMN_UNSAFE_XML` and no entity is resolved. No transaction is opened for B or C.
+- **Example:** `boundaryEvent be-timeout line 42 -> 422 BPMN_UNSUPPORTED_ELEMENT`.
+- **Test ID:** `PRE_033_bpmn_subset_import_rejects_unsupported_by_name`
+
+### PRE-034 BPMN export round-trips to the same definition hash
+- **Traces to:** `TR-DEF-01`
+- **Milestone:** M3 (cut candidate)
+- **Given:** Every example definition in `examples/`, including `agentTask` and `saga` steps.
+- **When:** Each is exported with `GET .../export?format=bpmn` and the result imported again.
+- **Then:** The exported XML validates against the BPMN 2.0 XSD; `agentTask` is a `serviceTask` with `horus:type="agentTask"`; the re-imported draft has the same `definitionHash` as the source.
+- **Example:** `export kyc-onboarding v2 -> import -> definitionHash equal`.
+- **Test ID:** `PRE_034_bpmn_export_round_trip_preserves_hash`
+
+---
+
+## Cockpit Read Models and Query Limits (ADR-0015)
+
+### PRE-027 Activities of an instance are read only from the partitions it lived in
+- **Traces to:** `TR-PERF-08`, `TR-OBS-01`
+- **Milestone:** M2
+- **Given:** `pre_history` has monthly partitions for 2026-01 to 2027-06; instance `I7` started 2027-03-10 and ended 2027-04-02; its `nationalId` input is masked.
+- **When:** `GET /api/bpm/processes/v1/instances/I7/activities?limit=200`, with the plan captured.
+- **Then:** The plan scans only the 2027-03 and 2027-04 partitions; the response lists per node entered and completed times, duration, attempts, actor and incident, with `nationalId` masked; a second call with the returned `ETag` gets `304`.
+- **Example:** `I7 activities -> 2 partitions scanned of 18; 304 on repeat`.
+- **Test ID:** `PRE_027_activities_bounded_by_instance_lifetime`
+
+### PRE-028 Live counts per node come from the token index, never from history
+- **Traces to:** `TR-PERF-09`
+- **Milestone:** M2
+- **Given:** `kyc-onboarding` v2 with 40 tokens `WAITING_USER` at `approve`, 7 `WAITING_ASYNC` at `assess-documents`, 2 open incidents at `assess-documents`, and 10,000 history rows.
+- **When:** `GET /definitions/kyc-onboarding/versions/2/node-stats?mode=live`, with SQL captured; then again within 5 s.
+- **Then:** Response `{approve: {WAITING_USER: 40}, assess-documents: {WAITING_ASYNC: 7, openIncidents: 2}}` with `asOf`; the captured SQL reads only `pre_token` through `idx_pre_token_live` and `pre_incident` through `idx_pre_incident_node`, never `pre_history`; the second call is served from the cache with the same `asOf`.
+- **Example:** `approve 40 waiting, assess-documents 7 async + 2 incidents; no pre_history read`.
+- **Test ID:** `PRE_028_live_node_counts_from_token_index`
+
+### PRE-029 The hourly rollup lags at most 10 minutes and never touches the step transaction
+- **Traces to:** `TR-PERF-10`
+- **Milestone:** M3
+- **Given:** Two replicas; `TestClock`; 1,200 completions of `approve` between 10:00 and 10:40 with durations from 2 min to 3 h; the rollup interval 5 min and lag 5 min.
+- **When:** The clock reaches 10:50 and both replicas run the rollup; a transition is captured at the SQL level during the run.
+- **Then:** Exactly one replica processes each slice; the 10:00 bucket for `approve` holds `completed_count = 1,200`; the p95 read from `?mode=window` is within 19 percent of the true p95; the captured transition contains no statement on `pre_node_stats_hourly` or `pre_engine_watermark`. A slice whose transaction is rolled back is counted once on the next run, not twice.
+- **Example:** `10:50 -> bucket 10:00 approve completed 1200; no stats write in step TX`.
+- **Test ID:** `PRE_029_rollup_bounded_lag_and_no_step_tx_writes`
+
+### PRE-030 Task queries by assignee, role, group, due date and SLA breach are bounded
+- **Traces to:** `TR-PERF-07`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:** `CallerResolver` returns user `minh`, roles `[credit-officer, ops]`, group `[branch-hcm-01]`; 30,000 open tasks for `credit-officer`, 12 claimed by `minh`, 3 overdue.
+- **When:** `GET /tasks?assignment=mine`, `GET /tasks?assignment=candidate&limit=50`, `GET /tasks?assignment=candidate&slaBreached=true`, and `GET /tasks?limit=500`.
+- **Then:** `mine` returns the 12 tasks ordered by `dueAt`; `candidate` returns 50 tasks across both roles and the group ordered by `(dueAt, id)` with a `nextCursor`; `slaBreached` returns the 3 overdue tasks; `limit=500` returns `400 QUERY_INVALID` naming the maximum 200. The query-plan check shows only partial-index range scans.
+- **Example:** `candidate limit 50 -> 50 items, nextCursor; limit 500 -> 400 QUERY_INVALID (max 200)`.
+- **Test ID:** `PRE_030_task_query_filters_bounded_by_index`
+
+### PRE-036 Every list query passes the CI query-plan check
+- **Traces to:** `TR-PERF-07`
+- **Milestone:** M2
+- **Given:** A seeded database with 2 tenants, 1 million instances, 20 million history rows over 12 monthly partitions, and the query registry of `process-engine-postgres`.
+- **When:** The query-plan check runs `EXPLAIN (FORMAT JSON)` for every registered query with representative parameters.
+- **Then:** No plan contains a sequential scan of a table above 10,000 rows or touches more partitions than its declared bound; a query added without a declared bound fails the build.
+- **Example:** `unregistered GROUP BY on pre_history -> build fails`.
+- **Test ID:** `PRE_036_list_queries_pass_query_plan_check`
+
+---
+
+## Task Forms and Step Catalogue
+
+### PRE-031 A task form is returned resolved and the completion is validated against it
+- **Traces to:** `TR-UI-02`, `TR-SEC-05`
+- **Milestone:** M2
+- **Given:** `userTask` `approve` with `form: { schema: forms/approve.schema.json, hints: { order: [decision, reason] } }` requiring `decision` in `[APPROVE, REJECT]` and `reason` when `decision = REJECT`; a second definition whose `userTask` has `form: { link: "https://evil.example/t/{taskId}" }` with `tasks.form-link-origins` empty.
+- **When:** `GET /tasks/T5/form`; then `:complete` with `{decision: REJECT}`; then with `{decision: REJECT, reason: "income not verified"}`; then the second definition is imported.
+- **Then:** The form response carries the schema, the hints and masked prefilled data; the first completion returns `422 FORM_VALIDATION_FAILED` with pointer `/reason`; the second returns `200`; the import returns `422 VALIDATION_FAILED` with problem `FORM_LINK_NOT_ALLOWED`.
+- **Example:** `complete {decision: REJECT} -> 422 FORM_VALIDATION_FAILED /reason`.
+- **Test ID:** `PRE_031_task_form_resolved_and_completion_validated`
+
+### PRE-032 The step catalogue lists only what the host registered
+- **Traces to:** `TR-SEC-01`
+- **Milestone:** M3
+- **Given:** The host registers service handler `kyc.verifyDocuments` (remote, compensable), agent adapter `doc-assessor`, calendar `vn-banking-hours`; rule sets `card-fee` (outputs `fee`) and `agent-output-guardrails` (outputs `allow`, `reasons`, hit policy `first`).
+- **When:** `carol` with `processes:author` calls `GET /api/bpm/processes/v1/step-catalogue`; `erin` with only `processes:read` calls it too.
+- **Then:** `carol` gets the handler with its input schema and `compensable: true`, the agent adapter, `card-fee` under decision rule sets, `agent-output-guardrails` under both decision and guardrail rule sets, and the calendar; no configuration value appears. `erin` gets `403 FORBIDDEN`. An import that names an unregistered handler fails with `422 VALIDATION_FAILED`.
+- **Example:** `catalogue -> 1 handler, 1 agent, 2 decision rule sets, 1 guardrail rule set, 1 calendar`.
+- **Test ID:** `PRE_032_step_catalogue_lists_registered_steps_only`
+
+---
+
+## Tenant Switching (ADR-0014)
+
+### PRE-038 `X-Tenant-Id` is accepted only for a tenant in the token's allowed list
+- **Traces to:** `TR-SEC-03`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:** `tenancy.switching.enabled=true`; `minh`'s token has `tenant_id: bank-a` and `allowed_tenants: [bank-a, bank-a-fin]`; tenant `bank-b` has instance `I9`.
+- **When:** `minh` calls `GET /tasks` with no header, with `X-Tenant-Id: bank-a-fin`, and with `X-Tenant-Id: bank-b`; then `GET /instances/I9` with `X-Tenant-Id: bank-a-fin`.
+- **Then:** The first call returns `bank-a` tasks; the second returns `bank-a-fin` tasks; the third returns `403 TENANT_NOT_ALLOWED`, returns no data and writes a security log entry with user, requested tenant and `correlationId`; the fourth returns `404 INSTANCE_NOT_FOUND`.
+- **Example:** `X-Tenant-Id: bank-b not in allowed_tenants -> 403 TENANT_NOT_ALLOWED, logged`.
+- **Test ID:** `PRE_038_tenant_header_accepted_only_within_allowed_tenants`

@@ -1,0 +1,28 @@
+sequenceDiagram
+  autonumber
+  box rgb(224,242,241) Rule Engine, one replica
+    participant S as Scheduler thread
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as rle_decision and its partitions
+  end
+  Note over S: daily, and at start-up
+  rect rgb(255,248,225)
+    Note over S,DB: TX1, sync: create next months, lock_timeout 5 s
+    S->>DB: pg_try_advisory_xact_lock, transaction-scoped, so one replica runs the job
+    S->>DB: CREATE TABLE rle_decision_2027_02 (LIKE rle_decision) with CHECK on created_at
+    alt default partition holds rows of that month
+      S->>DB: copy them into the new table and remove them from the default, same TX, metric horus_rle_partition_default_rows
+    end
+    S->>DB: ALTER TABLE rle_decision ATTACH PARTITION rle_decision_2027_02, SHARE UPDATE EXCLUSIVE on parent
+    S->>DB: COMMIT
+  end
+  alt lock_timeout reached
+    S->>DB: ROLLBACK, retry next run, 7 days of headroom remain
+  end
+  rect rgb(255,248,225)
+    Note over S,DB: TX2, only when decision-log.retention is set
+    S->>DB: find partitions whose upper bound is before now() - retention
+    S->>DB: SET lock_timeout 2 s, DROP TABLE rle_decision_2025_10
+    S->>DB: COMMIT, no row deleted, no vacuum needed
+  end

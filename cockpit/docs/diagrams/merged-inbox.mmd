@@ -1,0 +1,36 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant B as Cockpit inbox
+  end
+  box rgb(224,242,241) Hosts
+    participant L as Loans host
+    participant K as KYC host
+    participant C as Cards host
+  end
+  box rgb(255,248,225) Host databases
+    participant DB as pre_task, each host its own
+  end
+  Note over B: every 30 s with jitter while the tab is visible, paused when hidden
+  par in parallel, 5 s timeout each
+    B->>L: GET /tasks?assignment=mine,candidate&limit=50, If-None-Match
+    rect rgb(255,248,225)
+      Note over L,DB: Read-only TX, partial index ranges, LIMIT 51
+      L->>DB: bounded query
+    end
+    alt page unchanged
+      L-->>B: 304
+    else changed
+      L-->>B: 200, 50 tasks, nextCursor, ETag
+    end
+  and
+    B->>K: same request
+    K-->>B: 200, 12 tasks, no nextCursor
+  and
+    B->>C: same request
+    C--xB: timeout
+  end
+  B->>B: k-way merge by dueAt, then host id, then task id
+  B->>B: show items up to the smallest frontier of hosts that have more pages
+  B->>B: banner: Cards host unreachable, list incomplete
+  B->>L: Load more: next page only from hosts at the frontier

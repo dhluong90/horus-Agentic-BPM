@@ -1,0 +1,51 @@
+flowchart LR
+  subgraph PZ["Public Zone"]
+    OP["Author, approver, auditor<br/>cockpit in a browser"]:::client
+    CH["Customer channel"]:::client
+  end
+  subgraph DMZ["Banking DMZ"]
+    GW["API gateway and WAF"]:::host
+  end
+  subgraph IZ["Internal Trusted Zone"]
+    IDP["Bank identity provider<br/>OIDC"]:::host
+    subgraph HOST["Host Spring Boot service"]
+      APP["Host business code<br/>fees, eligibility, limits"]:::host
+      REST["Rule REST layer<br/>/api/bpm/rules/v1"]:::engine
+      RE[["Rule Engine<br/>rule-engine-core"]]:::engine
+      CACHE["Compiled version cache<br/>bounded LRU"]:::engine
+      LSN["Listener and epoch sweep"]:::engine
+    end
+    DB[("Host PostgreSQL<br/>host tables and rle_*")]:::db
+  end
+  subgraph CZ["Core and External"]
+    CORE["Core banking, card system"]:::external
+  end
+  subgraph OZ["Observability"]
+    OBS["Metrics, traces, logs"]:::obs
+    SINK["Host event sink, warehouse"]:::obs
+  end
+  CH -->|"1. HTTPS request"| GW
+  OP -->|"2. HTTPS, bearer token"| GW
+  GW -->|"3. verified request"| APP
+  GW -->|"4. verified request"| REST
+  REST -.->|"5. token validation keys"| IDP
+  APP -->|"6. RuleEngine.evaluate, joins host TX"| RE
+  REST --> RE
+  RE -->|"7. cached compiled tree"| CACHE
+  RE -->|"8. one INSERT rle_decision in the caller TX"| DB
+  LSN -.->|"9. LISTEN horus_rle_cache, cache_epoch sweep"| DB
+  APP -->|"10. host posts the result, own TX"| CORE
+  RE -.->|"11. version events inside the TX"| SINK
+  RE -.->|"12. Micrometer, OpenTelemetry"| OBS
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  style PZ fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style DMZ fill:none,stroke:#EF6C00,stroke-dasharray:5 5
+  style IZ fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style CZ fill:none,stroke:#6A1B9A,stroke-dasharray:5 5
+  style OZ fill:none,stroke:#546E7A,stroke-dasharray:5 5
+  style HOST fill:none,stroke:#2E7D32

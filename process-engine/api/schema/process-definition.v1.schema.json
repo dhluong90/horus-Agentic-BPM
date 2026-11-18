@@ -27,6 +27,10 @@
       "type": "array",
       "minItems": 2,
       "items": { "$ref": "#/$defs/step" }
+    },
+    "diagram": {
+      "description": "Optional layout: node positions, edge waypoints and lanes, in the format of definition-layout.v1.schema.json (urn:horus-bpm:schema:definition-layout:v1), checked by the engine at import. The engine stores it as a layout revision and removes it from the stored definition, so it is never part of the definition hash and changing it needs no approval (ADR-0013).",
+      "type": "object"
     }
   },
   "$defs": {
@@ -145,7 +149,16 @@
           "type": "boolean",
           "default": false
         },
-        "form": { "type": "string" },
+        "form": {
+          "description": "How the task is completed: a form key registered by the host, a JSON Schema with display hints (format of task-form.v1.schema.json $defs/hints, urn:horus-bpm:schema:task-form:v1), or a link to the host's own screen. A link must be relative or match tasks.form-link-origins, checked at import.",
+          "anyOf": [
+            { "type": "string", "minLength": 1, "maxLength": 200 },
+            { "type": "object", "required": ["schema"], "additionalProperties": false,
+              "properties": { "schema": { "type": "string", "minLength": 1 }, "hints": { "type": "object" } } },
+            { "type": "object", "required": ["link"], "additionalProperties": false,
+              "properties": { "link": { "description": "URL template; {taskId} and {instanceId} are replaced.", "type": "string", "minLength": 1, "maxLength": 2000 } } }
+          ]
+        },
         "sla": {
           "type": "object",
           "required": ["duration"],

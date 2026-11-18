@@ -1,0 +1,50 @@
+flowchart TB
+  subgraph STARTER["process-engine-spring-boot-starter"]
+    AC["Auto-configuration<br/>profile guards, scheduler lifecycle"]:::host
+  end
+  subgraph RESTM["process-engine-rest"]
+    CTRL["Controllers /api/bpm/processes/v1<br/>RFC 9457, ETag, Idempotency-Key"]:::engine
+  end
+  subgraph CORE["process-engine-core, no Spring, SQL or network"]
+    direction TB
+    API["api: ProcessEngine, DefinitionService,<br/>TaskService, ProcessQueryService, StepCatalogue"]:::engine
+    DOM["Domain: Definition aggregate and lifecycle,<br/>Instance and token tree, Task, GraphDiff"]:::engine
+    PORTS["Driven ports: DefinitionStore, LayoutStore,<br/>InstanceStore, JobQueue, HistoryLog, StatsReadModel"]:::engine
+    SPI["spi: ServiceAdapter, AgentAdapter, StepRegistry,<br/>BusinessCalendar, TenantResolver, CallerResolver,<br/>ProcessEventPublisher, FormRegistry"]:::engine
+  end
+  subgraph BPMN["process-engine-bpmn"]
+    STAX["BPMN subset reader and writer<br/>JDK StAX only"]:::engine
+  end
+  subgraph PG["process-engine-postgres"]
+    JDBC["JdbcClient adapters, Flyway pre_*,<br/>SKIP LOCKED poller, rollup job"]:::engine
+  end
+  subgraph TEST["process-engine-test"]
+    MEM["In-memory adapters, TestClock,<br/>StubAgentAdapter, @ProcessTest"]:::engine
+  end
+  RULES[["Rule Engine API<br/>optional bean"]]:::engine
+  HOSTC["Host beans: adapters, calendars,<br/>resolvers, event publisher"]:::host
+  DB[("Host PostgreSQL")]:::db
+  AC --> CTRL
+  AC --> JDBC
+  CTRL -->|"1. calls"| API
+  API --> DOM
+  DOM -->|"2. uses"| PORTS
+  DOM -->|"3. uses"| SPI
+  STAX -->|"4. produces definition and layout"| API
+  JDBC -.->|"5. implements"| PORTS
+  MEM -.->|"5. implements"| PORTS
+  HOSTC -.->|"6. implements"| SPI
+  DOM -->|"7. decision, guardrail"| RULES
+  JDBC -->|"8. JDBC"| DB
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  style STARTER fill:none,stroke:#2E7D32
+  style RESTM fill:none,stroke:#00796B
+  style CORE fill:none,stroke:#00796B,stroke-width:2px
+  style BPMN fill:none,stroke:#00796B
+  style PG fill:none,stroke:#00796B
+  style TEST fill:none,stroke:#00796B

@@ -1,0 +1,28 @@
+sequenceDiagram
+  autonumber
+  box rgb(224,242,241) Process Engine, any replica
+    participant S as Scheduler thread
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant W as pre_engine_watermark
+    participant H as pre_history, current partition
+    participant N as pre_node_stats_hourly
+  end
+  Note over S: every stats.rollup-interval (5 min), window end = now() - 5 min safety lag
+  rect rgb(255,248,225)
+    Note over S,N: One short transaction, database work only, no network call
+    S->>W: SELECT watermark FOR UPDATE SKIP LOCKED WHERE job 'node-stats'
+    alt another replica holds the row
+      W-->>S: no row, skip this run
+    else row locked by this replica
+      S->>H: aggregate NODE_COMPLETED, NODE_FAILED, INCIDENT_RAISED, SLA_BREACHED where occurred_at in (watermark, window end], BRIN range scan
+      H-->>S: per tenant, definition, node, hour: counts and duration histogram
+      S->>N: INSERT ON CONFLICT add counts, add histogram buckets
+      S->>W: UPDATE watermark = window end
+      S->>W: COMMIT, statement_timeout 10 s
+    end
+  end
+  alt statement timeout or error
+    S->>W: ROLLBACK, watermark unchanged, next run repeats the slice
+  end
+  Note over S,N: Step transactions never update counters, so no hot row lock on the write path

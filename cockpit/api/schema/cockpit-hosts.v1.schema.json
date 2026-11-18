@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:cockpit-hosts:v1",
+  "title": "HORUS cockpit host registry, schema version 1",
+  "description": "File cockpit-hosts.json, served next to the cockpit's index.html. A standalone cockpit lists every host it federates; the embedded starter generates a file with one host. The cockpit validates it at start-up and calls no host when it is invalid (ADR-0014).",
+  "type": "object",
+  "required": ["schemaVersion", "auth", "hosts"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "auth": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "description": "oidc: the cockpit signs in as a public OIDC client with PKCE. host-session: embedded only; the host's own session cookie authenticates, and the cockpit sends the host's CSRF token.",
+          "enum": ["oidc", "host-session"]
+        },
+        "issuer": { "description": "OIDC issuer URL; https only.", "type": "string", "pattern": "^https://[^\\s]+$" },
+        "clientId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "scopes": {
+          "description": "Scopes for the sign-in request. openid is always added.",
+          "type": "array", "uniqueItems": true, "maxItems": 20,
+          "items": { "type": "string", "pattern": "^[\\x21\\x23-\\x5B\\x5D-\\x7E]+$" }
+        },
+        "tokenMode": {
+          "description": "per-host (default): one access token per host, requested with that host's scope, so each token's audience is one host. shared: one token whose audience lists every host; weaker isolation, fewer requests to the identity provider.",
+          "enum": ["per-host", "shared"],
+          "default": "per-host"
+        },
+        "redirectPath": { "description": "Path of the sign-in callback, relative to the cockpit.", "type": "string", "default": "auth/callback", "pattern": "^[A-Za-z0-9._~/-]+$" },
+        "postLogoutRedirectPath": { "type": "string", "default": "", "pattern": "^[A-Za-z0-9._~/-]*$" }
+      },
+      "if": { "properties": { "mode": { "const": "oidc" } } },
+      "then": { "required": ["issuer", "clientId"] }
+    },
+    "hosts": {
+      "description": "Hosts in display order. The supported number of hosts per cockpit is pending PD-046 (proposed 15); the cockpit shows a warning above that.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/host" }
+    },
+    "refresh": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inboxSeconds": { "type": "integer", "minimum": 15, "maximum": 600, "default": 30 },
+        "incidentsSeconds": { "type": "integer", "minimum": 30, "maximum": 600, "default": 60 },
+        "hostTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 30, "default": 5 }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultLocale": { "enum": ["en", "vi"], "default": "en" },
+        "environmentBanner": { "description": "Text shown on every screen, for example PRODUCTION.", "type": "string", "maxLength": 40 }
+      }
+    }
+  },
+  "$defs": {
+    "label": {
+      "anyOf": [
+        { "type": "string", "minLength": 1, "maxLength": 80 },
+        { "type": "object", "required": ["en"], "propertyNames": { "pattern": "^[a-z]{2}(-[A-Z]{2})?$" }, "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 80 } }
+      ]
+    },
+    "host": {
+      "type": "object",
+      "required": ["id", "label", "baseUrl"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "description": "Stable id, used in URLs and merged lists.", "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 40 },
+        "label": { "$ref": "#/$defs/label" },
+        "baseUrl": {
+          "description": "Origin and optional path prefix of the host, without a trailing slash. https, or http only for localhost. Empty string means the same origin (embedded).",
+          "type": "string",
+          "pattern": "^(|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*|http://(localhost|127\\.0\\.0\\.1)(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*)$"
+        },
+        "scope": { "description": "OAuth scope that yields a token with this host's audience. Required in tokenMode per-host.", "type": "string", "pattern": "^[\\x21\\x23-\\x5B\\x5D-\\x7E]+$" },
+        "environment": { "type": "string", "maxLength": 40 },
+        "enabled": { "type": "boolean", "default": true }
+      }
+    }
+  }
+}

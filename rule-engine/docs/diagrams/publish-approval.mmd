@@ -1,0 +1,35 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant K as Approver in the cockpit
+  end
+  box rgb(224,242,241) Host replica A
+    participant V as VersionService
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as rle_version, rle_rule_set
+  end
+  box rgb(224,242,241) Host replica B
+    participant B as Listener and epoch sweep
+  end
+  K->>V: POST :approve, If-Match "3", Idempotency-Key
+  alt approver is the requester
+    V-->>K: 403 SELF_APPROVAL_FORBIDDEN, nothing written
+  else another identity
+    rect rgb(255,248,225)
+      Note over V,DB: One transaction, sync
+      V->>DB: UPDATE rle_version SET status PUBLISHED WHERE lock_version 3
+      V->>DB: UPDATE rle_rule_set SET cache_epoch = cache_epoch + 1
+      V->>DB: rules.version.published.v1 through the host publisher
+      V->>DB: SELECT pg_notify('horus_rle_cache', tenant and rule set)
+      V->>DB: COMMIT, NOTIFY is delivered only after commit
+    end
+    V-->>K: 200, ETag "4"
+  end
+  alt NOTIFY delivered
+    DB-->>B: notification
+    B->>B: evict compiled entry, within 1 s
+  else NOTIFY lost, or transaction-mode pooler
+    B->>DB: every 5 s, SELECT cache_epoch for cached rule sets
+    B->>B: epoch moved, evict, within 5 s
+  end

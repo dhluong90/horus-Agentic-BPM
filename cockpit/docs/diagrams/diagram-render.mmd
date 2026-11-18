@@ -1,0 +1,21 @@
+flowchart LR
+  A["Definition version<br/>GET ...?include=layout"]:::engine --> B{"Stored layout<br/>covers every node?"}:::client
+  B -->|"1. yes"| D["Use stored positions"]:::client
+  B -->|"2. partly"| C["dagre places missing nodes<br/>stored nodes fixed"]:::client
+  B -->|"3. no layout"| E["dagre lays out all nodes<br/>rankdir LR"]:::client
+  C --> F["React Flow nodes and edges<br/>one node type per step type"]:::client
+  D --> F
+  E --> F
+  F --> G{"View"}:::client
+  G -->|"4. definition"| H["Live counts per node<br/>node-stats mode live"]:::engine
+  G -->|"5. instance"| I["Token badges and activities<br/>instance and activities APIs"]:::engine
+  G -->|"6. heatmap, M3"| J["Window stats per node<br/>node-stats mode window"]:::engine
+  H --> K["Overlay: text and icon, not colour alone<br/>plus a keyboard node list"]:::client
+  I --> K
+  J --> K
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F

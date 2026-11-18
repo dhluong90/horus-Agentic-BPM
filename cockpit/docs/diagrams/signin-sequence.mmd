@@ -1,0 +1,40 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant B as Cockpit in the browser
+  end
+  box rgb(232,245,233) Internal Trusted Zone
+    participant I as Bank IdP
+  end
+  box rgb(224,242,241) Hosts
+    participant L as Loans host
+    participant K as KYC host
+  end
+  B->>B: load cockpit-hosts.json, validate against the v1 schema
+  alt invalid config
+    B->>B: config error screen naming the JSON Pointer, no host is called
+  end
+  B->>I: authorize, code challenge S256, state, nonce
+  I-->>B: redirect with code
+  B->>I: token request with code verifier
+  I-->>B: ID token, refresh token kept in memory only
+  par one token per host scope
+    B->>I: refresh grant, scope loans-bpm
+    I-->>B: access token, aud loans-bpm, 5 min
+  and
+    B->>I: refresh grant, scope kyc-bpm
+    I-->>B: access token, aud kyc-bpm, 5 min
+  end
+  par probe every host
+    B->>L: GET /api/bpm/meta and /api/bpm/me
+    L-->>B: engine 0.3.1, features, permissions
+  and
+    B->>K: GET /api/bpm/meta and /api/bpm/me
+    alt token audience is another host
+      K-->>B: 401, host logs the audience mismatch
+    else engine older than the previous minor
+      K-->>B: engine 0.1.4
+      B->>B: KYC marked UNSUPPORTED_VERSION, its screens turned off
+    end
+  end
+  Note over B,K: No database transaction is involved in sign-in, hosts only read

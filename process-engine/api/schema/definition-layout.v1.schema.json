@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:definition-layout:v1",
+  "title": "HORUS Process Engine diagram layout, schema version 1",
+  "description": "Positions of the steps of one definition version on a diagram. Stored as append-only revisions in pre_definition_layout, apart from the definition hash (ADR-0013). Node ids must exist in the definition; nodes not listed are placed by automatic layout in the cockpit. At most 256 KB.",
+  "type": "object",
+  "required": ["schemaVersion", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "direction": { "description": "Main flow direction used by automatic layout for unlisted nodes.", "enum": ["LR", "TB"], "default": "LR" },
+    "nodes": {
+      "description": "Keyed by step id.",
+      "type": "object",
+      "maxProperties": 500,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 100 },
+      "additionalProperties": { "$ref": "#/$defs/box" }
+    },
+    "edges": {
+      "description": "Optional waypoints, keyed by '<from>-><to>'.",
+      "type": "object",
+      "maxProperties": 2000,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*->[a-z][a-z0-9]*(-[a-z0-9]+)*$" },
+      "additionalProperties": {
+        "type": "array",
+        "maxItems": 50,
+        "items": { "$ref": "#/$defs/point" }
+      }
+    },
+    "lanes": {
+      "description": "Visual grouping only; lanes carry no assignment semantics.",
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "nodes"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$" },
+          "label": { "type": "string", "maxLength": 200 },
+          "nodes": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number", "minimum": -100000, "maximum": 100000 },
+        "y": { "type": "number", "minimum": -100000, "maximum": 100000 }
+      }
+    },
+    "box": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number", "minimum": -100000, "maximum": 100000 },
+        "y": { "type": "number", "minimum": -100000, "maximum": 100000 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 2000 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 2000 }
+      }
+    }
+  }
+}

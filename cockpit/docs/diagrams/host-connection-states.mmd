@@ -1,0 +1,22 @@
+stateDiagram-v2
+  direction LR
+  [*] --> CONFIGURED: entry in cockpit-hosts.json
+  CONFIGURED --> AUTHENTICATING: host selected or inbox needs it
+  AUTHENTICATING --> PROBING: token for the host scope
+  AUTHENTICATING --> FORBIDDEN: IdP refuses the scope
+  PROBING --> READY: meta and me answered, version supported
+  PROBING --> UNSUPPORTED_VERSION: engine minor older than previous
+  PROBING --> FORBIDDEN: 401 or 403 on me
+  PROBING --> UNREACHABLE: timeout, CORS or network error
+  READY --> AUTHENTICATING: token expires within 60 s
+  READY --> UNREACHABLE: 3 failed calls in a row
+  UNREACHABLE --> PROBING: retry with backoff, 5 s to 5 min
+  UNSUPPORTED_VERSION --> PROBING: reload or host upgraded
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class CONFIGURED,AUTHENTICATING,PROBING client
+  class READY engine
+  class UNREACHABLE,FORBIDDEN external
+  class UNSUPPORTED_VERSION obs

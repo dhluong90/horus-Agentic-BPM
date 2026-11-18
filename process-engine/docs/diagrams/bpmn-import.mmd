@@ -1,0 +1,35 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant P as Pipeline or architect
+  end
+  box rgb(224,242,241) Host service
+    participant R as REST layer
+    participant B as BPMN reader, JDK StAX
+    participant D as DefinitionService
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as pre_definition, pre_definition_layout
+  end
+  P->>R: POST /definitions:import-bpmn, Idempotency-Key, body up to 1 MB
+  Note over R,B: No transaction is open during parsing and conversion
+  R->>B: read(stream), DTD and external entities disabled, depth and element limits
+  alt DOCTYPE or external entity present
+    B-->>R: 422 BPMN_UNSAFE_XML
+  else element outside the subset
+    B-->>R: 422 BPMN_UNSUPPORTED_ELEMENT with element, id and line
+  else inside the subset
+    B-->>D: definition JSON and diagram part from BPMNDI
+    D->>D: schema, graph, step registry and guardrail checks, hash without diagram
+    alt invalid
+      D-->>R: 422 VALIDATION_FAILED with problems
+    else valid
+      rect rgb(255,248,225)
+        Note over D,DB: TX1, sync: one draft and its first layout revision
+        D->>DB: INSERT pre_definition status DRAFT, source BPMN
+        D->>DB: INSERT pre_definition_layout revision 1
+        D->>DB: COMMIT
+      end
+      R-->>P: 201, status DRAFT, definitionHash, warnings
+    end
+  end

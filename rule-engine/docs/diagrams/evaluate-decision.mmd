@@ -1,0 +1,37 @@
+sequenceDiagram
+  autonumber
+  box rgb(232,245,233) Host service
+    participant A as Host code
+  end
+  box rgb(224,242,241) Rule Engine, in process
+    participant E as RuleEngine
+    participant C as Compiled cache
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as rle_version, rle_decision, rle_decision_outbox
+  end
+  rect rgb(255,248,225)
+    Note over A,DB: Host transaction, sync in-transaction step
+    A->>E: evaluate("card-fee", input), tenant from resolver, clock from Clock bean
+    E->>C: get(tenant, card-fee, effective at clock)
+    alt cache miss or epoch moved
+      C->>DB: SELECT effective version
+      C->>C: parse, type check, compile once
+    end
+    E->>E: evaluate tree, no I/O, p99 under 100 us
+    alt log mode transactional
+      E->>DB: INSERT rle_decision, the only statement added
+    else log mode async
+      E->>DB: INSERT rle_decision_outbox
+    end
+    E-->>A: DecisionResult Matched, NoMatch or Failed
+    alt host commits
+      A->>DB: COMMIT, decision row commits with business data
+    else host rolls back
+      A->>DB: ROLLBACK, no decision row remains
+    end
+  end
+  rect rgb(255,248,225)
+    Note over DB: Async mode only: relay on the scheduler thread, own short TX
+    E->>DB: SELECT outbox FOR UPDATE SKIP LOCKED, INSERT rle_decision, mark SENT, COMMIT
+  end

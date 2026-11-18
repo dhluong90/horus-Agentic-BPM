@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:task-form:v1",
+  "title": "HORUS Process Engine resolved task form, schema version 1",
+  "description": "Response of GET /api/bpm/processes/v1/tasks/{id}/form. Either a form (a JSON Schema for the result, display hints and prefilled data) or a link to the host's own screen. The engine validates the result of :complete against the same schema (422 FORM_VALIDATION_FAILED).",
+  "type": "object",
+  "required": ["schemaVersion", "taskId", "lockVersion"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "taskId": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$" },
+    "lockVersion": { "type": "integer", "minimum": 0 },
+    "form": {
+      "type": "object",
+      "required": ["schema"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "description": "JSON Schema 2020-12 for the task result. Supported field types: string, integer, number, boolean, enum, date, date-time and the money object {currency, amount}.",
+          "type": "object"
+        },
+        "hints": { "$ref": "#/$defs/hints" },
+        "data": {
+          "description": "Prefilled values from declared variables. Masked fields are returned as masked placeholders, never in clear.",
+          "type": "object"
+        }
+      }
+    },
+    "link": {
+      "description": "Resolved link to the host's own screen; relative, or on an origin listed in tasks.form-link-origins.",
+      "type": "string",
+      "maxLength": 2000
+    }
+  },
+  "oneOf": [ { "required": ["form"] }, { "required": ["link"] } ],
+  "$defs": {
+    "hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "order": { "type": "array", "uniqueItems": true, "items": { "type": "string" }, "maxItems": 200 },
+        "widgets": {
+          "type": "object",
+          "additionalProperties": { "enum": ["text", "textarea", "select", "radio", "checkbox", "date", "datetime", "money", "readonly"] }
+        },
+        "labels": {
+          "description": "Per field, per locale, for example { \"reason\": { \"en\": \"Reason\", \"vi\": \"Lý do\" } }.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "propertyNames": { "pattern": "^[a-z]{2}(-[A-Z]{2})?$" },
+            "additionalProperties": { "type": "string", "maxLength": 200 }
+          }
+        },
+        "readOnly": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      }
+    }
+  }
+}

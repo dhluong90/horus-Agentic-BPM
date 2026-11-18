@@ -1,0 +1,39 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant C as Cockpit
+  end
+  box rgb(224,242,241) Host service
+    participant R as REST layer
+    participant Q as ProcessQueryService
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as pre_instance, pre_history, pre_token
+  end
+  C->>R: GET /instances/{id}/activities?limit=200, If-None-Match
+  R->>Q: activities(tenant, instanceId, cursor)
+  rect rgb(255,248,225)
+    Note over Q,DB: Read-only TX, SET LOCAL statement_timeout 2 s
+    Q->>DB: SELECT started_at, ended_at FROM pre_instance WHERE tenant_id AND id
+    alt not found in this tenant
+      R-->>C: 404 INSTANCE_NOT_FOUND
+    else found
+      Q->>DB: SELECT FROM pre_history WHERE tenant_id AND instance_id AND occurred_at between started_at and ended_at or now(), keyset, LIMIT 201
+      Note over DB: partition pruning keeps only the months the instance lived
+    end
+  end
+  alt page hash equals If-None-Match
+    R-->>C: 304 Not Modified
+  else changed
+    R-->>C: 200, items, nextCursor, ETag
+  end
+  C->>R: GET /definitions/{key}/versions/3/node-stats?mode=live
+  alt cached for this tenant and version, under TTL
+    R-->>C: 200 counts, asOf
+  else cache miss
+    rect rgb(255,248,225)
+      Note over Q,DB: Read-only TX, index-only scan of idx_pre_token_live
+      Q->>DB: SELECT current_node_id, status, count(*) GROUP BY ... WHERE tenant_id AND definition_id
+    end
+    R-->>C: 200 counts, asOf
+  end

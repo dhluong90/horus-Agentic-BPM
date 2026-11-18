@@ -1,0 +1,18 @@
+stateDiagram-v2
+  direction LR
+  [*] --> RUNNING: start (business key unique)
+  RUNNING --> RUNNING: step transition, migration, incident retry
+  RUNNING --> COMPLETED: last token reaches an end step
+  RUNNING --> CANCELLED: cancel (processes:start)
+  RUNNING --> COMPENSATING: onFailure compensate, or throwCompensation
+  COMPENSATING --> FAILED: compensation stack empty
+  COMPENSATING --> COMPENSATING: handler retry, manual incident
+  COMPLETED --> [*]
+  CANCELLED --> [*]
+  FAILED --> [*]
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class RUNNING engine
+  class COMPENSATING external
+  class COMPLETED,CANCELLED,FAILED obs

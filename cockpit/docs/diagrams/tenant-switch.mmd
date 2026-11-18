@@ -1,0 +1,25 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant B as Cockpit tenant switcher
+  end
+  box rgb(224,242,241) Host
+    participant F as Tenant resolver
+    participant R as REST layer
+  end
+  box rgb(236,239,241) Observability
+    participant O as Security log
+  end
+  B->>R: GET /api/bpm/me
+  R-->>B: tenant.current bank-a, tenant.allowed bank-a, bank-a-fin
+  B->>B: operator picks bank-a-fin, every screen reloads for one tenant
+  B->>F: GET /tasks, X-Tenant-Id bank-a-fin
+  F->>F: switching enabled, bank-a-fin in allowed_tenants claim
+  F->>R: tenant bank-a-fin
+  R-->>B: 200, bank-a-fin tasks only
+  B->>F: GET /tasks, X-Tenant-Id bank-b (edited request)
+  F->>F: bank-b not in allowed_tenants
+  F->>O: tenant.switch.refused, user, requested tenant, correlationId
+  F-->>B: 403 TENANT_NOT_ALLOWED, no data
+  B->>B: switcher resets to the token tenant and shows the refusal
+  Note over B,R: Reads only, no transaction is opened before the tenant is resolved

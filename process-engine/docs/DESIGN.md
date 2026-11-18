@@ -1,248 +1,703 @@
 # Process Engine: Design
 
-Status: architecture baseline (M0). Conforms to `ADR-0001` through `ADR-0007`, the proposed `ADR-0008` and `ADR-0009`, and `wiki/Technical-Requirements.md`. Money values follow the canonical contract in `rule-engine/docs/DESIGN.md` section 3.4.
+Status: architecture baseline (M0), updated 2026-11-18 for the cockpit direction (PD-032 to PD-042). Conforms to ADR-0001 to ADR-0007, ADR-0010 to ADR-0015, the proposed ADR-0008, ADR-0009 and ADR-0016, and [`docs/product/requirements.md`](../../docs/product/requirements.md). Money values follow the canonical contract in [`rule-engine/docs/DESIGN.md`](../../rule-engine/docs/DESIGN.md) section 3.4. Cross-module facts (transaction model, capacity baseline, failure table) are owned by [`docs/architecture/overview.md`](../../docs/architecture/overview.md); this document owns the Process Engine's model, DDL, APIs and read models.
 
-## 1. Context, Boundaries & Explicit Non-Goals
+Contents: 1 Context and boundaries. 2 Modules, ports and adapters. 3 Domain model and state machines. 4 Transaction model. 5 Definitions: notation, hash, diff, layout, BPMN, forms, step catalogue. 6 Java API and REST contract. 7 Storage model. 8 Read models, query limits and capacity math. 9 Failure modes. 10 Security controls. 11 Open questions.
 
-`horus-process-engine` is an embeddable workflow library for Java 21 / Spring Boot 3.4+ hosts using the host's PostgreSQL 14+ database (`pre_*`), where humans (`userTask`), host services (`serviceTask`), deterministic decisions (`decision` via Rule Engine SPI), and AI agents (`agentTask`) collaborate under explicit transactional, concurrency, and compensation guarantees.
+## 1. Context and boundaries
 
-- **Rule Engine independence:** `process-engine-core` depends ONLY on the `RuleEngine` API interface (optional bean if no `decision` or `agentTask` guardrail step exists). Rule Engine never depends on Process Engine (`ADR-0003`).
-- **Explicit non-goals:** No standalone Zeebe-like server (`ADR-0004`), no Elasticsearch exporter cluster, no XA/2PC distributed transactions (`ADR-0007`), no full BPMN 2.0 / CMMN symbol coverage.
+![Process Engine in the banking security zones](images/security-zones.svg)
 
-## 2. Module Decomposition & Dependency DAG
+Source: [`diagrams/security-zones.mmd`](diagrams/security-zones.mmd). Numbered edges: 1 to 4 enter through the bank's gateway; 6 to 8 run inside the host transaction; 9 to 11 are the Async Wait-State (ADR-0008), where the adapter call in 11 runs with no database connection held; 12 and 13 are events and telemetry.
 
-```text
-process-engine-core                (Java 21 + Jackson + optional RuleEngine SPI; zero Spring/SQL/net)
-  ▲
-  ├── process-engine-postgres      (Spring JDBC JdbcClient, Flyway pre_*, SKIP LOCKED poller, row-locked joins)
-  ├── process-engine-rest          (Spring WebMvc /api/bpm/processes/v1, RFC 9457, OpenAPI)
-  ├── process-engine-test          (In-memory ports, fixed Clock, stub AgentAdapter, JUnit 5 extension)
-  ▲
-process-engine-spring-boot-starter (@AutoConfiguration, scheduler lifecycle, Micrometer, OTel hooks)
-```
+`horus-process-engine` is an embeddable workflow library for Java 21 and Spring Boot 4.x hosts (3.5.x tested until 1.0, ADR-0011) on the host's PostgreSQL 14 or later (the range from 1.0 is pending PD-055). Humans (`userTask`), host services (`serviceTask`), rule-based decisions (`decision`, through the Rule Engine API) and AI agents (`agentTask`) take part in one process under explicit transaction, concurrency and compensation rules.
 
-## 3. Domain Model, Execution Token Tree & Transaction Split
+| Boundary | Rule |
+|---|---|
+| Rule Engine | `process-engine-core` depends only on the `RuleEngine` API interface, an optional bean needed only when a definition has a `decision` step or an `agentTask` guardrail. The Rule Engine never depends on the Process Engine |
+| Host data | The engine owns tables prefixed `pre_` and its Flyway history `pre_schema_history`. It never reads or writes host tables |
+| Network | Engine code does no network I/O (`TR-EMB-05`). Adapter calls are host code, invoked outside any engine transaction |
+| Identity | Tenant from the `TenantResolver`, caller, roles and groups from the `CallerResolver`. A tenant in a request body is ignored (`TR-SEC-03`) |
 
-### 3.1 Sync In-Transaction vs Async Wait-State Protocol
-To guarantee zero lost state on local DB commits AND zero HikariCP pool exhaustion during slow LLM/MCP/HTTP calls:
+Non-goals: no engine server (ADR-0004), no Elasticsearch or other secondary store, no XA or two-phase commit (ADR-0007), no full BPMN 2.0 or CMMN coverage, no `GROUP BY` over history on a request path (ADR-0015), no modification of a running instance's token positions by hand.
 
-```text
-[Client/Timer]
-   │
-   ▼  TX 1 (Short ACID TX in host DataSource)
-[Advance Token] ──► Sync Step (decision / exclusiveGateway / local bean)?
-   │                   └── Run inline in TX 1, commit business + engine state together
-   │
-   └──► Async Wait-State (agentTask / remote serviceTask)?
-           └── Claim pre_timer job (status=CLAIMED, locked_until=now()+timeout+lease-margin), COMMIT TX 1!
-                  │
-                  ▼  OUTSIDE ANY DB TRANSACTION OR ROW LOCK
-           [Invoke AgentAdapter / ServiceAdapter, cancelled at the step timeout]
-                  │
-                  ▼  TX 2 (Fresh ACID TX)
-           [Verify lease/version] ─► [Validate JSON Schema] ─► [RuleEngine.evaluate(guardrails.decision)]
-                  ├── allow == true                     ──► Complete step, advance token
-                  ├── allow == false, route-to-human    ──► Create maker-checker userTask with output, reasons + matched rules
-                  └── fail / timeout ──► Retry with backoff or open pre_incident / run Saga compensate
-```
+## 2. Modules, ports and adapters
 
-### 3.2 Process Instance & Execution Token State Machine
-Processes fork via `parallelGateway`; therefore active positions live in **`pre_token`** rows rather than a single column on `pre_instance`:
-- `pre_instance.status`: `RUNNING | COMPLETED | COMPENSATING | CANCELLED | FAILED`
-- `pre_token.status`: `ACTIVE | WAITING_USER | WAITING_ASYNC | WAITING_TIMER | JOINED | COMPLETED | COMPENSATED`
-- **Events** (`<module>.<aggregate>.<pastTense>.v<N>`, module `processes`): `processes.definition.deployed.v1`, `processes.instance.started.v1`, `processes.step.completed.v1`, `processes.task.created.v1`, `processes.task.completed.v1`, `processes.incident.raised.v1`, `processes.incident.resolved.v1`, `processes.compensation.started.v1`, `processes.instance.failed.v1`, `processes.instance.completed.v1`, `processes.instance.cancelled.v1`. Each is handed to the host event publisher inside the transaction of the state change it reports. A breaking payload change publishes a `.v2` type alongside `.v1`.
-- **Concurrency rule for `parallelGateway` join:** When a branch arrives at a converging `parallelGateway`, the engine locks `SELECT ... FROM pre_instance WHERE tenant_id = ? AND id = ? FOR UPDATE`, transitions the arriving token to `JOINED`, checks if all incoming sequence branches in that `scope_id` are `JOINED`, and only then emits the post-join `ACTIVE` token (`TR-PERF-05`).
+![Process Engine modules, ports and adapters](images/components.svg)
 
-### 3.3 `agentTask` Execution & Guardrail Pipeline (`TR-AGT-01..03`)
-1. **Bounded Inputs:** Resolve `${instance.<path>}` references (syntax defined in `process-engine/api/schema/process-definition.v1.schema.json`, `$defs/variableRef`) into an explicit input DTO; apply PII masking flags before audit logging.
-2. **Adapter SPI (Outside TX):** Call `AgentAdapter.execute(AgentInvocation)` (in-process bean, HTTP, or M3 MCP tool) under `timeout` (`PT5M` etc.). Engine never embeds LLM SDKs (`TR-AGT-03`).
-3. **Output Schema Gate (In TX 2):** Validate adapter JSON payload against declared `outputSchema`. Schema violation → retry up to `retry.max`, then `pre_incident` (or `onViolation` policy).
-4. **Deterministic Guardrail Gate (In TX 2):** Call `RuleEngine.evaluate(guardrails.decision, agentOutput)`.
-   - **Guardrail contract:** the rule set must have hit policy `first` or `unique` and declare the output `allow: boolean`, and may declare `reasons: list<string>`; no other output is read. `POST /definitions` checks the rule set's effective version against this contract at deploy time and rejects the definition with `422 GUARDRAIL_CONTRACT_INVALID` if the rule set is missing or does not comply. At run time the engine fails closed: a decision error (`UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`) or a later version that no longer complies counts as `allow == false` with reason `GUARDRAIL_EVALUATION_ERROR` and follows `onViolation`.
-   - `allow == true` → advance process, record `guardrailDecisionId` in `pre_history`.
-   - `allow == false` + `onViolation: route-to-human` → create a `userTask` (maker-checker) carrying inputs, agent output, `reasons`, and matched guardrail rule IDs (`TR-AGT-01`).
-   - `allow == false` + `onViolation: fail` → open `pre_incident` (or trigger `compensate`).
-5. **Eval Feedback Loop:** Whenever a human edits or overrides an `agentTask` recommendation on the escalated `userTask`, persist `human_override` metadata in `pre_history` for offline/CI Eval replay.
+Source: [`diagrams/components.mmd`](diagrams/components.mmd).
 
-### 3.4 Saga Reverse Compensation (`ADR-0007`, `TR-COMP-01..03`)
-- Whenever a `serviceTask` or `agentTask` with a declared `compensate` handler completes inside a process or `saga` scope, push `(step_id, attempt_id, compensate_handler, input_snapshot)` onto `pre_compensation_stack`.
-- On unrecoverable step failure (`onFailure: compensate`) or `throwCompensation`, iterate the stack in **strict LIFO reverse order**, invoking each idempotent compensate handler with `(instanceId, stepId, attemptId)` (`TR-IDEM-04`).
-- `compensate: manual` raises an immediate `pre_incident` (`COMPENSATION_MANUAL_REQUIRED`) rather than silently skipping (`TR-COMP-03`).
-
-### 3.5 Business Calendar SPI & Batched Instance Migration
-- `BusinessCalendar` (`add`, `isBusinessTime`) computes `userTask` SLA `due_at` using tenant-configured working hours, time zones, and holidays (`pre_calendar`, `pre_holiday`) (`TR-CAL-01/02`).
-- `MigrationService` validates `(sourceVersion -> targetVersion)` as a read-only dry run (`:validate`), then executes in batches of 100 instances (`:execute`), locking one `pre_instance` at a time (`TR-MIG-01/02`). M2 maps steps with the same id implicitly and reports every instance on a step that has no same-id target. Explicit `stepMappings` for renamed steps and cancellation of instances on removed steps are M3 (`TR-MIG-03`).
-
-## 4. Public Java SPI & REST Contract Summary (`/api/bpm/processes/v1`)
-
-| Endpoint | Purpose | Idempotency / Concurrency |
+| Module | Contents | May depend on |
 |---|---|---|
-| `POST /definitions` | Deploy JSON/YAML versioned definition; validated against `process-definition.v1.schema.json` and the guardrail contract (section 3.3) | `Idempotency-Key`; `422 VALIDATION_FAILED`, `422 GUARDRAIL_CONTRACT_INVALID` |
-| `POST /instances` | Start instance (`businessKey` unique per tenant+def) | `Idempotency-Key` + `business_key` upsert (`ADR-0006`) |
-| `GET /instances/{id}`, `GET /instances` | Inspect state, tokens, variables, history | Cursor pagination |
-| `POST /tasks/{id}:claim`, `:complete`, `:delegate`, `:reassign` | Human task lifecycle & four-eyes check | `Idempotency-Key` + `If-Match: "<lockVersion>"` (`409 VERSION_CONFLICT`) |
-| `POST /incidents/{id}:retry`, `:resolve` | Retry failed service/agent/comp step or mark resolved | `Idempotency-Key` + `If-Match: "<lockVersion>"` |
-| `POST /migrations`, `/{id}:validate`, `/{id}:execute` | Plan, dry-run, and execute instance version migration | `Idempotency-Key` |
+| `process-engine-core` | `api`, `spi` and `internal` packages: domain model, lifecycle, graph diff, validation, ports | JDK, the JSON library fixed by ADR-0011, `rule-engine` API (optional) |
+| `process-engine-bpmn` | BPMN subset reader and writer (section 5.5) | `process-engine-core`, JDK `javax.xml.stream` only |
+| `process-engine-postgres` | `JdbcClient` adapters for every driven port, Flyway scripts, `SKIP LOCKED` poller, rollup job | core, Spring JDBC, Flyway |
+| `process-engine-rest` | Controllers under `/api/bpm/processes/v1`, RFC 9457 errors, ETag, idempotency filter | core, bpmn, Spring WebMvc |
+| `process-engine-test` | In-memory adapters that pass the same storage contract suite, `TestClock`, `StubAgentAdapter`, `@ProcessTest` | core |
+| `process-engine-spring-boot-starter` | Auto-configuration, profile guards (`TR-SEC-11`), scheduler lifecycle, Micrometer, OpenTelemetry hooks | all of the above |
 
-Optimistic locking uses `lockVersion` (column `lock_version`), sent as `If-Match: "<lockVersion>"` or a `lockVersion` body field and returned as `ETag`; `version` always means the definition version number. Every endpoint that accepts `Idempotency-Key` returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` when the key was used with a different request hash and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` while the first request is still running (`ADR-0006`).
+ArchUnit rules in every build: core imports no `org.springframework..`, `java.sql..`, `java.net..`, `javax.script..` or `java.lang.reflect..` (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`); no adapter port (`ServiceAdapter`, `AgentAdapter`) is called from a class that runs inside a transaction (`TR-ASY-01`); public signatures in `..api..` and `..spi..` use only JDK, engine and JSpecify types (ADR-0016).
 
-## 5. Storage Model (`process-engine-postgres`)
+## 3. Domain model and state machines
 
-All tables place `tenant_id` first in indexes (`TR-TEN-01`), use ULID IDs, and `TIMESTAMPTZ`.
+### 3.1 Aggregates
+
+| Aggregate | Root and invariants | Table |
+|---|---|---|
+| Definition version | `DefinitionVersion(key, version, status, document, hash, effectiveFrom)`. Content is immutable once `PENDING_APPROVAL`; only `DRAFT` content changes. The requester never approves. Approval requires `version` greater than every `ACTIVE` version of the key | `pre_definition` |
+| Layout | `LayoutRevision(definitionId, revision, layout)`. Append-only; never part of the definition hash; node ids must exist in the definition | `pre_definition_layout` |
+| Instance | `ProcessInstance` with its token tree. Pinned to one definition version until migrated. All transitions of one instance serialise on the `pre_instance` row lock | `pre_instance`, `pre_token` |
+| Task | `HumanTask(status, assignment, form, forbiddenUsers, lockVersion)`. Four-eyes is checked in `TaskService`, so Java and REST behave the same | `pre_task` |
+| Incident | `Incident(status, errorCode, retryCount, lockVersion)` | `pre_incident` |
+| Job | Timer, SLA escalation, async step attempt, compensation attempt or definition effective-date job, with a lease | `pre_timer` |
+
+Value objects: `TenantId`, `DefinitionKey`, `BusinessKey`, `IdempotencyKey`, `AttemptId`, `Money`, `ContentHash`, `NodeId`. All are records with validating constructors.
+
+### 3.2 Definition lifecycle (ADR-0012)
+
+![Definition lifecycle](images/definition-lifecycle.svg)
+
+Source: [`diagrams/definition-lifecycle.mmd`](diagrams/definition-lifecycle.mmd).
+
+| From | Command | Permission | Guard | To | Side effect and event |
+|---|---|---|---|---|---|
+| none | `importDefinition` (`POST /definitions`, start-up classpath import) | `processes:deploy` | Schema valid, size limits (`TR-DEF-05`), step registry, guardrail contract | `DRAFT` | Next `version_num`, canonical JSON and hash stored, `diagram` part split into layout revision 1, `source` recorded |
+| none | `createDraft` (`POST /definitions/{key}/drafts`) | `processes:author` | `authoring.cockpit-drafts` is `true`, else `403 DRAFT_AUTHORING_DISABLED` | `DRAFT` | Copy of the chosen version, or a minimal start-end graph |
+| `DRAFT` | `updateDraft` | `processes:author` | Same setting; `If-Match` equals `lock_version` | `DRAFT` | Content and hash replaced; `updated_by` recorded |
+| `DRAFT` | `validate` | `processes:author` or `processes:deploy` | None | `DRAFT` | Report only |
+| `DRAFT` | `requestApproval(effectiveFrom)` | `processes:author` or `processes:deploy` | Zero validation errors; `effectiveFrom` absent (means at approval) or not in the past | `PENDING_APPROVAL` | `requested_by`, `requested_at`; `processes.definition.publish-requested.v1` |
+| `PENDING_APPROVAL` | `approve(comment)` | `processes:approve` | Caller is not `requested_by` (`403 SELF_APPROVAL_FORBIDDEN`); no `ACTIVE` version with a higher number (`409 VERSION_SUPERSEDED`); guardrail contract re-checked | `ACTIVE` | `approved_by`, `approved_at`; job `DEFINITION_EFFECTIVE` at `effective_from`; `processes.definition.approved.v1` |
+| `PENDING_APPROVAL` | `reject(reason)` | `processes:approve` | Reason not blank | `DRAFT` | `decision_comment`; `processes.definition.rejected.v1` |
+| `DRAFT` | `importDefinition` in the `dev` profile with `definitions-auto-approve: true` | `processes:deploy` | Profile `dev` active, else start-up fails (`TR-SEC-11`) | `ACTIVE` | `approved_by = system:dev-auto-approve`; `approved.v1` |
+| `ACTIVE` | Effective-date job finds a newer `ACTIVE` version effective | scheduler | `effective_from <= now()` of the newer version | `RETIRED` | `processes.definition.retired.v1`. Running instances keep their version |
+| `ACTIVE` | `retire` | `processes:approve` | None | `RETIRED` | `retired.v1`; new starts of the key get `404 NO_EFFECTIVE_VERSION` if no other version is effective |
+| `DRAFT` | `retire` (withdraw a draft) | `processes:author` | None | `RETIRED` | `retired.v1` |
+
+The effective version of a key is the `ACTIVE` version with the highest `version_num` whose `effective_from <= now()`. `POST /instances` resolves it with one lookup on `idx_pre_definition_effective`.
+
+Approval sequence, with the self-approval and supersession refusals:
+
+![Request approval and approve](images/definition-approval.svg)
+
+Source: [`diagrams/definition-approval.mmd`](diagrams/definition-approval.mmd).
+
+### 3.3 Instance states
+
+![Instance states](images/instance-states.svg)
+
+Source: [`diagrams/instance-states.mmd`](diagrams/instance-states.mmd).
+
+| From | Trigger | Guard | To | Event |
+|---|---|---|---|---|
+| none | `start` | Effective version exists; business key unused for `(tenant, key)`, else the existing instance is returned (`TR-IDEM-02`) | `RUNNING` | `processes.instance.started.v1` |
+| `RUNNING` | Step transition, incident retry, migration | `pre_instance` row lock | `RUNNING` | `processes.step.completed.v1` |
+| `RUNNING` | Last token reaches an `end` step | None | `COMPLETED` | `processes.instance.completed.v1` |
+| `RUNNING` | `cancel` | `processes:start` | `CANCELLED` | `processes.instance.cancelled.v1`; open tasks cancelled |
+| `RUNNING` | `onFailure: compensate` exhausted, or `throwCompensation` | Compensation stack not empty | `COMPENSATING` | `processes.compensation.started.v1` |
+| `COMPENSATING` | Stack walked to the bottom | Every handler `DONE` or resolved | `FAILED` | `processes.instance.failed.v1` |
+
+An open incident does not change the instance status; the affected token stays in its waiting status and the incident row records the cause.
+
+### 3.4 Token states
+
+Processes fork at a `parallelGateway`, so positions live in `pre_token` rows, not in a column of `pre_instance`.
+
+![Token states](images/token-states.svg)
+
+Source: [`diagrams/token-states.mmd`](diagrams/token-states.mmd).
+
+| From | Trigger | To | Note |
+|---|---|---|---|
+| none | Start, or fork at a `parallelGateway` | `ACTIVE` | One token per outgoing branch |
+| `ACTIVE` | `userTask` reached | `WAITING_USER` | Task row created in the same transaction |
+| `WAITING_USER` | Task completed | `ACTIVE` | Moves to the next step in the same transaction |
+| `ACTIVE` | Async step reached | `WAITING_ASYNC` | Job row created; TX1 claims it later (section 4) |
+| `WAITING_ASYNC` | TX2 accepts the result | `ACTIVE` | Guardrail and schema checks in TX2 |
+| `ACTIVE` | `timer` step | `WAITING_TIMER` | Job `TIMER` at the due time |
+| `WAITING_TIMER` | Timer fires | `ACTIVE` | |
+| `ACTIVE` | Arrives at a converging `parallelGateway` | `JOINED` | Under the `pre_instance` row lock; the last arrival of the scope creates the post-join `ACTIVE` token (`TR-ASY-03`) |
+| `ACTIVE` | `end` step | `COMPLETED` | |
+| `COMPLETED` | Compensation of the token's steps ran | `COMPENSATED` | |
+
+Every token row carries `definition_id`, copied from the instance and changed with it by migration, so live counts per node read one index (section 8.2).
+
+### 3.5 Task states
+
+![Task states](images/task-states.svg)
+
+Source: [`diagrams/task-states.mmd`](diagrams/task-states.mmd).
+
+| From | Command | Permission | Guard | To |
+|---|---|---|---|---|
+| none | Token reaches a `userTask`, or a guardrail routes to a human | engine | None | `OPEN` |
+| `OPEN` | `claim` | `processes:task:work` | Caller matches the user, one of the roles or one of the groups; not in `forbidden_users` | `CLAIMED` |
+| `CLAIMED` | `unclaim` | `processes:task:work` | Caller is the claimant | `OPEN` |
+| `CLAIMED` | `delegate(user)` | `processes:task:manage` | Target not in `forbidden_users` | `CLAIMED` |
+| `OPEN` | `reassign(user)` | `processes:task:manage` | Target not in `forbidden_users` | `CLAIMED` |
+| `CLAIMED` | `complete(result)` | `processes:task:work` | Caller is the claimant; four-eyes (`403 SELF_APPROVAL_FORBIDDEN`); result valid against the form (`422 FORM_VALIDATION_FAILED`); `If-Match` matches | `COMPLETED` |
+| `OPEN`, `CLAIMED` | Instance cancelled, or migrated off the step | engine | None | `CANCELLED` |
+
+## 4. Transaction model
+
+| Step kind | Transaction | Why |
+|---|---|---|
+| `decision`, gateways, `userTask` state changes, `timer` scheduling, `serviceTask` with `mode: local` | Sync: inside the caller's or the scheduler's transaction | Writes only to the host database; atomic with business state |
+| `agentTask`, `serviceTask` with `mode: remote`, remote compensation handlers | Async Wait-State: TX1 claim, call with no connection, TX2 complete | A network call must never hold a connection or a row lock (ADR-0008, `TR-ASY-01`) |
+| Definition lifecycle commands, layout writes | Sync, one short transaction each | Database only; validation runs before the transaction opens |
+| BPMN import and export | Parse and convert outside any transaction; one insert transaction | CPU work on up to 1 MB of XML must not hold a connection |
+| Rollup of node statistics | One short scheduler transaction per slice | Database only, no network; bounded by `statement_timeout` |
+
+![Async Wait-State protocol](images/async-wait-state.svg)
+
+Source: [`diagrams/async-wait-state.mmd`](diagrams/async-wait-state.mmd). The worker claims a job only when an adapter executor slot is free, so time spent queued inside the JVM never consumes the lease. The lease is the step timeout plus `jobs.lease-margin` (default 30 s), stored per row in `pre_timer.lease_duration` so a batch claim computes `locked_until` per job in SQL.
+
+### 4.1 `agentTask` guardrail pipeline (`TR-AGT-01` to `TR-AGT-03`)
+
+1. Bounded inputs: `${instance.<path>}` references (schema `$defs/variableRef`) resolve into an explicit input map; fields marked `mask: true` are hashed before any history write.
+2. TX1 claims; the adapter `AgentAdapter.execute(AgentInvocation)` runs with no connection, under the step `timeout`. The engine never embeds a model SDK.
+3. TX2 validates the output against `outputSchema`. A violation is a failed attempt; after `retry.max` the incident `AGENT_SCHEMA_INVALID` opens.
+4. TX2 evaluates `guardrails.decision` with `RuleEngine.evaluate`. Contract: hit policy `first` or `unique`, output `allow: boolean`, optional `reasons: list<string>`. Checked at import, at request-approval and at approval (`422 GUARDRAIL_CONTRACT_INVALID`). At run time a decision error or a non-complying later version counts as `allow == false` with reason `GUARDRAIL_EVALUATION_ERROR` (fail closed).
+5. `allow == true` advances and records `guardrailDecisionId`. `allow == false` with `route-to-human` opens an approval task with inputs, output, `reasons` and matched rule ids; with `fail` opens an incident or starts compensation.
+6. A reviewer's change to the agent output is stored as `human_override` in history for offline evaluation.
+
+### 4.2 Saga compensation (ADR-0007, `TR-COMP-01` to `TR-COMP-03`)
+
+A completed `serviceTask` or `agentTask` with a `compensate` handler pushes `(step_id, attempt_id, handler, input_snapshot)` onto `pre_compensation_stack`. On `onFailure: compensate` or `throwCompensation` the stack is walked newest first; each handler call is an async job with its own retry policy and a new `attemptId`, and receives the forward step's `attemptId` as `forwardAttemptId`. `compensate: manual` opens `COMPENSATION_MANUAL_REQUIRED` instead of skipping.
+
+### 4.3 Business calendars and migration
+
+`BusinessCalendar` (`add`, `isBusinessTime`) computes `due_at` from working hours, time zone and holidays per tenant (`TR-CAL-01`, `TR-CAL-02`). `MigrationService` validates a plan as a dry run, then executes in batches of 100 instances, one `pre_instance` lock at a time; it updates `pre_instance.definition_id` and every token's `definition_id` in the same transaction (`TR-MIG-01`, `TR-MIG-02`). Explicit step mappings are M3 (`TR-MIG-03`).
+
+## 5. Definitions: notation, hash, diff, layout, BPMN, forms, step catalogue
+
+### 5.1 Notation (ADR-0013, `TR-DEF-01`)
+
+The canonical format is our JSON (or YAML), owned by [`api/schema/process-definition.v1.schema.json`](../api/schema/process-definition.v1.schema.json). It may carry an optional `diagram` part (node positions, edge waypoints, lanes; schema [`api/schema/definition-layout.v1.schema.json`](../api/schema/definition-layout.v1.schema.json)). On import the engine stores the `diagram` part as a layout revision and removes it from `definition_json`.
+
+### 5.2 Content hash (`TR-DEF-04`)
+
+`definition_hash` is the lowercase hex SHA-256 of the RFC 8785 (JSON Canonicalization Scheme) serialisation of the document with the `diagram` member removed. YAML is converted to JSON first. The canonicaliser is about 150 lines in `process-engine-core`, with the RFC 8785 test vectors in CI; no dependency. A pipeline computes the same hash from the file in Git, so "does production match Git" is one string comparison; the cockpit shows the hash on every version (PD-036).
+
+### 5.3 Graph diff (PE-F-46)
+
+`GraphDiff diff(base, target)` is a pure function. Nodes are matched by step `id`; edges by `(from, to, kind)` where kind is `next`, `branch[i]`, `default` or `fork`. Output: `nodesAdded`, `nodesRemoved`, `nodesChanged` (each with JSON Pointer paths and old and new values), `edgesAdded`, `edgesRemoved`. Layout is never part of the diff. Complexity O(N + E); a 500-node definition diffs in under 5 ms.
+
+### 5.4 Layout (ADR-0013, `TR-DEF-02`, M3)
+
+Layout revisions are append-only rows with author and time. Saving needs `processes:author` and `If-Match: "<revision>"`, and no approval, because layout never changes behaviour (principle 6 wording, PD-040). A layout may list a subset of nodes; the cockpit places the rest with automatic layout. A revision referring to a node id that is not in the definition is `422 LAYOUT_INVALID`. Size limit 256 KB. Layout writes stay allowed when `authoring.cockpit-drafts` is `false`.
+
+### 5.5 BPMN subset import and export (ADR-0013, PE-F-41 M3, PE-F-53 M3 cut candidate)
+
+![BPMN subset import](images/bpmn-import.svg)
+
+Source: [`diagrams/bpmn-import.mmd`](diagrams/bpmn-import.mmd).
+
+| BPMN 2.0 element | Our step | Notes |
+|---|---|---|
+| `startEvent` (none) | `start` | One per process |
+| `endEvent` (none) | `end` | |
+| `userTask` | `userTask` | `horus:assignee`, `horus:fourEyes`, `horus:form`, `horus:sla` extension attributes |
+| `serviceTask` | `serviceTask` | `horus:handler`, `horus:mode`, `horus:compensate` |
+| `serviceTask` with `horus:type="agentTask"` | `agentTask` | `horus:agent`, `horus:outputSchema`, `horus:guardrail` are required |
+| `businessRuleTask` | `decision` | `horus:ruleSet` |
+| `exclusiveGateway` with `conditionExpression` and `default` | `exclusiveGateway` | Conditions in our expression language, `language="urn:horus-bpm:expr:v1"` |
+| `parallelGateway` | `parallelGateway` | |
+| `intermediateCatchEvent` with `timerEventDefinition` (`timeDuration` or `timeDate`) | `timer` | |
+| `callActivity` | `callProcess` | `calledElement` is the definition key |
+| `transaction` subprocess | `saga` | |
+| `intermediateThrowEvent` with `compensateEventDefinition` | `throwCompensation` | |
+| `sequenceFlow` | `next`, `branches[]` | |
+| `bpmndi:BPMNShape`, `bpmndi:BPMNEdge` | layout revision 1 | Bounds and waypoints |
+| Anything else (message, signal, error and boundary events, inclusive and event-based gateways, lanes with semantics, scripts, multi-instance markers) | rejected | `422 BPMN_UNSUPPORTED_ELEMENT` naming element, `id` and line |
+
+The reader uses `XMLInputFactory` with `SUPPORT_DTD=false` and `IS_SUPPORTING_EXTERNAL_ENTITIES=false`; any `DOCTYPE` is `422 BPMN_UNSAFE_XML`. Limits: 1 MB, nesting depth 32, 5,000 elements. Export writes the same subset with the `horus` namespace and BPMNDI from the latest layout (or from an automatic layout computed by the cockpit and sent with the request). Round trip: export then import of a definition gives the same `definition_hash`; CI checks this for every example definition and validates exported XML against the BPMN 2.0 XSD.
+
+### 5.6 Task forms (PE-F-51, M2)
+
+A `userTask` declares `form` as one of: a form key registered by the host through `FormRegistry`; an object `{ "schema": "<path of a JSON Schema>", "hints": { ... } }`; or `{ "link": "<URL template>" }` for the host's own screen. `GET /tasks/{id}/form` returns the resolved form ([`api/schema/task-form.v1.schema.json`](../api/schema/task-form.v1.schema.json)): JSON Schema 2020-12 limited to `string`, `integer`, `number`, `boolean`, `enum`, `date`, `datetime` and the money object; display hints (`order`, `widgets`, `labels` per locale, `readOnly`); prefilled data from declared variables, masked fields still masked; or the link. `:complete` validates the result against the same schema in the service layer (`422 FORM_VALIDATION_FAILED` with JSON Pointers). A link must be relative or match `tasks.form-link-origins`, checked at import; otherwise the import fails with a `FORM_LINK_NOT_ALLOWED` problem inside `422 VALIDATION_FAILED`.
+
+### 5.7 Step catalogue (PE-F-52, M3)
+
+`GET /step-catalogue` returns what an author may place on the canvas: service handlers and agent adapters registered through `StepRegistry` (name, mode, input schema, compensable), rule sets usable as `decision` steps (name, effective version, inputs, outputs), rule sets that meet the guardrail contract, calendars, form keys, and roles and groups when the host provides a `RoleCatalogue`. Handlers are registered as typed functional interfaces under a name; the engine never invokes a method by reflection (`TR-SEC-01`). Import validation uses the same registry, so a step the catalogue does not offer cannot be imported either.
+
+## 6. Java API and REST contract
+
+### 6.1 Java API (`com.horus.bpm.process.api`)
+
+Entry points follow ADR-0016: one interface per job, request records with builders, sealed result types, unchecked exceptions with `code()`.
+
+```java
+public interface DefinitionService {
+  DefinitionVersion importDefinition(ImportRequest request);              // processes:deploy, creates DRAFT
+  DefinitionVersion createDraft(DraftRequest request);                    // processes:author
+  DefinitionVersion updateDraft(DefinitionRef ref, long expectedLockVersion, DefinitionDocument document);
+  ValidationReport validate(DefinitionRef ref);
+  DefinitionVersion requestApproval(DefinitionRef ref, long expectedLockVersion, @Nullable Instant effectiveFrom);
+  DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment);
+  DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason);
+  DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion);
+  GraphDiff diff(DefinitionRef base, DefinitionRef target);
+  LayoutRevision saveLayout(DefinitionRef ref, int expectedRevision, Layout layout);
+  Optional<LayoutRevision> latestLayout(DefinitionRef ref);
+}
+
+public interface ProcessQueryService {
+  Page<Activity> activities(InstanceId id, @Nullable Cursor cursor, int limit);
+  NodeCounts liveNodeCounts(DefinitionRef ref);
+  NodeStats windowNodeStats(DefinitionRef ref, Instant from, Instant to);
+  Page<TaskSummary> tasks(TaskQuery query);
+}
+```
+
+`ProcessEngine` (start, cancel), `TaskService` (claim, unclaim, complete, delegate, reassign, form), `IncidentService`, `MigrationService` and `StepCatalogue` complete the API. The tenant and caller come from the resolvers; no method takes a tenant parameter except the batch-only `TenantScoped` variants used by host jobs.
+
+### 6.2 REST endpoints (`/api/bpm/processes/v1`)
+
+| Endpoint | Permission | Purpose | Idempotency and concurrency | Errors beyond the common set | Milestone |
+|---|---|---|---|---|---|
+| `POST /definitions` | `processes:deploy` | Import a full JSON or YAML document as the next `DRAFT`; optional `requestApproval` and `effectiveFrom` in the body | `Idempotency-Key` | `422 VALIDATION_FAILED`, `422 GUARDRAIL_CONTRACT_INVALID`, `422 DEFINITION_TOO_LARGE` | M2 |
+| `POST /definitions:import-bpmn` | `processes:deploy` | Import a BPMN subset file as a `DRAFT` | `Idempotency-Key` | `422 BPMN_UNSUPPORTED_ELEMENT`, `422 BPMN_UNSAFE_XML`, `422 VALIDATION_FAILED` | M3 |
+| `GET /definitions` | `processes:read` | Keys with effective version, pending count, last change | Cursor, at most 200 | | M2 |
+| `POST /definitions/{key}/drafts` | `processes:author` | New draft from `fromVersion` or blank | `Idempotency-Key` | `403 DRAFT_AUTHORING_DISABLED` | M2 |
+| `GET /definitions/{key}/versions/{v}` | `processes:read` | Document, status, hash, approval fields; `?include=layout` adds the latest layout | `ETag` from hash and layout revision | `404 DEFINITION_NOT_FOUND` | M2 |
+| `PUT /definitions/{key}/versions/{v}` | `processes:author` | Replace draft content | `If-Match: "<lockVersion>"` | `403 DRAFT_AUTHORING_DISABLED`, `409 VERSION_CONFLICT`, `409 INVALID_STATE` | M2 |
+| `POST /definitions/{key}/versions/{v}:validate` | `processes:author` or `processes:deploy` | Validation report | None | | M2 |
+| `POST /definitions/{key}/versions/{v}:request-approval` | `processes:author` or `processes:deploy` | To `PENDING_APPROVAL` | `Idempotency-Key`, `If-Match` | `422 VALIDATION_FAILED`, `409 INVALID_STATE` | M2 |
+| `POST /definitions/{key}/versions/{v}:approve` | `processes:approve` | To `ACTIVE` | `Idempotency-Key`, `If-Match` | `403 SELF_APPROVAL_FORBIDDEN`, `409 VERSION_SUPERSEDED`, `409 INVALID_STATE` | M2 |
+| `POST /definitions/{key}/versions/{v}:reject` | `processes:approve` | Back to `DRAFT`, reason required | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
+| `POST /definitions/{key}/versions/{v}:retire` | `processes:approve` (`ACTIVE`), `processes:author` (`DRAFT`) | To `RETIRED` | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
+| `GET /definitions/{key}/versions/{v}/diff?base=` | `processes:read` | Graph diff; `base` defaults to the effective version | `ETag` | | M2 |
+| `GET /definitions/{key}/versions/{v}/export?format=json\|yaml\|bpmn` | `processes:read` | Export; `bpmn` is M3 | | | M2, M3 |
+| `GET`, `PUT /definitions/{key}/versions/{v}/layout` | `processes:read`, `processes:author` | Latest layout; save a new revision | `If-Match: "<revision>"` on `PUT` | `409 VERSION_CONFLICT`, `422 LAYOUT_INVALID` | M3 |
+| `GET /definitions/{key}/versions/{v}/layout/revisions` | `processes:read` | Revision list with author and time | Cursor | | M3 |
+| `GET /definitions/{key}/versions/{v}/node-stats?mode=live` | `processes:read` | Active tokens and open incidents per node | `ETag`, `asOf` | | M2 |
+| `GET /definitions/{key}/versions/{v}/node-stats?mode=window&from=&to=` | `processes:read` | Counts, p50, p95, SLA breaches per node from the rollup; window at most 31 days | `ETag`, `asOf` | `400 QUERY_INVALID` | M3 |
+| `GET /step-catalogue` | `processes:author` | Section 5.7 | `ETag` | | M3 |
+| `POST /instances` | `processes:start` | Start on the effective version | `Idempotency-Key`, business key | `404 NO_EFFECTIVE_VERSION` | M2 |
+| `GET /instances?status=&definitionKey=&startedFrom=&startedTo=` | `processes:read` | List; `status` defaults to `RUNNING`; the range is at most 31 days | Cursor, at most 200 | `400 QUERY_INVALID` | M2 |
+| `GET /instances/{id}` | `processes:read` | State, tokens, masked variables | `ETag` | `404 INSTANCE_NOT_FOUND` | M2 |
+| `GET /instances/{id}/activities` | `processes:read` | Per node: entered, completed, duration, attempts, actor, incident; bounded by the instance's lifetime | Cursor, at most 200, `ETag` | `404 INSTANCE_NOT_FOUND` | M2 |
+| `POST /instances/{id}:cancel` | `processes:start` | Cancel | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
+| `GET /tasks?assignment=&status=&role=&group=&dueBefore=&slaBreached=` | `processes:task:work`; `any` needs `processes:task:manage` | Task query (section 8.2): `assignment` is one or more of `mine`, `candidate`, `any`; `status` one or more of `OPEN`, `CLAIMED`; ordered by `(dueAt, id)` | Cursor, at most 200, `ETag` | `400 QUERY_INVALID` | M2 |
+| `GET /tasks/{id}`, `GET /tasks/{id}/form` | `processes:task:work` | Task context and resolved form | `ETag` | `404 TASK_NOT_FOUND` | M2 |
+| `POST /tasks/{id}:claim`, `:unclaim`, `:complete` | `processes:task:work` | Section 3.5 | `Idempotency-Key`, `If-Match` | `403 SELF_APPROVAL_FORBIDDEN`, `422 FORM_VALIDATION_FAILED` | M2 |
+| `POST /tasks/{id}:delegate`, `:reassign` | `processes:task:manage` | Section 3.5 | `Idempotency-Key`, `If-Match` | | M2 |
+| `GET /incidents?status=OPEN&definitionKey=&nodeId=` | `processes:read` | Incident list | Cursor, at most 200, `ETag` | | M2 |
+| `POST /incidents/{id}:retry`, `:resolve` | `processes:incident:manage` | Retry or resolve | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
+| `POST /migrations`, `/{id}:validate`, `/{id}:execute` | `processes:migration:manage` | Plan, dry run, execute | `Idempotency-Key` | | M2 |
+
+Common set on every endpoint: `400 INPUT_INVALID`, `401`, `403 FORBIDDEN` (permission), `403 TENANT_NOT_ALLOWED` (ADR-0014), `409 VERSION_CONFLICT` where `If-Match` applies, `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` where `Idempotency-Key` applies (ADR-0006), `500 INTERNAL` with `correlationId` only. Bodies are RFC 9457 with `code`; `type` URIs follow ADR-0010. `lockVersion` travels as `If-Match: "<lockVersion>"` and `ETag`; `version` always means the definition version number. `/api/bpm/meta` and `/api/bpm/me` are host-level endpoints owned by [`cockpit/docs/DESIGN.md`](../../cockpit/docs/DESIGN.md) section 6; this engine contributes its feature flags there.
+
+### 6.3 Permissions
+
+From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start`, `processes:task:work`, `processes:task:manage`, `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage`.
+
+### 6.4 Events
+
+Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the host publisher inside the transaction of the state change it reports; additive changes stay in `.v1`.
+
+| Event | Payload beyond the envelope |
+|---|---|
+| `processes.definition.publish-requested.v1` | `definitionKey`, `version`, `definitionHash`, `requestedBy`, `effectiveFrom`, `source` |
+| `processes.definition.approved.v1` | Same plus `approvedBy`, `approvedAt` |
+| `processes.definition.rejected.v1` | `definitionKey`, `version`, `rejectedBy`, `reason` |
+| `processes.definition.retired.v1` | `definitionKey`, `version`, `retiredBy` or `supersededBy` |
+| `processes.instance.started.v1`, `.completed.v1`, `.cancelled.v1`, `.failed.v1` | `instanceId`, `definitionKey`, `version`, `businessKey` |
+| `processes.step.completed.v1` | `instanceId`, `nodeId`, `attemptId`, `durationMs` |
+| `processes.task.created.v1`, `processes.task.completed.v1` | `taskId`, `instanceId`, `nodeId`, assignment, `completedBy` |
+| `processes.incident.raised.v1`, `processes.incident.resolved.v1` | `incidentId`, `instanceId`, `nodeId`, `errorCode` |
+| `processes.compensation.started.v1` | `instanceId`, `scopeId`, stack depth |
+
+`processes.definition.deployed.v1` from the earlier baseline is removed: deploy now creates a draft, and no release has shipped.
+
+### 6.5 Configuration (`horus.bpm.processes.*`)
+
+| Property | Default | Meaning |
+|---|---|---|
+| `definitions` | empty | Classpath locations imported at start-up through the `importDefinition` path, as drafts |
+| `definitions-auto-approve` | `false` | Approve imported drafts automatically. Start-up fails unless the `dev` profile is active (`TR-SEC-11`) |
+| `maker-checker.enabled` | `true` | `false` is refused outside the `dev` profile (`TR-SEC-11`) |
+| `authoring.cockpit-drafts` | `true` | `false` refuses draft creation and draft edits through `processes:author` endpoints with `403 DRAFT_AUTHORING_DISABLED`; imports with `processes:deploy`, approvals and layout writes still work (PD-036) |
+| `definitions.max-nodes`, `definitions.max-bytes` | `500`, `1MB` | May be lowered, never raised (`TR-DEF-05`) |
+| `tasks.form-link-origins` | empty | Origins allowed in form links; relative links are always allowed |
+| `stats.live-cache-ttl`, `stats.live-cache-ttl-large` | `PT5S`, `PT15S` | Live count cache per replica; the large TTL applies when the last count exceeded 100,000 tokens |
+| `stats.rollup-interval`, `stats.rollup-lag`, `stats.rollup-max-slice` | `PT5M`, `PT5M`, `PT1M` | Rollup cadence, safety lag, history time per transaction |
+| `stats.rollup-retention` | `P13M` | Drops whole monthly partitions of the derived rollup table |
+| `query.max-page-size`, `query.statement-timeout` | `200`, `PT2S` | Page size may be lowered only; timeout per read transaction |
+| `jobs.lease-margin`, `adapters.default-timeout` | `30s`, `PT30S` | ADR-0008 |
+| `history.retention` | unset (keep everything) | Drops whole monthly partitions of `pre_history`; the default and the floor are pending PD-050 |
+
+## 7. Storage model (`process-engine-postgres`)
+
+Every table has `tenant_id` first in its primary key, unique constraints and query indexes (`TR-TEN-01`); foreign keys include `tenant_id`, so a row can never reference another tenant's row. Ids are ULIDs (`VARCHAR(26)`), times are `TIMESTAMPTZ`. Engine-internal sweeps (job poller, effective-date jobs, rollup, partition maintenance) are the only reads across tenants, and they never return rows to a caller; the tenancy rule for sweeps is the open M1 question in the architecture overview section 12.
 
 ```sql
 CREATE TABLE pre_definition (
-  id              VARCHAR(26) PRIMARY KEY,
-  tenant_id       TEXT NOT NULL,
-  key_name        TEXT NOT NULL,
-  version_num     INT NOT NULL,
-  status          TEXT NOT NULL, -- ACTIVE | RETIRED
-  definition_json JSONB NOT NULL,
-  definition_hash CHAR(64) NOT NULL,
-  created_at      TIMESTAMPTZ NOT NULL,
-  UNIQUE (tenant_id, key_name, version_num)
+  tenant_id         TEXT        NOT NULL,
+  id                VARCHAR(26) NOT NULL,
+  key_name          TEXT        NOT NULL,
+  version_num       INT         NOT NULL,
+  status            TEXT        NOT NULL CHECK (status IN ('DRAFT','PENDING_APPROVAL','ACTIVE','RETIRED')),
+  schema_version    INT         NOT NULL,
+  definition_json   JSONB       NOT NULL,        -- canonical document without the diagram part
+  definition_hash   CHAR(64)    NOT NULL,        -- SHA-256 of the RFC 8785 form of definition_json
+  node_count        INT         NOT NULL CHECK (node_count <= 500),
+  source            TEXT        NOT NULL CHECK (source IN ('IMPORT','STARTUP','AUTHORED','BPMN')),
+  effective_from    TIMESTAMPTZ,
+  lock_version      BIGINT      NOT NULL DEFAULT 0,
+  created_by        TEXT        NOT NULL,
+  created_at        TIMESTAMPTZ NOT NULL,
+  updated_by        TEXT        NOT NULL,
+  updated_at        TIMESTAMPTZ NOT NULL,
+  requested_by      TEXT,
+  requested_at      TIMESTAMPTZ,
+  approved_by       TEXT,
+  approved_at       TIMESTAMPTZ,
+  decision_comment  TEXT,
+  retired_by        TEXT,
+  retired_at        TIMESTAMPTZ,
+  PRIMARY KEY (tenant_id, id),
+  UNIQUE (tenant_id, key_name, version_num),
+  CHECK (status <> 'ACTIVE' OR (approved_by IS NOT NULL AND effective_from IS NOT NULL)),
+  CHECK (approved_by IS NULL OR approved_by <> requested_by OR approved_by = 'system:dev-auto-approve')
 );
+CREATE INDEX idx_pre_definition_effective
+  ON pre_definition (tenant_id, key_name, status, effective_from DESC);
+CREATE INDEX idx_pre_definition_pending
+  ON pre_definition (tenant_id, requested_at) WHERE status = 'PENDING_APPROVAL';
+
+CREATE TABLE pre_definition_layout (
+  tenant_id         TEXT        NOT NULL,
+  definition_id     VARCHAR(26) NOT NULL,
+  revision          INT         NOT NULL CHECK (revision >= 1),
+  layout_json       JSONB       NOT NULL,        -- definition-layout.v1: nodes, edges, lanes
+  layout_hash       CHAR(64)    NOT NULL,
+  definition_hash   CHAR(64)    NOT NULL,        -- hash of the definition the layout was drawn for
+  source            TEXT        NOT NULL CHECK (source IN ('IMPORT','BPMN','COCKPIT','API')),
+  created_by        TEXT        NOT NULL,
+  created_at        TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, definition_id, revision),
+  FOREIGN KEY (tenant_id, definition_id) REFERENCES pre_definition (tenant_id, id)
+);
+-- Append-only: the engine issues INSERT only. Latest = backward scan of the primary key.
+-- A save inserts revision = expected + 1; a duplicate key means a concurrent save (409 VERSION_CONFLICT).
 
 CREATE TABLE pre_instance (
-  id              VARCHAR(26) PRIMARY KEY,
-  tenant_id       TEXT NOT NULL,
-  definition_id   VARCHAR(26) NOT NULL REFERENCES pre_definition(id),
-  definition_key  TEXT NOT NULL,
-  definition_ver  INT NOT NULL,
+  tenant_id       TEXT        NOT NULL,
+  id              VARCHAR(26) NOT NULL,
+  definition_id   VARCHAR(26) NOT NULL,
+  definition_key  TEXT        NOT NULL,
+  definition_ver  INT         NOT NULL,
   business_key    TEXT,
-  status          TEXT NOT NULL, -- RUNNING | COMPLETED | COMPENSATING | CANCELLED | FAILED
-  variables       JSONB NOT NULL,
-  lock_version    BIGINT NOT NULL DEFAULT 0,
+  status          TEXT        NOT NULL CHECK (status IN ('RUNNING','COMPLETED','COMPENSATING','CANCELLED','FAILED')),
+  variables       JSONB       NOT NULL,
+  lock_version    BIGINT      NOT NULL DEFAULT 0,
   started_by      TEXT,
   started_at      TIMESTAMPTZ NOT NULL,
-  ended_at        TIMESTAMPTZ
+  ended_at        TIMESTAMPTZ,
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, definition_id) REFERENCES pre_definition (tenant_id, id)
 );
 CREATE UNIQUE INDEX uq_pre_instance_business_key
   ON pre_instance (tenant_id, definition_key, business_key) WHERE business_key IS NOT NULL;
 CREATE INDEX idx_pre_instance_status
   ON pre_instance (tenant_id, status, started_at DESC);
+CREATE INDEX idx_pre_instance_definition
+  ON pre_instance (tenant_id, definition_key, status, started_at DESC);
 
 CREATE TABLE pre_token (
-  id              VARCHAR(26) PRIMARY KEY,
-  tenant_id       TEXT NOT NULL,
-  instance_id     VARCHAR(26) NOT NULL REFERENCES pre_instance(id),
+  tenant_id       TEXT        NOT NULL,
+  id              VARCHAR(26) NOT NULL,
+  instance_id     VARCHAR(26) NOT NULL,
+  definition_id   VARCHAR(26) NOT NULL,          -- copy of pre_instance.definition_id, updated by migration
   parent_token_id VARCHAR(26),
-  scope_id        TEXT NOT NULL,
-  current_node_id TEXT NOT NULL,
-  status          TEXT NOT NULL, -- ACTIVE | WAITING_USER | WAITING_ASYNC | WAITING_TIMER | JOINED | COMPLETED | COMPENSATED
-  created_at      TIMESTAMPTZ NOT NULL
+  scope_id        TEXT        NOT NULL,
+  current_node_id TEXT        NOT NULL,
+  status          TEXT        NOT NULL CHECK (status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','JOINED','COMPLETED','COMPENSATED')),
+  entered_at      TIMESTAMPTZ NOT NULL,          -- when the token reached current_node_id
+  created_at      TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id)
 );
 CREATE INDEX idx_pre_token_instance ON pre_token (tenant_id, instance_id, status);
+CREATE INDEX idx_pre_token_live
+  ON pre_token (tenant_id, definition_id, status, current_node_id)
+  WHERE status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER');
 
 CREATE TABLE pre_task (
-  id              VARCHAR(26) PRIMARY KEY,
-  tenant_id       TEXT NOT NULL,
-  instance_id     VARCHAR(26) NOT NULL REFERENCES pre_instance(id),
-  token_id        VARCHAR(26) NOT NULL REFERENCES pre_token(id),
-  node_id         TEXT NOT NULL,
-  task_kind       TEXT NOT NULL, -- USER_TASK | APPROVAL_TASK
-  assignee_user   TEXT,
+  tenant_id       TEXT        NOT NULL,
+  id              VARCHAR(26) NOT NULL,
+  instance_id     VARCHAR(26) NOT NULL,
+  token_id        VARCHAR(26) NOT NULL,
+  definition_id   VARCHAR(26) NOT NULL,
+  node_id         TEXT        NOT NULL,
+  task_kind       TEXT        NOT NULL CHECK (task_kind IN ('USER_TASK','APPROVAL_TASK')),
+  assignee_user   TEXT,                          -- declared user, or the claimant
   assignee_role   TEXT,
   assignee_group  TEXT,
-  forbidden_users JSONB NOT NULL DEFAULT '[]', -- enforces four-eyes / maker-checker
-  context_payload JSONB NOT NULL,
-  status          TEXT NOT NULL, -- OPEN | CLAIMED | COMPLETED | CANCELLED
+  forbidden_users JSONB       NOT NULL DEFAULT '[]',
+  form_ref        JSONB,                         -- resolved form key, schema path and hints, or link
+  context_payload JSONB       NOT NULL,          -- masked fields stored as keyed hashes
+  status          TEXT        NOT NULL CHECK (status IN ('OPEN','CLAIMED','COMPLETED','CANCELLED')),
   due_at          TIMESTAMPTZ,
-  lock_version    BIGINT NOT NULL DEFAULT 0,
+  lock_version    BIGINT      NOT NULL DEFAULT 0,
   completed_by    TEXT,
   created_at      TIMESTAMPTZ NOT NULL,
-  completed_at    TIMESTAMPTZ
+  completed_at    TIMESTAMPTZ,
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id),
+  FOREIGN KEY (tenant_id, token_id) REFERENCES pre_token (tenant_id, id)
 );
-CREATE INDEX idx_pre_task_queue
-  ON pre_task (tenant_id, status, assignee_role, assignee_user, due_at);
+CREATE INDEX idx_pre_task_mine
+  ON pre_task (tenant_id, assignee_user, due_at, id) WHERE status IN ('OPEN','CLAIMED');
+CREATE INDEX idx_pre_task_role
+  ON pre_task (tenant_id, assignee_role, due_at, id) WHERE status = 'OPEN' AND assignee_role IS NOT NULL;
+CREATE INDEX idx_pre_task_group
+  ON pre_task (tenant_id, assignee_group, due_at, id) WHERE status = 'OPEN' AND assignee_group IS NOT NULL;
+CREATE INDEX idx_pre_task_open_due
+  ON pre_task (tenant_id, due_at, id) WHERE status IN ('OPEN','CLAIMED');
 
 CREATE TABLE pre_timer (
-  id              VARCHAR(26) PRIMARY KEY,
-  tenant_id       TEXT NOT NULL,
-  instance_id     VARCHAR(26) NOT NULL REFERENCES pre_instance(id),
+  tenant_id       TEXT        NOT NULL,
+  id              VARCHAR(26) NOT NULL,
+  instance_id     VARCHAR(26),                   -- null for DEFINITION_EFFECTIVE jobs
+  definition_id   VARCHAR(26),
   token_id        VARCHAR(26),
-  job_kind        TEXT NOT NULL, -- TIMER | ASYNC_AGENT | ASYNC_SERVICE | SLA_ESCALATION
-  node_id         TEXT NOT NULL,
-  status          TEXT NOT NULL, -- DUE | CLAIMED | DONE | FAILED
+  job_kind        TEXT        NOT NULL CHECK (job_kind IN ('TIMER','SLA_ESCALATION','ASYNC_AGENT','ASYNC_SERVICE','COMPENSATION','DEFINITION_EFFECTIVE')),
+  node_id         TEXT,
+  status          TEXT        NOT NULL CHECK (status IN ('DUE','CLAIMED','DONE','FAILED')),
   next_fire_at    TIMESTAMPTZ NOT NULL,
+  lease_duration  INTERVAL    NOT NULL,          -- step timeout + jobs.lease-margin, or jobs.timer-lease
   locked_by       TEXT,
   locked_until    TIMESTAMPTZ,
-  attempt         INT NOT NULL DEFAULT 0,
-  max_attempts    INT NOT NULL DEFAULT 3,
-  payload         JSONB NOT NULL DEFAULT '{}'
+  attempt         INT         NOT NULL DEFAULT 0,
+  max_attempts    INT         NOT NULL DEFAULT 3,
+  attempt_id      VARCHAR(26),
+  payload         JSONB       NOT NULL DEFAULT '{}',
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id)
 );
 CREATE INDEX idx_pre_timer_poll
-  ON pre_timer (status, next_fire_at, locked_until) WHERE status IN ('DUE', 'CLAIMED');
+  ON pre_timer (next_fire_at, locked_until) WHERE status IN ('DUE','CLAIMED');   -- engine sweep, crosses tenants
 
 CREATE TABLE pre_incident (
-  id              VARCHAR(26) PRIMARY KEY,
-  tenant_id       TEXT NOT NULL,
-  instance_id     VARCHAR(26) NOT NULL REFERENCES pre_instance(id),
+  tenant_id       TEXT        NOT NULL,
+  id              VARCHAR(26) NOT NULL,
+  instance_id     VARCHAR(26) NOT NULL,
+  definition_id   VARCHAR(26) NOT NULL,
   token_id        VARCHAR(26),
-  node_id         TEXT NOT NULL,
-  error_code      TEXT NOT NULL,
-  cause_summary   TEXT NOT NULL,
-  retry_count     INT NOT NULL DEFAULT 0,
-  status          TEXT NOT NULL, -- OPEN | RESOLVED
-  lock_version    BIGINT NOT NULL DEFAULT 0,
+  node_id         TEXT        NOT NULL,
+  error_code      TEXT        NOT NULL,
+  cause_summary   TEXT        NOT NULL,
+  retry_count     INT         NOT NULL DEFAULT 0,
+  status          TEXT        NOT NULL CHECK (status IN ('OPEN','RESOLVED')),
+  lock_version    BIGINT      NOT NULL DEFAULT 0,
   created_at      TIMESTAMPTZ NOT NULL,
-  resolved_at     TIMESTAMPTZ
+  resolved_at     TIMESTAMPTZ,
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id)
 );
-CREATE INDEX idx_pre_incident_open ON pre_incident (tenant_id, status, created_at DESC);
+CREATE INDEX idx_pre_incident_open ON pre_incident (tenant_id, created_at DESC, id) WHERE status = 'OPEN';
+CREATE INDEX idx_pre_incident_node ON pre_incident (tenant_id, definition_id, node_id) WHERE status = 'OPEN';
 
 CREATE TABLE pre_history (
+  tenant_id       TEXT        NOT NULL,
+  occurred_at     TIMESTAMPTZ NOT NULL,
   id              VARCHAR(26) NOT NULL,
-  tenant_id       TEXT NOT NULL,
   instance_id     VARCHAR(26) NOT NULL,
-  event_type      TEXT NOT NULL,
+  definition_id   VARCHAR(26) NOT NULL,
+  event_type      TEXT        NOT NULL,          -- INSTANCE_STARTED, NODE_ENTERED, NODE_COMPLETED, NODE_FAILED,
+                                                 -- TASK_CLAIMED, TASK_COMPLETED, INCIDENT_RAISED, INCIDENT_RESOLVED,
+                                                 -- SLA_BREACHED, COMPENSATION_STARTED, COMPENSATED, MIGRATED, INSTANCE_ENDED
   node_id         TEXT,
   actor_id        TEXT,
   attempt_id      VARCHAR(26),
-  details         JSONB NOT NULL, -- agent inputs/outputs (masked), decisionId, override diff, migration note
-  occurred_at     TIMESTAMPTZ NOT NULL,
+  duration_ms     BIGINT,                        -- set on NODE_COMPLETED and NODE_FAILED
+  details         JSONB       NOT NULL,          -- masked agent inputs and outputs, decision id, override diff
   PRIMARY KEY (tenant_id, occurred_at, id)
 ) PARTITION BY RANGE (occurred_at);
-CREATE INDEX idx_pre_history_instance ON pre_history (tenant_id, instance_id, occurred_at);
+CREATE TABLE pre_history_default PARTITION OF pre_history DEFAULT;
+CREATE TABLE pre_history_2027_01 PARTITION OF pre_history
+  FOR VALUES FROM ('2027-01-01 00:00:00+00') TO ('2027-02-01 00:00:00+00');   -- created by the scheduler 7 days ahead
+CREATE INDEX idx_pre_history_instance ON pre_history (tenant_id, instance_id, occurred_at, id);
+CREATE INDEX idx_pre_history_time_brin ON pre_history USING brin (occurred_at);   -- rollup slices
+
+CREATE TABLE pre_node_stats_hourly (
+  tenant_id         TEXT        NOT NULL,
+  definition_id     VARCHAR(26) NOT NULL,
+  bucket_start      TIMESTAMPTZ NOT NULL,        -- hour, UTC
+  node_id           TEXT        NOT NULL,
+  entered_count     BIGINT      NOT NULL DEFAULT 0,
+  completed_count   BIGINT      NOT NULL DEFAULT 0,
+  failed_count      BIGINT      NOT NULL DEFAULT 0,
+  incident_count    BIGINT      NOT NULL DEFAULT 0,
+  sla_breach_count  BIGINT      NOT NULL DEFAULT 0,
+  duration_sum_ms   BIGINT      NOT NULL DEFAULT 0,
+  duration_hist     INT[]       NOT NULL,        -- 64 buckets, bucket k covers [10 ms * 2^(k/2), 10 ms * 2^((k+1)/2))
+  updated_at        TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, definition_id, bucket_start, node_id),
+  CHECK (cardinality(duration_hist) = 64)
+) PARTITION BY RANGE (bucket_start);
+CREATE TABLE pre_node_stats_hourly_default PARTITION OF pre_node_stats_hourly DEFAULT;
+
+CREATE TABLE pre_engine_watermark (            -- engine-internal, one row per sweep job, no tenant data
+  job_name        TEXT        PRIMARY KEY,       -- 'node-stats'
+  watermark       TIMESTAMPTZ NOT NULL,
+  updated_by      TEXT        NOT NULL,
+  updated_at      TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE pre_compensation_stack (
+  tenant_id         TEXT        NOT NULL,
+  id                VARCHAR(26) NOT NULL,
+  instance_id       VARCHAR(26) NOT NULL,
+  scope_id          TEXT        NOT NULL,
+  seq               INT         NOT NULL,        -- push order; walked in descending order
+  step_id           TEXT        NOT NULL,
+  forward_attempt_id VARCHAR(26) NOT NULL,
+  handler           TEXT        NOT NULL,        -- registered handler name, or 'manual'
+  input_snapshot    JSONB       NOT NULL,
+  status            TEXT        NOT NULL CHECK (status IN ('PENDING','RUNNING','DONE','FAILED','MANUAL')),
+  pushed_at         TIMESTAMPTZ NOT NULL,
+  completed_at      TIMESTAMPTZ,
+  PRIMARY KEY (tenant_id, id),
+  UNIQUE (tenant_id, instance_id, scope_id, seq),
+  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id)
+);
 
 CREATE TABLE pre_idempotency (
-  tenant_id       TEXT NOT NULL,
-  operation       TEXT NOT NULL,
-  idempotency_key TEXT NOT NULL,
-  request_hash    CHAR(64) NOT NULL,
-  status_code     INT NOT NULL,
-  response_body   JSONB NOT NULL,
+  tenant_id       TEXT        NOT NULL,
+  operation       TEXT        NOT NULL,
+  idempotency_key TEXT        NOT NULL,
+  request_hash    CHAR(64)    NOT NULL,
+  status_code     INT         NOT NULL,
+  response_body   JSONB       NOT NULL,
   expires_at      TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, operation, idempotency_key)
 );
 
 CREATE TABLE pre_calendar (
-  id              VARCHAR(26) PRIMARY KEY,
-  tenant_id       TEXT NOT NULL,
-  calendar_key    TEXT NOT NULL,
-  timezone        TEXT NOT NULL,
-  weekly_hours    JSONB NOT NULL,
+  tenant_id       TEXT        NOT NULL,
+  id              VARCHAR(26) NOT NULL,
+  calendar_key    TEXT        NOT NULL,
+  timezone        TEXT        NOT NULL,
+  weekly_hours    JSONB       NOT NULL,
+  PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, calendar_key)
 );
 
 CREATE TABLE pre_holiday (
-  id              VARCHAR(26) PRIMARY KEY,
-  tenant_id       TEXT NOT NULL,
-  calendar_id     VARCHAR(26) NOT NULL REFERENCES pre_calendar(id),
-  holiday_date    DATE NOT NULL,
+  tenant_id       TEXT        NOT NULL,
+  id              VARCHAR(26) NOT NULL,
+  calendar_id     VARCHAR(26) NOT NULL,
+  holiday_date    DATE        NOT NULL,
   description     TEXT,
-  UNIQUE (tenant_id, calendar_id, holiday_date)
+  PRIMARY KEY (tenant_id, id),
+  UNIQUE (tenant_id, calendar_id, holiday_date),
+  FOREIGN KEY (tenant_id, calendar_id) REFERENCES pre_calendar (tenant_id, id)
 );
 ```
-*(Plus `pre_compensation_stack` storing completed compensable steps per `instance_id` / `scope_id`.)*
 
-## 6. Runtime Mechanics & 10x Capacity Math
+Migration rules (`TR-OPS-01`, `TR-OPS-02`): forward-only scripts in `pre_schema_history`; every DDL statement runs with `SET lock_timeout = '5s'`; indexes on populated tables are created `CONCURRENTLY` in their own script; columns are added nullable or with a constant default, back-filled in batches of 10,000, then constrained in the next minor release. Partition creation creates the monthly table standalone with a matching `CHECK` constraint and then runs `ATTACH PARTITION`, which takes only `SHARE UPDATE EXCLUSIVE` on the parent.
 
-- **Timer & Async Job Poller (`TR-PERF-04`, `TR-PERF-05`):** Each host replica runs a single scheduler thread polling `pre_timer` in batches (e.g. 50 rows) using `SELECT ... FOR UPDATE SKIP LOCKED`. Lease length (`locked_until`, always computed with the database `now()`) depends on the job kind (`ADR-0008`):
-  - `ASYNC_AGENT`, `ASYNC_SERVICE` and remote compensation: step `timeout` plus `jobs.lease-margin` (default `30 s`). A `PT5M` agent step holds a 5 min 30 s lease; the worker cancels the adapter call at 5 min, so a live attempt always finishes or fails before its lease ends and is never taken over. The margin covers TX2 (about 5 ms), a GC pause and scheduling delay. Steps without a declared timeout use `adapters.default-timeout` (default `PT30S`), giving a 60 s lease.
-  - `TIMER` and `SLA_ESCALATION`: fixed `jobs.timer-lease` (default `60 s`); they run no external call (`PRE-006`).
-  - Cost: a crashed replica's async job is reclaimed after `timeout + 30 s` rather than a fixed 60 s. For a `PT5M` step recovery takes 5 min 30 s instead of 60 s, which is acceptable because the same step legitimately takes up to 5 min.
-- **Connection Pool Protection:** Because `agentTask` and remote `serviceTask` release their claim TX *before* calling external HTTP/MCP/LLM endpoints, **100 concurrent 10-second LLM agent calls consume 0 DB connections while waiting**, keeping a 20-connection HikariCP pool below 10% utilization.
-- **Throughput Target (`TR-PERF-04`):** Batching sync transitions + single `INSERT` history writes limits per-step DB time to ~1 ms, sustaining >1,000 transitions/sec on a 4-vCPU PostgreSQL instance.
+## 8. Read models, query limits and capacity math (ADR-0015)
 
-## 7. Open Questions
-- **Max compensation stack depth & nested `callProcess` propagation:** Confirm whether parent process failure triggers child process compensation automatically or via explicit `saga` handler (Owner: maintainers, Gate: M2 start).
+Targets, not measurements, on the reference shape of the architecture overview section 8: one replica with a 20-connection pool, PostgreSQL on 4 vCPU, 1 ms round trip.
+
+### 8.1 Rules for every read
+
+| Rule | Detail | Verified by |
+|---|---|---|
+| Tenant and a bound | Every list query has `tenant_id` and either a leading-index equality (instance, definition, assignee) or a time range of at most 31 days | CI query-plan check: `EXPLAIN (FORMAT JSON)` of every registered query on a seeded database fails on a sequential scan of a table above 10,000 rows or on more partitions than the bound allows (`TR-PERF-07`) |
+| Pages | Keyset cursor, default 50, at most 200; `limit` above 200 is `400 QUERY_INVALID`; no `OFFSET`; no exact totals, a count is shown as "200+" | REST tests |
+| Time per read | Read-only transaction with `SET LOCAL statement_timeout = '2s'` | Fault test with a slowed database |
+| History | `pre_history` is read only for one instance, bounded by its lifetime, or by the rollup job in one-minute slices. Never `GROUP BY` over history on a request path | ArchUnit rule on the query registry; query-plan check |
+| Counters | No counter is updated inside a step transaction | Code review rule; SQL capture test of a transition shows no `UPDATE` of a statistics table |
+
+![Bounded cockpit reads](images/cockpit-reads.svg)
+
+Source: [`diagrams/cockpit-reads.mmd`](diagrams/cockpit-reads.mmd).
+
+### 8.2 Read model math
+
+| Read | Path | Cost model | Baseline | 10x and what to do |
+|---|---|---|---|---|
+| Activities of one instance | PK lookup of `pre_instance`, then `idx_pre_history_instance` in the partitions between `started_at` and `ended_at` | About 3 buffer reads per partition probed | Instance alive 3 months: 4 partitions, 12 buffer reads, under 5 ms. Unbounded with 24 months kept: 24 probes and planning over 24 partitions, about 15 ms; with 10 years kept, 120 probes, 50 ms or more | Bound is mandatory (`TR-PERF-08`); 10x the history volume does not change the per-instance cost |
+| Live counts per node | Index-only scan of `idx_pre_token_live` for one `(tenant, definition)` | About 90 bytes per entry: 100,000 live tokens = 9 MB, 1,100 index pages; 20 to 60 ms when pages are all-visible, up to about 150 ms with heap fetches | 500 operators, 20 percent on a diagram, 15 s refresh = 7 requests/s per host; 5 s cache per `(tenant, version)` and about 20 distinct versions in view: at most 4 queries/s x 60 ms = 0.24 busy connections | Above 100,000 tokens the cache TTL becomes 15 s and the response carries `asOf` (`TR-PERF-09`); at 1 million tokens a scan is about 600 ms, so the 15 s TTL limits it to 0.04 busy connections per version |
+| Open incidents per node | `idx_pre_incident_node` | Small: open incidents are hundreds | Under 2 ms | Unchanged |
+| Window stats per node | PK range on `pre_node_stats_hourly` for `(tenant, definition, bucket_start range)` | 20 nodes x 720 hours (31 days) = 14,400 rows, histograms merged in SQL | About 15 ms | 500 nodes x 720 hours = 360,000 rows, about 200 ms: the 31-day cap holds this; longer windows need a daily rollup (open question 11.4) |
+| Task query, one user | `idx_pre_task_mine`, `idx_pre_task_role` per role, `idx_pre_task_group` per group, each `LIMIT 51` ordered by `(due_at, id)`, merged in Java | About 0.3 ms per index range | User with 5 roles and 3 groups: 9 ranges, about 3 ms | 10x open tasks does not change it: each range stops after 51 rows |
+| SLA breaches | The same indexes with `due_at < now()` | Same | Same | Same |
+| Federated cockpit load | 10 hosts, 500 operators, inbox refresh 30 s, incidents 60 s | 500 / 30 = 17 inbox and 8 incident requests/s per host; about 3 ms and 1 ms of database time | 0.06 busy connections per host. `ETag` and `304` save payload and serialisation, not the query | 2,000 operators: 67 inbox requests/s, 0.2 busy connections. The limit is the identity provider and the browser, see the cockpit design section 9 |
+
+### 8.3 Rollup job math (PE-F-49, `TR-PERF-10`)
+
+![Node statistics rollup](images/rollup-job.svg)
+
+Source: [`diagrams/rollup-job.mmd`](diagrams/rollup-job.mmd).
+
+| Item | Baseline: 1,000 transitions/s sustained | 10x |
+|---|---|---|
+| Rows read per slice of `stats.rollup-max-slice` (1 min) | About 60,000 `NODE_COMPLETED` and related rows, about 30 MB of recently written heap, found through the BRIN index | 600,000 rows, 300 MB |
+| Time per slice transaction | About 0.2 s, one connection | About 2 s, inside the 10 s `statement_timeout` |
+| Load per 5-minute run | 5 slices, about 1 s of one connection: 0.3 percent of the pool's time | 10 s of one connection: 3 percent |
+| Rows written per slice | One upsert per `(tenant, definition, node, hour)` touched: about 1,000 | About 10,000 |
+| Lag | `stats.rollup-lag` 5 min plus up to one interval of 5 min: at most 10 min behind | Same, while a run finishes inside its interval; a run that does not stops after 60 s and the next continues from the watermark |
+| Storage | 50 versions x 20 nodes active = 1,000 rows/hour x about 420 bytes = 10 MB/day, 3.7 GB/year | 37 GB/year; retention `P13M` by dropping monthly partitions |
+
+The rollup only adds counts and histogram buckets, so a repeated slice after a crash would double-count; the watermark update in the same transaction prevents that. A history row from a transaction that stays open longer than the 5-minute safety lag is not counted; the rollup is an operational view, and the audit record remains `pre_history`. Percentiles come from the merged histogram: bucket boundaries grow by a factor of the square root of 2, so a reported p50 or p95 is within 19 percent of the true value.
+
+### 8.4 Write path and storage math
+
+| Resource | Baseline | 10x | Action |
+|---|---|---|---|
+| Sync transitions | 1,000/s x about 2 ms = 2 busy connections (`TR-PERF-04`) | 20 busy: the whole pool | 3 replicas, or batch history inserts |
+| `pre_history` | 1,000 rows/s x 500 bytes = 43 GB/day at a sustained peak | 430 GB/day | Monthly partitions; size from the daily average; retention pending PD-050 |
+| `pre_token` | 1 million instances/month x 10 tokens x 150 bytes = 1.5 GB/month, mostly ended | 15 GB/month | The partial index holds live tokens only; removal of tokens of ended instances is open question 11.3 |
+| Definition validation | 500 nodes, 1 MB: parse about 10 ms, graph checks under 5 ms, one Rule Engine lookup per guardrail | Same per definition | Runs before the transaction opens |
+| Layout | 200 nodes x 60 bytes = 12 KB per revision; 100 revisions = 1.2 MB per version | Same | 256 KB cap per revision |
+| Async steps | 100 concurrent 10 s calls = 0 connections while waiting | 1,000 concurrent: still 0; the adapter executor (16 threads by default) is the limit | Claim only when a slot is free |
+
+Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authentication and tenant resolution 5 ms, query 30 ms, serialisation 5 ms, the rest is network and queueing.
+
+## 9. Failure modes
+
+| Scenario | Blast radius | Detection | Recovery |
+|---|---|---|---|
+| Two approvers approve the same version at once | One version | `lock_version` predicate updates 0 rows for the second | `409 VERSION_CONFLICT`; the first approval stands |
+| Approver is the requester, through any API | None | Service-layer check, and the table `CHECK` as a second line | `403 SELF_APPROVAL_FORBIDDEN`; nothing written |
+| An older draft is approved after a newer version went live | One key | Approval guard | `409 VERSION_SUPERSEDED`; the author creates a new draft from the effective version |
+| Replica dies before the effective-date job runs | One key, until the lease expires | Lease on `pre_timer` | Another replica claims the job after `jobs.timer-lease`; the previous version stays effective until then because effective selection reads `effective_from`, not the job |
+| Concurrent layout saves | One layout | Duplicate primary key on `revision` | `409 VERSION_CONFLICT`; the cockpit reloads and shows the newer revision |
+| Malicious BPMN (entity expansion, deep nesting) | One request | Reader limits, DTD refused | `422 BPMN_UNSAFE_XML`; no transaction was opened |
+| Rollup slice times out | Statistics only | `statement_timeout` | Rollback; watermark unchanged; next run repeats; metric `horus_pre_rollup_lag_seconds` alerts above 15 min |
+| Rollup partition for next month missing | Rollup inserts | Default partition receives rows | Partition job creates months 7 days ahead and moves stragglers |
+| Cockpit drafts turned off in production | Authoring endpoints | Setting | `403 DRAFT_AUTHORING_DISABLED`; imports from the pipeline still create drafts |
+| Unbounded list query added by a contributor | Host database | CI query-plan check | Build fails before merge |
+| Host database fails over | All engine work in flight | Transactions roll back | Callers retry with the same idempotency key; jobs resume after their leases expire (`TR-ASY-02`) |
+
+## 10. Security controls
+
+| Control | Where | Verified by |
+|---|---|---|
+| Maker-checker for definitions: requester never approves; outside `dev` the starter refuses auto-approve and disabled maker-checker | `DefinitionService`, starter | `PRE-019`, `PRE-022` (`TR-SEC-04`, `TR-SEC-11`) |
+| Cockpit draft authoring can be turned off per environment | `DefinitionService` | `PRE-023` (`TR-DEF-04`) |
+| Tenant from the resolver; `X-Tenant-Id` accepted only within the token's allowed tenants | Shared tenant resolver (ADR-0014) | `PRE-038` (`TR-SEC-03`) |
+| Another tenant's resource answers `404`; composite foreign keys forbid cross-tenant references | Every query and table | Two-tenant tests (`TR-TEN-01`, `TR-TEN-02`) |
+| XML hardening for BPMN | `process-engine-bpmn` | `PRE-033` (`TR-DEF-01`) |
+| Form links restricted to relative paths or listed origins | Import validation | `PRE-031` |
+| Masked variables stay masked in activities, task context and forms | Query service | `PRE-012`, `PRE-027` (`TR-SEC-05`) |
+| Step catalogue needs `processes:author`; it lists names and schemas, never configuration values or secrets | REST | `PRE-032` |
+| Bounded reads and statement timeouts limit the cost any caller can impose | Query registry | `PRE-030` (`TR-PERF-07`) |
+| No reflection: handlers are registered typed functions | `StepRegistry` | ArchUnit (`TR-SEC-01`) |
+
+## 11. Open questions
+
+| # | Question | Recommendation | Owner and gate |
+|---|---|---|---|
+| 11.1 | Nested `callProcess` compensation: does a parent's failure compensate a completed child automatically? | Only through an explicit `saga` scope in the parent | Maintainers, M2 start |
+| 11.2 | Should the approver also differ from every identity that edited the draft, for both engines? | Yes, for both engines at once; record editors in a JSONB list. **Decision needed** by the product owner because it changes `TR-SEC-04` for rules as well | Architect, M2 start |
+| 11.3 | Remove tokens of instances ended more than 30 days ago? `pre_token` is not an audit table; history keeps every transition | Yes, by the scheduler in batches of 10,000, configurable | Maintainers, M2 |
+| 11.4 | Windows longer than 31 days for the heatmap need a daily rollup table | Defer to after 1.0 unless a pilot asks | Architect, M3 |
+| 11.5 | Migration plan storage (`pre_migration`) has no DDL yet | DDL before M2 execution work | Maintainers, M2 |
+| 11.6 | Which JSON library major `*-core` uses (ADR-0011) | Architecture overview section 12; gates M1 | Architect, M1 start |

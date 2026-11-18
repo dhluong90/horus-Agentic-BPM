@@ -1,0 +1,23 @@
+stateDiagram-v2
+  direction LR
+  [*] --> ACTIVE: start or fork
+  ACTIVE --> WAITING_USER: userTask created
+  WAITING_USER --> ACTIVE: task completed
+  ACTIVE --> WAITING_ASYNC: TX1 claims async job
+  WAITING_ASYNC --> ACTIVE: TX2 accepts result
+  ACTIVE --> WAITING_TIMER: timer step
+  WAITING_TIMER --> ACTIVE: timer fires
+  ACTIVE --> JOINED: arrives at join, instance row locked
+  ACTIVE --> COMPLETED: end step
+  COMPLETED --> COMPENSATED: compensation of its steps ran
+  JOINED --> [*]
+  COMPLETED --> [*]
+  COMPENSATED --> [*]
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class ACTIVE engine
+  class WAITING_USER client
+  class WAITING_ASYNC,WAITING_TIMER external
+  class JOINED,COMPLETED,COMPENSATED obs

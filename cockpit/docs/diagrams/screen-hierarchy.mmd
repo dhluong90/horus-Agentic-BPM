@@ -1,0 +1,44 @@
+flowchart LR
+  subgraph T1["Tier 1: workspace and context"]
+    CTX["Top bar: host, tenant,<br/>environment banner, user"]:::client
+    NAV["Workspaces: Inbox, Incidents,<br/>Processes, Rules, Approvals"]:::client
+  end
+  subgraph T2["Tier 2: queues and lists, counts in the header"]
+    QI["Inbox: merged tasks by due date"]:::client
+    QN["Incidents: merged by age"]:::client
+    QD["Definitions and instances"]:::client
+    QR["Rule sets and decisions"]:::client
+    QA["Pending approvals: rules, processes"]:::client
+  end
+  subgraph T3["Tier 3: detail and action"]
+    DT["Task form, complete or link"]:::client
+    DI["Instance diagram, tokens, activities"]:::client
+    DN["Incident detail, retry, resolve"]:::client
+    DV["Version diff, simulation, approve"]:::client
+    DM["Definition diagram, graph diff,<br/>modeller in M3"]:::client
+    DA["Agent task inspector"]:::client
+  end
+  CTX --> NAV
+  NAV -->|"1."| QI
+  NAV -->|"2."| QN
+  NAV -->|"3."| QD
+  NAV -->|"4."| QR
+  NAV -->|"5."| QA
+  QI -->|"1a."| DT
+  QI -->|"1b."| DA
+  QN -->|"2a."| DN
+  QN -->|"2b."| DI
+  QD -->|"3a."| DI
+  QD -->|"3b."| DM
+  QR -->|"4a."| DV
+  QA -->|"5a."| DV
+  QA -->|"5b."| DM
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  style T1 fill:none,stroke:#1565C0
+  style T2 fill:none,stroke:#1565C0
+  style T3 fill:none,stroke:#1565C0
