@@ -1,5 +1,8 @@
 flowchart TB
-  Browser["Operator browser<br/>Cockpit: React 18, TypeScript 5, Vite"]
+  subgraph Public["Public zone"]
+    Browser["Operator browser<br/>Cockpit: React 18, TypeScript 5, Vite"]
+  end
+  subgraph Internal["Internal zone"]
   subgraph JVM["Host service: Java 21, Spring Boot 4.x"]
     direction TB
     CockpitStarter["cockpit-spring-boot-starter<br/>static assets at /bpm/cockpit"]
@@ -10,7 +13,10 @@ flowchart TB
     Adapters["Host adapters<br/>AgentAdapter, ServiceAdapter beans"]
   end
   DB[("PostgreSQL 14+<br/>host schema with rle_* and pre_*")]
-  Ext["External agent or service<br/>HTTP or MCP"]
+  end
+  subgraph External["Core and external"]
+    Ext["External agent or service<br/>HTTP or MCP"]
+  end
 
   Browser -->|"HTTPS, JSON, bearer token"| RESTc
   Browser -->|"HTTPS, static files"| CockpitStarter
@@ -21,3 +27,18 @@ flowchart TB
   PG -->|"JDBC, host DataSource"| DB
   Core -->|"adapter port, called after TX1 commit"| Adapters
   Adapters -->|"bounded timeout"| Ext
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class Browser client
+  class CockpitStarter,RESTc,Starter,Adapters host
+  class Core,PG engine
+  class DB db
+  class Ext external
+  style Public fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style Internal fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style External fill:none,stroke:#6A1B9A,stroke-dasharray:5 5

@@ -1,16 +1,23 @@
 sequenceDiagram
   autonumber
-  participant W as Engine worker
-  participant DB as PostgreSQL (pre_instance, pre_compensation_stack, pre_timer)
-  participant H as Compensate handlers (host)
+  box rgba(21,101,192,0.04) Internal zone
+    participant W as Engine worker
+    participant DB as PostgreSQL (pre_instance, pre_compensation_stack, pre_timer)
+    participant H as Compensate handlers (host)
+  end
 
   Note over W,DB: Forward path: each TX2 of a step with a compensate handler pushes (step, attemptId, handler, input snapshot) onto the stack
-  W->>DB: notify-partner fails, retries exhausted, onFailure compensate
-  W->>DB: instance COMPENSATING, event processes.compensation.started.v1, job for top of stack, COMMIT
+  rect rgba(224,242,241,0.8)
+    Note over W,DB: TX: start compensation
+    W->>DB: notify-partner fails, retries exhausted, onFailure compensate
+    W->>DB: instance COMPENSATING, event processes.compensation.started.v1, job for top of stack, COMMIT
+  end
   loop each stack entry, newest first (LIFO)
     alt handler is a bean method
       Note over W,H: Async Wait-State: TX1 claim with lease, call, TX2
-      W->>H: closeAccount(instanceId, stepId, attemptId)
+      rect rgba(243,229,245,0.7)
+        W->>H: closeAccount(instanceId, stepId, attemptId)
+      end
       alt handler succeeds
         W->>DB: history row, pop entry, token COMPENSATED, job for next entry, COMMIT
       else handler fails after its retries
@@ -20,4 +27,7 @@ sequenceDiagram
       W->>DB: pre_incident COMPENSATION_MANUAL_REQUIRED, walk paused until resolved
     end
   end
-  W->>DB: stack empty: instance FAILED (compensated), event processes.instance.failed.v1, COMMIT
+  rect rgba(224,242,241,0.8)
+    Note over W,DB: TX: finish
+    W->>DB: stack empty: instance FAILED (compensated), event processes.instance.failed.v1, COMMIT
+  end

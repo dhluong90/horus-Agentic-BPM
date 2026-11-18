@@ -8,6 +8,10 @@ Design preview: Rule Engine screens and the host registry describe the Cockpit 0
 
 A React application built to static assets. It keeps no state and has no backend of its own; it talks only to the REST layer of your services (ADR-0005). Authentication and permissions are your services'; see [[Multi-Tenancy and Security]] and the permission list in [[Rule Engine Configuration]].
 
+Screens sit in three tiers: the shell (sign-in, host and tenant), one area per job (Rules, Processes, Work), and the screens inside each area. The version after each screen is the first cockpit version that has it.
+
+![Cockpit screen hierarchy in three tiers: shell, areas, screens](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/cockpit-screen-hierarchy.svg)
+
 ## Embed it in your service
 
 Add the starter next to the engine starter:
@@ -32,7 +36,7 @@ An embedded cockpit shows only the service that serves it. To see several servic
 
 ## Host it standalone
 
-![Deployment shapes](images/deployment-shapes.svg)
+![Deployment shapes](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/deployment-shapes.svg)
 
 1. Download the cockpit archive of the matching release and serve it from any static web server.
 2. List your services in the cockpit's host registry, one base URL per service (TR-UI-01). The configuration format will be documented here before Cockpit 0.1 ships.
@@ -47,6 +51,17 @@ Each host answers two endpoints the cockpit reads after sign-in:
 | `/api/bpm/me` | Tenant, user, permissions | Hide screens the user has no permission for |
 
 In Cockpit 0.1 you work with one host at a time and switch between hosts from the registry. From 0.2, task and incident lists merge across hosts.
+
+![Standalone cockpit federating several hosts with one OIDC sign-in](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/cockpit-federation.svg)
+
+| Step | What happens |
+|---|---|
+| 1 | The browser loads the cockpit archive and the host registry from your static web server |
+| 2 | The cockpit signs in once at your identity provider: authorization code with PKCE, as a public client. It holds no client secret |
+| 3 | For each host it calls `/api/bpm/meta` and `/api/bpm/me` with the same bearer token |
+| 4 | It calls the rules and, from 0.2, processes APIs of the selected host. Each host must allow the cockpit origin in CORS |
+| 5 | Each host validates the token itself |
+| 6 | Each host reads only its own PostgreSQL. No data is copied to a central store |
 
 ## Rule Engine tasks (Cockpit 0.1)
 
@@ -85,11 +100,17 @@ Authoring in 0.1 is by YAML or JSON import; see [[Rule Engine Authoring Decision
 
 Live counts of active tokens and incidents on each step of a definition diagram are planned for 0.2 and move to M3 if the 5 Mar 2027 checkpoint fails.
 
+![Where the diagram, token and heatmap overlays get their data](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/cockpit-diagram-overlay.svg)
+
+The counts come from an index on the live tokens, never from a query over history. The heatmap (M3) reads an hourly rollup that the engine's scheduler fills a few minutes behind real time. Nothing is copied out of your service; for longer analysis, send the engine events to your own data warehouse.
+
 Behaviour behind these screens is described in [[Process Engine Overview]].
 
 ## Process approval
 
 Process definitions follow the same governed lifecycle as rule sets: draft, pending approval, active, retired. The requester can never approve their own change, and the approved version takes effect on its effective date.
+
+![Process definition maker-checker with graph diff](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/cockpit-process-approval.svg)
 
 | Part | When | What it means for you |
 |---|---|---|
@@ -106,6 +127,7 @@ Moving a box on a diagram changes only the layout. It needs no approval; see pri
 | Replay history through a draft | Choose "Replay last N decisions" in Simulation; count and breakdown of changed outcomes |
 | Edit business calendars | Working hours and holidays per tenant. Moves after 1.0 if the M3 checkpoint fails |
 | Instance migration | Create a plan, run the dry run, execute in batches with progress; the plan shows as two diagrams side by side with the mapped steps |
+| See where processes slow down | A heatmap on the definition diagram: counts, incidents and p50 and p95 durations per step for a chosen window. Moves after 1.0 if the M3 checkpoint fails |
 
 ## Troubleshooting
 

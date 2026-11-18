@@ -1,49 +1,79 @@
 # HORUS Agentic BPM
 
-Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockpit. Humans, services and AI agents take steps in the same process.
+Decision tables and approval processes that run as a library inside your Spring Boot service, in its PostgreSQL transaction. Business users change rules, the engine enforces a second approver, and AI agent output must pass your deterministic rules before the process continues.
 
-Design preview: this wiki describes the 0.1 target. Nothing is released yet and the API may change until 1.0. Licensed under the PolyForm Noncommercial License 1.0.0. For any other use, contact HORUS. See [LICENSE](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/LICENSE).
+**Status: design preview.** Nothing is released yet, and the API may change until 1.0. The first release, Rule Engine 0.1 with Cockpit 0.1, targets 15 January 2027. The state of each feature: [[Feature status|Feature-Status]].
 
-![System context](images/system-context.svg)
+**Licence:** Licensed under the PolyForm Noncommercial License 1.0.0. For any other use, contact HORUS. See [[Licensing and commercial use|Licensing-and-Commercial-Use]].
 
-Two libraries inside your service, your PostgreSQL, one static cockpit. No engine cluster, no search index, no separate identity. The [[Architecture]] page explains how.
+![System context](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/system-context.svg)
 
-## Tutorials: learn by doing
+## What it looks like
 
-| Page | You will |
+A decision table in `src/main/resources/rules/loan-eligibility.yaml`:
+
+```yaml
+schemaVersion: 1
+ruleSet: loan-eligibility
+hitPolicy: first
+inputs:
+  - { name: age,    type: integer }
+  - { name: income, type: money }
+outputs:
+  - { name: eligible, type: boolean }
+  - { name: reason,   type: string }
+rules:
+  - id: R1
+    when: { age: "< 18" }
+    then: { eligible: false, reason: "'UNDER_AGE'" }
+  - id: R2
+    when: { income: "< 5000000 VND" }
+    then: { eligible: false, reason: "'LOW_INCOME'" }
+  - id: R3
+    when: {}
+    then: { eligible: true, reason: "'OK'" }
+```
+
+Evaluated from your service:
+
+```java
+DecisionResult r = rules.evaluate("loan-eligibility",
+    DecisionInput.of("age", 25, "income", Money.of("VND", 8_000_000)));
+r.matchedRuleIds();                   // ["R3"]
+r.output("eligible", Boolean.class);  // true
+```
+
+The decision, its inputs and the matched row are written to the decision log in your transaction: if your service rolls back, the log entry rolls back with it. A change to this table takes effect only after a second person approves it, and the engine refuses self-approval whatever the caller's roles. The full walkthrough is in [[Getting Started]].
+
+## The three capabilities
+
+| Capability | What it means in practice | Detail |
+|---|---|---|
+| Runs inside your service and PostgreSQL transaction | Add a Spring Boot starter. Engine state lives in your database under the `rle_` and `pre_` table prefixes. No engine cluster, no search index, no separate identity service, no message broker | [[Architecture]] |
+| Rule changes by business users, second approver enforced in the engine | Draft, simulate, request publication, a different identity approves, the version takes effect on its effective date. No code deployment. The check is in the service layer, not only in the user interface. Process definitions get the same lifecycle in Process Engine 0.1 | [[Rule Engine Versioning and Publishing]] |
+| Agent output checked by deterministic rules before the process continues | An `agentTask` step must return output that matches a JSON Schema and passes a rule set you own. If a rule fires, the step goes to a human approver or fails. The engine never calls a model itself | [[Guarded agent steps|Guarded-Agent-Steps]] |
+
+## Who it is for, and who it is not for
+
+| A good fit if you | Not a good fit if you |
 |---|---|
-| [[Getting Started]] | Add the starter to a Spring Boot service, load a loan-eligibility table, evaluate it from a test, over HTTP and from Java |
+| Build Java 21 or 25 services on Spring Boot 4.x (3.5.x supported until 1.0) with PostgreSQL 14 or later | Run on another language, framework or database before 1.0 |
+| Need business rules that product, risk or compliance staff change under four-eyes approval with effective dates | Need full BPMN 2.0, DMN FEEL or CMMN, or a general-purpose diagram tool |
+| Need approval flows, human task queues with SLAs, and compensating service steps inside one service | Want one central orchestration platform shared by many teams and run by a platform team |
+| Want AI agents to take process steps, but only within rules your compliance team can read | Need cross-process message correlation (planned after 1.0) or durable execution of arbitrary code across many services |
+| Must keep the decision log and process history in your own database, in your own transactions | Need something you can run in production now: nothing is released yet |
 
-## How-to guides: get a task done
+Not sure? Read [[Compare and choose|Compare-and-Choose]]. It sets this project against Camunda 8, the Camunda 7 forks, Flowable, Drools and Kogito, Temporal and hand-coded rules, including where each of them is the better choice.
 
-| Page | Task |
-|---|---|
-| [[Rule Engine Authoring Decision Tables]] | Write a decision table in YAML: inputs, outputs, rows, hit policy |
-| [[Rule Engine Versioning and Publishing]] | Change rules without a deployment: draft, request, approve, schedule, roll back |
-| [[Rule Engine Simulation and Testing]] | Check a draft before publishing and unit-test rule sets in CI |
-| [[Rule Engine Decision Log and Audit]] | Find a decision, explain it, mask personal data, manage retention |
-| [[Cockpit]] | Embed or host the cockpit and perform operator tasks in it |
-| [[Contributing]] | Propose a change and get it merged |
+## Start here
 
-## Reference: look something up
-
-| Page | Contents |
-|---|---|
-| [[Rule Engine Expression Language]] | Literals, operators, functions, grammar, error codes |
-| [[Rule Engine Decision API]] | Java API, REST endpoints, request and response schemas, error codes |
-| [[Rule Engine Configuration]] | Every `horus.bpm.rules.*` property and the REST permissions |
-| [[Technical Requirements]] | Numbered requirements (`TR-*`) with their verification method |
-| [[Technical Stack]] | Libraries and tools chosen, and what was rejected |
-| [[Release Notes]] | What shipped in each module version |
-
-## Explanation: understand the design
-
-| Page | Answers |
-|---|---|
-| [[Concepts]] | What do rule set, version, hit policy, decision, tenant and agent task mean? |
-| [[Principles]] | Which twelve rules decide every trade-off? |
-| [[Architecture]] | Where does state live, how do the modules depend on each other, how does it deploy? |
-| [[Process Engine Overview]] | What will the Process Engine and the `agentTask` step do? |
-| [[Multi-Tenancy and Security]] | How are tenants isolated and what can expressions never do? |
-| [[Roadmap]] | What ships when, and what would make the maintainers change course? |
-| [[FAQ]] | Why not Drools or Camunda, is it open source, what does "agentic" mean here? |
+| You are | Your question | Read |
+|---|---|---|
+| Evaluating or choosing an architecture | Does it fit, what does it replace, what does it not do? | [[Compare and choose|Compare-and-Choose]], [[Architecture]], [[Feature status|Feature-Status]] |
+| A developer adding it to a service | How do I get a first decision from my code? | [[Getting Started]], [[Rule Engine Decision API]], [[Rule Engine Configuration]] |
+| A rule author or business analyst | How do I change a rule and get it approved? | [[Rule Engine Authoring Decision Tables]], [[Rule Engine Versioning and Publishing]], [[Cockpit]] |
+| Designing AI agent steps | How is agent output checked, and who reviews it? | [[Guarded agent steps|Guarded-Agent-Steps]], [[Process Engine Overview]] |
+| An operator | What runs in my service, and what fails how? | [[Architecture]] sections 8 and 9, [[Cockpit]] |
+| A security or compliance reviewer | How are tenants isolated and approvals enforced? | [[Multi-Tenancy and Security]], [[Rule Engine Decision Log and Audit]] |
+| Buying or approving a licence | Does my use need a commercial licence? | [[Licensing and commercial use|Licensing-and-Commercial-Use]] |
+| A contributor | How do I propose a change? | [[Contributing]], [[Roadmap]] |

@@ -1,7 +1,10 @@
 flowchart LR
-  Ops(["Operators and approvers<br/>(people)"])
+  subgraph Public["Public zone"]
+    Ops(["Operators and approvers<br/>(people)"])
+    Cockpit["Cockpit<br/>React 18 static assets"]
+  end
   Dev(["Host developers<br/>(Java API)"])
-  Cockpit["Cockpit<br/>React 18 static assets"]
+  subgraph Internal["Internal zone"]
   subgraph Host["Host Spring Boot service (one JVM)"]
     direction TB
     App["Business code"]
@@ -12,21 +15,41 @@ flowchart LR
   end
   DB[("Host PostgreSQL 14+<br/>host tables, rle_*, pre_*")]
   IdP["Identity provider<br/>(host Spring Security, OIDC)"]
+  Bus["Host event sink<br/>audit, analytics"]
+  end
+  subgraph External["Core and external"]
   Agent["Model or agent API<br/>HTTP or MCP"]
   Svc["Other systems<br/>core banking, partners"]
-  Bus["Host event sink<br/>audit, analytics"]
+  end
 
-  Ops -->|"HTTPS"| Cockpit
-  Cockpit -->|"JSON over HTTPS, bearer token"| REST
+  Ops -->|"1. HTTPS"| Cockpit
+  Cockpit -->|"2. JSON over HTTPS, bearer token"| REST
   Dev -->|"in-process"| App
   App -->|"RuleEngine API"| RE
   App -->|"ProcessEngine API"| PE
   REST --> RE
   REST --> PE
   PE -.->|"decision step, guardrail<br/>RuleEngine API only"| RE
-  PE -->|"after TX1 commit"| Adp
-  Adp -->|"bounded timeout,<br/>no DB connection held"| Agent
-  Adp -->|"bounded timeout,<br/>no DB connection held"| Svc
+  PE -->|"4. after TX1 commit"| Adp
+  Adp -->|"5. bounded timeout,<br/>no DB connection held"| Agent
+  Adp -->|"5. bounded timeout,<br/>no DB connection held"| Svc
   Host -->|"JDBC, host DataSource<br/>and transactions"| DB
-  REST -.->|"token validation"| IdP
+  REST -.->|"3. token validation"| IdP
   Host -.->|"events .v1 through<br/>the host publisher"| Bus
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class Ops,Cockpit client
+  class Dev,App,REST,Adp,IdP host
+  class RE,PE engine
+  class DB db
+  class Agent,Svc external
+  class Bus obs
+  style Public fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style Internal fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style External fill:none,stroke:#6A1B9A,stroke-dasharray:5 5
+  style Host fill:#FAFBFA,stroke:#2E7D32

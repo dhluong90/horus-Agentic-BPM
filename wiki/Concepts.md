@@ -25,7 +25,7 @@ Design preview: describes the 0.1 target (Rule Engine) and the Process Engine 0.
 
 ## Lifecycle of a version
 
-![Version lifecycle](images/version-lifecycle.svg)
+![Version lifecycle](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/version-lifecycle.svg)
 
 | State | Editable | Evaluable | Leaves the state when |
 |---|---|---|---|

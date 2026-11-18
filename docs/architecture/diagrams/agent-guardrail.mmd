@@ -1,15 +1,20 @@
 sequenceDiagram
   autonumber
-  participant W as Engine worker
-  participant AD as AgentAdapter (host)
-  participant V as OutputSchemaValidator
-  participant RE as RuleEngine (in-process)
-  participant DB as PostgreSQL (pre_*, rle_decision)
+  box rgba(21,101,192,0.04) Internal zone
+    participant W as Engine worker
+    participant AD as AgentAdapter (host)
+    participant V as OutputSchemaValidator
+    participant RE as RuleEngine (in-process)
+    participant DB as PostgreSQL (pre_*, rle_decision)
+  end
 
   Note over W,DB: TX1 already committed: bounded inputs resolved, fields with mask true stored as HMAC in pre_history, lease held
-  W->>AD: execute(agent, inputs in clear, outputSchema id, attemptId, timeout)
-  AD-->>W: raw output and latency
-  rect rgb(230, 242, 241)
+  rect rgba(243,229,245,0.7)
+    Note over W,AD: Outside any transaction
+    W->>AD: execute(agent, inputs in clear, outputSchema id, attemptId, timeout)
+    AD-->>W: raw output and latency
+  end
+  rect rgba(224,242,241,0.8)
     Note over W,DB: TX2, lease verified first
     W->>V: validate output against outputSchema
     alt schema invalid

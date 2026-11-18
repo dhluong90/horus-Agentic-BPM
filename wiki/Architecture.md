@@ -2,7 +2,7 @@
 
 This page explains how the engines are built, where state lives, how they behave under load and failure, and which checks prove it. Module depth lives in `rule-engine/docs/DESIGN.md`, `process-engine/docs/DESIGN.md` and `cockpit/docs/DESIGN.md`; this page links there instead of repeating them. Every choice below follows from the [[Principles]] and the ADRs in `docs/adr/`.
 
-![System context](images/system-context.svg)
+![System context](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/system-context.svg)
 
 ## 1. Context, boundaries and non-goals
 
@@ -14,13 +14,27 @@ This page explains how the engines are built, where state lives, how they behave
 | State it never touches | `pre_*`, host tables | `rle_*` (uses the `RuleEngine` API), host tables | Any database |
 | Network I/O | None (`TR-EMB-05`) | None inside engine artifacts; adapters are host code and run outside transactions (`TR-ASY-01`) | HTTPS to the host |
 
+### Security zones and integration
+
+A bank runs the host service in its internal zone, behind its own gateway. The engines add no network listener, no server and no store of their own. Every call to core banking, partners or a model leaves through a host adapter, after the engine's first transaction has committed.
+
+![Four-zone security and integration view](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/architecture-security-zones.svg)
+
+| Step | Path | Rule |
+|---|---|---|
+| 1, 2 | Channel or cockpit to your gateway, then to the host | HTTPS; the host validates the bearer token itself |
+| 3 | Business code or REST layer to the engines | In-process call, no network hop |
+| 4 | Engines to PostgreSQL | The host's `DataSource` and transaction: business rows, `rle_*` and `pre_*` commit together (`TR-EMB-04`) |
+| 5, 6 | Engines to host adapters, adapters to core banking, partners or a model | Only after TX1 commits, outside any transaction, under a timeout (`TR-ASY-01`) |
+| 7 | Engines to the host event publisher | Inside the transaction; a host that forwards events writes them to its own outbox |
+
 Non-goals, fixed by ADR: no standalone server (ADR-0004), no engine-owned database or connection pool (ADR-0002), no scripting engine or reflection in definitions (ADR-0003), no two-phase commit (ADR-0007), no message broker or search index requirement, no built-in identity provider, no full BPMN 2.0 or DMN FEEL.
 
 ## 2. Containers and modules
 
-![Containers](images/c4-container.svg)
+![Containers](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/c4-container.svg)
 
-![Module structure](images/module-structure.svg)
+![Module structure](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/module-structure.svg)
 
 | Artifact | Role | Allowed dependencies | Verified by |
 |---|---|---|---|
@@ -47,7 +61,7 @@ Money is never a floating-point number: `{ "currency": "VND", "amount": 60000000
 
 ### 3.2 Rule set version lifecycle
 
-![Version lifecycle](images/version-lifecycle.svg)
+![Version lifecycle](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/version-lifecycle.svg)
 
 | From | Event | Guard | To | Emitted event |
 |---|---|---|---|---|
@@ -63,7 +77,7 @@ A `RETIRED` version never changes state again. "Restore" copies its content into
 
 ### 3.3 Process instance and token lifecycle
 
-![Process instance states](images/process-instance-states.svg)
+![Process instance states](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/process-instance-states.svg)
 
 Positions in a process are rows in `pre_token`, not a column on the instance, because `parallelGateway` forks several active positions.
 
@@ -88,7 +102,7 @@ Positions in a process are rows in `pre_token`, not a column on the instance, be
 
 ## 4. Transaction model: sync steps and the Async Wait-State protocol
 
-![Async wait-state protocol](images/async-wait-state.svg)
+![Async wait-state protocol](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/async-wait-state.svg)
 
 | Step kind | Runs in | Holds a DB connection during | Examples |
 |---|---|---|---|
@@ -97,7 +111,7 @@ Positions in a process are rows in `pre_token`, not a column on the instance, be
 
 TX2 re-reads the job `WHERE locked_by = me AND locked_until > now()`. If another replica took the lease after it expired, the late result is discarded and the other attempt owns the step. Adapters receive the `attemptId` so hosts can make their side idempotent (`TR-IDEM-04`). ADR-0008 records the decision. The idempotent start and complete calls:
 
-![Idempotent start and complete](images/idempotent-start-complete.svg)
+![Idempotent start and complete](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/idempotent-start-complete.svg)
 
 ## 5. Storage
 
@@ -130,7 +144,7 @@ See [[Rule Engine Decision API]] for the REST reference.
 
 The two decision log modes differ in what a host rollback does to the decision row:
 
-![Decision log modes](images/decision-log-modes.svg)
+![Decision log modes](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/decision-log-modes.svg)
 
 ## 8. Scale and bottleneck math
 
@@ -177,7 +191,7 @@ Latency budget per hot path (p50 / p99 targets after warm-up):
 
 ## 10. Deployment shapes
 
-![Deployment shapes](images/deployment-shapes.svg)
+![Deployment shapes](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/deployment-shapes.svg)
 
 Engines keep no state outside the database. Replicas coordinate only through PostgreSQL: `SKIP LOCKED` leases for jobs, row locks for joins, `cache_epoch` plus `NOTIFY` for compiled caches. A standalone cockpit needs a CORS allowlist on each host it talks to (ADR-0005).
 

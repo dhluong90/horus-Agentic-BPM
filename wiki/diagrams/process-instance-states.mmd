@@ -1,7 +1,10 @@
 stateDiagram-v2
   direction LR
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
   [*] --> RUNNING: start (idempotency key, business key)
-  RUNNING --> RUNNING: token advances; waits on user, async or timer step; incident opened or resolved
+  RUNNING --> RUNNING: token advances, waits on a user, async or timer step, incident opened or resolved
   RUNNING --> COMPLETED: last token reaches end
   RUNNING --> CANCELLED: cancel
   RUNNING --> COMPENSATING: retries exhausted with onFailure compensate, or throwCompensation
@@ -12,6 +15,9 @@ stateDiagram-v2
   note right of RUNNING
     Positions live in pre_token rows:
     ACTIVE, WAITING_USER, WAITING_ASYNC,
-    WAITING_TIMER, JOINED, COMPLETED.
+    WAITING_TIMER, JOINED, COMPLETED, COMPENSATED.
     An incident pauses one token, not the instance.
   end note
+  class RUNNING engine
+  class COMPENSATING external
+  class COMPLETED,CANCELLED,FAILED obs

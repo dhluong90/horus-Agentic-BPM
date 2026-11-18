@@ -37,7 +37,7 @@ This wiki is the `wiki/` folder of the repository; a workflow publishes it on me
 |---|---|
 | Opening | One sentence saying what the page is for, then a status note if the page describes behaviour not yet implemented, then short sections |
 | Length | Prose under about 400 words; anything with three or more parallel items goes in a table |
-| Diagrams | Mermaid sources in `wiki/diagrams/*.mmd`, rendered to `wiki/images/*.svg` with `tools/render-diagrams.sh` (theme in `wiki/diagrams/theme.json`). Pages embed the SVG as `![Alt](images/name.svg)`; never add an image without its source |
+| Diagrams | Mermaid sources in `wiki/diagrams/*.mmd`, rendered to `wiki/images/*.svg` with `tools/render-diagrams.sh` (theme in `wiki/diagrams/theme.json`). Pages embed the SVG by absolute URL, `![Alt](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/name.svg)`, because relative paths break between `/wiki` and `/wiki/Home`. Diagrams use the shared `classDef` names `client`, `host`, `engine`, `db`, `external` and `obs`, and dashed zone subgraphs for the Public zone, DMZ, Internal zone and Core and external. Never add an image without its source |
 | Names | Terms as defined in [[Concepts]]. Requirement ids (`TR-*`), specification ids (`RLE-*`, `PRE-*`, `CKP-*`) and ADR numbers are quoted, never paraphrased |
 | Links | `[[Page Name]]` form; file names use dashes |
 | One owner per fact | Endpoints: [[Rule Engine Decision API]]. Properties: [[Rule Engine Configuration]]. Terms: [[Concepts]]. Dates and scope: [[Roadmap]]. Elsewhere, link; do not restate |

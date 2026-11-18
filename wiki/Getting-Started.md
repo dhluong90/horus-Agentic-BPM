@@ -4,6 +4,8 @@ In about 30 minutes you add the Rule Engine to a Spring Boot service, load a loa
 
 Design preview: describes the 0.1 target. The artifacts named below are not published yet, so the steps cannot be run today.
 
+![Getting started flow: add the starter, load the table, evaluate, see the log](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/getting-started-flow.svg)
+
 ## Before you start
 
 | You need | Version | Check |
@@ -74,6 +76,7 @@ horus:
 `src/main/resources/rules/loan-eligibility.yaml`:
 
 ```yaml
+schemaVersion: 1
 ruleSet: loan-eligibility
 hitPolicy: first
 inputs:
@@ -86,19 +89,19 @@ outputs:
 rules:
   - id: R1
     when: { age: "< 18" }
-    then: { eligible: false, reason: "UNDER_AGE" }
+    then: { eligible: false, reason: "'UNDER_AGE'" }
   - id: R2
     when: { income: "< 5000000 VND" }
-    then: { eligible: false, reason: "LOW_INCOME" }
+    then: { eligible: false, reason: "'LOW_INCOME'" }
   - id: R3
     when: { country: "not in ['VN', 'SG', 'ID']" }
-    then: { eligible: false, reason: "UNSUPPORTED_COUNTRY" }
+    then: { eligible: false, reason: "'UNSUPPORTED_COUNTRY'" }
   - id: R4
     when: {}
-    then: { eligible: true, reason: "OK" }
+    then: { eligible: true, reason: "'OK'" }
 ```
 
-Rows are checked top to bottom and the first match wins (`hitPolicy: first`). The empty `when: {}` on R4 matches everything, so R4 is the default. The full format is in [[Rule Engine Authoring Decision Tables]].
+Every `then` value is an expression, so a text output needs inner quotes: `"'UNDER_AGE'"` is the text `UNDER_AGE`, while a bare `"UNDER_AGE"` would be read as the name of an input. `schemaVersion: 1` names the definition format. Rows are checked top to bottom and the first match wins (`hitPolicy: first`). The empty `when: {}` on R4 matches everything, so R4 is the default. The full format is in [[Rule Engine Authoring Decision Tables]].
 
 ## 5. Evaluate from a unit test
 

@@ -2,6 +2,10 @@
 
 This page explains how the engines isolate tenants, which security controls they enforce themselves, which they delegate to the host, and how each control is verified. The engines add no authentication of their own; they run under the host's Spring Security.
 
+![Security boundary across four zones](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/security-boundary.svg)
+
+Each numbered step is a control the request passes. Steps 1 to 3 run in your gateway, your identity provider and your Spring Security configuration. Steps 4 to 9 are enforced by the engine modules inside your service, whatever the cockpit shows.
+
 ## Tenant resolution
 
 | Source (`tenancy.resolver`) | How | Use when |
@@ -23,7 +27,7 @@ The REST layer checks one permission string per endpoint with `@PreAuthorize`; t
 
 ## Maker-checker in the service layer
 
-![Publish sequence with maker-checker](images/publish-sequence.svg)
+![Publish sequence with maker-checker](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/publish-sequence.svg)
 
 | Control | Implementation |
 |---|---|

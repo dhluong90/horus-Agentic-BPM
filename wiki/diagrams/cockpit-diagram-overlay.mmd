@@ -1,0 +1,51 @@
+flowchart LR
+  subgraph Internal["Internal zone: your service"]
+    direction TB
+    subgraph Engine["Process Engine read models"]
+      direction TB
+      DEF["1. Definition version<br/>steps and connections"]
+      LAY["2. Layout<br/>automatic when none is stored (0.2)<br/>stored apart from the definition hash (M3)"]
+      TOK["3. Tokens and node history of one instance<br/>when, how long, attempts, who acted"]
+      LIVE["4. Live counts per node<br/>active tokens and incidents, read from an index"]
+      ROLL["5. Hourly rollup per node<br/>counts, incidents, p50 and p95 durations<br/>filled by the scheduler with a watermark"]
+    end
+    DB[("PostgreSQL pre_*")]
+    REST["REST layer<br/>/api/bpm/processes/v1"]
+  end
+  subgraph Public["Public zone: cockpit in the browser"]
+    direction TB
+    DV["Definition diagram (0.2)"]
+    IV["Instance diagram with live token positions (0.2)"]
+    CNT["Count badges on each step (0.2)"]
+    HM["Heatmap overlay for a chosen window (M3)"]
+  end
+
+  DB --> DEF
+  DB --> TOK
+  DB --> LIVE
+  DB --> ROLL
+  DEF --> REST
+  LAY --> REST
+  TOK --> REST
+  LIVE --> REST
+  ROLL --> REST
+  REST -->|"1. and 2."| DV
+  REST -->|"1., 2. and 3."| IV
+  REST -->|"4."| CNT
+  REST -->|"5."| HM
+  CNT -.- DV
+  HM -.- DV
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class DEF,LAY,TOK,LIVE,ROLL engine
+  class DB db
+  class REST host
+  class DV,IV,CNT,HM client
+  style Engine fill:#FAFBFA,stroke:#00796B
+  style Public fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style Internal fill:none,stroke:#1565C0,stroke-dasharray:5 5

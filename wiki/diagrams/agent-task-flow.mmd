@@ -1,14 +1,26 @@
 flowchart TB
-  I["agentTask reached\nresolve bounded inputs, mask flagged fields"] --> W["Async Wait-State\nTX1 claim lease, commit, call adapter"]
-  W --> O{"Output received\nwithin timeout?"}
+  I["1. agentTask reached<br/>resolve bounded inputs, mask flagged fields"] -->|"2."| W["Async wait-state<br/>TX1: claim lease, commit"]
+  W -->|"3. call outside any transaction"| AD["Host adapter<br/>calls the agent under timeout"]
+  AD --> O{"Output received<br/>within timeout?"}
   O -->|"no: timeout or adapter error"| R{"attempt < retry.max?"}
-  O -->|"yes"| V{"Validates against\noutputSchema?"}
+  O -->|"4. yes, TX2"| V{"Validates against<br/>outputSchema?"}
   V -->|"no: AGENT_SCHEMA_INVALID"| R
-  V -->|"yes"| G["RuleEngine.evaluate\n(guardrail rule set, output)"]
-  G -->|"allow"| N["Advance token\nhistory: output, guardrailDecisionId, latency"]
-  G -->|"violation, onViolation route-to-human"| H["Approval userTask\ncarries output and matched rule ids\nmaker-checker: agent requester excluded"]
-  G -->|"violation, onViolation fail"| F["Incident AGENT_GUARDRAIL_FAILED\nor compensation"]
+  V -->|"5. yes"| G["RuleEngine.evaluate<br/>(guardrail rule set, output)"]
+  G -->|"6a. allow"| N["Advance token<br/>history: output, guardrailDecisionId, latency"]
+  G -->|"6b. violation, route-to-human"| H["Approval userTask<br/>carries output and matched rule ids<br/>the triggering identity cannot approve"]
+  G -->|"6c. violation, fail"| F["Incident or compensation"]
   R -->|"yes"| W
   R -->|"no"| F
   H -->|"approve or edit"| N
   H -->|"reject"| F
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class I,W,O,V,G,N,R engine
+  class AD host
+  class H client
+  class F obs

@@ -10,11 +10,11 @@ Design preview: describes the 0.1 target.
 - Two identities: one with `rules:author` (the maker, `alice` below) and a different one with `rules:approve` (the checker, `bob`). Permissions are listed in [[Rule Engine Configuration]].
 - Every mutating call below accepts an `Idempotency-Key` header; replaying the same key returns the original response (ADR-0006).
 
-![Version lifecycle](images/version-lifecycle.svg)
+![Version lifecycle](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/version-lifecycle.svg)
 
 ## Publish a change
 
-![Publish sequence](images/publish-sequence.svg)
+![Publish sequence](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/publish-sequence.svg)
 
 | Step | Who | Call | Expected |
 |---|---|---|---|

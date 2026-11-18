@@ -1,12 +1,23 @@
 flowchart LR
   subgraph Sim["Simulation (rules:simulate)"]
-    SI["POST /rule-sets/card-fee/versions/3:simulate\nsample inputs or logged decisions, explicit clock"] --> SR["Resolve draft v3\ncompile in memory"]
-    SR --> SE["Evaluate\npure, same engine"]
-    SE --> SO["Simulation report\nper-input outcome, diff against v2\n0 rows in rle_decision"]
+    SI["POST /rule-sets/card-fee/versions/3:simulate<br/>sample inputs, explicit clock"] -->|"1."| SR["Resolve draft v3<br/>compile in memory"]
+    SR -->|"2."| SE["Evaluate<br/>pure, same engine"]
+    SE -->|"3."| SO["Simulation report<br/>per-input outcome, diff against v2<br/>0 rows in rle_decision"]
   end
   subgraph Eval["Evaluate (rules:evaluate)"]
-    EI["POST /decisions/card-fee:evaluate\ninputs, correlationId"] --> ER["Resolve effective version\neffective_from <= clock"]
-    ER --> EE["Evaluate\npure, same engine"]
-    EE --> EO["DecisionResult\ndecisionId, outputs, matched rules"]
-    EE --> EL[("rle_decision\nexactly 1 INSERT")]
+    EI["POST /decisions/card-fee:evaluate<br/>inputs, correlationId"] -->|"1."| ER["Resolve effective version<br/>effective_from <= clock"]
+    ER -->|"2."| EE["Evaluate<br/>pure, same engine"]
+    EE -->|"3a."| EO["DecisionResult<br/>decisionId, outputs, matched rules"]
+    EE -->|"3b."| EL[("rle_decision<br/>exactly 1 INSERT")]
   end
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class SI,EI client
+  class SR,SE,ER,EE engine
+  class SO,EO host
+  class EL db

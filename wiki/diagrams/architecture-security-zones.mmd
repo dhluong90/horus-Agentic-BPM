@@ -1,0 +1,60 @@
+flowchart LR
+  subgraph Public["Public zone"]
+    CH["Customer channels<br/>mobile, web, partner"]
+    OB["Operator browser<br/>cockpit"]
+  end
+  subgraph DMZ["DMZ"]
+    GW["Your WAF and API gateway<br/>TLS, routing"]
+  end
+  subgraph Internal["Internal zone"]
+    direction TB
+    IdP["OIDC identity provider"]
+    subgraph Host["Your Spring Boot service"]
+      direction TB
+      BIZ["Business API and code"]
+      REST["Engine REST layer<br/>/api/bpm/rules/v1, /api/bpm/processes/v1"]
+      ENG[["Rule Engine and Process Engine<br/>in-process libraries"]]
+      ADP["Host adapters<br/>ServiceAdapter, AgentAdapter"]
+      PUB["Host event publisher and outbox"]
+    end
+    DB[("Your PostgreSQL<br/>business tables, rle_*, pre_*")]
+    OBS["Your monitoring<br/>Micrometer metrics, OpenTelemetry traces"]
+  end
+  subgraph External["Core and external"]
+    CORE["Core banking and payment rails"]
+    PART["Partners"]
+    AI["AI model or agent API"]
+  end
+
+  CH -->|"1. HTTPS business call"| GW
+  OB -->|"1. HTTPS, bearer token"| GW
+  GW -->|"2. forward with token"| BIZ
+  GW -->|"2. forward with token"| REST
+  BIZ -.->|"token validation"| IdP
+  BIZ -->|"3. in-process call"| ENG
+  REST -->|"3."| ENG
+  ENG -->|"4. one ACID transaction:<br/>business rows, rle_*, pre_*"| DB
+  ENG -->|"5. after TX1 commits:<br/>call outside any transaction"| ADP
+  ADP -->|"6. bounded timeout"| CORE
+  ADP -->|"6."| PART
+  ADP -->|"6."| AI
+  ENG -->|"7. events handed over<br/>inside the transaction"| PUB
+  ENG -.->|"metrics and traces"| OBS
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class CH,OB client
+  class GW,BIZ,REST,ADP,PUB,IdP host
+  class ENG engine
+  class DB db
+  class CORE,PART,AI external
+  class OBS obs
+  style Host fill:#FAFBFA,stroke:#2E7D32
+  style Public fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style DMZ fill:none,stroke:#EF6C00,stroke-dasharray:5 5
+  style Internal fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style External fill:none,stroke:#6A1B9A,stroke-dasharray:5 5

@@ -1,28 +1,52 @@
 flowchart LR
-  Ops(["Operators and approvers\n(people)"])
-  Dev(["Host developers\n(Java API)"])
-  Cockpit["Cockpit\nReact 18 static assets"]
-  subgraph Host["Your Spring Boot service (one JVM)"]
-    direction TB
-    App["Business code"]
-    RE[["Rule Engine\nJava 21 library"]]
-    PE[["Process Engine\nJava 21 library"]]
-    REST["Engine REST layer (optional)\n/api/bpm/rules/v1, /api/bpm/processes/v1"]
+  subgraph Public["Public zone"]
+    Ops(["Operators and approvers<br/>(people)"])
+    Cockpit["Cockpit<br/>React 18 static assets"]
   end
-  DB[("Your PostgreSQL 14+\nrle_* and pre_* tables")]
-  IdP["Identity provider\n(host Spring Security, OIDC)"]
-  Agent["AI agent or model API\n(via host adapter)"]
-  Svc["Other services\n(core banking, partners)"]
+  Dev(["Host developers<br/>(Java API)"])
+  subgraph Internal["Internal zone"]
+    direction TB
+    subgraph Host["Your Spring Boot service (one JVM)"]
+      direction TB
+      App["Business code"]
+      REST["Engine REST layer (optional)<br/>/api/bpm/rules/v1<br/>/api/bpm/processes/v1"]
+      RE[["Rule Engine<br/>Java 21 library"]]
+      PE[["Process Engine<br/>Java 21 library"]]
+    end
+    DB[("Your PostgreSQL 14+<br/>rle_* and pre_* tables")]
+    IdP["Identity provider<br/>(host Spring Security, OIDC)"]
+  end
+  subgraph External["Core and external"]
+    Agent["AI agent or model API<br/>(via host adapter)"]
+    Svc["Other services<br/>(core banking, partners)"]
+  end
 
-  Ops -->|"HTTPS"| Cockpit
-  Cockpit -->|"JSON over HTTPS\nbearer token"| REST
+  Ops -->|"1. HTTPS"| Cockpit
+  Cockpit -->|"2. JSON over HTTPS<br/>bearer token"| REST
+  REST -.->|"3. token validation"| IdP
   Dev -->|"in-process calls"| App
   App -->|"in-process"| RE
   App -->|"in-process"| PE
-  REST --> RE
-  REST --> PE
-  PE -.->|"decision step\nRuleEngine API only"| RE
-  Host -->|"Spring JDBC, host DataSource\nTCP 5432"| DB
-  REST -.->|"token validation"| IdP
-  PE -->|"agentTask adapter\nHTTP or MCP, outside any DB transaction"| Agent
-  PE -->|"serviceTask adapter\nHTTP, outside any DB transaction"| Svc
+  REST -->|"4."| RE
+  REST -->|"4."| PE
+  PE -.->|"decision step<br/>RuleEngine API only"| RE
+  RE -->|"5. Spring JDBC, host DataSource"| DB
+  PE -->|"5. Spring JDBC, host DataSource"| DB
+  PE -->|"6. agentTask adapter, HTTP<br/>outside any DB transaction"| Agent
+  PE -->|"6. serviceTask adapter, HTTP<br/>outside any DB transaction"| Svc
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class Ops,Cockpit client
+  class Dev,App,REST,IdP host
+  class RE,PE engine
+  class DB db
+  class Agent,Svc external
+  style Public fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style Internal fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style Host fill:#FAFBFA,stroke:#2E7D32
+  style External fill:none,stroke:#6A1B9A,stroke-dasharray:5 5

@@ -1,8 +1,20 @@
 flowchart LR
-  S(["start"]) --> A["reserve funds\ncompensate: release funds"]
-  A --> B["create account in core\ncompensate: close account"]
-  B --> C["notify partner\ncompensate: manual"]
+  S(["start"]) -->|"1."| A["reserve funds<br/>compensate: release funds"]
+  A -->|"2."| B["create account in core<br/>compensate: close account"]
+  B -->|"3."| C["notify partner<br/>compensate: manual"]
   C --> E(["end"])
-  C -. "fails after retries" .-> X{{"compensate completed steps\nin reverse order (LIFO)"}}
-  X --> B2["close account\nattemptId as idempotency key"] --> A2["release funds\nattemptId as idempotency key"] --> F(["FAILED: compensated"])
-  X -. "a compensate handler fails\nor is manual" .-> I[["incident\nretry or resolve by hand"]]
+  C -. "4. fails after retries" .-> X{{"compensate completed steps<br/>in reverse order (LIFO)"}}
+  X -->|"5."| B2["close account<br/>attemptId as idempotency key"]
+  B2 -->|"6."| A2["release funds<br/>attemptId as idempotency key"]
+  A2 -->|"7."| F(["FAILED: compensated"])
+  X -. "a compensate handler fails<br/>or is manual" .-> I[["incident<br/>retry or resolve by hand"]]
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class S,E,X,F engine
+  class A,B,C,B2,A2 host
+  class I obs

@@ -2,7 +2,7 @@
 
 Reference for the libraries and tools the project uses, what each one is for, and what was rejected. Chosen for small footprint, long support and permissive licences; the decisions are ADRs in `docs/adr/`.
 
-![Containers](images/c4-container.svg)
+![Containers](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/c4-container.svg)
 
 ## Engines
 | Area | Choice | Licence | Rejected, and why |

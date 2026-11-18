@@ -4,7 +4,7 @@ Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockp
 
 **Documentation: the [project wiki](../../wiki)** (source in [`wiki/`](wiki/)).
 
-![System context](wiki/images/system-context.svg)
+![System context](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/system-context.svg)
 
 > Status: design preview. The wiki describes the 0.1 target and is reviewed before the code is written. No artifact is published yet.
 

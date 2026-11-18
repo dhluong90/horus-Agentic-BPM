@@ -1,0 +1,42 @@
+flowchart LR
+  subgraph Public["Public zone"]
+    B["Operator browser<br/>cockpit app, keeps no state"]
+    N["Cockpit 0.1: one host at a time, switch in the registry<br/>Cockpit 0.2: task inbox and incident list merged in the browser"]
+    end
+  subgraph DMZ["DMZ"]
+    GW["Your reverse proxy or API gateway<br/>TLS, one route per host"]
+  end
+  subgraph Internal["Internal zone"]
+    SWS["Static web server<br/>cockpit archive and host registry"]
+    IdP["OIDC identity provider<br/>one issuer that every host accepts"]
+    HA["Host service A<br/>Rule Engine and REST layer<br/>CORS allows the cockpit origin"]
+    HB["Host service B<br/>both engines and REST layer<br/>CORS allows the cockpit origin"]
+    DBA[("PostgreSQL A")]
+    DBB[("PostgreSQL B")]
+  end
+
+  B -->|"HTTPS"| GW
+  GW -->|"1. load assets and host registry"| SWS
+  GW -->|"2. sign in once: authorization code<br/>with PKCE, public client"| IdP
+  GW -->|"3. GET /api/bpm/meta and /api/bpm/me<br/>4. rules and processes APIs, bearer token"| HA
+  GW -->|"3. and 4. same token"| HB
+  HA -.->|"5. validate token"| IdP
+  HB -.->|"5. validate token"| IdP
+  HA -->|"6. JDBC"| DBA
+  HB -->|"6. JDBC"| DBB
+  N -.- B
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class B,N client
+  class GW,SWS host
+  class IdP external
+  class HA,HB host
+  class DBA,DBB db
+  style Public fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style DMZ fill:none,stroke:#EF6C00,stroke-dasharray:5 5
+  style Internal fill:none,stroke:#1565C0,stroke-dasharray:5 5

@@ -2,7 +2,7 @@
 
 Reference for the two Rule Engine surfaces: the in-process Java API and the optional REST API under `/api/bpm/rules/v1` that the cockpit and remote callers use. _Design preview: the contract is reviewed here before the code exists._
 
-![Rule evaluation flow](images/rule-evaluation-flow.svg)
+![Rule evaluation flow](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/rule-evaluation-flow.svg)
 
 ## Java
 
@@ -104,7 +104,7 @@ Batch request and response wrap items in `{ "items": [ { "inputs": {}, "correlat
 
 Definition documents carry `schemaVersion`; old schema versions import forever. Simulation of a draft (`:simulate`) uses the same evaluator as `:evaluate` and writes no decision rows:
 
-![Simulation versus evaluate](images/simulation-vs-evaluate.svg)
+![Simulation versus evaluate](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/simulation-vs-evaluate.svg)
 
 ## Idempotency-Key semantics
 

@@ -1,23 +1,44 @@
 flowchart TB
-  Browser["Operator browser\nCockpit: React 18, TypeScript 5, Vite"]
-  subgraph JVM["Host service: Java 21, Spring Boot 3.4+"]
-    direction TB
-    Starter["rule-engine / process-engine\nspring-boot-starter\n@AutoConfiguration, TenantResolver, Micrometer"]
-    Core["*-core\nparser, evaluator, token runtime\nJava 21 + Jackson only"]
-    PG["*-postgres\nJdbcClient, Flyway (rle_/pre_ history tables)\nSKIP LOCKED poller, LISTEN/NOTIFY"]
-    RESTc["*-rest\nSpring WebMvc, RFC 9457 problem+json\nOpenAPI 3.1"]
-    CockpitStarter["cockpit-spring-boot-starter\nserves static assets at /bpm/cockpit"]
-    Adapters["Host adapters\nAgentAdapter, ServiceAdapter beans"]
+  subgraph Public["Public zone"]
+    Browser["Operator browser<br/>Cockpit: React 18, TypeScript 5, Vite"]
   end
-  DB[("PostgreSQL 14+\nhost schema with rle_* and pre_*")]
-  Ext["External agent or service\nHTTP / MCP"]
+  subgraph Internal["Internal zone"]
+    subgraph JVM["Host service: Java 21, Spring Boot"]
+      direction TB
+      CockpitStarter["cockpit-spring-boot-starter<br/>serves static assets at /bpm/cockpit"]
+      RESTc["*-rest<br/>Spring WebMvc, RFC 9457 problem+json<br/>OpenAPI 3.1"]
+      Starter["rule-engine / process-engine<br/>spring-boot-starter<br/>@AutoConfiguration, TenantResolver, Micrometer"]
+      Core["*-core<br/>parser, evaluator, token runtime<br/>Java 21 + Jackson only"]
+      PG["*-postgres<br/>JdbcClient, Flyway (rle_ and pre_ history tables)<br/>SKIP LOCKED poller, LISTEN/NOTIFY"]
+      Adapters["Host adapters<br/>AgentAdapter, ServiceAdapter beans"]
+    end
+    DB[("PostgreSQL 14+<br/>host schema with rle_* and pre_*")]
+  end
+  subgraph External["Core and external"]
+    Ext["External agent or service<br/>HTTP"]
+  end
 
-  Browser -->|"HTTPS, JSON\nAuthorization: Bearer"| RESTc
   Browser -->|"HTTPS, static files"| CockpitStarter
+  Browser -->|"HTTPS, JSON<br/>Authorization: Bearer"| RESTc
   RESTc --> Starter
   Starter --> Core
   Starter --> PG
   PG --> Core
   PG -->|"JDBC, host DataSource and transactions"| DB
   Core -->|"SPI call after TX1 commit"| Adapters
-  Adapters -->|"HTTP or MCP, bounded timeout\nno DB connection held"| Ext
+  Adapters -->|"HTTP, bounded timeout<br/>no DB connection held"| Ext
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class Browser client
+  class CockpitStarter,RESTc,Starter,Adapters host
+  class Core,PG engine
+  class DB db
+  class Ext external
+  style Public fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style Internal fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style External fill:none,stroke:#6A1B9A,stroke-dasharray:5 5

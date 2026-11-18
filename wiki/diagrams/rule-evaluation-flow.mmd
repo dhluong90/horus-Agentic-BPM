@@ -1,13 +1,23 @@
 flowchart LR
   subgraph Authoring["Authoring: once per version"]
-    D["Definition\nYAML, JSON or cockpit"] --> V["Validate\ntypes, names, overlaps"]
-    V --> C["Compile\nexpressions to typed tree, slot indices"]
-    C --> S[("rle_version\ncanonical JSON + hash")]
+    D["Definition<br/>YAML, JSON or cockpit"] -->|"1."| V["Validate<br/>types, names, overlaps"]
+    V -->|"2."| C["Compile<br/>expressions to typed tree, slot indices"]
+    C -->|"3."| S[("rle_version<br/>canonical JSON + hash")]
   end
   subgraph Evaluation["Evaluation: every call, no I/O"]
-    I["DecisionInput\nvalues, clock, tenant"] --> R["Resolve version\neffective at clock"]
-    S -->|"compiled cache per replica\ninvalidated by NOTIFY + epoch"| R
-    R --> E["Evaluate\npure, p99 target under 100 us"]
-    E --> O["DecisionResult\noutputs, matched rules"]
-    E --> L[("rle_decision\nappend-only, one INSERT")]
+    I["DecisionInput<br/>values, clock, tenant"] -->|"4."| R["Resolve version<br/>effective at clock"]
+    S -->|"compiled cache per replica<br/>invalidated by NOTIFY + epoch"| R
+    R -->|"5."| E["Evaluate<br/>pure, p99 target under 100 us"]
+    E -->|"6a."| O["DecisionResult<br/>outputs, matched rules"]
+    E -->|"6b."| L[("rle_decision<br/>append-only, one INSERT")]
   end
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class D,I host
+  class V,C,R,E,O engine
+  class S,L db

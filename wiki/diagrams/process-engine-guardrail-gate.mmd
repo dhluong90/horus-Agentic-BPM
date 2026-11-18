@@ -1,0 +1,41 @@
+flowchart LR
+  subgraph Internal["Internal zone: your service"]
+    direction TB
+    W[["Process Engine worker<br/>agentTask assess-documents"]]
+    DB[("PostgreSQL<br/>pre_timer, pre_token, pre_history")]
+    ADP["Host AgentAdapter"]
+    VAL[["Output schema check<br/>outputSchema"]]
+    RE[["Rule Engine<br/>guardrail rule set, in-process"]]
+    NEXT["Token advances<br/>history: output, guardrailDecisionId"]
+    TASK["Approval task<br/>inputs, output, matched rule ids"]
+    INC["Incident or compensation"]
+  end
+  subgraph External["Core and external"]
+    AI["Model or agent API"]
+  end
+
+  W -->|"1. TX1: claim lease, commit"| DB
+  W -->|"2. no transaction, no connection"| ADP
+  ADP -->|"3. call under timeout"| AI
+  AI -->|"4. raw output"| ADP
+  ADP -->|"5. TX2: lease still held?"| VAL
+  VAL -->|"6. schema valid"| RE
+  VAL -->|"6. invalid: failed attempt,<br/>retry or AGENT_SCHEMA_INVALID"| INC
+  RE -->|"7a. allow = true"| NEXT
+  RE -->|"7b. allow = false,<br/>route-to-human"| TASK
+  RE -->|"7c. allow = false, fail"| INC
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class W,VAL,RE engine
+  class DB db
+  class ADP,NEXT host
+  class TASK client
+  class INC obs
+  class AI external
+  style Internal fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style External fill:none,stroke:#6A1B9A,stroke-dasharray:5 5

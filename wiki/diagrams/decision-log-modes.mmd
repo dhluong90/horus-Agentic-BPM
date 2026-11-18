@@ -1,12 +1,14 @@
 sequenceDiagram
   autonumber
-  participant H as Host service (@Transactional)
-  participant RE as RuleEngine
-  participant DB as PostgreSQL
-  participant SCH as Scheduler thread
+  box rgba(21,101,192,0.04) Internal zone: your service and database
+    participant H as Host service (@Transactional)
+    participant RE as RuleEngine
+    participant DB as PostgreSQL
+    participant SCH as Scheduler thread
+  end
 
-  rect rgb(230, 242, 241)
-    Note over H,DB: decision-log.mode = transactional
+  rect rgba(224,242,241,0.8)
+    Note over H,DB: decision-log.mode = transactional (one host transaction)
     H->>RE: evaluate("card-fee", input)
     RE->>DB: INSERT rle_decision (same connection and transaction)
     RE-->>H: DecisionResult
@@ -17,12 +19,15 @@ sequenceDiagram
     end
   end
 
-  rect rgb(243, 244, 246)
-    Note over H,SCH: decision-log.mode = async
+  rect rgba(224,242,241,0.8)
+    Note over H,DB: decision-log.mode = async, TX1 (host transaction)
     H->>RE: evaluate("card-fee", input)
     RE->>DB: INSERT rle_decision_outbox (same transaction, small row)
     RE-->>H: DecisionResult
     H->>DB: COMMIT
+  end
+  rect rgba(236,239,241,0.9)
+    Note over SCH,DB: async, TX2 (scheduler transaction, later)
     SCH->>DB: SELECT ... FROM rle_decision_outbox FOR UPDATE SKIP LOCKED LIMIT 100
     SCH->>DB: INSERT rle_decision (log_mode=ASYNC), mark outbox SENT, COMMIT
     Note over SCH,DB: log lags by the poll interval, visible as log_mode=ASYNC

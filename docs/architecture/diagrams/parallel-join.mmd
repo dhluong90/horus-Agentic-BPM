@@ -1,17 +1,25 @@
 sequenceDiagram
   autonumber
-  participant A as Replica A (branch credit-bureau)
-  participant B as Replica B (branch fraud-check)
-  participant DB as PostgreSQL (pre_instance, pre_token)
+  box rgba(21,101,192,0.04) Internal zone
+    participant A as Replica A (branch credit-bureau)
+    participant B as Replica B (branch fraud-check)
+    participant DB as PostgreSQL (pre_instance, pre_token)
+  end
 
   par both branches finish in the same millisecond
     A->>DB: SELECT ... FROM pre_instance WHERE tenant_id=? AND id=? FOR UPDATE
     B->>DB: SELECT ... FROM pre_instance WHERE tenant_id=? AND id=? FOR UPDATE (waits)
   end
-  A->>DB: token A JOINED at join-checks
-  A->>DB: count tokens in the scope not yet JOINED: 1
-  A->>DB: COMMIT (lock released, A does not advance)
-  B->>DB: lock acquired, token B JOINED
-  B->>DB: count tokens in the scope not yet JOINED: 0
-  B->>DB: INSERT one ACTIVE token at underwrite, A and B COMPLETED, COMMIT
+  rect rgba(224,242,241,0.8)
+    Note over A,DB: TX A holds the instance row lock
+    A->>DB: token A JOINED at join-checks
+    A->>DB: count tokens in the scope not yet JOINED: 1
+    A->>DB: COMMIT (lock released, A does not advance)
+  end
+  rect rgba(224,242,241,0.8)
+    Note over B,DB: TX B gets the lock after A commits
+    B->>DB: lock acquired, token B JOINED
+    B->>DB: count tokens in the scope not yet JOINED: 0
+    B->>DB: INSERT one ACTIVE token at underwrite, A and B COMPLETED, COMMIT
+  end
   Note over A,DB: Without the row lock both could count 1 (lost wakeup) or both count 0 (two tokens)

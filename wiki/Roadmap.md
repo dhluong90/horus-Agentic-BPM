@@ -4,7 +4,7 @@ Design preview: nothing is released. Dates are targets, not commitments; [[Relea
 
 This page is the short public view. The full plan, with the features in each milestone, the release gates and the assumptions that could change it, is the [product roadmap](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/product/roadmap.md).
 
-![Milestones](images/roadmap-timeline.svg)
+![Milestones](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/roadmap-timeline.svg)
 
 ## Milestones
 

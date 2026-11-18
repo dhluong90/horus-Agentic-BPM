@@ -12,7 +12,7 @@ Design preview: simulation against sample inputs and the test library describe t
 
 ## Simulate a draft against sample inputs
 
-![Simulation versus evaluate](images/simulation-vs-evaluate.svg)
+![Simulation versus evaluate](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/simulation-vs-evaluate.svg)
 
 In the cockpit: open the rule set, choose the draft, open Simulation, paste rows or upload a CSV with one column per input, run. The screen shows outputs and matched rule ids per row.
 

@@ -15,7 +15,7 @@ Design preview: describes the 0.1 target.
 ruleSet: card-fee               # unique within a tenant, kebab-case
 description: Monthly fee by card tier and balance
 hitPolicy: first                # first | unique | collect
-effectiveFrom: 2026-12-01       # optional; otherwise effective when approved
+effectiveFrom: 2026-12-01T00:00:00+07:00   # optional ISO instant; otherwise effective when approved
 ```
 
 | Policy | Behaviour | Use it for |

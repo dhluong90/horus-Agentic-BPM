@@ -4,7 +4,7 @@ flowchart TB
     RT["rule-engine-test"] --> RC
     RR["rule-engine-rest"] --> RS["rule-engine-spring-boot-starter"]
     RS --> RP["rule-engine-postgres"]
-    RS --> RC["rule-engine-core\nJava 21 + Jackson only"]
+    RS --> RC["rule-engine-core<br/>Java 21 + Jackson only"]
     RP --> RC
   end
   subgraph ProcessEngine["Process Engine"]
@@ -12,11 +12,22 @@ flowchart TB
     PT["process-engine-test"] --> PC
     PR["process-engine-rest"] --> PS["process-engine-spring-boot-starter"]
     PS --> PP["process-engine-postgres"]
-    PS --> PC["process-engine-core\nJava 21 + Jackson only"]
+    PS --> PC["process-engine-core<br/>Java 21 + Jackson only"]
     PP --> PC
   end
   PC -.->|"RuleEngine API interface only"| RC
-  CK["cockpit\nstatic assets"] --> RR
+  CK["cockpit<br/>static assets"] --> RR
   CK --> PR
-  BOM["bpm-bom\npins every module version"] -.- RuleEngine
+  BOM["bpm-bom<br/>pins every module version"] -.- RuleEngine
   BOM -.- ProcessEngine
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class RC,PC,RP,PP engine
+  class RS,PS,RR,PR,RT,PT host
+  class CK client
+  class BOM obs

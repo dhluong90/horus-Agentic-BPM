@@ -1,0 +1,51 @@
+flowchart LR
+  subgraph Public["Public zone"]
+    U["Browser or API client"]
+  end
+  subgraph DMZ["DMZ"]
+    GW["Your gateway<br/>TLS; in header mode it sets X-Tenant-Id<br/>only after it authenticates the caller"]
+  end
+  subgraph Internal["Internal zone"]
+    direction TB
+    IdP["OIDC identity provider<br/>tenant_id claim, allowed tenants"]
+    subgraph Host["Your service"]
+      direction TB
+      SEC["Spring Security<br/>authenticate, TenantResolver;<br/>tenantId in a body is ignored"]
+      PERM["REST layer<br/>one permission per endpoint (@PreAuthorize)"]
+      SVC["Service layer<br/>maker-checker, four-eyes on tasks"]
+      CORE[["Engine core<br/>closed expression grammar, no scripts,<br/>bounded regex"]]
+    end
+    DB[("PostgreSQL<br/>tenant_id first in every index;<br/>another tenant's row answers 404")]
+    AUD["Audit rows<br/>rle_decision, pre_history append-only;<br/>masked inputs as HMAC-SHA256"]
+  end
+  subgraph External["Core and external"]
+    EXT["Model, core banking or partner API<br/>reached only through your adapter"]
+  end
+
+  U -->|"1. HTTPS, bearer token"| GW
+  GW -->|"2."| SEC
+  SEC -.->|"3. validate token"| IdP
+  SEC -->|"4. tenant and caller resolved"| PERM
+  PERM -->|"5."| SVC
+  SVC -->|"6."| CORE
+  CORE -->|"7. queries filtered by tenant"| DB
+  CORE -->|"8. masked before write"| AUD
+  CORE -->|"9. adapter call, outside any transaction"| EXT
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class U client
+  class GW,SEC,PERM,SVC,IdP host
+  class CORE engine
+  class DB db
+  class AUD obs
+  class EXT external
+  style Host fill:#FAFBFA,stroke:#2E7D32
+  style Public fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style DMZ fill:none,stroke:#EF6C00,stroke-dasharray:5 5
+  style Internal fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style External fill:none,stroke:#6A1B9A,stroke-dasharray:5 5

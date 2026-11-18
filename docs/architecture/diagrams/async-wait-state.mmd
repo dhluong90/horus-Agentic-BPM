@@ -1,22 +1,28 @@
 sequenceDiagram
   autonumber
-  participant W as Engine worker (replica A)
-  participant DB as PostgreSQL (pre_timer, pre_token)
-  participant AD as Host adapter
-  participant X as External agent or service
+  box rgba(21,101,192,0.04) Internal zone
+    participant W as Engine worker (replica A)
+    participant DB as PostgreSQL (pre_timer, pre_token)
+    participant AD as Host adapter
+  end
+  box rgba(106,27,154,0.05) Core and external
+    participant X as External agent or service
+  end
 
-  rect rgb(230, 242, 241)
+  rect rgba(224,242,241,0.8)
     Note over W,DB: TX1: claim with lease, commit (target under 5 ms)
     W->>DB: token reaches agentTask or remote serviceTask: token WAITING_ASYNC
     W->>DB: job CLAIMED, locked_by=A, locked_until=now() + timeout + jobs.lease-margin, attempt+1
     W->>DB: COMMIT
   end
-  Note over W,X: Outside any transaction: no DB connection, no row lock
-  W->>AD: execute(invocation with attemptId, inputs, timeout)
-  AD->>X: HTTP or MCP call
-  X-->>AD: output, error, or nothing
-  AD-->>W: result, or cancelled by the worker at the step timeout
-  rect rgb(230, 242, 241)
+  rect rgba(243,229,245,0.7)
+    Note over W,X: Outside any transaction: no DB connection, no row lock
+    W->>AD: execute(invocation with attemptId, inputs, timeout)
+    AD->>X: HTTP or MCP call
+    X-->>AD: output, error, or nothing
+    AD-->>W: result, or cancelled by the worker at the step timeout
+  end
+  rect rgba(224,242,241,0.8)
     Note over W,DB: TX2: fresh transaction
     W->>DB: SELECT job WHERE id=? AND locked_by=A AND locked_until > now() FOR UPDATE
     alt lease still held by A

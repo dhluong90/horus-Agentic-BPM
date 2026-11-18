@@ -1,0 +1,43 @@
+sequenceDiagram
+  autonumber
+  box rgba(158,158,158,0.06) Public zone
+    actor Au as author (processes:author)
+    actor Ap as approver (processes:approve)
+  end
+  box rgba(21,101,192,0.04) Internal zone
+    participant API as Process Engine REST layer
+    participant SVC as Definition lifecycle (engine)
+    participant DB as PostgreSQL (pre_*)
+  end
+
+  rect rgba(224,242,241,0.8)
+    Note over API,DB: TX: deploy or import from Git creates a draft
+    Au->>API: deploy kyc-onboarding v3
+    API->>SVC: create draft
+    SVC->>DB: v3 status=DRAFT, content hash stored, COMMIT
+  end
+  Au->>API: :validate v3
+  API-->>Au: 0 errors
+  rect rgba(224,242,241,0.8)
+    Note over API,DB: TX: request approval
+    Au->>API: :request-approval v3, effectiveFrom 2027-04-01T00:00:00+07:00
+    SVC->>DB: status=PENDING_APPROVAL, requested_by=author, COMMIT
+    SVC-->>Au: event processes.definition.publish-requested.v1
+  end
+  Au->>API: :approve v3
+  API-->>Au: 403, a requester cannot approve their own change
+  Ap->>API: graph diff v2 to v3
+  API-->>Ap: steps and connections added, removed or changed
+  rect rgba(224,242,241,0.8)
+    Note over API,DB: TX: decide
+    alt approve, by an identity other than the requester
+      Ap->>API: :approve v3
+      SVC->>DB: status=ACTIVE from effectiveFrom, COMMIT
+      SVC-->>Ap: event processes.definition.approved.v1
+    else reject with a comment
+      Ap->>API: :reject v3
+      SVC->>DB: status=DRAFT, COMMIT
+      SVC-->>Ap: event processes.definition.rejected.v1
+    end
+  end
+  Note over Au,DB: Engine lifecycle and graph diff: M2, through REST or your tooling. Cockpit approval screens: M3. Only the dev profile may approve automatically.

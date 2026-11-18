@@ -2,7 +2,7 @@
 
 This page explains what the Process Engine does, which guarantees it gives for human, service and agent steps, and how it keeps those guarantees across replicas. It ships in milestone 2 with the core of `agentTask`; milestone 3 adds the MCP adapter, reference LLM adapters and bounded multi-step planning. Internals: `process-engine/docs/DESIGN.md` and `SPEC.md` (`PRE-001` to `PRE-015`).
 
-![Process instance states](images/process-instance-states.svg)
+![Process instance states](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/process-instance-states.svg)
 
 ## Scope of the first release
 | Area | Content |
@@ -33,7 +33,7 @@ The transition table with guards and emitted events is in [[Architecture]] secti
 | Sync in-transaction | `decision`, `exclusiveGateway`, `parallelGateway`, `userTask` state changes, a local `serviceTask` bean that writes only to the host database | Runs inside the caller's or the scheduler's transaction. Engine state and host writes commit or roll back together |
 | Async Wait-State | `agentTask`, `serviceTask` with `mode: remote` (HTTP, MCP), compensation handlers that call other systems | TX1 claims the job with a lease and commits. The adapter runs with no database connection and no row lock. TX2 verifies the lease, records the result and advances, retries or opens an incident |
 
-![Async wait-state protocol](images/async-wait-state.svg)
+![Async wait-state protocol](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/async-wait-state.svg)
 
 Numbers that follow from the rule: 100 concurrent agent calls of 10 s each hold 0 connections while waiting; the same calls inside a transaction would need 100 connections. The engine part of an async step costs two short transactions, about 10 ms in total. Adapters receive `attemptId`; a result that arrives after the lease expired is discarded because another attempt owns the step by then (`TR-ASY-01`, `TR-ASY-02`, ADR-0008).
 
@@ -69,13 +69,13 @@ FROM claimed WHERE t.id = claimed.id RETURNING t.*;
 
 ## `parallelGateway` join without lost wakeups
 
-![Parallel join](images/parallel-join.svg)
+![Parallel join](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/parallel-join.svg)
 
 When two branches finish on two replicas at the same instant, each transaction locks the parent `pre_instance` row `FOR UPDATE` before it marks its token `JOINED` and counts the remaining tokens in the join scope. The lock serialises the two counts, so exactly one transaction sees zero remaining and creates the single outgoing token (`PRE-005`, `TR-ASY-03`). The lock is per instance and held for about 2 ms, so it never contends across instances.
 
 ## Idempotency and business keys
 
-![Idempotent start and complete](images/idempotent-start-complete.svg)
+![Idempotent start and complete](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/idempotent-start-complete.svg)
 
 ```
 POST /api/bpm/processes/v1/instances
@@ -95,7 +95,7 @@ Java API methods take the same keys as parameters (ADR-0006). The idempotency re
 
 ## Compensation
 
-![Compensation flow](images/compensation-flow.svg)
+![Compensation flow](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/compensation-flow.svg)
 
 ```yaml
 - id: reserve-funds
@@ -133,7 +133,7 @@ public interface BusinessCalendar {
 The default implementation reads weekly hours, holidays and time zone from `pre_calendar` and `pre_holiday`, editable in the cockpit. A 24x7 calendar is built in. A computed `due_at` does not move when the calendar changes later (`TR-CAL-02`).
 
 ## Instance migration
-![Instance migration](images/instance-migration.svg)
+![Instance migration](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/instance-migration.svg)
 
 ```
 POST /api/bpm/processes/v1/migrations                 # create plan: source v1 to target v2, step mapping
@@ -144,7 +144,9 @@ Steps with the same id map implicitly; renamed steps need an explicit mapping; r
 
 ## The `agentTask` step
 
-![Agent task guardrail flow](images/agent-task-flow.svg)
+![Guardrail gate: two short transactions around the agent call](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/process-engine-guardrail-gate.svg)
+
+![Agent task guardrail flow](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/agent-task-flow.svg)
 
 ```yaml
 - id: assess-documents

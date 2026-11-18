@@ -58,7 +58,7 @@ The log stores a keyed HMAC of the value instead of the value. The same national
 
 ## Choose transactional or async logging
 
-![Decision log modes](images/decision-log-modes.svg)
+![Decision log modes](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/decision-log-modes.svg)
 
 | Mode | Behaviour | Use it for |
 |---|---|---|
