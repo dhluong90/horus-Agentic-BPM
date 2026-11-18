@@ -18,7 +18,19 @@
       "maxLength": 100
     },
     "description": { "type": "string", "maxLength": 2000 },
-    "hitPolicy": { "enum": ["first", "unique", "collect"] },
+    "expressionLanguage": {
+      "description": "Language of every expression in this document. Only urn:horus-bpm:expr:v1 is accepted in schema version 1; FEEL arrives with a later schema version (ADR-0017, ADR-0019). Stored with the version.",
+      "enum": ["urn:horus-bpm:expr:v1"],
+      "default": "urn:horus-bpm:expr:v1"
+    },
+    "timeZone": {
+      "description": "IANA time zone id in which today() and now() are evaluated, for example Asia/Ho_Chi_Minh. Part of the versioned definition, so replay is deterministic. Default UTC.",
+      "type": "string",
+      "pattern": "^(UTC|[A-Za-z_]+(/[A-Za-z0-9_+-]+)+)$",
+      "maxLength": 64,
+      "default": "UTC"
+    },
+    "hitPolicy": { "description": "DMN hit policies F (first), U (unique) and C (collect). The other DMN hit policies (A, P, R, O) arrive in a later schema version (standards-compliance.md section 6.2).", "enum": ["first", "unique", "collect"] },
     "effectiveFrom": {
       "description": "Optional. The instant the version becomes effective, ISO 8601 with Z or an offset (RFC 3339 date-time), for example 2027-01-01T00:00:00+07:00. A bare date is rejected because it does not name an instant. Without it the version is effective when approved.",
       "type": "string",

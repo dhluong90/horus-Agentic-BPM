@@ -25,6 +25,18 @@
             "type": "array", "uniqueItems": true,
             "items": { "type": "string", "pattern": "^[a-z]+(\\.[a-z0-9-]+)+$" }
           },
+          "standards": {
+            "description": "Optional. What this module executes, so a federated cockpit renders, validates and offers modeller symbols per host (ADR-0017, standards-compliance.md section 6). Absent means the ADR-0013 subset for processes and rule-set.v1 decision tables for rules.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "bpmnStage": { "description": "Highest BPMN stage this host executes.", "enum": ["S0", "S1", "S2", "S3"] },
+              "bpmnExecutableElements": { "description": "BPMN element and event definition names this host executes, for example userTask, boundaryEvent:timer.", "type": "array", "uniqueItems": true, "items": { "type": "string", "maxLength": 60 } },
+              "dmnVersion": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+              "dmnConformanceLevel": { "enum": [1, 2, 3] },
+              "expressionLanguages": { "type": "array", "uniqueItems": true, "items": { "type": "string", "maxLength": 100 } }
+            }
+          },
           "settings": {
             "description": "Host settings the cockpit must respect, for example { \"authoring.cockpit-drafts\": false }.",
             "type": "object",

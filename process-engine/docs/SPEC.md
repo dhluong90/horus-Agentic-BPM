@@ -387,3 +387,44 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The first call returns `bank-a` tasks; the second returns `bank-a-fin` tasks; the third returns `403 TENANT_NOT_ALLOWED`, returns no data and writes a security log entry with user, requested tenant and `correlationId`; the fourth returns `404 INSTANCE_NOT_FOUND`.
 - **Example:** `X-Tenant-Id: bank-b not in allowed_tenants -> 403 TENANT_NOT_ALLOWED, logged`.
 - **Test ID:** `PRE_038_tenant_header_accepted_only_within_allowed_tenants`
+
+---
+
+## Standards Foundations (ADR-0017)
+
+### PRE-039 Import keeps the source document; the hash is fixed in the stored schema version
+- **Traces to:** `TR-STD-01`, `TR-STD-03`
+- **Milestone:** M2
+- **Given:** `kyc-onboarding.yaml` in Git (with comments) and the RFC 8785 hash the pipeline computed from it; the same definition later read back after a newer schema version file has been added to the build.
+- **When:** It is imported with `POST /api/bpm/processes/v1/definitions`, then read with `GET .../definitions/kyc-onboarding/versions/1?include=source`.
+- **Then:** `pre_definition` has `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` of those bytes, and `definition_hash` equal to the pipeline's hash; the response carries the original text; with the newer schema version present, `definition_hash` of version 1 is unchanged and no stored document is re-serialised.
+- **Example:** `import kyc-onboarding.yaml -> source_format YAML, definitionHash = pipeline hash, unchanged after upgrade`.
+- **Test ID:** `PRE_039_import_keeps_source_document_and_fixed_hash`
+
+### PRE-040 A handler's business error opens an incident until error events exist
+- **Traces to:** `TR-OPS-03`, `TR-IDEM-04`
+- **Milestone:** M2
+- **Given:** Definition `loan-disbursement` with a local `serviceTask` `check-limit` whose handler returns `HandlerResult.BusinessError("LIMIT_EXCEEDED", "Daily limit reached")`.
+- **When:** An instance reaches `check-limit`.
+- **Then:** The step transaction commits an incident with `error_code = UNHANDLED_BUSINESS_ERROR` and the business code `LIMIT_EXCEEDED` in `cause_summary`; the token stays on `check-limit`; no retry is scheduled because a business error is not retryable; `:retry` after the host fixes the data runs the handler again with a new `attemptId`.
+- **Example:** `BusinessError(LIMIT_EXCEEDED) -> incident UNHANDLED_BUSINESS_ERROR, token on check-limit`.
+- **Test ID:** `PRE_040_business_error_result_opens_incident`
+
+### PRE-041 Cancelling an instance during an adapter call discards the late result
+- **Traces to:** `TR-ASY-01`, `TR-ASY-02`, `TR-STD-12`
+- **Milestone:** M2
+- **Given:** Instance `I1` on `agentTask` `score-applicant` with its job `CLAIMED` by replica A and a stub adapter that answers after 2 s.
+- **When:** `POST /instances/I1:cancel` commits after 0.5 s, and the adapter answers at 2 s.
+- **Then:** The cancel transaction sets the instance `CANCELLED`, the token `CANCELLED`, the job `CANCELLED` and writes `TOKEN_CANCELLED`; replica A's TX2 selects no row for `status = 'CLAIMED'`, writes only `LATE_RESULT_DISCARDED` with the attempt id, and does not advance, retry or open an incident; no connection was held during the adapter call.
+- **Example:** `cancel at 0.5 s, adapter result at 2 s -> LATE_RESULT_DISCARDED, instance CANCELLED`.
+- **Test ID:** `PRE_041_cancel_during_adapter_call_discards_late_result`
+
+### PRE-042 BPMN-style step ids are accepted and kept everywhere
+- **Traces to:** `TR-STD-03`, `TR-DEF-01`
+- **Milestone:** M2
+- **Given:** A definition whose steps have ids `StartEvent_1`, `Activity_0x1y2z3`, `Gateway_kyc.risk` and `end`, and a layout keyed by the same ids; a second definition with step id `1-bad`.
+- **When:** Both are imported, the first is approved and an instance runs to `Activity_0x1y2z3`.
+- **Then:** The first is stored with those ids unchanged in `definition_json`, the layout, `pre_token.current_node_id`, `pre_history.node_id` and the graph diff; the second is `422 VALIDATION_FAILED` naming `1-bad`, because an id must start with a letter or underscore.
+- **Example:** `step id Activity_0x1y2z3 -> stored and shown unchanged; 1-bad -> 422`.
+- **Test ID:** `PRE_042_bpmn_style_step_ids_kept`
+

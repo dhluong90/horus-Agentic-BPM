@@ -1,0 +1,62 @@
+flowchart LR
+  subgraph Public["Public zone"]
+    Modeller(["Process and decision modellers<br/>(any BPMN 2.0 or DMN 1.5 tool)"])
+    Cockpit["Cockpit<br/>static assets, BPMN and DMN symbols"]
+  end
+  subgraph DMZ["Banking DMZ"]
+    GW["Bank API gateway"]
+  end
+  subgraph Internal["Internal trusted zone"]
+    subgraph HostA["Host service A (one JVM)"]
+      direction TB
+      RestA["Engine REST layer<br/>import, export, correlate"]
+      InA["Host inbound adapter<br/>REST or broker consumer the host owns"]
+      PEA[["Process Engine<br/>canonical BPMN model"]]
+      REA[["Rule Engine<br/>canonical DMN model, FEEL"]]
+      OutA["Host outbox<br/>MessageAdapter"]
+    end
+    DBA[("Host A PostgreSQL<br/>pre_*, rle_*, source documents")]
+    subgraph HostB["Host service B (one JVM)"]
+      PEB[["Process Engine<br/>pool B of the collaboration"]]
+    end
+    Broker["Host-owned broker or HTTP<br/>(not an engine dependency)"]
+  end
+  subgraph Core["Core and external"]
+    Partner["Partner or core system<br/>sends business messages"]
+  end
+  subgraph Obs["Observability"]
+    Audit["Host event sink<br/>audit, analytics"]
+  end
+
+  Modeller -->|"1. BPMN XML or DMN XML file"| GW
+  Cockpit -->|"2. HTTPS, bearer token"| GW
+  GW -->|"3. import, display, export"| RestA
+  RestA -->|"4. parse outside any TX, store draft"| PEA
+  RestA --> REA
+  Partner -->|"5. business message"| Broker
+  Broker -->|"6. host consumer"| InA
+  InA -->|"7. correlateMessage in the host TX"| PEA
+  PEA -->|"8. businessRuleTask, decisionRef"| REA
+  PEA -->|"9. message throw: outbox row in the same TX"| OutA
+  OutA -->|"10. relay after commit"| Broker
+  Broker -->|"11. host B consumer calls correlate"| PEB
+  PEA -->|"12. JDBC, host DataSource"| DBA
+  PEA -.->|"13. events .v1"| Audit
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class Modeller,Cockpit client
+  class GW,RestA,InA,OutA,Broker host
+  class PEA,REA,PEB engine
+  class DBA db
+  class Partner external
+  class Audit obs
+  style Public fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style DMZ fill:none,stroke:#EF6C00,stroke-dasharray:5 5
+  style Internal fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style Core fill:none,stroke:#6A1B9A,stroke-dasharray:5 5
+  style Obs fill:none,stroke:#546E7A,stroke-dasharray:5 5

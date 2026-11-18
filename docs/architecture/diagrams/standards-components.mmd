@@ -1,0 +1,62 @@
+flowchart LR
+  subgraph In["Readers (pure, outside any transaction)"]
+    J1["JSON or YAML v1<br/>rule-set.v1, process-definition.v1"]
+    J2["JSON v2<br/>one to one with the model"]
+    BX["BPMN 2.0 XML reader<br/>JDK StAX, hardened"]
+    DX["DMN 1.2 to 1.5 XML reader<br/>JDK StAX, hardened"]
+  end
+  subgraph Core["*-core canonical model"]
+    BM[["BPMN semantic model<br/>sealed records per metamodel class"]]
+    DM[["DMN semantic model<br/>DRG, item definitions, boxed expressions"]]
+    HX["HORUS extensions<br/>agentTask, guardrails, async mode, forms, SLA"]
+    FX["Foreign extensions<br/>opaque, never interpreted"]
+    VAL["Validator and executability check<br/>per release stage"]
+    EXP["ExpressionLanguage SPI<br/>horus-expr-v1 and FEEL front ends"]
+    CMP["Compiler<br/>runtime graph, typed trees, slots"]
+  end
+  subgraph Out["Writers"]
+    W1["Canonical JSON<br/>RFC 8785, definition_hash"]
+    W2["BPMN XML and BPMNDI"]
+    W3["DMN XML and DMNDI"]
+  end
+  subgraph Store["Host PostgreSQL"]
+    SRC[("source_document, source_hash")]
+    CAN[("definition_json or canonical_json,<br/>definition_hash")]
+    LAY[("pre_definition_layout")]
+  end
+  J1 --> BM
+  J1 --> DM
+  J2 --> BM
+  J2 --> DM
+  BX --> BM
+  DX --> DM
+  BM --- HX
+  BM --- FX
+  DM --- FX
+  BM --> VAL
+  DM --> VAL
+  VAL --> EXP
+  VAL --> CMP
+  EXP --> CMP
+  BM --> W1
+  DM --> W1
+  BM --> W2
+  DM --> W3
+  W1 --> CAN
+  BX -.->|"bytes as received"| SRC
+  DX -.->|"bytes as received"| SRC
+  BX -.->|"BPMNDI"| LAY
+
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class J1,J2,BX,DX,W1,W2,W3 host
+  class BM,DM,HX,VAL,EXP,CMP engine
+  class FX obs
+  class SRC,CAN,LAY db
+  style In fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style Core fill:none,stroke:#00796B,stroke-dasharray:5 5
+  style Out fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style Store fill:none,stroke:#F9A825,stroke-dasharray:5 5

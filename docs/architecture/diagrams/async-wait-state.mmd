@@ -24,7 +24,7 @@ sequenceDiagram
   end
   rect rgba(224,242,241,0.8)
     Note over W,DB: TX2: fresh transaction
-    W->>DB: SELECT job WHERE id=? AND locked_by=A AND locked_until > now() FOR UPDATE
+    W->>DB: SELECT job WHERE id=? AND locked_by=A AND status='CLAIMED' AND locked_until > now() FOR UPDATE
     alt lease still held by A
       alt success: output valid, guardrail allow
         W->>DB: history row, advance token, job DONE, processes.step.completed.v1
@@ -36,6 +36,8 @@ sequenceDiagram
       W->>DB: COMMIT
     else lease expired and taken over
       W->>DB: ROLLBACK: late result discarded, the newer attempt owns the step
+    else job CANCELLED by instance cancel, migration or (from S1) an interrupting boundary
+      W->>DB: history LATE_RESULT_DISCARDED with attemptId, COMMIT
     end
   end
   Note over W,DB: Crash between TX1 and TX2: any replica's poller reclaims the job after locked_until with FOR UPDATE SKIP LOCKED and a new attemptId

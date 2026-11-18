@@ -1,6 +1,6 @@
 # Rule Engine: Design
 
-Status: architecture baseline (M0), updated 2026-11-18. Conforms to ADR-0001 to ADR-0006, ADR-0010 (contract conventions), ADR-0011 (Spring Boot 4.x baseline), ADR-0014 (tenant switching and host metadata), the proposed ADR-0009 (cache coherence) and the proposed ADR-0016 (Java API conventions), and to [`docs/product/requirements.md`](../../docs/product/requirements.md). Cross-module facts are owned by [`docs/architecture/overview.md`](../../docs/architecture/overview.md).
+Status: architecture baseline (M0), updated 2026-11-18. Conforms to ADR-0001 to ADR-0006, ADR-0010 (contract conventions), ADR-0011 (Spring Boot 4.x baseline), ADR-0014 (tenant switching and host metadata), the proposed ADR-0009 (cache coherence) and the proposed ADR-0016 (Java API conventions), ADR-0017 (full DMN on the roadmap; the do-now items of [`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 9 are applied below and tagged with their milestone), the proposed ADR-0018 (canonical DMN model) and ADR-0019 (FEEL strategy), and to [`docs/product/requirements.md`](../../docs/product/requirements.md). Cross-module facts are owned by [`docs/architecture/overview.md`](../../docs/architecture/overview.md).
 
 Contents: 1 Context and boundaries. 2 Modules, ports and adapters. 3 Domain model and compiler. 4 Java API and REST contract. 5 Storage model. 6 Runtime mechanics and capacity math. 7 Open questions.
 
@@ -36,7 +36,7 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
 ## 3. Domain model and compiler (`rule-engine-core`)
 
 ### 3.1 Immutable rule set and typed tree
-- `RuleSetDefinition` (`record`): `schemaVersion`, `ruleSetName`, `version` (the rule set version number, 1, 2, 3; never the optimistic lock), `hitPolicy` (`FIRST | UNIQUE | COLLECT`), `collectAggregate` (`NONE | SUM | MIN | MAX | COUNT`), `moneyRounding` (default `HALF_EVEN`), `effectiveFrom` (`Instant`), `inputs` (`List<InputSchema>`), `outputs` (`List<OutputSchema>`), `rules` (`List<RuleRow>`), `canonicalHash` (SHA-256).
+- `RuleSetDefinition` (`record`): `schemaVersion`, `expressionLanguage` (only `urn:horus-bpm:expr:v1` before S1), `timeZone` (IANA zone id, default `UTC`; M1, DN-06), `ruleSetName`, `version` (the rule set version number, 1, 2, 3; never the optimistic lock), `hitPolicy` (`FIRST | UNIQUE | COLLECT`), `collectAggregate` (`NONE | SUM | MIN | MAX | COUNT`), `moneyRounding` (default `HALF_EVEN`), `effectiveFrom` (`Instant`), `inputs` (`List<InputSchema>`), `outputs` (`List<OutputSchema>`), `rules` (`List<RuleRow>`), `canonicalHash` (SHA-256).
 - `Expr` (`sealed interface`):
   - `LiteralExpr(ValueType type, Object value)`
   - `VarRefExpr(int slotIndex, String name, ValueType type)` *(bound to slot index at compile time)*
@@ -48,6 +48,8 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
   - `CallExpr(String functionName, List<Expr> args, PureFunction impl)`
 - `Money` (`record(String currency, long minorUnits)`, scale derived from the currency): the canonical contract is section 3.4.
 - The definition document format is owned by `rule-engine/api/schema/rule-set.v1.schema.json` (JSON Schema 2020-12). `tools/validate-examples.sh` checks every YAML example in `wiki/` against it.
+- **Decision model identity (M1, DN-08).** A rule set is a DMN decision model (`definitions`) named after the rule set with exactly one decision, a decision table with the rule set's name. If ADR-0018 is accepted, `RuleSetDefinition` is built as that DMN-shaped model (`Definitions`, `Decision`, `DecisionTable`, `InputClause`, `OutputClause`, `Rule`) by the v1 reader, so DRDs with several decisions (S1) extend the model instead of replacing it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 3.6).
+- **Hash identity (M1, DN-04).** `canonical_hash` is the SHA-256 of the RFC 8785 form of the document in the schema version it is stored in. It is never recomputed when a later schema version exists; upgrading is an author action that creates a new draft. A DMN XML import (RE-F-30, M3) produces the lowest schema version that can express the model, so a v1 rule set exported to DMN and imported again keeps its hash.
 
 ### 3.2 Two-phase compilation and slot-indexed evaluation
 1. **Compile & Static Type-Check (Save / Publish):**
@@ -56,7 +58,13 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
    - Invalid expressions fail validation and cannot transition to `PENDING_APPROVAL` or `PUBLISHED` (`TR-DET-02`).
 2. **Runtime Evaluation (`< 100 µs` hot path):**
    - Map `DecisionInput` into `Object[] slots` once; evaluate compiled `CompiledRuleSet` tree with zero regex compilation and zero `HashMap` lookups per row.
-   - Pass explicit `Clock` / `Instant evaluationTime` so `today()` and `now()` are deterministic (`TR-DET-01`, `TR-DET-05`).
+   - Pass explicit `Clock` / `Instant evaluationTime` so `today()` and `now()` are deterministic (`TR-DET-01`, `TR-DET-05`). `today()` is the date of the evaluation instant in the rule set's `timeZone` (default `UTC`); the zone is part of the versioned definition, so the decision row's version identifies it (M1, DN-06, `RLE-022`).
+3. **Semantics aligned with FEEL (M1, DN-07, ADR-0019 proposed).** These rules were unspecified and are fixed now so that every expression has a FEEL equivalent with the same result ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) sections 4.3 and 4.4, `RLE-021`):
+   - Numbers: `integer` and `decimal` are declared constraints on one number type, evaluated as `BigDecimal` with `MathContext.DECIMAL128` (34 significant digits, `HALF_EVEN`); `7 / 2` is `3.5`; division by zero is `EVALUATION_ERROR`.
+   - `round(x, scale)` rounds half-even. Money arithmetic keeps its own rounding (`moneyRounding`, section 3.4).
+   - `matches(s, p)` is an unanchored search with the XPath `fn:matches` regex dialect: no back-references, no look-around; bounded as `TR-SEC-02`.
+   - Strings compare by Unicode code point. `datetime` is a FEEL `date and time` with offset `Z` (Java `Instant`).
+   - Null: today `RLE-006` (any comparison with `null` is `false`). FEEL three-valued logic (`5 != null` is `true`; `not(null)` is `null`, so not matched) is pending decision P1; if accepted it applies from M1 and `RLE-006` changes for `!=` and `not`.
    - Regex evaluation wraps input in a bounded `InterruptibleCharSequence` enforcing `evaluation.regex-timeout-ms` (`50 ms` default, `TR-SEC-02`).
 
 ### 3.3 Version lifecycle
@@ -97,6 +105,36 @@ This section is the single statement of how money is represented; the Process En
 | Currency scale | ISO 4217 minor unit | USD 2, VND 0, JPY 0, KWD 3 | From `java.util.Currency#getDefaultFractionDigits`; a currency without a defined minor unit (for example `XAU`) is rejected unless the host registers a scale |
 | Arithmetic | Exact in minor units | `money + money`, `money - money` (same currency), `money * number`, `money / number` | Mixed currencies are `EVALUATION_ERROR` at run time and a validation error when both sides are literals (`TR-DET-03`). `money / money` is rejected at publish time. Results of `*` and `/` round to the currency scale with the rule set's `moneyRounding`, default `HALF_EVEN`; the mode is part of the versioned definition, so replay is deterministic |
 
+### 3.5 Expression language SPI and value mapping (M1, DN-05)
+
+The parser and evaluator are reached through one interface in `com.horus.bpm.rules.api.expr`, so a second language (FEEL, ADR-0019) registers beside the first and the Process Engine never depends on parser classes:
+
+```java
+public interface ExpressionLanguage {
+  String id();                                                     // "urn:horus-bpm:expr:v1"; FEEL from S1
+  CompiledExpression compile(String source, TypeEnvironment types); // throws ExpressionInvalidException with position
+}
+public interface CompiledExpression {
+  ValueType resultType();
+  EvaluationProfile profile();                                     // COMPILED in M1; GENERAL for full FEEL
+  Object evaluate(EvaluationContext context);                      // clock, zone, slots, functions, step budget
+}
+```
+
+Java value mapping in `api` (ADR-0016), fixed now so FEEL types are additive later:
+
+| Type | Java | From |
+|---|---|---|
+| `string`, `boolean` | `String`, `Boolean` | M1 |
+| `integer`, `decimal` (FEEL number) | `Long` or `BigDecimal` on input; always `BigDecimal` on output | M1 |
+| `date`, `datetime` | `LocalDate`, `Instant` | M1 |
+| `money` | `Money` | M1 |
+| `list<T>` | `List<T>` (immutable) | M1 |
+| FEEL `time`, zoned `date and time` | `LocalTime` or `OffsetTime`, `OffsetDateTime` or `ZonedDateTime` | S1 |
+| FEEL days and time duration, years and months duration | `Duration`, `Period` | S1 |
+| FEEL context | `Map<String, Object>` (immutable, insertion order) | S2 |
+| FEEL range | `Range` record | S2 |
+
 ## 4. Java API and REST contract
 
 ### 4.1 Java API (`com.horus.bpm.rules.api`)
@@ -108,7 +146,7 @@ public interface RuleEngine {
   <T> T evaluateAs(String ruleSet, DecisionInput input, Class<T> outputType); // throws instead of returning Failed
 }
 ```
-`DecisionResult.outcome()` is a sealed type (`Matched`, `NoMatch`, `Failed`). `UNIQUE_HIT_VIOLATION` and `EVALUATION_ERROR` are returned as `Failed` with a `code()`, because they are logged decisions; `evaluateAs` throws `DecisionFailedException` with the same code (ADR-0016). Outbound SPIs, each `@ConditionalOnMissingBean` in the starter: `TenantResolver`, `CallerResolver`, `RuleFunctionRegistry`, `RuleEventPublisher`, `Clock`.
+`DecisionRequest` carries an optional `decision` (the id of a decision inside the decision model) in its builder before the 1.0 freeze; in M1 it may be absent or equal to the rule set name, anything else is `400 INPUT_INVALID`; from S1 it selects a decision of a DRD (DN-08). `DecisionResult.outcome()` is a sealed type (`Matched`, `NoMatch`, `Failed`). `UNIQUE_HIT_VIOLATION` and `EVALUATION_ERROR` are returned as `Failed` with a `code()`, because they are logged decisions; `evaluateAs` throws `DecisionFailedException` with the same code (ADR-0016). Outbound SPIs, each `@ConditionalOnMissingBean` in the starter: `TenantResolver`, `CallerResolver`, `RuleFunctionRegistry`, `RuleEventPublisher`, `Clock`.
 
 ### 4.2 REST endpoints (`/api/bpm/rules/v1`)
 
@@ -121,6 +159,7 @@ Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `ru
 | `POST /decisions/{ruleSet}:evaluate-batch` | `rules:evaluate` | At most 1,000 items; `Idempotency-Key`; per-item outcome in a `207`-style body with `200` status | `400 INPUT_INVALID`, `404 NO_EFFECTIVE_VERSION`; item errors `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR` |
 | `POST /rule-sets/{name}/versions/{v}:simulate` | `rules:simulate` | Sample inputs, at most 1,000 sets; writes no decision row (`RLE-016`) | `400 INPUT_INVALID`, `404 VERSION_NOT_FOUND`, `422 VALIDATION_FAILED` |
 | `GET /rule-sets`, `GET /rule-sets/{name}` | `rules:read` | Cursor, at most 200 | `404 RULE_SET_NOT_FOUND` |
+| `GET /rule-sets/{name}/versions/{v}` | `rules:read` | `ETag`; `?include=source` adds `sourceFormat`, `sourceDocument` and `sourceHash` (M1, DN-01) | `404 VERSION_NOT_FOUND` |
 | `POST /rule-sets`, `POST /rule-sets/{name}/versions`, `PUT /rule-sets/{name}/versions/{v}` | `rules:author` | `Idempotency-Key` on `POST`; `If-Match: "<lockVersion>"` on `PUT` | `400 INPUT_INVALID`, `409 RULE_SET_EXISTS`, `409 VERSION_CONFLICT`, `422 VALIDATION_FAILED` |
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | `rules:author` | `Idempotency-Key`; `If-Match` | `409 VERSION_CONFLICT`, `409 INVALID_STATE`, `422 VALIDATION_FAILED` |
 | `POST /rule-sets/{name}/versions/{v}:approve`, `:reject`, `:retire` | `rules:approve` | `Idempotency-Key`; `If-Match`; approver is not the requester | `403 SELF_APPROVAL_FORBIDDEN`, `409 INVALID_STATE`, `409 VERSION_CONFLICT` |
@@ -170,7 +209,10 @@ CREATE TABLE rle_version (
   hit_policy        TEXT        NOT NULL CHECK (hit_policy IN ('FIRST','UNIQUE','COLLECT')),
   effective_from    TIMESTAMPTZ,
   canonical_json    JSONB       NOT NULL,
-  canonical_hash    CHAR(64)    NOT NULL,
+  canonical_hash    CHAR(64)    NOT NULL,        -- SHA-256 of RFC 8785 form, in the stored schema version (DN-04)
+  source_format     TEXT        NOT NULL CHECK (source_format IN ('JSON','YAML','DMN_XML')),   -- M1, DN-01
+  source_document   TEXT        NOT NULL,        -- the document as received, never executed (TR-STD-01)
+  source_hash       CHAR(64)    NOT NULL,        -- SHA-256 of the source bytes
   lock_version      BIGINT      NOT NULL DEFAULT 0,
   requested_by      TEXT,
   requested_at      TIMESTAMPTZ,
@@ -304,3 +346,5 @@ Targets, not measurements, on the reference shape (one replica, 20-connection po
 | 7.2 | Maven `groupId`: `com.horus.bpm` or `io.github.dhluong90.bpm` | Decide before Central Portal registration | Maintainers, before the M1 publish |
 | 7.3 | Default async outbox flush cadence: batch size 100 or 500 | Measure in the M1 JMH and Testcontainers runs | Maintainers, M1 exit |
 | 7.4 | Should partition drops run only in a configured window? | Add `decision-log.retention-window` only if a pilot reports insert stalls | Architect, M2 |
+| 7.5 | P1: adopt FEEL three-valued null logic in M1 (changes `RLE-006` for `!=` and `not`) | **Decision needed.** Accept, before M1 code; a later change breaks replay ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 9.2) | Product owner, M1 start |
+| 7.6 | P3: build `RuleSetDefinition` as the DMN-shaped model of ADR-0018 | **Decision needed.** Accept; about 3 days in M1 | Product owner, M1 start |

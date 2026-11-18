@@ -10,6 +10,11 @@ stateDiagram-v2
   ACTIVE --> JOINED: arrives at join, instance row locked
   ACTIVE --> COMPLETED: end step
   COMPLETED --> COMPENSATED: compensation of its steps ran
+  WAITING_USER --> CANCELLED: instance cancelled or migrated off the step
+  WAITING_ASYNC --> CANCELLED: instance cancelled, job CANCELLED
+  WAITING_TIMER --> CANCELLED: instance cancelled
+  ACTIVE --> CANCELLED: instance cancelled
+  CANCELLED --> [*]
   JOINED --> [*]
   COMPLETED --> [*]
   COMPENSATED --> [*]
@@ -20,4 +25,4 @@ stateDiagram-v2
   class ACTIVE engine
   class WAITING_USER client
   class WAITING_ASYNC,WAITING_TIMER external
-  class JOINED,COMPLETED,COMPENSATED obs
+  class JOINED,COMPLETED,COMPENSATED,CANCELLED obs

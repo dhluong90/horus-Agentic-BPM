@@ -1,6 +1,6 @@
 # Process Engine: Design
 
-Status: architecture baseline (M0), updated 2026-11-18 for the cockpit direction (PD-032 to PD-042). Conforms to ADR-0001 to ADR-0007, ADR-0010 to ADR-0015, the proposed ADR-0008, ADR-0009 and ADR-0016, and [`docs/product/requirements.md`](../../docs/product/requirements.md). Money values follow the canonical contract in [`rule-engine/docs/DESIGN.md`](../../rule-engine/docs/DESIGN.md) section 3.4. Cross-module facts (transaction model, capacity baseline, failure table) are owned by [`docs/architecture/overview.md`](../../docs/architecture/overview.md); this document owns the Process Engine's model, DDL, APIs and read models.
+Status: architecture baseline (M0), updated 2026-11-18 for the cockpit direction (PD-032 to PD-042). Conforms to ADR-0001 to ADR-0007, ADR-0010 to ADR-0015, the proposed ADR-0008, ADR-0009 and ADR-0016, ADR-0017 (full BPMN 2.0 on the roadmap; the do-now items of [`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 9 are applied below and tagged with their milestone), the proposed ADR-0018 (canonical BPMN model) and ADR-0020 (execution tree), and [`docs/product/requirements.md`](../../docs/product/requirements.md). Money values follow the canonical contract in [`rule-engine/docs/DESIGN.md`](../../rule-engine/docs/DESIGN.md) section 3.4. Cross-module facts (transaction model, capacity baseline, failure table) are owned by [`docs/architecture/overview.md`](../../docs/architecture/overview.md); this document owns the Process Engine's model, DDL, APIs and read models.
 
 Contents: 1 Context and boundaries. 2 Modules, ports and adapters. 3 Domain model and state machines. 4 Transaction model. 5 Definitions: notation, hash, diff, layout, BPMN, forms, step catalogue. 6 Java API and REST contract. 7 Storage model. 8 Read models, query limits and capacity math. 9 Failure modes. 10 Security controls. 11 Open questions.
 
@@ -19,7 +19,7 @@ Source: [`diagrams/security-zones.mmd`](diagrams/security-zones.mmd). Numbered e
 | Network | Engine code does no network I/O (`TR-EMB-05`). Adapter calls are host code, invoked outside any engine transaction |
 | Identity | Tenant from the `TenantResolver`, caller, roles and groups from the `CallerResolver`. A tenant in a request body is ignored (`TR-SEC-03`) |
 
-Non-goals: no engine server (ADR-0004), no Elasticsearch or other secondary store, no XA or two-phase commit (ADR-0007), no full BPMN 2.0 or CMMN coverage, no `GROUP BY` over history on a request path (ADR-0015), no modification of a running instance's token positions by hand.
+Non-goals: no engine server (ADR-0004), no Elasticsearch or other secondary store, no XA or two-phase commit (ADR-0007), no CMMN; full BPMN 2.0 is not an M2 goal but a staged target after 1.0 that this design must allow without a rewrite (ADR-0017), no `GROUP BY` over history on a request path (ADR-0015), no modification of a running instance's token positions by hand.
 
 ## 2. Modules, ports and adapters
 
@@ -29,7 +29,7 @@ Source: [`diagrams/components.mmd`](diagrams/components.mmd).
 
 | Module | Contents | May depend on |
 |---|---|---|
-| `process-engine-core` | `api`, `spi` and `internal` packages: domain model, lifecycle, graph diff, validation, ports | JDK, the JSON library fixed by ADR-0011, `rule-engine` API (optional) |
+| `process-engine-core` | `api`, `spi` and `internal` packages: domain model, lifecycle, graph diff, validation, ports | JDK, the JSON library fixed by ADR-0011, `rule-engine` API (optional for `decision` steps and guardrails; its `ExpressionLanguage` SPI is the only way gateway conditions are compiled and evaluated, M2, DN-05) |
 | `process-engine-bpmn` | BPMN subset reader and writer (section 5.5) | `process-engine-core`, JDK `javax.xml.stream` only |
 | `process-engine-postgres` | `JdbcClient` adapters for every driven port, Flyway scripts, `SKIP LOCKED` poller, rollup job | core, Spring JDBC, Flyway |
 | `process-engine-rest` | Controllers under `/api/bpm/processes/v1`, RFC 9457 errors, ETag, idempotency filter | core, bpmn, Spring WebMvc |
@@ -118,8 +118,11 @@ Source: [`diagrams/token-states.mmd`](diagrams/token-states.mmd).
 | `ACTIVE` | Arrives at a converging `parallelGateway` | `JOINED` | Under the `pre_instance` row lock; the last arrival of the scope creates the post-join `ACTIVE` token (`TR-ASY-03`) |
 | `ACTIVE` | `end` step | `COMPLETED` | |
 | `COMPLETED` | Compensation of the token's steps ran | `COMPENSATED` | |
+| `ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER` | Instance cancelled, or migrated off the node | `CANCELLED` | Under the `pre_instance` row lock: open task `CANCELLED`, open job `CANCELLED`. An adapter call already running is not stopped; its TX2 finds the job `CANCELLED` and writes only `LATE_RESULT_DISCARDED` (M2, DN-10, `PRE-041`). From S1 interrupting boundary events and terminate end events use the same transition |
 
 Every token row carries `definition_id`, copied from the instance and changed with it by migration, so live counts per node read one index (section 8.2).
+
+Pending decision P2 (ADR-0020, proposed): every scope becomes a token row. M2 would create a root scope token per instance and one per `saga`, `scope_token_id` would replace the text `scope_id`, and joins and compensation would be keyed by scope token, so subprocesses, event subprocesses and multi-instance (S1) add rows instead of reshaping this table ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 5.1).
 
 ### 3.5 Task states
 
@@ -149,7 +152,7 @@ Source: [`diagrams/task-states.mmd`](diagrams/task-states.mmd).
 
 ![Async Wait-State protocol](images/async-wait-state.svg)
 
-Source: [`diagrams/async-wait-state.mmd`](diagrams/async-wait-state.mmd). The worker claims a job only when an adapter executor slot is free, so time spent queued inside the JVM never consumes the lease. The lease is the step timeout plus `jobs.lease-margin` (default 30 s), stored per row in `pre_timer.lease_duration` so a batch claim computes `locked_until` per job in SQL.
+Source: [`diagrams/async-wait-state.mmd`](diagrams/async-wait-state.mmd). TX2 requires `status = 'CLAIMED'` as well as the lease, so a job cancelled meanwhile is never completed (DN-10). The worker claims a job only when an adapter executor slot is free, so time spent queued inside the JVM never consumes the lease. The lease is the step timeout plus `jobs.lease-margin` (default 30 s), stored per row in `pre_timer.lease_duration` so a batch claim computes `locked_until` per job in SQL.
 
 ### 4.1 `agentTask` guardrail pipeline (`TR-AGT-01` to `TR-AGT-03`)
 
@@ -174,9 +177,19 @@ A completed `serviceTask` or `agentTask` with a `compensate` handler pushes `(st
 
 The canonical format is our JSON (or YAML), owned by [`api/schema/process-definition.v1.schema.json`](../api/schema/process-definition.v1.schema.json). It may carry an optional `diagram` part (node positions, edge waypoints, lanes; schema [`api/schema/definition-layout.v1.schema.json`](../api/schema/definition-layout.v1.schema.json)). On import the engine stores the `diagram` part as a layout revision and removes it from `definition_json`.
 
+Standards foundations (ADR-0017):
+
+| Rule | Milestone |
+|---|---|
+| The document as received (JSON, YAML, or from M3 BPMN XML) is stored in `source_document` with `source_format` and `source_hash`; it is never executed (DN-01, `PRE-039`) | M2 |
+| `expressionLanguage` names the language of every condition; only `urn:horus-bpm:expr:v1` before S1 (DN-02) | M2 |
+| Step ids accept the BPMN id form `^[A-Za-z_][A-Za-z0-9_.-]*$` (at most 100), so imported BPMN ids are kept; kebab-case stays the recommended style; definition keys stay kebab-case (DN-03, `PRE-042`) | M2 |
+| The v1 reader generates sequence flow ids deterministically (`<from>__<to>`, `<gateway>__b<i>`, `<gateway>__default`, `<gateway>__f<i>`); they are not part of the hash because they are derived | M2 |
+| Pending decision P3 (ADR-0018, proposed): the in-memory model is the BPMN semantic model (flow nodes and sequence flows with ids, HORUS extensions for our step types), and the M3 BPMN subset reader is built on it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 3) | M2, M3 |
+
 ### 5.2 Content hash (`TR-DEF-04`)
 
-`definition_hash` is the lowercase hex SHA-256 of the RFC 8785 (JSON Canonicalization Scheme) serialisation of the document with the `diagram` member removed. YAML is converted to JSON first. The canonicaliser is about 150 lines in `process-engine-core`, with the RFC 8785 test vectors in CI; no dependency. A pipeline computes the same hash from the file in Git, so "does production match Git" is one string comparison; the cockpit shows the hash on every version (PD-036).
+`definition_hash` is the lowercase hex SHA-256 of the RFC 8785 (JSON Canonicalization Scheme) serialisation of the document with the `diagram` member removed. It is computed in the schema version the document is stored in and never recomputed when a later schema version exists; a BPMN import produces the lowest schema version that can express the model, which keeps `PRE-034` true (DN-04). YAML is converted to JSON first. The canonicaliser is about 150 lines in `process-engine-core`, with the RFC 8785 test vectors in CI; no dependency. A pipeline computes the same hash from the file in Git, so "does production match Git" is one string comparison; the cockpit shows the hash on every version (PD-036).
 
 ### 5.3 Graph diff (PE-F-46)
 
@@ -208,7 +221,8 @@ Source: [`diagrams/bpmn-import.mmd`](diagrams/bpmn-import.mmd).
 | `intermediateThrowEvent` with `compensateEventDefinition` | `throwCompensation` | |
 | `sequenceFlow` | `next`, `branches[]` | |
 | `bpmndi:BPMNShape`, `bpmndi:BPMNEdge` | layout revision 1 | Bounds and waypoints |
-| Anything else (message, signal, error and boundary events, inclusive and event-based gateways, lanes with semantics, scripts, multi-instance markers) | rejected | `422 BPMN_UNSUPPORTED_ELEMENT` naming element, `id` and line |
+| Anything else (message, signal, error and boundary events, inclusive and event-based gateways, lanes with semantics, scripts, multi-instance markers) | rejected in M3 | `422 BPMN_UNSUPPORTED_ELEMENT` naming element, `id`, line and the stage that adds it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 6.1, `TR-STD-04`). From S1 every element is imported and displayed, and activation of a definition with an element not yet executable is `422 BPMN_NOT_EXECUTABLE` |
+| A CMMN document | rejected | `422 CMMN_UNSUPPORTED` (ADR-0017, `TR-STD-26`) |
 
 The reader uses `XMLInputFactory` with `SUPPORT_DTD=false` and `IS_SUPPORTING_EXTERNAL_ENTITIES=false`; any `DOCTYPE` is `422 BPMN_UNSAFE_XML`. Limits: 1 MB, nesting depth 32, 5,000 elements. Export writes the same subset with the `horus` namespace and BPMNDI from the latest layout (or from an automatic layout computed by the cockpit and sent with the request). Round trip: export then import of a definition gives the same `definition_hash`; CI checks this for every example definition and validates exported XML against the BPMN 2.0 XSD.
 
@@ -249,6 +263,16 @@ public interface ProcessQueryService {
 }
 ```
 
+Handler results are sealed so that BPMN error events (S1) need no SPI change after the 1.0 freeze (M2, DN-09, `PRE-040`):
+
+```java
+public sealed interface HandlerResult permits HandlerResult.Completed, HandlerResult.BusinessError, HandlerResult.Failed {
+  record Completed(Map<String, Object> output) implements HandlerResult {}
+  record BusinessError(String code, String message) implements HandlerResult {}   // M2: incident UNHANDLED_BUSINESS_ERROR; S1: error boundary or error event subprocess
+  record Failed(String errorCode, String detail, boolean retryable) implements HandlerResult {}  // technical failure: retry policy, then incident or compensation
+}
+```
+
 `ProcessEngine` (start, cancel), `TaskService` (claim, unclaim, complete, delegate, reassign, form), `IncidentService`, `MigrationService` and `StepCatalogue` complete the API. The tenant and caller come from the resolvers; no method takes a tenant parameter except the batch-only `TenantScoped` variants used by host jobs.
 
 ### 6.2 REST endpoints (`/api/bpm/processes/v1`)
@@ -259,7 +283,7 @@ public interface ProcessQueryService {
 | `POST /definitions:import-bpmn` | `processes:deploy` | Import a BPMN subset file as a `DRAFT` | `Idempotency-Key` | `422 BPMN_UNSUPPORTED_ELEMENT`, `422 BPMN_UNSAFE_XML`, `422 VALIDATION_FAILED` | M3 |
 | `GET /definitions` | `processes:read` | Keys with effective version, pending count, last change | Cursor, at most 200 | | M2 |
 | `POST /definitions/{key}/drafts` | `processes:author` | New draft from `fromVersion` or blank | `Idempotency-Key` | `403 DRAFT_AUTHORING_DISABLED` | M2 |
-| `GET /definitions/{key}/versions/{v}` | `processes:read` | Document, status, hash, approval fields; `?include=layout` adds the latest layout | `ETag` from hash and layout revision | `404 DEFINITION_NOT_FOUND` | M2 |
+| `GET /definitions/{key}/versions/{v}` | `processes:read` | Document, status, hash, approval fields; `?include=layout` adds the latest layout; `?include=source` adds `sourceFormat`, `sourceDocument` and `sourceHash` (DN-01) | `ETag` from hash and layout revision | `404 DEFINITION_NOT_FOUND` | M2 |
 | `PUT /definitions/{key}/versions/{v}` | `processes:author` | Replace draft content | `If-Match: "<lockVersion>"` | `403 DRAFT_AUTHORING_DISABLED`, `409 VERSION_CONFLICT`, `409 INVALID_STATE` | M2 |
 | `POST /definitions/{key}/versions/{v}:validate` | `processes:author` or `processes:deploy` | Validation report | None | | M2 |
 | `POST /definitions/{key}/versions/{v}:request-approval` | `processes:author` or `processes:deploy` | To `PENDING_APPROVAL` | `Idempotency-Key`, `If-Match` | `422 VALIDATION_FAILED`, `409 INVALID_STATE` | M2 |
@@ -340,7 +364,10 @@ CREATE TABLE pre_definition (
   status            TEXT        NOT NULL CHECK (status IN ('DRAFT','PENDING_APPROVAL','ACTIVE','RETIRED')),
   schema_version    INT         NOT NULL,
   definition_json   JSONB       NOT NULL,        -- canonical document without the diagram part
-  definition_hash   CHAR(64)    NOT NULL,        -- SHA-256 of the RFC 8785 form of definition_json
+  definition_hash   CHAR(64)    NOT NULL,        -- SHA-256 of the RFC 8785 form of definition_json, in its schema version (DN-04)
+  source_format     TEXT        NOT NULL CHECK (source_format IN ('JSON','YAML','BPMN_XML')),   -- M2, DN-01
+  source_document   TEXT        NOT NULL,        -- as received, at most 1 MB, never executed (TR-STD-01)
+  source_hash       CHAR(64)    NOT NULL,        -- SHA-256 of the source bytes
   node_count        INT         NOT NULL CHECK (node_count <= 500),
   source            TEXT        NOT NULL CHECK (source IN ('IMPORT','STARTUP','AUTHORED','BPMN')),
   effective_from    TIMESTAMPTZ,
@@ -411,9 +438,9 @@ CREATE TABLE pre_token (
   instance_id     VARCHAR(26) NOT NULL,
   definition_id   VARCHAR(26) NOT NULL,          -- copy of pre_instance.definition_id, updated by migration
   parent_token_id VARCHAR(26),
-  scope_id        TEXT        NOT NULL,
+  scope_id        TEXT        NOT NULL,          -- becomes scope_token_id VARCHAR(26) if P2 is accepted (ADR-0020)
   current_node_id TEXT        NOT NULL,
-  status          TEXT        NOT NULL CHECK (status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','JOINED','COMPLETED','COMPENSATED')),
+  status          TEXT        NOT NULL CHECK (status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','JOINED','COMPLETED','COMPENSATED','CANCELLED')),
   entered_at      TIMESTAMPTZ NOT NULL,          -- when the token reached current_node_id
   created_at      TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, id),
@@ -465,7 +492,7 @@ CREATE TABLE pre_timer (
   token_id        VARCHAR(26),
   job_kind        TEXT        NOT NULL CHECK (job_kind IN ('TIMER','SLA_ESCALATION','ASYNC_AGENT','ASYNC_SERVICE','COMPENSATION','DEFINITION_EFFECTIVE')),
   node_id         TEXT,
-  status          TEXT        NOT NULL CHECK (status IN ('DUE','CLAIMED','DONE','FAILED')),
+  status          TEXT        NOT NULL CHECK (status IN ('DUE','CLAIMED','DONE','FAILED','CANCELLED')),   -- CANCELLED: M2, DN-10
   next_fire_at    TIMESTAMPTZ NOT NULL,
   lease_duration  INTERVAL    NOT NULL,          -- step timeout + jobs.lease-margin, or jobs.timer-lease
   locked_by       TEXT,
@@ -508,7 +535,8 @@ CREATE TABLE pre_history (
   definition_id   VARCHAR(26) NOT NULL,
   event_type      TEXT        NOT NULL,          -- INSTANCE_STARTED, NODE_ENTERED, NODE_COMPLETED, NODE_FAILED,
                                                  -- TASK_CLAIMED, TASK_COMPLETED, INCIDENT_RAISED, INCIDENT_RESOLVED,
-                                                 -- SLA_BREACHED, COMPENSATION_STARTED, COMPENSATED, MIGRATED, INSTANCE_ENDED
+                                                 -- SLA_BREACHED, COMPENSATION_STARTED, COMPENSATED, MIGRATED, INSTANCE_ENDED,
+                                                 -- TOKEN_CANCELLED, LATE_RESULT_DISCARDED (M2, DN-10)
   node_id         TEXT,
   actor_id        TEXT,
   attempt_id      VARCHAR(26),
@@ -670,6 +698,8 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | Replica dies before the effective-date job runs | One key, until the lease expires | Lease on `pre_timer` | Another replica claims the job after `jobs.timer-lease`; the previous version stays effective until then because effective selection reads `effective_from`, not the job |
 | Concurrent layout saves | One layout | Duplicate primary key on `revision` | `409 VERSION_CONFLICT`; the cockpit reloads and shows the newer revision |
 | Malicious BPMN (entity expansion, deep nesting) | One request | Reader limits, DTD refused | `422 BPMN_UNSAFE_XML`; no transaction was opened |
+| Instance cancelled while an adapter call runs | One step | TX2 finds the job `CANCELLED` | Result discarded and recorded as `LATE_RESULT_DISCARDED` with the attempt id; the external effect, if any, is the host's to reconcile by `attemptId` (DN-10) |
+| Handler returns a business error before S1 | One step | `HandlerResult.BusinessError` | Incident `UNHANDLED_BUSINESS_ERROR` with the code; retry or resolve as any incident (DN-09) |
 | Rollup slice times out | Statistics only | `statement_timeout` | Rollback; watermark unchanged; next run repeats; metric `horus_pre_rollup_lag_seconds` alerts above 15 min |
 | Rollup partition for next month missing | Rollup inserts | Default partition receives rows | Partition job creates months 7 days ahead and moves stragglers |
 | Cockpit drafts turned off in production | Authoring endpoints | Setting | `403 DRAFT_AUTHORING_DISABLED`; imports from the pipeline still create drafts |
@@ -701,3 +731,5 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | 11.4 | Windows longer than 31 days for the heatmap need a daily rollup table | Defer to after 1.0 unless a pilot asks | Architect, M3 |
 | 11.5 | Migration plan storage (`pre_migration`) has no DDL yet | DDL before M2 execution work | Maintainers, M2 |
 | 11.6 | Which JSON library major `*-core` uses (ADR-0011) | Architecture overview section 12; gates M1 | Architect, M1 start |
+| 11.7 | P2: scope tokens in M2 (ADR-0020) | **Decision needed.** Accept; about 4 days in M2; avoids rewriting joins and compensation in S1 | Product owner, before the first M2 migration |
+| 11.8 | P3: BPMN semantic model as the in-memory model (ADR-0018) | **Decision needed.** Accept; about 5 days in M2; the M3 BPMN reader is then built on it | Product owner, M2 start |

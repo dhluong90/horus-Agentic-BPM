@@ -1,0 +1,35 @@
+stateDiagram-v2
+  direction LR
+  [*] --> ACTIVE: start, fork, boundary fires, MI child created
+  [*] --> WAITING_SCOPE: scope entered (process, subprocess, event subprocess, MI body)
+  ACTIVE --> WAITING_USER: userTask
+  ACTIVE --> WAITING_ASYNC: async step, TX1
+  ACTIVE --> WAITING_TIMER: timer catch
+  ACTIVE --> WAITING_EVENT: message, signal or conditional catch, receive task, event-based gateway (S2)
+  ACTIVE --> JOINED: parallel, inclusive or complex join, instance row locked
+  WAITING_USER --> ACTIVE: task completed
+  WAITING_ASYNC --> ACTIVE: TX2 accepts result
+  WAITING_TIMER --> ACTIVE: timer fires
+  WAITING_EVENT --> ACTIVE: correlated or triggered
+  WAITING_USER --> CANCELLED: interrupting boundary, terminate, cancel
+  WAITING_ASYNC --> CANCELLED: interrupting boundary, terminate, cancel
+  WAITING_TIMER --> CANCELLED: interrupting boundary, terminate, cancel
+  WAITING_EVENT --> CANCELLED: other branch of event-based gateway won
+  WAITING_SCOPE --> COMPLETED: last child token completed
+  WAITING_SCOPE --> CANCELLED: interrupting event subprocess or boundary on the scope
+  ACTIVE --> COMPLETED: end event
+  COMPLETED --> COMPENSATED: compensation of its activity instances ran
+  JOINED --> [*]
+  COMPLETED --> [*]
+  CANCELLED --> [*]
+  COMPENSATED --> [*]
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class ACTIVE engine
+  class WAITING_SCOPE host
+  class WAITING_USER client
+  class WAITING_ASYNC,WAITING_TIMER,WAITING_EVENT external
+  class JOINED,COMPLETED,CANCELLED,COMPENSATED obs

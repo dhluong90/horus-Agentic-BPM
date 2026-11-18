@@ -42,6 +42,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-026 | `CKP_026_heatmap_window_stats_per_node` | Testing Library | M3 (cut candidate) | `TR-PERF-10` | Planned |
 | CKP-027 | `CKP_027_migration_plan_side_by_side_diagrams` | Playwright | M3 | `TR-MIG-03` | Planned |
 | CKP-028 | `CKP_028_bundle_budget_and_lazy_diagram_chunk` | CI bundle check, Playwright throttled | M2 | `TR-UI-06` | Planned |
+| CKP-029 | `CKP_029_diagram_nodes_by_bpmn_type_unknown_rendered_generic` | Component | M2 | `TR-UI-07`, `TR-UI-08` | Planned |
 
 ## Known gaps
 | Gap | Plan |

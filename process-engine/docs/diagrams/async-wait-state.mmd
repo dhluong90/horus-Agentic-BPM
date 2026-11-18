@@ -28,7 +28,7 @@ sequenceDiagram
   end
   rect rgb(255,248,225)
     Note over W,DB: TX2, sync, fresh transaction
-    W->>DB: SELECT job WHERE locked_by A AND locked_until > now() FOR UPDATE
+    W->>DB: SELECT job WHERE locked_by A AND status CLAIMED AND locked_until > now() FOR UPDATE
     alt lease held, output valid, guardrail allow
       W->>DB: history row, advance token, job DONE, events
     else guardrail denies, route-to-human
@@ -39,6 +39,8 @@ sequenceDiagram
       W->>DB: open incident, or start compensation
     else lease expired or taken over
       W->>DB: ROLLBACK, late result discarded
+    else job CANCELLED (instance cancelled or migrated off the step)
+      W->>DB: history LATE_RESULT_DISCARDED with attemptId, nothing else
     end
     W->>DB: COMMIT
   end

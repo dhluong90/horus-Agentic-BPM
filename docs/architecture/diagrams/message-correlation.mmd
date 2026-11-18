@@ -1,0 +1,37 @@
+sequenceDiagram
+  autonumber
+  box rgba(106,27,154,0.05) Core and external
+    participant P as Partner or other host service
+  end
+  box rgba(21,101,192,0.04) Internal zone
+    participant C as Host inbound adapter (host code)
+    participant E as Process Engine MessageService
+    participant DB as PostgreSQL (pre_event_subscription, pre_idempotency)
+  end
+  P->>C: business message with messageId and correlation key
+  rect rgba(224,242,241,0.8)
+    Note over C,DB: One host transaction, no network I/O inside
+    C->>E: correlate(name, correlationKey, messageId, variables)
+    E->>DB: pre_idempotency (tenant, correlate, messageId)
+    alt messageId seen before with the same hash
+      E-->>C: stored result, no second effect
+    else new messageId
+      E->>DB: SELECT subscription by (tenant_id, kind, event_name, correlation_key)
+      alt one waiting subscription
+        E->>DB: SELECT pre_instance FOR UPDATE, delete subscription, token ACTIVE
+        E->>DB: run sync steps to the next wait state, history, events
+        E-->>C: Correlated(instanceId)
+      else definition-level message start event
+        E->>DB: insert instance, business key from the message
+        E-->>C: Started(instanceId)
+      else no subscription
+        E-->>C: NotCorrelated, nothing written except the idempotency row
+      end
+    end
+    C->>DB: COMMIT with the host's own writes
+  end
+  alt NotCorrelated
+    C-->>P: host decides: retry later, park, or reject
+  else Correlated or Started
+    C-->>P: acknowledge after commit
+  end

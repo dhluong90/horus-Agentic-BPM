@@ -1,0 +1,19 @@
+flowchart LR
+  S0["S0, M1 to M3 (before 1.0)<br/>do-now foundations<br/>source kept, canonical model, FEEL-aligned v1<br/>BPMN subset import and export, DMN table import"]
+  S1["S1, release 1.1<br/>scopes and errors<br/>subprocess, boundary timer, error, escalation<br/>event subprocess, inclusive, multi-instance<br/>full BPMN import and display, MIWG round trip<br/>DMN Level 2, all hit policies, DRD"]
+  S2["S2, release 1.2<br/>events across instances<br/>message correlation, signals, conditional<br/>event-based gateway, full compensation, transactions<br/>full FEEL, boxed expressions, BKM, decision services"]
+  S3["S3, release 1.3<br/>completeness<br/>complex gateway, ad-hoc subprocess, multiple events<br/>conformance suite 100 percent<br/>DMN TCK Level 3, imports, DMNDI"]
+  F["FEEL engine core<br/>parser, types, S-FEEL (S1)"]
+  ET["Execution tree with scope tokens<br/>(M2 if accepted)"]
+  SUB["pre_event_subscription<br/>(S2)"]
+  S0 --> S1 --> S2 --> S3
+  ET --> S1
+  F --> S1
+  F -->|"full FEEL"| S2
+  SUB --> S2
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class S0 obs
+  class S1,S2,S3 engine
+  class F,ET,SUB host

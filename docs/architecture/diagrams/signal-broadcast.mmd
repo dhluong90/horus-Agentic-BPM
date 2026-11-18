@@ -1,0 +1,29 @@
+sequenceDiagram
+  autonumber
+  box rgba(21,101,192,0.04) Internal zone
+    participant H as Host code or a signal throw event
+    participant E as Process Engine
+    participant DB as PostgreSQL (pre_signal, pre_event_subscription, pre_timer)
+    participant W as Poller, any replica
+  end
+  rect rgba(224,242,241,0.8)
+    Note over H,DB: TX0: record the signal, no fan-out in this transaction
+    H->>E: broadcast(name, variables, signalId)
+    E->>DB: insert pre_signal (thrown_at = now()), job SIGNAL_DELIVERY DUE
+    E->>DB: COMMIT with the caller's writes
+  end
+  loop until no subscription with id greater than the cursor
+    rect rgba(224,242,241,0.8)
+      Note over W,DB: TXn: one batch of at most 100 subscriptions
+      W->>DB: claim SIGNAL_DELIVERY with SKIP LOCKED and lease
+      W->>DB: subscriptions of the signal name with created_at <= thrown_at and id > cursor, LIMIT 100
+      loop each subscription, its instance locked in turn
+        W->>DB: SELECT pre_instance FOR UPDATE, deliver, history SIGNAL_RECEIVED
+      end
+      W->>DB: job payload cursor = last id, COMMIT
+    end
+  end
+  alt one instance fails in a batch
+    W->>DB: incident on that instance, cursor still advances
+  end
+  W->>DB: job DONE, processes.signal.delivered.v1 with the count

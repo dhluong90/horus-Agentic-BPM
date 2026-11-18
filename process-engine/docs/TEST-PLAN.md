@@ -54,6 +54,10 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-036 | `PRE_036_list_queries_pass_query_plan_check` | Query-plan check on a seeded database | M2 | `TR-PERF-07` | Planned |
 | PRE-037 | `PRE_037_definition_events_published_in_transaction` | Integration, rollback | M2 | `TR-OBS-04`, `TR-OBS-06` | Planned |
 | PRE-038 | `PRE_038_tenant_header_accepted_only_within_allowed_tenants` | WebMvc, log capture | M2 | `TR-SEC-03`, `TR-TEN-01` | Planned |
+| PRE-039 | `PRE_039_import_keeps_source_document_and_fixed_hash` | Integration, WebMvc | M2 | `TR-STD-01`, `TR-STD-03` | Planned |
+| PRE-040 | `PRE_040_business_error_result_opens_incident` | Integration | M2 | `TR-OPS-03`, `TR-IDEM-04` | Planned |
+| PRE-041 | `PRE_041_cancel_during_adapter_call_discards_late_result` | Testcontainers fault injection, 2-connection pool | M2 | `TR-ASY-01`, `TR-ASY-02`, `TR-STD-12` | Planned |
+| PRE-042 | `PRE_042_bpmn_style_step_ids_kept` | Unit, integration | M2 | `TR-STD-03`, `TR-DEF-01` | Planned |
 
 ## Known gaps
 | Gap | Plan |

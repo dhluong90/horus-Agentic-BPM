@@ -63,6 +63,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** `R1` evaluates to `false` (does not match); `R2` matches (`matchedRuleIds = ["R2"]`).
 - **Example:** `income = null -> R1 false, R2 true`.
 - **Test ID:** `RLE_006_null_comparisons_are_false_unless_is_null`
+- **Pending decision P1 (ADR-0019, proposed):** if FEEL three-valued null logic is accepted for M1, this statement keeps its Given, When and Then, and adds two cases: `tier != 'GOLD'` with `tier = null` matches (FEEL: `null != "GOLD"` is `true`), and `not (income < 5000000 VND)` with `income = null` does not match (FEEL: `not(null)` is `null`). See [`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 4.3.
 
 ### RLE-007 Regex execution is bounded by length and timeout
 - **Traces to:** `TR-SEC-02`
@@ -192,3 +193,34 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** `meta` returns `schemaVersion: 1`, `modules: [{ module: rules, apiVersion: v1, engineVersion: 0.1.3, features: [...] }]` and no process entry; `me` returns user `lan`, `tenant.current: bank-a`, `tenant.allowed: [bank-a]` and exactly the two permissions; the request without a token returns `401`. Both responses validate against `cockpit/api/schema/bpm-meta.v1.schema.json` and `bpm-me.v1.schema.json`.
 - **Example:** `GET /api/bpm/me -> {user: lan, tenant: {current: bank-a}, permissions: [rules:read, rules:author]}`.
 - **Test ID:** `RLE_019_meta_and_me_describe_host_and_caller`
+
+---
+
+## Standards Foundations (ADR-0017)
+
+### RLE-020 Import keeps the source document beside the canonical version
+- **Traces to:** `TR-STD-01`, `TR-STD-03`
+- **Milestone:** M1
+- **Given:** The YAML file `card-fee.yaml` (1,834 bytes, with comments and keys in author order) in Git, and its RFC 8785 hash computed by the pipeline.
+- **When:** It is imported with `POST /api/bpm/rules/v1/rule-sets`, then read with `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1?include=source` and without the parameter.
+- **Then:** `rle_version` stores `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` the SHA-256 of those bytes, and `canonical_hash` equal to the pipeline's hash; with `include=source` the response carries the original text including comments and its hash; without it, the canonical document only. Nothing in the source document is evaluated.
+- **Example:** `import card-fee.yaml -> source_format YAML, source bytes equal, canonical_hash = pipeline hash`.
+- **Test ID:** `RLE_020_import_keeps_source_document_and_canonical_hash`
+
+### RLE-021 Every expression has a FEEL translation that gives the same result
+- **Traces to:** `TR-STD-02`, `TR-DET-01`
+- **Milestone:** M1 (proposed with ADR-0019; the null cases depend on decision P1)
+- **Given:** jqwik generators for well-typed `horus-expr-v1` expressions over `string`, `integer`, `decimal`, `boolean`, `date`, `datetime` and lists, with inputs including `null`, and the translation table of `standards-compliance.md` section 4.4. The reference FEEL implementation runs in test scope only.
+- **When:** Each expression is evaluated by the engine and its FEEL translation by the reference implementation with the same inputs and clock; 1,000 tries per property in CI, 100,000 nightly. Fixed cases: `7 / 2`, `round(2.5, 0)`, `matches('ab12', '[0-9]+')`, `daysBetween(date('2027-01-01'), date('2027-03-01'))`.
+- **Then:** Results are equal for every try (money expressions excluded, since money is a HORUS extension); the fixed cases give `3.5`, `2`, `true` and `59`.
+- **Example:** `matches('ab12', '[0-9]+') -> true` (unanchored search, as FEEL).
+- **Test ID:** `RLE_021_v1_expressions_match_their_feel_translation`
+
+### RLE-022 `today()` uses the rule set's time zone
+- **Traces to:** `TR-DET-01`, `TR-DET-05`
+- **Milestone:** M1
+- **Given:** Rule set `same-day-cutoff` v1 with `timeZone: Asia/Ho_Chi_Minh` and rule `R1` (`txDate == today() -> sameDay: true`); a second version v2 without `timeZone` (default `UTC`).
+- **When:** Both are evaluated with `txDate = date('2027-01-16')` and clock `2027-01-15T18:30:00Z` (01:30 on 16 January in Ho Chi Minh City).
+- **Then:** v1 matches `R1` (`today()` is 2027-01-16 in the rule set's zone); v2 does not match (`today()` is 2027-01-15 in UTC); replaying either decision with its logged version and clock gives the same result.
+- **Example:** `clock 2027-01-15T18:30Z, zone Asia/Ho_Chi_Minh -> today() = 2027-01-16`.
+- **Test ID:** `RLE_022_today_uses_rule_set_time_zone`

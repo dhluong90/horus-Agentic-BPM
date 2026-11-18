@@ -10,17 +10,17 @@
     "schemaVersion": { "const": 1 },
     "direction": { "description": "Main flow direction used by automatic layout for unlisted nodes.", "enum": ["LR", "TB"], "default": "LR" },
     "nodes": {
-      "description": "Keyed by step id.",
+      "description": "Keyed by step id (the BPMN-style id form of process-definition.v1 $defs/nodeId).",
       "type": "object",
       "maxProperties": 500,
-      "propertyNames": { "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 100 },
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$", "maxLength": 100 },
       "additionalProperties": { "$ref": "#/$defs/box" }
     },
     "edges": {
-      "description": "Optional waypoints, keyed by '<from>-><to>'.",
+      "description": "Optional waypoints, keyed by '<from>-><to>'. Step ids use the BPMN-style id form. Layouts for models with two sequence flows between the same pair of nodes are keyed by flow id in a later schema version (standards-compliance.md section 3.4).",
       "type": "object",
       "maxProperties": 2000,
-      "propertyNames": { "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*->[a-z][a-z0-9]*(-[a-z0-9]+)*$" },
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*->[A-Za-z_][A-Za-z0-9_.-]*$", "maxLength": 202 },
       "additionalProperties": {
         "type": "array",
         "maxItems": 50,

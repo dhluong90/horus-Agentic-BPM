@@ -17,6 +17,11 @@
     },
     "name": { "type": "string", "maxLength": 200 },
     "description": { "type": "string", "maxLength": 2000 },
+    "expressionLanguage": {
+      "description": "Language of every expression in this document (gateway conditions). Only urn:horus-bpm:expr:v1 is accepted in schema version 1; FEEL arrives with a later schema version (ADR-0017, ADR-0019). Stored with the version.",
+      "enum": ["urn:horus-bpm:expr:v1"],
+      "default": "urn:horus-bpm:expr:v1"
+    },
     "variables": {
       "description": "Optional declaration of instance variables and their types, used for deploy-time checks of ${instance.x} references.",
       "type": "object",
@@ -36,6 +41,12 @@
   "$defs": {
     "identifier": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "maxLength": 64 },
     "kebabId": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 100 },
+    "nodeId": {
+      "description": "Step id. Any BPMN-style id (an XML ID without a colon: a letter or underscore, then letters, digits, underscore, dot or hyphen), so ids of imported BPMN models are kept as they are (ADR-0017). Kebab-case is the recommended style for hand-written definitions.",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+      "maxLength": 100
+    },
     "valueType": {
       "type": "string",
       "pattern": "^(string|integer|decimal|boolean|date|datetime|money|object|list<(string|integer|decimal|boolean|date|datetime|money|object)>)$"
@@ -73,7 +84,7 @@
     },
     "next": {
       "description": "Id of the following step. Defaults to the next step in the list.",
-      "$ref": "#/$defs/kebabId"
+      "$ref": "#/$defs/nodeId"
     },
     "retry": {
       "description": "max is the number of retries after the first attempt, so max 2 gives 3 attempts in total. backoff is the delay before each retry.",
@@ -100,7 +111,7 @@
       "type": "object",
       "required": ["id", "type"],
       "properties": {
-        "id": { "$ref": "#/$defs/kebabId" },
+        "id": { "$ref": "#/$defs/nodeId" },
         "type": { "type": "string" },
         "name": { "type": "string" },
         "description": { "type": "string" }
@@ -254,11 +265,11 @@
             "additionalProperties": false,
             "properties": {
               "when": { "type": "string", "minLength": 1 },
-              "next": { "$ref": "#/$defs/kebabId" }
+              "next": { "$ref": "#/$defs/nodeId" }
             }
           }
         },
-        "default": { "description": "Step taken when no branch matches.", "$ref": "#/$defs/kebabId" }
+        "default": { "description": "Step taken when no branch matches.", "$ref": "#/$defs/nodeId" }
       }
     },
     "parallelGatewayStep": {
@@ -268,8 +279,8 @@
         "next": {
           "description": "A list forks one token per entry. A single id, or none, after a join.",
           "anyOf": [
-            { "$ref": "#/$defs/kebabId" },
-            { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/kebabId" } }
+            { "$ref": "#/$defs/nodeId" },
+            { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/nodeId" } }
           ]
         }
       }

@@ -289,3 +289,17 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The initial chunk is at most 500 KB gzipped; React Flow and dagre are in a separate chunk not requested until a diagram opens; the first screen is usable within 2 s.
 - **Example:** `initial 270 KB gz; diagram chunk requested only on first diagram`.
 - **Test ID:** `CKP_028_bundle_budget_and_lazy_diagram_chunk`
+
+---
+
+## Standards Foundations (ADR-0017)
+
+### CKP-029 Diagram nodes are keyed by BPMN element type; unknown types render as generic nodes
+- **Traces to:** `TR-UI-07`, `TR-UI-08`
+- **Milestone:** M2
+- **Given:** Host `loans` serves a definition with steps `start`, `userTask`, `agentTask` and `end`; host `cards` (a newer engine) serves a definition containing a node of BPMN type `boundaryEvent:timer` and reports `standards: { bpmnStage: S1 }` in `/api/bpm/meta`.
+- **When:** The operator opens both definition diagrams in the same cockpit build.
+- **Then:** `loans` renders node types `startEvent`, `userTask`, `serviceTask:agentTask` and `endEvent`; on `cards` the boundary node renders as a labelled generic node showing `boundaryEvent:timer` with no error and the rest of the diagram intact; the stage reported by each host is shown in the host details.
+- **Example:** `unknown boundaryEvent:timer -> generic node with its type name, diagram rendered`.
+- **Test ID:** `CKP_029_diagram_nodes_by_bpmn_type_unknown_rendered_generic`
+

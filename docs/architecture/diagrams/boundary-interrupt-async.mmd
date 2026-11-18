@@ -1,0 +1,46 @@
+sequenceDiagram
+  autonumber
+  box rgba(21,101,192,0.04) Internal zone
+    participant WA as Worker, replica A
+    participant WB as Poller, replica B
+    participant DB as PostgreSQL (pre_instance, pre_token, pre_timer)
+    participant AD as Host adapter
+  end
+  box rgba(106,27,154,0.05) Core and external
+    participant X as External service
+  end
+  rect rgba(224,242,241,0.8)
+    Note over WA,DB: TX1: enter agentTask with an interrupting boundary timer PT10M
+    WA->>DB: token WAITING_ASYNC, activity_instance_id=AI1
+    WA->>DB: job ASYNC_AGENT CLAIMED, lease = timeout + margin
+    WA->>DB: job BOUNDARY_TIMER DUE at now()+10 min, activity_instance_id=AI1
+    WA->>DB: COMMIT
+  end
+  rect rgba(243,229,245,0.7)
+    Note over WA,X: Outside any transaction
+    WA->>AD: execute(attemptId=T1)
+    AD->>X: call, slow
+  end
+  rect rgba(224,242,241,0.8)
+    Note over WB,DB: TX-B: boundary timer fires first
+    WB->>DB: claim BOUNDARY_TIMER with SKIP LOCKED
+    WB->>DB: SELECT pre_instance FOR UPDATE
+    WB->>DB: async job status CANCELLED, token CANCELLED
+    WB->>DB: new ACTIVE token on the boundary flow, history BOUNDARY_FIRED
+    WB->>DB: COMMIT
+  end
+  X-->>AD: result arrives late
+  AD-->>WA: result for T1
+  rect rgba(224,242,241,0.8)
+    Note over WA,DB: TX2: lease and status check
+    WA->>DB: SELECT job WHERE locked_by=A AND status='CLAIMED' FOR UPDATE
+    alt job CANCELLED by the boundary
+      WA->>DB: history LATE_RESULT_DISCARDED with attemptId T1
+      opt step declares a compensate handler
+        WA->>DB: incident LATE_RESULT_AFTER_INTERRUPT for an operator decision
+      end
+      WA->>DB: COMMIT
+    else job still CLAIMED (adapter won the race)
+      WA->>DB: advance token, delete boundary timer job of AI1, COMMIT
+    end
+  end

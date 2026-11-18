@@ -1,6 +1,6 @@
 # ADR-0005: Cockpit as static assets served by the host or standalone
 
-- Status: accepted
+- Status: accepted. Amended by ADR-0014 (multi-host cockpit federation)
 - Date: 2026-11-18
 - Deciders: maintainers
 - Module: cockpit

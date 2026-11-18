@@ -1,6 +1,6 @@
 # ADR-0010: Engine contract conventions
 
-- Status: accepted
+- Status: accepted. Amended by ADR-0012 (process permissions)
 - Date: 2026-11-18
 - Deciders: maintainers
 - Module: project
