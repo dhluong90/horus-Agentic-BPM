@@ -6,8 +6,10 @@
 #   1. No secrets in the layers: no .env, private key or keystore file in any layer or inside any jar
 #      (one level of nested jars too), except the exact paths in ALLOWED below; no secret-like variable
 #      in the image config; and none of the values of HORUS_DB_ADMIN_PASSWORD, HORUS_DB_PASSWORD and
-#      HORUS_DEMO_PASSWORD (from the environment or ./.env) anywhere in the saved image, including the
-#      unpacked contents of every jar. Files a later layer deletes are still checked.
+#      HORUS_DEMO_PASSWORD anywhere in the saved image, including the unpacked contents of every jar.
+#      Files a later layer deletes are still checked. Each value comes from the environment, else from
+#      its secret file in ./secrets (deploy/create-secrets.sh; HORUS_SECRETS_DIR overrides the folder),
+#      else from ./.env when that file exists (deployments made before the secret files).
 #   2. Vulnerabilities: Grype scans the image (operating system packages and the Java libraries) with
 #      the repository's .grype.yaml and fails on a high or critical finding.
 #
@@ -36,9 +38,10 @@ ALLOWED=(
   "opt/java/openjdk/lib/security/cacerts"  # the JRE's public CA certificates, no private key
 )
 
-env_value() {
-  local name="$1"
+secret_value() { # secret_value NAME FILE: the environment, else the secret file, else ./.env if present
+  local name="$1" file="${HORUS_SECRETS_DIR:-$ROOT/secrets}/$2"
   if [[ -n "${!name:-}" ]]; then printf '%s' "${!name}"; return; fi
+  if [[ -f "$file" ]]; then cat "$file"; return; fi
   if [[ -f "$ROOT/.env" ]]; then sed -n "s/^${name}=//p" "$ROOT/.env" | tail -n 1; fi
 }
 
@@ -107,15 +110,18 @@ if docker image inspect "$IMAGE" --format '{{json .Config.Env}}' | grep -i -E '(
   echo "FAIL  secret-like variable in the image config" >&2
   failed=1
 fi
-for name in HORUS_DB_ADMIN_PASSWORD HORUS_DB_PASSWORD HORUS_DEMO_PASSWORD; do
-  value="$(env_value "$name")"
+checked=0
+for pair in HORUS_DB_ADMIN_PASSWORD:db_admin_password HORUS_DB_PASSWORD:db_password HORUS_DEMO_PASSWORD:demo_password; do
+  name="${pair%%:*}"
+  value="$(secret_value "$name" "${pair#*:}")"
   [[ -z "$value" ]] && continue
+  checked=$((checked + 1))
   if grep -a -q -F -- "$value" "$contents"; then
     echo "FAIL  the value of $name is inside the image" >&2
     failed=1
   fi
 done
-(( failed == 0 )) && echo "PASS  no secrets in the image layers, jars or config ($(wc -l < "$listing" | tr -d ' ') files and jar entries checked, $jars jars unpacked)"
+(( failed == 0 )) && echo "PASS  no secrets in the image layers, jars or config ($(wc -l < "$listing" | tr -d ' ') files and jar entries checked, $jars jars unpacked, $checked password values searched)"
 if [[ "${SCAN_SECRETS_ONLY:-}" == 1 ]]; then exit "$failed"; fi
 
 # 2. Vulnerabilities

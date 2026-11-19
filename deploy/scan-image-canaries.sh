@@ -8,7 +8,10 @@
 #   2. a random value inside a deflated entry of a jar planted in /app/BOOT-INF/lib must fail the gate,
 #      with the value passed as HORUS_DEMO_PASSWORD; the script first checks that the value is not
 #      readable in the raw jar bytes, which is what a scan without unpacking would see;
-#   3. IMAGE itself, with the same value, must pass.
+#   3. the same jar image must fail again when the value comes only from a secret file, as
+#      deploy/create-secrets.sh writes it (HORUS_SECRETS_DIR points at a throwaway folder; nothing in
+#      the environment), so the value scan reads secrets/ and not just the environment;
+#   4. IMAGE itself, with the same value, must pass.
 # Needs:   docker, zip, unzip, openssl.
 # Exit:    0 all three behaved as expected, 1 otherwise.
 
@@ -65,7 +68,17 @@ rc="$(gate "$TAG:jar" "$WORK/jar.log")"
   || { cat "$WORK/jar.log"; fail "canary 2: a value inside a jar in BOOT-INF/lib passed the gate (exit $rc)"; }
 pass "canary 2: a value inside a deflated jar entry in BOOT-INF/lib fails the gate (not visible in the raw bytes)"
 
-# 3. The image itself
+# 3. The same value, read from a secret file only
+mkdir -p "$WORK/secrets"
+printf '%s' "$value" > "$WORK/secrets/demo_password"
+rc=0
+env -u HORUS_DEMO_PASSWORD -u HORUS_DB_PASSWORD -u HORUS_DB_ADMIN_PASSWORD HORUS_SECRETS_DIR="$WORK/secrets" \
+  SCAN_SECRETS_ONLY=1 "$ROOT/deploy/scan-image.sh" "$TAG:jar" > "$WORK/secret-file.log" 2>&1 || rc=$?
+[[ "$rc" == 1 ]] && grep -q -F 'the value of HORUS_DEMO_PASSWORD is inside the image' "$WORK/secret-file.log" \
+  || { cat "$WORK/secret-file.log"; fail "canary 3: a value read from secrets/demo_password was not found in the jar (exit $rc)"; }
+pass "canary 3: the same value read from a secret file (secrets/demo_password) fails the gate"
+
+# 4. The image itself
 rc="$(gate "$IMAGE" "$WORK/clean.log")"
 [[ "$rc" == 0 ]] || { cat "$WORK/clean.log"; fail "the image $IMAGE fails the secrets gate (exit $rc)"; }
 pass "the image $IMAGE passes: $(grep -F 'PASS' "$WORK/clean.log")"
