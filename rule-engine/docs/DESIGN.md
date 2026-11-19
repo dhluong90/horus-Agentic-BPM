@@ -155,7 +155,7 @@ This section is the single statement of how money is represented; the Process En
 
 ### 3.5 Expression language SPI and value mapping (M1, DN-05)
 
-The parser and evaluator are reached through one interface in `io.github.dhluong90.bpm.rules.api.expr`, so a second language (FEEL, ADR-0019) registers beside the first and the Process Engine never depends on parser classes:
+The parser and evaluator are reached through one interface, in `io.github.dhluong90.bpm.expr.api` of the `bpm-expression` library that both engines depend on (ADR-0027), so a second language (FEEL, ADR-0019) registers beside the first and the Process Engine never depends on parser classes:
 
 ```java
 public interface ExpressionLanguage {

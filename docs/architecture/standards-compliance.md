@@ -182,7 +182,7 @@ Both dialects parse into the same `Expr` tree. Export to DMN writes FEEL text fr
 | User functions | FEEL function definitions and BKMs are pure closures over immutable frames; recursion depth at most 64 |
 | External functions | `external` Java and PMML functions are refused at import (`422 DMN_EXTERNAL_FUNCTION_UNSUPPORTED`); host functions registered through `RuleFunctionRegistry` are callable by name and must be pure |
 | Errors | FEEL defines many errors as `null`. Per decision model `errorMode`: `spec` (FEEL semantics, the error recorded as a warning in the decision trace, outcome `OK_WITH_WARNINGS`) or `strict` (today's `EVALUATION_ERROR`). Default `strict` for v1 rule sets and `spec` for imported DMN models; the TCK runs in `spec`. Guardrails fail closed in both modes (Decision needed P9) |
-| SPI | `ExpressionLanguage` (language id, `compile(source, TypeEnvironment)`, `CompiledExpression.evaluate(EvaluationContext)`) in `rule-engine-core` `api`. The Process Engine uses only this interface for gateway conditions, timer expressions, input and output mappings and script tasks |
+| SPI | `ExpressionLanguage` (language id, `compile(source, TypeEnvironment)`, `CompiledExpression.evaluate(EvaluationContext)`) in the `bpm-expression` library (ADR-0027), which also holds the HORUS FEEL engine. The Process Engine uses only this interface for gateway conditions, timer expressions, input and output mappings and script tasks |
 
 ### 4.6 Expression language ids
 

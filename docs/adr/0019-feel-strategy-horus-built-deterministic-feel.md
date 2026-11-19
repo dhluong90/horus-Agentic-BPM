@@ -1,6 +1,6 @@
 # ADR-0019: A HORUS-built, deterministic FEEL; our expression language as a semantic subset of FEEL
 
-- Status: accepted, 2026-11-19
+- Status: accepted, 2026-11-19; decision 1's module placement amended by ADR-0027 (`bpm-expression`)
 - Date: 2026-11-18 (proposed), 2026-11-19 (accepted)
 - Deciders: maintainers; accepted by the product owner (PD-061 option 1; FEEL null semantics PD-058 option 1)
 - Module: rule-engine, process-engine
