@@ -140,6 +140,7 @@ public final class DefaultVersionService implements VersionService {
         }
         String sourceText = utf8(source);
         ParsedRuleSet parsed = checkedDocument(format, source);
+        requireMaskDeclarations(tenant, parsed.canonicalJson());
         String name = parsed.model().name();
         Instant now = context.clock().instant();
         String ruleSetId;
@@ -163,7 +164,7 @@ public final class DefaultVersionService implements VersionService {
         store.insertVersion(version);
         history(version, LifecycleAction.CREATED, null, actor, null, now);
         event(tenant, EVENT_CREATED, version, actor, now);
-        return version.toView(false);
+        return view(version, false);
     }
 
     @Override
@@ -195,6 +196,7 @@ public final class DefaultVersionService implements VersionService {
             checkLock(current, opts);
             String sourceText = utf8(source);
             ParsedRuleSet parsed = checkedDocument(request.format(), source);
+            requireMaskDeclarations(tenant, parsed.canonicalJson());
             if (!ruleSet.equals(parsed.model().name())) {
                 throw new InputInvalidException("Document names rule set '" + parsed.model().name() + "', not '"
                         + ruleSet + "'");
@@ -212,7 +214,7 @@ public final class DefaultVersionService implements VersionService {
                     .put("updatedBy", actor)
                     .put("canonicalHash", updated.canonicalHash())
                     .put("previousCanonicalHash", current.canonicalHash()));
-            return updated.toView(false);
+            return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
 
@@ -227,7 +229,8 @@ public final class DefaultVersionService implements VersionService {
         return context.withoutDooming(() -> {
             StoredVersion compared = existing(tenant, ruleSet, version);
             StoredVersion against = existing(tenant, ruleSet, base);
-            return VersionDiffs.diff(compared, against);
+            return VersionDiffs.diff(compared, against, context.masking().maskByDefault(tenant),
+                    context.masking().personalDataNames(tenant));
         });
     }
 
@@ -251,6 +254,8 @@ public final class DefaultVersionService implements VersionService {
                 throw new InvalidStateException(ruleSet, version, current.status(), "request-publish");
             }
             checkLock(current, opts);
+            // A draft imported before strict mode was turned on is checked again before anyone can approve it.
+            requireMaskDeclarations(tenant, current.canonicalJson());
             Instant now = context.clock().instant();
             StoredVersion updated = current.requested(actor, now);
             store.updateVersion(updated, current.lockVersion());
@@ -261,7 +266,7 @@ public final class DefaultVersionService implements VersionService {
                 payload.put("requestedBy", actor);
                 payload.set("effectiveFrom", EngineValues.value(updated.effectiveFrom()));
             });
-            return updated.toView(false);
+            return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
 
@@ -295,7 +300,7 @@ public final class DefaultVersionService implements VersionService {
                 payload.put("requestedBy", updated.requestedBy());
                 payload.put("approvedBy", actor);
             });
-            return updated.toView(false);
+            return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
 
@@ -326,7 +331,7 @@ public final class DefaultVersionService implements VersionService {
             event(tenant, EVENT_REJECTED, updated, actor, now, payload -> payload
                     .put("rejectedBy", actor)
                     .put("reason", reason));
-            return updated.toView(false);
+            return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
 
@@ -437,7 +442,7 @@ public final class DefaultVersionService implements VersionService {
             return Optional.empty();
         }
         return context.withoutDooming(() ->
-                store.findVersion(tenant, ruleSet, version, false).map(v -> v.toView(includeSource)));
+                store.findVersion(tenant, ruleSet, version, false).map(v -> view(v, includeSource)));
     }
 
     @Override
@@ -464,6 +469,24 @@ public final class DefaultVersionService implements VersionService {
     private static void requireRuleSetName(String ruleSet) {
         if (!RuleSetReader.isRuleSetName(ruleSet)) {
             throw new RuleSetNotFoundException("(invalid name)");
+        }
+    }
+
+    /**
+     * The caller's view of a version, with the warnings its author and approver should see (RLE-049): every undeclared
+     * input whose name looks like personal data under the tenant's list. Computed from the stored definition and the
+     * tenant's settings on each read, so the approver sees what the author saw at import.
+     */
+    private RuleSetVersion view(StoredVersion version, boolean includeSource) {
+        String tenant = version.tenantId();
+        return version.toView(includeSource).withWarnings(MaskDeclarations.warnings(version.canonicalJson(),
+                context.masking().personalDataNames(tenant), context.masking().maskByDefault(tenant)));
+    }
+
+    /** Strict mode (RLE-050): every input declares {@code mask}, or the command is refused before anything is stored. */
+    private void requireMaskDeclarations(String tenant, String canonicalJson) {
+        if (context.masking().requireExplicitMask(tenant)) {
+            MaskDeclarations.requireDeclared(canonicalJson);
         }
     }
 

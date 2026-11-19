@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.api;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -23,6 +24,8 @@ import java.util.Objects;
  * @param approvedAt when it was approved, or null
  * @param createdBy who imported the version, or null when not recorded
  * @param createdAt when the version was created
+ * @param warnings what the author and the approver should see before publication, such as an undeclared input that
+ *     looks like personal data (RLE-049); empty when none, never null
  */
 public record RuleSetVersion(
         String ruleSet,
@@ -41,7 +44,8 @@ public record RuleSetVersion(
         String approvedBy,
         Instant approvedAt,
         String createdBy,
-        Instant createdAt) {
+        Instant createdAt,
+        List<VersionWarning> warnings) {
 
     public RuleSetVersion {
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
@@ -52,6 +56,49 @@ public record RuleSetVersion(
         Objects.requireNonNull(sourceFormat, "sourceFormat must not be null");
         Objects.requireNonNull(sourceHash, "sourceHash must not be null");
         Objects.requireNonNull(createdAt, "createdAt must not be null");
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
+    }
+
+    /**
+     * Creates a version without warnings.
+     *
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param status see the record
+     * @param hitPolicy see the record
+     * @param effectiveFrom see the record
+     * @param lockVersion see the record
+     * @param canonicalDocument see the record
+     * @param canonicalHash see the record
+     * @param sourceFormat see the record
+     * @param sourceHash see the record
+     * @param sourceDocument see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param approvedBy see the record
+     * @param approvedAt see the record
+     * @param createdBy see the record
+     * @param createdAt see the record
+     */
+    public RuleSetVersion(String ruleSet, int version, VersionStatus status, String hitPolicy, Instant effectiveFrom,
+            long lockVersion, String canonicalDocument, String canonicalHash, SourceFormat sourceFormat,
+            String sourceHash, String sourceDocument, String requestedBy, Instant requestedAt, String approvedBy,
+            Instant approvedAt, String createdBy, Instant createdAt) {
+        this(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument, canonicalHash,
+                sourceFormat, sourceHash, sourceDocument, requestedBy, requestedAt, approvedBy, approvedAt, createdBy,
+                createdAt, List.of());
+    }
+
+    /**
+     * Returns a copy with these warnings.
+     *
+     * @param newWarnings the warnings
+     * @return the version
+     */
+    public RuleSetVersion withWarnings(List<VersionWarning> newWarnings) {
+        return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument,
+                canonicalHash, sourceFormat, sourceHash, sourceDocument, requestedBy, requestedAt, approvedBy,
+                approvedAt, createdBy, createdAt, newWarnings);
     }
 
     /**
@@ -62,6 +109,6 @@ public record RuleSetVersion(
     public RuleSetVersion withoutSource() {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument,
                 canonicalHash, sourceFormat, sourceHash, null, requestedBy, requestedAt, approvedBy, approvedAt,
-                createdBy, createdAt);
+                createdBy, createdAt, warnings);
     }
 }

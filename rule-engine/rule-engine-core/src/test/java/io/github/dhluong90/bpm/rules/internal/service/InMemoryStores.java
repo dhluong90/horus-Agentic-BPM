@@ -227,6 +227,18 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     final Map<String, byte[]> engineKeys = new ConcurrentHashMap<>();
+    /** Setting name to tenant to value, as {@code rle_setting_seen}. */
+    final Map<String, Map<String, String>> settingsSeen = new ConcurrentHashMap<>();
+
+    @Override
+    public Map<String, String> settingsSeen(String setting) {
+        return Map.copyOf(settingsSeen.getOrDefault(setting, Map.of()));
+    }
+
+    @Override
+    public void recordSettingSeen(String tenantId, String setting, String value, Instant at) {
+        settingsSeen.computeIfAbsent(setting, ignored -> new ConcurrentHashMap<>()).put(tenantId, value);
+    }
 
     @Override
     public byte[] engineKey(String name, byte[] candidate, Instant now) {

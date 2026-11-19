@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.rules.api.Money;
 import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.SourceFormat;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
+import io.github.dhluong90.bpm.rules.api.VersionWarning;
 import io.github.dhluong90.bpm.rules.internal.model.InputClause;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -257,6 +258,14 @@ public final class EngineValues {
         node.set("createdBy", value(version.createdBy()));
         node.put("createdAt", version.createdAt().toString());
         node.set("definition", read(version.canonicalDocument()));
+        ArrayNode warnings = node.putArray("warnings");
+        for (VersionWarning warning : version.warnings()) {
+            ObjectNode item = warnings.addObject();
+            item.put("code", warning.code());
+            item.put("input", warning.input());
+            item.set("matchedName", value(warning.matchedName()));
+            item.put("message", warning.message());
+        }
         return node;
     }
 
@@ -285,7 +294,20 @@ public final class EngineValues {
                 text(node.get("approvedBy")),
                 instant(node.get("approvedAt")),
                 text(node.get("createdBy")),
-                Instant.parse(node.get("createdAt").stringValue()));
+                Instant.parse(node.get("createdAt").stringValue()),
+                warnings(node.get("warnings")));
+    }
+
+    /** The warnings of a stored version result; absent in results recorded before warnings existed. */
+    private static List<VersionWarning> warnings(JsonNode warnings) {
+        List<VersionWarning> result = new ArrayList<>();
+        if (warnings != null) {
+            for (JsonNode w : warnings) {
+                result.add(new VersionWarning(w.get("code").stringValue(), w.get("input").stringValue(),
+                        text(w.get("matchedName")), w.get("message").stringValue()));
+            }
+        }
+        return result;
     }
 
     /**
