@@ -2514,6 +2514,8 @@ Committed: the release does not ship without these.
 | New issue: Docker Compose example | The example host and PostgreSQL start with one command from a fresh clone | X-F-14 (deployable part) |
 | New issue: release review and GitHub Release | The go or no-go review and the GitHub Release with artifacts, checksums, bill of materials and release notes | X-F-09, X-F-19 |
 
+**Added to the committed scope, 2026-11-19 (product manager, delegated, on the product owner's feedback).** The product owner found the cockpit empty, with no menu, and the sign-in page unattractive. The release review is visual, so the cockpit navigation shell, a non-empty Home and a branded sign-in page for the example host are committed for the Fri 20 Nov review (#180). The shell follows the approved prototype (PD-056): Home, Rules, Approvals, Decisions, and Processes labelled Preview; Home shows pending approvals, recent rule sets and recent decisions (PD-078). Sign-in stays the host's page; the cockpit library has no login of its own.
+
 Pulled in by PD-084: in the release only if each meets the same readiness bar at the Fri 20 Nov review; otherwise cut in the order below.
 
 | Issue | What ships | Feature map |
