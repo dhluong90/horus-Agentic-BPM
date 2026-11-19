@@ -9,7 +9,7 @@
     dependency management, and this one must pin engine modules only, never the host's Spring Boot,
     Flyway or driver versions.
   -->
-  <groupId>com.horus.bpm</groupId>
+  <groupId>io.github.dhluong90.bpm</groupId>
   <artifactId>bpm-bom</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
@@ -41,32 +41,32 @@
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <groupId>com.horus.bpm</groupId>
+        <groupId>io.github.dhluong90.bpm</groupId>
         <artifactId>bpm-host-metadata</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>com.horus.bpm</groupId>
+        <groupId>io.github.dhluong90.bpm</groupId>
         <artifactId>rule-engine-core</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>com.horus.bpm</groupId>
+        <groupId>io.github.dhluong90.bpm</groupId>
         <artifactId>rule-engine-postgres</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>com.horus.bpm</groupId>
+        <groupId>io.github.dhluong90.bpm</groupId>
         <artifactId>rule-engine-rest</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>com.horus.bpm</groupId>
+        <groupId>io.github.dhluong90.bpm</groupId>
         <artifactId>rule-engine-spring-boot-starter</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>com.horus.bpm</groupId>
+        <groupId>io.github.dhluong90.bpm</groupId>
         <artifactId>cockpit-spring-boot-starter</artifactId>
         <version>${project.version}</version>
       </dependency>
