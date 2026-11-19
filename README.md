@@ -6,7 +6,9 @@ Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockp
 
 ![System context](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/system-context.svg)
 
-> Status: design preview. The wiki describes the 0.1 target and is reviewed before the code is written. No artifact is published yet.
+> Status: pre-alpha. The build skeleton and the Rule Engine schema exist; engine features are being added. The wiki describes the 0.1 target. No artifact is published yet.
+
+Requirements: Java 21 or later, PostgreSQL 14 or later, and Spring Boot 4.x now; 3.5.x support lands with the compatibility matrix ([#9](https://github.com/dhluong90/horus-Agentic-BPM/issues/9), [ADR-0011](docs/adr/0011-spring-boot-4-baseline.md)).
 
 ## What it looks like
 
@@ -67,6 +69,14 @@ The engines are libraries, not servers. State lives in your PostgreSQL under the
 ## Out of scope
 
 Full BPMN 2.0 or DMN FEEL compliance, CMMN, a distributed job executor, a standalone server mode. See [FAQ](../../wiki/FAQ).
+
+## Build from source
+
+```bash
+mvn -B verify
+```
+
+Needs JDK 21 or later and a running Docker for the Testcontainers tests. To run the example host, see [`examples/rule-engine-only/`](examples/rule-engine-only/README.md).
 
 ## Contributing
 

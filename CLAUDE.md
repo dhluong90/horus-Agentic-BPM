@@ -1,6 +1,6 @@
 # HORUS Agentic BPM
 
-Lightweight, embeddable **Process Engine** and **Rule Engine** for Java 21 / Spring Boot 3.4+, PostgreSQL 14+, and an embeddable React Operations Cockpit, where **humans, services, and AI agents are first-class process participants**.
+Lightweight, embeddable **Process Engine** and **Rule Engine** for Java 21 (Java 25 tested) / Spring Boot 4.x (ADR-0011; 3.5.x support lands with the compatibility matrix, #9), PostgreSQL 14+, and an embeddable React Operations Cockpit, where **humans, services, and AI agents are first-class process participants**.
 
 Source-available under **PolyForm Noncommercial License 1.0.0**; commercial use under `COMMERCIAL-LICENSE.md`.
 
@@ -10,7 +10,7 @@ Read these before doing product, design, or implementation work:
 - `wiki/Technical-Requirements.md` — numbered `TR-*` release gates (`Must` vs `Should`)
 - `wiki/Technical-Stack.md` — approved stack (`JdbcClient`, Flyway, Jackson, recursive-descent expression parser, ULID)
 - `wiki/Roadmap.md` — outcome-driven milestones (`M0`–`M3`) and Red-Team kill assumptions
-- `docs/adr/` — Architecture Decision Records (`ADR-0001` through `ADR-0007`)
+- `docs/adr/` — Architecture Decision Records (`ADR-0001` onwards; `ADR-0011` sets the Spring Boot 4.x baseline)
 - `process-engine/docs/`, `rule-engine/docs/`, `cockpit/docs/` — per-module `SPEC.md`, `DESIGN.md`, `TEST-PLAN.md`
 
 ## Non-negotiables (Architectural & Product Guardrails)
@@ -25,6 +25,11 @@ Read these before doing product, design, or implementation work:
 6. **Tenant & Maker-Checker enforcement at the service layer.** `tenant_id` comes only from the configured resolver (never request body); publication requester cannot approve their own version across Java or REST APIs.
 7. **Supply-chain & Spec-to-Test traceability.** Permissive third-party licences only (Apache 2.0, MIT, BSD); every `SPEC.md` statement has a named test (`TR-QA-01`).
 
+
+## Build
+- `mvn -B verify` from the repository root builds every module and runs unit, ArchUnit and Testcontainers tests (needs JDK 21 or later and Docker). CI runs the same command (`.github/workflows/ci.yml`).
+- Layout: `pom.xml` (parent, Spring Boot BOM import), `bpm-bom/` (pins engine modules for hosts, no parent), `rule-engine/rule-engine-{core,postgres,spring-boot-starter}`, `examples/rule-engine-only/`. Java packages `com.horus.bpm.rules.*`; groupId `com.horus.bpm` (set once in the parent, rule-engine DESIGN open question 7.2).
+- Test names start with the id they prove, upper case, hyphens as underscores: `RLE_013_...` for a `SPEC.md` statement, `TR_EMB_01_...` for a requirement. This is the prefix the spec-to-test gate (TR-QA-01) matches; tests that prove no id carry no prefix. See `rule-engine/docs/TEST-PLAN.md`.
 
 ## Conventions
 - Branches: `feat/<module>/<slug>`, `fix/...`, `docs/...`, `chore/...`. Keep `main` buildable.

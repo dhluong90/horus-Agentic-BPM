@@ -2,6 +2,8 @@
 
 Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose name starts with the statement's test id (`TR-QA-01`). A CI script lists the statement ids in `SPEC.md` and fails when a test with that id prefix is missing for a statement whose milestone has been reached.
 
+**Naming rule.** A test name starts with the id it proves, in upper case with hyphens written as underscores: `RLE_013_...` for a `SPEC.md` statement, `TR_EMB_01_...` for a requirement in [`requirements.md`](../../docs/product/requirements.md). The spec-to-test gate matches this prefix. A test that proves no id (a helper check, a value-type check) carries no id prefix, so it never counts as coverage.
+
 ## Strategy
 | Layer | Tool | Scope | Gate |
 |---|---|---|---|
@@ -37,6 +39,19 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-020 | `RLE_020_import_keeps_source_document_and_canonical_hash` | Integration, WebMvc | M1 | `TR-STD-01`, `TR-STD-03` | Planned |
 | RLE-021 | `RLE_021_v1_expressions_match_their_feel_translation` | Property, differential against a reference FEEL in test scope | M1 (proposed with ADR-0019) | `TR-STD-02`, `TR-DET-01` | Planned |
 | RLE-022 | `RLE_022_today_uses_rule_set_time_zone` | Unit, replay | M1 | `TR-DET-01`, `TR-DET-05` | Planned |
+
+## Requirement-level tests
+Tests that prove a platform requirement directly, before any `SPEC.md` statement covers it. "Partial" means the test proves a precondition or part of the requirement; the named statement completes it.
+
+| Requirement | Tests | Level | Coverage |
+|---|---|---|---|
+| `TR-EMB-01` | `RuleEngineOnlyHostIT.TR_EMB_01_host_boots_healthy_on_clean_database_and_rle_tables_are_usable`, `RuleEngineSchemaMigratorIT.TR_EMB_01_clean_database_gets_every_rle_table` | Testcontainers, example host | Full for the skeleton |
+| `TR-EMB-03` | `CoreArchitectureTest.TR_EMB_03_core_has_no_framework_or_sql_imports`, plus the Maven Enforcer `bannedDependencies` rule in `rule-engine-core/pom.xml` | ArchUnit, build | Full |
+| `TR-EMB-04` | `RuleEngineOnlyHostIT.TR_EMB_04_engine_uses_host_datasource_and_transaction_manager_and_no_pool_of_its_own`, `RuleEngineAutoConfigurationTest.TR_EMB_04_*`, `PostgresArchitectureTest.TR_EMB_04_*` | Bean graph, context runner, ArchUnit | **Partial.** These prove the precondition (one host `DataSource`, the transaction manager that manages it, no engine pool). The requirement's verification is the rollback test `RLE_013_transactional_decision_log_rolls_back_with_host`, which arrives with the decision log writer |
+| `TR-EMB-05` | `CoreArchitectureTest.TR_EMB_05_core_has_no_network_or_file_io`, `PostgresArchitectureTest.TR_EMB_05_postgres_module_has_no_http_client` | ArchUnit | Full for the modules that exist |
+| `TR-EMB-06` | `RuleEngineOnlyHostIT.TR_EMB_06_*`, `HostRestartIT.TR_EMB_06_*`, `RuleEngineSchemaMigratorIT.TR_EMB_06_*` | Testcontainers, example host | Full |
+| `TR-OPS-04` | `RuleEngineSchemaMigratorIT.TR_OPS_04_*`, `RuleEngineOnlyHostIT.TR_OPS_04_*`, `RuleEngineAutoConfigurationTest.TR_OPS_04_*` | Testcontainers with fixed instants, context runner | **Partial.** Start-up creation of the current and next UTC month, UTC boundaries and the move of rows out of the default partition. Scheduled creation up to `partitions-ahead`, retention by drop and the default-rows gauge are `RLE-017` |
+| `TR-SEC-01` | `CoreArchitectureTest.TR_SEC_01_core_has_no_scripting_reflection_class_loading_or_deserialisation` | ArchUnit | Partial: the boundary rule. The parser and evaluator tests of `RLE-004` and `RLE-007` complete it |
 
 ## Known gaps
 | Gap | Plan |

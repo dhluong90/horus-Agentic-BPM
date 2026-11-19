@@ -20,7 +20,7 @@ Wait for a maintainer to label the issue `status:accepted` before you write code
 |---|---|
 | One pull request per issue | Branch `feat/<module>/<issue>-<slug>`, for example `feat/rule-engine/12-collect-hit-policy` |
 | Conventional Commits | `feat(rule-engine): add collect hit policy (#12)`; scope is the module name |
-| Tests named by specification id | Every statement in the module `SPEC.md` has a test named by its id, for example `RLE_003_collect_hit_policy_aggregates_matched_rules` (TR-QA-01) |
+| Tests named by specification id | Every statement in the module `SPEC.md` has a test whose name starts with its id in upper case with underscores, for example `RLE_003_collect_hit_policy_aggregates_matched_rules` (TR-QA-01). Tests that prove a requirement use the same form, for example `TR_EMB_01_host_boots_healthy_on_clean_database_and_rle_tables_are_usable`. A test that proves no id carries no id prefix |
 | No code execution paths in definitions | Pull requests that add reflection, scripting engines or I/O to the expression language or to definitions are declined ([[Principles]] 4) |
 | Permissive dependencies only | Apache 2.0, MIT or BSD; the build fails on anything else (TR-LIC-01) |
 | Documentation in the same pull request | Any change to a REST path, configuration key, error code, metric name or architectural invariant updates the wiki page that owns it and the module docs in the same pull request (TR-QA-02) |
