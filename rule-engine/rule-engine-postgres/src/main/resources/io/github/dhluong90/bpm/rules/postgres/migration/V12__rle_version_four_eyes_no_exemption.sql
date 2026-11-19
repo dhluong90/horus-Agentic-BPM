@@ -22,8 +22,11 @@ SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE rle_version DROP CONSTRAINT rle_version_four_eyes;
 
--- NOT VALID then VALIDATE: adding the constraint checks new writes only and takes its lock briefly; the scan of
--- existing rows runs under SHARE UPDATE EXCLUSIVE and does not block writers.
+-- Locking: Flyway runs this script in one transaction, so the ACCESS EXCLUSIVE lock taken by DROP CONSTRAINT is
+-- held until commit, through the VALIDATE scan; NOT VALID then VALIDATE does not spare writers here. That is
+-- acceptable because rle_version is small (one row per rule set version) and lock_timeout is 5 s, so the
+-- migration fails fast instead of queueing behind a host lock. Do not copy this pattern onto a large table: there,
+-- run the VALIDATE in a separate transaction (its own migration) so the scan holds only SHARE UPDATE EXCLUSIVE.
 ALTER TABLE rle_version ADD CONSTRAINT rle_version_four_eyes CHECK (
   approved_by IS NULL
   OR (approved_by IS DISTINCT FROM requested_by AND approved_by IS DISTINCT FROM created_by)
