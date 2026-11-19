@@ -3,23 +3,24 @@ flowchart LR
     direction TB
     M0X["Cross-cutting 3<br/>3 specified"]
   end
-  subgraph M1 ["M1: 52"]
+  subgraph M1 ["M1: 56"]
     direction TB
-    M1R["Rule Engine 30<br/>16 specified, 14 spec gap"]
-    M1C["Cockpit 10<br/>7 specified, 3 spec gap"]
-    M1X["Cross-cutting 12<br/>7 specified, 5 spec gap"]
+    M1R["Rule Engine 31<br/>17 specified, 14 spec gap"]
+    M1C["Cockpit 12<br/>7 specified, 5 spec gap"]
+    M1X["Cross-cutting 13<br/>7 specified, 6 spec gap"]
   end
-  subgraph M2 ["M2: 60"]
+  subgraph M2 ["M2: 65"]
     direction TB
-    M2P["Process Engine 43<br/>21 specified, 21 spec gap, 1 preview"]
-    M2C["Cockpit 14<br/>4 specified, 10 spec gap"]
+    M2R["Rule Engine 2<br/>2 spec gap"]
+    M2P["Process Engine 44<br/>21 specified, 22 spec gap, 1 preview"]
+    M2C["Cockpit 16<br/>4 specified, 12 spec gap"]
     M2X["Cross-cutting 3<br/>1 specified, 2 spec gap"]
   end
   subgraph M3 ["M3: 31"]
     direction TB
     M3R["Rule Engine 6<br/>1 specified, 5 spec gap"]
-    M3P["Process Engine 12<br/>11 spec gap, 1 preview"]
-    M3C["Cockpit 8<br/>1 specified, 7 spec gap"]
+    M3P["Process Engine 11<br/>10 spec gap, 1 preview"]
+    M3C["Cockpit 9<br/>1 specified, 8 spec gap"]
     M3X["Cross-cutting 5<br/>1 specified, 4 spec gap"]
   end
   subgraph ST ["Standards track 1.1 to 1.3: 18, all design preview"]
@@ -29,16 +30,12 @@ flowchart LR
     S3["1.3 (S3): 2<br/>Rule Engine 1, Process Engine 1"]
     S1 --> S2 --> S3
   end
-  subgraph LT ["After 1.0: 9"]
+  subgraph LT ["After 1.0: 11"]
     direction TB
-    LTA["Rule Engine 3, Process Engine 1,<br/>Cockpit 3, Cross-cutting 2<br/>all design preview"]
+    LTA["Rule Engine 4, Process Engine 2,<br/>Cockpit 3, Cross-cutting 2<br/>all design preview"]
   end
   M0 --> M1 --> M2 --> M3 --> ST
   M3 --> LT
-  P43["Pending PD-043, not counted: 7 spec gaps<br/>3 in M1, 3 in M2, 1 in M3"]
-  P58["Pending PD-058 to PD-060, not counted: 3<br/>RE-F-41, PE-F-58, X-F-28"]
-  P43 -.-> M1
-  P58 -.-> M1
 
   classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
   classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
@@ -46,11 +43,11 @@ flowchart LR
   classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
   classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
   classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
-  class M1R,M2P,M3P,M3R engine;
+  class M1R,M2R,M2P,M3P,M3R engine;
   class M1C,M2C,M3C client;
   class M0X,M1X,M2X,M3X host;
   class S1,S2,S3 external;
-  class LTA,P43,P58 obs;
+  class LTA obs;
   style M0 fill:none,stroke:#1565C0,stroke-dasharray:5 5
   style M1 fill:none,stroke:#1565C0,stroke-dasharray:5 5
   style M2 fill:none,stroke:#1565C0,stroke-dasharray:5 5

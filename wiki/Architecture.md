@@ -38,7 +38,7 @@ Non-goals, fixed by ADR: no standalone server (ADR-0004), no engine-owned databa
 
 | Artifact | Role | Allowed dependencies | Verified by |
 |---|---|---|---|
-| `*-core` | Model, parser and compiler, evaluator, token runtime, lifecycle, storage and log ports | Java 21, Jackson; Process Engine core also sees the `RuleEngine` interface | ArchUnit: no `org.springframework..`, `java.sql..`, `java.net..`, `javax.script..`, `java.lang.reflect.Method` (`TR-EMB-03`, `TR-SEC-01`) |
+| `*-core` | Model, parser and compiler, evaluator, token runtime, lifecycle, storage and log ports | Java 21, Jackson 3 inside the engine only (ADR-0021); Process Engine core also sees the `RuleEngine` interface | ArchUnit: no `org.springframework..`, `java.sql..`, `java.net..`, `javax.script..`, `java.lang.reflect.Method` (`TR-EMB-03`, `TR-SEC-01`) |
 | `*-postgres` | Storage adapters on `JdbcClient`, Flyway migrations, `SKIP LOCKED` poller, `LISTEN/NOTIFY` listener | `*-core`, Spring JDBC, Flyway | ArchUnit: no HTTP clients (`TR-EMB-05`) |
 | `*-rest` | Controllers, RFC 9457 problem responses, OpenAPI 3.1 document | `*-core`, Spring WebMvc | WebMvc contract tests |
 | `*-spring-boot-starter` | `@AutoConfiguration`, host `DataSource` binding, isolated Flyway run, `TenantResolver`, Micrometer | `*-core`, `*-postgres`, optional `*-rest` | Starter boot test on a clean database (`TR-EMB-01`) |
@@ -54,7 +54,7 @@ Dependency direction is inward to `*-core`. The Rule Engine never depends on the
 
 | Engine | Aggregates | Value objects and records |
 |---|---|---|
-| Rule Engine | `RuleSet` (per tenant), `RuleSetVersion` (immutable once published), `Decision` (append-only) | `Money(currency, minorUnits, scale)`, `TenantId`, `DecisionInput`, `DecisionResult`, `Expr` (sealed AST), `CompiledRuleSet` |
+| Rule Engine | `RuleSet` (per tenant), `RuleSetVersion` (immutable once published), `Decision` (append-only) | `Money(currency, minorUnits)`, `TenantId`, `DecisionInput`, `DecisionResult`, `Expr` (sealed AST), `CompiledRuleSet` |
 | Process Engine | `ProcessDefinition` (versioned), `ProcessInstance`, `ExecutionToken`, `Task`, `Job` (timer or async step), `Incident` | `BusinessKey`, `IdempotencyKey`, `AttemptId`, `Lease(lockedBy, lockedUntil)`, `CompensationEntry` |
 
 Money is never a floating-point number: `{ "currency": "VND", "amount": 60000000 }` in JSON, `BIGINT` minor units plus an ISO code in SQL. Identifiers are ULIDs.
@@ -93,7 +93,7 @@ Positions in a process are rows in `pre_token`, not a column on the instance, be
 | token `WAITING_ASYNC` | failure, attempts remaining | `attempt < retry.max` | token `WAITING_ASYNC`; job `DUE` at `now + backoff` | none |
 | token `WAITING_ASYNC` or `ACTIVE` | failure, attempts exhausted, `onFailure: incident` | | token paused; `pre_incident OPEN`; instance stays `RUNNING` | `processes.incident.raised.v1` |
 | any paused token | `incident:retry` or `:resolve` | `lock_version` matches | token `ACTIVE` (retry) or as resolved | `processes.incident.resolved.v1` |
-| token `ACTIVE` | reaches a `parallelGateway` join | `pre_instance` row locked `FOR UPDATE`; all sibling tokens in the scope `JOINED` | one new `ACTIVE` token; siblings `COMPLETED` | none |
+| token `ACTIVE` | reaches a `parallelGateway` join | `pre_instance` row locked `FOR UPDATE`; all sibling tokens under the same scope token `JOINED` | one new `ACTIVE` token; siblings `COMPLETED` | none |
 | token `ACTIVE` | reaches `timer` | Timer row `DUE` | token `WAITING_TIMER` | none |
 | `RUNNING` | failure with `onFailure: compensate`, or `throwCompensation` | | `COMPENSATING`; compensation stack walked LIFO | `processes.compensation.started.v1` |
 | `COMPENSATING` | all handlers done, or the manual-compensation incident resolved | | `FAILED` (terminal, compensated) | `processes.instance.failed.v1` |

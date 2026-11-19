@@ -22,7 +22,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-003 | `RLE_003_collect_hit_policy_aggregates_matched_rules` | Unit | M1 | `TR-DET-01` | Planned |
 | RLE-004 | `RLE_004_publish_rejects_unparsable_or_ill_typed_expressions` | Unit, property | M1 | `TR-DET-02`, `TR-SEC-01` | Planned |
 | RLE-005 | `RLE_005_money_currency_mismatch_is_rejected` | Unit | M1 | `TR-DET-03` | Planned |
-| RLE-006 | `RLE_006_null_comparisons_are_false_unless_is_null` | Unit | M1 | `TR-DET-01` | Planned |
+| RLE-006 | `RLE_006_null_follows_feel_three_valued_logic` | Unit, replay | M1 | `TR-DET-01`, `TR-STD-02` | Planned |
 | RLE-007 | `RLE_007_regex_timeout_aborts_adversarial_input` | Unit, adversarial | M1 | `TR-SEC-02` | Planned |
 | RLE-008 | `RLE_008_explicit_clock_resolves_effective_version_and_replays` | Unit, replay | M1 | `TR-DET-01`, `TR-DET-05` | Planned |
 | RLE-009 | `RLE_009_maker_checker_blocks_self_approval` | Service, WebMvc | M1 | `TR-SEC-04` | Planned |
@@ -37,8 +37,10 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-018 | `RLE_018_tenant_header_accepted_only_within_allowed_tenants` | WebMvc, log capture | M2 | `TR-SEC-03`, `TR-TEN-01` | Planned |
 | RLE-019 | `RLE_019_meta_and_me_describe_host_and_caller` | WebMvc, JSON Schema contract | M1 | `TR-UI-08`, `TR-SEC-08` | Planned |
 | RLE-020 | `RLE_020_import_keeps_source_document_and_canonical_hash` | Integration, WebMvc | M1 | `TR-STD-01`, `TR-STD-03` | Planned |
-| RLE-021 | `RLE_021_v1_expressions_match_their_feel_translation` | Property, differential against a reference FEEL in test scope | M1 (proposed with ADR-0019) | `TR-STD-02`, `TR-DET-01` | Planned |
+| RLE-021 | `RLE_021_v1_expressions_match_their_feel_translation` | Property, differential against a reference FEEL in test scope | M1 | `TR-STD-02`, `TR-DET-01` | Planned |
 | RLE-022 | `RLE_022_today_uses_rule_set_time_zone` | Unit, replay | M1 | `TR-DET-01`, `TR-DET-05` | Planned |
+| RLE-023 | `RLE_023_engine_json_ignores_host_jackson_settings` | WebMvc in the Spring Boot 4.x and 3.5 legs, dependency-tree check | M1 | `TR-EMB-07`, `TR-API-06` | Planned |
+| RLE-024 | `RLE_024_v1_rule_set_round_trips_through_dmn_model` | Unit over every example rule set, RFC 8785 vectors | M1 | `TR-STD-28`, `TR-STD-03` | Planned |
 
 ## Requirement-level tests
 Tests that prove a platform requirement directly, before any `SPEC.md` statement covers it. "Partial" means the test proves a precondition or part of the requirement; the named statement completes it.
@@ -56,5 +58,5 @@ Tests that prove a platform requirement directly, before any `SPEC.md` statement
 ## Known gaps
 | Gap | Plan |
 |---|---|
-| The Jackson major for `*-core` is undecided (DESIGN open question 7.1) | Decide at M1 start; the contract suite then runs on both Spring Boot lines |
+| Jackson 3 inside the core is conditional on the Spring Boot 3.5 coexistence test (ADR-0021) | `RLE-023` runs in the first parsing pull request of Sprint 1; if it fails, option 3 of ADR-0021 returns before that pull request merges; the contract suite runs on both Spring Boot lines |
 | The licence scope for JUnit, jqwik and JMH is pending PD-053 | Tests are written now; the CI licence check is configured after the decision |

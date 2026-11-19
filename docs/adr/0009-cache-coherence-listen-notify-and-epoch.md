@@ -1,8 +1,8 @@
 # ADR-0009: Compiled-version caches stay coherent through LISTEN/NOTIFY with a version-epoch bound
 
-- Status: proposed
-- Date: 2026-11-18
-- Deciders: maintainers
+- Status: accepted, 2026-11-19
+- Date: 2026-11-18 (proposed), 2026-11-19 (accepted)
+- Deciders: maintainers; accepted by the product owner (PD-030)
 - Module: project
 
 ## Context
@@ -23,4 +23,6 @@ Process definitions need no invalidation channel. A deployed definition version 
 ## Consequences
 Hosts behind transaction-mode poolers set `cache.listen-notify=false` and accept the 5 s bound. The sweep cost grows with tenants x replicas / interval; above about 1 000 reads/s the interval is raised or the sweep is limited to recently evaluated tenants. Decisions always log the version they used, so a stale window is auditable. Verified by `TR-ASY-04`, `TR-PERF-06` and `RLE-010`.
 
-Aligned on 2026-11-18 with `rule-engine/docs/DESIGN.md` (event types, `cache_epoch` on approve and retire) and `process-engine/docs/DESIGN.md` (no definition epoch). Status stays proposed until the maintainers accept it.
+## History
+- 2026-11-18: proposed by the maintainers; aligned the same day with `rule-engine/docs/DESIGN.md` (event types, `cache_epoch` on approve and retire) and `process-engine/docs/DESIGN.md` (no definition epoch).
+- 2026-11-19: accepted by the product owner without change (PD-030).

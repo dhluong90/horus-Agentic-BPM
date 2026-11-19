@@ -1,7 +1,7 @@
 stateDiagram-v2
   direction LR
   [*] --> ACTIVE: start, fork, boundary fires, MI child created
-  [*] --> WAITING_SCOPE: scope entered (process, subprocess, event subprocess, MI body)
+  [*] --> WAITING_SCOPE: scope entered (process and saga from M2; subprocess, event subprocess, MI body from S1)
   ACTIVE --> WAITING_USER: userTask
   ACTIVE --> WAITING_ASYNC: async step, TX1
   ACTIVE --> WAITING_TIMER: timer catch

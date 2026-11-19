@@ -44,7 +44,7 @@ class CardFeeRulesTest {
 
   @Test
   void gold_with_high_balance_is_waived(RuleSetUnderTest rules) {
-    var r = rules.evaluate(Map.of("tier", "GOLD", "balance", Money.of("VND", 60_000_000), "txCount", 3));
+    var r = rules.evaluate(Map.of("tier", "GOLD", "balance", Money.ofMinor("VND", 60_000_000), "txCount", 3));
     assertThat(r.matchedRuleIds()).containsExactly("R2");
     assertThat(r.output("waived", Boolean.class)).isTrue();
   }

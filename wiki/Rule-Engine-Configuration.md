@@ -13,12 +13,11 @@ Reference for every `horus.bpm.rules.*` property of the Rule Engine starter and 
 
 ## Properties
 
-All names are under `horus.bpm.rules.`.
+All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway history `rle_schema_history`) and have no property.
 
 | Property | Default | Status | Meaning |
 |---|---|---|---|
 | `enabled` | `true` | Built | Register the engine beans. The engine needs exactly one `DataSource` in the host (or one marked `@Primary`); without it the starter stays inactive and logs a warning |
-| `schema-prefix` | `rle_` | Pending PD-072 | Table prefix in the host database. The Flyway history table is `<prefix>schema_history`, separate from the host's. The first build fixes the prefix at `rle_` and the history table at `rle_schema_history` |
 | `migrate-on-start` | `true` | Built | Run the engine's Flyway migrations at start-up with the host `DataSource`; `false` for hosts that run migrations in a separate job |
 | `definitions` | unset | 0.1 (M1) | Resource pattern of YAML rule sets to load as drafts at start-up |
 | `definitions-tenant` | `default` | 0.1 (M1) | Tenant that owns rule sets loaded from `definitions`. A document may override it with a top-level `tenant:` field; multi-tenant hosts load per-tenant files or use the import endpoint |
@@ -44,13 +43,14 @@ All names are under `horus.bpm.rules.`.
 | `maker-checker.enabled` | `true` | 0.1 (M1) | `false` is refused unless the `dev` profile is active |
 | `tenancy.resolver` | `security-context` | 0.1 (M1) | `security-context`, `header:X-Tenant-Id` (behind a gateway only), or the name of a `TenantResolver` bean |
 | `events.decision-evaluated` | `false` | 0.1 (M1) | Publish `rules.decision.evaluated.v1` for every decision |
-| `clock` | system | 0.1 (M1) | Fixed instant for tests, for example `2026-12-01T00:00:00Z`. The first build reads the host `Clock` bean instead; see [Host beans](#host-beans-the-starter-picks-up) |
 | `scheduler.enabled` | `true` | 0.1 (M1) | Run the engine's scheduler thread (outbox relay, partition creation, partition drop, idempotency cleanup) on this replica |
 | `security.role-permissions` | empty | 0.1 (M1) | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities) |
 
-Properties with a prefix of `tenancy`, `masking`, `rest.cors` and `clock` are shared with the Process Engine starter under `horus.bpm.processes.*`; when both engines run in one host, set them once under `horus.bpm.*`.
+Properties with a prefix of `tenancy`, `masking` and `rest.cors` are shared with the Process Engine starter under `horus.bpm.processes.*`; when both engines run in one host, set them once under `horus.bpm.*`.
 
 There is no property to turn decision log partitioning on or off. `rle_decision` is partitioned by month in every install (ADR-0010).
+
+There is no `clock` property either. The engine's time comes from the host's `Clock` bean (see [Host beans](#host-beans-the-starter-picks-up)), and a single decision can reason about another instant through the request's `clock` field, which needs `rules:simulate` over REST. To fix time in tests, declare a fixed `Clock` bean, for example `Clock.fixed(Instant.parse("2026-12-01T00:00:00Z"), ZoneOffset.UTC)`.
 
 ### What the first build reads
 
@@ -96,9 +96,9 @@ The `ruleEngine` health contributor also reports whether next month's partition 
 | `CallerResolver` | Principal name | Audit needs a different identity |
 | `RuleFunctionRegistry` | Built-in pure functions | Host registers extra pure functions, listed in the cockpit |
 | `RuleEventPublisher` | Spring `ApplicationEventPublisher` | Events go to an outbox or a bus |
-| `Clock` | System UTC | Tests and replays. The first build uses it for partition creation and the health check; it never registers a `Clock` bean of its own |
+| `Clock` | System UTC | Tests and replays. The engine's only source of time: the default for `DecisionRequest.clock`, partition creation and the health check. The engine uses the host's bean when there is exactly one and never registers a `Clock` bean of its own |
 
-All are `@ConditionalOnMissingBean`; the starter never component-scans the host. In the first build only `Clock` is read; the others arrive with 0.1.
+The engine's default `TenantResolver`, `CallerResolver`, `RuleFunctionRegistry` and `RuleEventPublisher` beans are `@ConditionalOnMissingBean`, so a host bean replaces them. `Clock` is read from the host and has no engine bean. The starter never component-scans the host. In the first build only `Clock` is read; the others arrive with 0.1.
 
 ## Permissions
 

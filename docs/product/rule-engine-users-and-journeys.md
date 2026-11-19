@@ -4,7 +4,7 @@
 |---|---|
 | Type | Explanation and reference |
 | Owner area | Product |
-| Last reviewed | 2026-11-18 |
+| Last reviewed | 2026-11-19 |
 
 Design preview: nothing is released. This page answers three questions about the Rule Engine: who uses it, what each of them can do and in which milestone, and how the work passes from one person to the next. Feature scope and status are owned by the [feature map](feature-map.md), dates by the [roadmap](roadmap.md), and reasons by the [decision log](decisions.md). The module requirements are in [prd-rule-engine.md](prd-rule-engine.md) and [prd-cockpit.md](prd-cockpit.md).
 
@@ -13,9 +13,9 @@ Design preview: nothing is released. This page answers three questions about the
 | Question | Answer |
 |---|---|
 | Who is the user? | Eight roles in a bank or fintech: two business authors (pricing manager, credit risk analyst), a business analyst who works in YAML and Git, an approver from compliance, support staff who explain decisions, an internal auditor, the developer of the host service and the platform administrator. Table: [Users](#users) |
-| How do they interact with it? | Business users through the cockpit and, if PD-043 is accepted, a spreadsheet they export and import; the business analyst through YAML in Git; support staff mostly through the bank's own case screen, which calls the engine's REST API; developers through the Java API, REST and JUnit; administrators through configuration and monitoring. Table: [Surfaces](#surfaces) |
-| How many use cases? | 69 catalogued for a real bank. Under today's plan 37 work in M1, 5 more in M2, 10 more in M3, 13 later and 4 never. With PD-043 as recommended: 43 in M1, 6 in M2, 11 in M3, 5 later, 4 never. Table: [Counts](#counts) |
-| Is there a user-friendly UI for business users? | Not in M1 today: Cockpit 0.1 imports YAML or JSON, and the grid editor arrives in Cockpit 0.2 (M2). [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml) (pending) recommends a spreadsheet round-trip with plain conditions in M1 and a grid with templates in M2, and defines "user-friendly" as seven testable criteria |
+| How do they interact with it? | Business users through the cockpit and a spreadsheet they export and import (PD-043); the business analyst through YAML in Git; support staff mostly through the bank's own case screen, which calls the engine's REST API; developers through the Java API, REST and JUnit; administrators through configuration and monitoring. Table: [Surfaces](#surfaces) |
+| How many use cases? | 69 catalogued for a real bank. Under the plan (PD-043 and PD-012 decided 2026-11-19): 43 in M1, 6 in M2, 11 in M3, 6 later, 3 never. Before PD-043 it was 37, 5, 10, 13 and 4. Table: [Counts](#counts) |
+| Is there a user-friendly UI for business users? | Yes, in two steps: in M1 a spreadsheet round-trip with plain conditions and plain errors; in M2 a grid with templates. "User-friendly" is seven testable criteria ([PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml), decided 2026-11-19) |
 
 ## Users
 
@@ -37,11 +37,11 @@ Permissions are the `<module>:<action>` set of [PD-003](decisions.md#pd-003-perm
 | Surface | Milestone | Who uses it | What it does |
 |---|---|---|---|
 | Cockpit: Rule sets | M1 | All except support | List rule sets, effective version, pending requests; read a version; import and export YAML or JSON |
-| Cockpit: spreadsheet round-trip | M1 if PD-043 | Pricing manager, risk analyst, business analyst | Export rows as CSV, edit in Excel, import as a draft with plain-language errors (CK-F-35) |
+| Cockpit: spreadsheet round-trip | M1 | Pricing manager, risk analyst, business analyst | Export rows as CSV, edit in Excel, import as a draft with plain-language errors (CK-F-35) |
 | Cockpit: Simulation | M1; replay M3 | Authors, approvers, auditors | Run sample inputs on a draft or a pinned version; nothing is logged |
 | Cockpit: Approvals and Diff | M1 | Compliance officer | Row diff, approve, reject with a comment; Approve disabled for the requester |
 | Cockpit: Decisions | M1 | Risk analyst, support, auditor | Filter, open one decision, matched row and explanation, masked inputs |
-| Cockpit: grid editor | M2 | Pricing manager, risk analyst | Typed cells, validation, templates and a "new rule set" flow (CK-F-36 if PD-043) |
+| Cockpit: grid editor | M2 | Pricing manager, risk analyst | Typed cells, validation, templates and a "new rule set" flow (CK-F-36) |
 | Git and YAML | M1 | Business analyst, developer | Rule sets as files, reviewed in pull requests, imported as drafts |
 | Java API | M1 | Developer | `evaluate` in the host transaction, JUnit extension |
 | REST `/api/bpm/rules/v1` | M1 | Developer; the bank's own screens and ticket tools | Every engine action, with idempotency keys and Problem Details errors |
@@ -57,18 +57,18 @@ Permissions are the `<module>:<action>` set of [PD-003](decisions.md#pd-003-perm
 | Pricing manager or risk analyst | Compliance officer | A version in `PENDING_APPROVAL` with an effective date | The approver does not know it is waiting: the host must route the `publish-requested` event to email or chat, since the cockpit cannot push (K9) |
 | Compliance officer | Author | Approval, or a rejection with a comment | A rejected draft has no owner if the author is away; the comment is the only record of why |
 | Risk analyst | Developer | A new rule set's inputs and outputs, to wire into the service | The service does not have an input; the developer must compute it or register a function (journey 2) |
-| Business analyst | Business user | A spreadsheet of the current rows (PD-043) or a draft to check | Without PD-043 every business change passes through this analyst |
-| Engine | Support staff | A `decisionId` the host stores on the application, and an explanation | The host did not store the id; search by correlation id comes only in M2 (RE-F-34 if PD-043) |
+| Business analyst | Business user | A spreadsheet of the current rows (PD-043) or a draft to check | Changes to existing tables no longer need this analyst; new rule sets still do |
+| Engine | Support staff | A `decisionId` the host stores on the application, and an explanation | The host did not store the id; search by correlation id comes only in M2 (RE-F-34) |
 | Support staff | Risk analyst | A disputed decision: link and `correlationId` | No ticket link in the product; the bank's ticket tool carries it |
 | Engine | Auditor | Versions with requester and approver, and the decision log | Retention dropped the month (RE-F-31); masked inputs used in a condition cannot be replayed from the log alone (gap G4) |
 
 ## Use case catalogue
 
-Each row is one thing a person in a bank or fintech does with the Rule Engine. "Today" is the milestone in which that persona can do it themselves on the stated surface under the current plan; "With PD-043" is the milestone if [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml) is accepted as recommended. `later` means after 1.0 or not scheduled; `never` means ruled out by a principle or a decision. Feature ids are in the [feature map](feature-map.md). The actor of each use case is the persona in the group heading; where another person is needed, the surface or the journey names them.
+Each row is one thing a person in a bank or fintech does with the Rule Engine. "Plan" is the milestone in which that persona can do it themselves on the stated surface, now that [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml) is decided (2026-11-19); "Before PD-043" keeps the milestone of the earlier plan for comparison. `later` means after 1.0 or not scheduled; `never` means ruled out by a principle or a decision. Feature ids are in the [feature map](feature-map.md). The actor of each use case is the persona in the group heading; where another person is needed, the surface or the journey names them.
 
 ### Pricing manager (fees and pricing)
 
-| Id | Goal | Trigger | Surface | Today | With PD-043 | Features |
+| Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-01 | Change a fee or rate in an existing table from a future date | Pricing committee approves a new fee schedule | CSV round-trip in the cockpit (M1); grid (M2) | M2 | M1 | CK-F-35, CK-F-10, RE-F-25, RE-F-02, RE-F-05 |
 | UC-RE-02 | Add a row for a new tier, segment or channel | New card tier or channel launches | CSV round-trip (M1); grid (M2) | M2 | M1 | CK-F-35, CK-F-10, RE-F-02 |
@@ -76,7 +76,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 | UC-RE-04 | Preview the change on sample customers before asking for approval | Draft ready | Cockpit: Simulation | M1 | M1 | CK-F-05, RE-F-21 |
 | UC-RE-05 | Request approval with an effective date | Preview looks right | Cockpit: rule set version, Request approval | M1 | M1 | CK-F-04, RE-F-06, RE-F-07 |
 | UC-RE-06 | Confirm the change is live and from when | Effective date reached | Cockpit: Rule sets; host notification from the `published` and `retired` events | M1 | M1 | CK-F-02, RE-F-29 |
-| UC-RE-07 | Undo a wrong change | Complaint or wrong fee charged | Restore the earlier version as a draft, then approval (no single-person path, PD-012) | M1 | M1 | RE-F-33 (if PD-043), CK-F-02, RE-F-25, CK-F-04 |
+| UC-RE-07 | Undo a wrong change | Complaint or wrong fee charged | Restore the earlier version as a draft, then approval (the emergency path only if the bank turned it on, PD-012) | M1 | M1 | RE-F-33, CK-F-02, RE-F-25, CK-F-04 |
 | UC-RE-08 | See how many past decisions the change would have changed | Approver asks who is affected | Cockpit: Simulation, replay | M3 | M3 | RE-F-22, CK-F-11 |
 | UC-RE-09 | Compare two versions over a past period (what-if) | Quarterly pricing review | Cockpit or REST | M3 | M3 | RE-F-24 |
 | UC-RE-10 | Withdraw their own pending request to fix a mistake | Error found after requesting | Not planned; the approver rejects with a comment instead | later | later | RE-F-35 |
@@ -85,7 +85,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 
 ### Credit risk analyst
 
-| Id | Goal | Trigger | Surface | Today | With PD-043 | Features |
+| Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-13 | Tighten an eligibility threshold (minimum income, maximum debt-to-income) | Credit policy change approved by the credit committee | CSV round-trip (M1); grid (M2) | M2 | M1 | CK-F-35, CK-F-10, RE-F-02 |
 | UC-RE-14 | Write conditions without expression syntax (equals, one of, between, at least, any) | Every edit | Cell shorthand in CSV (M1); drop-downs and plain-language reading in the grid (M2) | later | M1 | CK-F-35, CK-F-37 |
@@ -100,7 +100,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 
 ### Business analyst in the change team
 
-| Id | Goal | Trigger | Surface | Today | With PD-043 | Features |
+| Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-23 | Keep rule sets as YAML in Git, review them in a pull request, import them as drafts | Change request from the business | Git and YAML; Cockpit: import | M1 | M1 | RE-F-25, CK-F-02, RE-F-02 |
 | UC-RE-24 | Validate a file before import and fix the named errors | Every import | Cockpit import or REST `:validate` | M1 | M1 | RE-F-02 |
@@ -111,7 +111,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 
 ### Compliance officer (approver)
 
-| Id | Goal | Trigger | Surface | Today | With PD-043 | Features |
+| Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-29 | Learn that a change waits for approval | Author requests publication | Cockpit: Approvals; the bank's email or chat from the `publish-requested` event | M1 | M1 | CK-F-04, RE-F-29 |
 | UC-RE-30 | Read a change as a row diff in business terms | Opens a pending request | Cockpit: Diff; plain-language conditions from M2 | M1 | M1 | CK-F-03, RE-F-08, CK-F-37 |
@@ -121,12 +121,12 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 | UC-RE-34 | Read a simulation report the author attached | Large change | Cockpit: Approvals | M3 | M3 | RE-F-23, CK-F-20 |
 | UC-RE-35 | Approve from the bank's own ticket or workflow tool | Policy requires one approval tool (K8) | REST and events; integration is the host's | M1 | M1 | RE-F-20, RE-F-29 |
 | UC-RE-36 | Require two approvers from different functions (risk and compliance) | Credit policy needs two sign-offs | Not planned | later | later | RE-F-36 |
-| UC-RE-37 | Approve an urgent change alone | Fee charged in error, out of hours | None before 1.0 (PD-012, pending) | never | never | none |
+| UC-RE-37 | Approve an urgent change alone | Fee charged in error, out of hours | The emergency path, only if the bank turned it on by configuration; logged and reviewed afterwards (PD-012, decided 2026-11-19); milestone set by the architect's ADR | never | later | RE-F-48 |
 | UC-RE-38 | Retire a rule set no longer used | Product withdrawn | Cockpit or REST `:retire` | M1 | M1 | RE-F-07 |
 
 ### Operations and customer support staff
 
-| Id | Goal | Trigger | Surface | Today | With PD-043 | Features |
+| Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-39 | Explain a declined application to a customer from the bank's case screen | Customer calls or writes | Host screen calling `GET /decisions/{id}/explain` | M1 | M1 | RE-F-18, RE-F-20 |
 | UC-RE-40 | Open the decision in the cockpit from a link in the case screen | Needs the matched row | Cockpit: Decisions, deep link | later | M1 | CK-F-34, CK-F-06 |
@@ -136,7 +136,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 
 ### Internal auditor
 
-| Id | Goal | Trigger | Surface | Today | With PD-043 | Features |
+| Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-44 | Reconstruct a decision from six months ago: version, inputs, matched row, explanation | Complaint, audit sample or regulator request | Cockpit: Decisions; simulation of the pinned version with the logged clock | M1 | M1 | RE-F-05, RE-F-14, RE-F-16, RE-F-18, CK-F-06 |
 | UC-RE-45 | Show who requested and approved each version in a period | Audit of change control | REST and events (M1); history screen (M3) | M1 | M1 | RE-F-06, RE-F-07, RE-F-29, CK-F-38 |
@@ -146,7 +146,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 
 ### Host-service developer
 
-| Id | Goal | Trigger | Surface | Today | With PD-043 | Features |
+| Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-49 | Add the engine to a service | New service or first adoption | Maven dependency, configuration block | M1 | M1 | X-F-01, X-F-02, X-F-14, X-F-16 |
 | UC-RE-50 | Call a decision from Java inside the business transaction | Business logic needs a decision | Java API | M1 | M1 | RE-F-20, RE-F-14 |
@@ -162,7 +162,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 
 ### Platform administrator
 
-| Id | Goal | Trigger | Surface | Today | With PD-043 | Features |
+| Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-60 | Map the bank's roles to engine permissions | Go-live, joiners and leavers | IdP role mapping | M1 | M1 | X-F-06 |
 | UC-RE-61 | Limit who may author or approve each rule set (pricing edits only fee tables) | Security review | Not planned; permissions are per tenant | later | later | RE-F-37 |
@@ -179,17 +179,17 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 
 | Plan | M1 | M2 | M3 | Later | Never | Total |
 |---|---|---|---|---|---|---|
-| Today | 37 | 5 | 10 | 13 | 4 | 69 |
-| With PD-043 as recommended | 43 | 6 | 11 | 5 | 4 | 69 |
+| Before PD-043 | 37 | 5 | 10 | 13 | 4 | 69 |
+| Plan (PD-043 and PD-012 decided) | 43 | 6 | 11 | 6 | 3 | 69 |
 
-Per persona, with PD-043 as recommended:
+Per persona, under the plan:
 
 | Persona | M1 | M2 | M3 | Later | Never | Total |
 |---|---|---|---|---|---|---|
 | Pricing manager (fees and pricing) | 7 | 0 | 2 | 2 | 1 | 12 |
 | Credit risk analyst | 6 | 2 | 1 | 0 | 1 | 10 |
 | Business analyst in the change team | 3 | 0 | 2 | 0 | 1 | 6 |
-| Compliance officer (approver) | 7 | 0 | 1 | 1 | 1 | 10 |
+| Compliance officer (approver) | 7 | 0 | 1 | 2 | 0 | 10 |
 | Operations and customer support staff | 3 | 1 | 1 | 0 | 0 | 5 |
 | Internal auditor | 3 | 1 | 1 | 0 | 0 | 5 |
 | Host-service developer | 9 | 2 | 0 | 0 | 0 | 11 |
@@ -200,7 +200,7 @@ Six journeys cover the most frequent and the most consequential use cases. Each 
 
 ### Journey 1: a pricing manager changes a card fee for next month
 
-Milestone: M1 if PD-043 is accepted (spreadsheet round-trip); otherwise steps 2 to 4 are done by a business analyst in YAML in M1, or by the pricing manager in the grid from M2. Use cases UC-RE-01, UC-RE-04, UC-RE-05, UC-RE-06.
+Milestone: M1, through the spreadsheet round-trip (PD-043); from M2 the pricing manager can also use the grid. Use cases UC-RE-01, UC-RE-04, UC-RE-05, UC-RE-06.
 
 The pricing committee approved on 10 Dec 2026 that the GOLD card monthly fee rises from 30,000 VND to 35,000 VND from 1 Jan 2027.
 
@@ -232,7 +232,7 @@ Failure paths:
 
 ### Journey 2: a credit risk analyst creates a new eligibility rule set
 
-Milestone: M2 if PD-043 is accepted (grid with templates); today a business analyst writes the YAML in M1. Use cases UC-RE-15, UC-RE-16, UC-RE-52, UC-RE-57.
+Milestone: M2, in the grid with templates (PD-043); in M1 a business analyst writes the YAML. Use cases UC-RE-15, UC-RE-16, UC-RE-52, UC-RE-57.
 
 A new salaried personal loan launches on 1 Apr 2027. The analyst needs rule set `personal-loan-salaried-eligibility` with inputs `age`, `monthlyIncome`, `employmentMonths`, `dti` and outputs `eligible` and `reasonCode`.
 
@@ -289,7 +289,7 @@ Failure paths:
 
 ### Journey 4: a support agent explains a declined application to a customer
 
-Milestone: M1 (explain API); deep link M1 if PD-043; search by correlation id M2 if PD-043. Use cases UC-RE-39 to UC-RE-43.
+Milestone: M1 (explain API); deep link M1; search by correlation id M2 (PD-043). Use cases UC-RE-39 to UC-RE-43.
 
 A customer calls about credit card application `APP-7781`, declined on 12 Jan 2027.
 
@@ -307,7 +307,7 @@ Failure paths:
 
 | What goes wrong | Recovery |
 |---|---|
-| The host did not store the `decisionId` | M1: filter Decisions by rule set and day and read the outputs. M2 (if PD-043): filter by correlation id `APP-7781` (RE-F-34) |
+| The host did not store the `decisionId` | M1: filter Decisions by rule set and day and read the outputs. M2: filter by correlation id `APP-7781` (RE-F-34) |
 | The agent's screen gets `403` | The host's service account or the agent's role lacks `rules:log:read`; the error shows a `correlationId` for the administrator |
 | The explanation is too technical for a customer | Explanation templates per rule set arrive in M3 (RE-F-19) |
 | The decision was made by a version since retired | Nothing to do: the entry keeps its version and the explanation uses it |
@@ -316,7 +316,7 @@ Most banks keep support staff in their own case screen, so the explain API, not 
 
 ### Journey 5: an auditor reconstructs a decision from six months ago
 
-Milestone: M1 capability, used in July 2027 for a January decision. Version history screen and evidence export M3 if PD-043. Use cases UC-RE-44, UC-RE-45, UC-RE-47, UC-RE-48.
+Milestone: M1 capability, used in July 2027 for a January decision. Version history screen and evidence export M3 (PD-043). Use cases UC-RE-44, UC-RE-45, UC-RE-47, UC-RE-48.
 
 | Step | Who | Screen or call | What happens |
 |---|---|---|---|
@@ -334,7 +334,7 @@ Failure paths:
 | What goes wrong | Recovery |
 |---|---|
 | The month is older than the retention setting and was dropped | Nothing to find; the retention setting (RE-F-31, M3) is the record. Retention must be set to the bank's records policy before go-live |
-| The auditor has the customer's national id but not the application id | Search by the exact id: the engine hashes it with the masking key and matches (RE-F-12; filter RE-F-34, M2 if PD-043) |
+| The auditor has the customer's national id but not the application id | Search by the exact id: the engine hashes it with the masking key and matches (RE-F-12; filter RE-F-34, M2) |
 | A masked input is used in a condition | The log holds only its hash, so step 5 cannot rerun the decision from the log alone (gap G4) |
 | The auditor lacks `rules:read` | Can see the decision but not the version rows; map the permission |
 
@@ -369,11 +369,11 @@ Failure paths:
 
 | Id | Gap | Where | Proposed handling |
 |---|---|---|---|
-| G1 | No path without YAML for business users in M1 | UC-RE-01 to UC-RE-03, UC-RE-13 | PD-043 |
+| G1 | No path without YAML for business users in M1 | UC-RE-01 to UC-RE-03, UC-RE-13 | Closed by PD-043 (decided 2026-11-19): spreadsheet round-trip in M1 |
 | G2 | The "Request approval" button and the "Restore as draft" and "Fork from tenant default" actions are described on the wiki but are not feature rows | Journey 1 step 6, UC-RE-07, UC-RE-21 | Request: covered by CK-F-04 and RE-F-07 until the cockpit SPEC names it. Restore: RE-F-33 (PD-043). Copy across tenants: CK-F-39, later; the wiki should say "export and import" until then |
 | G3 | No rule for an approval that happens after the requested effective date | Journey 1 | Architect: refuse, or take effect at approval and log it |
 | G4 | A masked input used in a condition cannot be replayed from the log alone | Journey 5 | Architect: the validator warns when a masked input appears in a condition |
-| G5 | No search by correlation id or by input value | Journeys 4 and 5 | RE-F-34 (PD-043) |
+| G5 | No search by correlation id or by input value | Journeys 4 and 5 | RE-F-34 in M2 (PD-043) |
 | G6 | Permissions cannot be limited to some rule sets | UC-RE-61 | RE-F-37, later; to be raised with the security reviewer, since a bank's access review may ask for it before 1.0 |
 | G7 | No two-approver rule for credit policy | UC-RE-36 | RE-F-36, later |
 | G8 | Masking key rotation is not designed | UC-RE-69 | Architect, before 1.0 |
@@ -382,15 +382,15 @@ Failure paths:
 
 | Id | Assumption | Fails if | Cheapest test | Kill criterion | Then |
 |---|---|---|---|---|---|
-| K3 | Analysts change existing tables without help (revised by PD-043 to the spreadsheet path) | Every change still needs a business analyst or developer | Two moderated sessions in week 2 of M1 | Neither reaches `PENDING_APPROVAL` within 15 minutes | Move the grid (CK-F-10, CK-F-37) to the start of M2 and protect it |
-| A1 | Most business changes edit an existing rule set | New rule sets or new inputs are common | Classify 12 months of changes from two pricing and two risk contacts | More than one third need a new rule set or input | Raise templates (CK-F-36) in M2 |
+| K3 | Analysts change existing tables without help through the spreadsheet path (PD-043) | Every change still needs a business analyst or developer | Two moderated sessions in week 2 of M1 | Neither reaches `PENDING_APPROVAL` within 15 minutes | Move the grid (CK-F-10, CK-F-37) to the start of M2 and protect it |
+| A1 (roadmap K22) | Most business changes edit an existing rule set | New rule sets or new inputs are common | Classify 12 months of changes from two pricing and two risk contacts | More than one third need a new rule set or input | Raise templates (CK-F-36) in M2 |
 | A2 | Banks keep fee schedules and credit policy in Excel today | Pricing already lives in a product catalogue system | Two pricing and three compliance conversations in M1 | Three of five do not use spreadsheets | Drop CK-F-35 and integrate with the catalogue through REST |
-| A3 | Excel does not change values silently in a CSV round-trip | A changed value passes validation | One-day test, Windows and macOS, English and Vietnamese locales | Any changed value accepted | Quote every exported cell and document the Excel steps; reconsider `.xlsx` |
+| A3 (roadmap K23) | Excel does not change values silently in a CSV round-trip | A changed value passes validation | One-day test, Windows and macOS, English and Vietnamese locales | Any changed value accepted | Quote every exported cell and document the Excel steps; reconsider `.xlsx` |
 | A4 | Support staff work in the bank's case screen, not in the cockpit | Banks want support to use the cockpit directly | Two operations lead conversations before M2 | Both want the cockpit | Move RE-F-34 out of the cut list and add a support view to Cockpit 0.2 |
 
 ## Related documents
 
-- [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml): business-user authoring decision
+- [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml): business-user authoring, decided 2026-11-19 (option 3)
 - [prd-rule-engine.md](prd-rule-engine.md) and [prd-cockpit.md](prd-cockpit.md): module requirements
 - [feature-map.md](feature-map.md): features RE-F-33 to RE-F-37 and CK-F-34 to CK-F-39 added from this catalogue
 - Diagram sources: [`diagrams/`](diagrams/)
