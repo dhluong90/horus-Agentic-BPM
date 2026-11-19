@@ -21,16 +21,22 @@ import java.util.Optional;
  */
 public final class LocalServiceInvoker implements ServiceInvoker {
 
+    private static final System.Logger LOG = System.getLogger(LocalServiceInvoker.class.getName());
+
     private final Map<String, ServiceTaskHandler> handlers;
     private final Optional<RuleEngine> ruleEngine;
+    private final long slowCallNanos;
 
     /**
      * @param handlers registered handlers by name
      * @param ruleEngine the Rule Engine, or empty when the host has none
+     * @param slowCallWarning calls longer than this are logged at WARNING ({@code handlers.slow-call-warning})
      */
-    public LocalServiceInvoker(Map<String, ServiceTaskHandler> handlers, Optional<RuleEngine> ruleEngine) {
+    public LocalServiceInvoker(Map<String, ServiceTaskHandler> handlers, Optional<RuleEngine> ruleEngine,
+            java.time.Duration slowCallWarning) {
         this.handlers = Map.copyOf(handlers);
         this.ruleEngine = ruleEngine;
+        this.slowCallNanos = slowCallWarning.toNanos();
     }
 
     /** @param name handler name @return whether it is registered */
@@ -45,11 +51,25 @@ public final class LocalServiceInvoker implements ServiceInvoker {
 
     @Override
     public StepResult invoke(String tenantId, String instanceId, String businessKey, Effect.InvokeService call) {
-        return switch (call.kind()) {
-            case HANDLER -> handler(tenantId, instanceId, businessKey, call);
-            case DECISION -> decision(instanceId, call);
-            default -> new StepResult.Failed("NOT_SUPPORTED", call.kind() + " invocations are not supported yet", false);
-        };
+        long started = System.nanoTime();
+        try {
+            return switch (call.kind()) {
+                case HANDLER -> handler(tenantId, instanceId, businessKey, call);
+                case DECISION -> decision(instanceId, call);
+                default -> new StepResult.Failed("NOT_SUPPORTED", call.kind() + " invocations are not supported yet",
+                        false);
+            };
+        } finally {
+            long elapsed = System.nanoTime() - started;
+            if (elapsed > slowCallNanos) {
+                // Never the inputs: they may hold personal data.
+                LOG.log(System.Logger.Level.WARNING, "process.step.slow kind={0} target={1} node={2} instance={3} "
+                        + "elapsedMs={4} thresholdMs={5}: a local step holds the instance lock and a connection for "
+                        + "its whole duration; a network call belongs in an asynchronous step (ADR-0008)",
+                        call.kind(), call.target(), call.nodeId(), instanceId, elapsed / 1_000_000,
+                        slowCallNanos / 1_000_000);
+            }
+        }
     }
 
     private StepResult handler(String tenantId, String instanceId, String businessKey, Effect.InvokeService call) {

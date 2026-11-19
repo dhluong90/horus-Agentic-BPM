@@ -45,8 +45,8 @@
     <module>bpm-bom</module>
     <module>bpm-host-metadata</module>
     <module>rule-engine</module>
-    <module>cockpit</module>
     <module>process-engine</module>
+    <module>cockpit</module>
     <module>examples</module>
   </modules>
 

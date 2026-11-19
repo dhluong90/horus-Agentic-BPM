@@ -25,8 +25,8 @@ The process is [`processes/card-fee-review.bpmn`](src/main/resources/processes/c
 
 What the host adds:
 
-1. Two dependencies: `rule-engine-spring-boot-starter` and `process-engine-spring-boot-starter`.
-2. One configuration block, `horus.bpm` in [`application.yml`](src/main/resources/application.yml): role-to-permission mappings for both engines and the BPMN file to import.
+1. Three dependencies: `rule-engine-spring-boot-starter`, `process-engine-spring-boot-starter` and `cockpit-spring-boot-starter` (the cockpit at `/bpm/cockpit`, behind the host's own sign-in).
+2. One configuration block, `horus.bpm` in [`application.yml`](src/main/resources/application.yml): role-to-permission mappings for both engines, the BPMN file to import and the cockpit's name for this service.
 3. Two `ServiceTaskHandler` beans, the only code the process calls: [`CardProfileHandler`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/CardProfileHandler.java) (`cardProfiles.load`) and [`CardDecisionHandler`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/CardDecisionHandler.java) (`cardApplications.decide`). The engine finds them by name, never by reflection.
 4. Its own use case, [`CardApplicationService`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/CardApplicationService.java), which stores the application and starts the process in one `@Transactional` method.
 
@@ -61,9 +61,10 @@ sequenceDiagram
 
 ## Run locally
 
-Needs JDK 21 or later and Docker.
+Needs JDK 21 or later, Node 22 or later (for the cockpit bundle) and Docker.
 
 ```bash
+(cd cockpit/web && npm ci && npm run build)                         # once; or build with -Dcockpit.bundle.skip=true
 docker run -d --name horus-pe-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
   -e POSTGRES_PASSWORD=change-me -p 5432:5432 postgres:16-alpine
 
@@ -79,6 +80,7 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=demo-pass HORUS_DB_PASSWORD=chang
 | `HORUS_DB_PASSWORD` | empty | Database password; never in a file |
 | `HORUS_DEMO_PASSWORD` | empty | Password of the demo users, `dev` profile only |
 | `PORT` | `8080` | HTTP port |
+| `HORUS_BPM_PROCESSES_HANDLERS_SLOW_CALL_WARNING` | `200ms` | A local handler or decision slower than this is logged at WARN as `process.step.slow`: it holds the instance row lock and a connection, which usually means a network call in a handler |
 | `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the demo users, the fixed tenant `bank-a`, the start-up import and auto-approval of the sample process |
 
 At start-up the log shows, in order: the host's own migration, the Rule Engine schema (`rle_schema_history`), the Process Engine schema (`pre_schema_history`), the sample process imported as version 1 `ACTIVE` for `bank-a`, and the `card-fee` rule set published by two seed identities (one requests, the other approves).
@@ -98,8 +100,10 @@ Demo users on the `dev` profile, all with the password from `HORUS_DEMO_PASSWORD
 |---|---|---|
 | `tuan` | `TELLER` | `processes:start`, `processes:read`, `rules:evaluate` |
 | `an` | `CARD_OFFICER` | `processes:read`, `processes:task:work`, `rules:evaluate` |
-| `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:read` |
-| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
+| `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:read`; `rules:evaluate` on `dev` only |
+| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve`; `rules:evaluate` on `dev` only |
+
+On the `dev` profile the author and the approver may also evaluate, so the cockpit's Try it works for them ([`application-dev.yml`](src/main/resources/application-dev.yml)).
 
 Seed customers of `bank-a`: `C-001` (GOLD, 0 VND), `C-002` (STANDARD with 5 transactions, 10,000 VND), `C-003` (STANDARD with 1 transaction, 50,000 VND).
 
@@ -162,9 +166,33 @@ docker exec horus-pe-pg psql -U horus -d horus -tAc \
   "SELECT count(*) FROM card_application WHERE application_id='APP-1099'"   # 0
 ```
 
+## Change the fee in the cockpit, then run the process
+
+Sign in at `http://localhost:8080/bpm/cockpit` as `lan`, open the `card-fee` rule set, change row `R1` (gold customers) from `0 VND` to `5000 VND`, try it, and request publication. Sign in as `minh` and approve it; `lan` cannot approve. The next application is priced by version 2. The same steps through the REST API the cockpit uses:
+
+```bash
+sed 's/then: { fee: "0 VND" }/then: { fee: "5000 VND" }/' \
+  examples/rule-and-process/src/main/resources/rules/card-fee.yaml > /tmp/card-fee-v2.yaml
+R=localhost:8080/api/bpm/rules/v1/rule-sets/card-fee
+curl -s -u lan:$P -H 'Content-Type: application/yaml' --data-binary @/tmp/card-fee-v2.yaml $R/versions
+# {"ruleSet":"card-fee","version":2,"status":"DRAFT","createdBy":"lan",...}
+curl -s -u lan:$P -X POST $R/versions/2:request-publish
+# {"version":2,"status":"PENDING_APPROVAL","requestedBy":"lan",...}
+curl -s -u lan:$P -X POST $R/versions/2:approve
+# {"status":403,"code":"PERMISSION_DENIED","detail":"The caller lacks permission rules:approve",...}
+curl -s -u minh:$P -X POST $R/versions/2:approve
+# {"version":2,"status":"PUBLISHED","requestedBy":"lan","approvedBy":"minh",...}
+
+curl -s -u tuan:$P -H 'Content-Type: application/json' \
+  -d '{"applicationId":"APP-2002","customerId":"C-001"}' localhost:8080/api/cards/applications
+# {"applicationId":"APP-2002","instanceStatus":"RUNNING",...}   before the change, C-001 completed automatically
+# GET the instance: pricing.fee is {"currency":"VND","amount":5000} and the token waits at officer-review;
+# rle_decision holds the evaluation with version_num 2.
+```
+
 ## Import a BPMN file
 
-`lan` may import BPMN files. The same document again creates no new version; an unsupported element is refused with its id and line; a `DOCTYPE` is refused before anything is resolved.
+`lan` may import BPMN files. The same document again creates no new version and returns the existing one, still with `201`; an unsupported element is refused with its id and line; a `DOCTYPE` is refused before anything is resolved.
 
 ```bash
 curl -s -u lan:$P -H 'Content-Type: application/xml' \

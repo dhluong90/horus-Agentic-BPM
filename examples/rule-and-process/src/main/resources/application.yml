@@ -19,7 +19,7 @@ management:
     health:
       show-components: when-authorized
 
-# The configuration a host adds for the two engines.
+# The configuration a host adds for the two engines, plus the cockpit's name for this service.
 horus:
   bpm:
     host-id: rule-and-process
@@ -41,3 +41,7 @@ horus:
           ROLE_PROCESS_DEPLOYER: [processes:deploy, processes:read]
           ROLE_TELLER: [processes:start, processes:read]
           ROLE_CARD_OFFICER: [processes:read, processes:task:work]
+    cockpit:
+      # How the cockpit header names this service.
+      host-label: Card issuing
+      environment: demo

@@ -15,6 +15,11 @@ public final class EngineDefaults {
     public static final int MAX_XML_ELEMENTS = 5_000;
     /** {@code idempotency.retention}. */
     public static final Duration IDEMPOTENCY_RETENTION = Duration.ofHours(24);
+    /**
+     * {@code handlers.slow-call-warning}: a local handler or decision that takes longer is logged, because it holds
+     * the instance row lock and a pool connection for its whole duration (a sign of a network call in a handler).
+     */
+    public static final Duration SLOW_CALL_WARNING = Duration.ofMillis(200);
     /** Parsed conditions cached per replica. */
     public static final int CONDITION_CACHE_ENTRIES = 1_000;
     /** Longest idempotency key. */
