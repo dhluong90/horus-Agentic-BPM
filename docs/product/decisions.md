@@ -115,7 +115,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-091](#pd-091-no-tag-ruleset-or-immutable-releases-for-now) | No tag ruleset or immutable releases for now | Decided (revisitable) |
 | [PD-092](#pd-092-the-cockpit-opens-on-home-for-every-role) | The cockpit opens on Home for every role | Decided (product manager, delegated, PD-073) |
 | [PD-093](#pd-093-cockpit-menu-for-authors-and-two-changes-to-the-approved-prototype) | Cockpit menu for authors and two changes to the approved prototype | Decided (product manager, delegated, PD-073) |
-| [PD-094](#pd-094-cockpit-draft-editing-is-off-by-default-in-010) | Cockpit draft editing is off by default in 0.1.0 | Decided (product manager, delegated, PD-073) |
+| [PD-094](#pd-094-cockpit-draft-editing-is-off-by-default-in-010) | Cockpit draft editing is off by default in 0.1.0 | Decided (product manager, delegated, PD-073; superseded in 0.2.0 by PD-095) |
+| [PD-095](#pd-095-cockpit-draft-editing-on-by-default-again-in-020) | Cockpit draft editing on by default again in 0.2.0 | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2831,6 +2832,8 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 
 ### PD-094 Cockpit draft editing is off by default in 0.1.0
 
+From 0.2.0 the default is on again: superseded by [PD-095](#pd-095-cockpit-draft-editing-on-by-default-again-in-020). The 0.1.0 default and release note stand for 0.1.0.
+
 | Field | Value |
 |---|---|
 | Date | 2026-11-19 |
@@ -2857,3 +2860,31 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - **Import button:** the cockpit's "Import rule set" action depends on `rules:author` only, not on this setting.
 
 **Follow-ups.** Maintainers (engineering): the cockpit default, the example host setting and the import action. Architect: DESIGN section 4.4. Documentation: the release notes and the wiki Rule Engine Configuration page.
+
+### PD-095 Cockpit draft editing on by default again in 0.2.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 (decided ahead; applies when #165 merges, after the `v0.1.0` tag) |
+| Question | PD-094 turned cockpit draft editing off by default in 0.1.0, because each save created a new draft version. #165 (pull request #234) lets an author replace their draft in place, and the engine now enforces `authoring.cockpit-drafts`. Should the default go back to on in 0.2.0? |
+| Raised by | Product manager, the revisit named in PD-094 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1. Supersedes PD-094 from 0.2.0. Returns to the default of PD-036 and PD-075 |
+
+**Options considered**
+
+1. On by default from 0.2.0 (chosen). A host that keeps production rule changes in Git sets `authoring.cockpit-drafts: false` per environment, as PD-036 intended. Consequence: business users edit a draft in place in the cockpit out of the box. Every change still needs a second approver before it takes effect, so four-eyes is untouched. The engine refuses editing with `403 DRAFT_AUTHORING_DISABLED` where the host turns it off.
+2. Keep it off by default. Consequence: safest for Git-driven banks. Every evaluator must find and set one more setting before the cockpit's main business feature works, against the newcomer target (K26).
+
+**Recommendation and decision.** Option 1. The reason for PD-094 was the known limit, which #165 removes. Turning editing on adds no new way to publish, so under PD-074 rule 2 it relaxes no control: approvals, the decision log and the audit trail are unchanged.
+
+**Condition.** This applies only when #165 merges with its definition of done, including the replace-in-place and diff specification statements (proposed as `RLE-047` and `RLE-048`). If #165 slips out of 0.2.0, the 0.1.0 default stays, and this entry is superseded.
+
+**Release note line (0.2.0).** "Cockpit draft editing is on by default again, and a save now replaces your draft instead of creating a new version. Hosts that keep production rule changes in Git set `authoring.cockpit-drafts: false` per environment. Upgrade note: a host on 0.1.0 that relied on the off default and wants to keep editing off must now set the setting explicitly."
+
+**Consequences.**
+- **Cockpit:** a missing setting means on again (the reverse of the PD-094 change in `cockpitDraftsOn`).
+- **Rule engine DESIGN section 4.4:** the default is `true` again.
+- **Example host:** the explicit setting can stay, so the demo does not depend on the default.
+- **Wiki Rule Engine Configuration page:** names the default and the upgrade note.
+
+**Follow-ups.** Maintainers (engineering): the cockpit default and its tests, with or right after #234. Architect: DESIGN section 4.4 and the two specification statements. Documentation: the 0.2.0 release notes, the upgrade note and the wiki page.
