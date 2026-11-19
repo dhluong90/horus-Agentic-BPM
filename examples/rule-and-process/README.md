@@ -225,7 +225,7 @@ curl -s -u lan:$P -H 'Content-Type: application/xml' \
 #   {"element":"endEvent with terminateEventDefinition","elementId":"end","line":8,...}],...}
 ```
 
-Supported in this release: none start and end events, `serviceTask` (local), `businessRuleTask`, `userTask` (with `horus:resultVariable`; `horus:fourEyes` optional), `exclusiveGateway` with conditions and a default flow. Everything else is refused by name with the stage that adds it. Files must be UTF-8; bodies above `definitions.max-bytes` (1 MB) are refused with `413` before they are read.
+Supported in this release: none start and end events, `serviceTask` (local), `businessRuleTask`, `userTask` (with `horus:resultVariable`; `horus:fourEyes` optional), `exclusiveGateway` with conditions and a default flow, `parallelGateway` (fork and join; no conditions on its outgoing flows). Everything else is refused by name with the stage that adds it. Files must be UTF-8; bodies above `definitions.max-bytes` (1 MB) are refused with `413` before they are read.
 
 Conditions follow the Rule Engine's rules: null follows FEEL three-valued logic (`income < 5000000 VND` is null when `income` is unset, `tier != 'GOLD'` is true), only a true condition is taken, otherwise the default flow; numbers are decimals; money compares only within one currency, and a type error fails the step.
 

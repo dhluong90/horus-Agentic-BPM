@@ -5,7 +5,7 @@ import io.github.dhluong90.bpm.process.internal.exec.BehaviorRegistry;
 
 /**
  * Behaviours of the execution kernel stream. This release: none start and end events, service task (local mode),
- * business rule task, user task and exclusive gateway. Manual and none tasks, parallel gateway, terminate end,
+ * business rule task, user task, exclusive gateway and parallel gateway. Manual and none tasks, terminate end,
  * link events, script task and data associations follow in this module.
  */
 public final class CoreBehaviors implements BehaviorModule {
@@ -18,6 +18,8 @@ public final class CoreBehaviors implements BehaviorModule {
                 .register(new BusinessRuleTaskBehavior())
                 .register(new UserTaskBehavior())
                 .register(new ExclusiveGatewayBehavior())
-                .compileStep(new ConditionCompileStep());
+                .register(new ParallelGatewayBehavior())
+                .compileStep(new ConditionCompileStep())
+                .compileStep(new ParallelJoinCompileStep());
     }
 }
