@@ -3,7 +3,7 @@ package io.github.dhluong90.bpm.process.postgres;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.rules.api.Money;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.InstanceNotFoundException;
 import io.github.dhluong90.bpm.process.api.NoEffectiveVersionException;
