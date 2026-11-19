@@ -23,6 +23,12 @@ public final class MaskingKey {
     /** Prefix of every fingerprint, as stored in the decision log. */
     public static final String PREFIX = "hmac:";
 
+    /**
+     * Start of the HKDF {@code info} of a tenant subkey; the tenant id follows. The {@code v1} is part of the stored
+     * token contract: changing it changes every token, so it never changes within {@code hmac:<keyId>:<hex>}.
+     */
+    public static final String TENANT_INFO_PREFIX = "horus-bpm/masking/v1/tenant/";
+
     /** Key id of a key configured without one. */
     public static final String DEFAULT_KEY_ID = "k1";
 
@@ -69,6 +75,63 @@ public final class MaskingKey {
      */
     public static MaskingKey fromBase64(String keyId, String base64) {
         return of(keyId, decode(base64));
+    }
+
+    /**
+     * Derives the subkey of one tenant from a key shared by several tenants (the host key), so two tenants never get
+     * the same token for one value: {@code HKDF-SHA256(this key, salt = none, info = "horus-bpm/masking/v1/tenant/"
+     * + tenantId, 32 bytes)} (RFC 5869). The subkey keeps this key's id. A key configured for one tenant only is
+     * used as it is and never derived.
+     *
+     * @param tenantId the tenant
+     * @return the tenant's subkey, with the same key id
+     */
+    public MaskingKey forTenant(String tenantId) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        byte[] ikm = key.getEncoded();
+        try {
+            return new MaskingKey(keyId, hkdfSha256(ikm, new byte[0],
+                    (TENANT_INFO_PREFIX + tenantId).getBytes(StandardCharsets.UTF_8), MIN_BYTES));
+        } finally {
+            java.util.Arrays.fill(ikm, (byte) 0);
+        }
+    }
+
+    /**
+     * HKDF with HMAC-SHA256 (RFC 5869), extract then expand, with the JDK's {@code Mac} only.
+     *
+     * @param ikm the input keying material
+     * @param salt the salt; empty means HashLen zero bytes, as RFC 5869 section 2.2 says
+     * @param info the context
+     * @param length bytes of output, 1 to 8160
+     * @return the output keying material
+     */
+    public static byte[] hkdfSha256(byte[] ikm, byte[] salt, byte[] info, int length) {
+        if (length < 1 || length > 255 * 32) {
+            throw new IllegalArgumentException("HKDF-SHA256 output length must be 1 to 8160 bytes");
+        }
+        try {
+            Mac mac = Mac.getInstance(ALGORITHM);
+            mac.init(new SecretKeySpec(salt.length == 0 ? new byte[32] : salt, ALGORITHM));
+            byte[] prk = mac.doFinal(ikm);
+            mac.init(new SecretKeySpec(prk, ALGORITHM));
+            byte[] okm = new byte[length];
+            byte[] block = new byte[0];
+            int filled = 0;
+            for (int i = 1; filled < length; i++) {
+                mac.update(block);
+                mac.update(info);
+                mac.update((byte) i);
+                block = mac.doFinal();
+                int n = Math.min(block.length, length - filled);
+                System.arraycopy(block, 0, okm, filled, n);
+                filled += n;
+            }
+            java.util.Arrays.fill(prk, (byte) 0);
+            return okm;
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("HmacSHA256 is not available in this JVM", e);
+        }
     }
 
     /**

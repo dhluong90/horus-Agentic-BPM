@@ -8,7 +8,9 @@ import java.util.Optional;
  * data with {@code mask: true}; this policy supplies the key their fingerprints are made with and whether inputs
  * that declare nothing are masked too. The Spring Boot starter provides a default backed by
  * {@code horus.bpm.rules.masking.*}; a host replaces it with its own bean, for example to read one key per tenant
- * from a secret store. Implementations must be thread-safe and must never log a key.
+ * from a secret store. The key returned for a tenant is used as it is; a host that shares one root key between
+ * tenants derives each tenant's key with {@link MaskingKey#forTenant(String)}, as the default does. Implementations
+ * must be thread-safe and must never log a key.
  */
 public interface MaskingPolicy {
 
@@ -66,13 +68,14 @@ public interface MaskingPolicy {
     }
 
     /**
-     * Returns a policy with one key for every tenant.
+     * Returns a policy with one host key shared by every tenant. The key is never used directly: each tenant gets its
+     * own subkey, {@link MaskingKey#forTenant(String)}, so two tenants never get the same token for one value.
      *
-     * @param key the key
+     * @param hostKey the host key
      * @return the policy
      */
-    static MaskingPolicy withKey(MaskingKey key) {
-        Optional<MaskingKey> held = Optional.of(key);
-        return tenantId -> held;
+    static MaskingPolicy withKey(MaskingKey hostKey) {
+        java.util.Objects.requireNonNull(hostKey, "hostKey must not be null");
+        return tenantId -> Optional.of(hostKey.forTenant(tenantId));
     }
 }

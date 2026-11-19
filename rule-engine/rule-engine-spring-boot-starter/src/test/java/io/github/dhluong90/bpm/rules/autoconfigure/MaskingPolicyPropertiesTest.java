@@ -55,7 +55,9 @@ class MaskingPolicyPropertiesTest {
                         "horus.bpm.rules.decision-log.mask-default=false")
                 .run(context -> {
                     PropertyMaskingPolicy policy = context.getBean(PropertyMaskingPolicy.class);
-                    assertThat(fingerprint(policy, "bank-a")).isEqualTo(MaskingKey.fromBase64(HOST_KEY).fingerprint("x"));
+                    // bank-a shares the host key, so it gets its own subkey; bank-b's own key is used as it is.
+                    assertThat(fingerprint(policy, "bank-a"))
+                            .isEqualTo(MaskingKey.fromBase64(HOST_KEY).forTenant("bank-a").fingerprint("x"));
                     assertThat(fingerprint(policy, "bank-b")).isEqualTo(MaskingKey.fromBase64(TENANT_KEY).fingerprint("x"));
                     assertThat(policy.maskByDefault("bank-a")).isFalse();
                     assertThat(policy.maskByDefault("bank-b")).isTrue();
@@ -69,7 +71,7 @@ class MaskingPolicyPropertiesTest {
     void RLE_012_the_shared_key_is_used_when_the_rule_engine_key_is_unset() {
         runner.withPropertyValues("horus.bpm.masking.hmac-key=" + SHARED_KEY)
                 .run(context -> assertThat(fingerprint(context.getBean(PropertyMaskingPolicy.class), "bank-a"))
-                        .isEqualTo(MaskingKey.fromBase64(SHARED_KEY).fingerprint("x")));
+                        .isEqualTo(MaskingKey.fromBase64(SHARED_KEY).forTenant("bank-a").fingerprint("x")));
     }
 
     @Test

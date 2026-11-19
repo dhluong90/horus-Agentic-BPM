@@ -11,7 +11,7 @@ import java.util.Optional;
 
 /**
  * The default {@link MaskingPolicy}: one host key from {@code horus.bpm.rules.masking.hmac-key} (or the shared
- * {@code horus.bpm.masking.hmac-key}), an optional key and masking default per tenant under
+ * {@code horus.bpm.masking.hmac-key}), from which each tenant gets its own HKDF subkey, an optional key and masking default per tenant under
  * {@code horus.bpm.rules.masking.tenants.<tenant>}, and the host masking default from
  * {@code horus.bpm.rules.decision-log.mask-default}. A value that is not a valid key is never used and never shown:
  * it is reported by setting name to the start-up check, which then refuses to start. Immutable and thread-safe.
@@ -109,10 +109,29 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
         }
     }
 
+    /** Tenant subkeys of the host key, derived once per tenant; bounded, then derived on each call. */
+    private final java.util.concurrent.ConcurrentHashMap<String, MaskingKey> derived =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int DERIVED_CACHE_MAX = 10_000;
+
     @Override
     public Optional<MaskingKey> hmacKey(String tenantId) {
-        // A tenant with its own key setting never falls back to the host key, even when its own key is invalid.
-        return tenantKeys.getOrDefault(tenantId, hostKey);
+        // A tenant with its own key setting uses it as it is and never falls back to the host key, even when its own
+        // key is invalid. Every other tenant gets its own HKDF subkey of the host key, never the host key itself.
+        if (tenantKeys.containsKey(tenantId)) {
+            return tenantKeys.get(tenantId);
+        }
+        return hostKey.map(host -> {
+            MaskingKey cached = derived.get(tenantId);
+            if (cached != null) {
+                return cached;
+            }
+            MaskingKey subkey = host.forTenant(tenantId);
+            if (derived.size() < DERIVED_CACHE_MAX) {
+                derived.put(tenantId, subkey);
+            }
+            return subkey;
+        });
     }
 
     @Override

@@ -162,7 +162,7 @@ class SecurityReviewRegressionTest {
 
         String logged = stores.decisions.getFirst().maskedInputsJson();
         assertThat(logged).isEqualTo("{\"fee\":{\"currency\":\"VND\",\"amount\":1000},\"rate\":1,\"nationalId\":\""
-                + key.fingerprint("079090001234") + "\"}");
+                + key.forTenant("bank-a").fingerprint("079090001234") + "\"}");
         assertThat(logged).doesNotContain("079090001234", "0903123456", "1903 4567 8901", "phone", "accountNumber");
     }
 

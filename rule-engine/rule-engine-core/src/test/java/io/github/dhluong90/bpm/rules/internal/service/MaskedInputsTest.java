@@ -152,7 +152,7 @@ class MaskedInputsTest {
 
         DecisionResult result = evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16));
 
-        String expected = "hmac:k1:" + hmacHex(KEY_A, NATIONAL_ID);
+        String expected = "hmac:k1:" + hmacHex(subkey(KEY_A, "bank-a"), NATIONAL_ID);
         String row = stores.decisions.getFirst().maskedInputsJson();
         assertThat(row).isEqualTo("{\"nationalId\":\"" + expected + "\",\"age\":16}").doesNotContain(NATIONAL_ID);
         assertThat(result.outputs()).containsEntry("route", "MANUAL");
@@ -374,19 +374,21 @@ class MaskedInputsTest {
         RuleEngines after = engines(new MaskingPolicy() {
             @Override
             public Optional<MaskingKey> hmacKey(String tenantId) {
-                return Optional.of(current);
+                return Optional.of(current.forTenant(tenantId));
             }
 
             @Override
             public List<MaskingKey> searchKeys(String tenantId) {
-                return List.of(current, old);
+                return List.of(current.forTenant(tenantId), old.forTenant(tenantId));
             }
         });
         String newDecision = evaluate(after, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 30))
                 .decisionId();
 
-        assertThat(stores.decisions.get(0).maskedInputsJson()).contains("hmac:k1:" + hmacHex(KEY_A, NATIONAL_ID));
-        assertThat(stores.decisions.get(1).maskedInputsJson()).contains("hmac:k2:" + hmacHex(KEY_B, NATIONAL_ID));
+        assertThat(stores.decisions.get(0).maskedInputsJson()).contains("hmac:k1:"
+                + hmacHex(subkey(KEY_A, "bank-a"), NATIONAL_ID));
+        assertThat(stores.decisions.get(1).maskedInputsJson()).contains("hmac:k2:"
+                + hmacHex(subkey(KEY_B, "bank-a"), NATIONAL_ID));
         caller.become("bank-a", "auditor", AUDIT);
         assertThat(after.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)).items())
                 .extracting(LoggedDecision::decisionId).containsExactlyInAnyOrder(oldDecision, newDecision);
@@ -417,7 +419,7 @@ class MaskedInputsTest {
         assertThat(stores.outbox.get(before + 1).payload()).contains("\"matches\":0");
         for (int i = before; i < stores.outbox.size(); i++) {
             assertThat(stores.outbox.get(i).payload()).doesNotContain(NATIONAL_ID, "079090000000",
-                    hmacHex(KEY_A, NATIONAL_ID), hmacHex(KEY_A, "079090000000"));
+                    hmacHex(subkey(KEY_A, "bank-a"), NATIONAL_ID), hmacHex(subkey(KEY_A, "bank-a"), "079090000000"));
         }
     }
 
@@ -482,7 +484,8 @@ class MaskedInputsTest {
         LifecycleEventPayloadTest.conformsTo("rules.decision-log.masked-input-searched.v1.schema.json", refused);
         assertThat(refused.path("outcome").asString()).isEqualTo("RATE_LIMITED");
         assertThat(refused.path("matches").asInt()).isZero();
-        assertThat(stores.outbox.get(before).payload()).doesNotContain(NATIONAL_ID, hmacHex(KEY_A, NATIONAL_ID));
+        assertThat(stores.outbox.get(before).payload()).doesNotContain(NATIONAL_ID,
+                hmacHex(subkey(KEY_A, "bank-a"), NATIONAL_ID));
 
         // Another caller of the same tenant has its own allowance.
         caller.become("bank-a", "second-auditor", AUDIT);
@@ -513,6 +516,64 @@ class MaskedInputsTest {
         engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID));
         assertThatThrownBy(() -> engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)))
                 .isInstanceOf(io.github.dhluong90.bpm.rules.api.RateLimitedException.class);
+    }
+
+    /** The HKDF-SHA256 tenant subkey, computed here independently of the engine (RFC 5869, empty salt, 32 bytes). */
+    static byte[] subkey(byte[] hostKey, String tenant) throws Exception {
+        Mac extract = Mac.getInstance("HmacSHA256");
+        extract.init(new SecretKeySpec(new byte[32], "HmacSHA256"));
+        byte[] prk = extract.doFinal(hostKey);
+        Mac expand = Mac.getInstance("HmacSHA256");
+        expand.init(new SecretKeySpec(prk, "HmacSHA256"));
+        expand.update(("horus-bpm/masking/v1/tenant/" + tenant).getBytes(StandardCharsets.UTF_8));
+        expand.update((byte) 1);
+        return expand.doFinal();
+    }
+
+    @Test
+    void RLE_012_tenants_sharing_the_host_key_get_different_tokens_from_their_own_subkeys() throws Exception {
+        RuleEngines engines = engines(MaskingPolicy.withKey(MaskingKey.of(KEY_A)));
+        publish(engines, "bank-a", MINOR_REVIEW, "minor-review");
+        publish(engines, "bank-b", MINOR_REVIEW, "minor-review");
+        evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16));
+        evaluate(engines, "bank-b", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16));
+
+        String inA = stores.decisions.get(0).maskedInputsJson();
+        String inB = stores.decisions.get(1).maskedInputsJson();
+        assertThat(inA).contains("hmac:k1:" + hmacHex(subkey(KEY_A, "bank-a"), NATIONAL_ID));
+        assertThat(inB).contains("hmac:k1:" + hmacHex(subkey(KEY_A, "bank-b"), NATIONAL_ID));
+        assertThat(inA).isNotEqualTo(inB).doesNotContain(hmacHex(KEY_A, NATIONAL_ID));
+        assertThat(inB).doesNotContain(hmacHex(KEY_A, NATIONAL_ID));
+    }
+
+    @Test
+    void RLE_012_an_explicit_tenant_key_is_used_as_it_is() throws Exception {
+        RuleEngines engines = engines(keys(Map.of("bank-a", KEY_B), Set.of()));
+        publish(engines, "bank-a", MINOR_REVIEW, "minor-review");
+
+        evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16));
+
+        assertThat(stores.decisions.getFirst().maskedInputsJson())
+                .contains("hmac:k1:" + hmacHex(KEY_B, NATIONAL_ID))
+                .doesNotContain(hmacHex(subkey(KEY_B, "bank-a"), NATIONAL_ID));
+    }
+
+    @Test
+    void TR_SEC_10_hkdf_matches_rfc_5869_and_the_documented_tenant_vector() {
+        // RFC 5869 test case 3: SHA-256, IKM 22 bytes of 0x0b, no salt, no info, L = 42.
+        byte[] okm = MaskingKey.hkdfSha256(bytes(22, (char) 0x0b), new byte[0], new byte[0], 42);
+        assertThat(HexFormat.of().formatHex(okm)).isEqualTo("8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e"
+                + "5f3c738d2d9d201395faa4b61a96c8");
+        // The vector of DESIGN section 6 and the wiki: host key 00 01 .. 1f, tenant bank-a, value 079090001234.
+        byte[] host = new byte[32];
+        for (int i = 0; i < 32; i++) {
+            host[i] = (byte) i;
+        }
+        assertThat(MaskingKey.of(host).forTenant("bank-a").fingerprint(NATIONAL_ID))
+                .isEqualTo("hmac:k1:e33165b4a825adb209efdafa2da3414acec8cc341b041985c539c537f69beeac");
+        assertThat(MaskingKey.of(host).forTenant("bank-b").fingerprint(NATIONAL_ID))
+                .isEqualTo("hmac:k1:4edfc45a138147c7adcfee3a67777fc17e3ac39db08af486b31929448eb809d7");
+        assertThat(MaskingKey.of("k7", host).forTenant("bank-a").keyId()).isEqualTo("k7");
     }
 
     static String hmacHex(byte[] key, String value) throws Exception {

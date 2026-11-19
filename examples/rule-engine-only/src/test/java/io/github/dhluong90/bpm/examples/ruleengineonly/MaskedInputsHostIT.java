@@ -95,7 +95,8 @@ class MaskedInputsHostIT {
             send(port, TestTokens.bearer("teller"), "POST", "/decisions/minor-review:evaluate",
                     "{\"inputs\": {\"nationalId\": \"" + NATIONAL_ID + "\", \"age\": 40}}", "application/json");
 
-            String fingerprint = "hmac:k1:" + hmacHex(K32, NATIONAL_ID);
+            // bank-a shares the host key, so its token is made with its HKDF subkey, computed here independently.
+            String fingerprint = "hmac:k1:" + hmacHex(tenantSubkey(K32, "bank-a"), NATIONAL_ID);
             JdbcClient jdbc = host.getBean(JdbcClient.class);
             assertThat(jdbc.sql("SELECT masked_inputs ->> 'nationalId' FROM rle_decision WHERE id = :id")
                     .param("id", decisionId).query(String.class).single()).isEqualTo(fingerprint);
@@ -229,6 +230,17 @@ class MaskedInputsHostIT {
             throw new IllegalStateException("cannot create test database " + name, e);
         }
         return name;
+    }
+
+    /** HKDF-SHA256 (RFC 5869), empty salt, info "horus-bpm/masking/v1/tenant/<tenant>", 32 bytes. */
+    static byte[] tenantSubkey(byte[] hostKey, String tenant) throws Exception {
+        Mac extract = Mac.getInstance("HmacSHA256");
+        extract.init(new SecretKeySpec(new byte[32], "HmacSHA256"));
+        Mac expand = Mac.getInstance("HmacSHA256");
+        expand.init(new SecretKeySpec(extract.doFinal(hostKey), "HmacSHA256"));
+        expand.update(("horus-bpm/masking/v1/tenant/" + tenant).getBytes(StandardCharsets.UTF_8));
+        expand.update((byte) 1);
+        return expand.doFinal();
     }
 
     static String hmacHex(byte[] key, String value) throws Exception {

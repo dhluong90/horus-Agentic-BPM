@@ -83,7 +83,7 @@ curl -s -X POST "$HOST/api/bpm/rules/v1/decisions:find-by-masked-input" \
 
 Every search writes one audit entry, the event `rules.decision-log.masked-input-searched.v1`, in the same transaction: who searched, which rule set and input, the period, how many decisions were found, the key ids used and the correlation id. It never holds the value or its fingerprint. Each token carries the id of the key that made it, `hmac:<keyId>:<hex>`, and the search tries every key your tenant holds.
 
-Each tenant can have its own key, so two banks on one host store different tokens for the same id and never find each other's decisions. To mask every input that declares nothing, set `decision-log.mask-default: true` for the host or `masking.tenants.<tenant>.mask-default: true` for one tenant; `mask: false` keeps an input in plain text.
+Two banks on one host always store different tokens for the same id: a tenant with its own key uses it as it is, and every other tenant uses its own subkey derived from the host key (see [Masking keys](Rule-Engine-Configuration#masking-keys)), never the host key itself. Neither bank finds the other's decisions. To mask every input that declares nothing, set `decision-log.mask-default: true` for the host or `masking.tenants.<tenant>.mask-default: true` for one tenant; `mask: false` keeps an input in plain text.
 
 ## Choose transactional or async logging
 
