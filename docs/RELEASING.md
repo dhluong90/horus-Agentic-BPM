@@ -18,7 +18,7 @@ The workflow "Release (dry run)" (`.github/workflows/release.yml`) runs the same
 |---|---|---|
 | 0 | Preflight | Trial mode in CI; a dirty working tree; on a tag, a version other than the tag's or a commit not on `main`; another Node version |
 | 1 | `mvn clean` and `cockpit/web/dist` deleted, so nothing left from another build is packaged; `BUILD-INFO.json` written | |
-| 2 | `tools/release/build-cockpit.sh` (meant for the container image too; see "One cockpit build"): `npm ci --ignore-scripts` for the release tools (`tools/release/npm`) and the cockpit; `lockfile-lint` on both lockfiles; `npm audit signatures`. npm is offline from here on | A lockfile entry points outside the npm registry, lacks HTTPS or an integrity hash, or a registry signature does not verify |
+| 2 | `tools/release/build-cockpit.sh` (meant for the container image too; see "One cockpit build"): both lockfiles checked by `tools/release/lockfile-check.mjs` (Node built-ins only) before anything is installed; `npm ci --ignore-scripts` then `npm audit signatures`, for the release tools (`tools/release/npm`) and then the cockpit, before any of their code runs; `lockfile-lint` on both lockfiles as a second opinion. npm is offline from here on | A lockfile entry is not from `https://registry.npmjs.org/` or lacks a sha512 integrity, or a registry signature does not verify |
 | 3 | Same script: cockpit licence check, `tsc -b` and the cockpit's `vite build` through `tools/release/cockpit-build.mjs`, which records the npm packages in the bundle and writes the SHA-256 of every bundle file right after the build (`cockpit-bundle.txt`) | A production package is not under Apache 2.0, MIT or BSD |
 | 4 | Publishing guard on the effective POM, then `mvn deploy` into `target/release/maven-repo`: every test, the Maven licence gate and the Maven bill of materials | Any plugin other than `maven-deploy-plugin` bound to `deploy`, a build extension or a publishing plugin; any test or gate |
 | 5 | The staged starter jar in `maven-repo` (exactly one) must carry exactly the files recorded in step 3 under `META-INF/horus-cockpit/` | A file is missing, different or stale |
@@ -27,11 +27,11 @@ The workflow "Release (dry run)" (`.github/workflows/release.yml`) runs the same
 
 Maven runs with `tools/release/dry-run-settings.xml` as both user and global settings, so `~/.m2/settings.xml` and its credentials are never read. Without cockpit sources the cockpit parts are skipped and the log says "Java-only release".
 
-The release tools (`@cyclonedx/cyclonedx-npm`, `lockfile-lint`, and `ajv` for the schema check) are exact-version dev dependencies in `tools/release/npm/package-lock.json`. They are not part of the cockpit's dependency tree and never ship. To update one, change the version in `tools/release/npm/package.json` and run `npm install --package-lock-only --ignore-scripts` there.
+The release tools (`@cyclonedx/cyclonedx-npm`, `lockfile-lint`, and `ajv` with `ajv-formats` and `ajv-formats-draft2019` for the schema check) are exact-version dev dependencies in `tools/release/npm/package-lock.json`. They are not part of the cockpit's dependency tree, never ship, and are named on the `TR-LIC-01` allow-list of build tools. To update one, change the version in `tools/release/npm/package.json` and run `npm install --package-lock-only --ignore-scripts` there.
 
 ## One cockpit build
 
-`tools/release/build-cockpit.sh OUT_DIR` is the only way the shipped cockpit bundle is built. The release build calls it, and the container image (`deploy/docker/Dockerfile`) should call it in its cockpit stage. It is POSIX `sh` and needs only Node and npm, so it runs in the `node:22-alpine` stage. The same sources give the same bytes in both places: the bundle built in `node:22-alpine` and the one built on macOS had identical SHA-256 for all three files.
+`tools/release/build-cockpit.sh OUT_DIR` is the only way the shipped cockpit bundle is built. `OUT_DIR` must be outside `cockpit/web`. The script refuses `BPM_RELEASE_TRIAL=true` under CI, and `cockpit-modules.json` records the Node and npm versions and the trial flag of the build. The release build calls it, and the container image (`deploy/docker/Dockerfile`) should call it in its cockpit stage. It is POSIX `sh` and needs only Node and npm, so it runs in the `node:22-alpine` stage. The same sources give the same bytes in both places: the bundle built in `node:22-alpine` and the one built on macOS had identical SHA-256 for all three files.
 
 ## Expected output
 
@@ -68,6 +68,7 @@ A tag build (`BPM_RELEASE_TAG`, set by the workflow on tag pushes) fails unless:
 
 - the tag is `<module>/vX.Y.Z` and `<module>/pom.xml` exists;
 - the reactor version, and the module's version, are exactly `X.Y.Z`, so a `-SNAPSHOT` is never tagged as a release;
+- the group id of the reactor and of the module is `io.github.dhluong90.bpm` (ADR-0022), so no release ships under the old `com.horus.bpm` coordinates; the rename is #21;
 - the tagged commit is on `main` (`git merge-base --is-ancestor`).
 
 ## Local trial

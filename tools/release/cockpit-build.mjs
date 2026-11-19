@@ -9,7 +9,7 @@
 // then writes two files outside dist/, so nothing is added to the jar:
 // BUNDLE.txt is the SHA-256 of every file of dist/ (cockpit-hosts.json excepted, as in the starter's
 // resource rule), written right after the build in the `shasum -a 256` format, sorted by path.
-// MODULES.json records what is in the bundle:
+// MODULES.json records how and what was built: build (Node and npm versions, trial flag), then
 //   packages        every node_modules package with at least one module in the bundle: name, version,
 //                   licence and the package directory
 //   bundlerRuntime  packages whose runtime helpers the bundler injected (virtual modules such as
@@ -153,6 +153,12 @@ console.log(`${bundleOut}: SHA-256 of ${files.length} file(s) under dist/`);
 
 const sorted = (map) => [...map.values()].sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
 const result = {
+  // How this bundle was built; a trial build (another Node version) says so here (build-cockpit.sh).
+  build: {
+    node: process.version,
+    npm: process.env.BPM_BUILD_NPM_VERSION ?? '',
+    trial: process.env.BPM_BUILD_TRIAL === 'true',
+  },
   vite: readPackage(dirname(vitePackageJson)).version,
   packages: sorted(packages).map(({ directory, ...pkg }) => ({ ...pkg, directory: directory.slice(web.length + 1) })),
   bundlerRuntime: sorted(runtime),
