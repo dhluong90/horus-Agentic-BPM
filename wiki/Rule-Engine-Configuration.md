@@ -1,12 +1,12 @@
 # Configuration
 
-Reference for every `horus.bpm.rules.*` property of the Rule Engine starter and the permission strings its REST layer checks. _Design preview: two properties are built; the rest describe Rule Engine 0.1._
+Reference for every `horus.bpm.rules.*` property of the Rule Engine starter and the permission strings its REST layer checks. _Design preview: three properties are built; the rest describe Rule Engine 0.1._
 
 ## Status of each property
 
 | Status | Meaning |
 |---|---|
-| Built | Read by the starter in the first engine build ([pull request #12](https://github.com/dhluong90/horus-Agentic-BPM/pull/12)). Not yet released |
+| Built | Read by the starter on `main`. Not yet released |
 | 0.1 (M1) | Planned for Rule Engine 0.1, milestone M1, 15 Jan 2027. Setting it today has no effect |
 | 0.1 (M1), may move | Planned for 0.1; the [[Roadmap]] names the milestone it moves to if M1 runs late |
 | Pending PD-nnn | Waits for a product decision in the [decision log](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/product/decisions.md) |
@@ -42,10 +42,20 @@ All names are under `horus.bpm.rules.`.
 | `cache.epoch-check-interval` | `PT5S` | 0.1 (M1) | Interval of the `cache_epoch` sweep; this is the staleness bound when NOTIFY is unavailable |
 | `idempotency.retention` | `PT24H` | 0.1 (M1) | Lifetime of `rle_idempotency` rows |
 | `maker-checker.enabled` | `true` | 0.1 (M1) | `false` is refused unless the `dev` profile is active |
-| `tenancy.resolver` | `security-context` | 0.1 (M1) | `security-context`, `header:X-Tenant-Id` (behind a gateway only), or the name of a `TenantResolver` bean |
+| `tenancy.resolver` | `security-context` | 0.1 (M1) | `security-context`, `header:X-Tenant-Id` (behind a gateway only), or the name of a `TenantResolver` bean. Built for `/api/bpm/meta` and `/api/bpm/me` as the host-wide `horus.bpm.tenancy.resolver`, without the bean option; see [Host-wide properties](#host-wide-properties) |
 | `events.decision-evaluated` | `false` | 0.1 (M1) | Publish `rules.decision.evaluated.v1` for every decision |
 | `scheduler.enabled` | `true` | 0.1 (M1) | Run the engine's scheduler thread (outbox relay, partition creation, partition drop, idempotency cleanup) on this replica |
-| `security.role-permissions` | empty | 0.1 (M1) | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities) |
+| `security.role-permissions` | empty | Built | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities). Read by `/api/bpm/me` today; the engine endpoints use it from 0.1. A permission outside the six below stops the start-up |
+
+### Host-wide properties
+
+These are under `horus.bpm.` and apply to every engine in the host. They are read by the host metadata endpoints, `/api/bpm/meta` and `/api/bpm/me` ([[Host Metadata and Permissions]]).
+
+| Property | Default | Status | Meaning |
+|---|---|---|---|
+| `host-id` | unset | Built | Id clients show for this host, 1 to 40 characters; returned as `hostId` by `/api/bpm/meta` |
+| `tenancy.resolver` | `security-context` | Built | `security-context`: the tenant is a claim of the caller's token. `header:<name>`: a trusted gateway sets the header; outside the `dev` profile the host logs a warning at start-up. Any other value stops the start-up |
+| `tenancy.claim` | `tenant_id` | Built | Token claim that carries the tenant in `security-context` mode |
 
 Properties with a prefix of `tenancy`, `masking` and `rest.cors` are shared with the Process Engine starter under `horus.bpm.processes.*`; when both engines run in one host, set them once under `horus.bpm.*`.
 
@@ -58,9 +68,14 @@ There is no `clock` property either. The engine's time comes from the host's `Cl
 ```yaml
 horus:
   bpm:
+    host-id: loans                 # optional
     rules:
-      enabled: true            # default
-      migrate-on-start: true   # default
+      enabled: true                # default
+      migrate-on-start: true       # default
+      security:
+        role-permissions:
+          ROLE_PRICING_ANALYST:  [rules:read, rules:author]
+          ROLE_PRICING_APPROVER: [rules:read, rules:approve]
 ```
 
 On a clean database on 19 Nov 2026, start-up logs two lines from the engine:
@@ -119,7 +134,7 @@ The REST layer checks `hasAuthority('<permission>')` on the authenticated princi
 | Way | How |
 |---|---|
 | Authorities from the token | A `JwtAuthenticationConverter` (or your OIDC mapper) emits the permission strings directly, for example from a `permissions` claim |
-| Roles to permissions | `security.role-permissions` maps the host's role authorities to engine permissions; the starter adds the mapped permissions to the principal for engine endpoints only |
+| Roles to permissions | `security.role-permissions` maps the host's role authorities to engine permissions; the starter adds the mapped permissions to the principal for engine endpoints only. `/api/bpm/me` lists them already |
 
 ```yaml
 horus.bpm.rules.security.role-permissions:
@@ -128,7 +143,7 @@ horus.bpm.rules.security.role-permissions:
   ROLE_SERVICE:      [rules:evaluate]
 ```
 
-The endpoint-to-permission table is in [[Rule Engine Decision API]].
+The endpoint-to-permission table is in [[Rule Engine Decision API]]. To see what a caller holds, call `GET /api/bpm/me` ([[Host Metadata and Permissions]]).
 
 ## Local development
 

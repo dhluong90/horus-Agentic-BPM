@@ -14,7 +14,7 @@ Each numbered step is a control the request passes. Steps 1 to 3 run in your gat
 | `header:X-Tenant-Id` | Trusted header set by a gateway after authentication | The gateway terminates authentication and the host network is private |
 | Bean name | Host `TenantResolver` implementation | Tenant from path, subdomain or session |
 
-Rules that hold in every mode: every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant.
+Rules that hold in every mode: every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant. Until tenant switching arrives (M2), an `X-Tenant-Id` header that differs from the token tenant is refused with `403 TENANT_NOT_ALLOWED` and the security log entry `tenant.switch.refused`; this is built for `/api/bpm/meta` and `/api/bpm/me` ([[Host Metadata and Permissions]]).
 
 ## Permissions
 

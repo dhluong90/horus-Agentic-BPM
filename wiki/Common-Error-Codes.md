@@ -1,6 +1,6 @@
 # Common Error Codes
 
-Every error from the Rule Engine (`/api/bpm/rules/v1`) and the Process Engine (`/api/bpm/processes/v1`) is an RFC 9457 `application/problem+json` body with a stable `code`. This page has one heading per code. The `type` URI of a problem points at that heading, for example `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#unique_hit_violation` (ADR-0010). Branch on `code`, never on `type`. _Design preview: the codes are reviewed here before the code exists._
+Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/api/bpm/processes/v1`) and the host metadata endpoints (`/api/bpm/meta`, `/api/bpm/me`, [[Host Metadata and Permissions]]) is an RFC 9457 `application/problem+json` body with a stable `code`. This page has one heading per code. The `type` URI of a problem points at that heading, for example `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#unique_hit_violation` (ADR-0010). Branch on `code`, never on `type`. _Design preview: the codes are reviewed here before the code exists._
 
 ```json
 {
@@ -24,7 +24,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`) and the Process Engine (`
 | 400 | [QUERY_INVALID](#query_invalid) | both | M1 |
 | 401 | [UNAUTHENTICATED](#unauthenticated) | both | M1 |
 | 403 | [PERMISSION_DENIED](#permission_denied) | both | M1 |
-| 403 | [TENANT_NOT_ALLOWED](#tenant_not_allowed) | both | M2 |
+| 403 | [TENANT_NOT_ALLOWED](#tenant_not_allowed) | both | M1 on `/api/bpm/meta` and `/api/bpm/me` (switching off); M2 everywhere |
 | 403 | [SELF_APPROVAL_FORBIDDEN](#self_approval_forbidden) | both | M1 |
 | 403 | [CLOCK_NOT_ALLOWED](#clock_not_allowed) | rules | M1 |
 | 403 | [DRAFT_AUTHORING_DISABLED](#draft_authoring_disabled) | processes | M2 |
@@ -63,7 +63,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`) and the Process Engine (`
 `400`. A list query breaks a read limit (ADR-0015): `limit` above 200, a time range longer than 31 days, or `GET /decisions` without `ruleSet`, `from` and `to`. Narrow the query and page with the cursor.
 
 ### UNAUTHENTICATED
-`401`. No principal, or a token whose audience is another host. Sign in again or request a token for this host.
+`401`. No principal, a token whose audience is another host, or no tenant for the caller (a token without the tenant claim, or a missing gateway header). Sign in again or request a token for this host. The host returns this body when its security chain uses `BpmProblemAuthenticationEntryPoint` ([[Host Metadata and Permissions]]).
 
 ### PERMISSION_DENIED
 `403`. The principal lacks the permission the endpoint checks. Map the permission to the caller's role; see [[Multi-Tenancy and Security]].

@@ -30,6 +30,7 @@
 
 **Security and compliance**
 - [[Multi-tenancy and security|Multi-Tenancy-and-Security]]
+- [[Host metadata and permissions|Host-Metadata-and-Permissions]]
 
 **Reference**
 - [[Common error codes|Common-Error-Codes]]

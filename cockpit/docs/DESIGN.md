@@ -166,7 +166,7 @@ In Cockpit 0.1 the user works with one host at a time and switches from the top 
 
 ## 6. Host metadata: `/api/bpm/meta` and `/api/bpm/me`
 
-Both endpoints are served once per host by a small shared module that both engine starters depend on; each engine contributes its entry. Both require an authenticated caller and no other permission, return `Cache-Control: private, max-age=60` and an `ETag`, and ship in M1 (X-F-22).
+Both endpoints are served once per host by a small shared module that both engine starters depend on, [`bpm-host-metadata`](../../bpm-host-metadata/README.md); each engine contributes its entry. The OpenAPI document is [`bpm-host-metadata/api/openapi.yaml`](../../bpm-host-metadata/api/openapi.yaml); it references the two schemas below. Both require an authenticated caller and no other permission, return `Cache-Control: private, max-age=60` and an `ETag`, and ship in M1 (X-F-22).
 
 | Endpoint | Schema | Content |
 |---|---|---|
