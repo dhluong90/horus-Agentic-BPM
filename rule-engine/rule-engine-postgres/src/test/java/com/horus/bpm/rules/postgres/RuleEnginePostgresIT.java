@@ -174,6 +174,43 @@ class RuleEnginePostgresIT {
     }
 
     @Test
+    void RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches() {
+        // Given
+        publish("/rules/loan-pricing.yaml", "loan-pricing");
+        caller.as("bank-a", "teller-01");
+
+        // When
+        DecisionResult overlap = engines.ruleEngine().evaluate("loan-pricing",
+                DecisionInput.of(Map.of("score", 750, "income", Money.ofMinor("VND", 25_000_000))));
+        DecisionResult none = engines.ruleEngine().evaluate("loan-pricing",
+                DecisionInput.of(Map.of("score", 500, "income", Money.ofMinor("VND", 5_000_000))));
+
+        // Then
+        assertThat(overlap.outputs()).isEmpty();
+        assertThat(none.outputs()).isEmpty();
+        assertThat(JdbcClient.create(db).sql("""
+                SELECT outcome || ' ' || error_code || ' ' || matched_rule_ids::text || ' ' || COALESCE(outputs::text, 'no-outputs')
+                FROM rle_decision WHERE tenant_id = 'bank-a' AND rule_set_name = 'loan-pricing'
+                """).query(String.class).list())
+                .containsExactlyInAnyOrder("UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [\"R1\", \"R2\"] no-outputs",
+                        "UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [] no-outputs");
+    }
+
+    @Test
+    void RLE_003_collect_hit_policy_aggregates_matched_rules() {
+        publish("/rules/risk-flags.yaml", "risk-flags");
+        caller.as("bank-a", "teller-01");
+
+        DecisionResult result = engines.ruleEngine().evaluate("risk-flags",
+                DecisionInput.of(Map.of("txPerHour", 12, "country", "VN", "newDevice", true)));
+
+        assertThat(result.matchedRuleIds()).containsExactly("R1", "R3");
+        assertThat(JdbcClient.create(db).sql("SELECT outputs::text FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id")
+                .param("id", result.decisionId()).query(String.class).single())
+                .isEqualTo("{\"flags\": [\"HIGH_VELOCITY\", \"NEW_DEVICE\"], \"penalty\": 15}");
+    }
+
+    @Test
     void RLE_009_maker_checker_blocks_self_approval() {
         // Given
         engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()));
@@ -224,6 +261,14 @@ class RuleEnginePostgresIT {
         assertThat(decisionRows()).isZero();
     }
 
+    private void publish(String resource, String name) {
+        caller.as("bank-a", "alice");
+        engines.versionService().importRuleSet(ImportRequest.yaml(resource(resource)));
+        engines.versionService().requestPublish(name, 1, WriteOptions.none());
+        caller.as("bank-a", "bob");
+        engines.versionService().approve(name, 1, WriteOptions.none());
+    }
+
     private void publishCardFee() {
         caller.as("bank-a", "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()));
@@ -249,7 +294,11 @@ class RuleEnginePostgresIT {
     }
 
     static byte[] cardFee() {
-        try (InputStream in = RuleEnginePostgresIT.class.getResourceAsStream("/rules/card-fee.yaml")) {
+        return resource("/rules/card-fee.yaml");
+    }
+
+    static byte[] resource(String path) {
+        try (InputStream in = RuleEnginePostgresIT.class.getResourceAsStream(path)) {
             return in.readAllBytes();
         } catch (IOException e) {
             throw new IllegalStateException(e);
