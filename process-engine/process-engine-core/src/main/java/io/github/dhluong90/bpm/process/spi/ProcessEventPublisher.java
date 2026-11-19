@@ -6,11 +6,20 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Receives every engine event after the transaction of the state change it reports has committed, never for work
- * that rolled back. Delivery is at most once and not durable in this release: an event is lost if the process stops
- * between the commit and the call, so hosts must not use events for money movement, audit or cross-service
- * integration until an engine outbox exists. Types follow {@code processes.<aggregate>.<pastTense>.v1} (DESIGN
- * section 6.4). The starter's default hands events to the Spring application event publisher. Must be thread-safe.
+ * Receives every engine event inside the transaction of the state change it reports (process engine DESIGN sections
+ * 5.8 and 6.4), so the event and the state change commit or roll back together. Types follow
+ * {@code processes.<aggregate>.<pastTense>.v1}. The starter's default hands events to the Spring application event
+ * publisher. Must be thread-safe.
+ *
+ * <p>Listener contract:
+ * <ul>
+ *   <li>A durable consumer writes an outbox row in that transaction; the host relays it after commit. This is the
+ *       only way to integrate events with money movement, audit or other services.</li>
+ *   <li>A notification listener uses {@code @TransactionalEventListener(phase = AFTER_COMMIT)}: it runs at most once
+ *       and never for work that rolled back.</li>
+ *   <li>A plain listener runs inside the engine transaction: it must not do network I/O, and an exception it throws
+ *       rolls the state change back.</li>
+ * </ul>
  */
 @FunctionalInterface
 public interface ProcessEventPublisher {
