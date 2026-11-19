@@ -32,7 +32,35 @@ public final class Views {
                 .put("sourceHash", v.sourceHash()).put("nodeCount", v.nodeCount());
         putNullable(o, "approvedBy", v.approvedBy());
         o.put("createdBy", v.createdBy()).put("createdAt", v.createdAt().toString());
+        putNullable(o, "source", v.source());
+        o.put("lockVersion", v.lockVersion());
+        putNullable(o, "effectiveFrom", v.effectiveFrom() == null ? null : v.effectiveFrom().toString());
+        putNullable(o, "requestedBy", v.requestedBy());
+        putNullable(o, "requestedAt", v.requestedAt() == null ? null : v.requestedAt().toString());
+        putNullable(o, "approvedAt", v.approvedAt() == null ? null : v.approvedAt().toString());
+        putNullable(o, "decisionComment", v.decisionComment());
+        putNullable(o, "retiredBy", v.retiredBy());
+        putNullable(o, "retiredAt", v.retiredAt() == null ? null : v.retiredAt().toString());
+        if (v.supersededBy() == null) {
+            o.putNull("supersededBy");
+        } else {
+            o.put("supersededBy", v.supersededBy().intValue());
+        }
         return o;
+    }
+
+    /** @param entries lifecycle history @return JSON array */
+    public static ArrayNode definitionHistory(List<io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry> entries) {
+        ArrayNode out = EngineJson.NODES.arrayNode();
+        for (var e : entries) {
+            ObjectNode o = out.addObject();
+            o.put("action", e.action());
+            putNullable(o, "fromStatus", e.fromStatus());
+            o.put("toStatus", e.toStatus()).put("actor", e.actor());
+            putNullable(o, "comment", e.comment());
+            o.put("occurredAt", e.occurredAt().toString());
+        }
+        return out;
     }
 
     static String definitionToJson(DefinitionVersion v) {
@@ -45,7 +73,16 @@ public final class Views {
                 n.get("status").stringValue(), text(n, "name"), n.get("definitionHash").stringValue(),
                 SourceFormat.valueOf(n.get("sourceFormat").stringValue()), n.get("sourceHash").stringValue(),
                 n.get("nodeCount").intValue(), text(n, "approvedBy"), n.get("createdBy").stringValue(),
-                Instant.parse(n.get("createdAt").stringValue()));
+                Instant.parse(n.get("createdAt").stringValue()), text(n, "source"),
+                n.has("lockVersion") ? n.get("lockVersion").longValue() : 0, instant(n, "effectiveFrom"),
+                text(n, "requestedBy"), instant(n, "requestedAt"), instant(n, "approvedAt"), text(n, "decisionComment"),
+                text(n, "retiredBy"), instant(n, "retiredAt"),
+                n.has("supersededBy") && !n.get("supersededBy").isNull() ? n.get("supersededBy").intValue() : null);
+    }
+
+    private static Instant instant(JsonNode n, String field) {
+        String value = text(n, field);
+        return value == null ? null : Instant.parse(value);
     }
 
     /** @param i instance @return JSON tree */

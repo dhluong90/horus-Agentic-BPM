@@ -26,6 +26,41 @@ class DevOnlyRelaxationTest {
         assertThatCode(() -> guard("dev", "test")).doesNotThrowAnyException();
     }
 
+    @Test
+    void PRE_022_dev_only_relaxations_refused_outside_dev_for_each_start_up() {
+        // (a) prod with auto-approve, (b) prod with maker-checker off, (d) dev,prod with auto-approve: refused
+        assertThatThrownBy(() -> startUp(new String[] {"prod"}, "horus.bpm.processes.definitions.auto-approve", "true"))
+                .as("(a)").hasMessageContaining("horus.bpm.processes.definitions.auto-approve")
+                .hasMessageContaining("dev profile");
+        assertThatThrownBy(() -> startUp(new String[] {"prod"}, "horus.bpm.processes.maker-checker.enabled", "false"))
+                .as("(b)").hasMessageContaining("horus.bpm.processes.maker-checker.enabled")
+                .hasMessageContaining("dev profile");
+        assertThatThrownBy(() -> startUp(new String[] {"dev", "prod"}, "horus.bpm.processes.definitions.auto-approve",
+                "true")).as("(d)").hasMessageContaining("dev profile");
+        // (e) the removed key, whatever its value and on any profile, names its replacement
+        for (String value : new String[] {"false", "true"}) {
+            assertThatThrownBy(() -> startUp(new String[] {"dev"}, "horus.bpm.processes.definitions-auto-approve", value))
+                    .as("(e) " + value).hasMessageContaining("horus.bpm.processes.definitions-auto-approve")
+                    .hasMessageContaining("horus.bpm.processes.definitions.auto-approve");
+        }
+        // (c) dev alone with auto-approve, and dev with maker-checker off: accepted
+        assertThatCode(() -> startUp(new String[] {"dev"}, "horus.bpm.processes.definitions.auto-approve", "true"))
+                .as("(c)").doesNotThrowAnyException();
+        assertThatCode(() -> startUp(new String[] {"dev"}, "horus.bpm.processes.maker-checker.enabled", "false"))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> startUp(new String[] {"prod"}, "horus.bpm.processes.maker-checker.enabled", "true"))
+                .doesNotThrowAnyException();
+    }
+
+    private static void startUp(String[] profiles, String property, String value) {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles(profiles);
+        environment.setProperty(property, value);
+        ProcessEngineProperties properties = org.springframework.boot.context.properties.bind.Binder.get(environment)
+                .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class);
+        ProcessEngineAutoConfiguration.requireDevOnlyRelaxations(environment, properties);
+    }
+
     private static void guard(String... active) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(active);

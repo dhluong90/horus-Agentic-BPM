@@ -12,11 +12,69 @@ import java.util.Optional;
  */
 public interface ProcessStore {
 
-    /** Definition version as stored. */
+    /** Definition version as stored, with its lifecycle fields (DESIGN sections 3.2 and 7). */
     record StoredDefinition(String tenantId, String id, String key, int version, String status, String name,
             String definitionJson, String definitionHash, String sourceFormat, String sourceDocument, String sourceHash,
             int nodeCount, String source, Instant effectiveFrom, String createdBy, Instant createdAt, String approvedBy,
-            Instant approvedAt) {
+            Instant approvedAt, long lockVersion, String requestedBy, Instant requestedAt, String decisionComment,
+            String retiredBy, Instant retiredAt, Integer supersededBy) {
+
+        /** A new version as imported, lock version 0, no lifecycle fields beyond the approval of a dev import. */
+        public StoredDefinition(String tenantId, String id, String key, int version, String status, String name,
+                String definitionJson, String definitionHash, String sourceFormat, String sourceDocument,
+                String sourceHash, int nodeCount, String source, Instant effectiveFrom, String createdBy,
+                Instant createdAt, String approvedBy, Instant approvedAt) {
+            this(tenantId, id, key, version, status, name, definitionJson, definitionHash, sourceFormat, sourceDocument,
+                    sourceHash, nodeCount, source, effectiveFrom, createdBy, createdAt, approvedBy, approvedAt, 0, null,
+                    null, null, null, null, null);
+        }
+
+        /** @return a copy {@code PENDING_APPROVAL}, requested by the actor */
+        public StoredDefinition requested(String actor, Instant at, Instant requestedEffectiveFrom) {
+            return new StoredDefinition(tenantId, id, key, version, "PENDING_APPROVAL", name, definitionJson,
+                    definitionHash, sourceFormat, sourceDocument, sourceHash, nodeCount, source, requestedEffectiveFrom,
+                    createdBy, createdAt, null, null, lockVersion + 1, actor, at, null, null, null, null);
+        }
+
+        /** @return a copy {@code ACTIVE}, approved by the approver, effective from the given time */
+        public StoredDefinition approved(String approver, Instant at, Instant effective, String comment) {
+            return new StoredDefinition(tenantId, id, key, version, "ACTIVE", name, definitionJson, definitionHash,
+                    sourceFormat, sourceDocument, sourceHash, nodeCount, source, effective, createdBy, createdAt,
+                    approver, at, lockVersion + 1, requestedBy, requestedAt, comment, null, null, null);
+        }
+
+        /** @return a copy back in {@code DRAFT}, with the reason; the request is cleared */
+        public StoredDefinition rejected(String reason) {
+            return new StoredDefinition(tenantId, id, key, version, "DRAFT", name, definitionJson, definitionHash,
+                    sourceFormat, sourceDocument, sourceHash, nodeCount, source, null, createdBy, createdAt, null, null,
+                    lockVersion + 1, null, null, reason, null, null, null);
+        }
+
+        /** @return a copy {@code RETIRED} by the actor, superseded by a version number or null */
+        public StoredDefinition retired(String actor, Instant at, Integer superseded) {
+            return new StoredDefinition(tenantId, id, key, version, "RETIRED", name, definitionJson, definitionHash,
+                    sourceFormat, sourceDocument, sourceHash, nodeCount, source, effectiveFrom, createdBy, createdAt,
+                    approvedBy, approvedAt, lockVersion + 1, requestedBy, requestedAt, decisionComment, actor, at,
+                    superseded);
+        }
+    }
+
+    /**
+     * One lifecycle transition of a definition version ({@code pre_definition_history}, append-only).
+     *
+     * @param tenantId tenant
+     * @param id row id
+     * @param definitionId version id
+     * @param action IMPORTED, REQUESTED, APPROVED, REJECTED or RETIRED
+     * @param fromStatus status before, or null
+     * @param toStatus status after
+     * @param actorId who
+     * @param comment comment or reason, or null
+     * @param detailsJson further fields, for example the approved source hash
+     * @param occurredAt when
+     */
+    record DefinitionHistoryRow(String tenantId, String id, String definitionId, String action, String fromStatus,
+            String toStatus, String actorId, String comment, String detailsJson, Instant occurredAt) {
     }
 
     /** Instance row; {@code sequence} is the kernel's id counter. */
@@ -43,6 +101,29 @@ public interface ProcessStore {
     Optional<StoredDefinition> definition(String tenant, String id);
 
     void insertDefinition(StoredDefinition definition);
+
+    Optional<StoredDefinition> definitionByVersion(String tenant, String key, int version);
+
+    /**
+     * Locks every version row of a key ({@code FOR UPDATE}, in version order), so lifecycle commands and the
+     * effective-date job of one key serialise.
+     *
+     * @return the versions, oldest first; empty when the key has none in the tenant
+     */
+    List<StoredDefinition> lockDefinitions(String tenant, String key);
+
+    /**
+     * Writes the lifecycle fields and the incremented lock version of a version.
+     *
+     * @param updated the new state; its {@code lockVersion} is the expected one plus 1
+     * @return rows updated: 1, or 0 when the stored lock version is not {@code updated.lockVersion() - 1}
+     */
+    int updateDefinition(StoredDefinition updated);
+
+    void appendDefinitionHistory(DefinitionHistoryRow row);
+
+    /** @return the history of a version, oldest first */
+    List<DefinitionHistoryRow> definitionHistory(String tenant, String definitionId);
 
     /**
      * @return false when an instance with the same business key exists (a concurrent start committed first)

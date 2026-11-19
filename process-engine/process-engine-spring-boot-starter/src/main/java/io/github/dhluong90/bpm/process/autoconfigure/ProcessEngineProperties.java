@@ -20,6 +20,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param security mapping of the host's roles to engine permissions
  * @param handlers local step settings
  * @param jobs timer and job settings
+ * @param makerChecker four eyes on definition approval
+ * @param lifecycle definition lifecycle settings
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -29,7 +31,9 @@ public record ProcessEngineProperties(
         @DefaultValue("PT24H") Duration idempotencyRetention,
         @DefaultValue Security security,
         @DefaultValue Handlers handlers,
-        @DefaultValue Jobs jobs) {
+        @DefaultValue Jobs jobs,
+        @DefaultValue MakerChecker makerChecker,
+        @DefaultValue Lifecycle lifecycle) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -74,6 +78,26 @@ public record ProcessEngineProperties(
         public Handlers {
             if (slowCallWarning.isNegative() || slowCallWarning.isZero()) {
                 throw new IllegalArgumentException("horus.bpm.processes.handlers.slow-call-warning must be positive");
+            }
+        }
+    }
+
+    /**
+     * @param enabled the requester of a definition version can never approve it; {@code false} is accepted on the
+     *     {@code dev} profile only (TR-SEC-11, PRE-022), and a self-approval is then recorded as
+     *     {@code system:dev-auto-approve}
+     */
+    public record MakerChecker(@DefaultValue("true") boolean enabled) {
+    }
+
+    /**
+     * @param reasonMaxLength longest rejection reason or approval comment, which land in the immutable history
+     */
+    public record Lifecycle(@DefaultValue("1000") int reasonMaxLength) {
+
+        public Lifecycle {
+            if (reasonMaxLength < 1 || reasonMaxLength > 10_000) {
+                throw new IllegalArgumentException("horus.bpm.processes.lifecycle.reason-max-length must be 1 to 10000");
             }
         }
     }
@@ -137,6 +161,6 @@ public record ProcessEngineProperties(
 
     EngineSettings toSettings() {
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
-                idempotencyRetention, handlers.slowCallWarning());
+                idempotencyRetention, handlers.slowCallWarning(), makerChecker.enabled(), lifecycle.reasonMaxLength());
     }
 }

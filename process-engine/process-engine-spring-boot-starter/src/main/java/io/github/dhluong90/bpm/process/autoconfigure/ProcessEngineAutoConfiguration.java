@@ -71,8 +71,10 @@ import org.springframework.transaction.PlatformTransactionManager;
 public class ProcessEngineAutoConfiguration {
 
     static final String DEV_PROFILE = "dev";
-    static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:start",
-            "processes:task:work");
+    static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
+            "processes:approve", "processes:start", "processes:task:work");
+    /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
+    static final String REMOVED_AUTO_APPROVE = "horus.bpm.processes.definitions-auto-approve";
     private static final Log LOG = LogFactory.getLog(ProcessEngineAutoConfiguration.class);
 
     @Bean
@@ -148,9 +150,7 @@ public class ProcessEngineAutoConfiguration {
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
             JdbcJobStore jobs, JobSettings jobSettings, ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
-        if (properties.definitions().autoApprove()) {
-            requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");
-        }
+        requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
                     + "(horus.bpm.processes.definitions.auto-approve, dev profile).");
@@ -170,6 +170,29 @@ public class ProcessEngineAutoConfiguration {
                         properties.handlers().slowCallWarning()), publisher,
                 properties.toSettings(), BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings);
+    }
+
+    /**
+     * Refuses, outside the {@code dev} profile, the relaxations of TR-SEC-11, and the removed auto-approve key on any
+     * profile (PRE-022).
+     *
+     * @param environment the environment
+     * @param properties the bound settings
+     */
+    static void requireDevOnlyRelaxations(Environment environment, ProcessEngineProperties properties) {
+        if (environment.containsProperty(REMOVED_AUTO_APPROVE)) {
+            throw new IllegalStateException(REMOVED_AUTO_APPROVE + " was removed; use "
+                    + "horus.bpm.processes.definitions.auto-approve, which is accepted only when the dev profile is "
+                    + "active on its own (PRE-022). Remove the old key whatever its value.");
+        }
+        if (properties.definitions().autoApprove()) {
+            requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");
+        }
+        if (!properties.makerChecker().enabled()) {
+            requireDevProfileOnly(environment, "horus.bpm.processes.maker-checker.enabled=false");
+            LOG.warn("Maker-checker for process definitions is off (horus.bpm.processes.maker-checker.enabled, dev "
+                    + "profile): a requester may approve their own version.");
+        }
     }
 
     /**

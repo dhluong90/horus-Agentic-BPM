@@ -1,5 +1,8 @@
 package io.github.dhluong90.bpm.process.rest;
 
+import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
+import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
+import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
@@ -18,6 +21,10 @@ import io.github.dhluong90.bpm.process.internal.service.Views;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -72,6 +79,102 @@ public class ProcessController {
                 new ImportRequest(SourceFormat.BPMN_XML, body, idempotencyKey));
         return json(HttpStatus.CREATED, Views.definition(version), null,
                 BASE + "/definitions/" + version.key() + "/versions/" + version.version());
+    }
+
+    /** Reads a definition version ({@code processes:read}); another tenant's version is {@code 404}. */
+    @GetMapping("/definitions/{key}/versions/{version}")
+    public ResponseEntity<byte[]> definitionVersion(@PathVariable("key") String key, @PathVariable("version") int version) {
+        DefinitionVersion v = definitions.find(DefinitionRef.of(key, version))
+                .orElseThrow(() -> new DefinitionNotFoundException("No version " + version + " of " + key));
+        return json(HttpStatus.OK, Views.definition(v), v.lockVersion(), null);
+    }
+
+    /** Lifecycle history of a version, oldest first ({@code processes:read}). */
+    @GetMapping("/definitions/{key}/versions/{version}/history")
+    public ResponseEntity<byte[]> definitionHistory(@PathVariable("key") String key,
+            @PathVariable("version") int version) {
+        List<DefinitionHistoryEntry> history = definitions.history(DefinitionRef.of(key, version));
+        tools.jackson.databind.node.ObjectNode body = EngineJson.NODES.objectNode();
+        body.set("items", Views.definitionHistory(history));
+        return json(HttpStatus.OK, body, null, null);
+    }
+
+    /**
+     * Requests approval of a draft ({@code processes:author} or {@code processes:deploy}). Body, optional:
+     * {@code effectiveFrom} (RFC 3339, not in the past). {@code If-Match} is required.
+     */
+    @PostMapping("/definitions/{key}/versions/{version}:request-approval")
+    public ResponseEntity<byte[]> requestApproval(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        JsonNode body = optionalBody(http);
+        Instant effectiveFrom = null;
+        String from = text(body, "effectiveFrom");
+        if (from != null) {
+            try {
+                effectiveFrom = OffsetDateTime.parse(from).toInstant();
+            } catch (DateTimeException e) {
+                throw new InputInvalidException("effectiveFrom must be an RFC 3339 date-time with an offset");
+            }
+        }
+        return version(definitions.requestApproval(DefinitionRef.of(key, version), lock, effectiveFrom, idempotencyKey));
+    }
+
+    /** Approves a pending version as a second person ({@code processes:approve}). Body, optional: {@code comment}. */
+    @PostMapping("/definitions/{key}/versions/{version}:approve")
+    public ResponseEntity<byte[]> approve(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        return version(definitions.approve(DefinitionRef.of(key, version), lock, text(optionalBody(http), "comment"),
+                idempotencyKey));
+    }
+
+    /** Sends a pending version back to draft ({@code processes:approve}). Body: {@code reason}, required. */
+    @PostMapping("/definitions/{key}/versions/{version}:reject")
+    public ResponseEntity<byte[]> reject(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        return version(definitions.reject(DefinitionRef.of(key, version), lock, text(optionalBody(http), "reason"),
+                idempotencyKey));
+    }
+
+    /** Retires an active version ({@code processes:approve}) or withdraws a draft ({@code processes:author}). */
+    @PostMapping("/definitions/{key}/versions/{version}:retire")
+    public ResponseEntity<byte[]> retire(@PathVariable("key") String key, @PathVariable("version") int version,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        long lock = requiredLockVersion(ifMatch);
+        return version(definitions.retire(DefinitionRef.of(key, version), lock, idempotencyKey));
+    }
+
+    private ResponseEntity<byte[]> version(DefinitionVersion v) {
+        return json(HttpStatus.OK, Views.definition(v), v.lockVersion(), null);
+    }
+
+    private static long requiredLockVersion(String ifMatch) {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new PreconditionRequiredException("Send If-Match with the version's lockVersion, for example \"0\"");
+        }
+        return lockVersion(ifMatch);
+    }
+
+    private static JsonNode optionalBody(HttpServletRequest http) throws IOException {
+        byte[] body = boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
+        return body.length == 0 ? EngineJson.NODES.objectNode() : parse(body);
+    }
+
+    private static String text(JsonNode body, String field) {
+        JsonNode value = body.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isString()) {
+            throw new InputInvalidException(field + " must be a string");
+        }
+        return value.stringValue();
     }
 
     /**

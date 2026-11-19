@@ -8,7 +8,11 @@ import io.github.dhluong90.bpm.process.api.TenantNotAllowedException;
 import io.github.dhluong90.bpm.process.api.SelfApprovalForbiddenException;
 import io.github.dhluong90.bpm.process.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
+import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
+import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
+import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
+import io.github.dhluong90.bpm.process.api.VersionSupersededException;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.IdempotencyKeyReuseException;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
@@ -101,7 +105,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     static final String PERMISSION_START = "processes:start";
     static final String PERMISSION_READ = "processes:read";
     static final String PERMISSION_TASK_WORK = "processes:task:work";
+    static final String PERMISSION_AUTHOR = "processes:author";
+    static final String PERMISSION_APPROVE = "processes:approve";
     static final String DEV_APPROVER = "system:dev-auto-approve";
+    /** Actor of a retirement made because a newer version took effect. */
+    static final String EFFECTIVE_DATE_ACTOR = "system:effective-date";
+    /** Version of the BPMN reader whose output an approval binds (DESIGN section 5.8). */
+    static final String READER_VERSION = "bpmn-subset-1";
     private static final System.Logger LOG = System.getLogger(ProcessServices.class.getName());
 
     private final TenantResolver tenants;
@@ -217,7 +227,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String requestHash = Hashes.sha256Parts("import", caller, request.format().name(), Hashes.sha256(bytes));
         return transactions.inTransaction(() -> idempotent(tenant, "import", request.idempotencyKey(), requestHash,
                 () -> {
-                    StoredDefinition latest = store.latestDefinition(tenant, process.id()).orElse(null);
+                    // Locks the key, so concurrent imports and lifecycle commands of one key serialise.
+                    List<StoredDefinition> versions = store.lockDefinitions(tenant, process.id());
+                    StoredDefinition latest = versions.isEmpty() ? null : versions.getLast();
                     if (latest != null && latest.definitionHash().equals(hash)) {
                         return view(latest);
                     }
@@ -229,13 +241,316 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
                             active ? DEV_APPROVER : null, active ? now : null);
                     store.insertDefinition(stored);
+                    lifecycleHistory(stored, "IMPORTED", null, caller, null, Map.of("source", source), now);
                     // One event per stored version, so its id is derived from the version id.
-                    publish(new ProcessEventPublisher.Event(io.github.dhluong90.bpm.process.internal.exec.Ids.child(
-                            stored.id(), 0), active ? "processes.definition.approved.v1"
-                            : "processes.definition.imported.v1", tenant, now,
-                            Map.of("definitionKey", stored.key(), "version", stored.version(), "definitionHash", hash)), null);
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("definitionKey", stored.key());
+                    payload.put("version", stored.version());
+                    payload.put("definitionHash", hash);
+                    if (active) {
+                        payload.put("approvedBy", DEV_APPROVER);
+                        payload.put("approvedAt", now.toString());
+                        payload.put("effectiveFrom", now.toString());
+                        payload.put("sourceHash", stored.sourceHash());
+                        payload.put("readerVersion", READER_VERSION);
+                        payload.put("source", source);
+                    }
+                    publishDefinition(stored, active ? "processes.definition.approved.v1"
+                            : "processes.definition.imported.v1", payload, now);
+                    if (active) {
+                        // PRE-022 (c): every auto-approved import is named in the log, with tenant and key.
+                        LOG.log(System.Logger.Level.WARNING, "process.definition.auto-approved tenant={0} key={1} "
+                                + "version={2} (definitions.auto-approve, dev profile)", tenant, stored.key(),
+                                stored.version());
+                        retireSuperseded(versions, stored, now);
+                    }
                     return view(stored);
                 }, Views::definitionToJson, Views::definitionFromJson));
+    }
+
+    // ---- definition lifecycle (ADR-0012, DESIGN section 3.2) -------------------------------------------------
+
+    @Override
+    public DefinitionVersion requestApproval(DefinitionRef ref, long expectedLockVersion, Instant effectiveFrom,
+            String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWithAny(PERMISSION_AUTHOR, PERMISSION_DEPLOY);
+        String requestHash = Hashes.sha256Parts("request-approval", caller, ref.key(), Integer.toString(ref.version()),
+                Long.toString(expectedLockVersion), String.valueOf(effectiveFrom));
+        return transactions.inTransaction(() -> idempotent(tenant, "request-approval", idempotencyKey, requestHash, () -> {
+            Locked locked = lockVersion(tenant, ref);
+            StoredDefinition current = locked.version();
+            requireStatus(current, "DRAFT", "request approval of");
+            requireLock(current, expectedLockVersion);
+            Instant now = clock.instant();
+            if (effectiveFrom != null && effectiveFrom.isBefore(now)) {
+                throw new InputInvalidException("effectiveFrom must not be in the past");
+            }
+            StoredDefinition updated = current.requested(caller, now, effectiveFrom);
+            write(updated);
+            lifecycleHistory(updated, "REQUESTED", current.status(), caller, null, Map.of(), now);
+            Map<String, Object> payload = definitionPayload(updated);
+            payload.put("requestedBy", caller);
+            payload.put("effectiveFrom", effectiveFrom == null ? null : effectiveFrom.toString());
+            payload.put("source", updated.source());
+            publishDefinition(updated, "processes.definition.publish-requested.v1", payload, now);
+            return view(updated);
+        }, Views::definitionToJson, Views::definitionFromJson));
+    }
+
+    @Override
+    public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_APPROVE);
+        String note = boundedComment(comment, false);
+        String requestHash = Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
+                Long.toString(expectedLockVersion), note);
+        return transactions.inTransaction(() -> idempotent(tenant, "approve", idempotencyKey, requestHash, () -> {
+            Locked locked = lockVersion(tenant, ref);
+            StoredDefinition current = locked.version();
+            requireStatus(current, "PENDING_APPROVAL", "approve");
+            // Four eyes (PRE-019): checked here, so the Java API and REST refuse alike, before anything is written.
+            boolean self = caller.equals(current.requestedBy());
+            if (self && settings.makerChecker()) {
+                throw new SelfApprovalForbiddenException("The requester of " + ref.key() + " v" + ref.version()
+                        + " cannot approve it");
+            }
+            requireLock(current, expectedLockVersion);
+            // An older version never overtakes a newer active one (PRE-021).
+            for (StoredDefinition other : locked.all()) {
+                if ("ACTIVE".equals(other.status()) && other.version() > current.version()) {
+                    throw new VersionSupersededException(ref.key() + " v" + other.version() + " is active; v"
+                            + ref.version() + " cannot be approved over it");
+                }
+            }
+            Instant now = clock.instant();
+            Instant effective = current.effectiveFrom() == null || current.effectiveFrom().isBefore(now) ? now
+                    : current.effectiveFrom();
+            // With maker-checker off (dev profile only) a self-approval is recorded as the system approver, so the
+            // table's four-eyes CHECK still holds; the history row names the person.
+            String approver = self ? DEV_APPROVER : caller;
+            StoredDefinition updated = current.approved(approver, now, effective, note);
+            write(updated);
+            lifecycleHistory(updated, "APPROVED", current.status(), caller, note,
+                    Map.of("sourceHash", updated.sourceHash(), "readerVersion", READER_VERSION,
+                            "effectiveFrom", effective.toString()), now);
+            Map<String, Object> payload = definitionPayload(updated);
+            payload.put("requestedBy", updated.requestedBy());
+            payload.put("effectiveFrom", effective.toString());
+            payload.put("source", updated.source());
+            payload.put("approvedBy", approver);
+            payload.put("approvedAt", now.toString());
+            payload.put("sourceHash", updated.sourceHash());
+            payload.put("readerVersion", READER_VERSION);
+            publishDefinition(updated, "processes.definition.approved.v1", payload, now);
+            if (!effective.isAfter(now)) {
+                retireSuperseded(locked.all(), updated, now);
+            } else {
+                // PRE-020: the older version stays effective until then; a replica-safe job retires it once.
+                jobs.insertJob(JobRow.due(tenant, Ulid.next(now), null, updated.id(), null, JobStore.DEFINITION_EFFECTIVE,
+                        null, effective, jobSettings.timerLease(), jobSettings.maxAttempts(),
+                        Values.write(Map.of("definitionKey", updated.key(), "version", updated.version()))), now);
+            }
+            return view(updated);
+        }, Views::definitionToJson, Views::definitionFromJson));
+    }
+
+    @Override
+    public DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_APPROVE);
+        String why = boundedComment(reason, true);
+        String requestHash = Hashes.sha256Parts("reject", caller, ref.key(), Integer.toString(ref.version()),
+                Long.toString(expectedLockVersion), why);
+        return transactions.inTransaction(() -> idempotent(tenant, "reject", idempotencyKey, requestHash, () -> {
+            StoredDefinition current = lockVersion(tenant, ref).version();
+            requireStatus(current, "PENDING_APPROVAL", "reject");
+            requireLock(current, expectedLockVersion);
+            Instant now = clock.instant();
+            StoredDefinition updated = current.rejected(why);
+            write(updated);
+            lifecycleHistory(updated, "REJECTED", current.status(), caller, why, Map.of(), now);
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("definitionKey", updated.key());
+            payload.put("version", updated.version());
+            payload.put("rejectedBy", caller);
+            payload.put("reason", why);
+            publishDefinition(updated, "processes.definition.rejected.v1", payload, now);
+            return view(updated);
+        }, Views::definitionToJson, Views::definitionFromJson));
+    }
+
+    @Override
+    public DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWithAny(PERMISSION_APPROVE, PERMISSION_AUTHOR);
+        String requestHash = Hashes.sha256Parts("retire", caller, ref.key(), Integer.toString(ref.version()),
+                Long.toString(expectedLockVersion));
+        return transactions.inTransaction(() -> idempotent(tenant, "retire", idempotencyKey, requestHash, () -> {
+            StoredDefinition current = lockVersion(tenant, ref).version();
+            String needed = switch (current.status()) {
+                case "ACTIVE" -> PERMISSION_APPROVE;
+                case "DRAFT" -> PERMISSION_AUTHOR;
+                default -> throw new InvalidStateException(ref.key() + " v" + ref.version() + " is " + current.status()
+                        + "; only an active version or a draft can be retired");
+            };
+            callerWith(needed);
+            requireLock(current, expectedLockVersion);
+            Instant now = clock.instant();
+            StoredDefinition updated = current.retired(caller, now, null);
+            write(updated);
+            lifecycleHistory(updated, "RETIRED", current.status(), caller, null, Map.of(), now);
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("definitionKey", updated.key());
+            payload.put("version", updated.version());
+            payload.put("retiredBy", caller);
+            publishDefinition(updated, "processes.definition.retired.v1", payload, now);
+            return view(updated);
+        }, Views::definitionToJson, Views::definitionFromJson));
+    }
+
+    @Override
+    public java.util.Optional<DefinitionVersion> find(DefinitionRef ref) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        return transactions.inTransaction(() -> versionOf(tenant, ref).map(ProcessServices::view));
+    }
+
+    @Override
+    public List<DefinitionHistoryEntry> history(DefinitionRef ref) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        return transactions.inTransaction(() -> {
+            StoredDefinition version = versionOf(tenant, ref).orElseThrow(() -> notFound(ref));
+            return store.definitionHistory(tenant, version.id()).stream()
+                    .map(h -> new DefinitionHistoryEntry(h.action(), h.fromStatus(), h.toStatus(), h.actorId(),
+                            h.comment(), h.occurredAt()))
+                    .toList();
+        });
+    }
+
+    /** The version and every version of its key, all locked. */
+    private record Locked(StoredDefinition version, List<StoredDefinition> all) {
+    }
+
+    private Locked lockVersion(String tenant, DefinitionRef ref) {
+        List<StoredDefinition> all = store.lockDefinitions(tenant, ref.key());
+        StoredDefinition version = all.stream().filter(d -> d.version() == ref.version()).findFirst()
+                .orElseThrow(() -> notFound(ref));
+        return new Locked(version, all);
+    }
+
+    private java.util.Optional<StoredDefinition> versionOf(String tenant, DefinitionRef ref) {
+        return store.definitionByVersion(tenant, ref.key(), ref.version());
+    }
+
+    private static DefinitionNotFoundException notFound(DefinitionRef ref) {
+        return new DefinitionNotFoundException("No version " + ref.version() + " of " + ref.key());
+    }
+
+    private static void requireStatus(StoredDefinition d, String expected, String action) {
+        if (!expected.equals(d.status())) {
+            throw new InvalidStateException("Cannot " + action + " " + d.key() + " v" + d.version() + ": it is "
+                    + d.status());
+        }
+    }
+
+    private static void requireLock(StoredDefinition d, long expected) {
+        if (d.lockVersion() != expected) {
+            throw new VersionConflictException(d.key() + " v" + d.version() + " is at lock version " + d.lockVersion());
+        }
+    }
+
+    private void write(StoredDefinition updated) {
+        if (store.updateDefinition(updated) != 1) {
+            throw new VersionConflictException(updated.key() + " v" + updated.version() + " changed concurrently");
+        }
+    }
+
+    private String boundedComment(String text, boolean required) {
+        if (text == null || text.isBlank()) {
+            if (required) {
+                throw new InputInvalidException("reason is required and must not be blank");
+            }
+            return null;
+        }
+        if (text.length() > settings.reasonMaxLength()) {
+            throw new InputInvalidException((required ? "reason" : "comment") + " must be at most "
+                    + settings.reasonMaxLength() + " characters, was " + text.length());
+        }
+        return text;
+    }
+
+    /**
+     * Retires every active version of the key older than the one now effective, each with its own history row and
+     * {@code retired.v1}. Runs under the key lock; a version already retired is left alone, so it happens once.
+     */
+    private void retireSuperseded(List<StoredDefinition> versions, StoredDefinition effective, Instant now) {
+        for (StoredDefinition older : versions) {
+            if ("ACTIVE".equals(older.status()) && older.version() < effective.version()) {
+                StoredDefinition retired = older.retired(EFFECTIVE_DATE_ACTOR, now, effective.version());
+                write(retired);
+                lifecycleHistory(retired, "RETIRED", older.status(), EFFECTIVE_DATE_ACTOR, null,
+                        Map.of("supersededBy", effective.version()), now);
+                Map<String, Object> payload = new LinkedHashMap<>();
+                payload.put("definitionKey", retired.key());
+                payload.put("version", retired.version());
+                payload.put("supersededBy", effective.version());
+                publishDefinition(retired, "processes.definition.retired.v1", payload, now);
+            }
+        }
+    }
+
+    /**
+     * The effective-date job (PRE-020): under the key lock, then the claim, retires the versions the approved one
+     * supersedes. A version no longer active by then (retired, or superseded itself) is consumed without effect.
+     */
+    private boolean fireDefinitionEffective(JobRow job, java.util.function.BooleanSupplier claimHeld) {
+        StoredDefinition target = store.definition(job.tenantId(), job.definitionId()).orElse(null);
+        List<StoredDefinition> versions = target == null ? List.of() : store.lockDefinitions(job.tenantId(), target.key());
+        if (!claimHeld.getAsBoolean()) {
+            return false;
+        }
+        StoredDefinition current = versions.stream().filter(d -> d.id().equals(job.definitionId())).findFirst()
+                .orElse(null);
+        if (current != null && "ACTIVE".equals(current.status())) {
+            retireSuperseded(versions, current, clock.instant());
+        }
+        return true;
+    }
+
+    private void lifecycleHistory(StoredDefinition d, String action, String from, String actor, String comment,
+            Map<String, Object> details, Instant now) {
+        store.appendDefinitionHistory(new ProcessStore.DefinitionHistoryRow(d.tenantId(), Ulid.next(now), d.id(), action,
+                from, d.status(), actor, comment, Values.write(details), now));
+    }
+
+    private static Map<String, Object> definitionPayload(StoredDefinition d) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("definitionKey", d.key());
+        payload.put("version", d.version());
+        payload.put("definitionHash", d.definitionHash());
+        return payload;
+    }
+
+    /** The event id is derived from the version id and its lock version, so a replayed transaction mints no new id. */
+    private void publishDefinition(StoredDefinition d, String type, Map<String, Object> payload, Instant now) {
+        publish(new ProcessEventPublisher.Event(io.github.dhluong90.bpm.process.internal.exec.Ids.child(d.id(),
+                d.lockVersion()), type, d.tenantId(), now, payload), null);
+    }
+
+    private String callerWithAny(String... permissions) {
+        String caller = callers.currentCallerId();
+        if (caller == null || caller.isBlank()) {
+            throw new UnauthenticatedException("No caller in the security context");
+        }
+        java.util.Set<String> held = callers.currentPermissions();
+        for (String p : permissions) {
+            if (held.contains(p)) {
+                return caller;
+            }
+        }
+        throw new PermissionDeniedException("Needs " + String.join(" or ", permissions));
     }
 
     /** Every handler a definition names must be registered, and decisions need a Rule Engine. */
@@ -322,7 +637,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * @return the handlers
      */
     public Map<String, JobHandler> jobHandlers() {
-        return Map.of(JobStore.TIMER, this::fireTimer);
+        return Map.of(JobStore.TIMER, this::fireTimer, JobStore.DEFINITION_EFFECTIVE, this::fireDefinitionEffective);
     }
 
     /**
@@ -589,7 +904,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private static DefinitionVersion view(StoredDefinition d) {
         return new DefinitionVersion(d.id(), d.key(), d.version(), d.status(), d.name(), d.definitionHash(),
                 SourceFormat.valueOf(d.sourceFormat()), d.sourceHash(), d.nodeCount(), d.approvedBy(), d.createdBy(),
-                d.createdAt());
+                d.createdAt(), d.source(), d.lockVersion(), d.effectiveFrom(), d.requestedBy(), d.requestedAt(),
+                d.approvedAt(), d.decisionComment(), d.retiredBy(), d.retiredAt(), d.supersededBy());
     }
 
     private <T> T idempotent(String tenant, String operation, String key, String requestHash,

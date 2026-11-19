@@ -43,6 +43,8 @@ public class ProcessProblemDetails {
             Map.entry("NO_EFFECTIVE_VERSION", HttpStatus.NOT_FOUND),
             Map.entry("INSTANCE_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("TASK_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("DEFINITION_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("VERSION_SUPERSEDED", HttpStatus.CONFLICT),
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("VERSION_CONFLICT", HttpStatus.CONFLICT),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),

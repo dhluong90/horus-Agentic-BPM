@@ -12,9 +12,30 @@ import java.util.Objects;
  * @param maxBytes {@code definitions.max-bytes}, at most {@link EngineDefaults#MAX_BYTES}
  * @param idempotencyRetention {@code idempotency.retention}
  * @param slowCallWarning {@code handlers.slow-call-warning}: local steps and event listeners slower than this are logged
+ * @param makerChecker {@code maker-checker.enabled}: when false (dev profile only, PRE-022) a requester may approve
+ *     their own definition version, recorded as approver {@code system:dev-auto-approve}
+ * @param reasonMaxLength {@code lifecycle.reason-max-length}: longest rejection reason or approval comment
  */
 public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
-        Duration slowCallWarning) {
+        Duration slowCallWarning, boolean makerChecker, int reasonMaxLength) {
+
+    /** Default longest rejection reason or approval comment. */
+    public static final int DEFAULT_REASON_MAX_LENGTH = 1_000;
+
+    /**
+     * Settings with maker-checker on and the default reason length.
+     *
+     * @param definitionsAutoApprove dev auto-approval
+     * @param maxNodes most nodes
+     * @param maxBytes largest document
+     * @param idempotencyRetention idempotency retention
+     * @param slowCallWarning slow call threshold
+     */
+    public EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
+            Duration slowCallWarning) {
+        this(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning, true,
+                DEFAULT_REASON_MAX_LENGTH);
+    }
 
     public EngineSettings {
         if (maxNodes < 2 || maxNodes > EngineDefaults.MAX_NODES) {
@@ -29,6 +50,9 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
         }
         if (slowCallWarning == null) {
             slowCallWarning = EngineDefaults.SLOW_CALL_WARNING;
+        }
+        if (reasonMaxLength < 1 || reasonMaxLength > 10_000) {
+            throw new IllegalArgumentException("lifecycle.reason-max-length must be 1 to 10000");
         }
     }
 
