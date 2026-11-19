@@ -2992,10 +2992,12 @@ The versions are the ones resolved in the build, recorded in the build's allow-l
 
 1. List each test image with its licence. Consequence: the list looks complete, but one licence per image misstates what an image contains. Keeping it right would need a per-image package licence scan for something that never ships.
 2. Keep images outside the allow-list, which covers libraries on a classpath or in a bundle (chosen). Consequence: one sentence in `TR-LIC-01` says where images are covered:
-   - test-only images are pinned by digest and never shipped;
+   - test-only images are never shipped and are to be pinned by digest (#288);
    - the example host image is covered by the image-scan gate and its bill of materials;
    - third-party images that a deployment file references, such as PostgreSQL in the Compose file, are named in the release notes with their licence.
 
 **Recommendation and decision.** Option 2. `TR-LIC-01` protects what reaches an adopter's service. A test image never does, and a deployment image is the adopter's own choice, which the release notes make visible. This concerns third-party material, not the project's own licence.
 
-**Follow-ups.** Documentation: the release notes name the PostgreSQL image of the Compose file and its licence. Maintainers (engineering): keep every test image pinned by digest.
+**Status, 2026-11-20.** Not every test image is pinned yet. On `main` the PostgreSQL test containers use a tag, and so does PgBouncer in #265. The Playwright image of CI and the PostgreSQL image of the Compose file are already pinned by digest. #288 pins the rest.
+
+**Follow-ups.** Documentation: the release notes name the PostgreSQL image of the Compose file and its licence. Maintainers (engineering): pin every test image by digest (#288), and keep new ones pinned.
