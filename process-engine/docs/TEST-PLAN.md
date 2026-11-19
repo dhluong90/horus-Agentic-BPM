@@ -5,7 +5,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 ## Strategy
 | Layer | Tool | Scope | Gate |
 |---|---|---|---|
-| Unit and property | JUnit 5, AssertJ, the project's seeded generator (PD-090) | Lifecycle guards, graph diff, RFC 8785 canonicaliser, calendar arithmetic, BPMN reader | Every pull request |
+| Unit and property | JUnit 5, AssertJ, jqwik | Lifecycle guards, graph diff, RFC 8785 canonicaliser, calendar arithmetic, BPMN reader | Every pull request |
 | Storage contract | Shared suite | In-memory and PostgreSQL adapters | Every pull request |
 | Integration and fault | Testcontainers, Toxiproxy | Two replicas, paused claimants, 2-connection pool, failover, rollup, partitions | Every pull request (PostgreSQL 16), nightly (full matrix) |
 | Query plans | `EXPLAIN (FORMAT JSON)` on a seeded database (1 million instances, 20 million history rows) | Every registered list query (`TR-PERF-07`) | Every pull request touching `process-engine-postgres` |
