@@ -68,6 +68,11 @@ jobs:
           java-version: ${{ matrix.java }}
           cache: maven
 
+      # A restored cache can hold *.lastUpdated markers of a download that failed in an earlier run; Maven
+      # then reports the artifact "(absent)" without asking Central again (#169). Ask again.
+      - name: Drop remembered download failures from the Maven cache
+        run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
+
       # The cockpit starter packages cockpit/web/dist; every leg builds the starter, and the example host's cockpit test needs it.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -133,7 +138,7 @@ jobs:
   dependency-gates:
     # TR-SEC-06, TR-LIC-01 and TR-LIC-02: policy checks, licence gate, SBOMs, licence notices in jars
     # and vulnerability scans. Tests run in the verify job; this job builds without them so both
-    # finish in parallel. Maven runs with --strict-checksums (.mvn/maven.config).
+    # finish in parallel. Maven runs with --strict-checksums and download retries (.mvn/maven.config).
     name: Dependency licences, SBOM and vulnerabilities
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -151,6 +156,11 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+
+      # A restored cache can hold *.lastUpdated markers of a download that failed in an earlier run; Maven
+      # then reports the artifact "(absent)" without asking Central again (#169). Ask again.
+      - name: Drop remembered download failures from the Maven cache
+        run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
 
       - name: Gate settings only in the root POM; Grype config lint
         run: |
