@@ -26,14 +26,14 @@ const SCREENS: readonly Screen[] = [
   {
     name: 'list',
     scenario: 'rules-author',
-    hash: '#/rule-sets',
+    hash: '#/rules',
     primary: { en: 'Import file', vi: 'Nhập tệp' },
     ready: async (page) => { await expect(page.locator('.dt--list .badge').first()).toBeVisible(); },
   },
   {
     name: 'table-try-it',
     scenario: 'rules-author',
-    hash: '#/rule-sets/card-fee/1',
+    hash: '#/rules/card-fee/1',
     primary: { en: 'New draft', vi: 'Tạo bản nháp' },
     prepare: async (page, locale) => {
       await page.locator('.try select').first().selectOption('GOLD');
@@ -45,7 +45,7 @@ const SCREENS: readonly Screen[] = [
   {
     name: 'editor-error',
     scenario: 'rules-author',
-    hash: '#/rule-sets/card-fee/1',
+    hash: '#/rules/card-fee/1',
     primary: { en: 'Save draft', vi: 'Lưu bản nháp' },
     prepare: async (page, locale) => {
       await page.getByRole('button', { name: locale === 'en' ? 'New draft' : 'Tạo bản nháp' }).click();
@@ -58,21 +58,21 @@ const SCREENS: readonly Screen[] = [
   {
     name: 'requester-pending',
     scenario: 'rules-author',
-    hash: '#/rule-sets/card-fee/2',
+    hash: '#/rules/card-fee/2',
     primary: { en: 'Approve and publish', vi: 'Phê duyệt và xuất bản' },
     ready: async (page) => { await expect(page.locator('.gate__reason')).toBeVisible(); },
   },
   {
     name: 'approver-changes',
     scenario: 'rules-approver',
-    hash: '#/rule-sets/card-fee/2',
+    hash: '#/rules/card-fee/2',
     primary: { en: 'Approve and publish', vi: 'Phê duyệt và xuất bản' },
     ready: async (page) => { await expect(page.locator('.change-mark').first()).toBeVisible(); },
   },
   {
     name: 'history',
     scenario: 'rules-author',
-    hash: '#/rule-sets/card-fee/1',
+    hash: '#/rules/card-fee/1',
     primary: { en: 'New draft', vi: 'Tạo bản nháp' },
     prepare: async (page, locale) => { await page.getByText(locale === 'en' ? 'History (3)' : 'Lịch sử (3)').click(); },
     ready: async (page) => { await expect(page.locator('.history__entry').nth(2)).toBeVisible(); },
@@ -80,7 +80,7 @@ const SCREENS: readonly Screen[] = [
   {
     name: 'source',
     scenario: 'rules-author',
-    hash: '#/rule-sets/card-fee/1/source',
+    hash: '#/rules/card-fee/1/source',
     primary: { en: 'New draft', vi: 'Tạo bản nháp' },
     ready: async (page) => { await expect(page.locator('.source__text')).toBeVisible(); },
   },

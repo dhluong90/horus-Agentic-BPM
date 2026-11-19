@@ -21,18 +21,18 @@ async function open(page: Page, scenario: Scenario, hash: string, locale: Locale
 }
 
 const SCREENS: { name: string; scenario: Scenario; hash: string; prepare?: (p: Page, l: Locale) => Promise<void> }[] = [
-  { name: 'list', scenario: 'rules-author', hash: '#/rule-sets' },
-  { name: 'table', scenario: 'rules-author', hash: '#/rule-sets/card-fee/1' },
-  { name: 'editor-error', scenario: 'rules-author', hash: '#/rule-sets/card-fee/1', prepare: async (p, l) => {
+  { name: 'list', scenario: 'rules-author', hash: '#/rules' },
+  { name: 'table', scenario: 'rules-author', hash: '#/rules/card-fee/1' },
+  { name: 'editor-error', scenario: 'rules-author', hash: '#/rules/card-fee/1', prepare: async (p, l) => {
     await p.getByRole('button', { name: l === 'en' ? 'New draft' : 'Tạo bản nháp' }).click();
     await p.getByRole('button', { name: l === 'en' ? 'Copy row R2' : 'Sao chép dòng R2' }).click();
     await p.getByLabel(l === 'en' ? 'Row R6, Balance' : 'Dòng R6, Balance').fill('>= 50000000');
     await p.getByRole('button', { name: l === 'en' ? 'Save draft' : 'Lưu bản nháp' }).click();
     await expect(p.locator('.cell-edit--bad').first()).toBeVisible();
   } },
-  { name: 'requester-pending', scenario: 'rules-author', hash: '#/rule-sets/card-fee/2' },
-  { name: 'approver-changes', scenario: 'rules-approver', hash: '#/rule-sets/card-fee/2' },
-  { name: 'source', scenario: 'rules-author', hash: '#/rule-sets/card-fee/1/source' },
+  { name: 'requester-pending', scenario: 'rules-author', hash: '#/rules/card-fee/2' },
+  { name: 'approver-changes', scenario: 'rules-approver', hash: '#/rules/card-fee/2' },
+  { name: 'source', scenario: 'rules-author', hash: '#/rules/card-fee/1/source' },
 ];
 
 for (const s of SCREENS) {
@@ -83,7 +83,7 @@ for (const s of SCREENS) {
 
 test('QA_fold_primary_at_1440x1200_and_900_for_approver', async ({ page }) => {
   for (const height of [900, 1200]) {
-    await open(page, 'rules-approver', '#/rule-sets/card-fee/2', 'vi', 'dark', height);
+    await open(page, 'rules-approver', '#/rules/card-fee/2', 'vi', 'dark', height);
     for (const name of ['Phê duyệt và xuất bản', 'Từ chối']) {
       const box = await page.getByRole('button', { name, exact: true }).boundingBox();
       expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(height);
@@ -92,7 +92,7 @@ test('QA_fold_primary_at_1440x1200_and_900_for_approver', async ({ page }) => {
 });
 
 test('QA_413_on_reject_shows_the_plain_message_and_code', async ({ page }) => {
-  await open(page, 'rules-approver', '#/rule-sets/card-fee/2');
+  await open(page, 'rules-approver', '#/rules/card-fee/2');
   await page.getByLabel(/Reason|Comment/).first().fill('x'.repeat(20_000));
   await page.getByRole('button', { name: 'Reject', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('The text is too long for the service.');
@@ -100,7 +100,7 @@ test('QA_413_on_reject_shows_the_plain_message_and_code', async ({ page }) => {
 });
 
 test('QA_413_on_save_draft_keeps_the_edits', async ({ page }) => {
-  await open(page, 'rules-author', '#/rule-sets/card-fee/1');
+  await open(page, 'rules-author', '#/rules/card-fee/1');
   await page.getByRole('button', { name: 'New draft' }).click();
   // Over the import limit of 1 MiB.
   await page.getByLabel('Row R2, Tier').fill("== '" + 'G'.repeat(1_100_000) + "'");
@@ -112,7 +112,7 @@ test('QA_413_on_save_draft_keeps_the_edits', async ({ page }) => {
 });
 
 test('QA_query_invalid_on_show_more_offers_restart_and_recovers', async ({ page }) => {
-  await open(page, 'rules-author', '#/rule-sets');
+  await open(page, 'rules-author', '#/rules');
   await page.unroute('**/api/bpm/rules/v1/**');
   let firstPages = 0;
   await page.route('**/api/bpm/rules/v1/rule-sets?**', async (route) => {
@@ -134,7 +134,7 @@ test('QA_query_invalid_on_show_more_offers_restart_and_recovers', async ({ page 
 });
 
 test('QA_double_click_request_publish_sends_one_request', async ({ page }) => {
-  await open(page, 'rules-author', '#/rule-sets/card-fee/1');
+  await open(page, 'rules-author', '#/rules/card-fee/1');
   // make a draft first
   await page.getByRole('button', { name: 'New draft' }).click();
   await page.getByRole('button', { name: 'Copy row R2' }).click();
@@ -159,7 +159,7 @@ test('QA_allowed_actions_reject_only_for_a_non_author_approver', async ({ page }
     if (request.method() === 'GET' && /\/versions\/2(\?.*)?$/.test(request.url())) body = JSON.stringify({ ...JSON.parse(body), allowedActions: ['reject'] });
     await route.fulfill({ status: answer.status, headers: answer.headers, body });
   });
-  await page.goto('./#/rule-sets/card-fee/2');
+  await page.goto('./#/rules/card-fee/2');
   await expect(page.getByTestId('header-user')).toBeVisible();
   const approve = page.getByRole('button', { name: 'Approve and publish' });
   await expect(approve).toBeDisabled();
@@ -167,7 +167,7 @@ test('QA_allowed_actions_reject_only_for_a_non_author_approver', async ({ page }
 });
 
 test('QA_reject_reason_is_required_and_shows_in_history', async ({ page }) => {
-  await open(page, 'rules-approver', '#/rule-sets/card-fee/2');
+  await open(page, 'rules-approver', '#/rules/card-fee/2');
   const reject = page.getByRole('button', { name: 'Reject', exact: true });
   await expect(reject).toBeDisabled();
   await page.getByLabel(/Reason|Comment/).first().fill('   ');
@@ -180,7 +180,7 @@ test('QA_reject_reason_is_required_and_shows_in_history', async ({ page }) => {
 });
 
 test('QA_CKP_030_import_next_version_of_existing_rule_set_from_its_page', async ({ page }) => {
-  await open(page, 'rules-author', '#/rule-sets/card-fee/1');
+  await open(page, 'rules-author', '#/rules/card-fee/1');
   const posts: string[] = [];
   page.on('response', (r) => { if (r.request().method() === 'POST') posts.push(`${new URL(r.url()).pathname} -> ${String(r.status())}`); });
   const chooser = page.waitForEvent('filechooser');
@@ -194,7 +194,7 @@ test('QA_CKP_030_import_next_version_of_existing_rule_set_from_its_page', async 
 });
 
 test('QA_import_twice_in_one_session', async ({ page }) => {
-  await open(page, 'rules-author', '#/rule-sets');
+  await open(page, 'rules-author', '#/rules');
   const doc = (n: string) => JSON.stringify({ schemaVersion: 1, ruleSet: n, hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }], rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] });
   for (const n of ['qa-one', 'qa-two']) {
     const chooser = page.waitForEvent('filechooser', { timeout: 5000 });
@@ -206,7 +206,7 @@ test('QA_import_twice_in_one_session', async ({ page }) => {
   }
 });
 
-for (const [name, scenario, hash] of [['table', 'rules-author', '#/rule-sets/card-fee/1'], ['approver', 'rules-approver', '#/rule-sets/card-fee/2'], ['list', 'ready', '#/rule-sets']] as const) {
+for (const [name, scenario, hash] of [['table', 'rules-author', '#/rules/card-fee/1'], ['approver', 'rules-approver', '#/rules/card-fee/2'], ['list', 'ready', '#/rules']] as const) {
   test(`QA_contrast_light_${name}`, async ({ page }) => {
     await open(page, scenario, hash, 'en', 'light');
     await page.waitForLoadState('networkidle');

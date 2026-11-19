@@ -5,42 +5,19 @@ import { useCallback, useSyncExternalStore } from 'react';
  * (the starter serves the cockpit at /bpm/cockpit/). Only navigation lives here; drafts stay in memory.
  */
 
-export const LENSES = ['table', 'changes', 'source'] as const;
-export type Lens = (typeof LENSES)[number];
-
-export type Route =
-  | { name: 'rule-sets' }
-  | { name: 'rule-set'; ruleSet: string; version: number | undefined; lens: Lens | undefined }
-  | { name: 'service' };
-
-function isLens(value: string | undefined): value is Lens {
-  return value !== undefined && (LENSES as readonly string[]).includes(value);
-}
+/** The app's areas. The rules area keeps its own sub-path (features/rules/routes.ts), as under /rules. */
+export type Route = { name: 'rules'; path: string } | { name: 'service' };
 
 export function parseRoute(hash: string): Route {
-  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
-  const [area, ruleSet, version, lens] = parts;
-  if (area === 'service') return { name: 'service' };
-  if (area === 'rule-sets' && ruleSet !== undefined) {
-    const number = version !== undefined && /^\d+$/.test(version) ? Number(version) : undefined;
-    return { name: 'rule-set', ruleSet, version: number, lens: isLens(lens) ? lens : undefined };
-  }
-  return { name: 'rule-sets' };
+  const path = hash.replace(/^#/, '');
+  if (/^\/?service\b/.test(path)) return { name: 'service' };
+  // "#/rules/card-fee/2"; "#/rules/..." is the earlier form and still opens.
+  const rules = /^\/?(?:rules|rule-sets)(\/.*)?$/.exec(path);
+  return { name: 'rules', path: rules?.[1] ?? '/' };
 }
 
 export function formatRoute(route: Route): string {
-  switch (route.name) {
-    case 'service':
-      return '#/service';
-    case 'rule-sets':
-      return '#/rule-sets';
-    case 'rule-set': {
-      const parts = ['rule-sets', encodeURIComponent(route.ruleSet)];
-      if (route.version !== undefined) parts.push(String(route.version));
-      if (route.version !== undefined && route.lens !== undefined) parts.push(route.lens);
-      return `#/${parts.join('/')}`;
-    }
-  }
+  return route.name === 'service' ? '#/service' : `#/rules${route.path === '/' ? '' : route.path}`;
 }
 
 function subscribe(onChange: () => void): () => void {

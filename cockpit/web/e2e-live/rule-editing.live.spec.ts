@@ -70,7 +70,7 @@ const rowHeads = (page: Page) => page.locator('table.dt tbody th[scope=row] .row
 test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ browser }) => {
   test.setTimeout(120_000);
   const lan = await signIn(browser, 'lan');
-  await openCockpit(lan, '#/rule-sets');
+  await openCockpit(lan, '#/rules');
 
   // Import a file: one POST with an Idempotency-Key, then the new draft opens.
   const chooser = lan.waitForEvent('filechooser');
@@ -90,7 +90,7 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
 
   // The approver opens the same link and approves.
   const minh = await signIn(browser, 'minh');
-  await openCockpit(minh, `#/rule-sets/${NAME}/1`);
+  await openCockpit(minh, `#/rules/${NAME}/1`);
   await expect(minh.getByText('First version: every row is new.')).toBeVisible();
   await minh.getByLabel('Comment or reason').fill('Fees match the tariff');
   await aboveFold(minh, 'Approve and publish');
@@ -131,7 +131,7 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
   await expect(lan.getByText('Version 2 is waiting for approval.')).toBeVisible();
 
   // The approver sends it back with a reason; the author sees it in the history and asks again.
-  await openCockpit(minh, `#/rule-sets/${NAME}/2`);
+  await openCockpit(minh, `#/rules/${NAME}/2`);
   await minh.getByLabel('Comment or reason').fill('R6 needs the pricing committee minutes');
   await minh.getByRole('button', { name: 'Reject' }).click();
   await expect(minh.getByText('Version 2 is back with its author.')).toBeVisible();

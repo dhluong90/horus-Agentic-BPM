@@ -2,7 +2,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toHostError } from '../../api/hostError';
 import type { RuleSetSummary } from '../../api/rules/schemas';
-import type { Route } from '../../app/route';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useRulesSession } from './api/rulesContext';
 import { useImportRuleSet, useRuleSets } from './api/useRules';
@@ -10,14 +9,16 @@ import { ImportFileButton } from './components/ImportFileButton';
 import { ProblemNotice } from './components/ProblemNotice';
 import { StatusBadge } from './components/StatusBadge';
 import { formatDateTime } from './model/dates';
+import { useRulesNavigation } from './routes';
 
 
 function SummaryRow({ summary }: { summary: RuleSetSummary }) {
   const { t, locale } = useI18n();
+  const { href } = useRulesNavigation();
   return (
     <tr>
       <th scope="row">
-        <a className="rs-link mono hit" href={`#/rule-sets/${encodeURIComponent(summary.ruleSet)}`}>{summary.ruleSet}</a>
+        <a className="rs-link mono hit" href={href({ name: 'rule-set', ruleSet: summary.ruleSet, version: undefined, lens: undefined })}>{summary.ruleSet}</a>
       </th>
       <td className="tnum">{t('ruleSets.versionShort', { version: String(summary.latestVersion) })}</td>
       <td><StatusBadge status={summary.latestStatus} /></td>
@@ -72,13 +73,14 @@ function ListBody() {
   );
 }
 
-export function RuleSetList({ navigate }: { navigate: (route: Route) => void }) {
+export function RuleSetList() {
+  const { go } = useRulesNavigation();
   const { t } = useI18n();
   const { can } = useRulesSession();
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const importFile = useImportRuleSet((version) => {
     setNotice(t('ruleSets.imported', { version: String(version.version), name: version.ruleSet }));
-    navigate({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'table' });
+    go({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'table' });
   });
 
   return (

@@ -40,7 +40,7 @@ const writes = () => calls.filter((c) => c.method === 'POST');
 
 describe('rule set list and version view', () => {
   it('CKP_030_list_shows_each_rule_set_with_latest_status_and_published_version', async () => {
-    open('#/rule-sets');
+    open('#/rules');
     const table = await screen.findByRole('table');
     const rows = within(table).getAllByRole('row').slice(1);
     await waitFor(() => { expect(within(rows[0] as HTMLElement).getByText('Waiting for approval')).toBeInTheDocument(); });
@@ -57,7 +57,7 @@ describe('rule set list and version view', () => {
       { type: 'x', title: 'Bad Request', status: 400, code: 'QUERY_INVALID', detail: 'The cursor was not issued by this endpoint', correlationId: '01JQUERY000000000000000000' },
       { status: 400, headers: { 'Content-Type': 'application/problem+json' } },
     ), { once: true }));
-    open('#/rule-sets');
+    open('#/rules');
     expect(await screen.findByText('The list changed while you were reading it.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Start the list again' }));
     expect(await screen.findByRole('table')).toHaveTextContent('kyc-risk');
@@ -66,7 +66,7 @@ describe('rule set list and version view', () => {
   it('TR_STD_01_a_json_file_is_sent_as_json', async () => {
     const user = userEvent.setup();
     const view = { container: document.body };
-    open('#/rule-sets');
+    open('#/rules');
     await screen.findByRole('table');
     const input = view.container.querySelector<HTMLInputElement>('input[type=file]');
     if (!input) throw new Error('file input missing');
@@ -79,14 +79,14 @@ describe('rule set list and version view', () => {
   });
 
   it('CKP_030_reader_without_author_permission_sees_no_import', async () => {
-    open('#/rule-sets', 'ready-approver');
+    open('#/rules', 'ready-approver');
     await screen.findByRole('table');
     expect(screen.queryByRole('button', { name: 'Import file' })).not.toBeInTheDocument();
   });
 
   it('CKP_030_version_reads_as_a_table_and_the_source_only_on_purpose', async () => {
     const user = userEvent.setup();
-    open('#/rule-sets/card-fee/1');
+    open('#/rules/card-fee/1');
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee Version 1');
     expect(screen.getByText('50,000,000 VND')).toBeInTheDocument();
     expect(screen.getAllByText('Any value').length).toBeGreaterThan(0);
@@ -98,7 +98,7 @@ describe('rule set list and version view', () => {
   });
 
   it('TR_UI_04_vietnamese_screen_is_one_language_with_vietnamese_amounts', async () => {
-    open('#/rule-sets/card-fee/1', 'rules-author', 'vi');
+    open('#/rules/card-fee/1', 'rules-author', 'vi');
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee Phiên bản 1');
     expect(screen.getByText('50.000.000 VND')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tạo bản nháp' })).toBeInTheDocument();
@@ -109,7 +109,7 @@ describe('rule set list and version view', () => {
 describe('minimal draft editing', () => {
   it('CKP_032_minimal_draft_editing_shows_errors_on_cells', async () => {
     const user = userEvent.setup();
-    open('#/rule-sets/card-fee/1');
+    open('#/rules/card-fee/1');
     await user.click(await screen.findByRole('button', { name: 'New draft' }));
     await user.clear(screen.getByLabelText('Row R1, Tier'));
     await user.click(screen.getByLabelText('Row R1, Tier'));
@@ -147,7 +147,7 @@ describe('minimal draft editing', () => {
 
   it('CKP_032_request_publish_sends_the_lock_version_and_waits_for_the_engine', async () => {
     const user = userEvent.setup();
-    open('#/rule-sets/card-fee/1');
+    open('#/rules/card-fee/1');
     await user.click(await screen.findByRole('button', { name: 'New draft' }));
     await user.clear(screen.getByLabelText('Row R3, Fee'));
     await user.type(screen.getByLabelText('Row R3, Fee'), '35000 VND');
@@ -161,7 +161,7 @@ describe('minimal draft editing', () => {
 
 describe('four eyes', () => {
   it('CKP_032_requester_sees_approve_disabled_with_the_reason', async () => {
-    open('#/rule-sets/card-fee/2');
+    open('#/rules/card-fee/2');
     const approve = await screen.findByRole('button', { name: 'Approve and publish' });
     expect(approve).toBeDisabled();
     expect(approve).toHaveAccessibleDescription(/Approve is unavailable\. You requested this change\. Another approver must decide\./);
@@ -169,7 +169,7 @@ describe('four eyes', () => {
 
   it('CKP_032_approver_reads_the_changes_and_approves', async () => {
     const user = userEvent.setup();
-    open('#/rule-sets/card-fee/2', 'rules-approver');
+    open('#/rules/card-fee/2', 'rules-approver');
     expect(await screen.findByText('Compared with version 1')).toBeInTheDocument();
     expect(screen.getByText('1 added, 2 changed, 0 moved, 0 removed')).toBeInTheDocument();
     expect(screen.getByText(/Aid: compared in this browser/)).toBeInTheDocument();
@@ -182,7 +182,7 @@ describe('four eyes', () => {
 
   it('RLE_025_approver_rejects_with_a_reason_and_the_history_shows_it', async () => {
     const user = userEvent.setup();
-    open('#/rule-sets/card-fee/2', 'rules-approver');
+    open('#/rules/card-fee/2', 'rules-approver');
     const reject = await screen.findByRole('button', { name: 'Reject' });
     expect(reject).toBeDisabled();
     expect(reject).toHaveAccessibleDescription('Reject needs a reason; it is kept in the history.');
@@ -197,7 +197,7 @@ describe('four eyes', () => {
   });
 
   it('RLE_043_PD_089_the_requester_never_rejects_their_own_request', async () => {
-    open('#/rule-sets/card-fee/2', 'rules-author-approver');
+    open('#/rules/card-fee/2', 'rules-author-approver');
     // Lan holds rules:approve here but wrote and requested v2: no Approve, and no Reject either.
     expect(await screen.findByRole('button', { name: 'Approve and publish' })).toBeDisabled();
     expect(screen.getByText(/Approve is unavailable\. You requested this change/)).toBeInTheDocument();
@@ -207,14 +207,14 @@ describe('four eyes', () => {
 
   it('RLE_043_a_disabled_approve_always_says_why', async () => {
     mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/card-fee/versions/2', () => HttpResponse.json({ ...pendingV2, allowedActions: ['reject'] })));
-    open('#/rule-sets/card-fee/2', 'rules-approver');
+    open('#/rules/card-fee/2', 'rules-approver');
     const approve = await screen.findByRole('button', { name: 'Approve and publish' });
     expect(approve).toBeDisabled();
     expect(approve).toHaveAccessibleDescription(/Approve is not available to you for this version\./);
   });
 
   it('PD_075_cockpit_drafts_off_hides_editing_and_keeps_import', async () => {
-    open('#/rule-sets/card-fee/1', 'rules-author-drafts-off');
+    open('#/rules/card-fee/1', 'rules-author-drafts-off');
     expect(await screen.findByText('Changes to this environment arrive through your release pipeline.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('link', { name: /All rule sets/ }));
@@ -227,7 +227,7 @@ describe('four eyes', () => {
       { type: 'x', title: 'Forbidden', status: 403, code: 'SELF_APPROVAL_FORBIDDEN', detail: 'The requester or author of card-fee v2 cannot approve it', correlationId: '01JSTALE0000000000000000000' },
       { status: 403, headers: { 'Content-Type': 'application/problem+json' } },
     )));
-    open('#/rule-sets/card-fee/2', 'rules-approver');
+    open('#/rules/card-fee/2', 'rules-approver');
     await user.click(await screen.findByRole('button', { name: 'Approve and publish' }));
     expect(await screen.findByText('You cannot approve a change you wrote or requested.')).toBeInTheDocument();
     expect(screen.getByTestId('problem-code')).toHaveTextContent('SELF_APPROVAL_FORBIDDEN');
@@ -241,7 +241,7 @@ describe('four eyes', () => {
       { type: 'x', title: 'Conflict', status: 409, code: 'VERSION_CONFLICT', detail: 'Expected lock version 1 but card-fee v2 is at 2', correlationId: '01JCONFLICT00000000000000000' },
       { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
     )));
-    open('#/rule-sets/card-fee/2', 'rules-approver');
+    open('#/rules/card-fee/2', 'rules-approver');
     await user.click(await screen.findByRole('button', { name: 'Approve and publish' }));
     expect(await screen.findByText('Someone changed this version. Reload it and try again.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
@@ -258,7 +258,7 @@ describe('import of the next version (CKP-030)', () => {
   };
 
   it('CKP_030_import_a_file_as_the_next_version_from_the_rule_set_page', async () => {
-    open('#/rule-sets/card-fee/1');
+    open('#/rules/card-fee/1');
     await screen.findByRole('button', { name: 'Import new version' });
     await upload(v3.replace('>= 50000000', '>= 50000000 VND'), 'card-fee-v3.yaml');
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee Version 3');
@@ -270,7 +270,7 @@ describe('import of the next version (CKP-030)', () => {
   });
 
   it('CKP_030_a_bad_file_is_located_by_row_and_column_and_creates_nothing', async () => {
-    open('#/rule-sets/card-fee/1');
+    open('#/rules/card-fee/1');
     await screen.findByRole('button', { name: 'Import new version' });
     await upload(v3, 'card-fee-bad.yaml');
     expect(await screen.findByText('Row R4, column balance')).toBeInTheDocument();
@@ -280,7 +280,7 @@ describe('import of the next version (CKP-030)', () => {
   });
 
   it('PD_075_import_stays_available_when_cockpit_drafts_are_off', async () => {
-    open('#/rule-sets/card-fee/1', 'rules-author-drafts-off');
+    open('#/rules/card-fee/1', 'rules-author-drafts-off');
     expect(await screen.findByRole('button', { name: 'Import new version' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
   });
@@ -293,7 +293,7 @@ describe('payload limits (413)', () => {
   ));
 
   it('RLE_044_an_import_over_the_limit_is_shown_in_plain_words', async () => {
-    open('#/rule-sets/card-fee/1');
+    open('#/rules/card-fee/1');
     await screen.findByRole('button', { name: 'Import new version' });
     const input = document.body.querySelector<HTMLInputElement>('.rs-head input[type=file]');
     if (!input) throw new Error('file input missing');
@@ -305,7 +305,7 @@ describe('payload limits (413)', () => {
   it('RLE_044_a_save_over_the_limit_keeps_the_edits', async () => {
     const user = userEvent.setup();
     mockHost.use(tooLarge('*/api/bpm/rules/v1/rule-sets/card-fee/versions'));
-    open('#/rule-sets/card-fee/1');
+    open('#/rules/card-fee/1');
     await user.click(await screen.findByRole('button', { name: 'New draft' }));
     await user.clear(screen.getByLabelText('Row R3, Fee'));
     await user.type(screen.getByLabelText('Row R3, Fee'), '35000 VND');
@@ -316,7 +316,7 @@ describe('payload limits (413)', () => {
 
   it('RLE_044_a_reject_reason_over_the_limit_is_shown_in_plain_words', async () => {
     const user = userEvent.setup();
-    open('#/rule-sets/card-fee/2', 'rules-approver');
+    open('#/rules/card-fee/2', 'rules-approver');
     await user.click(await screen.findByLabelText('Comment or reason'));
     await user.paste('x'.repeat(16_500));
     await user.click(screen.getByRole('button', { name: 'Reject' }));
@@ -328,7 +328,7 @@ describe('payload limits (413)', () => {
 describe('Try it', () => {
   it('CKP_030_try_it_shows_the_matched_row_and_formatted_outputs', async () => {
     const user = userEvent.setup();
-    open('#/rule-sets/card-fee/1');
+    open('#/rules/card-fee/1');
     await user.selectOptions(await screen.findByLabelText('Tier'), 'GOLD');
     await user.type(screen.getByLabelText('Balance'), '60000000');
     expect(screen.getByLabelText('Balance')).toHaveValue('60,000,000');
@@ -344,7 +344,7 @@ describe('Try it', () => {
   });
 
   it('CKP_030_try_it_needs_the_evaluate_permission', async () => {
-    open('#/rule-sets/card-fee/1', 'ready');
+    open('#/rules/card-fee/1', 'ready');
     expect(await screen.findByText('You cannot run rules on this service.')).toBeInTheDocument();
   });
 });

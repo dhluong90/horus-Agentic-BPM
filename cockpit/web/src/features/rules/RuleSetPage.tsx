@@ -1,7 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { toHostError } from '../../api/hostError';
 import type { RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
-import { LENSES, type Lens, type Route } from '../../app/route';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useRulesSession } from './api/rulesContext';
 import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersions } from './api/useRules';
@@ -15,10 +14,11 @@ import { SourceView } from './components/SourceView';
 import { StatusBadge } from './components/StatusBadge';
 import { TryItPanel } from './components/TryItPanel';
 import { draftReducer, initialDraft } from './model/draft';
+import { LENSES, useRulesNavigation, type Lens, type RulesRoute } from './routes';
 import { placeErrors } from './model/engineErrors';
 import { sameRows, toDocument, toRows } from './model/table';
 
-type Navigate = (route: Route) => void;
+type Navigate = (route: RulesRoute) => void;
 
 /** A confirmation from the engine, shown only on the version it is about. */
 interface Notice {
@@ -119,8 +119,9 @@ function LensContent({ lens, version, base, matched }: { lens: Lens; version: Ru
   }
 }
 
-export function RuleSetPage({ name, versionNumber, lens, navigate }: { name: string; versionNumber: number | undefined; lens: Lens | undefined; navigate: Navigate }) {
+export function RuleSetPage({ name, versionNumber, lens }: { name: string; versionNumber: number | undefined; lens: Lens | undefined }) {
   const { t } = useI18n();
+  const { go: navigate, href } = useRulesNavigation();
   const { can } = useRulesSession();
   const versions = useVersions(name);
   const [notice, setNotice] = useState<Notice | undefined>(undefined);
@@ -146,7 +147,7 @@ export function RuleSetPage({ name, versionNumber, lens, navigate }: { name: str
   }, [missing, name, selected, refetch]);
 
   const back = (
-    <a className="back-link hit" href="#/rule-sets">
+    <a className="back-link hit" href={href({ name: 'list' })}>
       <span aria-hidden="true">←</span> {t('ruleSet.back')}
     </a>
   );
