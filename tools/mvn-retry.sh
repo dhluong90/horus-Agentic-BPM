@@ -15,8 +15,8 @@
 #          It is never retried when Surefire or Failsafe report a failing or erroring test, whatever else
 #          the log says, so a flaky test is never hidden by a rerun. Any other failure (a test, a gate, a
 #          compile error) ends the script at once with Maven's exit status. Before a retry the remembered
-#          "not found" markers (*.lastUpdated) are removed and the retry runs with -U, after 30 s, then 60 s
-#          (MVN_RETRY_WAIT=<seconds> changes the 30).
+#          "not found" markers (*.lastUpdated) are removed and the retry runs with -U, after 60 s, then 120 s
+#          (MVN_RETRY_WAIT=<seconds> changes the 60).
 #          Every retry is announced as a GitHub warning, and a final resolution failure as an error.
 # Exit:    Maven's exit status of the last attempt.
 
@@ -26,11 +26,11 @@ if [[ "$#" -eq 0 ]]; then
   echo "Usage: tools/mvn-retry.sh MAVEN_ARGUMENTS..." >&2
   exit 2
 fi
-if [[ ! "${MVN_RETRY_WAIT:-30}" =~ ^[0-9]+$ ]]; then
+if [[ ! "${MVN_RETRY_WAIT:-60}" =~ ^[0-9]+$ ]]; then
   echo "MVN_RETRY_WAIT must be a whole number of seconds, not '${MVN_RETRY_WAIT}'." >&2
   exit 2
 fi
-retry_wait="${MVN_RETRY_WAIT:-30}"
+retry_wait="${MVN_RETRY_WAIT:-60}"
 # Maven's own summary lines for a resolution failure; test output is never matched.
 RESOLUTION_FAILURE='^\[ERROR\] (Failed to execute goal .*(Could not resolve dependencies|The following artifacts could not be resolved|Could not transfer artifact)|Plugin [^ ]+ or one of its dependencies could not be resolved|[[:space:]]*Non-resolvable (import|parent) POM)'
 # Surefire and Failsafe reporting a failing or erroring test.

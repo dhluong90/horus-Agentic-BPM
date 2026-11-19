@@ -69,7 +69,21 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
-          cache: maven
+
+      # Maven repository cache (#171). Exact key: this leg's Spring Boot line and every pom.xml. When the
+      # POMs changed, restore-keys fall back to the newest cache of the same line, then of any line; a
+      # pull request can restore caches saved on main, so a branch never starts from an empty repository.
+      # The last prefix reads the caches setup-java saved on main before this change.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Written as setup-java writes it (os.homedir() on the hosted runner), so the caches setup-java
+          # saved on main have the same cache version and match the last restore key.
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-boot-${{ matrix.boot }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-boot-${{ matrix.boot }}-
+            maven-${{ runner.os }}-
+            setup-java-${{ runner.os }}-x64-maven-
 
       # A restored cache can hold *.lastUpdated markers of a download that failed in an earlier run; Maven
       # then reports the artifact "(absent)" without asking Central again (#171). Ask again.
@@ -124,7 +138,7 @@ jobs:
             org.apache.maven.plugins:maven-dependency-plugin:3.11.0:tree \
             -Dincludes=com.fasterxml.jackson.core,tools.jackson.core -DoutputFile=target/jackson-tree.txt
           python3 tools/check-jackson-coexistence.py examples/rule-engine-only/target/jackson-tree.txt \
-            "$(mvn -B -ntp -q help:evaluate -Dexpression=settings.localRepository -DforceStdout)"
+            "$(tools/mvn-retry.sh -B -ntp -q help:evaluate -Dexpression=settings.localRepository -DforceStdout | tail -n 1)"
 
       - name: Name Maven Central downloads that failed
         if: failure()
@@ -171,7 +185,19 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: maven
+
+      # Maven repository cache (#171), as in the verify job: exact key, then the newest cache of this job,
+      # then of any job, including those saved on main.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Written as setup-java writes it (os.homedir() on the hosted runner), so the caches setup-java
+          # saved on main have the same cache version and match the last restore key.
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-gates-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-gates-
+            maven-${{ runner.os }}-
+            setup-java-${{ runner.os }}-x64-maven-
 
       # A restored cache can hold *.lastUpdated markers of a download that failed in an earlier run; Maven
       # then reports the artifact "(absent)" without asking Central again (#171). Ask again.
