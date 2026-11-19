@@ -77,9 +77,12 @@ public record RuleEngineProperties(
      *     match past it fails the decision with {@code EVALUATION_ERROR}, reason {@code REGEX_TIMEOUT}
      * @param regexMaxInputLength longest text {@code matches()} looks at, 1 to {@code max-string-length}; default
      *     4096. A longer text fails the decision without running the match, reason {@code REGEX_INPUT_TOO_LONG}
+     * @param regexMaxReads characters one {@code matches()} may read, 1 to 1000000; default 1000000. The deterministic
+     *     primary bound, the same on every machine; past it the decision fails with {@code REGEX_TIMEOUT}. Lower only
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
-            Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength) {
+            Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
+            Integer regexMaxReads) {
     }
 
     /**
@@ -123,7 +126,8 @@ public record RuleEngineProperties(
                                 // A host that lowers max-string-length lowers the default regex length with it;
                                 // an invalid max-string-length is reported by the settings, naming that property.
                                 : Math.max(1, Math.min(RegexLimits.MAX_INPUT_LENGTH, evaluation.maxStringLength() == null
-                                        ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength()))));
+                                        ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength())),
+                        evaluation.regexMaxReads() == null ? RegexLimits.MAX_READS : evaluation.regexMaxReads()));
     }
 
     /**

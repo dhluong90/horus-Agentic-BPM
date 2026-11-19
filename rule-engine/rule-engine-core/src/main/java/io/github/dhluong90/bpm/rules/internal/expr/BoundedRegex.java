@@ -4,25 +4,48 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 /**
- * Regular expressions of {@code matches(text, pattern)}, compiled once at import and run under a length and time bound
- * (TR-SEC-02, RLE-007). The pattern dialect is the XPath {@code fn:matches} subset the design names: no
- * back-references and no look-around, so a pattern means the same in the FEEL translation. The time bound does not
- * rely on the thread being interrupted: the matcher reads its text through a {@link CharSequence} that checks a
- * deadline, so a runaway match stops by itself on the calling thread and the thread is free at once.
+ * Regular expressions of {@code matches(text, 'pattern')}, compiled once at import and run under bounds (TR-SEC-02,
+ * RLE-007). The dialect is the subset of the XPath {@code fn:matches} regex dialect that Java reads the same way
+ * (DESIGN 3.2): refused at import are back-references, look-around, inline flags and every {@code (?} group except
+ * {@code (?:}, possessive quantifiers, character class nesting and intersection, Unicode block names and the Java
+ * escapes XPath does not have. Searching is unanchored.
+ *
+ * <p>Bounds, in order:
+ * <ol>
+ *   <li>a text longer than {@code evaluation.regex-max-input-length} is refused before matching
+ *       ({@value #REGEX_INPUT_TOO_LONG});</li>
+ *   <li>the primary bound is deterministic: the matcher reads its text through a {@link CharSequence} that counts
+ *       every character read and stops at {@code evaluation.regex-max-reads} (1,000,000 by default), so a decision
+ *       that stops replays the same on every machine ({@value #REGEX_TIMEOUT});</li>
+ *   <li>the wall-clock {@code evaluation.regex-timeout-ms} is the backstop on a slow machine, checked every
+ *       {@value #CHECK_EVERY} reads ({@value #REGEX_TIMEOUT});</li>
+ *   <li>a pattern whose backtracking recurses past the thread's stack fails the decision instead of the thread
+ *       ({@value #REGEX_TOO_DEEP}).</li>
+ * </ol>
+ * None of these relies on interrupts: the match stops by itself on the calling thread, which is free at once.
  */
 public final class BoundedRegex {
 
     /** Longest pattern accepted, in characters. A bound of the language. */
     public static final int MAX_PATTERN_LENGTH = 1000;
 
-    /** Reason of a match that ran past {@code evaluation.regex-timeout-ms}. */
+    /** Reason of a match that ran past its read budget or its time limit. */
     public static final String REGEX_TIMEOUT = "REGEX_TIMEOUT";
 
     /** Reason of a text longer than {@code evaluation.regex-max-input-length}; the match is not run. */
     public static final String REGEX_INPUT_TOO_LONG = "REGEX_INPUT_TOO_LONG";
 
-    /** Reads between two looks at the clock: often enough for millisecond precision, rare enough to cost nothing. */
+    /** Reason of a match whose backtracking ran out of thread stack. */
+    public static final String REGEX_TOO_DEEP = "REGEX_TOO_DEEP";
+
+    /** Reads between two looks at the clock. */
     private static final int CHECK_EVERY = 1024;
+
+    /** Escapes of single characters that XPath and Java read the same. */
+    private static final String CHARACTER_ESCAPES = "nrt\\|.-^?*+{}()[]$/";
+
+    /** Escapes of character classes that XPath and Java read the same. */
+    private static final String CLASS_ESCAPES = "sSdDwW";
 
     private BoundedRegex() {
     }
@@ -33,17 +56,16 @@ public final class BoundedRegex {
      * @param pattern the pattern text
      * @param position the position of the pattern literal, for the message
      * @return the compiled pattern
-     * @throws ExpressionException for a pattern that is too long, uses a back-reference or look-around, or is not a
-     *     valid regular expression
+     * @throws ExpressionException for a pattern that is too long, outside the dialect or not a valid regular
+     *     expression
      */
     static Pattern compile(String pattern, int position) {
         if (pattern.length() > MAX_PATTERN_LENGTH) {
             throw new ExpressionException("Pattern longer than " + MAX_PATTERN_LENGTH + " characters", position);
         }
-        String unsupported = unsupportedConstruct(pattern);
-        if (unsupported != null) {
-            throw new ExpressionException("Pattern uses " + unsupported + ", which matches() does not support",
-                    position);
+        String refused = unsupportedConstruct(pattern);
+        if (refused != null) {
+            throw new ExpressionException("Pattern " + refused, position);
         }
         try {
             return Pattern.compile(pattern);
@@ -52,41 +74,81 @@ public final class BoundedRegex {
         }
     }
 
-    /** The first back-reference or look-around of a pattern, or null; escapes and character classes are skipped. */
-    static String unsupportedConstruct(String pattern) {
+    /** Why a pattern is outside the dialect, or null when it is inside. */
+    static String unsupportedConstruct(String source) {
         boolean inClass = false;
-        for (int i = 0; i < pattern.length(); i++) {
-            char c = pattern.charAt(i);
-            if (c == '\\' && i + 1 < pattern.length()) {
-                char next = pattern.charAt(i + 1);
-                if (!inClass && next >= '1' && next <= '9') {
-                    return "a back-reference (\\" + next + ")";
+        int n = source.length();
+        for (int i = 0; i < n; i++) {
+            char c = source.charAt(i);
+            if (c == '\\') {
+                if (i + 1 >= n) {
+                    return "ends with a lone backslash";
                 }
-                if (!inClass && next == 'k') {
-                    return "a named back-reference (\\k)";
+                char escaped = source.charAt(++i);
+                if (escaped >= '0' && escaped <= '9') {
+                    return "uses a back-reference, which matches() does not support";
                 }
-                i++;
-            } else if (inClass) {
+                if (escaped == 'p' || escaped == 'P') {
+                    String problem = categoryProblem(source, i);
+                    if (problem != null) {
+                        return problem;
+                    }
+                    i = source.indexOf('}', i);
+                } else if (CHARACTER_ESCAPES.indexOf(escaped) < 0 && CLASS_ESCAPES.indexOf(escaped) < 0) {
+                    return "uses the escape \\" + escaped + ", which is not in the XPath regex dialect";
+                }
+                continue;
+            }
+            if (inClass) {
+                if (c == '[') {
+                    return "nests a character class, which matches() does not support";
+                }
+                if (c == '&' && i + 1 < n && source.charAt(i + 1) == '&') {
+                    return "uses character class intersection, which matches() does not support";
+                }
                 if (c == ']') {
                     inClass = false;
                 }
-            } else if (c == '[') {
-                inClass = true;
-                // A ']' right after '[' or '[^' is a literal member of the class.
-                if (i + 1 < pattern.length() && pattern.charAt(i + 1) == '^') {
-                    i++;
+                continue;
+            }
+            switch (c) {
+                case '[' -> {
+                    inClass = true;
+                    if (i + 1 < n && source.charAt(i + 1) == '^') {
+                        i++;
+                    }
+                    if (i + 1 < n && source.charAt(i + 1) == ']') {
+                        i++; // a leading ] is a literal
+                    }
                 }
-                if (i + 1 < pattern.length() && pattern.charAt(i + 1) == ']') {
-                    i++;
+                case '(' -> {
+                    if (i + 1 < n && source.charAt(i + 1) == '?' && !(i + 2 < n && source.charAt(i + 2) == ':')) {
+                        return "uses look-around or an inline flag, which matches() does not support";
+                    }
                 }
-            } else if (c == '(' && pattern.startsWith("?", i + 1)) {
-                if (pattern.startsWith("?=", i + 1) || pattern.startsWith("?!", i + 1)) {
-                    return "a look-ahead";
+                case '*', '+', '?', '}' -> {
+                    if (i + 1 < n && source.charAt(i + 1) == '+') {
+                        return "uses a possessive quantifier, which matches() does not support";
+                    }
                 }
-                if (pattern.startsWith("?<=", i + 1) || pattern.startsWith("?<!", i + 1)) {
-                    return "a look-behind";
+                default -> {
+                    // an ordinary character
                 }
             }
+        }
+        return null;
+    }
+
+    /** {@code \p{L}} or {@code \P{Nd}}: a general category; block names such as {@code IsBasicLatin} differ. */
+    private static String categoryProblem(String source, int at) {
+        int open = at + 1;
+        int close = source.indexOf('}', open);
+        if (open >= source.length() || source.charAt(open) != '{' || close < 0) {
+            return "uses \\p without a {category}";
+        }
+        String name = source.substring(open + 1, close);
+        if (!name.matches("[CLMNPSZ][a-z]?")) {
+            return "uses the category \\p{" + name + "}; only general categories such as L, Lu or Nd are allowed";
         }
         return null;
     }
@@ -96,65 +158,92 @@ public final class BoundedRegex {
      *
      * @param pattern the compiled pattern
      * @param text the text
-     * @param limits the length and time bounds
+     * @param limits the bounds
      * @return true when the pattern is found
-     * @throws EvaluationException with reason {@value #REGEX_INPUT_TOO_LONG} before matching a text over the length
-     *     limit, or {@value #REGEX_TIMEOUT} when the match runs past the time limit
+     * @throws EvaluationException with reason {@value #REGEX_INPUT_TOO_LONG}, {@value #REGEX_TIMEOUT} or
+     *     {@value #REGEX_TOO_DEEP}; the detail never contains the text
      */
     static boolean find(Pattern pattern, String text, RegexLimits limits) {
         if (text.length() > limits.maxInputLength()) {
             throw new EvaluationException(REGEX_INPUT_TOO_LONG, "matches() was given " + text.length()
                     + " characters; the limit is " + limits.maxInputLength() + " (evaluation.regex-max-input-length)");
         }
-        long deadline = System.nanoTime() + limits.timeoutMillis() * 1_000_000L;
+        Budget budget = new Budget(limits.maxReads(), System.nanoTime() + limits.timeoutMillis() * 1_000_000L);
         try {
-            return pattern.matcher(new DeadlineText(text, deadline)).find();
+            return pattern.matcher(new BudgetedText(text, budget, 0, text.length())).find();
+        } catch (ReadsSpent e) {
+            throw new EvaluationException(REGEX_TIMEOUT, "matches() stopped after reading " + limits.maxReads()
+                    + " characters (evaluation.regex-max-reads); simplify the pattern");
         } catch (Expired e) {
             throw new EvaluationException(REGEX_TIMEOUT, "matches() ran longer than " + limits.timeoutMillis()
                     + " ms and was stopped (evaluation.regex-timeout-ms)");
+        } catch (StackOverflowError e) {
+            // Backtracking recursion grows with the text for some legal patterns, such as (a|b)*c; the stack has
+            // unwound by the time we are here, so the thread carries on and only this decision fails.
+            throw new EvaluationException(REGEX_TOO_DEEP, "matches() ran out of thread stack on a text of "
+                    + text.length() + " characters; simplify the pattern or lower evaluation.regex-max-input-length");
         }
     }
 
-    /** The text as the matcher reads it, with a look at the clock every {@value #CHECK_EVERY} reads. */
-    private static final class DeadlineText implements CharSequence {
-
-        private final String text;
+    /** Reads left and the deadline of one match, shared by every view of its text. */
+    private static final class Budget {
+        private int readsLeft;
+        private int untilClock = CHECK_EVERY;
         private final long deadline;
-        private int reads;
 
-        DeadlineText(String text, long deadline) {
-            this.text = text;
+        Budget(int reads, long deadline) {
+            this.readsLeft = reads;
             this.deadline = deadline;
         }
 
-        @Override
-        public char charAt(int index) {
-            if (++reads == CHECK_EVERY) {
-                reads = 0;
+        void read() {
+            if (--readsLeft < 0) {
+                throw new ReadsSpent();
+            }
+            if (--untilClock == 0) {
+                untilClock = CHECK_EVERY;
                 if (System.nanoTime() - deadline > 0) {
                     throw new Expired();
                 }
             }
-            return text.charAt(index);
+        }
+    }
+
+    /** The text as the matcher reads it, every read counted against the match's budget. */
+    private record BudgetedText(String text, Budget budget, int start, int end) implements CharSequence {
+
+        @Override
+        public char charAt(int index) {
+            budget.read();
+            return text.charAt(start + index);
         }
 
         @Override
         public int length() {
-            return text.length();
+            return end - start;
         }
 
         @Override
-        public CharSequence subSequence(int start, int end) {
-            return new DeadlineText(text.substring(start, end), deadline);
+        public CharSequence subSequence(int from, int to) {
+            return new BudgetedText(text, budget, start + from, start + to);
         }
 
         @Override
         public String toString() {
-            return text;
+            return text.substring(start, end);
         }
     }
 
-    /** Thrown out of the matcher when the deadline has passed; no stack trace, it is control flow. */
+    /** The read budget is spent; control flow without a stack trace. */
+    private static final class ReadsSpent extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        ReadsSpent() {
+            super(null, null, false, false);
+        }
+    }
+
+    /** The deadline has passed; control flow without a stack trace. */
     private static final class Expired extends RuntimeException {
         private static final long serialVersionUID = 1L;
 

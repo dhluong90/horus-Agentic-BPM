@@ -79,21 +79,21 @@ public sealed interface Expr {
      * {@code matches(text, 'pattern')}: an unanchored search of a regular expression, bounded in input length and
      * time (TR-SEC-02). The pattern is a string literal, checked and compiled once at import.
      *
-     * @param text the tested text
+     * @param target the tested text
      * @param pattern the pattern as written
      * @param compiled the compiled pattern
      */
-    record Matches(Expr text, String pattern, java.util.regex.Pattern compiled) implements Expr {
+    record Matches(Expr target, String pattern, java.util.regex.Pattern compiled) implements Expr {
 
         /** Equal when the text and the pattern text are equal; a compiled pattern has no equality of its own. */
         @Override
         public boolean equals(Object other) {
-            return other instanceof Matches that && text.equals(that.text) && pattern.equals(that.pattern);
+            return other instanceof Matches that && target.equals(that.target) && pattern.equals(that.pattern);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(text, pattern);
+            return java.util.Objects.hash(target, pattern);
         }
     }
 

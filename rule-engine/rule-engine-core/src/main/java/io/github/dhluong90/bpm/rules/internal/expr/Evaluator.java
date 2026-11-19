@@ -84,7 +84,7 @@ public final class Evaluator {
             case Expr.IsNull isNull -> (evaluate(isNull.target(), slots) == null) != isNull.negated();
             case Expr.Matches matches -> {
                 // FEEL: a null or non-string text gives null, which never matches.
-                Object text = evaluate(matches.text(), slots);
+                Object text = evaluate(matches.target(), slots);
                 yield text instanceof String string ? BoundedRegex.find(matches.compiled(), string, regexLimits) : null;
             }
         };

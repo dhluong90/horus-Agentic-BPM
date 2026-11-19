@@ -119,4 +119,20 @@ class ExpressionSemanticsTest {
         assertThat(evaluator.evaluate(Parser.parse("matches('^GO')", name -> SLOTS.getOrDefault(name, -1), "tier"),
                 new Object[] {null, "GOLD", null, null})).isEqualTo(true);
     }
+
+    /** The fixed cases of RLE-021 for {@code matches}, shared with the FEEL alignment slice (#19). */
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource(delimiter = '|', value = {
+        "matches('ab12', '[0-9]+')        | true",
+        "matches('xaby', 'ab')            | true",
+        "matches('AB', '^a')              | false",
+        "matches('VN-001', '^VN-[0-9]{3}$') | true",
+        "matches('a.b', 'a\\\\.b')        | true",
+        "matches('axb', 'a\\\\.b')        | false",
+        "matches('12 34', '\\\\d+\\\\s\\\\d+') | true",
+        "matches('', 'a*')                | true"
+    })
+    void matches_is_an_unanchored_search_in_the_fixed_cases_shared_with_the_feel_slice(String expression, boolean expected) {
+        assertThat(eval(expression.strip())).isEqualTo(expected);
+    }
 }

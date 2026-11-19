@@ -96,7 +96,9 @@ class RegexBoundsTest {
         assertThat(elapsedMs).isLessThanOrEqualTo(50 + SCHEDULING_MARGIN_MS);
         assertThat(result.outcome()).isInstanceOfSatisfying(DecisionResult.Failed.class, failed -> {
             assertThat(failed.code()).isEqualTo("EVALUATION_ERROR");
-            assertThat(failed.detail()).startsWith("REGEX_TIMEOUT").contains("50 ms").doesNotContain(ADVERSARIAL);
+            // The deterministic read budget stops it first; the 50 ms clock is the backstop.
+            assertThat(failed.detail()).startsWith("REGEX_TIMEOUT").contains("evaluation.regex-max-reads")
+                    .doesNotContain(ADVERSARIAL);
         });
         assertThat(stores.decisions).singleElement().satisfies(row -> {
             assertThat(row.outcome()).isEqualTo("EVALUATION_ERROR");
@@ -119,16 +121,29 @@ class RegexBoundsTest {
 
 
     @Test
+    void RLE_007_the_read_budget_stops_the_same_way_on_every_run_whatever_the_clock() {
+        // A generous clock leaves only the deterministic budget: the outcome and detail are the same every time.
+        CompiledRuleSet rules = compiled(REFERENCE_CHECK, new RegexLimits(1000, 4096, 200_000));
+        List<String> details = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            CompiledRuleSet.Evaluation evaluation = rules.evaluateWithReason(
+                    DecisionInput.of(Map.of("reference", ADVERSARIAL)));
+            assertThat(evaluation.reason()).isEqualTo("REGEX_TIMEOUT");
+            details.add(((DecisionResult.Failed) evaluation.outcome()).detail());
+        }
+        assertThat(details).containsOnly("REGEX_TIMEOUT: matches() stopped after reading 200000 characters"
+                + " (evaluation.regex-max-reads); simplify the pattern");
+    }
+
+    @Test
     void TR_SEC_02_text_longer_than_the_limit_fails_without_running_the_match() {
-        RuleEngines engines = engines(EngineSettings.defaults().withRegexLimits(50, 16));
+        // A budget of one read: had the match run, it would have stopped with REGEX_TIMEOUT instead.
+        RuleEngines engines = engines(EngineSettings.defaults().withRegexLimits(new RegexLimits(50, 16, 1)));
         publish(engines, REFERENCE_CHECK, "reference-check");
 
-        long started = System.nanoTime();
         DecisionResult result = engines.ruleEngine().evaluate("reference-check",
                 DecisionInput.of(Map.of("reference", ADVERSARIAL)));
 
-        // The adversarial text would run for the whole timeout; refused before matching, it takes far less.
-        assertThat((System.nanoTime() - started) / 1_000_000).isLessThan(40);
         assertThat(result.outcome()).isInstanceOfSatisfying(DecisionResult.Failed.class, failed -> {
             assertThat(failed.code()).isEqualTo("EVALUATION_ERROR");
             assertThat(failed.detail()).startsWith("REGEX_INPUT_TOO_LONG").contains("29 characters", "16");
@@ -137,43 +152,68 @@ class RegexBoundsTest {
     }
 
     @Test
+    void TR_SEC_02_a_pattern_that_recurses_past_the_stack_fails_the_decision_not_the_thread() throws Exception {
+        // (a|b)*c recurses once per repetition; on a 256 KB stack a few thousand characters overflow it.
+        CompiledRuleSet rules = compiled(REFERENCE_CHECK.replace(EXPONENTIAL_PATTERN, "(a|b)*c"),
+                new RegexLimits(1000, 4096));
+        List<CompiledRuleSet.Evaluation> results = new java.util.concurrent.CopyOnWriteArrayList<>();
+        Thread small = new Thread(null, () -> {
+            results.add(rules.evaluateWithReason(DecisionInput.of(Map.of("reference", "a".repeat(4096)))));
+            results.add(rules.evaluateWithReason(DecisionInput.of(Map.of("reference", "abc"))));
+        }, "small-stack", 256 * 1024);
+        small.start();
+        small.join(10_000);
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).reason()).isEqualTo("REGEX_TOO_DEEP");
+        assertThat(((DecisionResult.Failed) results.get(0).outcome()).detail()).doesNotContain("aaaa");
+        assertThat(results.get(1).outcome()).isInstanceOf(DecisionResult.Matched.class);
+    }
+
+    @Test
     void TR_SEC_02_ten_adversarial_evaluations_do_not_delay_a_normal_one() throws Exception {
-        CompiledRuleSet rules = compiled(REFERENCE_CHECK, new RegexLimits(50, 4096));
+        CompiledRuleSet rules = compiled(REFERENCE_CHECK, RegexLimits.defaults());
         DecisionInput normal = DecisionInput.of(Map.of("reference", "FT20270115"));
         long usual = Long.MAX_VALUE;
-        for (int i = 0; i < 20; i++) {
+        for (int i = 0; i < 50; i++) {
             long started = System.nanoTime();
             rules.evaluateWithReason(normal);
             usual = Math.min(usual, System.nanoTime() - started);
         }
-        ExecutorService pool = Executors.newFixedThreadPool(11);
+        ExecutorService pool = Executors.newFixedThreadPool(10);
+        java.util.concurrent.atomic.AtomicBoolean stop = new java.util.concurrent.atomic.AtomicBoolean();
+        CountDownLatch started = new CountDownLatch(10);
         try {
-            CountDownLatch go = new CountDownLatch(1);
-            List<Future<CompiledRuleSet.Evaluation>> adversarial = new ArrayList<>();
+            List<Future<Set<String>>> adversarial = new ArrayList<>();
             for (int i = 0; i < 10; i++) {
                 adversarial.add(pool.submit(() -> {
-                    go.await();
-                    return rules.evaluateWithReason(DecisionInput.of(Map.of("reference", ADVERSARIAL)));
+                    // Each task keeps one adversarial match running until the normal decisions are measured.
+                    Set<String> reasons = new java.util.HashSet<>();
+                    started.countDown();
+                    while (!stop.get()) {
+                        reasons.add(rules.evaluateWithReason(DecisionInput.of(Map.of("reference", ADVERSARIAL)))
+                                .reason());
+                    }
+                    return reasons;
                 }));
             }
-            Future<Long> normalRun = pool.submit(() -> {
-                go.await();
-                Thread.sleep(5); // the adversarial matches are running
-                long started = System.nanoTime();
+            assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
+            long worst = 0;
+            for (int i = 0; i < 50; i++) {
+                assertThat(adversarial).noneMatch(Future::isDone);
+                long begin = System.nanoTime();
                 CompiledRuleSet.Evaluation evaluation = rules.evaluateWithReason(normal);
-                long elapsed = System.nanoTime() - started;
+                worst = Math.max(worst, System.nanoTime() - begin);
                 assertThat(evaluation.outcome()).isInstanceOf(DecisionResult.Matched.class);
-                return elapsed;
-            });
-            go.countDown();
-
-            long normalNanos = normalRun.get(5, TimeUnit.SECONDS);
+            }
+            stop.set(true);
             // Usual time is microseconds; allow one scheduler time slice on a runner with fewer cores than threads.
-            assertThat(normalNanos / 1_000_000).isLessThan(Math.max(1, usual / 1_000_000) + 50);
-            for (Future<CompiledRuleSet.Evaluation> run : adversarial) {
-                assertThat(run.get(5, TimeUnit.SECONDS).reason()).isEqualTo("REGEX_TIMEOUT");
+            assertThat(worst / 1_000_000).isLessThan(Math.max(1, usual / 1_000_000) + 50);
+            for (Future<Set<String>> run : adversarial) {
+                assertThat(run.get(10, TimeUnit.SECONDS)).containsOnly("REGEX_TIMEOUT");
             }
         } finally {
+            stop.set(true);
             pool.shutdownNow();
         }
     }
@@ -185,9 +225,16 @@ class RegexBoundsTest {
         for (String[] bad : new String[][] {
             // v1 strings escape a backslash as \\, and YAML double quotes escape it again.
             {"matches('(a)\\\\\\\\1')", "back-reference"},
-            {"matches('(?<x>a)\\\\\\\\k<x>')", "named back-reference"},
-            {"matches('FT(?=[0-9])')", "look-ahead"},
-            {"matches('(?<!X)FT')", "look-behind"},
+            {"matches('(?<x>a)b')", "look-around or an inline flag"},
+            {"matches('FT(?=[0-9])')", "look-around"},
+            {"matches('(?<!X)FT')", "look-around"},
+            {"matches('(?i)ft')", "inline flag"},
+            {"matches('a++')", "possessive quantifier"},
+            {"matches('[a[b]]')", "nests a character class"},
+            {"matches('[a-z&&[^b]]')", "intersection"},
+            {"matches('[a-z&&b]')", "intersection"},
+            {"matches('\\\\\\\\x41')", "not in the XPath regex dialect"},
+            {"matches('\\\\\\\\p{IsBasicLatin}')", "only general categories"},
             {"matches('[0-9')", "Invalid pattern"},
             {"matches('" + "a".repeat(1001) + "')", "longer than 1000"},
             {"matches(reference, reference)", "string literal"},

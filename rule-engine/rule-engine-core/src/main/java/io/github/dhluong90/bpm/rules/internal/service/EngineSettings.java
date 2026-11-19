@@ -149,7 +149,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
                 queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows,
                 regexLimits.maxInputLength() <= stringLength ? regexLimits
-                        : new RegexLimits(regexLimits.timeoutMillis(), stringLength));
+                        : new RegexLimits(regexLimits.timeoutMillis(), stringLength, regexLimits.maxReads()));
     }
 
     /**
@@ -160,8 +160,17 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      * @return the settings
      */
     public EngineSettings withRegexLimits(int timeoutMillis, int maxInputLength) {
+        return withRegexLimits(new RegexLimits(timeoutMillis, maxInputLength, regexLimits.maxReads()));
+    }
+
+    /**
+     * Returns a copy with the regular expression bounds set.
+     *
+     * @param limits the bounds
+     * @return the settings
+     */
+    public EngineSettings withRegexLimits(RegexLimits limits) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows,
-                new RegexLimits(timeoutMillis, maxInputLength));
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, limits);
     }
 }

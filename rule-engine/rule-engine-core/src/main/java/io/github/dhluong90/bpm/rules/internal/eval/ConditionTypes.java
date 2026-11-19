@@ -53,7 +53,7 @@ final class ConditionTypes {
                     comparableProblem(between.target(), between.high(), inputs));
             case Expr.IsNull ignored -> null;
             case Expr.Matches matches -> {
-                Kind text = kindOf(matches.text(), inputs);
+                Kind text = kindOf(matches.target(), inputs);
                 yield text == Kind.STRING || text == Kind.UNKNOWN || text == Kind.NULL ? null
                         : "matches() tests text, but it is given a " + name(text);
             }
