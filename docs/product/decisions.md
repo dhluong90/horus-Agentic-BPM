@@ -2764,7 +2764,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 
 **Residual risk (security review).** Anyone with write access can push a `v*` tag and publish a Release, and the assets of a published Release can be replaced.
 
-**Mitigations in place.**
+**Mitigations, in place once #166 and #168 merge, before the `v0.1.0` tag.**
 - The tag guard of the release workflow (#166) refuses a tag that is not on `main`, is not of the form `vX.Y.Z`, does not match every module's version, or builds a group id other than `io.github.dhluong90.bpm`.
 - Verification before publishing (#168): the publishing job checks the checksums and the build information before the Release is published; the bill of materials is validated earlier, by the release build.
 - A bad release is fixed with a new patch release (`v0.1.1`); a published tag is never moved, deleted and re-created, and published assets are never replaced.
