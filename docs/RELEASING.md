@@ -25,7 +25,7 @@ The workflow "Release (dry run)" (`.github/workflows/release.yml`) runs the same
 | 6 | After the jar is sealed: npm bill of materials (`cyclonedx-npm` from the tool lockfile, `npm exec --offline`), kept to the packages in the bundle; licences; merge; CycloneDX 1.6 schema validation | A bundled package is not a production dependency; a licence is not allowed; the merged document is not valid |
 | 7 | `SHA256SUMS` over `target/release`, printed to the log and to the run's step summary | |
 
-Maven runs with `tools/release/dry-run-settings.xml` as both user and global settings, so `~/.m2/settings.xml` and its credentials are never read. Without cockpit sources the cockpit parts are skipped and the log says "Java-only release".
+Maven runs with `tools/release/dry-run-settings.xml` as both user and global settings, so `~/.m2/settings.xml` and its credentials are never read. Every Maven call goes through `tools/mvn-retry.sh` (#171). When Maven Central fails to deliver an artifact, the call is run again with `-U`, at most 3 attempts, after 60 s and then 120 s. A failing test, gate or compile error is never retried, and no dependency cache is restored. Without cockpit sources the cockpit parts are skipped and the log says "Java-only release".
 
 The release tools (`@cyclonedx/cyclonedx-npm`, `lockfile-lint`, and `ajv` with `ajv-formats` and `ajv-formats-draft2019` for the schema check) are exact-version dev dependencies in `tools/release/npm/package-lock.json`. They are not part of the cockpit's dependency tree, never ship, and are named on the `TR-LIC-01` allow-list of build tools. To update one, change the version in `tools/release/npm/package.json` and run `npm install --package-lock-only --ignore-scripts` there.
 

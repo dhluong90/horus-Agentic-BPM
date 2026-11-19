@@ -49,7 +49,10 @@ TOOLS="$ROOT/tools/release/npm"
 SBOM_PY="$ROOT/tools/release/release-sbom.py"
 SETTINGS="$ROOT/tools/release/dry-run-settings.xml"
 NODE_PINNED="$(tr -d '[:space:]' < "$ROOT/tools/release/node-version")"
-MVN=(mvn -B -ntp -s "$SETTINGS" -gs "$SETTINGS")
+# Every Maven call goes through tools/mvn-retry.sh (#171): a run that Maven Central failed to deliver an
+# artifact to is retried with -U, at most 3 attempts; a failing test, gate or compile error never is.
+# No dependency cache is restored either way.
+MVN=("$ROOT/tools/mvn-retry.sh" -B -ntp -s "$SETTINGS" -gs "$SETTINGS")
 HELP_PLUGIN="org.apache.maven.plugins:maven-help-plugin:3.6.0"
 NPM_CI=(npm ci --ignore-scripts --no-audit --no-fund)
 LOCKFILE_LINT=(lockfile-lint --type npm --allowed-hosts npm --validate-https --validate-integrity
@@ -57,7 +60,8 @@ LOCKFILE_LINT=(lockfile-lint --type npm --allowed-hosts npm --validate-https --v
 
 step() { printf '\n== %s\n' "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
-evaluate() { "${MVN[@]}" -q "$HELP_PLUGIN:evaluate" -Dexpression="$1" -DforceStdout "${@:2}"; }
+# The value is the last line: a retry announces itself on the lines before it.
+evaluate() { "${MVN[@]}" -q "$HELP_PLUGIN:evaluate" -Dexpression="$1" -DforceStdout "${@:2}" | tail -n 1; }
 
 cd "$ROOT"
 cockpit=false

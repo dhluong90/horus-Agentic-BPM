@@ -108,7 +108,7 @@ class NormalFormTest {
                 + "<rule id=\"M3\"><inputEntry><text>-</text></inputEntry><outputEntry><text>money(-5, \"USD\")</text></outputEntry></rule>";
         String xml = DmnRuleSetTest.table("<input><inputExpression typeRef=\"number\"><text>age</text></inputExpression></input>", rules)
                 .replace("<output name=\"ok\" typeRef=\"boolean\"/>", "<output name=\"ok\" typeRef=\"Any\" horus:type=\"money\"/>")
-                .replace("<definitions ", "<definitions xmlns:horus=\"urn:horus-bpm:dmn:extensions:1\" ");
+                .replace("<definitions ", "<definitions xmlns:horus=\"urn:horus-bpm:dmn:extensions:v1\" ");
 
         ParsedRuleSet first = RuleSetReader.read(SourceFormat.DMN_XML, xml.getBytes(StandardCharsets.UTF_8));
         ParsedRuleSet second = RuleSetReader.read(SourceFormat.DMN_XML,

@@ -115,6 +115,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-091](#pd-091-no-tag-ruleset-or-immutable-releases-for-now) | No tag ruleset or immutable releases for now | Decided (revisitable) |
 | [PD-092](#pd-092-the-cockpit-opens-on-home-for-every-role) | The cockpit opens on Home for every role | Decided (product manager, delegated, PD-073) |
 | [PD-093](#pd-093-cockpit-menu-for-authors-and-two-changes-to-the-approved-prototype) | Cockpit menu for authors and two changes to the approved prototype | Decided (product manager, delegated, PD-073) |
+| [PD-094](#pd-094-cockpit-draft-editing-is-off-by-default-in-010) | Cockpit draft editing is off by default in 0.1.0 | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2520,6 +2521,11 @@ Committed: the release does not ship without these.
 
 **Added to the committed scope, 2026-11-19 (product manager, delegated, on the product owner's feedback).** The product owner found the cockpit empty, with no menu, and the sign-in page unattractive. The release review is visual, so the cockpit navigation shell, a non-empty Home and a branded sign-in page for the example host are committed for the Fri 20 Nov review (#180). The shell follows the approved prototype (PD-056): Home, Rules, Approvals, and Decisions and Processes labelled Preview. Home shows only pending approvals and recent rule sets (PD-078). Decisions has no read API in 0.1.0, and logged decisions may hold personal data until masking arrives, so the Decisions area shows a one-line "comes in 0.2.0" empty state and no decision data. Sign-in stays the host's page; the cockpit library has no login of its own.
 
+**Scope notes, 2026-11-19 (product manager, delegated).**
+- The rule set and version lists, reject and field errors (#147, pull request #152, merged) are in 0.1.0. The cockpit's Home and Rules pages need them.
+- Withdraw (#162) is not in 0.1.0 and ships in 0.2.0. The cockpit hides the action, and a requester asks an approver to reject instead.
+- Display names on the version API (`createdByName`, `requestedByName`, `approvedByName`) are not in 0.1.0. Rows show the identity recorded in the audit trail. Display names come in 0.2.0 from a host extension point that resolves names when they are read, rather than from names copied into engine tables.
+
 Pulled in by PD-084: in the release only if each meets the same readiness bar at the Fri 20 Nov review; otherwise cut in the order below.
 
 | Issue | What ships | Feature map |
@@ -2544,6 +2550,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] Each merged pull request links a green CI run at its head commit (PD-081), and the last run on `main` at the release commit is green on every leg: Java 21 and 25, Spring Boot 4.x, 4.0.x and 3.5.x, PostgreSQL 14 and 18.
 - [ ] The spec-to-test gate, the licence gate and the vulnerability scan are green at the release commit; no high or critical finding.
 - [ ] The package rename (#21) is merged before the `v0.1.0` tag, and the search for `com.horus` in the repository returns nothing (PD-070). The tag guard of the release workflow (#126) refuses the tag otherwise.
+- [ ] The DMN extension namespace uses `v1` (#186) before the `v0.1.0` tag. Exported DMN files carry that namespace for good, so it cannot change after the first release.
 - [ ] The release workflow builds from a clean checkout of the release commit; the cockpit bundle is built from source; the bill of materials lists the Java and npm packages; `shasum -c SHA256SUMS` verifies every artifact.
 - [ ] From a fresh clone on a clean machine with Docker only, `docker compose up` reaches a first logged decision by following the README; done by someone other than the author, with the time and every deviation recorded.
 - [ ] The security behaviour is shown by tests in CI: another tenant's rule set answers `404`; self-approval answers `403` through Java and REST; a reused idempotency key with another body answers `422`; no-store holds with the metadata endpoints switched off; the development tenant is refused beside a production profile; the container runs as a non-root user and holds no secret.
@@ -2552,7 +2559,8 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] The README, Getting Started and release notes claim only what ships: "first BPMN and DMN subset", no conformance claim (`TR-STD-05`), unsupported features named as later, the forward-only migrations listed (X-F-09), and no compatibility promise before 1.0.
 - [x] The version label is decided: `0.1.0` (PD-083, 2026-11-19).
 - [ ] A recorded walkthrough of the release journey exists for the review.
-- [ ] The GitHub Release upload (#153) is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the release of the `v0.1.0` tag, the one project tag for 0.1.0 (PD-087, #163).
+- [ ] Cockpit draft editing is off unless the host turns it on (PD-094), and the release notes state its known limit.
+- [x] The GitHub Release upload workflow (#153) is merged; it runs when the tag is pushed. The upload itself is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the release of the `v0.1.0` tag, the one project tag for 0.1.0 (PD-087, #163).
 - [ ] The release notes call the Process Engine a preview (ADR-0027, process DESIGN 5.8): outside `dev`, imports stay drafts, activation is by the development auto-approve setting only, and there is no claim step.
 
 **Assumption to test.** [ASSUMPTION] Pull requests #87, #17 and #126 and issues #133, #131 and #21 can all be reviewed and merged by Fri 20 Nov without a new BLOCKING finding. Cheap test: a merge-order check on Thu 19 Nov evening (#133, then #87, then #21, then #17 and #126) with the count of open findings; if more than two BLOCKING findings are open on Fri 20 Nov 08:00 ICT, the product manager tells the product owner before the review, not at it.
@@ -2820,3 +2828,32 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Consequences.** The styleguide (#182) and the cockpit shell (#183) follow (a) to (c). The UX design document records (b) and (c) as changes to the approved prototype. Configurable: no.
 
 **Follow-ups.** Designer: the styleguide menu rule matches (a). Maintainers (engineering): #183. Architect: the cockpit DESIGN section 3 menu list, with the PD-092 changes.
+
+### PD-094 Cockpit draft editing is off by default in 0.1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | In 0.1.0 the cockpit draft editor (#146) creates a new draft version on every save. Saving a draft in place arrives with #165. Today the cockpit treats a missing `authoring.cockpit-drafts` setting as on. What is the release default? |
+| Raised by | Delivery lead, pre-tag gates of 0.1.0 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1. Changes the default of PD-036 and PD-075 for 0.1.0 only |
+
+**Options considered**
+
+1. Off by default; each host turns it on with `authoring.cockpit-drafts: true` (chosen). Consequence: no adopter gets a growing list of draft versions without choosing it. The example host turns it on, so the demo and the review still show editing. The release notes state the limit.
+2. Show the editor only under the `dev` profile. Consequence: safe, but a bank cannot try editing in a test environment, and a profile check would decide product behaviour instead of a host setting, which goes against PD-074.
+3. On by default, with "each save creates a new draft version" as a known limit. Consequence: the fewest changes, but every adopter gets the limit by default, and approvers see several draft versions for one change.
+
+**Recommendation and decision.** Option 1, under PD-074: a behaviour with a known limit is off until the host chooses it, like the Process Engine preview. Import of a rule set document, approvals and simulation stay available whatever the setting, as rule engine DESIGN section 4.4 already says.
+
+**Release note line.** "Cockpit draft editing is off by default. Turn it on with `authoring.cockpit-drafts: true`. In 0.1.0 each save creates a new draft version; saving a draft in place comes in 0.2.0."
+
+**Revisit.** When #165 (replace a draft) ships, the default returns to on, as PD-036 decided, by a new entry in 0.2.0.
+
+**Consequences.**
+- **Cockpit:** a missing setting means off.
+- **Example host:** sets the setting to on, so the demo shows editing.
+- **Rule engine DESIGN section 4.4:** the default is `false` for 0.1.0.
+- **Import button:** the cockpit's "Import rule set" action depends on `rules:author` only, not on this setting.
+
+**Follow-ups.** Maintainers (engineering): the cockpit default, the example host setting and the import action. Architect: DESIGN section 4.4. Documentation: the release notes and the wiki Rule Engine Configuration page.

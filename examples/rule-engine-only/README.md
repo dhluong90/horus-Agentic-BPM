@@ -316,6 +316,50 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choos
 
 Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
 
+The cockpit opens on Home for every role. Home's content depends on the user: Lan sees her drafts and requests, Minh the requests waiting for his review, and Tuan, who has no rule permission, one line saying so. The menu shows Home, Rules, Approvals and, under Preview, Decisions to anyone with a rule permission; Processes appears only where a Process Engine is registered. A host can open the cockpit on `rules` or `approvals` with the `cockpit.landing` setting in `/api/bpm/meta`.
+
+### Sign-in page
+
+The sign-in page belongs to the host, not to the cockpit library. This example serves its own page at `GET /login`, and Spring Security still handles `POST /login`, CSRF and the redirect back to the cockpit.
+
+| Part | File |
+|---|---|
+| Template | [`sign-in/sign-in.html`](src/main/resources/sign-in/sign-in.html) |
+| Text in English and Vietnamese | [`sign-in/messages*.properties`](src/main/resources/sign-in) |
+| Styles and script, served from `/sign-in/` | [`static/sign-in/`](src/main/resources/static/sign-in) |
+| Rendering and headers | [`SignInPage`](src/main/java/com/horus/bpm/examples/ruleengineonly/SignInPage.java), [`SignInController`](src/main/java/com/horus/bpm/examples/ruleengineonly/SignInController.java) |
+
+- **Language:** `?lang=en` or `?lang=vi`, otherwise a Vietnamese browser, otherwise `horus.bpm.cockpit.default-locale`. The page also follows the language and theme chosen in the cockpit.
+- **Brand panel:** the service name, what it is for and three points, from the host's own messages. A bank replaces this panel.
+- **Demo users:** listed by name and role on the `dev` profile, and only when `HORUS_DEMO_PASSWORD` is set. Choosing one fills the username. The page never shows a password.
+- **Security:** no inline script or style, so the page has its own strict `Content-Security-Policy`, with `frame-ancestors 'none'` and `Cache-Control: no-store`.
+- **Changing it:** copy the template and set `host.sign-in.template` to your copy, for example `file:/etc/loans/sign-in.html`. Double braces always insert escaped text; triple braces are allowed only for the page's own markup blocks. An unknown or misused placeholder stops the page with an error that names it.
+
+![Sign-in page](../../cockpit/docs/images/screenshots/example-host-signin-1440x900-light-en.png)
+
+### Edit rules in the cockpit
+
+Draft editing in the cockpit is off by default in 0.1.0 (PD-094); this example turns it on with `horus.bpm.rules.authoring.cockpit-drafts: true` in `application-dev.yml`, so the `dev` profile shows editing. The cockpit lists rule sets, shows a version as a decision table, edits a draft, sends it for approval and lets a second person approve or reject it. "Try it" runs sample inputs; it needs `rules:evaluate`, which the demo roles do not hold, so add it on the command line for this walkthrough:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate' \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:evaluate'
+```
+
+1. As `lan`, open Rules, choose **Import file** and pick [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml). Version 1 opens as a draft table. Choose **Request publish**: the dock shows "Approve is unavailable. You requested this change. Another approver must decide."
+2. In a private window, sign in as `minh` and open the same address (the link in the address bar works as is). Version 1 opens on Changes. Add a comment and choose **Approve and publish**.
+3. Back as `lan`, reload and choose **New draft**. Cells edit as values: pick tiers, choose a comparison and type an amount (VND sits inside the field), toggle Yes or No. Add a row from **Add row** and move it with its ⋯ menu. Choose a comparison for the new row's balance but leave the amount empty, then **Save draft**: the cell says "Enter a value." and your other edits stay. Type the amount and save again. Version 2 opens as a draft. **Request publish**.
+4. As `minh`, open version 2: Changes lists the added and changed rows with the same labels and amounts as the table. Write a reason and choose **Reject**: version 2 goes back to `lan` as a draft, and **History** under the approval dock shows who rejected it and why. As `lan`, **Request publish** again; as `minh`, approve it.
+5. As either user, use **Try it**: tier `GOLD` matches R1 and the table marks the row.
+
+To bring in a file prepared elsewhere, open the rule set and choose **Import new version**: the file becomes the next draft. Only a person other than the author and the requester can approve or reject a version; a requester withdraws through the engine's withdraw action once it ships. A host that keeps rule changes in Git sets `horus.bpm.rules.authoring.cockpit-drafts: false`; the cockpit then hides New draft and Edit draft and keeps Import new version.
+
+A save creates a new draft version each time, because the engine has no endpoint to replace a draft yet (issue #165). A `.json` file is sent as YAML text (JSON is valid YAML), because this engine release imports YAML only.
+
+The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=http://localhost:8080 LIVE_PASSWORD=choose-one npm --prefix cockpit/web run e2e:live`. Started without the two properties, as the Docker Compose deployment is, the host gives the demo roles no `rules:evaluate`: Try it then says "You cannot run rules on this service", and the test checks that and skips the Try it step with a note.
+
 ## Rule Engine properties
 
 | Property | Default | Meaning |
@@ -344,6 +388,8 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `SessionSignInIT.RLE_019_*` | The curl demo above on the `dev` profile: form sign-in, then `200` from `/meta` and `/me` with the session for both users |
 | `SessionSignInIT.TR_SEC_03_*`, `SessionSignInIT.session_*` | A session caller cannot choose its tenant with a header; a state-changing call with the session needs the CSRF token; other pages still redirect to `/login` |
 | `CockpitEmbeddedIT.TR_SEC_09_*` | Without a session the cockpit path redirects to the host's sign-in and serves no file; the cockpit page carries the strict CSP and `X-Frame-Options: SAMEORIGIN` |
+| `CockpitEmbeddedIT.TR_SEC_09_the_host_sign_in_page_*` | `/login?lang=vi` is the branded page with the demo user names and no password, a strict CSP (`frame-ancestors 'none'`, no `unsafe-inline`) and `no-store`; its styles and script load before sign-in |
+| `SignInPageTest` | The page in English and Vietnamese, the error and signed-out states, the escaped CSRF field, demo users only on `dev` with a password, no inline script or style, and the same message keys in both languages |
 | `CockpitEmbeddedIT.CKP_001_*` | On the `dev` profile: form sign-in, the cockpit page and its one-host registry, then `200` from `/api/bpm/meta` and `/api/bpm/me` with the session, valid against the cockpit schemas; a call that changes data needs `X-XSRF-TOKEN` from the cookie |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
 | `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*`, `RLE_002_*`, `RLE_003_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |

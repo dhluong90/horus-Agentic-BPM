@@ -36,6 +36,18 @@ class RuleEngineModuleDescriptorTest {
     }
 
     @Test
+    void PD_094_cockpit_drafts_setting_is_published_false_by_default_and_true_when_the_host_sets_it() {
+        runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", false)));
+        runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=true")
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                        .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", true)));
+        runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=false")
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                        .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", false)));
+    }
+
+    @Test
     void RLE_019_role_mapping_property_keeps_host_role_names_as_written() {
         runner.withPropertyValues(
                         "horus.bpm.rules.security.role-permissions.ROLE_PRICING_APPROVER=rules:approve",
