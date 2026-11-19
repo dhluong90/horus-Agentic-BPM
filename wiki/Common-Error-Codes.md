@@ -86,7 +86,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `409`. The action does not fit the current state, for example `:approve` on a `DRAFT`. Follow the lifecycle order.
 
 ### RATE_LIMITED
-`429` with `Retry-After`. Returned only when the host configures a rate limiter. Wait and retry.
+`429` with `Retry-After`. The Rule Engine returns it for the masked-input search past `masking.search.max-per-minute` searches per caller per minute (default 30); the refusal is audited. Otherwise it is returned only when the host configures a rate limiter. Wait the given seconds and retry.
 
 ### INTERNAL_ERROR
 `500`. Unexpected failure. The body carries only `code` and `correlationId`; give the `correlationId` to the host's operators to find the server log.

@@ -32,6 +32,20 @@ public interface MaskingPolicy {
     }
 
     /**
+     * Returns how many masked-input searches one caller of a tenant may run per minute on this replica. The search
+     * is a test of whether a person was decided on, so it is always limited: a value below 1 counts as 1.
+     *
+     * @param tenantId the tenant
+     * @return the limit; the default is {@value #DEFAULT_SEARCHES_PER_MINUTE}
+     */
+    default int searchesPerMinute(String tenantId) {
+        return DEFAULT_SEARCHES_PER_MINUTE;
+    }
+
+    /** Default of {@code masking.search.max-per-minute}. */
+    int DEFAULT_SEARCHES_PER_MINUTE = 30;
+
+    /**
      * Tells whether an input that does not declare {@code mask} is masked for a tenant. An input with
      * {@code mask: false} is never masked by this default; one with {@code mask: true} always is.
      *

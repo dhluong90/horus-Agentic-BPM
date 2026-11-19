@@ -54,6 +54,7 @@ public class ProblemDetails {
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
+            Map.entry("RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
@@ -83,6 +84,10 @@ public class ProblemDetails {
             body.put("violationsTruncated", failed.truncated());
         }
         ResponseEntity<byte[]> response = response(status, body);
+        if (e instanceof io.github.dhluong90.bpm.rules.api.RateLimitedException limited) {
+            return ResponseEntity.status(status).header("Retry-After", Long.toString(limited.retryAfterSeconds()))
+                    .contentType(PROBLEM).body(response.getBody());
+        }
         if (status == HttpStatus.CONFLICT && "IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {
             return ResponseEntity.status(status).header("Retry-After", "1").contentType(PROBLEM).body(response.getBody());
         }

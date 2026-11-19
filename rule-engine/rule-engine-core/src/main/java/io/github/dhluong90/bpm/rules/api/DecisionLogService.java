@@ -1,8 +1,10 @@
 package io.github.dhluong90.bpm.rules.api;
 
 /**
- * Reads the decision log of the caller's tenant. Every call needs {@code rules:log:read}; the tenant comes from the
- * host's {@code TenantResolver} only (TR-SEC-03). Reads write nothing.
+ * Reads the decision log of the caller's tenant. Reads need {@code rules:log:read}; the masked-input search needs
+ * {@code rules:log:search-masked} instead, which no role holds by default. The tenant comes from the
+ * host's {@code TenantResolver} only (TR-SEC-03). Nothing is written to the decision log; each masked-input search
+ * writes one audit entry.
  */
 public interface DecisionLogService {
 
@@ -20,6 +22,7 @@ public interface DecisionLogService {
      *
      * @param query the rule set, input, plain value and period
      * @return the decisions, newest first
+     * @throws RateLimitedException past {@code masking.search.max-per-minute} searches of this caller in one minute
      * @throws QueryInvalidException for a period over 31 days, a limit out of range, an input that is not a
      *     name, or a tenant without a masking key
      */

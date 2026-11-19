@@ -517,7 +517,9 @@ paths:
       operationId: findDecisionsByMaskedInput
       summary: Find the decisions whose masked input had a given plain value
       description: |
-        Permission `rules:log:read`. The engine fingerprints `value` with the caller's tenant key
+        Permission `rules:log:search-masked`, which `rules:log:read` does not imply. At most
+        `masking.search.max-per-minute` searches per caller per minute on one replica (default 30,
+        at least 1); past it `429 RATE_LIMITED` with `Retry-After`, and the refusal is audited. The engine fingerprints `value` with the caller's tenant key
         and returns the decisions of `ruleSet` between `from` (inclusive) and `to` (exclusive)
         whose input `input` holds that fingerprint, newest first. The plain value travels in the
         body, so it never appears in a URL or an access log, and it is never stored or echoed.
@@ -551,6 +553,16 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
+        '429':
+          description: Past `masking.search.max-per-minute` for this caller; retry after the given seconds
+          headers:
+            Retry-After:
+              description: Seconds until the next search is allowed
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 components:
   securitySchemes:
     hostAuth:
@@ -938,7 +950,7 @@ components:
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, DECISION_NOT_FOUND,
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
-            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SCHEMA_NOT_READY]
+            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, RATE_LIMITED, INTERNAL_ERROR, SCHEMA_NOT_READY]
         detail: { type: string }
         correlationId: { type: string }
         violations:

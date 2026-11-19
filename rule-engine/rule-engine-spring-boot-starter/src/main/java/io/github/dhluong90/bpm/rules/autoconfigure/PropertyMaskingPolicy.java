@@ -26,9 +26,14 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
     private final boolean hostDefault;
     private final Map<String, Boolean> tenantDefaults;
     private final List<String> invalidSettings;
+    private final int hostSearchesPerMinute;
+    private final Map<String, Integer> tenantSearchesPerMinute;
 
     private PropertyMaskingPolicy(Optional<MaskingKey> hostKey, Map<String, Optional<MaskingKey>> tenantKeys,
-            boolean hostDefault, Map<String, Boolean> tenantDefaults, List<String> invalidSettings) {
+            boolean hostDefault, Map<String, Boolean> tenantDefaults, List<String> invalidSettings,
+            int hostSearchesPerMinute, Map<String, Integer> tenantSearchesPerMinute) {
+        this.hostSearchesPerMinute = hostSearchesPerMinute;
+        this.tenantSearchesPerMinute = Map.copyOf(tenantSearchesPerMinute);
         this.hostKey = hostKey;
         this.tenantKeys = Map.copyOf(tenantKeys);
         this.hostDefault = hostDefault;
@@ -50,6 +55,8 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
         Optional<MaskingKey> hostKey = decode(hostText, hostKeyId, hostProperty, invalid);
         Map<String, Optional<MaskingKey>> tenantKeys = new HashMap<>();
         Map<String, Boolean> tenantDefaults = new HashMap<>();
+        Map<String, Integer> tenantLimits = new HashMap<>();
+        int hostLimit = searchLimit(masking.search(), "horus.bpm.rules.masking.search.max-per-minute");
         masking.tenants().forEach((tenant, settings) -> {
             if (settings == null) {
                 return;
@@ -61,10 +68,32 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
             if (settings.maskDefault() != null) {
                 tenantDefaults.put(tenant, settings.maskDefault());
             }
+            if (settings.search() != null && settings.search().maxPerMinute() != null) {
+                tenantLimits.put(tenant, searchLimit(settings.search(),
+                        "horus.bpm.rules.masking.tenants." + tenant + ".search.max-per-minute"));
+            }
         });
         Boolean maskDefault = properties.decisionLog().maskDefault();
         return new PropertyMaskingPolicy(hostKey, tenantKeys, maskDefault == null ? EngineDefaults.MASK_DEFAULT
-                : maskDefault, tenantDefaults, invalid);
+                : maskDefault, tenantDefaults, invalid, hostLimit, tenantLimits);
+    }
+
+    /** A search limit below 1 stops start-up: the search cannot be left unlimited. */
+    private static int searchLimit(RuleEngineProperties.Search search, String property) {
+        Integer value = search == null ? null : search.maxPerMinute();
+        if (value == null) {
+            return DEFAULT_SEARCHES_PER_MINUTE;
+        }
+        if (value < 1) {
+            throw new IllegalArgumentException(property + " must be at least 1 (the masked-input search cannot be"
+                    + " unlimited), was " + value);
+        }
+        return value;
+    }
+
+    @Override
+    public int searchesPerMinute(String tenantId) {
+        return tenantSearchesPerMinute.getOrDefault(tenantId, hostSearchesPerMinute);
     }
 
     private static Optional<MaskingKey> decode(String text, String keyId, String property, List<String> invalid) {

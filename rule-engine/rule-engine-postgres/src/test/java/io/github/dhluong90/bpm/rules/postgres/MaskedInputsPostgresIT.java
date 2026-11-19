@@ -222,7 +222,8 @@ class MaskedInputsPostgresIT {
 
         @Override
         public Set<String> currentPermissions() {
-            return Set.of("rules:author", "rules:approve", "rules:evaluate", "rules:read", "rules:log:read");
+            return Set.of("rules:author", "rules:approve", "rules:evaluate", "rules:read", "rules:log:read",
+                    "rules:log:search-masked");
         }
     }
 }

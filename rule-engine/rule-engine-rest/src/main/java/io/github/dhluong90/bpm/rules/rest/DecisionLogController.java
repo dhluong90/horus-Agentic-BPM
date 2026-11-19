@@ -32,7 +32,8 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * Reads of the decision log (RLE-012). Masked inputs are returned as their {@code hmac:<hex>} fingerprints. The
  * search by a masked input's plain value is a {@code POST}, so the value travels in the body and never appears in a
- * URL or an access log. Permission {@code rules:log:read}; the tenant comes from the host's resolver only.
+ * URL or an access log. Reading needs {@code rules:log:read}; the search needs {@code rules:log:search-masked}, which
+ * {@code rules:log:read} does not imply and no role holds by default. The tenant comes from the host's resolver only.
  */
 @RestController
 @RequestMapping(RestSupport.BASE)
@@ -71,7 +72,7 @@ public class DecisionLogController {
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId)
             throws IOException {
-        RestSupport.require(callers, "rules:log:read");
+        RestSupport.require(callers, "rules:log:search-masked");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         JsonNode request = EngineValues.readRequest(body);
         if (!request.isObject()) {

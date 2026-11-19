@@ -40,7 +40,9 @@ class MaskedInputsTest {
     static final byte[] KEY_A = sequence(32, 0x0b);
     static final byte[] KEY_B = seeded(32, 20261120L);
     static final Set<String> EVALUATE = Set.of("rules:evaluate");
-    static final Set<String> AUDIT = Set.of("rules:log:read");
+    /** An auditor who may read decisions and search by a masked value; the search needs its own permission. */
+    static final Set<String> AUDIT = Set.of("rules:log:read", "rules:log:search-masked");
+    static final Set<String> READ_ONLY = Set.of("rules:log:read");
 
     /** The minor-review table of RLE-031: a national id (masked) and an age route a customer to a review. */
     static final String MINOR_REVIEW = """
@@ -75,8 +77,40 @@ class MaskedInputsTest {
     final TestCaller caller = new TestCaller("bank-a", "alice");
 
     RuleEngines engines(MaskingPolicy masking) {
-        return RuleEngines.create(new EngineContext(caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), stores, stores,
+        return engines(masking, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    RuleEngines engines(MaskingPolicy masking, Clock clock) {
+        return RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
                 EngineSettings.defaults(), masking), stores, stores, stores);
+    }
+
+    /** A clock the test moves forward. */
+    static final class MovingClock extends Clock {
+        private volatile Instant now;
+
+        MovingClock(Instant start) {
+            this.now = start;
+        }
+
+        void advance(java.time.Duration by) {
+            now = now.plus(by);
+        }
+
+        @Override
+        public java.time.ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
     }
 
     static MaskingPolicy keys(Map<String, byte[]> byTenant, Set<String> maskByDefault) {
@@ -373,6 +407,7 @@ class MaskedInputsTest {
         assertThat(stores.outbox).hasSize(before + 2);
         var entry = io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(stores.outbox.get(before).payload());
         LifecycleEventPayloadTest.conformsTo("rules.decision-log.masked-input-searched.v1.schema.json", entry);
+        assertThat(entry.path("outcome").asString()).isEqualTo("SEARCHED");
         assertThat(entry.path("actor").asString()).isEqualTo("auditor");
         assertThat(entry.path("tenantId").asString()).isEqualTo("bank-a");
         assertThat(entry.path("input").asString()).isEqualTo("nationalId");
@@ -393,6 +428,91 @@ class MaskedInputsTest {
         assertThat(MaskingKey.isFingerprint("hmac:" + "0".repeat(64))).isFalse();
         assertThatThrownBy(() -> MaskingKey.of("k 1", KEY_A)).hasMessageContaining("key id");
         assertThatThrownBy(() -> MaskingKey.of("x".repeat(33), KEY_A)).hasMessageContaining("key id");
+    }
+
+    @Test
+    void RLE_012_masked_search_needs_its_own_permission_not_implied_by_log_read() {
+        RuleEngines engines = engines(MaskingPolicy.withKey(MaskingKey.of(KEY_A)));
+        publish(engines, "bank-a", MINOR_REVIEW, "minor-review");
+        String id = evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16))
+                .decisionId();
+
+        caller.become("bank-a", "auditor", READ_ONLY);
+        assertThat(engines.decisionLog().get(id).decisionId()).isEqualTo(id);
+        assertThatThrownBy(() -> engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)))
+                .isInstanceOf(PermissionDeniedException.class).hasMessageContaining("rules:log:search-masked");
+
+        caller.become("bank-a", "privacy-ops", Set.of("rules:log:search-masked"));
+        assertThat(engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)).items()).hasSize(1);
+        assertThatThrownBy(() -> engines.decisionLog().get(id)).isInstanceOf(PermissionDeniedException.class);
+    }
+
+    @Test
+    void RLE_012_masked_search_is_limited_per_caller_per_minute_and_refusals_are_audited() throws Exception {
+        MovingClock clock = new MovingClock(NOW);
+        MaskingPolicy threePerMinute = new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenantId) {
+                return Optional.of(MaskingKey.of(KEY_A));
+            }
+
+            @Override
+            public int searchesPerMinute(String tenantId) {
+                return 3;
+            }
+        };
+        RuleEngines engines = engines(threePerMinute, clock);
+        publish(engines, "bank-a", MINOR_REVIEW, "minor-review");
+        evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16));
+        caller.become("bank-a", "auditor", AUDIT);
+        for (int i = 0; i < 3; i++) {
+            engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID));
+            clock.advance(java.time.Duration.ofSeconds(10));
+        }
+        int before = stores.outbox.size();
+
+        // The fourth search within one minute is refused, with the time until the first one leaves the window.
+        assertThatThrownBy(() -> engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)))
+                .isInstanceOfSatisfying(io.github.dhluong90.bpm.rules.api.RateLimitedException.class, e -> {
+                    assertThat(e.code()).isEqualTo("RATE_LIMITED");
+                    assertThat(e.retryAfterSeconds()).isEqualTo(30);
+                    assertThat(e.getMessage()).contains("masking.search.max-per-minute").doesNotContain(NATIONAL_ID);
+                });
+        var refused = io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(stores.outbox.get(before).payload());
+        LifecycleEventPayloadTest.conformsTo("rules.decision-log.masked-input-searched.v1.schema.json", refused);
+        assertThat(refused.path("outcome").asString()).isEqualTo("RATE_LIMITED");
+        assertThat(refused.path("matches").asInt()).isZero();
+        assertThat(stores.outbox.get(before).payload()).doesNotContain(NATIONAL_ID, hmacHex(KEY_A, NATIONAL_ID));
+
+        // Another caller of the same tenant has its own allowance.
+        caller.become("bank-a", "second-auditor", AUDIT);
+        assertThat(engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)).items()).hasSize(1);
+
+        // Once the first search is a minute old, the first caller may search again.
+        caller.become("bank-a", "auditor", AUDIT);
+        clock.advance(java.time.Duration.ofSeconds(30));
+        assertThat(engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)).items()).hasSize(1);
+    }
+
+    @Test
+    void RLE_012_the_search_limit_cannot_be_switched_off() {
+        RuleEngines engines = engines(new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenantId) {
+                return Optional.of(MaskingKey.of(KEY_A));
+            }
+
+            @Override
+            public int searchesPerMinute(String tenantId) {
+                return 0; // a host bean that tries to disable the limit gets one search per minute
+            }
+        });
+        publish(engines, "bank-a", MINOR_REVIEW, "minor-review");
+        caller.become("bank-a", "auditor", AUDIT);
+
+        engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID));
+        assertThatThrownBy(() -> engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)))
+                .isInstanceOf(io.github.dhluong90.bpm.rules.api.RateLimitedException.class);
     }
 
     static String hmacHex(byte[] key, String value) throws Exception {

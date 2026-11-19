@@ -51,8 +51,10 @@ public record RuleEngineProperties(
      * @param hmacKeyId the id stored in every fingerprint of {@code hmacKey} ({@code hmac:<keyId>:<hex>}), 1 to 32
      *     letters, digits, {@code _} or {@code -}; default {@code k1}. Not secret. Change it together with the key
      * @param tenants per-tenant settings, by tenant id; a tenant listed here with a key never uses the host key
+     * @param search limits of the masked-input search
      */
-    public record Masking(String hmacKey, String hmacKeyId, Map<String, TenantMasking> tenants) {
+    public record Masking(String hmacKey, String hmacKeyId, Map<String, TenantMasking> tenants,
+            @DefaultValue Search search) {
 
         /** Copies the tenants; unset is empty. */
         public Masking {
@@ -68,14 +70,24 @@ public record RuleEngineProperties(
     }
 
     /**
+     * Limits of the masked-input search ({@code POST /decisions:find-by-masked-input}).
+     *
+     * @param maxPerMinute searches one caller may run per minute on one replica, at least 1; default 30. It cannot be
+     *     switched off. Past it the search is refused with {@code 429 RATE_LIMITED} and the refusal is audited
+     */
+    public record Search(Integer maxPerMinute) {
+    }
+
+    /**
      * Masking settings of one tenant.
      *
      * @param hmacKey the tenant's Base64 key of at least 32 bytes after decoding; unset uses the host key
      * @param hmacKeyId the id stored in every fingerprint of the tenant's key; default {@code k1}
      * @param maskDefault whether this tenant's inputs that declare no {@code mask} are masked; unset uses
      *     {@code decision-log.mask-default}
+     * @param search the tenant's own search limit; unset uses {@code masking.search}
      */
-    public record TenantMasking(String hmacKey, String hmacKeyId, Boolean maskDefault) {
+    public record TenantMasking(String hmacKey, String hmacKeyId, Boolean maskDefault, Search search) {
 
         /** Never prints a key. */
         @Override

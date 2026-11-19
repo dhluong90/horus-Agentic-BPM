@@ -70,13 +70,16 @@ class MaskedInputsHostIT {
     @Test
     void RLE_035_masking_key_required_at_startup_and_never_leaked(CapturedOutput output) throws Exception {
         String db = freshDatabase();
-        String auditor = TestTokens.bearerFor("audrey", "bank-a", List.of("rules:log:read"));
-        String otherTenantAuditor = TestTokens.bearerFor("oscar", "tenant-b", List.of("rules:log:read"));
+        String auditor = TestTokens.bearerFor("audrey", "bank-a", List.of("rules:log:read", "rules:log:search-masked"));
+        String otherTenantAuditor = TestTokens.bearerFor("oscar", "tenant-b",
+                List.of("rules:log:read", "rules:log:search-masked"));
+        String readOnly = TestTokens.bearerFor("rhea", "bank-a", List.of("rules:log:read"));
         List<String> bodies = new ArrayList<>();
         String decisionId;
 
         // Case C: a 32-byte key starts the host; the masked value is stored, read and found by its fingerprint.
-        try (ConfigurableApplicationContext host = start(db, KEY_SETTING + "=" + K32_BASE64)) {
+        try (ConfigurableApplicationContext host = start(db, KEY_SETTING + "=" + K32_BASE64,
+                "horus.bpm.rules.masking.search.max-per-minute=4")) {
             int port = port(host);
             bodies.add(send(port, TestTokens.bearer("alice"), "POST", "/rule-sets", MINOR_REVIEW, "application/yaml")
                     .body());
@@ -132,6 +135,28 @@ class MaskedInputsHostIT {
             bodies.add(tooLong.body());
             assertThat(tooLong.status()).isEqualTo(400);
             assertThat(tooLong.json().path("code").asString()).isEqualTo("QUERY_INVALID");
+
+            // rules:log:read alone may read a decision but not search by a masked value.
+            assertThat(send(port, readOnly, "GET", "/decisions/" + decisionId, null, null).status()).isEqualTo(200);
+            Reply denied = send(port, readOnly, "POST", "/decisions:find-by-masked-input", search, "application/json");
+            assertThat(denied.status()).isEqualTo(403);
+
+            // Four searches per minute for this caller on this replica: the fifth is 429 with Retry-After.
+            for (int i = 0; i < 3; i++) {
+                assertThat(send(port, auditor, "POST", "/decisions:find-by-masked-input", search, "application/json")
+                        .status()).isEqualTo(200);
+            }
+            HttpResponse<String> limited = HTTP.send(HttpRequest.newBuilder(
+                            URI.create("http://localhost:" + port + "/api/bpm/rules/v1/decisions:find-by-masked-input"))
+                    .header("Authorization", auditor).header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(search)).build(), HttpResponse.BodyHandlers.ofString());
+            bodies.add(limited.body());
+            assertThat(limited.statusCode()).isEqualTo(429);
+            assertThat(JSON.readTree(limited.body()).path("code").asString()).isEqualTo("RATE_LIMITED");
+            assertThat(Long.parseLong(limited.headers().firstValue("Retry-After").orElseThrow())).isBetween(1L, 60L);
+            assertThat(jdbc.sql("SELECT count(*) FROM rle_decision_outbox WHERE payload ->> 'eventType' = "
+                    + "'rules.decision-log.masked-input-searched.v1' AND payload ->> 'outcome' = 'RATE_LIMITED'")
+                    .query(Long.class).single()).isEqualTo(1);
         }
 
         // Case A: the same database, no key: the host refuses to start and names the setting and the rule set.

@@ -107,6 +107,23 @@ class MaskingPolicyPropertiesTest {
                         .doesNotContain(HOST_KEY));
     }
 
+    @Test
+    void RLE_012_search_limit_defaults_to_30_per_minute_per_tenant_override_and_never_below_1() {
+        runner.run(context -> assertThat(context.getBean(PropertyMaskingPolicy.class).searchesPerMinute("bank-a"))
+                .isEqualTo(30));
+        runner.withPropertyValues("horus.bpm.rules.masking.search.max-per-minute=10",
+                        "horus.bpm.rules.masking.tenants.bank-b.search.max-per-minute=2")
+                .run(context -> {
+                    PropertyMaskingPolicy policy = context.getBean(PropertyMaskingPolicy.class);
+                    assertThat(policy.searchesPerMinute("bank-a")).isEqualTo(10);
+                    assertThat(policy.searchesPerMinute("bank-b")).isEqualTo(2);
+                });
+        runner.withPropertyValues("horus.bpm.rules.masking.search.max-per-minute=0")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.masking.search.max-per-minute")
+                        .hasMessageContaining("at least 1"));
+    }
+
     static String fingerprint(PropertyMaskingPolicy policy, String tenant) {
         return policy.hmacKey(tenant).orElseThrow().fingerprint("x");
     }

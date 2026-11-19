@@ -20,7 +20,7 @@ class RuleEngineModuleDescriptorTest {
             .withUserConfiguration(RuleEngineAutoConfigurationTest.HostWithEngineStandIns.class);
 
     @Test
-    void RLE_019_rules_entry_has_api_v1_the_build_version_and_the_six_permissions() {
+    void RLE_019_rules_entry_has_api_v1_the_build_version_and_the_seven_permissions() {
         runner.run(context -> {
             ModuleDescriptor rules = context.getBean(ModuleDescriptor.class);
 
@@ -30,7 +30,8 @@ class RuleEngineModuleDescriptorTest {
                     .doesNotContain("${").matches("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$");
             assertThat(rules.features()).isEmpty();
             assertThat(rules.permissions()).containsExactly(
-                    "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read");
+                    "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read",
+                    "rules:log:search-masked");
             assertThat(rules.rolePermissions()).isEmpty();
         });
     }
