@@ -137,11 +137,12 @@ class ExpressionPropertiesTest {
     }
 
     @TestFactory
-    Stream<DynamicTest> RLE_006_in_is_false_and_not_in_is_true_for_a_null_target() {
+    Stream<DynamicTest> RLE_006_a_null_target_is_in_a_list_only_when_the_list_holds_null() {
+        // FEEL list contains(list, null) is true only when the list holds null; v1 in is true when an element equals x
         return Property.tries(1_000).forAll(COMPARABLE, element -> {
-            assertThat(eval("a in [b]", null, element)).isEqualTo(false);
-            assertThat(eval("a not in [b]", null, element)).isEqualTo(true);
-            assertThat(eval("a in [b, c]", null, element, null, null, null, null)).isEqualTo(false);
+            assertThat(eval("a in [b]", null, element)).isEqualTo(element == null);
+            assertThat(eval("a not in [b]", null, element)).isEqualTo(element != null);
+            assertThat(eval("a in [b, c]", null, element, null, null, null, null)).isEqualTo(true);
         });
     }
 
@@ -169,17 +170,20 @@ class ExpressionPropertiesTest {
         });
     }
 
-    /** DESIGN 3.2: "between ... with a null operand give null", for the target and for either bound. */
+    /**
+     * DESIGN 3.2 and DMN 1.5: {@code x between a and b} is {@code x >= a and x <= b}, so a null target gives null and
+     * a null bound gives null only when the other comparison holds; when it fails, false.
+     */
     @TestFactory
-    Stream<DynamicTest> RLE_006_between_with_any_null_operand_is_null() {
+    Stream<DynamicTest> RLE_006_between_is_the_conjunction_of_its_two_comparisons() {
         Gen<Long> small = Gen.longs(-1000, 1000);
         return Property.tries(1_000).forAll(small, small, (x, bound) -> {
             BigDecimal v = BigDecimal.valueOf(x);
             BigDecimal other = BigDecimal.valueOf(bound);
 
             assertThat(eval("a between b and c", null, v, null, null, null, other)).isNull();
-            assertThat(eval("a between b and c", v, null, null, null, null, other)).isNull();
-            assertThat(eval("a between b and c", v, other, null, null, null, null)).isNull();
+            assertThat(eval("a between b and c", v, null, null, null, null, other)).isEqualTo(v.compareTo(other) <= 0 ? null : false);
+            assertThat(eval("a between b and c", v, other, null, null, null, null)).isEqualTo(v.compareTo(other) >= 0 ? null : false);
         });
     }
 
