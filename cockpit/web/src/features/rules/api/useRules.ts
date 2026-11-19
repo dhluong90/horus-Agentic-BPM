@@ -24,6 +24,7 @@ function useKeys() {
     version: (name: string, version: number) => [...rules, name, 'version', version] as const,
     history: (name: string, version: number) => [...rules, name, 'history', version] as const,
     source: (name: string, version: number) => [...rules, name, 'source', version] as const,
+    diff: (name: string, version: number, base: number) => [...rules, name, 'diff', version, base] as const,
   };
 }
 
@@ -42,6 +43,18 @@ export function useVersion(name: string, version: number | undefined) {
     queryKey: keys.version(name, version ?? 0),
     queryFn: ({ signal }) => client.getVersion(name, version ?? 0, { signal }),
     enabled: version !== undefined,
+    staleTime: 10_000,
+  });
+}
+
+/** The engine's row-level diff of a version against a base version (RLE-028); off while there is no base. */
+export function useVersionDiff(name: string, version: number, base: number | undefined) {
+  const { client } = useRulesSession();
+  const keys = useKeys();
+  return useQuery({
+    queryKey: keys.diff(name, version, base ?? 0),
+    queryFn: ({ signal }) => client.diffVersions(name, version, base ?? 0, signal),
+    enabled: base !== undefined,
     staleTime: 10_000,
   });
 }
