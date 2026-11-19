@@ -1,5 +1,6 @@
 package com.horus.bpm.rules.autoconfigure;
 
+import com.horus.bpm.host.spi.EngineAccess;
 import com.horus.bpm.rules.api.RuleEngine;
 import com.horus.bpm.rules.api.VersionService;
 import com.horus.bpm.rules.internal.service.RuleEngines;
@@ -22,7 +23,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClas
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.env.Environment;
 
 /**
  * The engine's entry points ({@link RuleEngine}, {@link VersionService}), the security SPIs and the
@@ -34,30 +34,14 @@ class RuleEngineServicesConfiguration {
 
     private static final Log LOG = LogFactory.getLog(RuleEngineServicesConfiguration.class);
 
+    /**
+     * The tenant from the host contract's {@code EngineAccess}, resolved per call so the host module's
+     * bean, registered after this configuration, is found.
+     */
     @Bean
     @ConditionalOnMissingBean
-    TenantResolver ruleEngineTenantResolver(
-            ObjectProvider<com.horus.bpm.host.spi.TenantResolver> hostResolver, Environment environment) {
-        com.horus.bpm.host.spi.TenantResolver host = hostResolver.getIfUnique();
-        if (host != null && SECURITY_PRESENT) {
-            return new HostTenantResolverBridge(host, environment.getProperty("horus.bpm.tenancy.claim", "tenant_id"),
-                    claims(RuleEngineServicesConfiguration.class.getClassLoader()));
-        }
-        LOG.warn("The host defines no TenantResolver: every Rule Engine call is refused with UNAUTHENTICATED. "
-                + "Declare a com.horus.bpm.host.spi.TenantResolver (or the engine's own) that reads the tenant from "
-                + "the authenticated principal.");
-        return () -> null;
-    }
-
-    private static final boolean SECURITY_PRESENT = org.springframework.util.ClassUtils.isPresent(
-            "org.springframework.security.core.context.SecurityContextHolder",
-            RuleEngineServicesConfiguration.class.getClassLoader());
-
-    /** Token claims when Spring Security OAuth2 is present; otherwise a principal has no claims. */
-    static java.util.function.Function<org.springframework.security.core.Authentication, java.util.Map<String, Object>>
-            claims(ClassLoader classLoader) {
-        return org.springframework.util.ClassUtils.isPresent(OAuth2PrincipalClaims.CLAIM_ACCESSOR, classLoader)
-                ? new OAuth2PrincipalClaims() : authentication -> java.util.Map.of();
+    TenantResolver ruleEngineTenantResolver(ObjectProvider<EngineAccess> access) {
+        return EngineAccessResolvers.tenants(access::getIfAvailable);
     }
 
     @Bean
@@ -86,8 +70,8 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        CallerResolver ruleEngineCallerResolver(RuleEngineProperties properties) {
-            return new SecurityContextCallerResolver(properties.security().rolePermissions());
+        CallerResolver ruleEngineCallerResolver(ObjectProvider<EngineAccess> access) {
+            return EngineAccessResolvers.callers(access::getIfAvailable);
         }
     }
 
