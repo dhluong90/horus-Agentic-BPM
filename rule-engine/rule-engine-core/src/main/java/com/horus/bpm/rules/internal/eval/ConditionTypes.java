@@ -82,6 +82,8 @@ final class ConditionTypes {
                 case BigDecimal ignored -> Kind.NUMBER;
                 case Boolean ignored -> Kind.BOOLEAN;
                 case Money ignored -> Kind.MONEY;
+                case java.time.LocalDate ignored -> Kind.DATE;
+                case java.time.Instant ignored -> Kind.DATETIME;
                 default -> Kind.UNKNOWN;
             };
             case Expr.Var var -> {

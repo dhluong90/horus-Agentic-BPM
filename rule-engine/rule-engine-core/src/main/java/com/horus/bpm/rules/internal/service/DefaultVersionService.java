@@ -24,6 +24,7 @@ import com.horus.bpm.rules.internal.read.RuleSetReader;
 import com.horus.bpm.rules.internal.store.EventOutbox;
 import com.horus.bpm.rules.internal.store.RuleStore;
 import com.horus.bpm.rules.internal.store.StoredVersion;
+import io.github.dhluong90.bpm.rules.internal.dmn.ruleset.DmnWriter;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
@@ -86,8 +87,8 @@ public final class DefaultVersionService implements VersionService {
     }
 
     private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source) {
-        if (format != SourceFormat.YAML) {
-            throw new InputInvalidException("Only YAML import is available in this release");
+        if (format != SourceFormat.YAML && format != SourceFormat.DMN_XML) {
+            throw new InputInvalidException("Only YAML and DMN XML import are available in this release");
         }
         String sourceText = utf8(source);
         ParsedRuleSet parsed = RuleSetReader.read(format, source);
@@ -169,6 +170,22 @@ public final class DefaultVersionService implements VersionService {
         context.callerWith(PERMISSION_READ);
         return context.withoutDooming(() ->
                 store.findVersion(tenant, ruleSet, version, false).map(v -> v.toView(includeSource)));
+    }
+
+    @Override
+    public String export(String ruleSet, int version, SourceFormat format) {
+        Objects.requireNonNull(format, "format must not be null");
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        StoredVersion stored = context.withoutDooming(() -> store.findVersion(tenant, ruleSet, version, false)
+                .orElseThrow(() -> store.findRuleSetId(tenant, ruleSet).isPresent()
+                        ? new VersionNotFoundException(ruleSet, version)
+                        : new RuleSetNotFoundException(ruleSet)));
+        return switch (format) {
+            case JSON -> stored.canonicalJson();
+            case DMN_XML -> DmnWriter.write(stored.canonicalJson());
+            case YAML -> throw new InputInvalidException("YAML export is not available in this release; use json or dmn");
+        };
     }
 
     private StoredVersion load(String tenant, String ruleSet, int version) {

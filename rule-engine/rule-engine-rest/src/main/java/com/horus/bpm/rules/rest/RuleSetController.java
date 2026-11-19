@@ -8,6 +8,7 @@ import com.horus.bpm.rules.api.VersionService;
 import com.horus.bpm.rules.api.WriteOptions;
 import com.horus.bpm.rules.internal.json.EngineValues;
 import com.horus.bpm.rules.spi.CallerResolver;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Objects;
 import org.springframework.http.HttpHeaders;
@@ -117,6 +118,31 @@ public class RuleSetController {
         return RestSupport.version(HttpStatus.OK, versions.approve(name, version, options));
     }
 
+    /**
+     * {@code GET /rule-sets/{name}/versions/{v}/export?format=json|dmn}: the version as a file that imports back with
+     * the same canonical hash. Writes nothing.
+     */
+    @GetMapping("/{name}/versions/{version:\\d+}/export")
+    public ResponseEntity<byte[]> export(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version,
+            @RequestParam(value = "format", required = false) String format) {
+        RestSupport.require(callers, "rules:read");
+        SourceFormat sourceFormat = switch (format == null ? "" : format) {
+            case "json" -> SourceFormat.JSON;
+            case "dmn" -> SourceFormat.DMN_XML;
+            case "yaml", "" -> SourceFormat.YAML;
+            default -> throw new InputInvalidException("format must be json or dmn");
+        };
+        String document = versions.export(name, version, sourceFormat);
+        String extension = sourceFormat == SourceFormat.DMN_XML ? "dmn" : sourceFormat.name().toLowerCase(Locale.ROOT);
+        String mediaType = sourceFormat == SourceFormat.DMN_XML ? "application/xml" : "application/json";
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, mediaType + ";charset=UTF-8")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + name + "-v" + version + "." + extension + "\"")
+                .body(document.getBytes(StandardCharsets.UTF_8));
+    }
+
     private static SourceFormat format(String contentType) {
         String type = contentType == null ? "" : contentType.toLowerCase(Locale.ROOT);
         if (type.contains("yaml")) {
@@ -125,6 +151,10 @@ public class RuleSetController {
         if (type.contains("json")) {
             return SourceFormat.JSON;
         }
-        throw new InputInvalidException("Content-Type must be application/yaml");
+        // application/xml, text/xml and the DMN media types such as application/dmn+xml
+        if (type.contains("xml") || type.contains("dmn")) {
+            return SourceFormat.DMN_XML;
+        }
+        throw new InputInvalidException("Content-Type must be application/yaml or application/xml (a DMN file)");
     }
 }
