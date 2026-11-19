@@ -222,10 +222,10 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-022 Outside the dev profile the starter refuses auto-approval and disabled maker-checker
 - **Traces to:** `TR-SEC-11`
 - **Milestone:** M2
-- **Given:** Three start-ups: (a) profile `prod`, `horus.bpm.processes.definitions-auto-approve=true`; (b) profile `prod`, `horus.bpm.processes.maker-checker.enabled=false`; (c) profile `dev`, `definitions-auto-approve=true` and one classpath definition.
+- **Given:** Five start-ups: (a) profile `prod`, `horus.bpm.processes.definitions.auto-approve=true`; (b) profile `prod`, `horus.bpm.processes.maker-checker.enabled=false`; (c) profile `dev`, `definitions.auto-approve=true` and one classpath definition; (d) profiles `dev,prod`, `definitions.auto-approve=true`; (e) profile `dev`, the removed key `horus.bpm.processes.definitions-auto-approve=false`.
 - **When:** The host starts.
-- **Then:** (a) and (b) fail to start with a message naming the property and the `dev`-only rule. (c) starts; the classpath definition is `ACTIVE` with `approvedBy: system:dev-auto-approve`.
-- **Example:** `prod + auto-approve -> start-up fails; dev + auto-approve -> ACTIVE by system:dev-auto-approve`.
+- **Then:** (a), (b) and (d) fail to start with a message naming the property and the `dev`-only rule. (e) fails to start with a message naming the removed key and its replacement, whatever its value. (c) starts; the classpath definition is `ACTIVE` with `approvedBy: system:dev-auto-approve`, a WARN log line names the tenant and definition key, and a definition imported afterwards through `POST /definitions` is auto-approved the same way.
+- **Example:** `prod + auto-approve -> start-up fails; dev,prod + auto-approve -> fails; legacy key set -> fails; dev + auto-approve -> ACTIVE by system:dev-auto-approve`.
 - **Test ID:** `PRE_022_dev_only_relaxations_refused_outside_dev`
 
 ### PRE-023 Turning off cockpit drafts blocks authoring endpoints, not imports
@@ -454,3 +454,37 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The start is accepted (`201`) because the engine reads the camelCase body with its own Jackson 3 mapper; the response keys are camelCase (`businessKey`, `startedAt`), `startedAt` is an ISO 8601 string, and the host's own controllers still answer in snake case; the dependency tree of the 3.5 leg shows Jackson 3 from the engine next to the host's Jackson 2, with no host version override.
 - **Example:** `host SNAKE_CASE -> engine response {"businessKey":"APP-1001","startedAt":"2027-02-01T09:00:00Z"}`.
 - **Test ID:** `PRE_045_engine_rest_bodies_ignore_host_json_settings`
+
+### PRE-046 A decision step evaluates in the instance's tenant, as the engine on behalf of the user, with no principal needed
+- **Traces to:** `TR-TEN-01`, `TR-IDEM-04`, ADR-0027
+- **Milestone:** M2
+- **Given:** Tenants `bank-a` and `bank-b` each publish a rule set `card-fee`, with different fees. An instance of `card-fee-review` runs in `bank-a`. Its `businessRuleTask` `price` is reached (a) inside `tuan`'s `POST /tasks/{id}:complete` request, and (b) on a thread with no principal (simulated by the test harness, as a timer or poller would run it).
+- **When:** The step evaluates `card-fee` through the `DecisionPort`, and the step is then retried with the same attempt.
+- **Then:**
+  - In both (a) and (b), the decision uses `bank-a`'s `card-fee`, read from `pre_instance.tenant_id`.
+  - The `rle_decision` row is in `bank-a`, with caller `system:process-engine` and `onBehalfOf` set to `tuan` in (a) and `null` in (b).
+  - `tuan` does not need `rules:evaluate`.
+  - The retry replays the logged decision with the idempotency key derived from instance, node and attempt; no second `rle_decision` row is written.
+- **Example:** `bank-a instance, no principal -> bank-a card-fee, caller system:process-engine; retry -> same decisionId`.
+- **Test ID:** `PRE_046_decision_step_uses_the_instance_tenant_and_the_engine_identity`
+
+### PRE-047 A request whose tenant differs from the instance's tenant cannot run its decision step
+- **Traces to:** `TR-TEN-01`, ADR-0027
+- **Milestone:** M2
+- **Given:** An instance in `bank-a` waiting at a user task followed by a `businessRuleTask`, and a request from a caller whose `EngineAccess` tenant is `bank-b`, which reaches the step through a host path that bypasses the task tenant check (simulated by the test harness).
+- **When:** The `DecisionPort` adapter is called for the step.
+- **Then:** The adapter refuses with `403 TENANT_NOT_ALLOWED` before any rule set is read, nothing is written to `rle_decision` in either tenant, the step fails and the whole transaction rolls back, and one security log entry is written.
+- **Example:** `request tenant bank-b, instance tenant bank-a -> 403 TENANT_NOT_ALLOWED, no decision row`.
+- **Test ID:** `PRE_047_decision_port_refuses_a_request_tenant_other_than_the_instance_tenant`
+
+### PRE-048 The kernel runs only the source document that was approved
+- **Traces to:** `TR-DEF-04`, `TR-STD-01`, ADR-0026
+- **Milestone:** M2
+- **Given:** Definition `card-fee-review` v1 approved (or auto-approved on `dev`), with `sourceHash` and `readerVersion` recorded in `processes.definition.approved.v1` and the approval history row, and one running instance.
+- **When:** (a) The stored `source_document` and `source_hash` are both replaced in the database by a different, internally consistent process. (b) The engine starts with a different BPMN reader version and the same source.
+- **Then:**
+  - (a) Starting or advancing the version is refused. Each affected instance gets an incident naming the integrity check, and one audit entry and one alert are written. The changed process never runs.
+  - (b) The version compiles and runs, and a WARN log line names the definition and both reader versions.
+- **Example:** `source swapped with a matching row hash -> refused, incident, audit, alert; reader upgraded -> runs, WARN`.
+- **Test ID:** `PRE_048_kernel_runs_only_the_approved_source`
+
