@@ -1,6 +1,6 @@
 # Deploying with Docker Compose
 
-From a fresh clone, one command builds the example host image and starts it beside PostgreSQL 16. The host is a Spring Boot service that embeds the Rule Engine ([`examples/rule-engine-only`](../examples/rule-engine-only/README.md)). This guide takes you from `git clone` to a priced transaction, with the exact commands and the output to expect.
+From a fresh clone, one command builds the example host image and starts it beside PostgreSQL 16. The host is a Spring Boot service that embeds the Rule Engine and the cockpit ([`examples/rule-engine-only`](../examples/rule-engine-only/README.md)). This guide takes you from `git clone` to a priced transaction, with the exact commands and the output to expect.
 
 ```mermaid
 flowchart LR
@@ -75,6 +75,8 @@ curl -s 127.0.0.1:8080/actuator/health
 |---|---|---|
 | `lan` | `PRICING_AUTHOR` | `rules:read`, `rules:author` |
 | `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
+| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve` |
+| `tuan` | `TELLER` | `rules:evaluate` |
 
 Load the passwords into this shell, then sign in as `lan` with the host's form. The session cookie is kept in `./cookies`:
 
@@ -106,16 +108,14 @@ curl -s 127.0.0.1:8080/api/bpm/meta
 
 ## 4. Import, approve and evaluate a rule set
 
-> **Availability.** These steps need the rule lifecycle endpoints, which arrive with pull request [#87](https://github.com/dhluong90/horus-Agentic-BPM/pull/87). On a build without them, every call below answers a plain `404` (`{"timestamp":...,"status":404,"error":"Not Found",...}`), and the smoke test reports this step as `SKIP`. The output below was recorded on a build of that pull request with the same Dockerfile and compose file.
-
-That build adds two demo users to the table above: `hoa` (author and approver) and `tuan` (teller, `rules:evaluate`). On the `dev` profile each call can carry Basic credentials instead of the session cookie.
+On the `dev` profile each call can carry Basic credentials instead of the session cookie, so the next steps use `-u`.
 
 ```bash
 H=127.0.0.1:8080/api/bpm/rules/v1
 P=$HORUS_DEMO_PASSWORD
 ```
 
-1. Hoa imports the card fee table, `examples/rule-engine-only/src/main/resources/rules/card-fee.yaml` on that build. It is stored as a draft:
+1. Hoa imports the card fee table, [`card-fee.yaml`](../examples/rule-engine-only/src/main/resources/rules/card-fee.yaml). It is stored as a draft:
 
    ```bash
    curl -s -u hoa:$P -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
@@ -183,25 +183,25 @@ P=$HORUS_DEMO_PASSWORD
    (1 row)
    ```
 
-## 5. Run the smoke test
+## 5. Open the cockpit
 
-[`deploy/smoke-test.sh`](../deploy/smoke-test.sh) runs steps 2 to 4 and exits non-zero on the first failure. CI runs it on every pull request that changes the deployment files.
+The image carries the cockpit when the checkout has `cockpit/web`: the build compiles it with Node 22 and packages it into the cockpit starter. Open <http://127.0.0.1:8080/bpm/cockpit/> in a browser and sign in as `lan`, `minh`, `hoa` or `tuan`. From the shell, with the session from step 3:
+
+```bash
+curl -s -b cookies -o /dev/null -w '%{http_code} %{content_type}\n' 127.0.0.1:8080/bpm/cockpit/
+```
+
+```
+200 text/html;charset=UTF-8
+```
+
+## 6. Run the smoke test
+
+[`deploy/smoke-test.sh`](../deploy/smoke-test.sh) runs steps 2 to 5 and exits non-zero on the first failure. CI runs it on every pull request that changes the deployment files. On a host built from an older commit without the rule lifecycle endpoints or the cockpit, the test reports those steps as `SKIP` instead of failing.
 
 ```bash
 deploy/smoke-test.sh
 ```
-
-On a build without the rule lifecycle endpoints:
-
-```
-PASS  health: {"groups":["liveness","readiness"],"status":"UP"}
-PASS  anonymous GET /api/bpm/meta: 401 "code":"UNAUTHENTICATED"
-PASS  GET /api/bpm/meta as lan: 200 {"schemaVersion":1,"hostId":"rule-engine-only",...}
-SKIP  rule lifecycle: this host has no rule lifecycle endpoints yet (probe answered a plain 404)
-Smoke test passed (rule lifecycle skipped).
-```
-
-On a build with them:
 
 ```
 PASS  health: {"groups":["liveness","readiness"],"status":"UP"}
@@ -212,12 +212,13 @@ PASS  request publication as hoa: 200 "status":"PENDING_APPROVAL"
 PASS  self-approval as hoa refused: 403 "code":"SELF_APPROVAL_FORBIDDEN"
 PASS  approve as minh: 200 "status":"PUBLISHED"
 PASS  evaluate card-fee as tuan: 200 {"decisionId":"...","outcome":"MATCHED","matchedRuleIds":["R1"],"outputs":{"fee":{"currency":"VND","amount":0}}}
+PASS  cockpit as lan: 200 <title>HORUS Cockpit</title>
 Smoke test passed.
 ```
 
 Run again on the same database, the test finds `card-fee` already published and only evaluates.
 
-## 6. Check the image before you ship it
+## 7. Check the image before you ship it
 
 [`deploy/scan-image.sh`](../deploy/scan-image.sh) applies the release gates to the built image: no secret in any layer or in the image configuration, and no high or critical vulnerability (Grype, with the repository's [`.grype.yaml`](../.grype.yaml)).
 
@@ -237,7 +238,7 @@ PASS  no high or critical vulnerability in horus-bpm/rule-engine-only:local (rep
 
 | Property | Value |
 |---|---|
-| Stages | Cockpit bundle (Node 22, only when the checkout has `cockpit/web`), Maven build (JDK 21), runtime file system, runtime image |
+| Stages | Cockpit bundle (Node 22, skipped when the checkout has no `cockpit/web`), Maven build (JDK 21), runtime file system, runtime image |
 | Runtime | Alpine 3.24 reduced to musl and busybox (no package manager, no OpenSSL), Temurin JRE 21.0.13.1 checked against its published SHA-256 |
 | User | `horus`, uid and gid 10001; the container runs with a read-only root file system, `/tmp` in memory, all capabilities dropped |
 | Health check | `wget` on `http://127.0.0.1:$PORT/actuator/health` every 10 seconds, after a 60-second start period |
@@ -245,7 +246,7 @@ PASS  no high or critical vulnerability in horus-bpm/rule-engine-only:local (rep
 | Secrets | none; `.dockerignore` keeps `.env`, keys and build output out of the build context |
 | Size | about 82 MB |
 
-Base images are pinned by digest. To update one, resolve the new digest, replace tag, digest and version comment together in [`deploy/docker/Dockerfile`](../deploy/docker/Dockerfile) or [`docker-compose.yml`](../docker-compose.yml), then rebuild and run steps 5 and 6. The JRE release, its file version and its SHA-256 (from the `.sha256.txt` file beside the archive on the Adoptium release page) change together.
+Base images are pinned by digest. To update one, resolve the new digest, replace tag, digest and version comment together in [`deploy/docker/Dockerfile`](../deploy/docker/Dockerfile) or [`docker-compose.yml`](../docker-compose.yml), then rebuild and run steps 6 and 7. The JRE release, its file version and its SHA-256 (from the `.sha256.txt` file beside the archive on the Adoptium release page) change together.
 
 ## Configuration
 
