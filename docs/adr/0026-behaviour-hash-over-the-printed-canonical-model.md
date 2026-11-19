@@ -29,7 +29,7 @@ Nothing has been released or logged in production yet. 0.1.0 is the first releas
 4. **What runs is what was hashed and approved.**
    - The engine compiles a version only by parsing its stored `canonical_json`, on every replica and after every restart. It never compiles from the import-time model or from the source document.
    - At import, the engine checks that `parse(print(model))` is structurally equal to `model`. If not, it refuses with `422 VALIDATION_FAILED` and stores nothing (fail closed).
-   - Before compiling a version, the engine checks that the SHA-256 of the RFC 8785 form of the stored `canonical_json` equals `canonical_hash`. If not, it refuses to serve that version: the evaluation is `EVALUATION_ERROR` with code `DEFINITION_INTEGRITY`, and the engine raises an alert and writes an audit entry.
+   - Before compiling a version, the engine checks that the SHA-256 of the RFC 8785 form of the stored `canonical_json` equals `canonical_hash`. If not, it refuses to serve that version: the evaluation fails with `EVALUATION_ERROR`, its detail naming the failed integrity check, and the engine raises an alert and writes an audit entry.
    - `canonical_json` is stored as `JSONB`. Because decimals are strings and integers are within plus or minus 2^53 - 1, reading it back and re-serialising it is exact.
 5. **"Was this version imported from that file?" uses `source_hash`.**
    - `source_hash` is the SHA-256 of the raw request bytes, taken before any decoding or trimming.
