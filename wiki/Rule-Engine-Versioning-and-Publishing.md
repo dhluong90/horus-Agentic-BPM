@@ -48,7 +48,7 @@ History is never rewritten, so a rollback is a new version with old content.
 
 ## Retire a rule set
 
-`POST .../versions/3:retire` with `{ "reason": "Tet promotion ended" }` by an identity with `rules:approve`. One identity is enough, because a retire only stops behaviour; the reason, the actor and the time are recorded and an event is emitted. Older published versions are retired with it, so none comes back. Callers then receive `404 NO_EFFECTIVE_VERSION`. Decisions already logged keep pointing at version 3 and replay; an evaluation with a clock before the retirement still selects version 3 (ADR-0025).
+`POST .../versions/3:retire` with `{ "reason": "Tet promotion ended" }` by an identity with `rules:approve`. By default one identity is enough, because a retire only stops behaviour and nothing is deleted; the reason, the actor and the time are recorded and an event is emitted. From M3 a host can set the retirement approval mode to `four-eyes`: the request then leaves the version published and serving until a second `rules:approve` holder, never the requester, confirms it ([[Rule Engine Configuration]]). Older published versions are retired with it, so none comes back. Callers then receive `404 NO_EFFECTIVE_VERSION`. Decisions already logged keep pointing at version 3 and replay; an evaluation with a clock before the retirement still selects version 3 (ADR-0025).
 
 ## Give one tenant different rules
 

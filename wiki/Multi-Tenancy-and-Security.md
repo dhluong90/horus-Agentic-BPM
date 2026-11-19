@@ -10,11 +10,11 @@ Each numbered step is a control the request passes. Steps 1 to 3 run in your gat
 
 | Source (`tenancy.resolver`) | How | Use when |
 |---|---|---|
-| `security-context` (default) | `TenantResolver` reads the `tenant_id` claim of the `JwtAuthenticationToken`, or the issuer realm when configured | OIDC hosts |
-| `header:X-Tenant-Id` | Trusted header set by a gateway after authentication | The gateway terminates authentication and the host network is private |
-| Bean name | Host `TenantResolver` implementation | Tenant from path, subdomain or session |
+| `security-context` (default) | `TenantResolver` reads the `tenancy.claim` attribute (`tenant_id`) of the authenticated principal in the host's security context: a validated token, or a server-side session login, or the issuer realm when configured | OIDC hosts, and host web applications that embed the cockpit behind their own session login |
+| `header:X-Tenant-Id` | Trusted header set by a gateway after authentication. Under revision: the product decided that no trusted-header resolver ships, because a misconfigured gateway would let one tenant's operator see another tenant's data; ADR-0014 is being updated | Used by the local development examples on this wiki until ADR-0014 settles it. Do not rely on it in production |
+| Bean name | Host `TenantResolver` implementation | Tenant from your user directory, a path or a subdomain. A resolver you write that trusts a request header is your risk |
 
-Rules that hold in every mode: every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant.
+Rules that hold in every mode: tenant isolation is a guarantee that no setting relaxes; every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); the cockpit's tenant switch is accepted only for a tenant in the user's allowed list; a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant.
 
 ## Permissions
 

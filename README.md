@@ -8,7 +8,7 @@ Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockp
 
 > Status: pre-alpha. The build skeleton and the Rule Engine schema exist; engine features are being added. The wiki describes the 0.1 target. No artifact is published yet.
 
-Requirements: Java 21 or later, PostgreSQL 14 or later, and Spring Boot 4.x now; 3.5.x support lands with the compatibility matrix ([#9](https://github.com/dhluong90/horus-Agentic-BPM/issues/9), [ADR-0011](docs/adr/0011-spring-boot-4-baseline.md)).
+Requirements: Java 21 or later, PostgreSQL 14 or later (15 or later from 1.0), and Spring Boot 4.x now; 3.5.x support lands with the compatibility matrix ([#9](https://github.com/dhluong90/horus-Agentic-BPM/issues/9), [ADR-0011](docs/adr/0011-spring-boot-4-baseline.md)).
 
 ## What it looks like
 
@@ -50,12 +50,14 @@ The decision, its inputs and the matched row are written to the decision log in 
 
 | Module | What it does | Artifact |
 |---|---|---|
-| [`rule-engine/`](rule-engine/) | Decision tables (`first`, `unique`, `collect`), versioned rule sets with maker-checker and effective dates, a safe expression language, decision API, append-only decision log, simulation | `com.horus.bpm:rule-engine-spring-boot-starter` |
-| [`process-engine/`](process-engine/) | Versioned process definitions with user, service and agent tasks, gateways and timers; human task queues with SLA and escalation; idempotent starts, saga compensation, instance migration | `com.horus.bpm:process-engine-spring-boot-starter` |
-| [`cockpit/`](cockpit/) | React dashboard for both engines, served by the host or hosted standalone as static assets | `com.horus.bpm:cockpit-spring-boot-starter` |
+| [`rule-engine/`](rule-engine/) | Decision tables (`first`, `unique`, `collect`), versioned rule sets with maker-checker and effective dates, a safe expression language, decision API, append-only decision log, simulation | `io.github.dhluong90.bpm:rule-engine-spring-boot-starter` |
+| [`process-engine/`](process-engine/) | Versioned process definitions with user, service and agent tasks, gateways and timers; human task queues with SLA and escalation; idempotent starts, saga compensation, instance migration | `io.github.dhluong90.bpm:process-engine-spring-boot-starter` |
+| [`cockpit/`](cockpit/) | React dashboard for both engines, served by the host or hosted standalone as static assets | `io.github.dhluong90.bpm:cockpit-spring-boot-starter` |
 | [`examples/`](examples/) | Minimal host services showing each engine alone and both together | |
 
 The engines are libraries, not servers. State lives in your PostgreSQL under the `rle_` and `pre_` prefixes, in your transactions. The Rule Engine never depends on the Process Engine. Decisions behind this are in [`docs/adr/`](docs/adr/).
+
+Generic by design: every business behaviour is optional and configurable per host or tenant, with a safe default, and business logic enters through extension points, never as bank-specific code in the engines ([Principles](../../wiki/Principles), [Configuration and Extension Points](../../wiki/Configuration-and-Extension-Points)).
 
 ## Where to read next
 
@@ -68,7 +70,9 @@ The engines are libraries, not servers. State lives in your PostgreSQL under the
 
 ## Out of scope
 
-Full BPMN 2.0 or DMN FEEL compliance, CMMN, a distributed job executor, a standalone server mode. See [FAQ](../../wiki/FAQ).
+CMMN, a distributed job executor, a standalone server mode. See [FAQ](../../wiki/FAQ).
+
+Full BPMN 2.0 and DMN are on the roadmap: 1.0 executes a published subset, and the releases after 1.0 extend it in stages to BPMN 2.0.2 execution conformance and DMN 1.5 Conformance Level 3, each with a published list of deviations ([ADR-0017](docs/adr/0017-full-bpmn-and-dmn-support-no-cmmn.md), [standards compliance](docs/architecture/standards-compliance.md)).
 
 ## Build from source
 
