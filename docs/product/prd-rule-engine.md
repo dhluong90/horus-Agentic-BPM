@@ -4,7 +4,7 @@
 |---|---|
 | Type | Product requirements |
 | Owner area | Product |
-| Last reviewed | 2026-11-18 |
+| Last reviewed | 2026-11-19 |
 
 Design preview. Behaviour is specified in [`rule-engine/docs/SPEC.md`](../../rule-engine/docs/SPEC.md) (`RLE-*`); release requirements in [requirements.md](requirements.md) (`TR-*`); milestone dates in the [product roadmap](roadmap.md); feature scope and status in the [feature map](feature-map.md); decisions in the [decision log](decisions.md). This PRD states what to build and why; SPEC and DESIGN refine it and never widen it.
 
@@ -37,7 +37,7 @@ The three segments below group eight roles found in a bank or fintech: pricing m
 | Segment | Job | Constraints |
 |---|---|---|
 | S1 Host developer | Call a decision from Java or REST, in the same transaction as the business write, and test rule sets in CI | Java 21+, Spring Boot 4.x or 3.5.x until 1.0 (PD-007), PostgreSQL 14+; shared connection pool |
-| S2 Rule author (product or risk analyst) | Change a fee, limit or eligibility table and see the effect before it goes live | Authors YAML or JSON in 0.1; grid editing arrives with Cockpit 0.2. Pricing managers and risk analysts work in Excel and do not write YAML; a spreadsheet round-trip in M1 is pending as [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml) |
+| S2 Rule author (product or risk analyst) | Change a fee, limit or eligibility table and see the effect before it goes live | Pricing managers and risk analysts work in Excel and do not write YAML. In 0.1 they export a table to Excel, edit it with plain shorthand and import it back as a draft with plain errors; grid editing with templates arrives with Cockpit 0.2 ([PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml), decided 2026-11-19). Business analysts keep YAML or JSON in Git |
 | S3 Approver and auditor (compliance, internal audit) | Approve changes made by someone else, and reconstruct any past decision | Four-eyes required; personal data must stay masked |
 
 ## 6. Value propositions
@@ -74,7 +74,7 @@ The shaded block is the host's business transaction: the decision log insert com
 | Data | Rule sets, immutable versions and an append-only decision log in `rle_*` tables, per tenant | RLE-011, RLE-013 | TR-TEN-01, TR-TEN-02, TR-OBS-01, TR-EMB-06 |
 | Data | Masked inputs stored as keyed HMAC, searchable by exact match | RLE-012 | TR-SEC-05, TR-SEC-10 |
 | Logic | Hit policies `first`, `unique`, `collect` | RLE-001 to RLE-003 | TR-DET-01, TR-DET-04 |
-| Logic | Closed expression language, publish-time type check, money safety, null semantics, bounded regex | RLE-004 to RLE-007 | TR-DET-02, TR-DET-03, TR-SEC-01, TR-SEC-02 |
+| Logic | Closed expression language, publish-time type check, money safety, null semantics that follow FEEL ([PD-058](decisions.md#pd-058-feel-null-semantics-in-the-expression-language-from-m1)), bounded regex | RLE-004 to RLE-007 | TR-DET-02, TR-DET-03, TR-SEC-01, TR-SEC-02 |
 | Logic | Version lifecycle with effective dates, explicit clock, replay | RLE-008 | TR-DET-05 |
 | Logic | Maker-checker in the service layer | RLE-009 | TR-SEC-04 |
 | Logic | Simulation of a draft over sample inputs, no log writes | RLE-016 | TR-OBS-01 |
@@ -101,15 +101,15 @@ Capabilities on the Roadmap or in TR with no `RLE-*` statement yet:
 | Metrics names and the full event list | M1 | TR-OBS-02, TR-OBS-04 |
 | Monthly partitions of `rle_decision` created ahead by the scheduler (PD-004) | M1 | TR-OPS-04 |
 | Compiled cache bounded by `cache.max-entries` | M1 | TR-PERF-06 |
-| Decision log retention by configuration (PD-020, pending) | M3 | TR-OPS-04 |
+| Decision log retention by configuration, required outside `dev`, at least 12 months (PD-020, PD-050) | M3 | TR-OPS-04 |
 | Explain templates; reports attached to publication requests; what-if over a period | M3 | TR-OBS-05 |
 
 ### 7.4 Assumptions and open questions
 
-- [ASSUMPTION] Analysts can author YAML in 0.1. Tested in the red-team below.
-- Open question: is an emergency change path (single approver, logged) ever allowed? Today none exists and principle 6 suggests none. Pending as [PD-012](decisions.md#pd-012-emergency-single-approver-path).
-- Resolved: `rle_decision` is partitioned monthly from the first migration ([PD-004](decisions.md#pd-004-the-decision-log-is-partitioned-monthly-from-the-first-migration)). When retention ships is pending as PD-020.
-- Pending: authoring without YAML for business users, and what "user-friendly" must mean (seven testable criteria U1 to U7), as [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml).
+- [ASSUMPTION] Analysts can change an existing table through the spreadsheet round-trip in 0.1. Tested in the red-team below.
+- Decided: an emergency single-approver path is allowed only when the bank turns it on by configuration; it is off by default, every use is logged and reviewed afterwards ([PD-012](decisions.md#pd-012-emergency-single-approver-path), 2026-11-19, RE-F-48). The architect's ADR sets its milestone and controls. Four-eyes stays engine-enforced unless a bank turns the path on.
+- Resolved: `rle_decision` is partitioned monthly from the first migration ([PD-004](decisions.md#pd-004-the-decision-log-is-partitioned-monthly-from-the-first-migration)). Retention is required outside the `dev` profile, at least 12 months, and the engine refuses to start until it is set ([PD-050](decisions.md#pd-050-retention-default-for-the-decision-log-and-history), 2026-11-19); the setting, the start-up check and the purge arrive together in M3, and nothing is deleted before ([PD-020](decisions.md#pd-020-conflict-partitioning-milestone-on-the-roadmap), 2026-11-19).
+- Decided: authoring without YAML for business users through a spreadsheet round-trip in M1 and the grid with templates in M2, judged against seven testable criteria U1 to U7 ([PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml), 2026-11-19).
 - Open question for the architect (gap G3 in the journeys page): what happens when a version is approved after its requested effective date.
 - Open question for the architect (gap G4): a masked input used in a condition cannot be replayed from the log alone; should the validator warn?
 
@@ -117,14 +117,14 @@ Capabilities on the Roadmap or in TR with no `RLE-*` statement yet:
 
 | Milestone | In scope |
 |---|---|
-| M1 (Rule Engine 0.1) | Everything in 7.2; sample-input simulation; YAML and JSON authoring; decision log partitioned monthly from the first migration. If PD-043 is accepted: spreadsheet round-trip (CK-F-35), restore an earlier version as a draft (RE-F-33) |
-| M2 | Grid editor in Cockpit 0.2 |
-| M3 (1.0) | Replay of logged decisions through a draft (RLE-015), moved from M2 by [PD-042](decisions.md#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted); explain templates; simulation reports on publication requests; what-if comparison; decision log retention by configuration (PD-020, pending); OpenTelemetry spans; DMN decision-table import; API freeze |
+| M1 (Rule Engine 0.1) | Everything in 7.2; sample-input simulation; YAML and JSON authoring; decision log partitioned monthly from the first migration; spreadsheet round-trip with plain shorthand and plain errors (CK-F-35) and restore an earlier version as a draft (RE-F-33) ([PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml)) |
+| M2 | Grid editor in Cockpit 0.2 with templates, a new rule set flow and drop-downs (CK-F-36, CK-F-37); batch evaluate (RE-F-26) and finding decisions by correlation id or input value (RE-F-34), both moved here or added by PD-043 |
+| M3 (1.0) | Replay of logged decisions through a draft (RLE-015), moved from M2 by [PD-042](decisions.md#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted); explain templates; simulation reports on publication requests; what-if comparison; decision log retention by configuration, required outside `dev` with a 12-month minimum (PD-050, PD-020); OpenTelemetry spans; DMN decision-table import; API freeze |
 | 1.1 (S1, dates pending PD-062) | Every DMN hit policy; decision requirement graphs with input data and item definitions; DMN 1.2 to 1.5 import and export with DMNDI; S-FEEL in the HORUS FEEL engine; DMN TCK Level 2 at 100 percent (RE-F-43 to RE-F-45) |
 | 1.2 (S2) | Full FEEL, every boxed expression, business knowledge models and decision services; DMN TCK Level 3 at least 95 percent (RE-F-46) |
 | 1.3 (S3) | DMN `import` of other models, DMNDI for every element, TCK Level 3 at 100 percent except the policy exclusions (RE-F-47) |
 
-Standards foundations in M1 ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)): the imported file is kept as received with its hash (RE-F-38); the rule set time zone (RE-F-39); number, rounding, regex and string rules aligned with FEEL (RE-F-40); a rule set is a DMN model with one decision and names its expression language, and the decision request accepts an optional decision id before the 1.0 freeze (RE-F-42). Pending: FEEL null logic from M1 ([PD-058](decisions.md#pd-058-feel-null-semantics-in-the-expression-language-from-m1), RE-F-41) and the canonical model ([PD-060](decisions.md#pd-060-canonical-model-bpmn-and-dmn-semantic-models)); both gate M1 code.
+Standards foundations in M1 ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)): the imported file is kept as received with its hash (RE-F-38); the rule set time zone (RE-F-39); number, rounding, regex and string rules aligned with FEEL (RE-F-40); a rule set is a DMN model with one decision and names its expression language, and the decision request accepts an optional decision id before the 1.0 freeze (RE-F-42). Decided on 2026-11-19: null logic follows FEEL from M1, checked by a differential test against a reference FEEL implementation in test scope, so every logged decision stays replayable under FEEL ([PD-058](decisions.md#pd-058-feel-null-semantics-in-the-expression-language-from-m1), RE-F-41); the rule set model is the DMN semantic model, with our JSON as its canonical serialisation, YAML authoring unchanged and hashes that never change ([PD-060](decisions.md#pd-060-canonical-model-bpmn-and-dmn-semantic-models), X-F-28); and FEEL for the standards track is built here, deterministic and sandboxed, with an existing FEEL engine used only as a test oracle ([PD-061](decisions.md#pd-061-horus-built-feel)).
 
 Non-goals: DMN conformance before 1.1 (it arrives in stages after 1.0, [PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)); DMN external Java and PMML functions, which are refused at import (principle 4); inference, rule chaining or complex event processing; scripting in expressions (principle 4); cross-tenant rule inheritance at evaluation time; any network I/O from the evaluator (`TR-EMB-05`); a standalone decision server ([ADR-0004](../adr/0004-no-standalone-server.md)).
 
@@ -132,6 +132,6 @@ Non-goals: DMN conformance before 1.1 (it arrives in stages after 1.0, [PD-057](
 
 | # | Assumption | Fails if | Evidence | Kill criterion | Cheapest test |
 |---|---|---|---|---|---|
-| 1 | Analysts author changes in YAML well enough for 0.1 (PD-043 would retarget this test to the spreadsheet round-trip) | Every change still needs a developer, so the M1 outcome ("without a code deployment") is true only for developers | Two moderated sessions: an analyst changes one row of `loan-eligibility` and requests publication | Neither analyst reaches `PENDING_APPROVAL` without help | The two sessions in week 2 of M1. If killed, restate the M1 outcome as developer-mediated and raise the grid editor's priority in M2 |
+| 1 | Analysts change an existing table through the spreadsheet round-trip without help (PD-043) | Every change still needs a business analyst or developer, so the M1 outcome ("without a code deployment") holds only through intermediaries | Two moderated sessions: an analyst changes one value and adds one row of `loan-eligibility` through the CSV path and requests publication | Neither analyst reaches `PENDING_APPROVAL` within 15 minutes without help | The two sessions in week 2 of M1. If killed, move the grid (CK-F-10, CK-F-37) to the start of M2 and protect it; restate the M1 outcome as analyst-mediated |
 | 2 | The closed expression language covers real bank tables | Common tables need constructs outside the grammar, so adopters ask for scripting | Rewrite ten public sample fee, limit and eligibility tables in the grammar | More than two of ten need a host function or cannot be expressed | One afternoon of rewriting; extend the built-in function list before M1 exit, never add scripting |
-| 3 | Mandatory four-eyes is a reason to adopt, not a blocker | Teams need same-day emergency changes and disable maker-checker, which the starter refuses outside `dev` | Ask three product or compliance contacts how an urgent fee change is approved today | Two of three require a single-person emergency path | Three conversations. If killed, decide by ADR between a logged emergency path and a documented non-goal (PD-012) |
+| 3 | Four-eyes enforced by default is a reason to adopt, and few banks turn on the configurable emergency path (PD-012) | Most banks turn the path on, so the default claim rarely holds in production | Ask three product or compliance contacts how an urgent fee change is approved today and whether they would turn the path on | Two of three would turn it on | Three conversations. If killed, ask the architect to schedule RE-F-48 before 1.0 and lead positioning with the review afterwards |

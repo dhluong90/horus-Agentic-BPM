@@ -18,11 +18,34 @@
   <description>Embeddable Process Engine and Rule Engine for Java and Spring Boot.</description>
   <url>https://github.com/dhluong90/horus-Agentic-BPM</url>
 
+  <!--
+    TR-LIC-02: every artifact carries the project licence notice and the commercial-licence pointer.
+    Inherited by every module; bpm-bom has no parent and repeats this block.
+  -->
+  <licenses>
+    <license>
+      <name>PolyForm-Noncommercial-1.0.0</name>
+      <url>https://polyformproject.org/licenses/noncommercial/1.0.0</url>
+      <distribution>repo</distribution>
+    </license>
+    <license>
+      <name>LicenseRef-HORUS-Commercial</name>
+      <url>https://github.com/dhluong90/horus-Agentic-BPM/blob/main/COMMERCIAL-LICENSE.md</url>
+      <distribution>manual</distribution>
+      <comments>Any use not permitted by the PolyForm Noncommercial License needs a separate written agreement with HORUS.</comments>
+    </license>
+  </licenses>
+
+  <organization>
+    <name>HORUS</name>
+    <url>https://github.com/dhluong90/horus-Agentic-BPM</url>
+  </organization>
+
   <modules>
     <module>bpm-bom</module>
     <module>rule-engine</module>
     <module>cockpit</module>
-    <module>examples/rule-engine-only</module>
+    <module>examples</module>
   </modules>
 
   <properties>
@@ -44,6 +67,20 @@
     <maven-install-plugin.version>3.1.4</maven-install-plugin.version>
     <maven-deploy-plugin.version>3.1.4</maven-deploy-plugin.version>
     <maven-clean-plugin.version>3.5.0</maven-clean-plugin.version>
+    <license-maven-plugin.version>2.9.0</license-maven-plugin.version>
+    <cyclonedx-maven-plugin.version>2.9.3</cyclonedx-maven-plugin.version>
+
+    <!-- Root of the reactor, for files every jar carries (LICENSE, COMMERCIAL-LICENSE.md). -->
+    <bpm.root>${maven.multiModuleProjectDirectory}</bpm.root>
+    <!-- TR-LIC-01 policy: the allowed licences and the spellings merged into them. -->
+    <bpm.licence-policy>file://${bpm.root}/tools/licence-policy</bpm.licence-policy>
+    <!--
+      The one switch for "this module never ships": set to true only in examples/pom.xml, the
+      parent of the example hosts (checked by tools/check-dependency-policy.py). It turns off the
+      deploy, the licence gate and the shipped SBOM entry together, so no module can skip the
+      licence gate and still be published.
+    -->
+    <maven.deploy.skip>false</maven.deploy.skip>
   </properties>
 
   <dependencyManagement>
@@ -105,6 +142,16 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-jar-plugin</artifactId>
           <version>${maven-jar-plugin.version}</version>
+          <configuration>
+            <archive>
+              <!-- TR-LIC-02: licence notice and commercial-licence pointer in every jar manifest. -->
+              <manifestEntries>
+                <Bundle-License>PolyForm-Noncommercial-1.0.0 OR LicenseRef-HORUS-Commercial</Bundle-License>
+                <X-HORUS-License>PolyForm Noncommercial License 1.0.0; see META-INF/LICENSE</X-HORUS-License>
+                <X-HORUS-Commercial-License>Commercial use needs a separate agreement; see META-INF/COMMERCIAL-LICENSE.md</X-HORUS-Commercial-License>
+              </manifestEntries>
+            </archive>
+          </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
@@ -131,10 +178,113 @@
           <artifactId>spring-boot-maven-plugin</artifactId>
           <version>${spring-boot.version}</version>
         </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>license-maven-plugin</artifactId>
+          <version>${license-maven-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.cyclonedx</groupId>
+          <artifactId>cyclonedx-maven-plugin</artifactId>
+          <version>${cyclonedx-maven-plugin.version}</version>
+        </plugin>
       </plugins>
     </pluginManagement>
 
+    <!-- TR-LIC-02: LICENSE and COMMERCIAL-LICENSE.md go into META-INF/ of every jar. -->
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <resource>
+        <directory>${bpm.root}</directory>
+        <targetPath>META-INF</targetPath>
+        <includes>
+          <include>LICENSE</include>
+          <include>COMMERCIAL-LICENSE.md</include>
+        </includes>
+      </resource>
+    </resources>
+
     <plugins>
+      <!--
+        TR-LIC-01: third-party dependencies that ship or that hosts must supply (compile, runtime
+        and provided scope) must be under a licence in tools/licence-policy/allowed-licences.txt.
+        The build fails naming the library and its licence. Test scope is out of this check until
+        PD-053 decides the rule for test and build tools; system scope is banned by the enforcer.
+        tools/licence-policy/licence-merges.txt folds the spellings found in POMs into one SPDX id.
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>license-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>licence-gate</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>add-third-party</goal>
+            </goals>
+            <configuration>
+              <skipAddThirdParty>${maven.deploy.skip}</skipAddThirdParty>
+              <excludedScopes>test,system</excludedScopes>
+              <excludedGroups>com\.horus\.bpm</excludedGroups>
+              <failOnMissing>true</failOnMissing>
+              <failOnBlacklist>true</failOnBlacklist>
+              <includedLicenses>${bpm.licence-policy}/allowed-licences.txt</includedLicenses>
+              <licenseMergesUrl>${bpm.licence-policy}/licence-merges.txt</licenseMergesUrl>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!--
+        TR-SEC-06: two CycloneDX SBOMs in the reactor root, both scanned by tools/scan-dependencies.sh.
+        target/bom.json (and bom.xml): what ships, the compile, runtime and provided scopes of the
+        deployed modules (skipNotDeployed leaves out modules with maven.deploy.skip). High or
+        critical findings fail the build.
+        target/bom-build.json: every module with its test scope too, the code that runs in CI.
+        Critical findings fail the build. Annotation processors are added by the CI job.
+      -->
+      <plugin>
+        <groupId>org.cyclonedx</groupId>
+        <artifactId>cyclonedx-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>sbom</id>
+            <phase>package</phase>
+            <goals>
+              <goal>makeAggregateBom</goal>
+            </goals>
+            <configuration>
+              <outputName>bom</outputName>
+              <outputFormat>all</outputFormat>
+              <projectType>library</projectType>
+              <skipNotDeployed>true</skipNotDeployed>
+              <includeTestScope>false</includeTestScope>
+              <includeProvidedScope>true</includeProvidedScope>
+              <includeSystemScope>false</includeSystemScope>
+            </configuration>
+          </execution>
+          <execution>
+            <id>sbom-build</id>
+            <phase>package</phase>
+            <goals>
+              <goal>makeAggregateBom</goal>
+            </goals>
+            <configuration>
+              <outputName>bom-build</outputName>
+              <skipAttach>true</skipAttach>
+              <outputFormat>json</outputFormat>
+              <projectType>library</projectType>
+              <skipNotDeployed>false</skipNotDeployed>
+              <includeTestScope>true</includeTestScope>
+              <includeProvidedScope>true</includeProvidedScope>
+              <includeSystemScope>false</includeSystemScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
@@ -155,6 +305,22 @@
                 </requireMavenVersion>
                 <dependencyConvergence/>
                 <banDuplicatePomDependencyVersions/>
+                <!-- TR-LIC-01: a system-scope jar would bypass the licence gate and the SBOM. -->
+                <bannedDependencies>
+                  <searchTransitive>true</searchTransitive>
+                  <excludes>
+                    <exclude>*:*:*:*:system</exclude>
+                  </excludes>
+                  <message>System scope is not allowed: the licence gate and the SBOM cannot see it (TR-LIC-01, TR-SEC-06).</message>
+                </bannedDependencies>
+                <!-- TR-LIC-02: every jar copies these from the reactor root (.mvn/ marks the root). -->
+                <requireFilesExist>
+                  <files>
+                    <file>${bpm.root}/LICENSE</file>
+                    <file>${bpm.root}/COMMERCIAL-LICENSE.md</file>
+                  </files>
+                  <message>LICENSE and COMMERCIAL-LICENSE.md not found at ${bpm.root}. Build from the repository, which has a .mvn/ directory at its root (TR-LIC-02).</message>
+                </requireFilesExist>
               </rules>
             </configuration>
           </execution>

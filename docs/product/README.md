@@ -26,43 +26,39 @@ HORUS Agentic BPM is two Java libraries and a static cockpit that run inside a t
 | Milestone | Target date | Outcome | Features |
 |---|---|---|---|
 | M0 Architecture | 4 Dec 2026 | Contracts verified against a live PostgreSQL; this review decided | 3 |
-| M1 Rule Engine 0.1, Cockpit 0.1 | 15 Jan 2027 | Business staff change governed rules without a deployment, from one cockpit that reaches every host | 52 |
-| M2 Process Engine 0.1 with `agentTask`, Cockpit 0.2 | 26 Mar 2027 | Approvals, sagas and guarded AI agent steps inside the team's own service; every instance on its diagram; one inbox across services | 60 |
+| M1 Rule Engine 0.1, Cockpit 0.1 | 15 Jan 2027 | Business staff change governed rules without a deployment, from one cockpit that reaches every host | 56 |
+| M2 Process Engine 0.1 with `agentTask`, Cockpit 0.2 | 26 Mar 2027 | Approvals, sagas and guarded AI agent steps inside the team's own service; every instance on its diagram; one inbox across services | 65 |
 | M3 Agentic depth, compatibility, 1.0 | 21 May 2027 | Production use with offline evaluation of agent changes, governed process changes and a frozen API | 31 |
 | S1 Standards 1.1 | Pending PD-062 | Any BPMN 2.0 model imported and shown in full; subprocesses, boundary events and multi-instance run; DMN Level 2 | 11 |
 | S2 Standards 1.2 | Pending PD-062 | Messages and signals across services; full FEEL and DMN Level 3 | 5 |
 | S3 Standards 1.3 | Pending PD-062 | BPMN 2.0.2 execution and DMN Level 3 conformance with published deviations | 2 |
-| After 1.0 | Candidates | Multi-agent planning, more databases, a hosted cockpit | 9 |
+| After 1.0 | Candidates | Agent-chosen steps, multi-agent planning, more databases, a hosted cockpit; the emergency approval path until its ADR sets a milestone | 11 |
 
-Full plan: [roadmap.md](roadmap.md). M2 and M3 moved by two weeks each when the product owner accepted the cockpit direction on 2026-11-18 (PD-042). Date risk: M1 has about five working weeks after the year-end break and holds only with the pre-approved cuts in PD-031 (pending); M2 has about nine working weeks after the Lunar New Year break and keeps three cut candidates; M3 carries 31 features in about seven working weeks, with seven cut candidates, and depends on two outside adopters (kill assumption K13).
+Full plan: [roadmap.md](roadmap.md). M2 and M3 moved by two weeks each when the product owner accepted the cockpit direction on 2026-11-18 (PD-042). Date risk: M1 has about five working weeks after the year-end break and holds only with the pre-approved cuts in PD-031 (decided 2026-11-19); M2 has about nine working weeks after the Lunar New Year break and keeps five cut candidates; M3 carries 31 features in about seven working weeks, with eight cut candidates, and depends on two outside adopters (kill assumption K13). Agent-chosen steps moved from M3 to after 1.0 (PD-028, decided 2026-11-19).
 
 ## Feature map in numbers
 
 | Module | Features | Specified | Spec gap | Design preview |
 |---|---|---|---|---|
-| Rule Engine | 44 | 17 | 19 | 8 |
-| Process Engine | 65 | 21 | 32 | 12 |
-| Cockpit | 37 | 12 | 20 | 5 |
-| Cross-cutting | 27 | 12 | 11 | 4 |
-| **Total** | **173** | **62** | **82** | **29** |
+| Rule Engine | 48 | 18 | 21 | 9 |
+| Process Engine | 66 | 21 | 32 | 13 |
+| Cockpit | 42 | 12 | 25 | 5 |
+| Cross-cutting | 28 | 12 | 12 | 4 |
+| **Total** | **184** | **63** | **90** | **31** |
 
-The standards direction (PD-057) added 27 features: 10 foundations before 1.0 (8 already specified) and 17 standards-track previews, with PE-F-40 moved into 1.2. 52 SPEC statements are indexed to a feature. The module SPECs hold 93; the 41 written since the last index (RLE-017 to RLE-019, PRE-018 to PRE-038, CKP-012 to CKP-028) are not yet mapped, so some features shown as spec gaps may already be specified. Mapping them is the next feature map update. 22 M1 features have no SPEC statement in the map; closing them is an M0 exit criterion. 12 features are cut candidates (2 in M1 if PD-031 is accepted, 3 in M2 and 7 in M3 under PD-042); no standards feature is one. Seven more features wait for PD-043 and three for PD-058 to PD-060, and are not counted. Details: [feature-map.md](feature-map.md).
+The standards direction (PD-057) added 27 features: 10 foundations before 1.0 (8 already specified) and 17 standards-track previews, with PE-F-40 moved into 1.2. 52 SPEC statements are indexed to a feature. The module SPECs hold 93; the 41 written since the last index (RLE-017 to RLE-019, PRE-018 to PRE-038, CKP-012 to CKP-028) are not yet mapped, so some features shown as spec gaps may already be specified. Mapping them is the next feature map update. PD-058 to PD-060 (decided 2026-11-19) added 3 foundation features, now counted: RE-F-41 and X-F-28 in M1, PE-F-58 in M2. PD-028 moved PE-F-39 from M3 to after 1.0. PD-043 (decided 2026-11-19) added 7 features (3 in M1, 3 in M2, 1 in M3) and moved batch evaluate from M1 to M2; PD-012 added the emergency path (RE-F-48) as later until its ADR. 25 M1 features have no SPEC statement in the map; closing them is an M0 exit criterion. 14 features are cut candidates (1 in M1 under PD-031, 5 in M2 and 8 in M3 under PD-042 and PD-043); no standards feature is one. Details: [feature-map.md](feature-map.md).
 
 ## Decisions waiting for the product owner
 
-Twenty-four decisions are recorded as decided (PD-001 to PD-011, PD-032 to PD-042 on the cockpit direction, PD-057 on the standards direction, and PD-067 approving the roadmap, summarised below). Forty-three need a decision: the twenty-two below; twelve from the requirements review (PD-044 to PD-055) in [Requirements review (pending)](#requirements-review-pending); and nine on the standards foundations and track (PD-058 to PD-066) in [Standards direction](#standards-direction-decided-2026-11-18). Full options and consequences: [decisions.md](decisions.md).
+Forty-three decisions are recorded as decided: PD-001 to PD-011; PD-032 to PD-042 on the cockpit direction; PD-057 on the standards direction; PD-067 approving the roadmap; PD-068 and PD-069 on the process; and, on 2026-11-19, PD-012, PD-013, PD-019, PD-020, PD-028 to PD-031, PD-043, PD-050, PD-058 to PD-061 and PD-070 to PD-072 ([Decided on 2026-11-19](#decided-on-2026-11-19)). Twenty-nine need a decision: the thirteen below; eleven from the requirements review (PD-044 to PD-055 except PD-050) in [Requirements review (pending)](#requirements-review-pending); and five on the standards track (PD-062 to PD-066) in [Standards direction](#standards-direction-decided-2026-11-18). Full options and consequences: [decisions.md](decisions.md).
 
 | Id | Question | Recommendation |
 |---|---|---|
-| PD-012 | Emergency single-approver path for urgent rule changes? | No path before 1.0; four-eyes stays mandatory. Revisit by ADR only if two of three compliance contacts require one |
-| PD-013 | Does `TR-UI-02` (authoring in the cockpit) gate M1? | No: tag it Must (M2); M1 gates on import, simulate, request and approve in the cockpit |
 | PD-014 | Record model and prompt version from the adapter? | Yes, optional fields in M2, recorded only, never interpreted |
 | PD-015 | Autonomy rung 0 (shadow) and rung 4? | Rung 0 as a documented pattern with the M3 offline runner; no rung 4 before 1.0 |
 | PD-016 | Cockpit pulse strip? | Remove from DESIGN for 0.x; show counts in queue headers |
 | PD-017 | First cut if M2 slips? | Batched migration execution moves to M3 if fewer than 9 of 17 `PRE-*` are green at week 5; dry run stays |
-| PD-018 | Replay simulation in M1? | Keep in M2; pull in only if the week 3 approver session fails |
-| PD-019 | North Star metric? | Governed decisions and process steps per week in adopters' services, adopter-reported from M3; input measures before that |
-| PD-020 | Partitioning on the roadmap (was M3) | Partitioned decision log in M1; retention configuration in M3 |
+| PD-018 | Replay simulation in M1? (held for discussion with the product owner) | Keep in M2; pull in only if the week 3 approver session fails |
 | PD-021 | Exit criteria omit tagged Musts | List every gating Must per milestone, including `TR-ASY-04`, `TR-PERF-06`, `TR-IDEM-05`, `TR-OPS-05` in M1 |
 | PD-022 | Simulation report in Cockpit 0.1 approvals (wiki) | M3; in 0.1 the approver reads the diff and runs samples |
 | PD-023 | Migration screen in Cockpit 0.2 (wiki) or M3 | M3, with renamed-step mapping |
@@ -70,12 +66,33 @@ Twenty-four decisions are recorded as decided (PD-001 to PD-011, PD-032 to PD-04
 | PD-025 | Process Engine "0.2" label (wiki Concepts) | Process Engine 0.1 in M2; module versions are independent |
 | PD-026 | Should requirements used as gates | `TR-PERF-04` reported only; accessibility and two languages gate, with `TR-UI-03` and `TR-UI-04` raised to Must (M1) |
 | PD-027 | Decision explanation in M1 without a SPEC statement | Generated explanation from the log in M1; author templates in M3 |
-| PD-028 | Agent-chosen steps in M3 or after 1.0 | After 1.0, to keep room for the API freeze |
-| PD-029 | Accept ADR-0008 (async wait-state) | Accept now |
-| PD-030 | Accept ADR-0009 (cache coherence) | Accept now, before M1 code |
-| PD-031 | Can the M1 date hold? (M2 and M3 rows replaced by PD-042) | Keep 15 Jan 2027 with the pre-approved M1 cut list |
-| PD-043 | Which authoring path do business users get in M1, and what does "user-friendly" mean? | Spreadsheet round-trip with plain conditions in M1; grid with templates and drop-downs in M2; no grid in M1. See the next section |
 | PD-056 | Rule management UX direction: grid, sentences, change request, or a hybrid? | Hybrid: change request page with CSV rows and engine readings in 0.1; editable grid with a sentence view in 0.2; replay, stored evidence and history in M3; assistant only after 1.0. Six sub-questions in the entry. Decide after the four-paradigm prototype the product owner requested, which is not yet delivered |
+
+## Decided on 2026-11-19
+
+In a decision session on 2026-11-19 the product owner accepted the product manager's recommendation on fourteen entries, decided three more differently from the recommendation (PD-012, PD-013, PD-050), held PD-018 for discussion, and accepted ADR-0008, ADR-0009, ADR-0016, ADR-0018, ADR-0019 and ADR-0020. The architect updates the ADR files. The [roadmap](roadmap.md), the [feature map](feature-map.md), both engine PRDs and the [vision](vision.md) apply the decisions.
+
+| Id | Decided |
+|---|---|
+| PD-012 | Option 4, added for this decision: an emergency single-approver path, allowed only when the bank turns it on by configuration; off by default; every use logged and reviewed afterwards. The architect's ADR sets its milestone and controls (RE-F-48, later until then). Four-eyes stays engine-enforced unless a bank turns the path on |
+| PD-013 | Option 4, "Both", added for this decision: import from the cockpit and authoring in the cockpit both gate M1. Collides with PD-043; the product manager proposes minimal M1 editing on a draft (cells with the shorthand; add, copy, delete or move rows; validation on save), about 5 to 7 days plus 1 day of QA, held on 15 Jan 2027 by moving async decision log writing (RE-F-15) to M2. Feature CK-F-43 is listed but not counted until the product owner confirms the scope |
+| PD-019 | Option 1: North Star is governed decisions and process steps per week in adopters' services, adopter-reported from M3, with three early signals before that |
+| PD-020 | Option 2: monthly partitioned decision log in M1 (January); retention setting and purge in M3 (May), together with the start-up check PD-050 requires |
+| PD-028 | Option 1: agent-chosen steps (PE-F-39) move to after 1.0, with multi-agent planning; M3 agentic depth is the MCP adapter, reference adapters, bounded memory and the offline runner |
+| PD-029 | Option 1: ADR-0008 (async wait-state for external steps) accepted |
+| PD-030 | Option 1: ADR-0009 (cache coherence) accepted |
+| PD-031 | Option 1, together with PD-028: M1 keeps 15 Jan 2027 with the pre-approved M1 cut list at the 8 Jan 2027 checkpoint; the never-cut list holds in every milestone. M2 and M3 rows stay as replaced by PD-042 |
+| PD-043 | Option 3: in M1 business users export a rule table to Excel, edit it with plain shorthand and import it as a draft with plain errors; the grid editor with templates follows in M2, and batch evaluate moves to M2 |
+| PD-050 | Option 3, the stricter option: retention is required; outside the `dev` profile the engine refuses to start until a period is set; the minimum is 12 months. Getting Started in `dev` is unaffected. With PD-020 the setting, the check and the purge arrive together in M3 |
+| PD-058 | Option 1: FEEL null logic in our expression language from M1, with a differential test (RE-F-41 joins M1) |
+| PD-059 | Option 1: scope tokens in the M2 execution tree (PE-F-58 joins M2) |
+| PD-060 | Option 2: BPMN and DMN semantic models canonical, our JSON as their serialisation (X-F-28 joins M1 and M2); supersedes the notation part of PD-034 |
+| PD-061 | Option 1: HORUS-built FEEL; an existing FEEL engine only as a test oracle |
+| PD-070 | Option 1: `io.github.dhluong90.bpm` for the Maven `groupId` and the Java package root together, renamed before Sprint 1 code |
+| PD-071 | Option 1 with its condition: Jackson 3 inside the cores only, provided the Spring Boot 3.5 test leg proves coexistence in the first parsing pull request; otherwise the architect returns with a neutral parsed-tree port before that merge |
+| PD-072 | Option 1: the `schema-prefix` property is dropped and table names are fixed at `rle_`; a dedicated PostgreSQL schema is the stated path if an adopter needs isolation |
+
+Effect on scope: M1 from 52 to 56 features, M2 from 60 to 65, M3 from 31 to 31 (PE-F-39 out, CK-F-38 in), after 1.0 from 9 to 11. No date changes. PD-063 (principle 9 wording) stays pending; with PD-060 decided, its recommendation is option 1. Follow-ups outside the product documents: the emergency path ADR, SPEC `RLE-006`, `TR-DEF-01`, `TR-STD-02`, `TR-API-07` and `TR-OPS-04` wording, module DESIGN files, the package rename and Maven Central namespace, and the wiki pages each entry names.
 
 ## Cockpit direction (decided 2026-11-18)
 
@@ -85,7 +102,7 @@ The product owner accepted the cockpit direction ("add it into the product roadm
 |---|---|
 | PD-032 | Read-only diagrams with token overlay in M2; modeller canvas in M3 as the first M3 cut (fallback 1.1); its engine APIs before the freeze |
 | PD-033 | Maker-checker for process definitions in the engine in M2, screens in M3; `dev` may auto-approve |
-| PD-034 | Own JSON canonical; BPMN subset import protected, export a cut candidate (superseded in part by PD-057: the subset is the M3 scope, not the end state) |
+| PD-034 | Own JSON canonical; BPMN subset import protected, export a cut candidate (superseded in part by PD-057: the subset is the M3 scope, not the end state; and in its notation part by PD-060: the BPMN and DMN semantic models are canonical) |
 | PD-035 | Standalone cockpit federating hosts; registry, `/meta` and `/me` in M1; merged inbox and incidents in M2 |
 | PD-036 | Git and cockpit both; imports arrive as drafts; cockpit authoring can be turned off per environment |
 | PD-037 | Tenant switching only within the token's allowed tenants, in M2 |
@@ -103,21 +120,19 @@ The product owner decided that BPMN 2.0 and DMN are fully supported on the roadm
 
 | Stage | Release | Content | Effort (assumption) |
 |---|---|---|---|
-| S0 | M1 to M3 | Foundations DN-01 to DN-11 (source documents, stable hashes and ids, FEEL-aligned semantics, BPMN-typed cockpit nodes, job cancellation); BPMN subset and DMN single-table import in M3; CMMN and everything else refused by name | About 5.5 days in M1 and 6 in M2, plus 7 in M1 and 9 in M2 if PD-058 to PD-060 are accepted |
+| S0 | M1 to M3 | Foundations DN-01 to DN-11 (source documents, stable hashes and ids, FEEL-aligned semantics, BPMN-typed cockpit nodes, job cancellation), FEEL null logic, scope tokens and the BPMN and DMN semantic models as the canonical model; BPMN subset and DMN single-table import in M3; CMMN and everything else refused by name | About 5.5 days in M1 and 6 in M2, plus 7 in M1 and 9 in M2 for PD-058 to PD-060 (decided 2026-11-19) |
 | S1 | 1.1 | Subprocesses, boundary and event subprocesses, inclusive gateway, multi-instance; full BPMN display with the MIWG round trip; DMN Level 2 with S-FEEL | About 24 engineer-weeks |
 | S2 | 1.2 | Messages, signals, conditional events, full compensation; full FEEL, boxed expressions, decision services; TCK Level 3 at least 95 percent | About 28 engineer-weeks |
 | S3 | 1.3 | Complex gateway, ad-hoc subprocess, multiple events; conformance suite and TCK Level 3 at 100 percent | About 8 engineer-weeks |
 
 Dates for S1 to S3 are pending (PD-062). The roadmap keeps M1 to M3 dates unchanged and never cuts a foundation item; kill assumption K19 tests whether they fit, K20 whether evaluators ask for conformance before S2 starts, K21 whether the FEEL core estimate holds. Positioning: "standard BPMN 2.0 and DMN models in and out, with a published deviation register"; no conformance claim before that stage's suites are green. Conformance removes a reason to lose; governed change in the host transaction and guarded agent steps remain the reasons to choose us.
 
+PD-058 to PD-061 were decided on 2026-11-19 ([Decided on 2026-11-19](#decided-on-2026-11-19)). Still pending:
+
 | Id | Question | Recommendation | Gate |
 |---|---|---|---|
-| PD-058 | FEEL null semantics in our expression language from M1 (changes two cases of `RLE-006`) | Accept; about 4 days with a differential test harness | Before M1 code |
-| PD-059 | Execution tree with scope tokens in M2 (ADR-0020) | Accept; about 4 days, avoids migrating in-flight instances at 1.1 | Before M2 code |
-| PD-060 | BPMN and DMN semantic models as the canonical model (ADR-0018) | Accept; about 3 days in M1 and 5 in M2; users see no change | Before M1 code |
-| PD-061 | HORUS-built FEEL (ADR-0019) | Accept; an existing FEEL engine only as a test oracle | Before S1 planning |
 | PD-062 | Dates for S1 to S3 | Publish order and exit criteria now; fix dates at the M3 exit review from measured throughput | M3 exit |
-| PD-063 | Principle 9 wording | The ADR-0017 wording if PD-060 is accepted; otherwise a wording that holds either way | Now |
+| PD-063 | Principle 9 wording | The ADR-0017 wording (option 1), since PD-060 was decided with option 2 | Now |
 | PD-064 | MIWG test data under CC BY 3.0 | Allow as build-time test data with attribution, never shipped, named in the PD-053 allow-list | Before S1 code |
 | PD-065 | Choreography and conversation diagrams | Not targeted; kept in the source document with a warning | Now |
 | PD-066 | FEEL error mode default | `strict` for v1 rule sets, `spec` for imported DMN; guardrails fail closed in both | Before S2 |
@@ -126,18 +141,18 @@ Applied with PD-057: roadmap standards track and do-now items, feature map rows,
 
 ## Roadmap approval (decided 2026-11-19)
 
-The product owner approved the [roadmap](roadmap.md) as of commit `54a7e95`: M0 to M3, the standards track 1.1 to 1.3, the do-now items and the cut lists ([PD-067](decisions.md#pd-067-product-roadmap-approved-sprint-planning-starts)). Sprint planning and the public project board start now, with the first five issues for the product owner's preview. The approval decides no pending entry: PD-058 and PD-060 still gate M1 code, and PD-059 gates M2 code.
+The product owner approved the [roadmap](roadmap.md) as of commit `54a7e95`: M0 to M3, the standards track 1.1 to 1.3, the do-now items and the cut lists ([PD-067](decisions.md#pd-067-product-roadmap-approved-sprint-planning-starts)). Sprint planning and the public project board start now, with the first five issues for the product owner's preview. The approval decided no pending entry; PD-058, PD-059 and PD-060, which gate M1 and M2 code, were decided on 2026-11-19.
 
 ## Who uses the Rule Engine and how
 
 Eight roles in a bank or fintech use the Rule Engine. Details, permissions, six end-to-end journeys and the full catalogue: [rule-engine-users-and-journeys.md](rule-engine-users-and-journeys.md).
 
-| Persona | Real role | Reads YAML | Main surface | Use cases (M1 / M2 / M3 / later / never, with PD-043) |
+| Persona | Real role | Reads YAML | Main surface | Use cases (M1 / M2 / M3 / later / never, under the plan) |
 |---|---|---|---|---|
 | Pricing manager | Product manager for fees and pricing | No | Cockpit; spreadsheet round-trip (PD-043) | 7 / 0 / 2 / 2 / 1 |
 | Credit risk analyst | Credit policy analyst | With help | Cockpit; spreadsheet; grid from M2 | 6 / 2 / 1 / 0 / 1 |
 | Business analyst | Change or IT delivery team | Yes | Git and YAML; cockpit import | 3 / 0 / 2 / 0 / 1 |
-| Compliance officer | Approver (checker) | No | Cockpit: Approvals; or the bank's ticket tool through REST | 7 / 0 / 1 / 1 / 1 |
+| Compliance officer | Approver (checker) | No | Cockpit: Approvals; or the bank's ticket tool through REST | 7 / 0 / 1 / 2 / 0 |
 | Support staff | Contact centre, branch or back office | No | The bank's case screen calling the explain API | 3 / 1 / 1 / 0 / 0 |
 | Internal auditor | Internal audit | No | Cockpit: Decisions and versions; REST for evidence | 3 / 1 / 1 / 0 / 0 |
 | Host-service developer | Java developer | Yes | Java API, REST, JUnit, Git | 9 / 2 / 0 / 0 / 0 |
@@ -147,16 +162,16 @@ Use cases per milestone (69 in total):
 
 | Plan | M1 | M2 | M3 | Later | Never |
 |---|---|---|---|---|---|
-| Today | 37 | 5 | 10 | 13 | 4 |
-| With PD-043 as recommended | 43 | 6 | 11 | 5 | 4 |
+| Before PD-043 | 37 | 5 | 10 | 13 | 4 |
+| Plan (PD-043 and PD-012 decided) | 43 | 6 | 11 | 6 | 3 |
 
-The main finding: under today's plan a pricing manager or credit risk analyst cannot change a table in M1 without a business analyst or developer writing YAML, so the M1 outcome "business staff change rules" holds only through intermediaries. Creating a new rule set always needs a developer, because the host must supply its inputs; most business changes are edits to existing tables.
+The main finding before PD-043: a pricing manager or credit risk analyst cannot change a table in M1 without a business analyst or developer writing YAML, so the M1 outcome "business staff change rules" holds only through intermediaries. Creating a new rule set always needs a developer, because the host must supply its inputs; most business changes are edits to existing tables.
 
-**PD-043 recommendation (pending product owner).** Option 3: in M1, a spreadsheet round-trip for existing rule sets (export rows as CSV, edit in Excel, import as a draft) with plain conditions such as `GOLD, PLATINUM`, `>= 50000000 VND` or `18 to 65`, and plain-language errors naming row and column; in M2, the grid editor gains templates, a "new rule set" flow and drop-downs. No grid in M1: it costs 2 to 3 weeks in a milestone with about five working weeks. "User-friendly" is defined as seven testable criteria: no YAML, no expression syntax for common conditions, templates, plain-language validation, preview with sample data, typed values, and requesting approval from the same screen. M1 date unchanged; batch evaluate moves to M2 to make room. Kill test: two analysts reach `PENDING_APPROVAL` within 15 minutes without help in week 2 of M1. Details: [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml).
+**PD-043 (decided by the product owner, 2026-11-19, option 3).** In M1, a spreadsheet round-trip for existing rule sets (export rows as CSV, edit in Excel, import as a draft) with plain conditions such as `GOLD, PLATINUM`, `>= 50000000 VND` or `18 to 65`, and plain-language errors naming row and column; in M2, the grid editor gains templates, a "new rule set" flow and drop-downs. No grid in M1: it costs 2 to 3 weeks in a milestone with about five working weeks. "User-friendly" is defined as seven testable criteria: no YAML, no expression syntax for common conditions, templates, plain-language validation, preview with sample data, typed values, and requesting approval from the same screen. M1 date unchanged; batch evaluate moves to M2 to make room. Kill test (K3): two analysts reach `PENDING_APPROVAL` within 15 minutes without help in week 2 of M1. Details: [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml).
 
 ## Requirements review (pending)
 
-The architect reviewed the technical, non-functional and developer requirements on 18 Nov 2026. Correctness is well covered; operations, usability and developer experience are not. The gaps that are product choices are below. The architect's other proposals (availability, failover, cockpit read limits, alerts, log content, footprint, Java API, documentation and test kit standards) wait for the product owner's acceptance. [requirements.md](requirements.md) does not change until these are decided.
+The architect reviewed the technical, non-functional and developer requirements on 18 Nov 2026. Correctness is well covered; operations, usability and developer experience are not. The gaps that are product choices are below. PD-050 (retention) was decided on 2026-11-19: retention is required outside `dev`, at least 12 months. The architect's other proposals (availability, failover, cockpit read limits, alerts, log content, footprint, Java API, documentation and test kit standards) wait for the product owner's acceptance. [requirements.md](requirements.md) does not change until these are decided.
 
 | Id | Question | Recommendation |
 |---|---|---|
@@ -166,7 +181,6 @@ The architect reviewed the technical, non-functional and developer requirements 
 | PD-047 | Usability targets | Three Should targets reported at milestone exit: operator finds why an instance is stuck in 3 clicks (M2); analyst reaches `PENDING_APPROVAL` in 15 minutes unaided (M1); newcomer's first decision in 30 minutes (M1) |
 | PD-048 | Diagram accessibility | A keyboard-usable node list for every diagram, state in text as well as colour; the canvas is exempt in M3 only because JSON or YAML import is an equivalent path |
 | PD-049 | WCAG, ASVS, coverage at 1.0 | Must at 1.0 for `TR-UI-03`, `TR-SEC-07`, `TR-QA-03`, and `TR-OPS-02` (zero-downtime upgrade, promised by the M3 outcome) |
-| PD-050 | Retention default | Keep forever unless configured; warn at start-up outside `dev`; never below 12 months; publish growth per row |
 | PD-051 | Tenant exit | Export and a governed purge (second approver, purge record) in 1.1; not supported before, and documented as such |
 | PD-052 | Tamper evidence | In 1.1; prefer sealing each closed monthly partition over a per-row chain; from 1.0 state that append-only protects against the engine's code, not against a database administrator |
 | PD-053 | Licence rule for tests | Runtime and the shipped cockpit bundle stay Apache, MIT or BSD; JUnit Jupiter API as `provided` in `*-test` artifacts; jqwik and JMH build-only; every exception named |

@@ -1,8 +1,8 @@
 # ADR-0016: Java API conventions
 
-- Status: proposed
-- Date: 2026-11-18
-- Deciders: maintainers; pending acceptance by the product owner
+- Status: accepted, 2026-11-19
+- Date: 2026-11-18 (proposed), 2026-11-19 (accepted)
+- Deciders: maintainers; accepted by the product owner
 - Module: project
 
 ## Context
@@ -20,7 +20,7 @@ The Java API is the primary product surface: the host developer is the first use
 | Transactions | Javadoc states for every method whether it joins the caller's transaction, which rows it writes, and whether it may call an adapter (never inside a transaction) |
 | Thread safety | Entry points are safe for concurrent use and hold no per-call state; SPI implementations must be thread-safe, and the SPI Javadoc says so |
 | No leaks | Public signatures use only JDK types, engine `api` and `spi` types and JSpecify annotations: no Jackson, Spring, JDBC or cache library types. Inputs go through `DecisionInput` and `Variables`, not a JSON tree type |
-| Packages | `com.horus.bpm.<engine>.api` (hosts call), `.spi` (hosts implement), `.internal` (no promise); `module-info` exports `api` and `spi` only; examples may not import `internal` |
+| Packages | `io.github.dhluong90.bpm.<engine>.api` (hosts call), `.spi` (hosts implement), `.internal` (no promise), under the package root of ADR-0022; `module-info` exports `api` and `spi` only; examples may not import `internal` |
 | Compatibility | 0.x: a minor may break, with release notes. From 1.0: a patch is binary and source compatible; a minor is binary compatible and additive, and new SPI methods are `default` methods; breaking changes only in a major. Checked by japicmp (Apache 2.0) against the last release for `api` and `spi`; revapi (Apache 2.0) as the fallback |
 | Deprecation | `@Deprecated(since, forRemoval)` and a `@deprecated` tag naming the replacement. The minimum length is pending PD-054 (proposed: one minor release and six months, removal only in a major) |
 | Javadoc | Every public type and method in `api` and `spi`: one-sentence purpose, contract, `@param` with units and nullability, `@return`, `@throws` with the error code, thread safety, `@since`, and one `{@snippet}` example per entry point taken from compiled example sources; `-Xdoclint:all -Werror` on those packages |
@@ -34,4 +34,8 @@ The Java API is the primary product surface: the host developer is the first use
 - New build dependencies, build scope only: JSpecify (Apache 2.0, also a compile-time annotation dependency of `api`), Error Prone and NullAway (Apache 2.0 and MIT), japicmp (Apache 2.0). Each gets its one-paragraph justification in the module DESIGN before adoption.
 - ArchUnit rules on `..api..` and `..spi..` signatures, and on `internal` imports from examples.
 - The engine DESIGN documents' Java API sketches follow this ADR.
-- Requirements: `TR-API-01` to `TR-API-09` and `TR-DOC-01` to `TR-DOC-04`, all proposed until this ADR is accepted; `TR-API-09` also depends on PD-054.
+- Requirements: `TR-API-01` to `TR-API-08` and `TR-DOC-01` to `TR-DOC-04` are release gates from 2026-11-19; `TR-API-09` stays proposed until PD-054 is decided.
+
+## History
+- 2026-11-18: proposed by the maintainers.
+- 2026-11-19: accepted by the product owner. The same day the package root changed from `com.horus.bpm` to `io.github.dhluong90.bpm` (PD-070, ADR-0022); the deprecation length stays pending PD-054.

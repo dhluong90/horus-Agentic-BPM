@@ -1,6 +1,6 @@
 # Process Engine: Design
 
-Status: architecture baseline (M0), updated 2026-11-18 for the cockpit direction (PD-032 to PD-042). Conforms to ADR-0001 to ADR-0007, ADR-0010 to ADR-0015, the proposed ADR-0008, ADR-0009 and ADR-0016, ADR-0017 (full BPMN 2.0 on the roadmap; the do-now items of [`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 9 are applied below and tagged with their milestone), the proposed ADR-0018 (canonical BPMN model) and ADR-0020 (execution tree), and [`docs/product/requirements.md`](../../docs/product/requirements.md). Money values follow the canonical contract in [`rule-engine/docs/DESIGN.md`](../../rule-engine/docs/DESIGN.md) section 3.4. Cross-module facts (transaction model, capacity baseline, failure table) are owned by [`docs/architecture/overview.md`](../../docs/architecture/overview.md); this document owns the Process Engine's model, DDL, APIs and read models.
+Status: architecture baseline (M0), updated 2026-11-18 for the cockpit direction (PD-032 to PD-042) and 2026-11-19 for the accepted ADR-0008, ADR-0009, ADR-0016, ADR-0018, ADR-0020 and ADR-0021. Conforms to ADR-0001 to ADR-0016, ADR-0017 (full BPMN 2.0 on the roadmap; the do-now items of [`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 9 are applied below and tagged with their milestone), ADR-0018 (the BPMN semantic model is canonical), ADR-0020 (execution tree with scope tokens from M2), ADR-0021 (Jackson 3 inside the core), ADR-0022 (package root), and [`docs/product/requirements.md`](../../docs/product/requirements.md). Money values follow the canonical contract in [`rule-engine/docs/DESIGN.md`](../../rule-engine/docs/DESIGN.md) section 3.4. Cross-module facts (transaction model, capacity baseline, failure table) are owned by [`docs/architecture/overview.md`](../../docs/architecture/overview.md); this document owns the Process Engine's model, DDL, APIs and read models.
 
 Contents: 1 Context and boundaries. 2 Modules, ports and adapters. 3 Domain model and state machines. 4 Transaction model. 5 Definitions: notation, hash, diff, layout, BPMN, forms, step catalogue. 6 Java API and REST contract. 7 Storage model. 8 Read models, query limits and capacity math. 9 Failure modes. 10 Security controls. 11 Open questions.
 
@@ -29,14 +29,14 @@ Source: [`diagrams/components.mmd`](diagrams/components.mmd).
 
 | Module | Contents | May depend on |
 |---|---|---|
-| `process-engine-core` | `api`, `spi` and `internal` packages: domain model, lifecycle, graph diff, validation, ports | JDK, the JSON library fixed by ADR-0011, `rule-engine` API (optional for `decision` steps and guardrails; its `ExpressionLanguage` SPI is the only way gateway conditions are compiled and evaluated, M2, DN-05) |
+| `process-engine-core` | `api`, `spi` and `internal` packages: domain model, lifecycle, graph diff, validation, ports | JDK, Jackson 3 in `internal` only (ADR-0021, `TR-EMB-07`), `rule-engine` API (optional for `decision` steps and guardrails; its `ExpressionLanguage` SPI is the only way gateway conditions are compiled and evaluated, M2, DN-05) |
 | `process-engine-bpmn` | BPMN subset reader and writer (section 5.5) | `process-engine-core`, JDK `javax.xml.stream` only |
 | `process-engine-postgres` | `JdbcClient` adapters for every driven port, Flyway scripts, `SKIP LOCKED` poller, rollup job | core, Spring JDBC, Flyway |
 | `process-engine-rest` | Controllers under `/api/bpm/processes/v1`, RFC 9457 errors, ETag, idempotency filter | core, bpmn, Spring WebMvc |
 | `process-engine-test` | In-memory adapters that pass the same storage contract suite, `TestClock`, `StubAgentAdapter`, `@ProcessTest` | core |
 | `process-engine-spring-boot-starter` | Auto-configuration, profile guards (`TR-SEC-11`), scheduler lifecycle, Micrometer, OpenTelemetry hooks | all of the above |
 
-ArchUnit rules in every build: core imports no `org.springframework..`, `java.sql..`, `java.net..`, `javax.script..` or `java.lang.reflect..` (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`); no adapter port (`ServiceAdapter`, `AgentAdapter`) is called from a class that runs inside a transaction (`TR-ASY-01`); public signatures in `..api..` and `..spi..` use only JDK, engine and JSpecify types (ADR-0016).
+ArchUnit rules in every build: core imports no `org.springframework..`, `java.sql..`, `java.net..`, `javax.script..` or `java.lang.reflect..` (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`); no adapter port (`ServiceAdapter`, `AgentAdapter`) is called from a class that runs inside a transaction (`TR-ASY-01`); public signatures in `..api..` and `..spi..` use only JDK, engine and JSpecify types (ADR-0016); `tools.jackson..` is allowed in `..internal..` of the core only and `com.fasterxml.jackson.databind..` nowhere in the core (ADR-0021).
 
 ## 3. Domain model and state machines
 
@@ -46,7 +46,7 @@ ArchUnit rules in every build: core imports no `org.springframework..`, `java.sq
 |---|---|---|
 | Definition version | `DefinitionVersion(key, version, status, document, hash, effectiveFrom)`. Content is immutable once `PENDING_APPROVAL`; only `DRAFT` content changes. The requester never approves. Approval requires `version` greater than every `ACTIVE` version of the key | `pre_definition` |
 | Layout | `LayoutRevision(definitionId, revision, layout)`. Append-only; never part of the definition hash; node ids must exist in the definition | `pre_definition_layout` |
-| Instance | `ProcessInstance` with its token tree. Pinned to one definition version until migrated. All transitions of one instance serialise on the `pre_instance` row lock | `pre_instance`, `pre_token` |
+| Instance | `ProcessInstance` with its execution tree: one root scope token, one scope token per entered `saga`, and flow tokens that name their scope token (ADR-0020). Pinned to one definition version until migrated. All transitions of one instance serialise on the `pre_instance` row lock | `pre_instance`, `pre_token` |
 | Task | `HumanTask(status, assignment, form, forbiddenUsers, lockVersion)`. Four-eyes is checked in `TaskService`, so Java and REST behave the same | `pre_task` |
 | Incident | `Incident(status, errorCode, retryCount, lockVersion)` | `pre_incident` |
 | Job | Timer, SLA escalation, async step attempt, compensation attempt or definition effective-date job, with a lease | `pre_timer` |
@@ -100,7 +100,15 @@ An open incident does not change the instance status; the affected token stays i
 
 ### 3.4 Token states
 
-Processes fork at a `parallelGateway`, so positions live in `pre_token` rows, not in a column of `pre_instance`.
+Processes fork at a `parallelGateway`, so positions live in `pre_token` rows, not in a column of `pre_instance`. Every token has a kind (ADR-0020, PD-059, `TR-STD-29`):
+
+| Kind | Created | `scope_token_id` | `current_node_id` |
+|---|---|---|---|
+| `SCOPE` | One root scope token at instance start; one per entry into a `saga` block | Null for the root; the enclosing scope token for a `saga` | The definition key for the root; the `saga` block id |
+| `FLOW` | At start, at a fork, after a join, at the first step inside a `saga` | The scope token the position belongs to | The step the token is on |
+| `MI_BODY` | From S1, for a multi-instance body | The enclosing scope token | The multi-instance activity |
+
+Joins count only tokens of one scope token, and compensation walks only the stack of one scope token, so subprocesses, event subprocesses and multi-instance (S1) add `SCOPE` and `MI_BODY` rows without changing this table or the join and compensation code ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 5.1).
 
 ![Token states](images/token-states.svg)
 
@@ -108,21 +116,25 @@ Source: [`diagrams/token-states.mmd`](diagrams/token-states.mmd).
 
 | From | Trigger | To | Note |
 |---|---|---|---|
-| none | Start, or fork at a `parallelGateway` | `ACTIVE` | One token per outgoing branch |
+| none | Instance start, or a `saga` block entered | `WAITING_SCOPE` | `SCOPE` token; the first `FLOW` token of the scope is created `ACTIVE` in the same transaction |
+| `WAITING_SCOPE` | The last live `FLOW` token under the scope token completes (an `end` step for the root; the end of the block's `steps` for a `saga`) | `COMPLETED` | Root: the instance completes. `saga`: a new `FLOW` token continues at the block's `next` in the enclosing scope |
+| `WAITING_SCOPE` | A step under the scope failed with `onFailure: compensate`, or `throwCompensation` ran, and the scope's stack was walked to the bottom | `COMPENSATED` | Live `FLOW` tokens under it are `CANCELLED` when the walk starts |
+| `WAITING_SCOPE` | Instance cancelled, or migrated off the `saga` block | `CANCELLED` | Every live `FLOW` token under it is cancelled in the same transaction |
+| none | Start, or fork at a `parallelGateway` | `ACTIVE` | `FLOW` token; one per outgoing branch, under the scope token of the gateway |
 | `ACTIVE` | `userTask` reached | `WAITING_USER` | Task row created in the same transaction |
 | `WAITING_USER` | Task completed | `ACTIVE` | Moves to the next step in the same transaction |
 | `ACTIVE` | Async step reached | `WAITING_ASYNC` | Job row created; TX1 claims it later (section 4) |
 | `WAITING_ASYNC` | TX2 accepts the result | `ACTIVE` | Guardrail and schema checks in TX2 |
 | `ACTIVE` | `timer` step | `WAITING_TIMER` | Job `TIMER` at the due time |
 | `WAITING_TIMER` | Timer fires | `ACTIVE` | |
-| `ACTIVE` | Arrives at a converging `parallelGateway` | `JOINED` | Under the `pre_instance` row lock; the last arrival of the scope creates the post-join `ACTIVE` token (`TR-ASY-03`) |
-| `ACTIVE` | `end` step | `COMPLETED` | |
-| `COMPLETED` | Compensation of the token's steps ran | `COMPENSATED` | |
+| `ACTIVE` | Arrives at a converging `parallelGateway` | `JOINED` | Under the `pre_instance` row lock; the last arrival among the tokens of the same scope token creates the post-join `ACTIVE` token (`TR-ASY-03`) |
+| `ACTIVE` | `end` step, or the end of a `saga` block's `steps` | `COMPLETED` | The scope token is checked for completion in the same transaction |
+| `COMPLETED` | Compensation of the token's steps ran (for a `SCOPE` token: a later `throwCompensation` walked its stack) | `COMPENSATED` | |
 | `ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER` | Instance cancelled, or migrated off the node | `CANCELLED` | Under the `pre_instance` row lock: open task `CANCELLED`, open job `CANCELLED`. An adapter call already running is not stopped; its TX2 finds the job `CANCELLED` and writes only `LATE_RESULT_DISCARDED` (M2, DN-10, `PRE-041`). From S1 interrupting boundary events and terminate end events use the same transition |
 
 Every token row carries `definition_id`, copied from the instance and changed with it by migration, so live counts per node read one index (section 8.2).
 
-Pending decision P2 (ADR-0020, proposed): every scope becomes a token row. M2 would create a root scope token per instance and one per `saga`, `scope_token_id` would replace the text `scope_id`, and joins and compensation would be keyed by scope token, so subprocesses, event subprocesses and multi-instance (S1) add rows instead of reshaping this table ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 5.1).
+Cost of scope tokens: one extra row per instance and one per `saga` entry, about 150 bytes each; at 1 million instances a month with one `saga` each, about 300 MB a month (section 8.4). The `WAITING_SCOPE` status is outside the `idx_pre_token_live` predicate, so live counts per node are unchanged.
 
 ### 3.5 Task states
 
@@ -165,7 +177,7 @@ Source: [`diagrams/async-wait-state.mmd`](diagrams/async-wait-state.mmd). TX2 re
 
 ### 4.2 Saga compensation (ADR-0007, `TR-COMP-01` to `TR-COMP-03`)
 
-A completed `serviceTask` or `agentTask` with a `compensate` handler pushes `(step_id, attempt_id, handler, input_snapshot)` onto `pre_compensation_stack`. On `onFailure: compensate` or `throwCompensation` the stack is walked newest first; each handler call is an async job with its own retry policy and a new `attemptId`, and receives the forward step's `attemptId` as `forwardAttemptId`. `compensate: manual` opens `COMPENSATION_MANUAL_REQUIRED` instead of skipping.
+A completed `serviceTask` or `agentTask` with a `compensate` handler pushes `(step_id, attempt_id, handler, input_snapshot)` onto `pre_compensation_stack` under its scope token: the enclosing `saga`'s scope token, or the root scope token outside any `saga` (ADR-0020). On `onFailure: compensate` or `throwCompensation` the stack of the failing or throwing step's scope token is walked newest first, and entries under other scope tokens are untouched (`PRE-044`); each handler call is an async job with its own retry policy and a new `attemptId`, and receives the forward step's `attemptId` as `forwardAttemptId`. `compensate: manual` opens `COMPENSATION_MANUAL_REQUIRED` instead of skipping.
 
 ### 4.3 Business calendars and migration
 
@@ -173,9 +185,9 @@ A completed `serviceTask` or `agentTask` with a `compensate` handler pushes `(st
 
 ## 5. Definitions: notation, hash, diff, layout, BPMN, forms, step catalogue
 
-### 5.1 Notation (ADR-0013, `TR-DEF-01`)
+### 5.1 Notation and canonical model (ADR-0013, ADR-0018, `TR-DEF-01`, `TR-STD-28`)
 
-The canonical format is our JSON (or YAML), owned by [`api/schema/process-definition.v1.schema.json`](../api/schema/process-definition.v1.schema.json). It may carry an optional `diagram` part (node positions, edge waypoints, lanes; schema [`api/schema/definition-layout.v1.schema.json`](../api/schema/definition-layout.v1.schema.json)). On import the engine stores the `diagram` part as a layout revision and removes it from `definition_json`.
+The canonical model in `process-engine-core` is the BPMN 2.0.2 semantic model: sealed records for flow nodes and sequence flows with ids, HORUS extension records for `agentTask`, guardrails, async mode, forms and SLA, and opaque foreign extensions (ADR-0018, PD-060). Our JSON (or YAML) is its canonical serialisation: the form that is stored, hashed, diffed and approved. The v1 reader maps a `process-definition.v1` document onto the model, and the canonical writer prints the model back; reading and writing a v1 document gives its RFC 8785 form unchanged, so its hash is unchanged (`PRE-043`). The format is owned by [`api/schema/process-definition.v1.schema.json`](../api/schema/process-definition.v1.schema.json). It may carry an optional `diagram` part (node positions, edge waypoints, lanes; schema [`api/schema/definition-layout.v1.schema.json`](../api/schema/definition-layout.v1.schema.json)). On import the engine stores the `diagram` part as a layout revision and removes it from `definition_json`.
 
 Standards foundations (ADR-0017):
 
@@ -185,7 +197,7 @@ Standards foundations (ADR-0017):
 | `expressionLanguage` names the language of every condition; only `urn:horus-bpm:expr:v1` before S1 (DN-02) | M2 |
 | Step ids accept the BPMN id form `^[A-Za-z_][A-Za-z0-9_.-]*$` (at most 100), so imported BPMN ids are kept; kebab-case stays the recommended style; definition keys stay kebab-case (DN-03, `PRE-042`) | M2 |
 | The v1 reader generates sequence flow ids deterministically (`<from>__<to>`, `<gateway>__b<i>`, `<gateway>__default`, `<gateway>__f<i>`); they are not part of the hash because they are derived | M2 |
-| Pending decision P3 (ADR-0018, proposed): the in-memory model is the BPMN semantic model (flow nodes and sequence flows with ids, HORUS extensions for our step types), and the M3 BPMN subset reader is built on it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 3) | M2, M3 |
+| The in-memory model is the BPMN semantic model (flow nodes and sequence flows with ids, HORUS extensions for our step types); a `saga` is a `transaction` subprocess and a `callProcess` a `callActivity` in the model; the M3 BPMN subset reader and writer are built on it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 3; decided 2026-11-19, PD-060) | M2 (model, `PRE-043`), M3 (BPMN reader) |
 
 ### 5.2 Content hash (`TR-DEF-04`)
 
@@ -236,7 +248,7 @@ A `userTask` declares `form` as one of: a form key registered by the host throug
 
 ## 6. Java API and REST contract
 
-### 6.1 Java API (`com.horus.bpm.process.api`)
+### 6.1 Java API (`io.github.dhluong90.bpm.process.api`, ADR-0022)
 
 Entry points follow ADR-0016: one interface per job, request records with builders, sealed result types, unchecked exceptions with `code()`.
 
@@ -437,16 +449,24 @@ CREATE TABLE pre_token (
   id              VARCHAR(26) NOT NULL,
   instance_id     VARCHAR(26) NOT NULL,
   definition_id   VARCHAR(26) NOT NULL,          -- copy of pre_instance.definition_id, updated by migration
-  parent_token_id VARCHAR(26),
-  scope_id        TEXT        NOT NULL,          -- becomes scope_token_id VARCHAR(26) if P2 is accepted (ADR-0020)
-  current_node_id TEXT        NOT NULL,
-  status          TEXT        NOT NULL CHECK (status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','JOINED','COMPLETED','COMPENSATED','CANCELLED')),
+  parent_token_id VARCHAR(26),                    -- token that forked or created this one (lineage)
+  token_kind      TEXT        NOT NULL CHECK (token_kind IN ('SCOPE','FLOW','MI_BODY')),  -- MI_BODY from S1 (ADR-0020)
+  scope_token_id  VARCHAR(26),                    -- enclosing scope token; null only for the root scope token
+  current_node_id TEXT        NOT NULL,          -- step id; definition key for the root scope; saga block id for a saga scope
+  status          TEXT        NOT NULL CHECK (status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_SCOPE','JOINED','COMPLETED','COMPENSATED','CANCELLED')),
   entered_at      TIMESTAMPTZ NOT NULL,          -- when the token reached current_node_id
   created_at      TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, id),
-  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id)
+  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id),
+  FOREIGN KEY (tenant_id, scope_token_id) REFERENCES pre_token (tenant_id, id),
+  CHECK ((token_kind = 'SCOPE' AND status IN ('WAITING_SCOPE','COMPLETED','COMPENSATED','CANCELLED'))
+      OR (token_kind = 'FLOW' AND status <> 'WAITING_SCOPE' AND scope_token_id IS NOT NULL)
+      OR token_kind = 'MI_BODY')
 );
 CREATE INDEX idx_pre_token_instance ON pre_token (tenant_id, instance_id, status);
+CREATE INDEX idx_pre_token_scope ON pre_token (tenant_id, scope_token_id, status);   -- join counts and scope completion
+CREATE UNIQUE INDEX uq_pre_token_root
+  ON pre_token (tenant_id, instance_id) WHERE token_kind = 'SCOPE' AND scope_token_id IS NULL;   -- one root per instance
 CREATE INDEX idx_pre_token_live
   ON pre_token (tenant_id, definition_id, status, current_node_id)
   WHERE status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER');
@@ -579,8 +599,8 @@ CREATE TABLE pre_compensation_stack (
   tenant_id         TEXT        NOT NULL,
   id                VARCHAR(26) NOT NULL,
   instance_id       VARCHAR(26) NOT NULL,
-  scope_id          TEXT        NOT NULL,
-  seq               INT         NOT NULL,        -- push order; walked in descending order
+  scope_token_id    VARCHAR(26) NOT NULL,        -- saga scope token, or the root scope token (ADR-0020)
+  seq               INT         NOT NULL,        -- push order within the scope token; walked in descending order
   step_id           TEXT        NOT NULL,
   forward_attempt_id VARCHAR(26) NOT NULL,
   handler           TEXT        NOT NULL,        -- registered handler name, or 'manual'
@@ -589,8 +609,9 @@ CREATE TABLE pre_compensation_stack (
   pushed_at         TIMESTAMPTZ NOT NULL,
   completed_at      TIMESTAMPTZ,
   PRIMARY KEY (tenant_id, id),
-  UNIQUE (tenant_id, instance_id, scope_id, seq),
-  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id)
+  UNIQUE (tenant_id, instance_id, scope_token_id, seq),
+  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id),
+  FOREIGN KEY (tenant_id, scope_token_id) REFERENCES pre_token (tenant_id, id)
 );
 
 CREATE TABLE pre_idempotency (
@@ -681,7 +702,7 @@ The rollup only adds counts and histogram buckets, so a repeated slice after a c
 |---|---|---|---|
 | Sync transitions | 1,000/s x about 2 ms = 2 busy connections (`TR-PERF-04`) | 20 busy: the whole pool | 3 replicas, or batch history inserts |
 | `pre_history` | 1,000 rows/s x 500 bytes = 43 GB/day at a sustained peak | 430 GB/day | Monthly partitions; size from the daily average; retention pending PD-050 |
-| `pre_token` | 1 million instances/month x 10 tokens x 150 bytes = 1.5 GB/month, mostly ended | 15 GB/month | The partial index holds live tokens only; removal of tokens of ended instances is open question 11.3 |
+| `pre_token` | 1 million instances/month x (10 flow tokens + 1 root scope token + 1 `saga` scope token) x 150 bytes = 1.8 GB/month, mostly ended; scope tokens add 300 MB/month (ADR-0020) | 18 GB/month | The partial index holds live tokens only; removal of tokens of ended instances is open question 11.3 |
 | Definition validation | 500 nodes, 1 MB: parse about 10 ms, graph checks under 5 ms, one Rule Engine lookup per guardrail | Same per definition | Runs before the transaction opens |
 | Layout | 200 nodes x 60 bytes = 12 KB per revision; 100 revisions = 1.2 MB per version | Same | 256 KB cap per revision |
 | Async steps | 100 concurrent 10 s calls = 0 connections while waiting | 1,000 concurrent: still 0; the adapter executor (16 threads by default) is the limit | Claim only when a slot is free |
@@ -730,6 +751,6 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | 11.3 | Remove tokens of instances ended more than 30 days ago? `pre_token` is not an audit table; history keeps every transition | Yes, by the scheduler in batches of 10,000, configurable | Maintainers, M2 |
 | 11.4 | Windows longer than 31 days for the heatmap need a daily rollup table | Defer to after 1.0 unless a pilot asks | Architect, M3 |
 | 11.5 | Migration plan storage (`pre_migration`) has no DDL yet | DDL before M2 execution work | Maintainers, M2 |
-| 11.6 | Which JSON library major `*-core` uses (ADR-0011) | Architecture overview section 12; gates M1 | Architect, M1 start |
-| 11.7 | P2: scope tokens in M2 (ADR-0020) | **Decision needed.** Accept; about 4 days in M2; avoids rewriting joins and compensation in S1 | Product owner, before the first M2 migration |
-| 11.8 | P3: BPMN semantic model as the in-memory model (ADR-0018) | **Decision needed.** Accept; about 5 days in M2; the M3 BPMN reader is then built on it | Product owner, M2 start |
+| 11.6 | Which JSON library major `*-core` uses (ADR-0011) | **Decided** 2026-11-19 (PD-071 option 1, ADR-0021): Jackson 3 in `internal` only; engine REST bodies use the engine's mapper (`PRE-045`). Condition: the Spring Boot 3.5 coexistence test passes in Sprint 1, or option 3 (no JSON library in the core) returns | Closed; the condition is checked by the maintainers in the first parsing pull request |
+| 11.7 | P2: scope tokens in M2 (ADR-0020) | **Decided** 2026-11-19 (PD-059 option 1): applied in sections 3.4, 4.2 and 7 (`PRE-044`, `TR-STD-29`) | Closed |
+| 11.8 | P3: BPMN semantic model as the in-memory model (ADR-0018) | **Decided** 2026-11-19 (PD-060 option 2): applied in section 5.1 (`PRE-043`, `TR-STD-28`) | Closed |

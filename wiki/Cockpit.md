@@ -18,7 +18,7 @@ Add the starter next to the engine starter:
 
 ```xml
 <dependency>
-  <groupId>com.horus.bpm</groupId>
+  <groupId>io.github.dhluong90.bpm</groupId>
   <artifactId>cockpit-spring-boot-starter</artifactId>
   <version>0.1.0</version>
 </dependency>

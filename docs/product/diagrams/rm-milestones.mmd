@@ -1,6 +1,6 @@
 flowchart LR
   M0["M0 Architecture<br/>18 Nov to 4 Dec 2026<br/>contracts verified on live PostgreSQL;<br/>diagram spike, ADR-0012 to ADR-0015 drafted"]
-  M1["M1 Rule Engine 0.1, Cockpit 0.1<br/>7 Dec 2026 to 15 Jan 2027<br/>business staff change governed rules<br/>without a deployment;<br/>standards foundations DN-01, 02, 04 to 08"]
+  M1["M1 Rule Engine 0.1, Cockpit 0.1<br/>7 Dec 2026 to 15 Jan 2027<br/>business staff change governed rules<br/>through an Excel round-trip, no deployment;<br/>standards foundations DN-01, 02, 04 to 08"]
   M2["M2 Process Engine 0.1, agentTask, Cockpit 0.2<br/>18 Jan to 26 Mar 2027<br/>guarded agent steps; every instance on its diagram;<br/>one inbox; no definition runs without a second approver;<br/>standards foundations DN-01 to 04, 09 to 11"]
   M3["M3 Agentic depth, compatibility, 1.0<br/>29 Mar to 21 May 2027<br/>offline evaluation of agent changes;<br/>governed process changes; frozen API;<br/>unsupported standards refused by name, no CMMN"]
   S1["S1 Standards 1.1<br/>dates pending PD-062<br/>scopes and errors; full BPMN display;<br/>MIWG round trip; DMN Level 2"]
@@ -8,15 +8,15 @@ flowchart LR
   S3["S3 Standards 1.3<br/>dates pending PD-062<br/>completeness; conformance suite 100 percent;<br/>DMN TCK Level 3 100 percent"]
   L["After 1.0<br/>candidates"]
 
-  G0{{"Gate: ADR-0008, ADR-0009, ADR-0011, ADR-0014 accepted;<br/>every M1 feature has a SPEC statement;<br/>PD-058 FEEL nulls and PD-060 canonical model decided"}}
-  G1{{"Gate: Rule Engine 0.1 published;<br/>ADR-0012, ADR-0013, ADR-0015; child compensation answered;<br/>PD-059 scope tokens decided"}}
+  G0{{"Gate: ADR-0011, ADR-0014 accepted;<br/>every M1 feature has a SPEC statement;<br/>ADR-0008, ADR-0009, PD-058, PD-060 decided 19 Nov"}}
+  G1{{"Gate: Rule Engine 0.1 published;<br/>ADR-0012, ADR-0013, ADR-0015; child compensation answered;<br/>PD-059 scope tokens decided 19 Nov"}}
   G2{{"Gate: M2 history with agent I/O and overrides;<br/>adapter SPI and migration execution in place"}}
-  G3{{"Gate: PD-061 FEEL build, PD-062 dates,<br/>PD-064 MIWG licence decided"}}
+  G3{{"Gate: PD-062 dates and PD-064 MIWG licence decided;<br/>PD-061 FEEL build decided 19 Nov"}}
   G4{{"Gate: K20 demand for conformance holds;<br/>K21 S-FEEL estimate holds"}}
 
-  C1["Checkpoint 8 Jan 2027<br/>cut RE-F-15, RE-F-26, log filters (PD-031)"]
-  C2["Checkpoint 5 Mar 2027<br/>fewer than 9 of 17 PRE green:<br/>cut PE-F-30, CK-F-26, PE-F-12"]
-  C3["Checkpoint 23 Apr 2027<br/>cut CK-F-18, CK-F-32, CK-F-27, PE-F-53,<br/>RE-F-30, RE-F-24, X-F-17"]
+  C1["Checkpoint 8 Jan 2027<br/>cut RE-F-15, log filters (PD-031, PD-043)"]
+  C2["Checkpoint 5 Mar 2027<br/>fewer than 9 of 17 PRE green:<br/>cut PE-F-30, CK-F-26, PE-F-12,<br/>RE-F-26, RE-F-34"]
+  C3["Checkpoint 23 Apr 2027<br/>cut CK-F-18, CK-F-32, CK-F-27, PE-F-53,<br/>RE-F-30, RE-F-24, X-F-17, CK-F-38"]
 
   M0 -- "1." --> G0 -- "2." --> M1 -- "3." --> G1 -- "4." --> M2 -- "5." --> G2 -- "6." --> M3
   M3 -- "7. API frozen, X-F-18" --> G3 -- "8." --> S1 -- "9." --> G4 -- "10." --> S2 -- "11." --> S3

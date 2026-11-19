@@ -32,9 +32,14 @@
       <groupId>org.springframework</groupId>
       <artifactId>spring-webmvc</artifactId>
     </dependency>
+    <!--
+      The Servlet API, provided by the host's container. Compiled against Tomcat's copy (Apache 2.0)
+      rather than jakarta.servlet-api (EPL 2.0 or GPL 2 with Classpath Exception), which the licence
+      gate refuses. Nothing of it ships in the starter.
+    -->
     <dependency>
-      <groupId>jakarta.servlet</groupId>
-      <artifactId>jakarta.servlet-api</artifactId>
+      <groupId>org.apache.tomcat.embed</groupId>
+      <artifactId>tomcat-embed-core</artifactId>
       <scope>provided</scope>
     </dependency>
     <!-- Optional: loads the host's CSRF token for host-session mode when the host uses Spring Security. -->
@@ -67,9 +72,18 @@
   </dependencies>
 
   <build>
+    <!-- Replaces the parent's resources, so its TR-LIC-02 licence files are repeated here. -->
     <resources>
       <resource>
         <directory>src/main/resources</directory>
+      </resource>
+      <resource>
+        <directory>${bpm.root}</directory>
+        <targetPath>META-INF</targetPath>
+        <includes>
+          <include>LICENSE</include>
+          <include>COMMERCIAL-LICENSE.md</include>
+        </includes>
       </resource>
       <!--
         The built React application (npm run build in ../web). It is packaged when present; a jar built
