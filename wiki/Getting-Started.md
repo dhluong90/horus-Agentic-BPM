@@ -122,14 +122,14 @@ class LoanEligibilityTest {
 
   @Test
   void adult_in_vietnam_with_income_is_eligible(RuleSetUnderTest rules) {
-    var r = rules.evaluate(Map.of("age", 25, "income", Money.of("VND", 8_000_000), "country", "VN"));
+    var r = rules.evaluate(Map.of("age", 25, "income", Money.ofMinor("VND", 8_000_000), "country", "VN"));
     assertThat(r.matchedRuleIds()).containsExactly("R4");
     assertThat(r.output("eligible", Boolean.class)).isTrue();
   }
 
   @Test
   void minor_is_rejected_before_income_is_checked(RuleSetUnderTest rules) {
-    var r = rules.evaluate(Map.of("age", 17, "income", Money.of("VND", 8_000_000), "country", "VN"));
+    var r = rules.evaluate(Map.of("age", 17, "income", Money.ofMinor("VND", 8_000_000), "country", "VN"));
     assertThat(r.matchedRuleIds()).containsExactly("R1");
     assertThat(r.output("reason", String.class)).isEqualTo("UNDER_AGE");
   }
@@ -192,7 +192,7 @@ class LoanService {
   boolean isEligible(Applicant a) {
     DecisionResult r = rules.evaluate("loan-eligibility", DecisionInput.of(
         "age", a.age(),
-        "income", Money.of("VND", a.monthlyIncomeMinorUnits()),
+        "income", Money.ofMinor("VND", a.monthlyIncomeMinorUnits()),
         "country", a.country()));
     return r.output("eligible", Boolean.class);
   }

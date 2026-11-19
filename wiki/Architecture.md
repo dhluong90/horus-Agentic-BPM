@@ -54,7 +54,7 @@ Dependency direction is inward to `*-core`. The Rule Engine never depends on the
 
 | Engine | Aggregates | Value objects and records |
 |---|---|---|
-| Rule Engine | `RuleSet` (per tenant), `RuleSetVersion` (immutable once published), `Decision` (append-only) | `Money(currency, minorUnits, scale)`, `TenantId`, `DecisionInput`, `DecisionResult`, `Expr` (sealed AST), `CompiledRuleSet` |
+| Rule Engine | `RuleSet` (per tenant), `RuleSetVersion` (immutable once published), `Decision` (append-only) | `Money(currency, minorUnits)`, `TenantId`, `DecisionInput`, `DecisionResult`, `Expr` (sealed AST), `CompiledRuleSet` |
 | Process Engine | `ProcessDefinition` (versioned), `ProcessInstance`, `ExecutionToken`, `Task`, `Job` (timer or async step), `Incident` | `BusinessKey`, `IdempotencyKey`, `AttemptId`, `Lease(lockedBy, lockedUntil)`, `CompensationEntry` |
 
 Money is never a floating-point number: `{ "currency": "VND", "amount": 60000000 }` in JSON, `BIGINT` minor units plus an ISO code in SQL. Identifiers are ULIDs.

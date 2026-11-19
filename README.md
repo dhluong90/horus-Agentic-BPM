@@ -39,7 +39,7 @@ Evaluated from your service:
 
 ```java
 DecisionResult r = rules.evaluate("loan-eligibility",
-    DecisionInput.of("age", 25, "income", Money.of("VND", 8_000_000)));
+    DecisionInput.of("age", 25, "income", Money.ofMinor("VND", 8_000_000)));
 r.matchedRuleIds();                   // ["R3"]
 r.output("eligible", Boolean.class);  // true
 ```
