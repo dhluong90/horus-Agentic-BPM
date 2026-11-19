@@ -18,8 +18,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | Spec id | Test | Level | Milestone | Traces to | Status |
 |---|---|---|---|---|---|
 | RLE-001 | `RLE_001_first_hit_policy_returns_top_matching_rule` | Unit | M1 | `TR-DET-01` | Planned |
-| RLE-002 | `RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches` | Unit, WebMvc | M1 | `TR-DET-04` | Planned |
-| RLE-003 | `RLE_003_collect_hit_policy_aggregates_matched_rules` | Unit | M1 | `TR-DET-01` | Planned |
+| RLE-002 | `RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several` | Unit, WebMvc | M1 | `TR-DET-04` | Planned |
+| RLE-003 | `RLE_003_collect_hit_policy_keeps_null_entries_and_aggregates_non_null_values` | Unit | M1 | `TR-DET-01` | Planned |
 | RLE-004 | `RLE_004_publish_rejects_unparsable_or_ill_typed_expressions` | Unit, property | M1 | `TR-DET-02`, `TR-SEC-01` | Planned |
 | RLE-005 | `RLE_005_money_currency_mismatch_is_rejected` | Unit | M1 | `TR-DET-03` | Planned |
 | RLE-006 | `RLE_006_null_follows_feel_three_valued_logic` | Unit, replay | M1 | `TR-DET-01`, `TR-STD-02` | Planned |
