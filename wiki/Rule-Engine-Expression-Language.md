@@ -35,7 +35,7 @@ Design preview: describes the 0.1 target.
 | Membership | `in [..]`, `not in [..]` | List element type must match |
 | Range | `between a and b` | Inclusive on both ends |
 | Arithmetic | `+` `-` `*` `/` | Number with number; money with money of the same currency for `+` and `-`; `money * number` and `money / number`; `money / money` is not allowed |
-| String | `startsWith(s, 'x')`, `endsWith(s, 'x')`, `contains(s, 'x')`, `matches(s, 'regex')` | Plain function form only; there is no method-call syntax. `matches` is bounded by `evaluation.regex-timeout-ms` and `evaluation.regex-max-input-length` |
+| String | `startsWith(s, 'x')`, `endsWith(s, 'x')`, `contains(s, 'x')`, `matches(s, 'regex')` | Plain function form only; there is no method-call syntax. `matches` is an unanchored search (use `^` and `$` to anchor); the pattern is a string literal, at most 1,000 characters, with no back-reference and no look-around, checked at import. In a condition cell, `matches('^FT[0-9]{8}$')` tests the cell's own input. A null text gives null. Each match is bounded by `evaluation.regex-timeout-ms` and `evaluation.regex-max-input-length`; past either the decision fails with `EVALUATION_ERROR` (`REGEX_TIMEOUT`, `REGEX_INPUT_TOO_LONG`). A v1 string escapes a backslash as `\\`, so `\d` is written `'\\d'` |
 | Null | `is null`, `is not null` | Always `true` or `false`. Other operators follow [Null values](#null-values) |
 
 Precedence from lowest to highest: `or`, `and`, `not`, comparison, `+ -`, `* /`, unary minus. Parentheses override.

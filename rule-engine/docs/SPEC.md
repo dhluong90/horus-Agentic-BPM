@@ -80,6 +80,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Evaluate the rule set.
 - **Then:** Either publish-time static check rejects nested quantifiers OR runtime aborts within `<= 50 ms` returning `EVALUATION_ERROR` (`REGEX_TIMEOUT`) without hanging the thread.
 - **Example:** `28 'a' + '!' -> abort <= 50ms with EVALUATION_ERROR`.
+- **Note (#20):** the runtime path is the one built. The decision row records `outcome = EVALUATION_ERROR` and `error_code = REGEX_TIMEOUT`; a text longer than `evaluation.regex-max-input-length` (default 4,096) fails the same way with `REGEX_INPUT_TOO_LONG` without running the match. Since Java 9 the JDK's regex engine memoises greedy group loops, so on Java 21 and 25 `(a+)+$` fails on this input in linear time and never reaches the limit; the test proves that it returns within the bound, and proves the abort with the lazy form `^(a+?)+?$`, which the JDK still runs in exponential time (seconds on this input).
 - **Test ID:** `RLE_007_regex_timeout_aborts_adversarial_input`
 
 ---

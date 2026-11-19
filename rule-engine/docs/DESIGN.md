@@ -67,7 +67,11 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
    - `matches(s, p)` is an unanchored search with the XPath `fn:matches` regex dialect: no back-references, no look-around; bounded as `TR-SEC-02`.
    - Strings compare by Unicode code point. `datetime` is a FEEL `date and time` with offset `Z` (Java `Instant`).
    - Null (PD-058, from M1, `RLE-006`): FEEL three-valued logic. `<`, `<=`, `>`, `>=`, `between`, arithmetic and functions with a `null` operand give `null`, except `coalesce`, which exists to handle `null`. `==` and `!=` are two-valued: `null == null` is `true`, `null == 'GOLD'` is `false`, `null != 'GOLD'` is `true`. `x in [...]` is `true` only when an element equals `x`, so it is `false` for a null `x`, and `x not in [...]` (FEEL `not(x in [...])`) is `true`. `is null` and `is not null` are always `true` or `false`. `and`, `or` and `not` follow the FEEL truth tables: `false and null` is `false`, `true and null` is `null`, `true or null` is `true`, `false or null` is `null`, `not(null)` is `null`. A `when` cell or a gateway condition matches only when it evaluates to `true`; `null` never matches. The type checker reports a warning, not an error, when an input that may be null is used with `!=` or `not in`, because those now match a missing value.
-   - Regex evaluation wraps input in a bounded `InterruptibleCharSequence` enforcing `evaluation.regex-timeout-ms` (`50 ms` default, `TR-SEC-02`).
+   - Regex evaluation wraps input in a bounded `InterruptibleCharSequence` enforcing `evaluation.regex-timeout-ms` (`50 ms` default, `TR-SEC-02`). Built as `BoundedRegex` (#20): the pattern of `matches(text, 'pattern')` must be a string literal, at most 1,000 characters, with no back-reference (`\1`, `\k<name>`) and no look-around, compiled once at import; at evaluation a text over `evaluation.regex-max-input-length` is refused before matching, and the matcher reads its text through a `CharSequence` that looks at the clock every 1,024 reads and throws past the deadline, so the match stops on the calling thread without interrupts and the thread and its connection are free at once. In a condition cell `matches('pattern')` tests the cell's own input. The decision row's `error_code` is the reason (`REGEX_TIMEOUT`, `REGEX_INPUT_TOO_LONG`) and `outcome` stays `EVALUATION_ERROR`. A `matches` cell has no DMN unary-test form yet, so DMN export refuses such a table, as it does other compound cells.
+
+     ![Bounded regular expressions](images/regex-bounds.svg)
+
+     Source: [`diagrams/regex-bounds.mmd`](diagrams/regex-bounds.mmd).
 
 ### 3.3 Version lifecycle
 
@@ -258,7 +262,8 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `decision-log.retention` | none; required outside `dev` from M3 | Whole months, ISO 8601 (`P12M`, `P120M`). The scheduler drops whole monthly partitions of `rle_decision` that lie entirely before `now() - retention` (ADR-0010). From M3, outside the `dev` profile, start-up is refused until it is set, and a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). The `dev` profile needs no value and drops nothing. Before M3 nothing is deleted and the property is ignored with a start-up note |
 | `decision-log.partitions-ahead` | `P7D` | How far ahead monthly partitions are created |
 | `cache.max-entries`, `cache.epoch-check-interval`, `cache.listen-notify` | `1000`, `PT5S`, `true` | ADR-0009 |
-| `evaluation.regex-timeout-ms` | `50` | `TR-SEC-02` |
+| `evaluation.regex-timeout-ms` | `50` | Longest time one `matches()` may run, `1` to `1000` (`TR-SEC-02`, `RLE-007`). Past it the decision fails with `EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT` |
+| `evaluation.regex-max-input-length` | `4096` | Longest text `matches()` looks at, `1` to `evaluation.max-string-length` (and lowered with it by default). A longer text fails the decision with `EVALUATION_ERROR`, `error_code = REGEX_INPUT_TOO_LONG`, without running the match |
 | `evaluation.max-input-scale` | `34` | Absolute scale bound of number inputs, `0` to `34`, lower only; precision is always at most 34 digits (`EngineDefaults`, ADR-0024) |
 | `evaluation.reject-undeclared-inputs` | `true` | Refuse undeclared input names with `INPUT_INVALID`; undeclared inputs are never logged |
 | `evaluation.max-rows` | `5000` | Rules per version, checked at import; lower only |

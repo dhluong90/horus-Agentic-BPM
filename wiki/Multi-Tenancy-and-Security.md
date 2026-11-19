@@ -46,7 +46,7 @@ The REST layer checks one permission string per endpoint with `@PreAuthorize`; t
 
 ## No code execution
 
-Expressions are parsed by a hand-written recursive-descent parser into a sealed, typed tree; there is no scripting engine, reflection, class loading or deserialisation of arbitrary types (`TR-SEC-01`, ADR-0003). Host-registered pure functions are the only extension point and are listed in the cockpit. Regex matching is bounded by input length (4 096 characters) and time (50 ms); nested quantifiers are rejected at publish time (`TR-SEC-02`, `RLE-007`).
+Expressions are parsed by a hand-written recursive-descent parser into a sealed, typed tree; there is no scripting engine, reflection, class loading or deserialisation of arbitrary types (`TR-SEC-01`, ADR-0003). Host-registered pure functions are the only extension point and are listed in the cockpit. Regex matching is bounded by input length (`evaluation.regex-max-input-length`, 4 096 characters) and time (`evaluation.regex-timeout-ms`, 50 ms): the matcher reads its text through a deadline check, so a runaway pattern stops on the calling thread and fails one decision with `REGEX_TIMEOUT` instead of holding the thread and its connection. Back-references and look-around are refused at import (`TR-SEC-02`, `RLE-007`).
 
 ## Data protection
 
@@ -73,7 +73,7 @@ The cockpit holds no secrets and no state (ADR-0005). It never marks an approval
 |---|---|---|---|---|
 | Spoofing | Tenant boundary | Caller sends `tenantId: "tenant-b"` in the body, or forges `X-Tenant-Id` from outside the gateway | Body tenant ignored; no header-based resolver ships; the tenant comes from the authenticated principal; `X-Tenant-Id` only switches to a tenant in the caller's allowed list | `RLE-011`, `RLE-037`; REST test with forged body and header |
 | Spoofing | Approvals | Compromised author token approves its own version | Service-layer identity check plus distinct permission | `RLE-009` at service and REST level |
-| Tampering | Rule definitions | Expression such as `T(java.lang.Runtime).getRuntime()` or a regex bomb in a draft | Closed grammar, no reflection; bounded regex; publish-time rejection | `RLE-004`, `RLE-007`; ArchUnit on `javax.script`, `java.lang.reflect.Method` |
+| Tampering | Rule definitions | Expression such as `T(java.lang.Runtime).getRuntime()` or a regex bomb in a draft | Closed grammar, no reflection; regex bounded in length and time at evaluation, back-references and look-around refused at import | `RLE-004`, `RLE-007`; ArchUnit on `javax.script`, `java.lang.reflect.Method` |
 | Tampering | Task state | Two completions of one task, or a replayed approval | `lock_version` predicate; status guard in the same `UPDATE` | `PRE-003`; concurrency test with two threads |
 | Tampering | Idempotency | Replay of a key with a changed payload to smuggle a different start | `request_hash` compared; `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` | `RLE-014`, `TR-IDEM-05` |
 | Repudiation | Decisions and process history | Operator claims a decision never happened or was different | Append-only rows with version, clock, caller, correlation id; no update path | `TR-OBS-01`; SQL capture test shows only `INSERT` |
@@ -81,7 +81,7 @@ The cockpit holds no secrets and no state (ADR-0005). It never marks an approval
 | Information disclosure | Personal data in logs | National id readable in `rle_decision` or the cockpit | Keyed HMAC masking; cockpit renders `*** (hmac)` | `RLE-012`; UI test |
 | Information disclosure | Cross-tenant reads | Guessable ULID of another tenant's decision | Every query filters `tenant_id`; `404` for other tenants | `RLE-011`; two-tenant integration test |
 | Information disclosure | Error bodies | Stack trace reveals class names and SQL | Problem Details only; `INTERNAL_ERROR` with `correlationId` | WebMvc test on an injected failure |
-| Denial of service | Evaluation threads | Adversarial regex input stalls a request thread | 50 ms bounded matcher, 4 096-character input limit | `RLE-007` |
+| Denial of service | Evaluation threads | Adversarial regex input stalls a request thread | 50 ms bounded matcher (`REGEX_TIMEOUT`), 4 096-character input limit (`REGEX_INPUT_TOO_LONG`), both host settings that can only be tightened | `RLE-007` |
 | Denial of service | Connection pool | 20 slow agent calls inside transactions exhaust a 20-connection pool | Async Wait-State: no connection during adapter calls (ADR-0008) | `PRE-009`: 10 concurrent 2 s calls on a 2-connection pool |
 | Denial of service | Batch endpoint | 1 000 000-item batch | `evaluation.max-batch` 1 000; `limit` max 200 | REST tests |
 | Denial of service | Scheduler | Poison job retried forever | `max_attempts` then incident; lease prevents hot loops | `PRE-011` |

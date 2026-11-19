@@ -34,6 +34,13 @@ import org.junit.jupiter.api.Test;
 class RegexBoundsTest {
 
     static final String ADVERSARIAL = "a".repeat(28) + "!";
+    /**
+     * The pattern of RLE-007. Since Java 9 the JDK memoises greedy group loops, so on Java 21 and 25 it fails on the
+     * adversarial input in linear time; it is kept to prove the decision returns at once.
+     */
+    static final String SPEC_PATTERN = "(a+)+$";
+    /** The same nesting with lazy quantifiers, which the JDK still runs in exponential time (seconds on this input). */
+    static final String EXPONENTIAL_PATTERN = "^(a+?)+?$";
     /** Time on top of the 50 ms limit for thread scheduling on a busy CI runner; the limit itself is not relaxed. */
     static final long SCHEDULING_MARGIN_MS = 150;
 
@@ -47,7 +54,7 @@ class RegexBoundsTest {
             outputs:
               - { name: route, type: string }
             rules:
-              - { id: R1, when: { reference: "matches('(a+)+$')" }, then: { route: "'REVIEW'" } }
+              - { id: R1, when: { reference: "matches('^(a+?)+?$')" }, then: { route: "'REVIEW'" } }
               - { id: R2, when: { reference: "matches('^FT[0-9]{8}$')" }, then: { route: "'AUTO'" } }
               - { id: R3, when: {}, then: { route: "'MANUAL'" } }
             """;
@@ -99,7 +106,17 @@ class RegexBoundsTest {
         // The thread is free: the same thread evaluates a normal reference straight after.
         assertThat(engines.ruleEngine().evaluate("reference-check", DecisionInput.of(Map.of("reference", "FT20270115")))
                 .outputs()).containsEntry("route", "AUTO");
+
+        // The pattern as RLE-007 writes it returns within the bound too; the JDK never lets it run away.
+        publish(engines, REFERENCE_CHECK.replace("reference-check", "reference-check-greedy")
+                .replace(EXPONENTIAL_PATTERN, SPEC_PATTERN), "reference-check-greedy");
+        started = System.nanoTime();
+        DecisionResult greedy = engines.ruleEngine().evaluate("reference-check-greedy",
+                DecisionInput.of(Map.of("reference", ADVERSARIAL)));
+        assertThat((System.nanoTime() - started) / 1_000_000).isLessThanOrEqualTo(50 + SCHEDULING_MARGIN_MS);
+        assertThat(greedy.outputs()).containsEntry("route", "MANUAL");
     }
+
 
     @Test
     void TR_SEC_02_text_longer_than_the_limit_fails_without_running_the_match() {
@@ -166,15 +183,16 @@ class RegexBoundsTest {
         RuleEngines engines = engines(EngineSettings.defaults());
         caller.become("bank-a", "alice");
         for (String[] bad : new String[][] {
-            {"matches('(a)\\\\1')", "back-reference"},
-            {"matches('(?<x>a)\\\\k<x>')", "named back-reference"},
+            // v1 strings escape a backslash as \\, and YAML double quotes escape it again.
+            {"matches('(a)\\\\\\\\1')", "back-reference"},
+            {"matches('(?<x>a)\\\\\\\\k<x>')", "named back-reference"},
             {"matches('FT(?=[0-9])')", "look-ahead"},
             {"matches('(?<!X)FT')", "look-behind"},
             {"matches('[0-9')", "Invalid pattern"},
             {"matches('" + "a".repeat(1001) + "')", "longer than 1000"},
             {"matches(reference, reference)", "string literal"},
             {"matches(42)", "string literal"}}) {
-            String yaml = REFERENCE_CHECK.replace("matches('(a+)+$')", bad[0]);
+            String yaml = REFERENCE_CHECK.replace("matches('" + EXPONENTIAL_PATTERN + "')", bad[0]);
             assertThatThrownBy(() -> engines.versionService().importRuleSet(
                     ImportRequest.yaml(yaml.getBytes(StandardCharsets.UTF_8))))
                     .as(bad[0]).isInstanceOf(ValidationFailedException.class)
@@ -184,7 +202,7 @@ class RegexBoundsTest {
     }
 
     @Test
-    void TR_SEC_02_matches_needs_text_and_escapes_inside_classes_are_not_back_references() {
+    void TR_SEC_02_matches_needs_text_and_a_character_class_is_not_look_around() {
         RuleEngines engines = engines(EngineSettings.defaults());
         caller.become("bank-a", "alice");
         String amountCheck = """
@@ -202,9 +220,10 @@ class RegexBoundsTest {
                 ImportRequest.yaml(amountCheck.getBytes(StandardCharsets.UTF_8))))
                 .isInstanceOf(ValidationFailedException.class).hasMessageContaining("matches() tests text");
 
-        CompiledRuleSet classes = compiled(REFERENCE_CHECK.replace("matches('(a+)+$')", "matches('[\\\\1x]')"),
-                RegexLimits.defaults());
-        assertThat(classes.evaluate(DecisionInput.of(Map.of("reference", "x"))))
+        // Inside a character class "(?=" is three literal characters, not a look-ahead.
+        CompiledRuleSet classes = compiled(REFERENCE_CHECK.replace("matches('" + EXPONENTIAL_PATTERN + "')",
+                "matches('[(?=]')"), RegexLimits.defaults());
+        assertThat(classes.evaluate(DecisionInput.of(Map.of("reference", "="))))
                 .isInstanceOfSatisfying(DecisionResult.Matched.class,
                         matched -> assertThat(matched.outputs()).containsEntry("route", "REVIEW"));
     }

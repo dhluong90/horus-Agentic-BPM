@@ -139,6 +139,9 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 ### EVALUATION_ERROR
 `422`. Evaluation failed: `detail` names `CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT` or `FUNCTION_ERROR`. The decision is logged with this outcome.
 
+- `REGEX_TIMEOUT`: a `matches()` ran longer than `evaluation.regex-timeout-ms` (default 50 ms) and was stopped. `detail` starts with `REGEX_TIMEOUT:` and the decision row has `error_code = REGEX_TIMEOUT`. Retrying the same input fails the same way; simplify the pattern (avoid nested quantifiers such as `(a+?)+?`).
+- `REGEX_INPUT_TOO_LONG`: the text given to `matches()` is longer than `evaluation.regex-max-input-length` (default 4,096); the match was not run. `detail` starts with `REGEX_INPUT_TOO_LONG:` and so does the row's `error_code`.
+
 ### BATCH_TOO_LARGE
 `422`. `:evaluate-batch` with more than 1,000 items. Split the batch.
 

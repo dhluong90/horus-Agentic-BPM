@@ -120,9 +120,10 @@ public record RuleEngineProperties(
                 new RegexLimits(
                         evaluation.regexTimeoutMs() == null ? RegexLimits.TIMEOUT_MILLIS : evaluation.regexTimeoutMs(),
                         evaluation.regexMaxInputLength() != null ? evaluation.regexMaxInputLength()
-                                // A host that lowers max-string-length lowers the default regex length with it.
-                                : Math.min(RegexLimits.MAX_INPUT_LENGTH, evaluation.maxStringLength() == null
-                                        ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength())));
+                                // A host that lowers max-string-length lowers the default regex length with it;
+                                // an invalid max-string-length is reported by the settings, naming that property.
+                                : Math.max(1, Math.min(RegexLimits.MAX_INPUT_LENGTH, evaluation.maxStringLength() == null
+                                        ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength()))));
     }
 
     /**
