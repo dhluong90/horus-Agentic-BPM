@@ -134,9 +134,9 @@ class DraftReplaceAndDiffIT {
         assertThat(jdbc.sql("SELECT count(*) FROM rle_decision_outbox WHERE tenant_id = :t "
                 + "AND payload->>'eventType' = 'rules.version.draft-updated.v1'").param("t", t).query(Long.class).single())
                 .isEqualTo(1L);
-        // and minh, another author, is pointed to ?copyOf=
+        // and minh, another author, is pointed to importing his own version
         assertThat(send(t, "minh", "PUT", path, cardFee("0 VND"), "application/yaml", "k-m2", replaced.etag()).json()
-                .path("detail").asString()).contains("?copyOf=2");
+                .path("detail").asString()).contains("POST .../rule-sets/card-fee/versions");
     }
 
     /** Security review of #234 (#275): an approval decided on replaced content is refused over HTTP. */

@@ -241,7 +241,7 @@ paths:
       description: |
         Permission `rules:author`, checked before the body is read; only the draft's author
         (`createdBy`) may replace it. Anyone else gets `403 PERMISSION_DENIED`, with a detail pointing
-        to `POST .../versions?copyOf={v}`, which starts their own draft; so the four-eyes check on
+        to importing their own document as a new version (`POST .../rule-sets/{name}/versions`); so the four-eyes check on
         `createdBy` keeps holding. When the host sets
         `horus.bpm.rules.authoring.cockpit-drafts` to `false` the answer is
         `403 DRAFT_AUTHORING_DISABLED` (DESIGN section 4.4).

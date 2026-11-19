@@ -166,7 +166,7 @@ class DraftReplaceAndDiffTest {
         assertThatThrownBy(() -> versions.replaceDraft("card-fee", 2, ImportRequest.yaml(CardFee.yaml()),
                 new WriteOptions("k-506", current.lockVersion(), null)))
                 .isInstanceOfSatisfying(PermissionDeniedException.class,
-                        e -> assertThat(e.getMessage()).contains("Only the author", "?copyOf=2"));
+                        e -> assertThat(e.getMessage()).contains("Only the author", "POST .../rule-sets/card-fee/versions"));
         // dan only reads
         caller.become("bank-a", "dan", READER);
         assertThatThrownBy(() -> versions.replaceDraft("card-fee", 2, ImportRequest.yaml(CardFee.yaml()),
