@@ -206,7 +206,7 @@ tenant.switch.refused reason=switching-off user=lan%40bank-a.vn tokenTenant=bank
 | `X-Correlation-Id` | A ULID issued by the host for every request, also in every problem body. A caller's own `X-Correlation-Id` is never adopted; it is logged as `clientCorrelationId` |
 | `WWW-Authenticate` | On every `401`. `Bearer` by default (`horus.bpm.security.challenge`); for a caller without a tenant a bearer challenge adds `error="invalid_token"` |
 
-Engine API responses under `/api/bpm/rules/**` and `/api/bpm/processes/**` get `Cache-Control: no-store` from the same module, also when the metadata endpoints are switched off.
+Every other response under `/api/bpm/**` gets `Cache-Control: no-store` from the same module: the rule engine and process engine APIs, their problem answers, and any unmapped `/api/bpm/...` path. The header is set before the endpoint runs, so success, problem and `304` answers all carry it, and it stays on when the metadata endpoints are switched off. Host endpoints outside `/api/bpm/**` keep whatever caching the host gives them (`TR-SEC-09`).
 
 | Status | `code` | When |
 |---|---|---|
