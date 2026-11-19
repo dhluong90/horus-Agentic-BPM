@@ -67,8 +67,8 @@ public final class DmnReader {
         XmlTree root = XmlTree.parse(source);
         String ns = root.namespace();
         if (!Dmn.MODEL_NAMESPACES.contains(ns) || !root.name().equals("definitions")) {
-            throw invalid("The root element must be a DMN 1.2 to 1.5 <definitions>; found <" + root.name()
-                    + "> in namespace '" + ns + "'", root);
+            throw invalid("The root element must be a DMN 1.2 to 1.5 <definitions>; found <" + Quote.text(root.name())
+                    + "> in namespace " + Quote.of(ns), root);
         }
         String feel = Dmn.feelNamespaceOf(ns);
         requireFeel(root, "expressionLanguage", feel);
@@ -125,7 +125,7 @@ public final class DmnReader {
             }
         }
         if (table == null) {
-            throw invalid("Decision '" + decision.attribute("id").orElse("") + "' has no <decisionTable>", decision);
+            throw invalid("Decision " + Quote.of(decision.attribute("id").orElse("")) + " has no <decisionTable>", decision);
         }
         readTable(table, feel, doc);
         return doc;
@@ -134,14 +134,14 @@ public final class DmnReader {
     private static void readTable(XmlTree table, String feel, ObjectNode doc) {
         String hitPolicy = table.attribute("hitPolicy").orElse("UNIQUE");
         if (table.attribute("aggregation").isPresent()) {
-            throw invalid("Hit policy COLLECT with aggregation " + table.attribute("aggregation").get()
+            throw invalid("Hit policy COLLECT with aggregation " + Quote.text(table.attribute("aggregation").get())
                     + " arrives in stage S1 (release 1.1)", table);
         }
         doc.put("hitPolicy", switch (hitPolicy) {
             case "FIRST" -> "first";
             case "UNIQUE" -> "unique";
             case "COLLECT" -> "collect";
-            default -> throw invalid("Hit policy " + hitPolicy + " arrives in stage S1 (release 1.1);"
+            default -> throw invalid("Hit policy " + Quote.text(hitPolicy) + " arrives in stage S1 (release 1.1);"
                     + " this release reads FIRST, UNIQUE and COLLECT", table);
         });
         if ("CrossTable".equals(table.attribute("preferredOrientation").orElse(""))) {
@@ -191,7 +191,7 @@ public final class DmnReader {
         requireFeel(expression, "expressionLanguage", feel);
         String name = text(expression).strip();
         if (!IDENTIFIER.matcher(name).matches() || name.length() > 64) {
-            throw invalid("Input expression '" + name + "' must be a plain input name such as txCount;"
+            throw invalid("Input expression " + Quote.of(name) + " must be a plain input name such as txCount;"
                     + " paths and calculations arrive with full FEEL in stage S2 (release 1.2)", expression);
         }
         ObjectNode node = inputs.addObject();
@@ -235,7 +235,7 @@ public final class DmnReader {
         String name = output.attribute("name")
                 .orElseThrow(() -> invalid("Every output column needs a name attribute, such as name=\"fee\"", output));
         if (!IDENTIFIER.matcher(name).matches() || name.length() > 64) {
-            throw invalid("Output name '" + name + "' must be an identifier such as fee", output);
+            throw invalid("Output name " + Quote.of(name) + " must be an identifier such as fee", output);
         }
         for (XmlTree child : output.children()) {
             if (child.namespace().equals(output.namespace()) && !child.name().equals("description")
@@ -255,7 +255,7 @@ public final class DmnReader {
             List<String> outputNames, int annotations, Set<String> ruleIds) {
         String id = rule.attribute("id").orElse("R" + position);
         if (!RULE_ID.matcher(id).matches()) {
-            throw invalid("Rule id '" + id + "' must start with a letter and use letters, digits, '-' or '_'"
+            throw invalid("Rule id " + Quote.of(id) + " must start with a letter and use letters, digits, '-' or '_'"
                     + " (at most 64 characters)", rule);
         }
         if (!ruleIds.add(id)) {
@@ -298,7 +298,7 @@ public final class DmnReader {
             try {
                 tests = Feel.parseUnaryTests(text.isBlank() ? "-" : text);
             } catch (Feel.UnsupportedException e) {
-                throw invalid("Rule " + id + ", input " + input + ": '" + text.strip() + "': " + e.getMessage(), entry);
+                throw invalid("Rule " + id + ", input " + input + ": " + Quote.of(text.strip()) + ": " + e.getMessage(), entry);
             }
             if (!tests.any()) {
                 when.put(input, V1Forms.condition(input, tests));
@@ -318,7 +318,7 @@ public final class DmnReader {
             try {
                 value = Feel.parseLiteral(text);
             } catch (Feel.UnsupportedException e) {
-                throw invalid("Rule " + id + ", output " + output + ": '" + text + "': " + e.getMessage()
+                throw invalid("Rule " + id + ", output " + output + ": " + Quote.of(text) + ": " + e.getMessage()
                         + "; output entries hold literal values before full FEEL", entry);
             }
             switch (value) {
@@ -339,8 +339,8 @@ public final class DmnReader {
             }
         }
         throw invalid("The rule set name is taken from the decision id; give the decision a kebab-case id such as"
-                + " card-fee (found id '" + decision.attribute("id").orElse("") + "', name '"
-                + decision.attribute("name").orElse("") + "')", decision);
+                + " card-fee (found id " + Quote.of(decision.attribute("id").orElse("")) + ", name "
+                + Quote.of(decision.attribute("name").orElse("")) + ")", decision);
     }
 
     /**
@@ -353,7 +353,7 @@ public final class DmnReader {
         if (horusType.isPresent()) {
             String declared = horusType.get();
             if (!Dmn.typeRefOf(declared).map(ref::equals).orElse(false)) {
-                throw invalid("horus:type '" + declared + "' of " + where + " does not match typeRef '" + ref + "'",
+                throw invalid("horus:type " + Quote.of(declared) + " of " + where + " does not match typeRef " + Quote.of(ref),
                         element);
             }
             return declared;
@@ -365,7 +365,7 @@ public final class DmnReader {
             case "boolean" -> "boolean";
             case "date" -> "date";
             case "date and time", "datetime" -> "datetime";
-            default -> throw invalid("typeRef '" + ref + "' of " + where + " is not supported; item definitions"
+            default -> throw invalid("typeRef " + Quote.of(ref) + " of " + where + " is not supported; item definitions"
                     + " arrive in stage S1 (release 1.1)", element);
         };
     }
@@ -390,16 +390,16 @@ public final class DmnReader {
     private static void requireFeel(XmlTree element, String attribute, String feel) {
         element.attribute(attribute).ifPresent(language -> {
             if (!language.equals(feel) && !Dmn.FEEL_NAMESPACES.contains(language)) {
-                throw invalid("<" + element.name() + "> " + attribute + " '" + language + "' is not FEEL;"
+                throw invalid("<" + Quote.text(element.name()) + "> " + attribute + " " + Quote.of(language) + " is not FEEL;"
                         + " only FEEL is supported", element);
             }
         });
     }
 
     private static ValidationFailedException refused(XmlTree element) {
-        String id = element.attribute("id").map(i -> " id=\"" + i + "\"").orElse("");
+        String id = element.attribute("id").map(i -> " id=\"" + Quote.text(i) + "\"").orElse("");
         String stage = LATER.get(element.name());
-        return invalid("<" + element.name() + id + "> is not supported in this release"
+        return invalid("<" + Quote.text(element.name()) + id + "> is not supported in this release"
                 + (stage == null ? "" : "; it arrives in stage " + stage), element);
     }
 

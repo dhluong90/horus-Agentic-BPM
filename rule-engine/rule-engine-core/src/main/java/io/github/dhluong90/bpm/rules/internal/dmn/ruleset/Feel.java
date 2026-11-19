@@ -262,7 +262,7 @@ final class Feel {
                         default -> throw unexpected(close, "']', ')' or '['");
                     }
                     if (!low.getClass().equals(high.getClass())) {
-                        throw new UnsupportedException("range endpoints " + print(low) + " and " + print(high)
+                        throw new UnsupportedException("range endpoints " + Quote.text(print(low)) + " and " + Quote.text(print(high))
                                 + " are of different types");
                     }
                     return new Test.Interval(lowClosed, low, high, highClosed);
@@ -318,7 +318,7 @@ final class Feel {
                             try {
                                 return new Value.DateTime(OffsetDateTime.parse(text).toInstant());
                             } catch (DateTimeException e) {
-                                throw new UnsupportedException("date and time(\"" + text
+                                throw new UnsupportedException("date and time(\"" + Quote.text(text)
                                         + "\") needs an ISO 8601 date and time with Z or an offset");
                             }
                         }
@@ -326,7 +326,7 @@ final class Feel {
                         try {
                             return new Value.Date(LocalDate.parse(text));
                         } catch (DateTimeException e) {
-                            throw new UnsupportedException("date(\"" + text + "\") is not an ISO 8601 date");
+                            throw new UnsupportedException("date(\"" + Quote.text(text) + "\") is not an ISO 8601 date");
                         }
                     }
                     case "money" -> {
@@ -348,10 +348,10 @@ final class Feel {
                     case "null" -> throw new UnsupportedException("null is not allowed here");
                     default -> {
                         if (cursor.peek().text.equals("(")) {
-                            throw new UnsupportedException("function '" + token.text + "' is not supported before full FEEL");
+                            throw new UnsupportedException("function " + Quote.of(token.text) + " is not supported before full FEEL");
                         }
-                        throw new UnsupportedException("name '" + token.text
-                                + "' is not supported; cells may hold only literal values before full FEEL");
+                        throw new UnsupportedException("name " + Quote.of(token.text)
+                                + " is not supported; cells may hold only literal values before full FEEL");
                     }
                 }
             }
@@ -370,7 +370,7 @@ final class Feel {
     }
 
     private static UnsupportedException unexpected(Token token, String expected) {
-        String found = token.kind == Kind.EOF ? "end of text" : "'" + token.text + "'";
+        String found = token.kind == Kind.EOF ? "end of text" : Quote.of(token.text);
         return new UnsupportedException("expected " + expected + " at position " + (token.position + 1) + " but found "
                 + found);
     }
@@ -487,7 +487,7 @@ final class Feel {
                                 value.append((char) Integer.parseInt(text.substring(i, i + 4), 16));
                                 i += 4;
                             }
-                            default -> throw new UnsupportedException("unknown escape '\\" + e + "' at position " + (i - 1));
+                            default -> throw new UnsupportedException("unknown escape " + Quote.of("\\" + e) + " at position " + (i - 1));
                         }
                     } else if (s == '"') {
                         closed = true;
@@ -515,7 +515,7 @@ final class Feel {
                     tokens.add(new Token(Kind.PUNCT, String.valueOf(c), i));
                     i++;
                 } else {
-                    throw new UnsupportedException("character '" + c + "' at position " + (i + 1)
+                    throw new UnsupportedException("character " + Quote.of(String.valueOf(c)) + " at position " + (i + 1)
                             + " is not supported before full FEEL");
                 }
             }

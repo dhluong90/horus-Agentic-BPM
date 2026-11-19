@@ -41,7 +41,8 @@ paths:
         comparisons, ranges such as `[18..65]`, lists, `not(...)`, `-`, `null`, strings, numbers,
         booleans, `date("...")` and `date and time("...")`; `money(12.50, "USD")` is a non-portable
         extension. Anything else is `422 VALIDATION_FAILED` naming the rule, the column and the line.
-        DTDs and entities are refused.
+        DTDs and entities are refused, and the file must be UTF-8. A body over 1 MB (1,048,576 bytes)
+        is `413 PAYLOAD_TOO_LARGE`, for every content type.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -82,6 +83,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions:
     post:
@@ -109,6 +111,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:
     get:
@@ -440,7 +443,7 @@ components:
           type: string
           enum: [INPUT_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND,
             VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT,
-            RULE_SET_EXISTS, VALIDATION_FAILED, IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR]
+            RULE_SET_EXISTS, VALIDATION_FAILED, IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, PAYLOAD_TOO_LARGE]
         detail: { type: string }
         correlationId: { type: string }
         decisionId:

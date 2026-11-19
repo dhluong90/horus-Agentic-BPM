@@ -1,7 +1,7 @@
 package io.github.dhluong90.bpm.rules.internal.dmn.ruleset;
 
 import com.horus.bpm.rules.api.ValidationFailedException;
-import java.io.ByteArrayInputStream;
+import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -11,6 +11,7 @@ import java.util.Optional;
 import javax.xml.XMLConstants;
 import javax.xml.namespace.QName;
 import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLResolver;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
@@ -45,14 +46,40 @@ record XmlTree(String namespace, String name, Map<String, String> attributes, Li
         children = List.copyOf(children);
     }
 
+    /** Longest attribute value accepted, in characters; as long as the longest cell text. */
+    static final int MAX_ATTRIBUTE = 4096;
+
+    private static final XMLResolver REFUSE_RESOLVER = (publicId, systemId, baseUri, namespace) -> {
+        throw new XMLStreamException("External resources are not allowed");
+    };
+
     /**
      * Parses a document.
      *
-     * @param source the bytes; the caller has already bounded their size
+     * @param source the UTF-8 bytes; the caller has already bounded their size
      * @return the root element
-     * @throws ValidationFailedException when the document is not well-formed, declares a DTD or breaks a limit
+     * @throws ValidationFailedException when the document is not UTF-8 or not well-formed, declares a DTD or
+     *         another encoding, or breaks a limit
      */
     static XmlTree parse(byte[] source) {
+        return parse(source, true, REFUSE_RESOLVER);
+    }
+
+    /**
+     * Parses a document. The bytes are decoded as UTF-8 here and the parser reads the decoded text, so the stored
+     * source and the parsed document cannot disagree; an XML declaration naming another encoding is refused.
+     * Package-private for the test that proves the factory settings alone stop entities and external DTDs.
+     *
+     * @param source the bytes
+     * @param refuseDoctype whether a DOCTYPE is refused on sight (always true outside that test)
+     * @param resolver the resolver of external resources (refusing outside that test)
+     * @return the root element
+     */
+    static XmlTree parse(byte[] source, boolean refuseDoctype, XMLResolver resolver) {
+        String document = Quote.utf8(source);
+        if (document.startsWith("\uFEFF")) {
+            document = document.substring(1);
+        }
         XMLInputFactory factory = XMLInputFactory.newDefaultFactory();
         factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
         factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
@@ -60,9 +87,9 @@ record XmlTree(String namespace, String name, Map<String, String> attributes, Li
         factory.setProperty(XMLInputFactory.IS_REPLACING_ENTITY_REFERENCES, true);
         factory.setProperty(XMLInputFactory.IS_NAMESPACE_AWARE, true);
         factory.setProperty(XMLInputFactory.IS_COALESCING, true);
-        factory.setXMLResolver((publicId, systemId, baseUri, namespace) -> {
-            throw new XMLStreamException("External resources are not allowed");
-        });
+        factory.setXMLResolver(resolver);
+        // Parser warnings and errors become exceptions here, never lines on System.err the host cannot see.
+        factory.setXMLReporter((message, errorType, relatedInformation, location) -> { });
         try {
             factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
         } catch (IllegalArgumentException ignored) {
@@ -70,14 +97,23 @@ record XmlTree(String namespace, String name, Map<String, String> attributes, Li
         }
         XMLStreamReader reader = null;
         try {
-            reader = factory.createXMLStreamReader(new ByteArrayInputStream(source));
+            reader = factory.createXMLStreamReader(new StringReader(document));
+            String declared = reader.getCharacterEncodingScheme();
+            if (declared != null && !declared.equalsIgnoreCase("UTF-8")) {
+                throw new ValidationFailedException("The XML declaration names the encoding " + Quote.of(declared)
+                        + "; DMN files must be UTF-8 (line 1)");
+            }
             Builder root = null;
             List<Builder> stack = new ArrayList<>();
             int elements = 0;
             while (reader.hasNext()) {
                 int event = reader.next();
                 switch (event) {
-                    case XMLStreamConstants.DTD -> throw invalid(reader, "DTDs are not allowed in a DMN document");
+                    case XMLStreamConstants.DTD -> {
+                        if (refuseDoctype) {
+                            throw invalid(reader, "DTDs are not allowed in a DMN document");
+                        }
+                    }
                     case XMLStreamConstants.ENTITY_REFERENCE, XMLStreamConstants.ENTITY_DECLARATION ->
                             throw invalid(reader, "Entity references are not allowed in a DMN document");
                     case XMLStreamConstants.START_ELEMENT -> {
@@ -116,7 +152,7 @@ record XmlTree(String namespace, String name, Map<String, String> attributes, Li
             return root.build();
         } catch (XMLStreamException e) {
             String where = e.getLocation() == null ? "" : " at line " + e.getLocation().getLineNumber();
-            throw new ValidationFailedException("Document is not well-formed XML" + where + ": " + firstLine(e.getMessage()));
+            throw new ValidationFailedException("Document is not well-formed XML" + where + ": " + Quote.text(firstLine(e.getMessage())));
         } finally {
             if (reader != null) {
                 try {
@@ -203,7 +239,12 @@ record XmlTree(String namespace, String name, Map<String, String> attributes, Li
                 QName attribute = reader.getAttributeName(i);
                 String ns = attribute.getNamespaceURI();
                 String key = ns == null || ns.isEmpty() ? attribute.getLocalPart() : "{" + ns + "}" + attribute.getLocalPart();
-                attributes.put(key, reader.getAttributeValue(i));
+                String value = reader.getAttributeValue(i);
+                if (value.length() > MAX_ATTRIBUTE) {
+                    throw invalid(reader, "Attribute " + Quote.of(attribute.getLocalPart()) + " of <" + name
+                            + "> is longer than " + MAX_ATTRIBUTE + " characters");
+                }
+                attributes.put(key, value);
             }
         }
 

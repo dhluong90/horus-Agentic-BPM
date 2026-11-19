@@ -111,4 +111,15 @@ class DmnLifecycleTest {
         assertThatThrownBy(() -> engines.versionService().export("card-fee", 1, SourceFormat.YAML))
                 .isInstanceOf(InputInvalidException.class);
     }
+
+    @Test
+    void TR_STD_25_a_document_over_the_size_limit_is_refused_as_too_large_before_decoding() {
+        byte[] huge = new byte[com.horus.bpm.rules.internal.read.RuleSetReader.MAX_SOURCE_BYTES + 1];
+        java.util.Arrays.fill(huge, (byte) 0xFF); // not UTF-8 either: the size check comes first
+
+        assertThatThrownBy(() -> engines.versionService().importRuleSet(new ImportRequest(SourceFormat.DMN_XML, huge, null)))
+                .isInstanceOf(com.horus.bpm.rules.api.PayloadTooLargeException.class)
+                .hasMessageContaining("larger than 1048576 bytes");
+        assertThat(stores.versions).isEmpty();
+    }
 }
