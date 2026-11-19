@@ -5,6 +5,8 @@ import java.util.Objects;
 import java.util.function.Supplier;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Joins the caller's transaction on the host's transaction manager, or opens one ({@code REQUIRED}). */
@@ -21,5 +23,19 @@ public final class ProcessEngineTransactions implements TransactionRunner {
     @Override
     public <T> T inTransaction(Supplier<T> work) {
         return template.execute(status -> work.get());
+    }
+
+    @Override
+    public void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
     }
 }

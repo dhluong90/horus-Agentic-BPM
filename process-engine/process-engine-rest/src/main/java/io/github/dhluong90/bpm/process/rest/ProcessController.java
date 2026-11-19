@@ -4,13 +4,18 @@ import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.InputInvalidException;
+import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
+import io.github.dhluong90.bpm.process.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
 import io.github.dhluong90.bpm.process.api.TaskService;
 import io.github.dhluong90.bpm.process.internal.json.EngineJson;
+import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.Views;
+import jakarta.servlet.http.HttpServletRequest;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
@@ -20,7 +25,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -42,13 +46,17 @@ public class ProcessController {
     private final DefinitionService definitions;
     private final ProcessEngine engine;
     private final TaskService tasks;
+    private final int maxDefinitionBytes;
 
     /**
      * @param definitions definition service
      * @param engine process engine
      * @param tasks task service
+     * @param maxDefinitionBytes largest BPMN document accepted ({@code definitions.max-bytes})
      */
-    public ProcessController(DefinitionService definitions, ProcessEngine engine, TaskService tasks) {
+    public ProcessController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
+            int maxDefinitionBytes) {
+        this.maxDefinitionBytes = maxDefinitionBytes;
         this.definitions = definitions;
         this.engine = engine;
         this.tasks = tasks;
@@ -56,8 +64,9 @@ public class ProcessController {
 
     /** Imports a BPMN 2.0 XML document ({@code processes:deploy}). */
     @PostMapping(value = "/definitions", consumes = {"application/xml", "text/xml", "application/bpmn+xml"})
-    public ResponseEntity<byte[]> importDefinition(@RequestBody byte[] body,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+    public ResponseEntity<byte[]> importDefinition(HttpServletRequest http,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        byte[] body = boundedBody(http, maxDefinitionBytes);
         DefinitionVersion version = definitions.importDefinition(
                 new ImportRequest(SourceFormat.BPMN_XML, body, idempotencyKey));
         return json(HttpStatus.CREATED, Views.definition(version), null,
@@ -66,9 +75,9 @@ public class ProcessController {
 
     /** Starts an instance ({@code processes:start}). Body: {@code definitionKey}, {@code businessKey}, {@code variables}. */
     @PostMapping(value = "/instances", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<byte[]> start(@RequestBody byte[] body,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        JsonNode request = parse(body);
+    public ResponseEntity<byte[]> start(HttpServletRequest http,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        JsonNode request = parse(boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES));
         JsonNode key = request.get("definitionKey");
         if (key == null || !key.isString()) {
             throw new InputInvalidException("definitionKey is required");
@@ -88,15 +97,42 @@ public class ProcessController {
         return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
     }
 
-    /** Completes a user task ({@code processes:task:work}). Body: {@code result}. {@code If-Match} carries the task lock version. */
+    /**
+     * Completes a user task ({@code processes:task:work}). Body: {@code result}. {@code If-Match} carries the task's
+     * {@code lockVersion} (from the task in the instance view, not the instance {@code ETag}) and
+     * {@code Idempotency-Key} makes a retry safe; both are required ({@code 428 PRECONDITION_REQUIRED}).
+     */
     @PostMapping(value = "/tasks/{id}:complete", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<byte[]> complete(@PathVariable("id") String id, @RequestBody(required = false) byte[] body,
+    public ResponseEntity<byte[]> complete(@PathVariable("id") String id, HttpServletRequest http,
             @RequestHeader(value = "If-Match", required = false) String ifMatch,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        JsonNode request = body == null || body.length == 0 ? EngineJson.NODES.objectNode() : parse(body);
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new PreconditionRequiredException("Send If-Match with the task's lockVersion, for example \"0\"");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot complete the task twice");
+        }
+        byte[] body = boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
+        JsonNode request = body.length == 0 ? EngineJson.NODES.objectNode() : parse(body);
         Map<String, Object> result = Views.variables(request.get("result"));
         ProcessInstance instance = tasks.complete(id, result, lockVersion(ifMatch), idempotencyKey);
         return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
+    }
+
+    /**
+     * Reads a body without ever holding more than the limit: a larger {@code Content-Length} is refused before
+     * reading, otherwise at most one byte more than the limit is read ({@code 413 PAYLOAD_TOO_LARGE}).
+     */
+    static byte[] boundedBody(HttpServletRequest http, int limit) throws IOException {
+        long declared = http.getContentLengthLong();
+        if (declared > limit) {
+            throw new PayloadTooLargeException("The body is larger than " + limit + " bytes");
+        }
+        byte[] bytes = http.getInputStream().readNBytes(limit + 1);
+        if (bytes.length > limit) {
+            throw new PayloadTooLargeException("The body is larger than " + limit + " bytes");
+        }
+        return bytes;
     }
 
     private static JsonNode parse(byte[] body) {
@@ -111,10 +147,7 @@ public class ProcessController {
         }
     }
 
-    private static Long lockVersion(String ifMatch) {
-        if (ifMatch == null || ifMatch.isBlank()) {
-            return null;
-        }
+    private static long lockVersion(String ifMatch) {
         String value = ifMatch.strip();
         if (value.startsWith("W/")) {
             value = value.substring(2);

@@ -54,7 +54,7 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
  * which the engines accept on the {@code dev} profile only (PD-079).
  *
  * <p>Demo users exist on the {@code dev} profile only: {@code lan} (roles PRICING_AUTHOR and PROCESS_DEPLOYER),
- * {@code minh} (role PRICING_APPROVER), {@code tuan} (role TELLER) and {@code an} (role CARD_OFFICER), with the password from
+ * {@code minh} (role PRICING_APPROVER), {@code tuan} (role TELLER), {@code an} (role CARD_OFFICER) and {@code hoa} (both), with the password from
  * {@code HORUS_DEMO_PASSWORD}. On that profile they may also use HTTP Basic, for the curl walkthrough. Their roles map to engine
  * permissions in {@code application.yml}. A real host signs users in through its identity provider instead.
  */
@@ -150,6 +150,8 @@ class HostSecurityConfiguration {
             users.add(User.withUsername("minh").password(encoded).roles("PRICING_APPROVER").build());
             users.add(User.withUsername("tuan").password(encoded).roles("TELLER").build());
             users.add(User.withUsername("an").password(encoded).roles("CARD_OFFICER").build());
+            // A branch supervisor holds both roles: the four-eyes review refuses her on her own applications.
+            users.add(User.withUsername("hoa").password(encoded).roles("TELLER", "CARD_OFFICER").build());
         }
         return new InMemoryUserDetailsManager(users);
     }

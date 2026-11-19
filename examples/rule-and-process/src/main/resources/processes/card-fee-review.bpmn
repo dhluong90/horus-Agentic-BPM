@@ -31,7 +31,7 @@
         <horus:input name="outcome" value="AUTO_APPROVED"/>
       </bpmn:extensionElements>
     </bpmn:serviceTask>
-    <bpmn:userTask id="officer-review" name="Officer reviews the fee" horus:assignee="role:CARD_OFFICER" horus:resultVariable="review"/>
+    <bpmn:userTask id="officer-review" name="Officer reviews the fee" horus:assignee="role:CARD_OFFICER" horus:fourEyes="true" horus:resultVariable="review"/>
     <bpmn:exclusiveGateway id="review-outcome" name="Approved?" default="review-outcome__reject"/>
     <bpmn:serviceTask id="approve-after-review" name="Approve" horus:handler="cardApplications.decide">
       <bpmn:extensionElements>

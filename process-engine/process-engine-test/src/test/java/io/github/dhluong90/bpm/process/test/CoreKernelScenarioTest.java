@@ -105,8 +105,8 @@ class CoreKernelScenarioTest {
         Process loan = BpmnModelBuilder.process("loan-origination")
                 .startEvent("start")
                 .exclusiveGateway("amount-check", "amount-check__auto")
-                .userTask("senior-approval", "role:SENIOR_CREDIT_OFFICER", null)
-                .userTask("auto-approve", "role:CREDIT_OFFICER", null)
+                .userTask("senior-approval", "role:SENIOR_CREDIT_OFFICER", "seniorReview")
+                .userTask("auto-approve", "role:CREDIT_OFFICER", "review")
                 .endEvent("end")
                 .chain("start", "amount-check")
                 .flow("amount-check__senior", "amount-check", "senior-approval", "amount >= 100000000 VND")
@@ -122,6 +122,29 @@ class CoreKernelScenarioTest {
         run.assertTokenAt("senior-approval", TokenStatus.WAITING_USER);
         assertThat(run.state().tokens()).filteredOn(t -> t.kind() == TokenKind.FLOW).singleElement();
         assertThat(run.openTasks()).extracting(Effect.CreateUserTask::nodeId).containsExactly("senior-approval");
+    }
+
+    @Test
+    void a_four_eyes_task_refuses_the_identity_that_started_the_instance() {
+        Process approval = BpmnModelBuilder.process("limit-change")
+                .startEvent("start")
+                .node(new io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask("approve", null, null, null, null,
+                        null, new io.github.dhluong90.bpm.process.internal.model.bpmn.ElementInfo(java.util.List.of(),
+                        new io.github.dhluong90.bpm.process.internal.model.bpmn.ExtensionBag(java.util.List.of(
+                                new io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment("role:SUPERVISOR", true),
+                                new io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable("approval")),
+                                java.util.List.of()), Map.of())))
+                .endEvent("end")
+                .chain("start", "approve", "end")
+                .build();
+        CompiledProcess compiled = new ProcessCompiler(BehaviorCatalog.registry(), 500).compile("D4", approval);
+        ScenarioRunner run = ScenarioRunner.of(new DefaultExecutionKernel(compiled, BehaviorCatalog.registry(),
+                new V1ExpressionEvaluator(100)), INSTANCE, "bank-a", "D4", clock).start(Map.of());
+
+        // ScenarioRunner starts as "starter"
+        assertThatThrownBy(() -> run.completeTask("approve", Map.of("ok", true), "starter"))
+                .isInstanceOf(ExecutionException.class)
+                .satisfies(e -> assertThat(((ExecutionException) e).code()).isEqualTo("SELF_APPROVAL_FORBIDDEN"));
     }
 
     @Test

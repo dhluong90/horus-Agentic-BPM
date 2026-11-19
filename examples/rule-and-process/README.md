@@ -102,6 +102,7 @@ Demo users on the `dev` profile, all with the password from `HORUS_DEMO_PASSWORD
 | `an` | `CARD_OFFICER` | `processes:read`, `processes:task:work`, `rules:evaluate` |
 | `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:read`; `rules:evaluate` on `dev` only |
 | `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve`; `rules:evaluate` on `dev` only |
+| `hoa` | `TELLER`, `CARD_OFFICER` (a branch supervisor) | both of the above sets; the four-eyes review refuses her on applications she submitted |
 
 On the `dev` profile the author and the approver may also evaluate, so the cockpit's Try it works for them ([`application-dev.yml`](src/main/resources/application-dev.yml)).
 
@@ -134,7 +135,7 @@ curl -s -u an:$P localhost:8080/api/bpm/processes/v1/instances/01M7S2PPTM395C88Y
 #  "tasks":[{"id":"01M7S2PPTM395C88YQ14000005","nodeId":"officer-review","assignee":"role:CARD_OFFICER","status":"OPEN","lockVersion":0,...}],...}
 ```
 
-Only a card officer may complete it; `If-Match` carries the task's lock version and `Idempotency-Key` makes a retry safe:
+Only a card officer may complete it, and never the person who submitted it: the review is a four-eyes task (`horus:fourEyes="true"`). `If-Match` carries the task's `lockVersion` (from the task in the instance view, not the instance `ETag`) and `Idempotency-Key` makes a retry safe; both are required (`428 PRECONDITION_REQUIRED` without them):
 
 ```bash
 T=01M7S2PPTM395C88YQ14000005
@@ -147,7 +148,7 @@ curl -s -u an:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Idem
 # {...,"status":"COMPLETED","tokens":[{"kind":"SCOPE",...,"status":"COMPLETED"},{"kind":"FLOW","nodeId":"end-approved","status":"COMPLETED"}],
 #  "tasks":[{...,"status":"COMPLETED","lockVersion":1,"completedBy":"an"}],...}
 
-curl -s -u an:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' \
+curl -s -u an:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Idempotency-Key: review-1002b' \
   -d '{"result":{"approved":true}}' "localhost:8080/api/bpm/processes/v1/tasks/${T}:complete"
 # {"status":409,"code":"VERSION_CONFLICT","detail":"Task 01M7S2PPTM395C88YQ14000005 is at lock version 1",...}
 
@@ -190,6 +191,19 @@ curl -s -u tuan:$P -H 'Content-Type: application/json' \
 # rle_decision holds the evaluation with version_num 2.
 ```
 
+The supervisor `hoa` may submit and may review, but not both on one application:
+
+```bash
+curl -s -u hoa:$P -H 'Content-Type: application/json' \
+  -d '{"applicationId":"APP-3001","customerId":"C-002"}' localhost:8080/api/cards/applications
+# take the task id from GET /api/bpm/processes/v1/instances/<instanceId>, then:
+curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Idempotency-Key: review-3001' \
+  -d '{"result":{"approved":true}}' "localhost:8080/api/bpm/processes/v1/tasks/<taskId>:complete"
+# {"status":403,"code":"SELF_APPROVAL_FORBIDDEN",...}
+```
+
+Engine events (`processes.instance.started.v1` and the others) reach Spring `@EventListener`s after the transaction commits, never for work that rolled back. In this release they are at most once and not durable; do not use them for money movement, audit or integration between services.
+
 ## Import a BPMN file
 
 `lan` may import BPMN files. The same document again creates no new version and returns the existing one, still with `201`; an unsupported element is refused with its id and line; a `DOCTYPE` is refused before anything is resolved.
@@ -209,7 +223,11 @@ curl -s -u lan:$P -H 'Content-Type: application/xml' \
 #   {"element":"endEvent with terminateEventDefinition","elementId":"end","line":8,...}],...}
 ```
 
-Supported in this release: none start and end events, `serviceTask` (local), `businessRuleTask`, `userTask`, `exclusiveGateway` with conditions and a default flow. Everything else is refused by name with the stage that adds it.
+Supported in this release: none start and end events, `serviceTask` (local), `businessRuleTask`, `userTask` (with `horus:resultVariable`; `horus:fourEyes` optional), `exclusiveGateway` with conditions and a default flow. Everything else is refused by name with the stage that adds it. Files must be UTF-8; bodies above `definitions.max-bytes` (1 MB) are refused with `413` before they are read.
+
+Conditions follow the Rule Engine's rules: null follows FEEL three-valued logic (`income < 5000000 VND` is null when `income` is unset, `tier != 'GOLD'` is true), only a true condition is taken, otherwise the default flow; numbers are decimals; money compares only within one currency, and a type error fails the step.
+
+Each version runs from its stored source document. Before a version is compiled, the source must still match its source hash and give the recorded definition hash; otherwise it is refused with `DEFINITION_INTEGRITY_FAILED`.
 
 ## Tests
 
@@ -217,4 +235,4 @@ Supported in this release: none start and end events, `serviceTask` (local), `bu
 mvn -B -pl examples/rule-and-process -am verify
 ```
 
-`RuleAndProcessIT` runs on PostgreSQL in Testcontainers: the start-up import, the automatic and the officer path over HTTP, a stale completion (`PRE-003`), the rollback of host and engine rows, a decision the caller may not evaluate, and tenant isolation (a second tenant cannot read the instance, complete its task, or start the process it has not imported).
+`RuleAndProcessIT` runs on PostgreSQL in Testcontainers: the start-up import, the automatic and the officer path over HTTP, a stale completion (`PRE-003`), four-eyes over REST and Java (`PRE-007`), two concurrent starts with one idempotency key doing the work once, the rollback of host and engine rows with no event emitted, a decision the caller may not evaluate, a tampered stored definition refused, `413` and `428`, and tenant isolation (a second tenant cannot read the instance, complete its task, or start the process it has not imported).

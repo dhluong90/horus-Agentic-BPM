@@ -3,7 +3,8 @@ package io.github.dhluong90.bpm.process.internal.exec;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 
 /**
- * Semantics of one flow node type. Registered by a {@link BehaviorModule}; one behaviour per node type.
+ * Semantics of one flow node type with one kind of event definition. Registered by a {@link BehaviorModule}; one
+ * behaviour per node class and {@link EventDefinitionKey}, looked up exactly (DESIGN section 5.8).
  * Behaviours mutate state only through the {@link ExecutionContext} and perform no I/O.
  *
  * @param <N> the node type
@@ -12,6 +13,14 @@ public interface FlowNodeBehavior<N extends FlowNode> {
 
     /** @return the node type this behaviour executes */
     Class<N> nodeType();
+
+    /**
+     * @return the event definition this behaviour executes: {@link EventDefinitionKey#NONE} (the default, for every
+     *     node that is not an event and for none events), one definition class, or {@link EventDefinitionKey#MULTIPLE}
+     */
+    default EventDefinitionKey eventDefinition() {
+        return EventDefinitionKey.NONE;
+    }
 
     /**
      * A token arrived at the node.

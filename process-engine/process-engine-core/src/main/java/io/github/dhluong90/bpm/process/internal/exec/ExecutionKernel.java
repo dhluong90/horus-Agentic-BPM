@@ -7,7 +7,8 @@ import java.time.Clock;
  *
  * <p>Rule of the contract: the kernel performs no network, adapter or database call and reads no clock other than
  * the one passed in. Every external action is an {@link Effect}. A kernel instance is bound to one compiled
- * definition version ({@link CompiledProcess}) and is safe for concurrent use.
+ * definition version ({@link CompiledProcess}) and is safe for concurrent use. A shell that caches kernels keys
+ * them by tenant and definition version id, as the Rule Engine keys its compiled rule sets.
  */
 public interface ExecutionKernel {
 

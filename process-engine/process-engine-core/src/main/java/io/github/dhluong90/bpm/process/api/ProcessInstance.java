@@ -15,7 +15,8 @@ import java.util.Objects;
  * @param definitionVersion the pinned version number
  * @param businessKey the business key, or null
  * @param status {@code RUNNING}, {@code COMPLETED}, {@code CANCELLED}, {@code COMPENSATING} or {@code FAILED}
- * @param variables the instance variables
+ * @param variables the instance variables, unmasked in this release (deliberate gap: masking of declared fields,
+ *     DESIGN section 9, comes with the variable declarations)
  * @param tokens the execution tree: the root scope token and its flow tokens (ADR-0020)
  * @param tasks open and completed user tasks, oldest first
  * @param lockVersion optimistic lock version of the instance

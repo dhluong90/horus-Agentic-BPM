@@ -10,6 +10,8 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -25,7 +27,8 @@ import java.util.stream.Collectors;
  * Validates a process as an executable graph and compiles it: one none start event, at least one end event, flows
  * between existing nodes, every node reachable from the start and able to reach an end, default flows that are
  * outgoing flows of their gateway, conditions on every non-default flow of a diverging exclusive gateway, a
- * registered behaviour for every node ({@code BPMN_NOT_EXECUTABLE}), and every compile step of the registry.
+ * registered behaviour for every node and its event definition ({@code BPMN_NOT_EXECUTABLE}), a result variable on
+ * every user task, and every compile step of the registry.
  */
 public final class ProcessCompiler {
 
@@ -108,6 +111,10 @@ public final class ProcessCompiler {
                         }
                     }
                 }
+            }
+            if (node instanceof UserTask task && task.extensions().first(ResultVariable.class).isEmpty()) {
+                problems.add(DefinitionProblem.of("RESULT_VARIABLE_REQUIRED", "A userTask needs horus:resultVariable, so"
+                        + " a completion result can never overwrite other process variables", node.id()));
             }
             if (behaviors.behaviorFor(node).isEmpty()) {
                 problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "has no behaviour in this release",

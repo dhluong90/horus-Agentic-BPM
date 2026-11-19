@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.process.internal.exec;
 
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.time.Clock;
 import java.util.Map;
 import java.util.Objects;
@@ -56,6 +57,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             throw new ExecutionException("INVALID_STATE", null, "Instance already started");
         }
         ctx.putAllVariables(start.variables());
+        ctx.addParticipant(start.actor());
         Token root = ctx.createToken(TokenKind.SCOPE, process.process().id(), null);
         ctx.history("INSTANCE_STARTED", root, Map.of("definitionId", process.definitionId()));
         ctx.effect(new Effect.EmitEvent("processes.instance.started.v1",
@@ -79,7 +81,17 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                     + " is not the current attempt of token " + tokenId);
         }
         FlowNode node = node(token.nodeId());
+        if (command instanceof Command.CompleteTask complete) {
+            boolean fourEyes = node.extensions().first(TaskAssignment.class).map(TaskAssignment::fourEyes).orElse(false);
+            if (fourEyes && ctx.isParticipant(complete.actor())) {
+                throw new ExecutionException("SELF_APPROVAL_FORBIDDEN", node.id(), "The identity that started this instance"
+                        + " or completed an earlier task of it cannot complete this four-eyes task");
+            }
+        }
         behaviorFor(node).trigger(node, token, command, ctx);
+        if (command instanceof Command.CompleteTask complete) {
+            ctx.addParticipant(complete.actor());
+        }
     }
 
     private void cancel(Command.Cancel cancel, WorkingContext ctx) {

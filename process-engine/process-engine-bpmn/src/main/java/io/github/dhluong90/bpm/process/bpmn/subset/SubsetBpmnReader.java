@@ -7,6 +7,8 @@ import io.github.dhluong90.bpm.process.api.DefinitionTooLargeException;
 import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
+import io.github.dhluong90.bpm.process.bpmn.xml.XmlHardening;
+import io.github.dhluong90.bpm.process.internal.json.Quote;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ElementInfo;
@@ -29,7 +31,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.HorusExtension;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
-import java.io.ByteArrayInputStream;
+import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -103,21 +105,20 @@ public final class SubsetBpmnReader {
             throw new DefinitionTooLargeException("The document has " + source.length + " bytes; at most "
                     + limits.maxBytes() + " are accepted (horus.bpm.processes.definitions.max-bytes)");
         }
-        XMLInputFactory factory = XMLInputFactory.newFactory();
-        factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
-        factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
-        factory.setProperty(XMLInputFactory.IS_REPLACING_ENTITY_REFERENCES, false);
-        factory.setProperty(XMLInputFactory.IS_NAMESPACE_AWARE, true);
+        String text = XmlHardening.utf8(source);
+        XMLInputFactory factory = XmlHardening.newInputFactory(limits);
         try {
-            XMLStreamReader xml = factory.createXMLStreamReader(new ByteArrayInputStream(source));
+            XMLStreamReader xml = factory.createXMLStreamReader(new StringReader(text));
             try {
+                XmlHardening.requireUtf8Declaration(xml);
                 return new Pass(xml).document();
             } finally {
                 xml.close();
             }
         } catch (XMLStreamException e) {
             String message = e.getMessage() == null ? "" : e.getMessage();
-            if (message.contains("DOCTYPE") || message.contains("DTD") || message.contains("ntity")) {
+            if (message.contains("DOCTYPE") || message.contains("DTD") || message.contains("ntity")
+                    || message.contains("not resolved")) {
                 throw new BpmnUnsafeXmlException("DOCTYPE and entity declarations are not accepted");
             }
             throw new ValidationFailedException(List.of(new DefinitionProblem("XML_MALFORMED",
@@ -181,11 +182,11 @@ public final class SubsetBpmnReader {
             int line = line();
             if (key == null || !KEY.matcher(key).matches()) {
                 invalid.add(new DefinitionProblem("KEY_INVALID", "The process id is the definition key and must be"
-                        + " kebab-case, for example card-fee-review", "process", key, line));
+                        + " kebab-case, for example card-fee-review", "process", safe(key), line));
             }
             if (!"true".equals(attr("isExecutable"))) {
                 invalid.add(new DefinitionProblem("NOT_EXECUTABLE", "Set isExecutable=\"true\" on the process",
-                        "process", key, line));
+                        "process", safe(key), line));
             }
             List<FlowElement> elements = new ArrayList<>();
             while (nextChild()) {
@@ -278,7 +279,7 @@ public final class SubsetBpmnReader {
             String result = horus("resultVariable");
             if (ruleSet == null) {
                 invalid.add(new DefinitionProblem("RULE_SET_MISSING", "A businessRuleTask needs horus:ruleSet",
-                        "businessRuleTask", id, line));
+                        "businessRuleTask", safe(id), line));
             }
             List<HorusExtension> ext = new ArrayList<>();
             ext.add(new DecisionRef(ruleSet));
@@ -300,7 +301,11 @@ public final class SubsetBpmnReader {
             String result = horus("resultVariable");
             if (assignee == null || !ASSIGNEE.matcher(assignee).matches()) {
                 invalid.add(new DefinitionProblem("ASSIGNEE_INVALID",
-                        "A userTask needs horus:assignee as user:<id>, role:<role> or group:<group>", "userTask", id, line));
+                        "A userTask needs horus:assignee as user:<id>, role:<role> or group:<group>", "userTask", safe(id), line));
+            }
+            if (result == null) {
+                invalid.add(new DefinitionProblem("RESULT_VARIABLE_REQUIRED", "A userTask needs horus:resultVariable, so"
+                        + " a completion result can never overwrite other process variables", "userTask", safe(id), line));
             }
             List<HorusExtension> ext = new ArrayList<>();
             ext.add(new TaskAssignment(assignee, fourEyes));
@@ -323,8 +328,7 @@ public final class SubsetBpmnReader {
                 if (BPMN.equals(xml.getNamespaceURI()) && "conditionExpression".equals(local)) {
                     String language = attr("language");
                     int line = line();
-                    String text = xml.getElementText();
-                    depth--;
+                    String text = text();
                     if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
                         unsupported.add(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language "
                                 + language + " is not supported; use " + BpmnNamespaces.EXPR_V1 + " (FEEL follows)",
@@ -378,10 +382,10 @@ public final class SubsetBpmnReader {
                     String value = xml.getAttributeValue(null, "value");
                     if (inputName == null || value == null || !inputName.matches("^[A-Za-z_][A-Za-z0-9_]{0,63}$")) {
                         invalid.add(new DefinitionProblem("INPUT_INVALID",
-                                "horus:input needs a name (identifier) and a value", element, id, line()));
+                                "horus:input needs a name (identifier) and a value", element, safe(id), line()));
                     } else if (!names.add(inputName)) {
                         invalid.add(new DefinitionProblem("INPUT_DUPLICATE", "Duplicate horus:input " + inputName,
-                                element, id, line()));
+                                element, safe(id), line()));
                     } else {
                         horus.add(new InputMapping(inputName, value));
                     }
@@ -427,6 +431,33 @@ public final class SubsetBpmnReader {
             return false;
         }
 
+        /** Reads the text of the current element through the guarded loop; child elements are refused. */
+        private String text() throws XMLStreamException {
+            StringBuilder out = new StringBuilder();
+            while (xml.hasNext()) {
+                int event = xml.next();
+                guard(event);
+                switch (event) {
+                    case XMLStreamConstants.CHARACTERS, XMLStreamConstants.CDATA, XMLStreamConstants.SPACE -> {
+                        out.append(xml.getText());
+                        if (out.length() > limits.maxTextChars()) {
+                            throw new BpmnUnsafeXmlException("Text longer than " + limits.maxTextChars()
+                                    + " characters at line " + line());
+                        }
+                    }
+                    case XMLStreamConstants.END_ELEMENT -> {
+                        depth--;
+                        return out.toString();
+                    }
+                    case XMLStreamConstants.START_ELEMENT -> throw new ValidationFailedException(List.of(
+                            new DefinitionProblem("XML_MALFORMED", "An expression may not contain elements", null, null,
+                                    line())));
+                    default -> { }
+                }
+            }
+            return out.toString();
+        }
+
         private void skip() throws XMLStreamException {
             while (nextChild()) {
                 skip();
@@ -436,6 +467,12 @@ public final class SubsetBpmnReader {
         private void enter() {
             depth++;
             elements++;
+            for (int i = 0; i < xml.getAttributeCount(); i++) {
+                if (xml.getAttributeValue(i).length() > limits.maxAttributeChars()) {
+                    throw new BpmnUnsafeXmlException("Attribute " + xml.getAttributeLocalName(i) + " longer than "
+                            + limits.maxAttributeChars() + " characters at line " + line());
+                }
+            }
             if (depth > limits.maxDepth()) {
                 throw new BpmnUnsafeXmlException("Element nesting deeper than " + limits.maxDepth() + " at line " + line());
             }
@@ -454,7 +491,7 @@ public final class SubsetBpmnReader {
         private String id() {
             String id = attr("id");
             if (id != null && !ids.add(id)) {
-                invalid.add(new DefinitionProblem("DUPLICATE_ID", "Duplicate id", xml.getLocalName(), id, line()));
+                invalid.add(new DefinitionProblem("DUPLICATE_ID", "Duplicate id", xml.getLocalName(), safe(id), line()));
             }
             return id == null ? "_missing_" + elements : id;
         }
@@ -475,8 +512,17 @@ public final class SubsetBpmnReader {
 
         private void unsupported(String element, String id, String stage) {
             unsupported.add(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                    "is not supported in this release; planned for " + stage, element, id, line()));
+                    "is not supported in this release; planned for " + stage, element, safe(id), line()));
         }
+    }
+
+    /** An id echoed in a problem: at most 80 characters, control characters escaped. */
+    static String safe(String id) {
+        if (id == null) {
+            return null;
+        }
+        String quoted = Quote.of(id);
+        return quoted.substring(1, quoted.length() - 1);
     }
 
     private static ElementInfo info(List<HorusExtension> horus, List<ForeignFragment> foreign) {
