@@ -29,6 +29,8 @@
   --scrim: rgba(15, 23, 42, .40);
   --select: #E6F2FA;
   --on-accent-fill: #FFFFFF;
+  /* Primary action fill (ux-design 6.3): --accent in light, white text 5.93:1; --accent-fill in dark, 5.95:1. */
+  --primary-fill: #0369A1; --on-primary: #FFFFFF;
 
   --radius-s: 6px; --radius-m: 8px; --radius-l: 12px;
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px;
@@ -64,6 +66,7 @@
   --scrim: rgba(2, 6, 12, .66);
   --select: rgba(14, 165, 233, .12);
   --on-accent-fill: #04131D;
+  --primary-fill: #0C9AD9; --on-primary: #04131D;
   --canvas: #0F1520; --dot: rgba(148, 163, 184, .12);
   --node: #161E2C; --node-stroke: #5F6C84; --edge: #5F6C84; --edge-label: #AAB4C5;
   --glow: rgba(56, 189, 248, .50); --token: #0C9AD9;
@@ -95,6 +98,7 @@
     --scrim: rgba(2, 6, 12, .66);
     --select: rgba(14, 165, 233, .12);
     --on-accent-fill: #04131D;
+  --primary-fill: #0C9AD9; --on-primary: #04131D;
     --canvas: #0F1520; --dot: rgba(148, 163, 184, .12);
     --node: #161E2C; --node-stroke: #5F6C84; --edge: #5F6C84; --edge-label: #AAB4C5;
     --glow: rgba(56, 189, 248, .50); --token: #0C9AD9;

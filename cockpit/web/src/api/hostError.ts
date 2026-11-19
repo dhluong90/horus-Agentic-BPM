@@ -17,10 +17,21 @@ export type HostError =
       correlationId: string | undefined;
       title: string | undefined;
       detail: string | undefined;
+      /** Located validation problems of a 422 VALIDATION_FAILED; absent for every other problem. */
+      violations?: readonly Violation[];
     }
   | { kind: 'signed-out' }
   | { kind: 'unreachable' }
   | { kind: 'unexpected-response'; status: number; correlationId: string | undefined };
+
+/** One located problem of a rejected document: the row (rule id) and column (input or output name), when known. */
+export interface Violation {
+  ruleId: string | null;
+  column: string | null;
+  message: string;
+}
+
+const violation = z.object({ ruleId: z.string().nullable().optional(), column: z.string().nullable().optional(), message: z.string() }).loose();
 
 export class HostCallError extends Error {
   readonly hostError: HostError;
@@ -38,6 +49,7 @@ const problemBody = z
     title: z.string().optional(),
     status: z.number().int().optional(),
     detail: z.string().optional(),
+    violations: z.array(z.unknown()).optional(),
     code: z.string().optional(),
     correlationId: z.string().optional(),
   })
@@ -62,7 +74,12 @@ export async function readProblem(response: Response): Promise<HostError> {
   if (!parsed.success) {
     return { kind: 'unexpected-response', status: response.status, correlationId: headerCorrelationId };
   }
+  const violations = (parsed.data.violations ?? []).flatMap((item) => {
+    const read = violation.safeParse(item);
+    return read.success ? [{ ruleId: read.data.ruleId ?? null, column: read.data.column ?? null, message: read.data.message }] : [];
+  });
   return {
+    ...(violations.length > 0 ? { violations } : {}),
     kind: 'problem',
     status: response.status,
     code: parsed.data.code,
