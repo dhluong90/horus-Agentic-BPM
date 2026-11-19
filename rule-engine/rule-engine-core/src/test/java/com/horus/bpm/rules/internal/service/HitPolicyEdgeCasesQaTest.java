@@ -161,11 +161,38 @@ class HitPolicyEdgeCasesQaTest {
         DecisionResult result = evaluate("all-null", Map.of("x", 1));
 
         // Corrected RLE-003 (DMN 1.5 check): a null under sum or min is EVALUATION_ERROR in errorMode strict, with
-        // the matched rules logged and no partial outputs. count and lists alone would give 2 and [null, null].
+        // the matched rules logged and no partial outputs. The count and list case without sum or min is
+        // RLE_003_count_and_lists_alone_keep_every_null below.
         assertThat(result.matchedRuleIds()).containsExactly("R1", "R2");
         assertThat(((DecisionResult.Failed) result.outcome()).code()).isEqualTo("EVALUATION_ERROR");
         assertThat(result.outputs()).isEmpty();
         // One list entry per matched rule, null included (B1 of this review, PD-088), so l is [null, null].
+    }
+
+    @Test
+    void RLE_003_count_and_lists_alone_keep_every_null() {
+        // Given only count and a list, so no aggregate refuses null
+        publish("""
+                schemaVersion: 1
+                ruleSet: count-and-list
+                hitPolicy: collect
+                inputs:
+                  - { name: x, type: integer }
+                outputs:
+                  - { name: n, type: integer, collect: count }
+                  - { name: l, type: list<string> }
+                rules:
+                  - { id: R1, when: {}, then: { n: null, l: null } }
+                  - { id: R2, when: {}, then: { n: null, l: null } }
+                """, "count-and-list");
+
+        // When
+        DecisionResult result = evaluate("count-and-list", Map.of("x", 1));
+
+        // Then count counts every matched rule, nulls included, and the list keeps one null per matched rule
+        assertThat(result.matchedRuleIds()).containsExactly("R1", "R2");
+        assertThat(result.outputs()).containsEntry("n", BigDecimal.valueOf(2))
+                .containsEntry("l", Arrays.asList(null, null));
     }
 
     @Test
@@ -188,7 +215,8 @@ class HitPolicyEdgeCasesQaTest {
 
         DecisionResult result = evaluate("count-nulls", inputs);
 
-        // Corrected RLE-003: count counts every matched rule (2); the null from v + 1 under sum is EVALUATION_ERROR
+        // Corrected RLE-003: the null from v + 1 under sum is EVALUATION_ERROR in errorMode strict, naming rule R1,
+        // so no output is returned, n included
         assertThat(((DecisionResult.Failed) result.outcome()).code()).isEqualTo("EVALUATION_ERROR");
         assertThat(((DecisionResult.Failed) result.outcome()).detail()).contains("R1");
         assertThat(result.outputs()).isEmpty();
