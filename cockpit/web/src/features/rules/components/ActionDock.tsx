@@ -3,6 +3,7 @@ import type { RuleSetVersion } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { useRulesSession } from '../api/rulesContext';
 import { formatDateTime } from '../model/dates';
+import { PersonalDataWarnings } from './PersonalDataWarnings';
 import { ProblemNotice } from './ProblemNotice';
 
 export interface Action<TArgs = void> {
@@ -66,6 +67,7 @@ export function DecisionCard({ version, approve, reject, onReload }: { version: 
   return (
     <section className="card decision" aria-labelledby="decision-title">
       <h2 id="decision-title" className="rules-card-title">{t('decision.title')}</h2>
+      <PersonalDataWarnings warnings={version.warnings} definition={version.definition} />
       {!canApprove && !canReject && self === undefined ? (
         <p className="dock__note">{t('dock.waiting')}</p>
       ) : (

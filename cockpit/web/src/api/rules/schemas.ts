@@ -123,6 +123,26 @@ export const historyEntry = z
 export type HistoryEntry = z.infer<typeof historyEntry>;
 export const versionHistory = z.object({ data: z.array(historyEntry) }).loose();
 
+/** Warning codes this cockpit shows. A warning with another code, from a newer engine, is dropped. */
+export const WARNING_CODES = ['UNMASKED_PERSONAL_DATA'] as const;
+export type WarningCode = (typeof WARNING_CODES)[number];
+
+const anyWarning = z.object({ code: z.string(), input: z.string(), matchedName: z.string().nullable().optional(), message: z.string() }).loose();
+export interface VersionWarning { code: WarningCode; input: string; matchedName: string | null; message: string }
+
+/**
+ * What the author and the approver should see before publication (RLE-049). Engines before 0.2.0 send no
+ * `warnings`: none. A warning this cockpit cannot read is dropped, never fatal.
+ */
+const versionWarnings = z
+  .array(z.unknown())
+  .default([])
+  .transform((items) => items.flatMap((item): VersionWarning[] => {
+    const parsed = anyWarning.safeParse(item);
+    if (!parsed.success || !(WARNING_CODES as readonly string[]).includes(parsed.data.code)) return [];
+    return [{ code: parsed.data.code as WarningCode, input: parsed.data.input, matchedName: parsed.data.matchedName ?? null, message: parsed.data.message }];
+  }));
+
 export const ruleSetVersion = z
   .object({
     ...lifecycle,
@@ -130,9 +150,34 @@ export const ruleSetVersion = z
     sourceHash: z.string(),
     sourceDocument: z.string().optional(),
     definition: ruleSetDefinition,
+    warnings: versionWarnings,
   })
   .loose();
 export type RuleSetVersion = z.infer<typeof ruleSetVersion>;
+
+/** An input's masking in one version (RLE-051): declared, or decided by the tenant's masking default. */
+export const MASKING_STATUSES = ['MASKED', 'NOT_MASKED', 'MASKED_BY_DEFAULT', 'NOT_MASKED_BY_DEFAULT'] as const;
+export type MaskingStatus = (typeof MASKING_STATUSES)[number];
+
+export const inputMasking = z
+  .object({
+    input: z.string(),
+    from: z.enum(MASKING_STATUSES).nullable(),
+    to: z.enum(MASKING_STATUSES).nullable(),
+    changed: z.boolean(),
+    personalDataName: z.string().nullable().optional(),
+  })
+  .loose();
+export type InputMasking = z.infer<typeof inputMasking>;
+
+/**
+ * GET .../diff?base= (RLE-028). The cockpit reads `masking` from it; the row diff is still computed in the
+ * browser, so the other members are kept as they come. An engine without `masking` gives an empty list.
+ */
+export const versionDiff = z
+  .object({ ruleSet: z.string(), version: z.number().int(), base: z.number().int(), masking: z.array(inputMasking).default([]) })
+  .loose();
+export type VersionDiff = z.infer<typeof versionDiff>;
 
 export const decisionResult = z
   .object({

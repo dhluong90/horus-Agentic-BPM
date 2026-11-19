@@ -418,3 +418,15 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .amount__input { min-height: 36px; align-self: stretch; }
 .amount__code { margin-right: 8px; }
 .list-note { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+
+/* Personal data without a masking rule (RLE-049), beside the decision; the styleguide's warning tokens. */
+.pii-warning { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius-m); background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-fill); font-size: 13px; line-height: 1.45; }
+.pii-warning__title { margin: 0; font-weight: 650; display: flex; gap: 6px; align-items: baseline; }
+.pii-warning__list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+.pii-warning__why { margin: 0; }
+
+/* The masking change of an input, under its header in the diff (RLE-051). */
+.masking-note { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; max-width: 18ch; font-size: 12px; font-weight: 500; color: var(--ink-2); white-space: normal; line-height: 1.4; }
+/* Column names stay on one line across the header when one of them carries a masking note. */
+.dt--diff thead tr:not(.dt__groups) th { vertical-align: top; }
+.masking-note__flag { display: inline-flex; white-space: nowrap; gap: 4px; align-self: flex-start; padding: 0 6px; border-radius: var(--radius-s); background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-fill); font-weight: 600; }

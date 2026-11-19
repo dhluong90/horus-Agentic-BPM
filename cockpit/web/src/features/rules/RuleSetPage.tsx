@@ -4,7 +4,7 @@ import { toHostError } from '../../api/hostError';
 import type { Rule, RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useRulesSession } from './api/rulesContext';
-import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersions } from './api/useRules';
+import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
 import { DecisionCard, DetailsPanel, DraftsOffNote, EditDock, HeaderActions, type Action } from './components/ActionDock';
 import { ChangesView } from './components/ChangesView';
 import { DecisionTable } from './components/DecisionTable';
@@ -13,6 +13,7 @@ import { DraftEditor } from './components/DraftEditor';
 import { HistoryList } from './components/HistoryList';
 import { useFilePicker } from './components/ImportFileButton';
 import { MenuButton } from './components/MenuButton';
+import { PersonalDataWarnings } from './components/PersonalDataWarnings';
 import { ProblemNotice } from './components/ProblemNotice';
 import { SourceView } from './components/SourceView';
 import { StatusBadge } from './components/StatusBadge';
@@ -71,9 +72,14 @@ function Inspector({ version, onMatched }: { version: RuleSetVersion; onMatched:
 function ChangesLens({ version, base }: { version: RuleSetVersion; base: VersionSummary | undefined }) {
   const { t } = useI18n();
   const baseVersion = useVersion(version.ruleSet, base?.version);
+  // The masking column comes from the engine's diff (RLE-051); the row diff is still computed here.
+  const masking = useVersionDiff(version.ruleSet, version.version, base?.version);
   if (base && baseVersion.isPending) return <p className="empty" role="status">{t('ruleSets.loading')}</p>;
   if (baseVersion.isError) return <ProblemNotice error={baseVersion.error} />;
-  return <ChangesView definition={version.definition} base={baseVersion.data?.definition} baseVersion={base?.version} baseInEffect={base?.status === 'PUBLISHED'} />;
+  return (
+    <ChangesView definition={version.definition} base={baseVersion.data?.definition} baseVersion={base?.version} baseInEffect={base?.status === 'PUBLISHED'}
+      masking={masking.data?.masking} maskingUnavailable={masking.isError} />
+  );
 }
 
 function LensContent({ lens, version, base, matched }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string> }) {
@@ -200,6 +206,12 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
             <DecisionCard version={version} onReload={() => { window.location.reload(); }}
               approve={{ start: (comment) => { approve.start({ version, comment }); }, isPending: approve.isPending, error: approve.error }}
               reject={{ start: (reason) => { reject.start({ version, reason }); }, isPending: reject.isPending, error: reject.error }} />
+          ) : null}
+          {!editing && version.status === 'DRAFT' && version.warnings.length > 0 ? (
+            // The author sees what the approver will see, before requesting publication.
+            <section className="card decision" aria-label={t('pii.title')}>
+              <PersonalDataWarnings warnings={version.warnings} definition={version.definition} />
+            </section>
           ) : null}
           {!editing ? (
             <Inspector version={version} onMatched={(ids) => {

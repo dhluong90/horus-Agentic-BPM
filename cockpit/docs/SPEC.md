@@ -379,3 +379,12 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The canvas announces and shows a notice that drawing is not keyboard accessible and that the definition can be edited as JSON or YAML and imported as a draft; the link opens the import path, which creates a draft that passes the same approval.
 - **Example:** `canvas notice -> "Edit as JSON or YAML and import as a draft" -> import creates a draft`.
 - **Test ID:** `CKP_036_canvas_exemption_names_import_path`
+
+### CKP-037 The approval screen names undeclared personal-data inputs beside Approve and marks masking changes in the diff
+- **Traces to:** `TR-UI-02`, `TR-UI-03`, `TR-UI-04`, PD-099 (mitigations 1 and 3), `RLE-049`, `RLE-051`
+- **Milestone:** M1
+- **Given:** Rule set `customer-screening` v1 `PUBLISHED` with inputs `nationalId` and `phoneNumber` (`mask: true`) and `segment`; v2 `PENDING_APPROVAL`, requested by `hoa`, where `nationalId` declares no `mask` and a new input `email` declares none. The engine answers v2 with two `UNMASKED_PERSONAL_DATA` warnings and its diff against v1 with `masking`. `minh` holds `rules:approve`. Second case: `card-fee` v2 with no warning and no masking change. Third case: a host whose diff endpoint answers `404`.
+- **When:** `minh` opens v2 at 1440x900, in English and in Vietnamese, light and dark.
+- **Then:** The decision card lists one line per warning beside Approve, naming each input by its column label and the personal-data name it matched, in plain words with no error code, and says the values would be kept unmasked in the decision log. The warning and Approve are both visible without scrolling. In the Changes view the `nationalId` header shows "Mask removed" and "Masked → Not masked by default", `email` shows "New column: Not masked by default", `phoneNumber` and `segment` show no mark, and the summary counts one removed mask. Approve stays enabled: the engine decides any blocking. In the second case there is no warning area and no masking mark. In the third case one line says masking changes are not available and the rows still show. A draft with the same warnings shows them to its author beside Request publish. axe-core finds no serious violation.
+- **Example:** `nationalId MASKED -> NOT_MASKED_BY_DEFAULT -> "Mask removed · Masked → Not masked by default"; phoneNumber MASKED -> MASKED -> no mark`.
+- **Test ID:** `CKP_037_the_warning_and_approve_are_both_on_screen_at_1440x900`

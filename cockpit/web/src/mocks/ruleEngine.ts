@@ -9,7 +9,7 @@
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 interface Rule { id: string; when: Record<string, string>; then: Record<string, Json> }
-interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[] }[]; outputs: { name: string; type: string }[]; rules: Rule[]; description?: string }
+interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string }[]; outputs: { name: string; type: string }[]; rules: Rule[]; description?: string }
 
 export interface StoredHistory { action: 'CREATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
 
@@ -70,8 +70,53 @@ function lifecycle(v: StoredVersion, request: FakeRequest) {
   };
 }
 
+/** A part of the engine's built-in personal-data names (RLE-049), as words. */
+const PERSONAL_DATA_NAMES = ['national id', 'passport', 'phone', 'phone number', 'email', 'address', 'date of birth', 'account number', 'cccd', 'cmnd'];
+
+/** Splits an identifier into lower-case words: nationalId, national_id and NATIONAL_ID all give "national id". */
+function words(name: string): string[] {
+  return name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter((word) => word !== '');
+}
+
+/** The personal-data name an input's name matches as whole words, as the engine compares them; undefined when none. */
+function personalDataName(input: string): string | undefined {
+  const have = words(input).join(' ');
+  const glued = words(input).join('');
+  return PERSONAL_DATA_NAMES.find((name) => ` ${have} `.includes(` ${name} `) || glued === name.replaceAll(' ', ''));
+}
+
+/** UNMASKED_PERSONAL_DATA for every input that declares no mask and looks like personal data. */
+function warningsOf(definition: Definition) {
+  return definition.inputs.flatMap((input) => {
+    const matched = input.mask === undefined ? personalDataName(input.name) : undefined;
+    return matched === undefined ? [] : [{
+      code: 'UNMASKED_PERSONAL_DATA', input: input.name, matchedName: matched,
+      message: `Input ${input.name} looks like personal data (it matches "${matched}") but declares no mask.`,
+    }];
+  });
+}
+
+/** The tenant's decision-log.mask-default in this fake: off, so an undeclared input is not masked by default. */
+function maskingStatus(input: Definition['inputs'][number] | undefined): string | null {
+  if (input === undefined) return null;
+  if (input.mask === true) return 'MASKED';
+  if (input.mask === false) return 'NOT_MASKED';
+  return 'NOT_MASKED_BY_DEFAULT';
+}
+
+/** The masking column of the engine's diff (RLE-051): inputs of this version first, then those only in base. */
+function maskingDiff(next: Definition, base: Definition) {
+  const names = [...next.inputs.map((input) => input.name), ...base.inputs.map((input) => input.name).filter((name) => !next.inputs.some((input) => input.name === name))];
+  return names.map((name) => {
+    const to = next.inputs.find((input) => input.name === name);
+    const from = maskingStatus(base.inputs.find((input) => input.name === name));
+    const status = maskingStatus(to);
+    return { input: name, from, to: status, changed: from !== status, personalDataName: to !== undefined && to.mask === undefined ? (personalDataName(name) ?? null) : null };
+  });
+}
+
 function view(v: StoredVersion, request: FakeRequest, withSource = false): FakeResponse {
-  const body = { ...lifecycle(v, request), sourceFormat: 'YAML', sourceHash: hash(v.source), ...(withSource ? { sourceDocument: v.source } : {}), definition: v.definition };
+  const body = { ...lifecycle(v, request), sourceFormat: 'YAML', sourceHash: hash(v.source), ...(withSource ? { sourceDocument: v.source } : {}), definition: v.definition, warnings: warningsOf(v.definition) };
   return json(body, { ETag: `"${String(v.lockVersion)}"` });
 }
 
@@ -292,6 +337,16 @@ export function createFakeEngine(seed: StoredVersion[]) {
       return versionsOf(name).length === 0 ? problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`) : json(summary(name));
     }
     if ((m = /^\/rule-sets\/([^/]+)\/versions$/.exec(path))) return request.method === 'GET' ? listVersions(m[1] ?? '', url, request) : importVersion(m[1], request);
+    if (request.method === 'GET' && (m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)\/diff$/.exec(path))) {
+      const v = find(m[1] ?? '', Number(m[2]));
+      const baseNumber = Number(url.searchParams.get('base'));
+      if (!v) return problem(404, 'VERSION_NOT_FOUND', `Version ${m[2] ?? ''} of rule set ${m[1] ?? ''} not found`);
+      if (!Number.isInteger(baseNumber) || baseNumber < 1 || baseNumber === v.version) return problem(400, 'INPUT_INVALID', 'base must be another version of the rule set');
+      const baseVersion = find(v.ruleSet, baseNumber);
+      if (!baseVersion) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(baseNumber)} of rule set ${v.ruleSet} not found`);
+      // The row diff is computed by the cockpit; this fake answers the members it reads.
+      return json({ ruleSet: v.ruleSet, version: v.version, base: baseNumber, masking: maskingDiff(v.definition, baseVersion.definition) });
+    }
     if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|:request-publish|:approve|:reject)?$/.exec(path))) {
       const v = find(m[1] ?? '', Number(m[2]));
       if (!v) return problem(404, 'VERSION_NOT_FOUND', `Version ${m[2] ?? ''} of rule set ${m[1] ?? ''} not found`);

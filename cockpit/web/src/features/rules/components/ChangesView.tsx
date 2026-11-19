@@ -1,6 +1,7 @@
-import type { Rule, RuleSetDefinition } from '../../../api/rules/schemas';
+import type { InputMasking, Rule, RuleSetDefinition } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { diffRules, type RowDiff } from '../model/diff';
+import { maskingMark, maskRemoved } from '../model/masking';
 import { cellText, nonAsciiCharacters } from '../model/nonAscii';
 import { readCondition, readOutput, type CellReading } from '../model/reading';
 import { CellValue, ValueText } from './CellValue';
@@ -71,6 +72,25 @@ function DiffCell({ now, before, changed, raw }: { now: CellReading; before: Cel
   );
 }
 
+/** Under an input's header: its masking change, if any. A removed mask carries the warning mark and words. */
+function MaskingNote({ masking }: { masking: InputMasking | undefined }) {
+  const { t } = useI18n();
+  const mark = maskingMark(masking);
+  if (mark.kind === 'none') return null;
+  if (mark.kind === 'added') {
+    return <span className="masking-note"><span className="sr-only">{t('masking.label')}: </span>{t('masking.added', { status: t(`masking.${mark.to}`) })}</span>;
+  }
+  return (
+    <span className={mark.removed ? 'masking-note masking-note--removed' : 'masking-note'}>
+      {mark.removed ? <span className="masking-note__flag"><span aria-hidden="true">▲</span> {t('masking.removed')}</span> : null}
+      <span>
+        <span className="sr-only">{t('masking.label')}: </span>
+        {t(`masking.${mark.from}`)} <span aria-hidden="true">→</span><span className="sr-only">,</span> {t(`masking.${mark.to}`)}
+      </span>
+    </span>
+  );
+}
+
 function rowClass(row: RowDiff): string {
   return `diff-row diff-row--${row.change.toLowerCase()}`;
 }
@@ -80,11 +100,14 @@ function rowClass(row: RowDiff): string {
  * editor's labels and formats. The comparison is computed in this browser until the engine's diff endpoint
  * (RLE-028, issue #165) lands; the stored version is the Table tab, and Details shows its content hash.
  */
-export function ChangesView({ definition, base, baseVersion, baseInEffect }: {
+export function ChangesView({ definition, base, baseVersion, baseInEffect, masking = [], maskingUnavailable = false }: {
   definition: RuleSetDefinition;
   base: RuleSetDefinition | undefined;
   baseVersion: number | undefined;
   baseInEffect: boolean;
+  /** The engine diff's masking column (RLE-051); empty until it answers or when the host has none. */
+  masking?: readonly InputMasking[] | undefined;
+  maskingUnavailable?: boolean;
 }) {
   const { t, locale } = useI18n();
   const rows = diffRules(base?.rules ?? [], definition.rules);
@@ -95,6 +118,8 @@ export function ChangesView({ definition, base, baseVersion, baseInEffect }: {
   }).length, 0);
   const count = (change: RowDiff['change']) => String(rows.filter((row) => row.change === change || (change === 'MOVED' && row.moved && row.change === 'CHANGED')).length);
   const empty: Rule = { id: '', when: {}, then: {} };
+  const maskingOf = new Map(masking.map((item) => [item.input, item]));
+  const removedMasks = definition.inputs.filter((input) => { const item = maskingOf.get(input.name); return item !== undefined && maskRemoved(item); }).length;
   return (
     <div className="changes">
       {base ? <p className="changes__note">{t('changes.browserNote')}</p> : null}
@@ -110,10 +135,14 @@ export function ChangesView({ definition, base, baseVersion, baseInEffect }: {
         {nonAscii > 0 ? (
           <span className="nonascii-mark"><span aria-hidden="true">▲</span> {t('changes.nonAsciiCount', { count: String(nonAscii) })}</span>
         ) : null}
+        {removedMasks > 0 ? (
+          <span className="nonascii-mark"><span aria-hidden="true">▲</span> {removedMasks === 1 ? t('changes.masksRemovedOne') : t('changes.masksRemovedCount', { count: String(removedMasks) })}</span>
+        ) : null}
       </p>
+      {maskingUnavailable && base ? <p className="changes__note">{t('changes.maskingUnavailable')}</p> : null}
       <div className="dt-scroll" role="region" tabIndex={0} aria-label={t('changes.tableLabel')}>
         <table className="dt dt--diff">
-          <TableHead definition={definition} />
+          <TableHead definition={definition} inputNote={(input) => <MaskingNote masking={maskingOf.get(input)} />} />
           <tbody>
             {rows.map((row) => {
               const now = row.rule ?? row.base ?? empty;
