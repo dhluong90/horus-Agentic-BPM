@@ -15,6 +15,7 @@ import com.horus.bpm.rules.internal.model.OutputClause;
 import com.horus.bpm.rules.internal.model.Rule;
 import com.horus.bpm.rules.internal.model.ValueType;
 import com.horus.bpm.rules.internal.model.When;
+import io.github.dhluong90.bpm.rules.internal.dmn.ruleset.DmnReader;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.DateTimeException;
@@ -41,7 +42,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 
 /**
- * Reads a schema version 1 rule set document (YAML or JSON) into the DMN-shaped model and its RFC 8785
+ * Reads a schema version 1 rule set document (YAML or JSON, or a DMN decision table) into the DMN-shaped model and its RFC 8785
  * canonical form. Structure only: nothing in the document is evaluated (TR-STD-01). Checks follow
  * {@code rule-engine/api/schema/rule-set.v1.schema.json}.
  */
@@ -70,7 +71,7 @@ public final class RuleSetReader {
     /**
      * Reads a source document.
      *
-     * @param format {@link SourceFormat#YAML} or {@link SourceFormat#JSON}
+     * @param format {@link SourceFormat#YAML}, {@link SourceFormat#JSON} or {@link SourceFormat#DMN_XML}
      * @param source the document bytes
      * @return the model, canonical JSON and canonical hash
      * @throws ValidationFailedException when the document is not a valid schema version 1 rule set
@@ -87,7 +88,8 @@ public final class RuleSetReader {
                     yield EngineJson.YAML.readTree(source);
                 }
                 case JSON -> EngineJson.JSON.readTree(source);
-                case DMN_XML -> throw new ValidationFailedException("DMN XML import is not available in this release");
+                // DMN is read into the lowest schema version that expresses it (TR-STD-03), then checked as JSON.
+                case DMN_XML -> EngineJson.JSON.readTree(EngineJson.JSON.writeValueAsBytes(DmnReader.toRuleSet(source)));
             };
         } catch (JacksonException e) {
             throw new ValidationFailedException("Document is not well-formed " + format + ": " + e.getOriginalMessage());

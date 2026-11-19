@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_0x7k2qa" name="DRD" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.17.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.3.0">
+  <decision id="card-fee" name="Monthly card fee">
+    <decisionTable id="DecisionTable_1n4x0rw" hitPolicy="FIRST">
+      <input id="Input_1" label="Card tier">
+        <inputExpression id="InputExpression_1" typeRef="string">
+          <text>tier</text>
+        </inputExpression>
+      </input>
+      <input id="InputClause_0b9w3qz" label="Transactions this month">
+        <inputExpression id="LiteralExpression_1q2y3dc" typeRef="integer">
+          <text>txCount</text>
+        </inputExpression>
+      </input>
+      <output id="Output_1" label="Fee (VND)" name="fee" typeRef="number" />
+      <rule id="DecisionRule_0fk2x7a">
+        <description>Gold customers pay nothing</description>
+        <inputEntry id="UnaryTests_1k9tq0e">
+          <text>"GOLD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0qbx8nn">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0p0w9xg">
+          <text>0</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1lh0wd3">
+        <inputEntry id="UnaryTests_1d5ndtd">
+          <text>-</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0tvtfua">
+          <text>&gt;= 3</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1a4gktv">
+          <text>10000</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_09rn3ah">
+        <inputEntry id="UnaryTests_1hmt58o">
+          <text>-</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1ebyexd">
+          <text>-</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1wj4cye">
+          <text>50000</text>
+        </outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram>
+      <dmndi:DMNShape dmnElementRef="card-fee">
+        <dc:Bounds height="80" width="180" x="160" y="100" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>

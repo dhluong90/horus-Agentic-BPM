@@ -286,9 +286,7 @@ public final class CompiledRuleSet {
 
     private static Expr condition(String input, String text, Map<String, Integer> slots, List<InputClause> inputs,
             String ruleId) {
-        String trimmed = text.strip();
-        boolean shorthand = SHORTHAND_PREFIXES.stream().anyMatch(trimmed::startsWith);
-        String source = shorthand ? input + " " + trimmed : trimmed;
+        String source = conditionSource(input, text);
         Expr expr;
         try {
             expr = Parser.parse(source, name -> slots.getOrDefault(name, -1));
@@ -297,6 +295,20 @@ public final class CompiledRuleSet {
         }
         ConditionTypes.requireBoolean(expr, inputs, "Rule " + ruleId + ", input " + input);
         return expr;
+    }
+
+    /**
+     * Returns the full expression of a condition cell: a shorthand such as {@code "< 18"} is prefixed with its
+     * input name, a full expression is returned as written.
+     *
+     * @param input the input the cell is keyed by
+     * @param text the cell text
+     * @return the expression source
+     */
+    public static String conditionSource(String input, String text) {
+        String trimmed = text.strip();
+        boolean shorthand = SHORTHAND_PREFIXES.stream().anyMatch(trimmed::startsWith);
+        return shorthand ? input + " " + trimmed : trimmed;
     }
 
     private static Expr cell(Cell cell, Map<String, Integer> slots, String where) {

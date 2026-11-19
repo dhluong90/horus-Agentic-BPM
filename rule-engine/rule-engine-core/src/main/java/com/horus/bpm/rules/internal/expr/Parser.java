@@ -2,14 +2,18 @@ package com.horus.bpm.rules.internal.expr;
 
 import com.horus.bpm.rules.api.Money;
 import java.math.BigDecimal;
+import java.time.DateTimeException;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.ToIntFunction;
 
 /**
  * Hand-written lexer and recursive-descent parser of {@code urn:horus-bpm:expr:v1} (ADR-0003). No
- * reflection, no scripting, no function calls in this release. Identifiers are bound to input slots
- * at parse time; an unknown identifier is a parse error.
+ * reflection, no scripting; the only calls are the constant literals {@code date('...')} and
+ * {@code datetime('...')}. Identifiers are bound to input slots at parse time; an unknown identifier is a
+ * parse error.
  *
  * <pre>
  * or         = and { "or" and }
@@ -21,6 +25,7 @@ import java.util.function.ToIntFunction;
  * multiplicative = unary { ("*"|"/") unary }
  * unary      = "-" unary | primary
  * primary    = number [CURRENCY] | string | "true" | "false" | "null" | identifier | "(" or ")" | list
+ *            | "date" "(" string ")" | "datetime" "(" string ")"
  * list       = "[" [ or { "," or } ] "]"
  * </pre>
  */
@@ -206,6 +211,9 @@ public final class Parser {
                         return new Expr.Literal(null);
                     }
                     default -> {
+                        if (peek().kind() == Kind.LPAREN && (token.text().equals("date") || token.text().equals("datetime"))) {
+                            return temporal(token);
+                        }
                         if (peek().kind() == Kind.LPAREN) {
                             throw new ExpressionException("Unknown function '" + token.text() + "'", token.position());
                         }
@@ -227,6 +235,27 @@ public final class Parser {
             default -> throw new ExpressionException(
                     token.kind() == Kind.EOF ? "Unexpected end of expression" : "Unexpected '" + token.text() + "'",
                     token.position());
+        }
+    }
+
+    /**
+     * {@code date('2026-12-01')} or {@code datetime('2026-12-01T00:00:00Z')} with a string literal argument: a constant,
+     * checked here, so a malformed date fails at import and never at evaluation (standards-compliance.md 4.4).
+     */
+    private Expr temporal(Token function) {
+        expect(Kind.LPAREN, "(");
+        Token argument = next();
+        if (argument.kind() != Kind.STRING) {
+            throw new ExpressionException(function.text() + "(...) takes one string literal", argument.position());
+        }
+        expect(Kind.RPAREN, ")");
+        try {
+            return new Expr.Literal(function.text().equals("date")
+                    ? LocalDate.parse(argument.text())
+                    : OffsetDateTime.parse(argument.text()).toInstant());
+        } catch (DateTimeException e) {
+            throw new ExpressionException("Invalid " + function.text() + " literal '" + argument.text() + "'",
+                    argument.position());
         }
     }
 
