@@ -221,20 +221,88 @@ class DefinitionLifecycleTest {
                 .isEqualTo("pipeline");
     }
 
-    @Test
-    void PRE_019_a_caller_cannot_act_under_the_engines_system_identities() {
-        // Given a pending version; the table's four-eyes CHECK exempts system:dev-auto-approve
-        DefinitionVersion pending = request(importAs(1), null);
+    // ---- reserved system identities: refused at every entry point (403 PERMISSION_DENIED) ----------------------
 
-        // When a caller claiming that id requests or approves
-        engine.identity.as("bank-a", "system:dev-auto-approve", "processes:approve", "processes:author",
-                "processes:read");
-        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), null, null))
-                // Then it is refused and nothing is written
-                .isInstanceOf(PermissionDeniedException.class).hasMessageContaining("reserved");
-        assertThatThrownBy(() -> engine.services.reject(pending.ref(), pending.lockVersion(), "no", null))
-                .isInstanceOf(PermissionDeniedException.class);
+    private static final String[] EVERY_PERMISSION = {"processes:deploy", "processes:author", "processes:approve",
+        "processes:start", "processes:read", "processes:task:work"};
+
+    /** Acts as a host user named like an engine identity, holding every permission; asserts the refusal. */
+    private void refusedAsSystem(String systemId, Runnable call) {
+        engine.identity.as("bank-a", systemId, EVERY_PERMISSION).roles = java.util.Set.of("KYC_OFFICER");
+        int history = count("SELECT count(*) FROM pre_definition_history");
+        int instanceHistory = count("SELECT count(*) FROM pre_history");
+        assertThatThrownBy(call::run).isInstanceOf(PermissionDeniedException.class).hasMessageContaining("reserved");
+        assertThat(count("SELECT count(*) FROM pre_definition_history")).isEqualTo(history);
+        assertThat(count("SELECT count(*) FROM pre_history")).isEqualTo(instanceHistory);
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_import() {
+        refusedAsSystem("system:startup", () -> engine.services.importDefinition(
+                new ImportRequest(SourceFormat.BPMN_XML, kyc(1), null)));
+        assertThat(count("SELECT count(*) FROM pre_definition")).isZero();
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_request_approval() {
+        DefinitionVersion v1 = importAs(1);
+        refusedAsSystem("system:dev-auto-approve", () -> engine.services.requestApproval(v1.ref(), v1.lockVersion(),
+                null, null));
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_approve() {
+        DefinitionVersion pending = request(importAs(1), null);
+        refusedAsSystem("system:dev-auto-approve", () -> engine.services.approve(pending.ref(), pending.lockVersion(),
+                null, null));
         assertThat(stored(1).status()).isEqualTo("PENDING_APPROVAL");
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_reject() {
+        DefinitionVersion pending = request(importAs(1), null);
+        refusedAsSystem("system:effective-date", () -> engine.services.reject(pending.ref(), pending.lockVersion(),
+                "no", null));
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_retire() {
+        DefinitionVersion v1 = activate(1);
+        refusedAsSystem("system:effective-date", () -> engine.services.retire(v1.ref(), v1.lockVersion(), "stop",
+                true, null));
+        assertThat(stored(1).status()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_definition_reads() {
+        DefinitionVersion v1 = importAs(1);
+        refusedAsSystem("system:startup", () -> engine.services.find(v1.ref()));
+        refusedAsSystem("system:startup", () -> engine.services.history(v1.ref()));
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_instance_start() {
+        activate(1);
+        refusedAsSystem("system:timer", () -> engine.services.start(new StartRequest(KEY, "KYC-SYS-1", Map.of(), null)));
+        assertThat(count("SELECT count(*) FROM pre_instance")).isZero();
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_instance_read() {
+        activate(1);
+        ProcessInstance instance = start("KYC-SYS-2");
+        refusedAsSystem("system:timer", () -> engine.services.instance(instance.id()));
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_task_completion() {
+        // A user named system:timer must never complete a task: the history would credit the engine
+        activate(1);
+        ProcessInstance instance = start("KYC-SYS-3");
+        ProcessInstance.Task task = instance.tasks().get(0);
+        refusedAsSystem("system:timer", () -> engine.services.complete(task.id(), Map.of("approved", true),
+                task.lockVersion(), "complete-sys-3"));
+        assertThat(count("SELECT count(*) FROM pre_task WHERE status = 'OPEN'")).isEqualTo(1);
     }
 
     @Test

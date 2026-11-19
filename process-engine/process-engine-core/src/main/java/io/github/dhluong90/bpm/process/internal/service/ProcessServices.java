@@ -305,7 +305,6 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment, String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_APPROVE);
-        requireNotSystemIdentity(caller);
         String note = boundedComment(comment, false);
         String requestHash = Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
                 Long.toString(expectedLockVersion), note);
@@ -369,7 +368,6 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     public DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason, String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_APPROVE);
-        requireNotSystemIdentity(caller);
         String why = boundedComment(reason, true);
         String requestHash = Hashes.sha256Parts("reject", caller, ref.key(), Integer.toString(ref.version()),
                 Long.toString(expectedLockVersion), why);
@@ -628,8 +626,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     /**
      * Identities starting with {@code system:} are the engine's own ({@code system:dev-auto-approve},
-     * {@code system:effective-date}, {@code system:startup}). The table's four-eyes CHECK exempts
-     * {@code system:dev-auto-approve}, so no caller may act under such an id in a lifecycle command.
+     * {@code system:effective-date}, {@code system:startup}, {@code system:timer}). No caller may act under such an
+     * id at any entry point: the four-eyes CHECK exempts {@code system:dev-auto-approve}, and history and events would
+     * credit the engine with the caller's work. Engine-internal paths (start-up import, job firing) never resolve a
+     * caller.
      */
     private static void requireNotSystemIdentity(String caller) {
         if (caller.startsWith(SYSTEM_PREFIX)) {
@@ -1033,6 +1033,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (caller == null || caller.isBlank()) {
             throw new UnauthenticatedException("No caller in the security context");
         }
+        // A host identity can never act as the engine: history and events would credit the engine with its work.
+        requireNotSystemIdentity(caller);
         if (!callers.currentPermissions().contains(permission)) {
             throw new PermissionDeniedException("Needs " + permission);
         }
