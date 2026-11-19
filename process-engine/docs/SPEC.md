@@ -192,14 +192,14 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `import kyc-onboarding -> 201 {version: 2, status: DRAFT}; start -> pinned to v1`.
 - **Test ID:** `PRE_018_import_creates_draft_not_active_version`
 
-### PRE-019 The requester of a definition version can never approve it
-- **Traces to:** `TR-SEC-04`, `TR-DEF-03`
+### PRE-019 No maker of a definition version can approve it
+- **Traces to:** `TR-SEC-04`, `TR-DEF-03`, PD-096
 - **Milestone:** M2
-- **Given:** `kyc-onboarding` v2 is `PENDING_APPROVAL`, requested by `alice`; `alice` and `bob` both hold `processes:approve`.
-- **When:** `alice` calls `:approve` through REST, and separately through `DefinitionService.approve`; then `bob` calls `:approve` with `If-Match: "<lockVersion>"`.
-- **Then:** Both of `alice`'s calls fail with `403 SELF_APPROVAL_FORBIDDEN` (Java: `SelfApprovalForbiddenException`, `code()` the same) and write nothing; `bob`'s call returns `200`, `status: ACTIVE`, `approvedBy: bob`.
-- **Example:** `request=alice, approve=alice -> 403 SELF_APPROVAL_FORBIDDEN; approve=bob -> 200 ACTIVE`.
-- **Test ID:** `PRE_019_definition_requester_cannot_approve`
+- **Given:** `kyc-onboarding` v2 was imported by `carol` and is `PENDING_APPROVAL`, requested by `alice`. `alice`, `bob` and `carol` hold `processes:approve`. Setting `lifecycle.approver-must-differ-from` is unset (default `makers`). Second case: the host sets `requester`. Once draft editing exists, a third case: `dave` edited the draft and holds `processes:approve`.
+- **When:** `alice` and `carol` each call `:approve`, through REST and through `DefinitionService.approve`; then `bob` calls `:approve` with `If-Match: "<lockVersion>"`. In the second case, `carol` calls `:approve`. In the third case, `dave` calls `:approve`.
+- **Then:** Under `makers`, `alice` (the requester) and `carol` (the importer) each get `403 SELF_APPROVAL_FORBIDDEN` (Java: `SelfApprovalForbiddenException`), with a detail naming why, and nothing is written. `bob` gets `200`, `status: ACTIVE`, `approvedBy: bob`. Under `requester`, `carol` may approve, `alice` still gets `403`, the start-up log has one WARN naming the relaxed setting, and the approval history row records `approverMustDifferFrom: requester`. In the third case `dave` gets `403` under `makers`. `/api/bpm/meta` lists `lifecycle.approver-must-differ-from` with the active value.
+- **Example:** `makers: requester alice -> 403, importer carol -> 403, bob -> 200 ACTIVE; requester mode: carol -> 200, alice -> 403`.
+- **Test ID:** `PRE_019_no_maker_of_a_definition_version_can_approve`
 
 ### PRE-020 An approved version takes effect on its effective date and retires the previous one
 - **Traces to:** `TR-DEF-03`, `TR-DET-01`
@@ -505,3 +505,12 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** (a) `200` with status `CANCELLED`, the task `CANCELLED` and `endedAt` set; one `INSTANCE_ENDED` history entry carrying the reason and one `processes.instance.cancelled.v1`, both in the transaction of the change; the replay returns the same body and writes nothing; the other reason is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; the second cancel is `409 INVALID_STATE`. (b) One `200` and one `409 VERSION_CONFLICT`, one history entry. (c) Four `200` with one body, one history entry. (d) `409 VERSION_CONFLICT`, `403 PERMISSION_DENIED`, `428 PRECONDITION_REQUIRED`; nothing is written.
 - **Example:** `cancel(I1, If-Match "1", k1) -> 200 CANCELLED; replay -> same body; second cancel -> 409 INVALID_STATE`.
 - **Test ID:** `PRE_050_cancel_is_idempotent_locked_and_ends_tokens_and_tasks`
+
+### PRE-052 The requester withdraws their own pending definition, and it returns to draft without a rejection
+- **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-097
+- **Milestone:** M2
+- **Given:** `kyc-onboarding` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`, who holds `processes:author`; v1 is `ACTIVE`; `bob` holds `processes:approve`.
+- **When:** `alice` sends `POST /api/bpm/processes/v1/definitions/kyc-onboarding/versions/2:withdraw` with `Idempotency-Key`, `If-Match: "3"` and an optional reason. Failure cases: `bob` withdraws v2; `alice` rejects v2 with `:reject`; `alice` withdraws with a stale `If-Match`; `alice` withdraws v1.
+- **Then:** `200`. v2 is `DRAFT` with the request cleared, one history row `WITHDRAWN` (actor `alice`, the reason or null) and one `processes.definition.withdrawn.v1`. No rejection is recorded, v1 stays in effect and nothing is published. A replay returns the same answer and writes nothing. `bob` gets `403 PERMISSION_DENIED`; `alice`'s `:reject` gets `403 SELF_APPROVAL_FORBIDDEN` with a detail pointing to `:withdraw`; the stale `If-Match` gets `409 VERSION_CONFLICT`; v1 gets `409 INVALID_STATE`. No failure case changes anything.
+- **Example:** `alice withdraws her pending v2 -> DRAFT, WITHDRAWN, v1 still active; alice rejects her own -> 403, use withdraw`.
+- **Test ID:** `PRE_052_requester_withdraws_own_pending_definition_to_draft`
