@@ -49,4 +49,6 @@ An intermediate timer catch event (`timeDuration` such as `P3D`, or `timeDate` w
 | `horus.bpm.processes.jobs.poll-interval`, `batch-size` | `1s`, `32` | Idle poll pause and rows per claim |
 | `horus.bpm.processes.jobs.max-attempts`, `retry-backoff` | `3`, `10s` | Retries of a failing firing, then `FAILED` |
 
+The poller survives an `Error` in one poll and logs it; a `VirtualMachineError` stops it and turns the `processEngineJobs` health contributor `DOWN` (details: replica id, last successful poll), so the orchestrator restarts the host.
+
 The proof is `ExactlyOnceTimersTest` in `process-engine-postgres`: four replicas on one PostgreSQL database fire 120 due timers, each exactly once, while a fifth replica that stalled past its lease fires none of its old claims.
