@@ -14,13 +14,14 @@ RLE-018 M2
 RLE-021 M1
 RLE-022 M1
 RLE-023 M1
-RLE-024 M1
 RLE-026 M1
 RLE-027 M1
+# RLE-028: the equal-hash half is tested (#233); the diff endpoint arrives with #165.
 RLE-028 M1
 RLE-029 M1
 RLE-030 M1
 RLE-031 M1
+# RLE-032: the JSON and DMN round trips keep the hash (#233); YAML export and format=xlsx are not tested yet.
 RLE-032 M1
 RLE-033 M1
 RLE-034 M1

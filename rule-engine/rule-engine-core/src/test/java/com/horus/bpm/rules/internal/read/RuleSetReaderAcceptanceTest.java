@@ -167,6 +167,54 @@ class RuleSetReaderAcceptanceTest {
         assertThat(fromWindows.canonicalHash()).isEqualTo(fromUnix.canonicalHash());
     }
 
+    @Test
+    void RLE_024_v1_rule_set_round_trips_through_dmn_model() {
+        // Given card-fee.yaml, every cell already in normal form, and the RFC 8785 hash of that document
+        String expectedHash = com.horus.bpm.rules.internal.json.Hashes.sha256(
+                com.horus.bpm.rules.internal.service.CardFee.CANONICAL);
+
+        // When the v1 reader builds the model and the canonical writer prints it back
+        ParsedRuleSet parsed = RuleSetReader.read(SourceFormat.YAML, resource("/rules/card-fee.yaml"));
+
+        // Then one Definitions card-fee holding one Decision card-fee with a FIRST table, 2 inputs, 1 output, R1 to R3
+        com.horus.bpm.rules.internal.model.Definitions model = parsed.model();
+        assertThat(model.name()).isEqualTo("card-fee");
+        assertThat(model.decisions()).hasSize(1);
+        assertThat(model.decision().id()).isEqualTo("card-fee");
+        com.horus.bpm.rules.internal.model.DecisionTable table = model.decision().table();
+        assertThat(table.hitPolicy()).isEqualTo(com.horus.bpm.rules.internal.model.HitPolicy.FIRST);
+        assertThat(table.inputs()).extracting(com.horus.bpm.rules.internal.model.InputClause::name)
+                .containsExactly("tier", "txCount");
+        assertThat(table.outputs()).extracting(com.horus.bpm.rules.internal.model.OutputClause::name).containsExactly("fee");
+        assertThat(table.rules()).extracting(com.horus.bpm.rules.internal.model.Rule::id).containsExactly("R1", "R2", "R3");
+        // and the printed canonical JSON is byte for byte the RFC 8785 document, with that hash
+        assertThat(parsed.canonicalJson()).isEqualTo(com.horus.bpm.rules.internal.service.CardFee.CANONICAL);
+        assertThat(parsed.canonicalHash()).isEqualTo(expectedHash);
+    }
+
+    /** #233: effectiveFrom stays on the model but is never printed, so it is outside the behaviour hash. */
+    @Test
+    void RLE_020_effective_from_is_kept_on_the_model_and_left_out_of_the_canonical_form_and_hash() {
+        String unix = new String(resource("/rules/card-fee.yaml"), StandardCharsets.UTF_8);
+        byte[] dated = unix.replace("hitPolicy: first", "effectiveFrom: \"2026-11-01T00:00:00Z\"\nhitPolicy: first")
+                .getBytes(StandardCharsets.UTF_8);
+        byte[] datedLater = unix.replace("hitPolicy: first", "effectiveFrom: \"2027-01-01T07:00:00+07:00\"\nhitPolicy: first")
+                .getBytes(StandardCharsets.UTF_8);
+
+        ParsedRuleSet plain = RuleSetReader.read(SourceFormat.YAML, unix.getBytes(StandardCharsets.UTF_8));
+        ParsedRuleSet first = RuleSetReader.read(SourceFormat.YAML, dated);
+        ParsedRuleSet second = RuleSetReader.read(SourceFormat.YAML, datedLater);
+
+        assertThat(first.model().effectiveFrom()).isEqualTo(java.time.Instant.parse("2026-11-01T00:00:00Z"));
+        assertThat(second.model().effectiveFrom()).isEqualTo(java.time.Instant.parse("2027-01-01T00:00:00Z"));
+        assertThat(first.canonicalJson()).doesNotContain("effectiveFrom")
+                .isEqualTo(second.canonicalJson()).isEqualTo(plain.canonicalJson())
+                .isEqualTo(com.horus.bpm.rules.internal.service.CardFee.CANONICAL);
+        assertThat(first.canonicalHash()).isEqualTo(second.canonicalHash()).isEqualTo(plain.canonicalHash());
+        // and the stored canonical form reads back without a date: the date lives on the version row only
+        assertThat(RuleSetReader.readCanonical(first.canonicalJson()).effectiveFrom()).isNull();
+    }
+
     static byte[] resource(String path) {
         try (InputStream in = RuleSetReaderAcceptanceTest.class.getResourceAsStream(path)) {
             return in.readAllBytes();
