@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:event:rules.version.publish-requested.v1",
+  "title": "rules.version.publish-requested.v1",
+  "description": "Written to the Rule Engine outbox in the transaction where an author requests publication of a DRAFT version (POST .../versions/{v}:request-publish, DESIGN section 3.3). The version is now PENDING_APPROVAL and frozen. The outbox row id is the event id. Additive changes only within v1.",
+  "type": "object",
+  "required": [
+    "eventType",
+    "ruleSet",
+    "version",
+    "tenantId",
+    "actor",
+    "occurredAt",
+    "canonicalHash",
+    "requestedBy",
+    "effectiveFrom"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "eventType": {
+      "const": "rules.version.publish-requested.v1"
+    },
+    "ruleSet": {
+      "description": "Rule set name, kebab-case.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "version": {
+      "description": "Version number of the rule set, not the lock version.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "tenantId": {
+      "description": "The tenant, from the authenticated context; never from a request body.",
+      "type": "string"
+    },
+    "actor": {
+      "description": "Who sent the command.",
+      "type": "string"
+    },
+    "occurredAt": {
+      "description": "When the transition committed, ISO 8601 UTC.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "canonicalHash": {
+      "description": "SHA-256 of the canonical document, lower-case hex: the behaviour under four eyes (ADR-0026). effectiveFrom is not part of it.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "requestedBy": {
+      "description": "Who requested publication; always equal to actor. The approver must be someone else.",
+      "type": "string"
+    },
+    "effectiveFrom": {
+      "description": "The instant the version is asked to take effect, ISO 8601 UTC, or null for 'at approval'. Version metadata, outside canonicalHash.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  },
+  "examples": [
+    {
+      "eventType": "rules.version.publish-requested.v1",
+      "ruleSet": "card-fee",
+      "version": 2,
+      "tenantId": "bank-a",
+      "actor": "lan",
+      "occurredAt": "2026-12-10T03:00:00Z",
+      "canonicalHash": "3f1c9a5e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d",
+      "requestedBy": "lan",
+      "effectiveFrom": "2027-01-01T00:00:00Z"
+    }
+  ]
+}
