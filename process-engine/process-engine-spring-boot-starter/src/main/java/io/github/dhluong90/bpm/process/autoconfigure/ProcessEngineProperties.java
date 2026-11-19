@@ -17,6 +17,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param definitions definition import settings
  * @param idempotencyRetention how long an idempotency record answers replays
  * @param security mapping of the host's roles to engine permissions
+ * @param handlers local step settings
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -24,7 +25,8 @@ public record ProcessEngineProperties(
         @DefaultValue("true") boolean migrateOnStart,
         @DefaultValue Definitions definitions,
         @DefaultValue("PT24H") Duration idempotencyRetention,
-        @DefaultValue Security security) {
+        @DefaultValue Security security,
+        @DefaultValue Handlers handlers) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -57,6 +59,19 @@ public record ProcessEngineProperties(
             }
             locations = List.copyOf(locations);
             startupTenants = List.copyOf(startupTenants);
+        }
+    }
+
+    /**
+     * @param slowCallWarning a local handler or decision that takes longer is logged at WARN: it holds the instance
+     *     row lock and a pool connection for its whole duration, which usually means a network call in a handler
+     */
+    public record Handlers(@DefaultValue("200ms") Duration slowCallWarning) {
+
+        public Handlers {
+            if (slowCallWarning.isNegative() || slowCallWarning.isZero()) {
+                throw new IllegalArgumentException("horus.bpm.processes.handlers.slow-call-warning must be positive");
+            }
         }
     }
 

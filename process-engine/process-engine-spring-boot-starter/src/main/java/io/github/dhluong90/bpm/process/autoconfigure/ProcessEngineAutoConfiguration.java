@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.autoconfigure;
 
+import com.horus.bpm.host.spi.EngineAccess;
 import com.horus.bpm.host.spi.ModuleDescriptor;
 import com.horus.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
@@ -27,7 +28,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import javax.sql.DataSource;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -35,7 +35,6 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnSingleCandidate;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -59,7 +58,10 @@ import org.springframework.transaction.PlatformTransactionManager;
     "org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration",
     "org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration",
     "com.horus.bpm.rules.autoconfigure.RuleEngineAutoConfiguration"
-}, beforeName = "com.horus.bpm.host.autoconfigure.HostMetadataAutoConfiguration")
+}, beforeName = {
+    "com.horus.bpm.host.autoconfigure.EngineAccessAutoConfiguration",
+    "com.horus.bpm.host.autoconfigure.HostMetadataAutoConfiguration"
+})
 @ConditionalOnSingleCandidate(DataSource.class)
 @ConditionalOnProperty(prefix = "horus.bpm.processes", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(ProcessEngineProperties.class)
@@ -121,7 +123,8 @@ public class ProcessEngineAutoConfiguration {
                 EngineDefaults.MAX_XML_DEPTH, EngineDefaults.MAX_XML_ELEMENTS, 0));
         return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
-                new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique())), publisher,
+                new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
+                        properties.handlers().slowCallWarning()), publisher,
                 properties.toSettings(), BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES));
     }
@@ -158,51 +161,20 @@ public class ProcessEngineAutoConfiguration {
                 PERMISSIONS, properties.security().rolePermissions());
     }
 
-    /** Default resolvers on Spring Security; a host bean of the same type replaces each. */
-    @Configuration(proxyBeanMethods = false)
-    @ConditionalOnClass(name = "org.springframework.security.core.context.SecurityContextHolder")
-    static class SecurityResolverConfiguration {
-
-        @Bean
-        @ConditionalOnMissingBean
-        CallerResolver processEngineCallerResolver(ProcessEngineProperties properties) {
-            return SecurityContextResolvers.callers(properties.security().rolePermissions());
-        }
-
-        @Bean
-        @ConditionalOnMissingBean
-        TenantResolver processEngineTenantResolver(ObjectProvider<com.horus.bpm.host.spi.TenantResolver> host,
-                Environment environment) {
-            com.horus.bpm.host.spi.TenantResolver resolver = host.getIfUnique();
-            if (resolver == null) {
-                LOG.warn("The host defines no TenantResolver: every Process Engine call is refused with UNAUTHENTICATED.");
-                return () -> null;
-            }
-            return SecurityContextResolvers.tenants(resolver, environment.getProperty("horus.bpm.tenancy.claim",
-                    "tenant_id"));
-        }
+    /**
+     * Default caller and tenant from the host contract's {@code EngineAccess} (bpm-host-metadata); a host bean of
+     * the same type replaces each. Without a host contract every call is refused as unauthenticated.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    CallerResolver processEngineCallerResolver(ObjectProvider<EngineAccess> access) {
+        return EngineAccessResolvers.callers(access::getIfAvailable);
     }
 
-    /** Without Spring Security every call is refused until the host declares its resolvers. */
-    @Configuration(proxyBeanMethods = false)
-    @ConditionalOnMissingClass("org.springframework.security.core.context.SecurityContextHolder")
-    static class NoSecurityResolverConfiguration {
-
-        @Bean
-        @ConditionalOnMissingBean
-        CallerResolver processEngineCallerResolver() {
-            return new CallerResolver() {
-                @Override
-                public String currentCallerId() {
-                    return null;
-                }
-
-                @Override
-                public Set<String> currentPermissions() {
-                    return Set.of();
-                }
-            };
-        }
+    @Bean
+    @ConditionalOnMissingBean
+    TenantResolver processEngineTenantResolver(ObjectProvider<EngineAccess> access) {
+        return EngineAccessResolvers.tenants(access::getIfAvailable);
     }
 
     /** REST endpoints in a servlet host. */
