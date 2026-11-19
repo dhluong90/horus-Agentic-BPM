@@ -1,0 +1,19 @@
+# Local development only. The demo users sign in with the host's form or HTTP Basic and carry no tenant
+# attribute, so the engines serve them for this fixed tenant. Refused outside the dev profile.
+horus:
+  bpm:
+    tenancy:
+      dev-tenant: bank-a
+    rules:
+      security:
+        role-permissions:
+          # Dev only: the author and the approver may also evaluate, so the cockpit's Try it works for them.
+          ROLE_PRICING_AUTHOR: [rules:read, rules:author, rules:evaluate]
+          ROLE_PRICING_APPROVER: [rules:read, rules:approve, rules:evaluate]
+          ROLE_TELLER: [rules:evaluate]
+          ROLE_CARD_OFFICER: [rules:evaluate]
+    processes:
+      definitions:
+        # Seed the sample process for the demo tenant and activate it without approval (dev profile only).
+        startup-tenants: [bank-a]
+        auto-approve: true
