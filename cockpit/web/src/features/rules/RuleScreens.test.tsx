@@ -11,7 +11,7 @@ let calls: { method: string; path: string; key: string | null }[] = [];
 
 beforeEach(() => {
   calls = [];
-  window.localStorage.setItem(KNOWN_RULE_SETS.key, KNOWN_RULE_SETS.value);
+  for (const { key, value } of KNOWN_RULE_SETS) window.localStorage.setItem(key, value);
   mockHost.events.on('request:start', ({ request }) => {
     const path = decodeURIComponent(new URL(request.url).pathname);
     if (path.startsWith('/api/bpm/rules')) calls.push({ method: request.method, path: path.replace('/api/bpm/rules/v1', ''), key: request.headers.get('Idempotency-Key') });

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { HostCallError } from '../hostError';
 import { csrfToken } from '../hostCall';
-import { listVersions } from './catalogue';
+import { knownRuleSets, listVersions, rememberRuleSet } from './catalogue';
 import { createRulesClient } from './rulesClient';
 import { createFakeEngine, demoSeed } from '../../mocks/ruleEngine';
 
@@ -59,6 +59,22 @@ describe('rules client', () => {
     expect(versions.map((v) => [v.version, v.status])).toEqual([[1, 'PUBLISHED'], [2, 'PENDING_APPROVAL']]);
     expect(sent.map((s) => s.url.split('/').pop())).toEqual(['1', '2', '3']);
     expect(await listVersions(createRulesClient('', fetchImpl), 'nothing-here')).toEqual([]);
+  });
+
+  it('CKP_030_probing_stops_at_the_first_not_found', async () => {
+    const { sent, fetchImpl } = engineFetch();
+    await listVersions(createRulesClient('', fetchImpl), 'kyc-risk');
+    expect(sent).toHaveLength(2);
+  });
+
+  it('CKP_030_remembered_rule_sets_are_kept_per_user', () => {
+    const lan = { hostId: 'loans', tenant: 'bank-a', userId: 'lan' };
+    const minh = { ...lan, userId: 'minh' };
+    rememberRuleSet(lan, 'card-fee');
+    rememberRuleSet(lan, 'Not A Name');
+    expect(knownRuleSets(lan)).toEqual(['card-fee']);
+    expect(knownRuleSets(minh)).toEqual([]);
+    expect(knownRuleSets({ ...lan, tenant: 'bank-b' })).toEqual([]);
   });
 
   it('TR_UI_02_csrf_token_is_read_from_the_host_cookie', () => {

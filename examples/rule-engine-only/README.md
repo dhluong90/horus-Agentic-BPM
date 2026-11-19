@@ -212,9 +212,9 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choos
 4. As `minh`, open version 2: Changes lists the added and changed rows with the same labels and amounts as the table. Approve it.
 5. As either user, use **Try it**: tier `GOLD` matches R1 and the table marks the row.
 
-A save creates a new draft version each time, because this engine release has no endpoint to replace a draft. Rule sets appear in the list once this browser has imported or opened them by name, because the engine has no list endpoint yet.
+A save creates a new draft version each time, because this engine release has no endpoint to replace a draft. Rule sets appear in the list once you have imported or opened them by name in this browser, because the engine has no list endpoint yet; the list is kept per user.
 
-The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=http://localhost:8080 LIVE_PASSWORD=choose-one npm --prefix cockpit/web run e2e:live`.
+The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=http://localhost:8080 LIVE_PASSWORD=choose-one npm --prefix cockpit/web run e2e:live`. Started without the two properties, as the Docker Compose deployment is, the host gives the demo roles no `rules:evaluate`: Try it then says "You cannot run rules on this service", and the test checks that and skips the Try it step with a note.
 
 ## Rule Engine properties
 
