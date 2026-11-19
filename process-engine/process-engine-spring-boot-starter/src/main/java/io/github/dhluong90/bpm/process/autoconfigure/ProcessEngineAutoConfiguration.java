@@ -5,6 +5,7 @@ import com.horus.bpm.host.spi.ModuleDescriptor;
 import com.horus.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
+import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.TaskService;
 import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnReader;
@@ -165,6 +166,12 @@ public class ProcessEngineAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(ProcessQueryService.class)
+    ProcessQueryService processQueryService(ProcessServices services) {
+        return services;
+    }
+
+    @Bean
     @ConditionalOnMissingBean
     ProcessEngineInitializer processEngineInitializer(ProcessEngineSchemaMigrator migrator, ProcessServices services,
             ProcessEngineProperties properties, ResourceLoader resources) {
@@ -203,8 +210,8 @@ public class ProcessEngineAutoConfiguration {
         @Bean
         @ConditionalOnMissingBean
         ProcessController processEngineController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
-                ProcessEngineProperties properties) {
-            return new ProcessController(definitions, engine, tasks, properties.definitions().maxBytes());
+                ProcessQueryService queries, ProcessEngineProperties properties) {
+            return new ProcessController(definitions, engine, tasks, queries, properties.definitions().maxBytes());
         }
 
         @Bean

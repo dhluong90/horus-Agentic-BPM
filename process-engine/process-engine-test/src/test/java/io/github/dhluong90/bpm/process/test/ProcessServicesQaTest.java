@@ -312,6 +312,17 @@ class ProcessServicesQaTest {
         }
 
         @Override
+        public Optional<StoredDefinition> definitionVersion(String tenant, String key, int version) {
+            return definitions.stream().filter(d -> d.key().equals(key) && d.version() == version).findFirst();
+        }
+
+        @Override
+        public List<io.github.dhluong90.bpm.process.api.DefinitionSummary> definitionKeys(String tenant, String afterKey,
+                int limit, Instant now) {
+            return List.of();
+        }
+
+        @Override
         public void insertDefinition(StoredDefinition definition) {
             definitions.add(definition);
         }
@@ -335,6 +346,12 @@ class ProcessServicesQaTest {
         @Override
         public Optional<InstanceRow> findInstanceByBusinessKey(String tenant, String key, String businessKey) {
             return instances.values().stream().filter(i -> businessKey.equals(i.businessKey())).findFirst();
+        }
+
+        @Override
+        public List<InstanceRow> instances(String tenant, List<String> statuses, String definitionKey, Instant from,
+                Instant to, Instant afterStartedAt, String afterId, int limit) {
+            return List.of();
         }
 
         @Override
@@ -390,6 +407,11 @@ class ProcessServicesQaTest {
                 Instant expiresAt, Instant now) {
             return idempotency.putIfAbsent(operation + "/" + key,
                     new IdempotencyRecord(tenant, operation, key, requestHash, null, expiresAt)) == null;
+        }
+
+        @Override
+        public byte[] engineKey(String name, byte[] candidate, Instant now) {
+            return candidate;
         }
 
         @Override
