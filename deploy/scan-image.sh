@@ -5,7 +5,8 @@
 #
 #   1. No secrets in the layers: no .env, private key or keystore file in any layer, no secret-like
 #      variable in the image config, and none of the values of HORUS_DB_ADMIN_PASSWORD,
-#      HORUS_DB_PASSWORD and HORUS_DEMO_PASSWORD (from the environment or ./.env) anywhere in the saved image.
+#      HORUS_DB_PASSWORD and HORUS_DEMO_PASSWORD anywhere in the saved image. Each value comes from the
+#      environment or, when unset, from its secret file in ./secrets (deploy/create-secrets.sh).
 #   2. Vulnerabilities: Grype scans the image (operating system packages and the Java libraries) with
 #      the repository's .grype.yaml and fails on a high or critical finding.
 #
@@ -23,10 +24,10 @@ WORK="$(mktemp -d)"
 # Keep the exit status: bash 3.2 would otherwise exit with the status of the clean-up.
 trap 'status=$?; rm -rf "$WORK"; exit $status' EXIT
 
-env_value() {
-  local name="$1"
+secret_value() { # secret_value NAME FILE: the variable from the environment, else the secret file
+  local name="$1" file="$ROOT/secrets/$2"
   if [[ -n "${!name:-}" ]]; then printf '%s' "${!name}"; return; fi
-  [[ -f "$ROOT/.env" ]] && sed -n "s/^${name}=//p" "$ROOT/.env" | tail -n 1
+  if [[ -f "$file" ]]; then cat "$file"; fi
 }
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "Image $IMAGE not found; build it first." >&2; exit 2; }
@@ -57,15 +58,18 @@ if docker image inspect "$IMAGE" --format '{{json .Config.Env}}' | grep -i -E '(
   echo "FAIL  secret-like variable in the image config" >&2
   failed=1
 fi
-for name in HORUS_DB_ADMIN_PASSWORD HORUS_DB_PASSWORD HORUS_DEMO_PASSWORD; do
-  value="$(env_value "$name")"
+checked=0
+for pair in HORUS_DB_ADMIN_PASSWORD:db_admin_password HORUS_DB_PASSWORD:db_password HORUS_DEMO_PASSWORD:demo_password; do
+  name="${pair%%:*}"
+  value="$(secret_value "$name" "${pair#*:}")"
   [[ -z "$value" ]] && continue
+  checked=$((checked + 1))
   if grep -a -q -F -- "$value" "$contents"; then
     echo "FAIL  the value of $name is inside the image" >&2
     failed=1
   fi
 done
-(( failed == 0 )) && echo "PASS  no secrets in the image layers or config ($(wc -l < "$listing" | tr -d ' ') files checked)"
+(( failed == 0 )) && echo "PASS  no secrets in the image layers or config ($(wc -l < "$listing" | tr -d ' ') files checked, $checked password values searched)"
 
 # 2. Vulnerabilities
 mkdir -p "$ROOT/target"
