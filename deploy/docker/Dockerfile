@@ -45,7 +45,8 @@ ARG EXAMPLE
 WORKDIR /src
 # Dependency layer: the real package lifecycle of the example host and the modules it needs, run on the
 # POMs alone, puts every dependency and plugin the build uses into /root/.m2/repository in this layer.
-# With no sources the compiler skips its annotation processor, so that one is fetched by name.
+# With no sources the compiler skips its annotation processor, so that one is fetched by name. The help
+# and dependency plugins used here are pinned in the parent POM, and the enforcer checks they stay pinned.
 # The layer changes only when a POM, .mvn/ or the licence files (checked by the enforcer) change.
 COPY --from=poms /poms/ ./
 COPY .mvn/ .mvn/
@@ -55,7 +56,7 @@ RUN set -eu; \
     mvn -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests \
       -Dcockpit.bundle.skip=true -Dspring-boot.repackage.skip=true; \
     boot="$(mvn -B -ntp -q -N help:evaluate -Dexpression=spring-boot.version -DforceStdout)"; \
-    mvn -B -ntp -q dependency:get -Dartifact="org.springframework.boot:spring-boot-configuration-processor:${boot}"; \
+    mvn -B -ntp -q -N dependency:get -Dartifact="org.springframework.boot:spring-boot-configuration-processor:${boot}"; \
     find . -name target -type d -prune -exec rm -rf {} +
 COPY . .
 COPY --from=cockpit /out/dist/ /tmp/cockpit-dist/
