@@ -27,7 +27,7 @@ Source: [`extension-points.mmd`](../architecture/diagrams/extension-points.mmd).
 4. Everything configurable, including the controls. Simplest rule to state; a host can switch off four-eyes or masking, which removes the reason a bank adopts the engine.
 
 ## Consequences
-- Requirements `TR-EXT-01` to `TR-EXT-06`.
+- Requirements in [`requirements.md`](../product/requirements.md#configuration-and-extension-adr-0024): `TR-EXT-01` (configurable behaviour with safe defaults), `TR-EXT-02` (documented SPIs with overridable default beans), `TR-EXT-03` (typed, validated properties), `TR-EXT-04` (no business constants in core, review plus ArchUnit), `TR-EXT-05` (controls never switched off), `TR-EXT-06` (veto-only hooks), `TR-EXT-07` (configuration documented on the wiki).
 - Both module DESIGN documents list their properties and SPIs; the business values they had fixed became properties or SPIs on 2026-11-19 (rule engine DESIGN 4.4, process engine DESIGN 6.5).
 - ArchUnit rules: no `System.getenv` or `System.getProperty` in `*-core`; public static numeric or `Duration` constants in `..internal..` only in `EngineDefaults`; every `spi` interface has a default bean in the starter, checked by a context-runner test that replaces it.
 - Design review checklist item: a literal business value in a DESIGN or a pull request is `SHOULD-FIX`, and `BLOCKING` when it weakens a control or forces a fork.
