@@ -16,6 +16,7 @@ export function PreferenceControls() {
           <button
             key={option}
             type="button"
+            className="hit"
             lang={option}
             aria-pressed={locale === option}
             title={LOCALE_NAME[option]}
@@ -27,7 +28,7 @@ export function PreferenceControls() {
           </button>
         ))}
       </div>
-      <button type="button" className="iconbtn" onClick={toggle} aria-label={themeLabel} title={themeLabel}>
+      <button type="button" className="iconbtn hit" onClick={toggle} aria-label={themeLabel} title={themeLabel}>
         {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
       </button>
     </div>

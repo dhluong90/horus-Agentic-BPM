@@ -14,7 +14,7 @@ export function CopyButton({ value }: { value: string }) {
   };
   return (
     <>
-      <button type="button" className="btn btn--quiet btn--small" onClick={() => void copy()}>
+      <button type="button" className="btn btn--quiet btn--small hit" onClick={() => void copy()}>
         {t('action.copyReference')}
       </button>
       <span className="sr-only" role="status" aria-live="polite">

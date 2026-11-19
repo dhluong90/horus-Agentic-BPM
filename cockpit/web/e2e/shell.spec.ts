@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { cspViolations, mockHost } from './mockHost';
+import { cspViolations, mockHost, rememberLocale } from './mockHost';
 
 async function box(locator: Locator) {
   const value = await locator.boundingBox();
@@ -199,5 +199,73 @@ test.describe('theme before the script runs', () => {
       return getComputedStyle(document.body).backgroundColor;
     });
     expect(background).toBe('rgb(11, 15, 23)');
+  });
+});
+
+test.describe('targets and fold (ux-design section 8)', () => {
+  for (const scenario of ['ready', 'me-forbidden', 'signed-out'] as const) {
+    test(`TR_UI_03_every_visible_control_has_a_44px_hit_area_${scenario}`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await rememberLocale(page, 'vi');
+      await mockHost(page, scenario);
+      await page.goto('./');
+      await expect(scenario === 'ready' ? page.getByTestId('header-user') : page.getByRole('alert')).toBeVisible();
+
+      const tooSmall = await page.evaluate(() => {
+        const half = 21; // probe inside a 44 x 44 px box centred on the control
+        const failures: string[] = [];
+        for (const control of document.querySelectorAll<HTMLElement>('button, a[href]')) {
+          const rect = control.getBoundingClientRect();
+          if (rect.width === 0 || rect.bottom < 0 || rect.top > window.innerHeight) continue;
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const probes: Array<[number, number]> = [[cx, cy - half], [cx, cy + half], [cx - half, cy], [cx + half, cy]];
+          const missed = probes.filter(([x, y]) => {
+            const hit = document.elementFromPoint(x, y);
+            return !(hit && (hit === control || control.contains(hit)));
+          });
+          if (missed.length > 0) failures.push(`${control.textContent.trim() || (control.getAttribute('aria-label') ?? '?')} ${Math.round(rect.width)}x${Math.round(rect.height)}`);
+        }
+        return failures;
+      });
+      expect(tooSmall).toEqual([]);
+    });
+  }
+
+  test('CKP_001_primary_action_of_every_error_state_is_above_the_fold_at_1440x900_in_vietnamese', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await rememberLocale(page, 'vi');
+    const cases = [
+      ['me-forbidden', 'Thử lại'],
+      ['me-unauthenticated', 'Thử lại'],
+      ['meta-not-found', 'Thử lại'],
+      ['me-bad-shape', 'Thử lại'],
+      ['signed-out', 'Đăng nhập lại'],
+    ] as const;
+    for (const [scenario, action] of cases) {
+      await page.unrouteAll();
+      await mockHost(page, scenario);
+      await page.goto('./');
+      const button = page.getByRole('button', { name: action });
+      await expect(button, scenario).toBeVisible();
+      await expectInsideViewport(page, button);
+      expect((await box(button)).height, scenario).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test('CKP_001_usual_vietnamese_service_tenant_and_user_are_not_truncated_at_1440', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await rememberLocale(page, 'vi');
+    await mockHost(page, 'ready');
+    await page.goto('./');
+    await expect(page.getByTestId('header-user')).toBeVisible();
+
+    const cut = await page.evaluate(() =>
+      ['header-host', 'header-tenant', 'header-user'].filter((id) => {
+        const el = document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+        return !el || el.scrollWidth > el.clientWidth;
+      }),
+    );
+    expect(cut).toEqual([]);
   });
 });

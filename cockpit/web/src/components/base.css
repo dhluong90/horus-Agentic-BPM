@@ -25,6 +25,7 @@ a { color: var(--accent); }
 }
 .skip {
   position: absolute; left: 12px; top: -60px; z-index: 100;
+  display: inline-flex; align-items: center; min-height: var(--target-min);
   background: var(--surface); color: var(--ink); padding: 8px 12px;
   border-radius: var(--radius-s); box-shadow: var(--sh-2);
 }

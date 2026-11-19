@@ -32,6 +32,16 @@
 
   --radius-s: 6px; --radius-m: 8px; --radius-l: 12px;
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px;
+  /* Diagram canvas, money direction, charts, diffs, releases (ux-design.md section 6.4) */
+  --canvas: #FAFBFC; --dot: rgba(15, 23, 42, .09);
+  --node: #FFFFFF; --node-stroke: #7B879A; --edge: #7E8A9C; --edge-label: #475569;
+  --glow: rgba(2, 132, 199, .40); --token: #0369A1;
+  --gain: #059669; --loss: #DC2626; --net: #334155; --ref: #8792A3; --spark-max: #075985;
+  --rel-1: #075985; --rel-2: #0284C7; --rel-3: #38BDF8; --rel-later: #64748B;
+  --diff-add: #E3F6EC; --diff-del: #FCEBEB; --diff-mod: #E9ECFC;
+  --sh-node: 0 4px 10px rgba(15, 23, 42, .16);
+  --node-hover: drop-shadow(0 4px 10px rgba(15, 23, 42, .16));
+  --target-min: 44px;
   color-scheme: light;
 }
 
@@ -54,6 +64,14 @@
   --scrim: rgba(2, 6, 12, .66);
   --select: rgba(14, 165, 233, .12);
   --on-accent-fill: #04131D;
+  --canvas: #0F1520; --dot: rgba(148, 163, 184, .12);
+  --node: #161E2C; --node-stroke: #5F6C84; --edge: #5F6C84; --edge-label: #AAB4C5;
+  --glow: rgba(56, 189, 248, .50); --token: #0C9AD9;
+  --gain: #0E9F6E; --loss: #EF4444; --net: #AAB4C5; --ref: #5A677D; --spark-max: #7DD3FC;
+  --rel-1: #BAE6FD; --rel-2: #38BDF8; --rel-3: #0284C7; --rel-later: #7C889D;
+  --diff-add: rgba(16, 185, 129, .14); --diff-del: rgba(239, 68, 68, .15); --diff-mod: rgba(99, 102, 241, .16);
+  --sh-node: 0 0 0 1px rgba(148, 163, 184, .34), 0 6px 16px rgba(0, 0, 0, .6);
+  --node-hover: drop-shadow(0 0 1px rgba(148, 163, 184, .9)) drop-shadow(0 6px 16px rgba(0, 0, 0, .6));
   color-scheme: dark;
 }
 
@@ -77,6 +95,14 @@
     --scrim: rgba(2, 6, 12, .66);
     --select: rgba(14, 165, 233, .12);
     --on-accent-fill: #04131D;
+    --canvas: #0F1520; --dot: rgba(148, 163, 184, .12);
+    --node: #161E2C; --node-stroke: #5F6C84; --edge: #5F6C84; --edge-label: #AAB4C5;
+    --glow: rgba(56, 189, 248, .50); --token: #0C9AD9;
+    --gain: #0E9F6E; --loss: #EF4444; --net: #AAB4C5; --ref: #5A677D; --spark-max: #7DD3FC;
+    --rel-1: #BAE6FD; --rel-2: #38BDF8; --rel-3: #0284C7; --rel-later: #7C889D;
+    --diff-add: rgba(16, 185, 129, .14); --diff-del: rgba(239, 68, 68, .15); --diff-mod: rgba(99, 102, 241, .16);
+    --sh-node: 0 0 0 1px rgba(148, 163, 184, .34), 0 6px 16px rgba(0, 0, 0, .6);
+    --node-hover: drop-shadow(0 0 1px rgba(148, 163, 184, .9)) drop-shadow(0 6px 16px rgba(0, 0, 0, .6));
     color-scheme: dark;
   }
 }
