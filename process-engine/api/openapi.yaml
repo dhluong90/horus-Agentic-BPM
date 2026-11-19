@@ -335,4 +335,7 @@ components:
         nodeId: { type: string, description: Present on `STEP_FAILED` }
         reason:
           type: string
-          description: Present on `STEP_FAILED`, for example `UNHANDLED_BUSINESS_ERROR`, `DECISION_NO_MATCH`, `STEP_LIMIT`
+          description: >-
+            Present on `STEP_FAILED`, for example `UNHANDLED_BUSINESS_ERROR`, `DECISION_NO_MATCH`, `STEP_LIMIT`,
+            `NO_PATH` (an exclusive gateway with no true condition and no default flow) or `CONDITION_ERROR`
+            (a condition that compares values of different types or currencies)
