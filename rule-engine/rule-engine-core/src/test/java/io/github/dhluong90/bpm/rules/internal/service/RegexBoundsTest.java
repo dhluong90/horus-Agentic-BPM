@@ -187,13 +187,14 @@ class RegexBoundsTest {
             List<Future<Set<String>>> adversarial = new ArrayList<>();
             for (int i = 0; i < 10; i++) {
                 adversarial.add(pool.submit(() -> {
-                    // Each task keeps one adversarial match running until the normal decisions are measured.
+                    // Each task keeps one adversarial match running until the normal decisions are measured. It
+                    // runs at least once, so a task scheduled late still reports its outcome after the stop.
                     Set<String> reasons = new java.util.HashSet<>();
                     started.countDown();
-                    while (!stop.get()) {
+                    do {
                         reasons.add(rules.evaluateWithReason(DecisionInput.of(Map.of("reference", ADVERSARIAL)))
                                 .reason());
-                    }
+                    } while (!stop.get());
                     return reasons;
                 }));
             }
