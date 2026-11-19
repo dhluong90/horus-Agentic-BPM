@@ -60,6 +60,21 @@
         <artifactId>rule-engine-spring-boot-starter</artifactId>
         <version>${project.version}</version>
       </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
+        <artifactId>process-engine-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
+        <artifactId>process-engine-bpmn</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
+        <artifactId>process-engine-test</artifactId>
+        <version>${project.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 </project>
