@@ -98,7 +98,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 ### WARNINGS_NOT_ACKNOWLEDGED
 `409`. The version carries a warning the host requires the approver to accept, for example an input that looks like personal data and would be logged without masking (PD-104). The body lists the `warnings` (`code`, `input`, `matchedName`) and the codes the host requires (`setting`, from `lifecycle.acknowledge-warnings`). Nothing was published.
-- **What to do:** read the warnings. To publish anyway, send the approval again with `"acknowledgedWarnings": ["UNMASKED_PERSONAL_DATA"]`; the acceptance is recorded on the approval history row and the published event.
+- **What to do:** read the warnings. To publish anyway, send the approval again with exactly the pairs in `warnings`, for example `"acknowledgedWarnings": [{ "code": "UNMASKED_PERSONAL_DATA", "input": "nationalId" }]`. The engine accepts only the exact current set; the acceptance is recorded on the approval history row and the published event.
 - **What not to do:** a client never retries on its own with the codes added. Otherwise nobody would have accepted the risk.
 
 ### SELF_APPROVAL_FORBIDDEN
