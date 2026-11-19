@@ -219,7 +219,7 @@ public final class RuleSetReader {
             if (mask != null && !mask.isBoolean()) {
                 throw invalid("Input '" + inputName + "': mask must be true or false");
             }
-            inputs.add(new InputClause(inputName, type(input, inputName), mask != null && mask.booleanValue()));
+            inputs.add(new InputClause(inputName, type(input, inputName), mask == null ? null : mask.booleanValue()));
         }
         List<OutputClause> outputs = new ArrayList<>();
         Set<String> outputNames = new HashSet<>();

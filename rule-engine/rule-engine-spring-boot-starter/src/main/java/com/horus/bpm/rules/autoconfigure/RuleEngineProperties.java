@@ -23,6 +23,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
  * @param authoring how rule changes may be made on this host
+ * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
+ * @param decisionLog what the decision log records
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -34,7 +36,59 @@ public record RuleEngineProperties(
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle,
         @DefaultValue Security security,
-        @DefaultValue Authoring authoring) {
+        @DefaultValue Authoring authoring,
+        @DefaultValue Masking masking,
+        @DefaultValue DecisionLog decisionLog) {
+
+    /**
+     * Keys of the keyed fingerprints (HMAC-SHA256) of masked inputs (RLE-012, RLE-035). Supply every key from an
+     * environment variable or a secret store, never from a file in the repository. A host that needs a key per
+     * tenant from a vault declares its own {@code MaskingPolicy} bean instead.
+     *
+     * @param hmacKey Base64 key of at least 32 bytes after decoding, for every tenant without its own key. When
+     *     unset, the shared {@code horus.bpm.masking.hmac-key} is used. Start-up fails when a rule set masks an input
+     *     and its tenant has no valid key
+     * @param tenants per-tenant settings, by tenant id; a tenant listed here with a key never uses the host key
+     */
+    public record Masking(String hmacKey, Map<String, TenantMasking> tenants) {
+
+        /** Copies the tenants; unset is empty. */
+        public Masking {
+            tenants = tenants == null ? Map.of() : Map.copyOf(tenants);
+        }
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "Masking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", tenants=" + tenants.keySet() + "]";
+        }
+    }
+
+    /**
+     * Masking settings of one tenant.
+     *
+     * @param hmacKey the tenant's Base64 key of at least 32 bytes after decoding; unset uses the host key
+     * @param maskDefault whether this tenant's inputs that declare no {@code mask} are masked; unset uses
+     *     {@code decision-log.mask-default}
+     */
+    public record TenantMasking(String hmacKey, Boolean maskDefault) {
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "TenantMasking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", maskDefault=" + maskDefault
+                    + "]";
+        }
+    }
+
+    /**
+     * What the decision log records.
+     *
+     * @param maskDefault whether inputs that declare no {@code mask} are masked, for every tenant without its own
+     *     setting; default false. An input with {@code mask: false} is never masked by this default
+     */
+    public record DecisionLog(Boolean maskDefault) {
+    }
 
     /**
      * How rule changes may be made on this host (PD-075, PD-094).

@@ -144,4 +144,12 @@ public interface RuleStore {
      * @return the key, or empty
      */
     Optional<byte[]> findEngineKey(String name);
+
+    /**
+     * Lists the declared inputs of every version that is not retired, in every tenant. Engine-internal, used once at
+     * start-up outside any request; never exposed to a caller.
+     *
+     * @return the inputs, by tenant, rule set and version
+     */
+    List<VersionInputs> liveVersionInputs();
 }

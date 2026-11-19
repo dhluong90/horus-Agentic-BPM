@@ -3,6 +3,7 @@ package com.horus.bpm.rules.internal.json;
 import com.horus.bpm.rules.api.DecisionInput;
 import com.horus.bpm.rules.api.DecisionResult;
 import com.horus.bpm.rules.api.InputInvalidException;
+import com.horus.bpm.rules.api.MaskingKey;
 import com.horus.bpm.rules.api.Money;
 import com.horus.bpm.rules.api.RuleSetVersion;
 import com.horus.bpm.rules.api.SourceFormat;
@@ -86,21 +87,68 @@ public final class EngineValues {
 
     /**
      * Converts the declared inputs to the JSON object written to the decision log. Undeclared keys are
-     * dropped, never logged (data minimisation); declared inputs with {@code mask: true} are replaced.
+     * dropped, never logged (data minimisation); a masked input with a value is replaced by its keyed
+     * fingerprint (RLE-012). A null value stays null: there is nothing to hide, and an auditor sees it was missing.
      *
      * @param input the inputs as supplied
      * @param declared the rule set's input clauses
+     * @param maskByDefault whether inputs that declare no {@code mask} are masked
+     * @param key the tenant's masking key; required when an input with a value is masked
      * @return the object
+     * @throws IllegalStateException when an input must be masked and there is no key; callers check first
      */
-    public static ObjectNode loggedInputs(DecisionInput input, List<InputClause> declared) {
+    public static ObjectNode loggedInputs(DecisionInput input, List<InputClause> declared, boolean maskByDefault,
+            MaskingKey key) {
         ObjectNode node = EngineJson.NODES.objectNode();
         for (InputClause clause : declared) {
             if (input.values().containsKey(clause.name())) {
                 Object v = input.get(clause.name());
-                node.set(clause.name(), clause.masked() && v != null ? EngineJson.NODES.stringNode("masked") : value(v));
+                if (v != null && clause.masked(maskByDefault)) {
+                    if (key == null) {
+                        throw new IllegalStateException("No masking key for a masked input");
+                    }
+                    node.put(clause.name(), fingerprint(key, v));
+                } else {
+                    node.set(clause.name(), value(v));
+                }
             }
         }
         return node;
+    }
+
+    /**
+     * Returns the keyed fingerprint of one input value. The fingerprinted text is the value's plain form, so an
+     * auditor can compute it outside the engine: a string as it is (the fingerprint of a national id is the
+     * HMAC-SHA256 of its UTF-8 bytes); a number as its decimal digits without trailing zeros ({@code 5} and
+     * {@code 5.00} are one value); money as currency, colon and minor units ({@code VND:50000000}); a boolean, date
+     * or datetime as its ISO text; a list as its canonical JSON (RFC 8785).
+     *
+     * @param key the tenant's key
+     * @param value the plain value, not null
+     * @return {@code hmac:<hex>}
+     */
+    public static String fingerprint(MaskingKey key, Object value) {
+        return key.fingerprint(plainForm(value));
+    }
+
+    private static String plainForm(Object value) {
+        return switch (value) {
+            case String text -> text;
+            case BigDecimal number -> plainNumber(number);
+            case BigInteger number -> number.toString();
+            case Long number -> number.toString();
+            case Integer number -> number.toString();
+            case Short number -> number.toString();
+            case Money money -> money.currency() + ":" + money.minorUnits();
+            case Boolean flag -> flag.toString();
+            case LocalDate date -> date.toString();
+            case Instant instant -> instant.toString();
+            default -> CanonicalJson.write(value(value));
+        };
+    }
+
+    private static String plainNumber(BigDecimal number) {
+        return number.signum() == 0 ? "0" : number.stripTrailingZeros().toPlainString();
     }
 
     /**

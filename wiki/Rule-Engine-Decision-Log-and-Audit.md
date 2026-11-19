@@ -63,7 +63,25 @@ inputs:
   - { name: nationalId, type: string, mask: true }
 ```
 
-The log stores a keyed HMAC of the value instead of the value. The same national id always produces the same token, so an auditor can still search for all decisions about one person without reading the id. The cockpit and the REST API render it masked (TR-SEC-05). To mask every input of every rule set by default, set `decision-log.mask-default: true`.
+The log stores a keyed HMAC of the value instead of the value, `hmac:` followed by 64 hex digits. The same national id always produces the same token under one key, so an auditor can still find every decision about one person without the id being stored. The REST API returns it masked (TR-SEC-05); the key setting and the start-up check are described in [[Rule Engine Configuration]].
+
+To find the decisions about one person, post the plain value; the engine fingerprints it with your tenant's key before it searches:
+
+```bash
+curl -s -X POST "$HOST/api/bpm/rules/v1/decisions:find-by-masked-input" \
+  -H "Authorization: Bearer $AUDITOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"ruleSet": "minor-review", "input": "nationalId", "value": "079090001234",
+       "from": "2027-01-01T00:00:00Z", "to": "2027-02-01T00:00:00Z"}'
+```
+
+```json
+{ "data": [ { "decisionId": "01KF2Q8Z0RQ6V2Y8M1C4N5P7T9", "ruleSet": "minor-review", "version": 1,
+              "outcome": "OK", "inputs": { "nationalId": "hmac:7d8c2f0a…", "age": 16 },
+              "outputs": { "route": "MANUAL" }, "matchedRuleIds": ["R1"] } ],
+  "truncated": false }
+```
+
+Each tenant can have its own key, so two banks on one host store different tokens for the same id and never find each other's decisions. To mask every input that declares nothing, set `decision-log.mask-default: true` for the host or `masking.tenants.<tenant>.mask-default: true` for one tenant; `mask: false` keeps an input in plain text.
 
 ## Choose transactional or async logging
 

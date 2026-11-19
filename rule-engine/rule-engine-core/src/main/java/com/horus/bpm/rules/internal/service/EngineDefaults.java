@@ -97,6 +97,18 @@ public final class EngineDefaults {
     /** Longest accepted {@code X-Correlation-Id}; a longer or malformed one is replaced by a generated id. */
     public static final int CORRELATION_ID_MAX_LENGTH = 128;
 
+    /**
+     * Longest period of one decision-log search, from inclusive to exclusive (ADR-0015): at most two monthly
+     * partitions are read. A bound of the engine.
+     */
+    public static final java.time.Duration QUERY_MAX_RANGE = java.time.Duration.ofDays(31);
+
+    /** The host setting of the masking key, named in every message about a missing or invalid key (RLE-035). */
+    public static final String MASKING_KEY_PROPERTY = "horus.bpm.rules.masking.hmac-key";
+
+    /** Default of {@code horus.bpm.rules.decision-log.mask-default}: inputs that declare no {@code mask} are logged. */
+    public static final boolean MASK_DEFAULT = false;
+
     private EngineDefaults() {
     }
 }

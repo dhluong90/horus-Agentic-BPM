@@ -1,15 +1,18 @@
 package com.horus.bpm.rules.autoconfigure;
 
 import com.horus.bpm.host.spi.EngineAccess;
+import com.horus.bpm.rules.api.DecisionLogService;
 import com.horus.bpm.rules.api.RuleEngine;
 import com.horus.bpm.rules.api.VersionService;
 import com.horus.bpm.rules.internal.service.RuleEngines;
 import com.horus.bpm.rules.postgres.PostgresRuleEngines;
 import com.horus.bpm.rules.postgres.RuleEngineTransactions;
 import com.horus.bpm.rules.rest.DecisionController;
+import com.horus.bpm.rules.rest.DecisionLogController;
 import com.horus.bpm.rules.rest.ProblemDetails;
 import com.horus.bpm.rules.rest.RuleSetController;
 import com.horus.bpm.rules.spi.CallerResolver;
+import com.horus.bpm.rules.spi.MaskingPolicy;
 import com.horus.bpm.rules.spi.TenantResolver;
 import java.time.Clock;
 import java.util.Set;
@@ -23,6 +26,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClas
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 
 /**
  * The engine's entry points ({@link RuleEngine}, {@link VersionService}), the security SPIs and the
@@ -44,12 +48,36 @@ class RuleEngineServicesConfiguration {
         return EngineAccessResolvers.tenants(access::getIfAvailable);
     }
 
+    /**
+     * Masking from {@code horus.bpm.rules.masking.*} and {@code decision-log.mask-default}; a host bean, for example
+     * one reading a key per tenant from a vault, replaces it.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    MaskingPolicy ruleEngineMaskingPolicy(RuleEngineProperties properties, Environment environment) {
+        return PropertyMaskingPolicy.from(properties,
+                environment.getProperty(PropertyMaskingPolicy.SHARED_KEY_PROPERTY));
+    }
+
     @Bean
     @ConditionalOnMissingBean
     RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
-            CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties) {
+            CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
+            MaskingPolicy masking) {
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings());
+                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(), masking);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngines engines, MaskingPolicy masking) {
+        return RuleEngineMaskingCheck.of(engines.maskingCheck(), masking);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    DecisionLogService ruleEngineDecisionLogService(RuleEngines engines) {
+        return engines.decisionLog();
     }
 
     @Bean
@@ -119,6 +147,12 @@ class RuleEngineServicesConfiguration {
         @ConditionalOnMissingBean
         DecisionController ruleEngineDecisionController(RuleEngine engine, CallerResolver callers) {
             return new DecisionController(engine, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions, CallerResolver callers) {
+            return new DecisionLogController(decisions, callers);
         }
 
         @Bean

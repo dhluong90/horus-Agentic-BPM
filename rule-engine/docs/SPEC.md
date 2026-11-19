@@ -131,8 +131,8 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Input `nationalId` declared with `mask: true` and host `hmac-key` configured.
 - **When:** Evaluate with `nationalId = "079090001234"`.
-- **Then:** Plaintext `"079090001234"` never appears in `rle_decision.masked_inputs` or `GET /decisions/{id}` REST response; instead a deterministic keyed HMAC token (e.g. `hmac:9f4a...`) is stored so exact-match audit search still works.
-- **Example:** `input="079090001234" -> DB/REST shows "hmac:<hex>", plaintext absent`.
+- **Then:** Plaintext `"079090001234"` never appears in `rle_decision.masked_inputs` or `GET /decisions/{id}` REST response; instead a deterministic keyed HMAC token (e.g. `hmac:9f4a...`) is stored so exact-match audit search still works. An auditor with `rules:log:read` who posts the plain value to `POST /decisions:find-by-masked-input` finds every decision of that value: the engine fingerprints it with the caller's tenant key before the query. Each tenant may hold its own key, so tenants `bank-a` and `bank-b` store different fingerprints of one value and neither tenant's read or search returns the other's decisions. A tenant without a key never logs a masked input in plain text: the decision fails closed with `EVALUATION_ERROR` (row `error_code = MASKING_KEY_MISSING`, no input logged).
+- **Example:** `input="079090001234" -> DB/REST shows "hmac:<hex>", plaintext absent; two decisions of 079090001234 -> both found by the plain value; bank-b's search finds none of bank-a's`.
 - **Test ID:** `RLE_012_masked_inputs_stored_as_keyed_hmac`
 
 ### RLE-013 Decision log participates in host transaction rollback and adds one insert
@@ -379,7 +379,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Rule set `minor-review` with input `nationalId` (`mask: true`) loaded at start-up through `definitions`. Case A: no `horus.bpm.rules.masking.hmac-key`. Case B: a Base64 key that decodes to 31 bytes. Case C: a Base64 key `k32` that decodes to 32 bytes, with log capture on.
 - **When:** The host starts in each case; in case C it evaluates `minor-review` with `nationalId = "079090001234"`, reads the decision through `GET /decisions/{id}` and its explanation, and computes HMAC-SHA256 of `079090001234` under `k32` in the test.
-- **Then:** Cases A and B fail start-up with a message that names `horus.bpm.rules.masking.hmac-key` and the rule set `minor-review`, and no decision is accepted. Case C starts; no log line, response body, problem body, event or metric label contains `k32` or `079090001234`; the stored `masked_inputs.nationalId` equals `hmac:` followed by the hex of the value the test computed, so an exact-match lookup by the masked value finds the decision (`RLE-012`).
+- **Then:** Cases A and B fail start-up with a message that names `horus.bpm.rules.masking.hmac-key` and the rule set `minor-review`, and no decision is accepted. The check covers every version that is not retired, in every tenant, and an input masked by the tenant's `decision-log.mask-default` as well as by `mask: true`; a tenant with its own key setting (`masking.tenants.<tenant>.hmac-key`) is checked against that key only. Case C starts; no log line, response body, problem body, event or metric label contains `k32` or `079090001234`; the stored `masked_inputs.nationalId` equals `hmac:` followed by the hex of the value the test computed, so an exact-match lookup by the masked value finds the decision (`RLE-012`).
 - **Example:** `no key -> start-up fails naming the key setting and minor-review; 31-byte key -> fails; 32-byte key -> starts, 0 occurrences of key or plain value in logs and responses`.
 - **Test ID:** `RLE_035_masking_key_required_at_startup_and_never_leaked`
 

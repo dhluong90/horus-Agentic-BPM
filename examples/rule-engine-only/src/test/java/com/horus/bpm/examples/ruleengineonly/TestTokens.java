@@ -43,6 +43,11 @@ final class TestTokens {
 
     /** Registers the public key and the audience with the host's token validation. */
     static void register(DynamicPropertyRegistry registry) {
+        properties().forEach((name, value) -> registry.add(name, () -> value));
+    }
+
+    /** The token-validation properties of the host, for a host started with command-line arguments. */
+    static Map<String, String> properties() {
         try {
             Path publicKey = Files.createTempFile("rule-lifecycle-it", ".pub");
             Files.writeString(publicKey, "-----BEGIN PUBLIC KEY-----\n"
@@ -50,8 +55,8 @@ final class TestTokens {
                             .encodeToString(KEYS.getPublic().getEncoded())
                     + "\n-----END PUBLIC KEY-----\n");
             publicKey.toFile().deleteOnExit();
-            registry.add("spring.security.oauth2.resourceserver.jwt.public-key-location", () -> "file:" + publicKey);
-            registry.add("spring.security.oauth2.resourceserver.jwt.audiences", () -> AUDIENCE);
+            return Map.of("spring.security.oauth2.resourceserver.jwt.public-key-location", "file:" + publicKey,
+                    "spring.security.oauth2.resourceserver.jwt.audiences", AUDIENCE);
         } catch (java.io.IOException e) {
             throw new IllegalStateException(e);
         }

@@ -93,7 +93,8 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions/{v}:cancel-retire` | M3: withdraw a pending retirement request, with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `GET /rule-sets/{name}/versions/{v}/export` | YAML, JSON or DMN 1.5 export | `rules:read` | |
 | `POST /rule-sets/{name}/versions:import` | Create a draft from YAML or JSON | `rules:author` | `Idempotency-Key` |
-| `GET /decisions/{id}` | One decision; masked inputs stay hashed | `rules:log:read` | |
+| `GET /decisions/{id}` | One decision as logged; masked inputs are `hmac:<hex>`. Another tenant's decision is `404 DECISION_NOT_FOUND` | `rules:log:read` | |
+| `POST /decisions:find-by-masked-input` | Decisions of one rule set, in at most 31 days, whose masked input had a plain value. Body `{ "ruleSet", "input", "value", "from", "to", "limit" }`; the engine fingerprints `value` with your tenant's key, so the value is never stored or put in a URL. Answers `{ "data": [...], "truncated": false }`, newest first | `rules:log:read` | `limit` 1 to 200, default 50 |
 | `GET /decisions/{id}/explain` | Plain-language explanation | `rules:log:read` | |
 | `GET /decisions?ruleSet=&from=&to=&outcome=&matchedRuleId=&cursor=&limit=` | Decision log, newest first. `ruleSet`, `from` and `to` are required; the range is at most 31 days | `rules:log:read` | cursor pagination |
 

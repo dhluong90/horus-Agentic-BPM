@@ -38,6 +38,7 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
     private final boolean migrate;
     private final Clock clock;
     private final RuleEngineCursorKeyInitializer cursorKeys;
+    private final RuleEngineMaskingCheck maskingCheck;
 
     RuleEngineSchemaInitializer(
             RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate, Clock clock) {
@@ -46,11 +47,17 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
 
     RuleEngineSchemaInitializer(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate,
             Clock clock, RuleEngineCursorKeyInitializer cursorKeys) {
+        this(migrator, partitions, migrate, clock, cursorKeys, null);
+    }
+
+    RuleEngineSchemaInitializer(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate,
+            Clock clock, RuleEngineCursorKeyInitializer cursorKeys, RuleEngineMaskingCheck maskingCheck) {
         this.migrator = Objects.requireNonNull(migrator, "migrator must not be null");
         this.partitions = Objects.requireNonNull(partitions, "partitions must not be null");
         this.migrate = migrate;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.cursorKeys = cursorKeys;
+        this.maskingCheck = maskingCheck;
     }
 
     @Override
@@ -75,6 +82,11 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
         List<String> created = partitions.ensureCurrentAndNextMonth(clock.instant());
         if (!created.isEmpty()) {
             LOG.info("Rule Engine created decision log partitions " + created);
+        }
+        if (maskingCheck != null) {
+            // Before any key is loaded or request served: a host that would log personal data in plain text, or
+            // refuse every masked decision, does not start (RLE-035).
+            maskingCheck.verify();
         }
         if (cursorKeys != null) {
             cursorKeys.start();

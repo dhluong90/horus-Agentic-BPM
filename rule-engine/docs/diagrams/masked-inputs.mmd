@@ -1,0 +1,39 @@
+sequenceDiagram
+  autonumber
+  box rgb(232,245,233) Host service
+    participant H as Host code or REST caller
+    participant P as MaskingPolicy (host settings or host bean)
+  end
+  box rgb(224,242,241) Rule Engine, in process
+    participant E as RuleEngine
+    participant L as DecisionLogService
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as rle_version, rle_decision
+  end
+  rect rgb(255,248,225)
+    Note over P,DB: Start-up, after the migrations, outside any request
+    E->>DB: SELECT inputs of every version not retired, all tenants
+    E->>P: hmacKey(tenant), maskByDefault(tenant)
+    alt a tenant masks an input and has no valid key
+      E-->>H: start-up fails naming horus.bpm.rules.masking.hmac-key and the rule set
+    end
+  end
+  rect rgb(232,245,233)
+    Note over H,DB: Evaluate, in the host transaction
+    H->>E: evaluate("minor-review", nationalId = 079090001234, age = 16)
+    E->>P: hmacKey(tenant from resolver)
+    alt no key for this tenant
+      E->>DB: INSERT rle_decision EVALUATION_ERROR, error_code MASKING_KEY_MISSING, inputs {}
+    else key present
+      E->>E: nationalId becomes hmac:hex, HMAC-SHA256 of the plain value
+      E->>DB: INSERT rle_decision, masked_inputs holds the fingerprint only
+    end
+  end
+  rect rgb(224,242,241)
+    Note over H,DB: Audit lookup, rules:log:read, read only
+    H->>L: find-by-masked-input(minor-review, nationalId, plain value, period at most 31 days)
+    L->>P: hmacKey(tenant from resolver)
+    L->>DB: SELECT WHERE tenant_id AND rule_set_name AND created_at range AND masked_inputs ->> nationalId = hmac:hex
+    L-->>H: decisions of this tenant only, plain value never echoed
+  end
