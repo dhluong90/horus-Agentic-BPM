@@ -32,3 +32,12 @@ target/
 .vscode/
 .DS_Store
 
+# Local secrets for docker compose (docs/DEPLOYING.md); only .env.example is committed.
+.env
+.env.*
+!.env.example
+# Session cookie file of the curl walkthrough in docs/DEPLOYING.md.
+/cookies
+
+# Local Maven repository used by some build commands.
+.m2repo/
