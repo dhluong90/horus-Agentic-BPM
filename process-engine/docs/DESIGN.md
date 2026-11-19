@@ -477,7 +477,7 @@ CREATE INDEX idx_pre_definition_effective
   ON pre_definition (tenant_id, key_name, status, effective_from DESC);
 CREATE INDEX idx_pre_definition_pending
   ON pre_definition (tenant_id, requested_at) WHERE status = 'PENDING_APPROVAL';
--- 0.2.0 (#47, migration V4) adds requested_by, requested_at, decision_comment, retired_by, retired_at and
+-- 0.2.0 (#47, migration V6) adds requested_by, requested_at, decision_comment, retired_by, retired_at and
 -- superseded_by (INT, the version that took over) as nullable columns; updated_by and updated_at come with draft
 -- editing. The four-eyes CHECK is ck_pre_definition_four_eyes.
 
