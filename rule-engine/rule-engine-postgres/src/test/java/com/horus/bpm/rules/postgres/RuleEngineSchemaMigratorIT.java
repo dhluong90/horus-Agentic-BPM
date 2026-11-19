@@ -2,17 +2,23 @@ package com.horus.bpm.rules.postgres;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Instant;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.postgresql.ds.PGSimpleDataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-/** Runs the engine's migrations against a real PostgreSQL, one fresh database per test. */
+/**
+ * The engine's migrations and the start-up partition step against a real PostgreSQL, one fresh
+ * database per test. Partition months come from fixed instants, never from the wall clock.
+ */
 @Testcontainers
 class RuleEngineSchemaMigratorIT {
 
@@ -22,7 +28,7 @@ class RuleEngineSchemaMigratorIT {
     private static final AtomicInteger DATABASES = new AtomicInteger();
 
     @Test
-    void tr_emb_01_clean_database_gets_every_rle_table() {
+    void TR_EMB_01_clean_database_gets_every_rle_table() {
         DataSource db = freshDatabase();
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
@@ -41,69 +47,87 @@ class RuleEngineSchemaMigratorIT {
     }
 
     @Test
-    void tr_ops_04_decision_log_has_current_and_next_month_partitions() {
+    void TR_OPS_04_migration_creates_the_partitioned_decision_log_with_only_the_default_partition() {
         DataSource db = freshDatabase();
+
         new RuleEngineSchemaMigrator(db).migrate();
-        JdbcClient jdbc = JdbcClient.create(db);
 
-        List<String> expected = jdbc.sql("""
-                SELECT 'rle_decision_' || to_char(date_trunc('month', now() AT TIME ZONE 'UTC'), 'YYYY_MM')
-                UNION ALL
-                SELECT 'rle_decision_' || to_char(date_trunc('month', now() AT TIME ZONE 'UTC') + INTERVAL '1 month', 'YYYY_MM')
-                """).query(String.class).list();
-
-        assertThat(partitionsOf(db, "rle_decision"))
-                .containsAll(expected)
-                .contains("rle_decision_default")
-                .hasSize(3);
+        assertThat(JdbcClient.create(db).sql("SELECT relkind::text FROM pg_class WHERE relname = 'rle_decision'")
+                .query(String.class).single()).isEqualTo("p");
+        assertThat(partitionsOf(db)).containsExactly("rle_decision_default");
     }
 
     @Test
-    void tr_ops_04_decision_of_this_month_lands_in_its_monthly_partition_not_the_default() {
-        DataSource db = freshDatabase();
-        new RuleEngineSchemaMigrator(db).migrate();
-        JdbcClient jdbc = JdbcClient.create(db);
+    void TR_OPS_04_startup_step_creates_current_and_next_month_from_the_clock() {
+        DataSource db = migratedDatabase();
+        DecisionLogPartitions partitions = partitions(db);
 
-        jdbc.sql("""
-                INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy,
-                    outcome, masked_inputs, outputs, matched_rule_ids, eval_clock, duration_micros, log_mode)
-                VALUES ('bank-a', now(), '01JD0000000000000000000001', 'card-fee', 1, 'FIRST',
-                    'OK', '{"tier":"GOLD"}', '{"fee":"0 VND"}', '["R1"]', now(), 42, 'TRANSACTIONAL')
-                """).update();
+        List<String> created = partitions.ensureCurrentAndNextMonth(Instant.parse("2027-01-26T00:00:00Z"));
 
-        String partition = jdbc.sql("SELECT tableoid::regclass::text FROM rle_decision WHERE id = '01JD0000000000000000000001'")
-                .query(String.class).single();
-        String currentMonth = jdbc.sql(
-                "SELECT 'rle_decision_' || to_char(date_trunc('month', now() AT TIME ZONE 'UTC'), 'YYYY_MM')")
-                .query(String.class).single();
-        assertThat(partition).isEqualTo(currentMonth);
+        assertThat(created).containsExactly("rle_decision_2027_01", "rle_decision_2027_02");
+        assertThat(partitionsOf(db)).containsExactlyInAnyOrder(
+                "rle_decision_default", "rle_decision_2027_01", "rle_decision_2027_02");
+        assertThat(partitions.exists(YearMonth.of(2027, 2))).isTrue();
+        assertThat(partitions.exists(YearMonth.of(2027, 3))).isFalse();
     }
 
     @Test
-    void tr_emb_06_engine_migrates_a_schema_that_already_has_host_tables_and_host_history() {
+    void TR_OPS_04_startup_step_is_idempotent_and_only_adds_the_missing_month() {
+        DataSource db = migratedDatabase();
+        DecisionLogPartitions partitions = partitions(db);
+        partitions.ensureCurrentAndNextMonth(Instant.parse("2027-01-26T00:00:00Z"));
+
+        assertThat(partitions.ensureCurrentAndNextMonth(Instant.parse("2027-01-31T23:59:59Z"))).isEmpty();
+        assertThat(partitions.ensureCurrentAndNextMonth(Instant.parse("2027-02-01T00:00:00Z")))
+                .containsExactly("rle_decision_2027_03");
+    }
+
+    @Test
+    void TR_OPS_04_month_boundaries_are_utc() {
+        DataSource db = migratedDatabase();
+
+        // 23:30 UTC on 31 December is already January in Asia/Ho_Chi_Minh; the partition month is UTC.
+        List<String> created = partitions(db).ensureCurrentAndNextMonth(Instant.parse("2026-12-31T23:30:00Z"));
+
+        assertThat(created).containsExactly("rle_decision_2026_12", "rle_decision_2027_01");
+        assertThat(partitionOfRow(db, "2026-12-31T23:59:59.999Z")).isEqualTo("rle_decision_2026_12");
+        assertThat(partitionOfRow(db, "2027-01-01T00:00:00Z")).isEqualTo("rle_decision_2027_01");
+    }
+
+    @Test
+    void TR_OPS_04_rows_already_in_the_default_partition_move_into_the_new_month() {
+        DataSource db = migratedDatabase();
+        JdbcClient jdbc = JdbcClient.create(db);
+        insertDecision(jdbc, "01JD0000000000000000000M15", "2027-03-15T00:00:00Z");
+        assertThat(partitionOf(jdbc, "01JD0000000000000000000M15")).isEqualTo("rle_decision_default");
+
+        partitions(db).ensureCurrentAndNextMonth(Instant.parse("2027-03-01T08:00:00Z"));
+
+        assertThat(partitionOf(jdbc, "01JD0000000000000000000M15")).isEqualTo("rle_decision_2027_03");
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision_default").query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision").query(Long.class).single()).isEqualTo(1L);
+    }
+
+    @Test
+    void TR_EMB_06_engine_installs_on_a_non_empty_schema_with_foreign_tables() {
         DataSource db = freshDatabase();
         JdbcClient jdbc = JdbcClient.create(db);
         jdbc.sql("CREATE TABLE loan_application (id BIGINT PRIMARY KEY, amount_minor BIGINT NOT NULL, currency CHAR(3) NOT NULL)")
                 .update();
-        jdbc.sql("""
-                CREATE TABLE flyway_schema_history (installed_rank INT PRIMARY KEY, version TEXT, description TEXT)
-                """).update();
-        jdbc.sql("INSERT INTO flyway_schema_history VALUES (1, '1', 'create loan application')").update();
+        jdbc.sql("INSERT INTO loan_application VALUES (1, 800000000, 'VND')").update();
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.currentVersion()).isEqualTo("1");
         assertThat(result.migrationsExecuted()).isEqualTo(1);
-        assertThat(jdbc.sql("SELECT version || ':' || description FROM flyway_schema_history")
-                .query(String.class).list())
-                .containsExactly("1:create loan application");
-        assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank")
-                .query(String.class).list())
+        assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
                 .containsExactly("0", "1");
+        assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
+                .isEqualTo(800_000_000L);
     }
 
     @Test
-    void tr_emb_06_second_run_applies_nothing_and_keeps_the_history() {
+    void TR_EMB_06_second_run_applies_nothing_and_keeps_the_history() {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
         migrator.migrate();
@@ -116,6 +140,52 @@ class RuleEngineSchemaMigratorIT {
         assertThat(migrator.currentVersion()).contains("1");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
                 .isEqualTo(1L);
+    }
+
+    @Test
+    void schema_status_reports_pending_migrations_until_migrated() {
+        DataSource db = freshDatabase();
+        RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
+
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 1));
+        assertThat(migrator.status().isCurrent()).isFalse();
+
+        migrator.migrate();
+
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus("1", 0));
+        assertThat(migrator.status().isCurrent()).isTrue();
+    }
+
+    private static DecisionLogPartitions partitions(DataSource db) {
+        return new DecisionLogPartitions(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)));
+    }
+
+    private static DataSource migratedDatabase() {
+        DataSource db = freshDatabase();
+        new RuleEngineSchemaMigrator(db).migrate();
+        return db;
+    }
+
+    private static String partitionOfRow(DataSource db, String createdAt) {
+        JdbcClient jdbc = JdbcClient.create(db);
+        String id = "01JD" + String.format("%022d", DATABASES.incrementAndGet());
+        insertDecision(jdbc, id, createdAt);
+        return partitionOf(jdbc, id);
+    }
+
+    private static void insertDecision(JdbcClient jdbc, String id, String createdAt) {
+        jdbc.sql("""
+                INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy,
+                    outcome, masked_inputs, outputs, matched_rule_ids, eval_clock, duration_micros, log_mode)
+                VALUES ('bank-a', CAST(:createdAt AS timestamptz), :id, 'card-fee', 1, 'FIRST',
+                    'OK', '{"tier":"GOLD"}', '{"fee":"0 VND"}', '["R1"]', CAST(:createdAt AS timestamptz), 42,
+                    'TRANSACTIONAL')
+                """).param("createdAt", createdAt).param("id", id).update();
+    }
+
+    private static String partitionOf(JdbcClient jdbc, String id) {
+        return jdbc.sql("SELECT tableoid::regclass::text FROM rle_decision WHERE id = :id")
+                .param("id", id).query(String.class).single();
     }
 
     private static DataSource freshDatabase() {
@@ -142,12 +212,11 @@ class RuleEngineSchemaMigratorIT {
                 """).query(String.class).list();
     }
 
-    private static List<String> partitionsOf(DataSource db, String parent) {
+    private static List<String> partitionsOf(DataSource db) {
         return JdbcClient.create(db).sql("""
                 SELECT child.relname FROM pg_inherits i
                 JOIN pg_class child ON child.oid = i.inhrelid
-                JOIN pg_class parent ON parent.oid = i.inhparent
-                WHERE parent.relname = :parent
-                """).param("parent", parent).query(String.class).list();
+                WHERE i.inhparent = 'rle_decision'::regclass
+                """).query(String.class).list();
     }
 }

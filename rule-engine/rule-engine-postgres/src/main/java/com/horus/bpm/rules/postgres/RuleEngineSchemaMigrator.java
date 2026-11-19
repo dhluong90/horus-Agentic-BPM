@@ -6,6 +6,7 @@ import java.util.Optional;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
+import org.flywaydb.core.api.MigrationInfoService;
 import org.flywaydb.core.api.output.MigrateResult;
 
 /**
@@ -58,6 +59,19 @@ public final class RuleEngineSchemaMigrator {
      */
     public Optional<String> currentVersion() {
         return currentVersionOf(flyway());
+    }
+
+    /**
+     * Compares the engine schema with the migrations in this build: one history read and one
+     * classpath scan. Callers that report it repeatedly, such as health checks, cache the result.
+     *
+     * @return the applied version and the number of pending migrations
+     */
+    public SchemaStatus status() {
+        MigrationInfoService info = flyway().info();
+        MigrationInfo current = info.current();
+        String version = (current == null || current.getVersion() == null) ? null : current.getVersion().getVersion();
+        return new SchemaStatus(version, info.pending().length);
     }
 
     private static Optional<String> currentVersionOf(Flyway flyway) {

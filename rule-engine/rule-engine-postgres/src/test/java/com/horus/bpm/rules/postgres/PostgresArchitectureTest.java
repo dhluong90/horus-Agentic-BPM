@@ -21,7 +21,7 @@ class PostgresArchitectureTest {
     }
 
     @Test
-    void tr_emb_05_postgres_module_has_no_http_client() {
+    void TR_EMB_05_postgres_module_has_no_http_client() {
         noClasses()
                 .should().dependOnClassesThat()
                 .resideInAnyPackage(
@@ -34,7 +34,7 @@ class PostgresArchitectureTest {
     }
 
     @Test
-    void tr_emb_04_postgres_module_creates_no_connection_pool() {
+    void TR_EMB_04_postgres_module_creates_no_connection_pool() {
         noClasses()
                 .should().dependOnClassesThat()
                 .resideInAnyPackage("com.zaxxer.hikari..", "org.apache.commons.dbcp2..", "org.apache.tomcat.jdbc..")
