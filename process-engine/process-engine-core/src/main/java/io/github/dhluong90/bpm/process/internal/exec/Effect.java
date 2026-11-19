@@ -1,0 +1,161 @@
+package io.github.dhluong90.bpm.process.internal.exec;
+
+import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * Outputs of the kernel, applied by the shell. The kernel never performs them itself.
+ */
+public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.PushCompensation, Effect.RaiseIncident, Effect.EmitEvent {
+
+    /**
+     * Insert a job in {@code pre_timer}.
+     *
+     * @param jobId job id
+     * @param jobKind job kind, for example TIMER
+     * @param tokenId token
+     * @param nodeId node
+     * @param dueAt due time
+     * @param payload payload
+     */
+    record ScheduleJob(String jobId, String jobKind, String tokenId, String nodeId, Instant dueAt, Map<String, Object> payload) implements Effect {
+        public ScheduleJob {
+            payload = payload == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(payload));
+        }
+    }
+
+    /**
+     * Cancel an open job.
+     *
+     * @param jobId job id
+     */
+    record CancelJob(String jobId) implements Effect {    }
+
+    /**
+     * Insert a message, signal or conditional subscription.
+     *
+     * @param subscriptionId id
+     * @param kind MESSAGE, SIGNAL or CONDITIONAL
+     * @param name event name
+     * @param correlationKey correlation key or null
+     * @param tokenId token
+     * @param nodeId node
+     */
+    record CreateSubscription(String subscriptionId, String kind, String name, String correlationKey, String tokenId, String nodeId) implements Effect {    }
+
+    /**
+     * Delete a subscription.
+     *
+     * @param subscriptionId id
+     */
+    record DeleteSubscription(String subscriptionId) implements Effect {    }
+
+    /**
+     * Insert a user task.
+     *
+     * @param taskId task id
+     * @param tokenId token
+     * @param nodeId user task id
+     * @param name name or null
+     * @param assignee user:, role: or group: assignee
+     * @param fourEyes four-eyes rule
+     * @param context masked context for the task
+     */
+    record CreateUserTask(String taskId, String tokenId, String nodeId, String name, String assignee, boolean fourEyes, Map<String, Object> context) implements Effect {
+        public CreateUserTask {
+            context = context == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(context));
+        }
+    }
+
+    /**
+     * Cancel an open user task.
+     *
+     * @param taskId task id
+     */
+    record CancelUserTask(String taskId) implements Effect {    }
+
+    /**
+     * Call a handler, a decision or an agent; the result returns as {@link Command.AsyncResult}.
+     *
+     * @param tokenId token
+     * @param nodeId node
+     * @param attemptId attempt id, the idempotency key
+     * @param kind what to call
+     * @param target handler name, rule set key or agent name
+     * @param inputs bounded inputs
+     * @param mode in or outside the transaction
+     */
+    record InvokeService(String tokenId, String nodeId, String attemptId, ServiceKind kind, String target, Map<String, Object> inputs, ExecutionMode mode) implements Effect {
+        public InvokeService {
+            inputs = inputs == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(inputs));
+        }
+    }
+
+    /**
+     * Hand a message to the host's MessageAdapter through the outbox.
+     *
+     * @param messageName message
+     * @param correlationKey key or null
+     * @param payload payload
+     */
+    record ThrowMessage(String messageName, String correlationKey, Map<String, Object> payload) implements Effect {
+        public ThrowMessage {
+            payload = payload == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(payload));
+        }
+    }
+
+    /**
+     * Start a called process.
+     *
+     * @param calledElement definition key
+     * @param tokenId call activity token
+     * @param variables input variables
+     */
+    record StartChildInstance(String calledElement, String tokenId, Map<String, Object> variables) implements Effect {
+        public StartChildInstance {
+            variables = variables == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(variables));
+        }
+    }
+
+    /**
+     * Push a compensation entry for a completed activity.
+     *
+     * @param scopeTokenId scope token
+     * @param nodeId activity
+     * @param attemptId forward attempt
+     * @param handler handler or manual
+     * @param inputSnapshot inputs at completion
+     */
+    record PushCompensation(String scopeTokenId, String nodeId, String attemptId, String handler, Map<String, Object> inputSnapshot) implements Effect {
+        public PushCompensation {
+            inputSnapshot = inputSnapshot == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(inputSnapshot));
+        }
+    }
+
+    /**
+     * Open an incident; the token stays where it is.
+     *
+     * @param tokenId token
+     * @param nodeId node
+     * @param errorCode code
+     * @param detail detail
+     */
+    record RaiseIncident(String tokenId, String nodeId, String errorCode, String detail) implements Effect {    }
+
+    /**
+     * Hand an engine event to the host publisher in the transaction.
+     *
+     * @param eventId stable id derived like other kernel ids (instance id and sequence); consumers deduplicate on it
+     * @param type for example processes.instance.started.v1
+     * @param payload payload; never instance variables
+     */
+    record EmitEvent(String eventId, String type, Map<String, Object> payload) implements Effect {
+        public EmitEvent {
+            Objects.requireNonNull(eventId, "eventId must not be null");
+            payload = payload == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(payload));
+        }
+    }
+}

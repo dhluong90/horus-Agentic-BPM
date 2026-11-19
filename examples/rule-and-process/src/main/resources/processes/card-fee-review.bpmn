@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Card application with fee review: the profile is loaded, the card-fee rule set prices the card, a zero fee is
+     approved automatically, any other fee goes to a card officer. Opens in BPMN modellers; the horus attributes and
+     inputs are the engine's extension namespace. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_card-fee-review"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="card-fee-review" name="Card application fee review" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:serviceTask id="load-profile" name="Load customer profile" horus:handler="cardProfiles.load" horus:resultVariable="profile">
+      <bpmn:extensionElements>
+        <horus:input name="customerId" value="${instance.customerId}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:businessRuleTask id="price-card" name="Price the card" horus:ruleSet="card-fee" horus:resultVariable="pricing">
+      <bpmn:extensionElements>
+        <horus:input name="tier" value="${instance.profile.tier}"/>
+        <horus:input name="txCount" value="${instance.profile.txCount}"/>
+      </bpmn:extensionElements>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="fee-check" name="Fee waived?" default="fee-check__review"/>
+    <bpmn:serviceTask id="auto-approve" name="Approve automatically" horus:handler="cardApplications.decide">
+      <bpmn:extensionElements>
+        <horus:input name="applicationId" value="${instance.applicationId}"/>
+        <horus:input name="fee" value="${instance.pricing.fee}"/>
+        <horus:input name="outcome" value="AUTO_APPROVED"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="officer-review" name="Officer reviews the fee" horus:assignee="role:CARD_OFFICER" horus:fourEyes="true" horus:resultVariable="review"/>
+    <bpmn:exclusiveGateway id="review-outcome" name="Approved?" default="review-outcome__reject"/>
+    <bpmn:serviceTask id="approve-after-review" name="Approve" horus:handler="cardApplications.decide">
+      <bpmn:extensionElements>
+        <horus:input name="applicationId" value="${instance.applicationId}"/>
+        <horus:input name="fee" value="${instance.pricing.fee}"/>
+        <horus:input name="outcome" value="APPROVED"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="reject" name="Reject" horus:handler="cardApplications.decide">
+      <bpmn:extensionElements>
+        <horus:input name="applicationId" value="${instance.applicationId}"/>
+        <horus:input name="fee" value="${instance.pricing.fee}"/>
+        <horus:input name="outcome" value="REJECTED"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end-approved" name="Card approved"/>
+    <bpmn:endEvent id="end-rejected" name="Card rejected"/>
+
+    <bpmn:sequenceFlow id="start__load-profile" sourceRef="start" targetRef="load-profile"/>
+    <bpmn:sequenceFlow id="load-profile__price-card" sourceRef="load-profile" targetRef="price-card"/>
+    <bpmn:sequenceFlow id="price-card__fee-check" sourceRef="price-card" targetRef="fee-check"/>
+    <bpmn:sequenceFlow id="fee-check__auto" name="fee is 0" sourceRef="fee-check" targetRef="auto-approve">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">pricing.fee == 0 VND</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="fee-check__review" name="fee charged" sourceRef="fee-check" targetRef="officer-review"/>
+    <bpmn:sequenceFlow id="auto-approve__end" sourceRef="auto-approve" targetRef="end-approved"/>
+    <bpmn:sequenceFlow id="officer-review__outcome" sourceRef="officer-review" targetRef="review-outcome"/>
+    <bpmn:sequenceFlow id="review-outcome__approve" name="approved" sourceRef="review-outcome" targetRef="approve-after-review">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">review.approved == true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="review-outcome__reject" name="not approved" sourceRef="review-outcome" targetRef="reject"/>
+    <bpmn:sequenceFlow id="approve__end" sourceRef="approve-after-review" targetRef="end-approved"/>
+    <bpmn:sequenceFlow id="reject__end" sourceRef="reject" targetRef="end-rejected"/>
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="Diagram_card-fee-review">
+    <bpmndi:BPMNPlane id="Plane_card-fee-review" bpmnElement="card-fee-review">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="152" y="202" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="load-profile_di" bpmnElement="load-profile"><dc:Bounds x="240" y="180" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="price-card_di" bpmnElement="price-card"><dc:Bounds x="390" y="180" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="fee-check_di" bpmnElement="fee-check" isMarkerVisible="true"><dc:Bounds x="545" y="195" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="auto-approve_di" bpmnElement="auto-approve"><dc:Bounds x="650" y="60" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="officer-review_di" bpmnElement="officer-review"><dc:Bounds x="650" y="300" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="review-outcome_di" bpmnElement="review-outcome" isMarkerVisible="true"><dc:Bounds x="805" y="315" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="approve-after-review_di" bpmnElement="approve-after-review"><dc:Bounds x="910" y="190" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reject_di" bpmnElement="reject"><dc:Bounds x="910" y="400" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end-approved_di" bpmnElement="end-approved"><dc:Bounds x="1092" y="82" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end-rejected_di" bpmnElement="end-rejected"><dc:Bounds x="1092" y="422" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="start__load-profile_di" bpmnElement="start__load-profile"><di:waypoint x="188" y="220"/><di:waypoint x="240" y="220"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="load-profile__price-card_di" bpmnElement="load-profile__price-card"><di:waypoint x="340" y="220"/><di:waypoint x="390" y="220"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="price-card__fee-check_di" bpmnElement="price-card__fee-check"><di:waypoint x="490" y="220"/><di:waypoint x="545" y="220"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="fee-check__auto_di" bpmnElement="fee-check__auto"><di:waypoint x="570" y="195"/><di:waypoint x="570" y="100"/><di:waypoint x="650" y="100"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="fee-check__review_di" bpmnElement="fee-check__review"><di:waypoint x="570" y="245"/><di:waypoint x="570" y="340"/><di:waypoint x="650" y="340"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="auto-approve__end_di" bpmnElement="auto-approve__end"><di:waypoint x="750" y="100"/><di:waypoint x="1092" y="100"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="officer-review__outcome_di" bpmnElement="officer-review__outcome"><di:waypoint x="750" y="340"/><di:waypoint x="805" y="340"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="review-outcome__approve_di" bpmnElement="review-outcome__approve"><di:waypoint x="830" y="315"/><di:waypoint x="830" y="230"/><di:waypoint x="910" y="230"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="review-outcome__reject_di" bpmnElement="review-outcome__reject"><di:waypoint x="830" y="365"/><di:waypoint x="830" y="440"/><di:waypoint x="910" y="440"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="approve__end_di" bpmnElement="approve__end"><di:waypoint x="1010" y="230"/><di:waypoint x="1110" y="230"/><di:waypoint x="1110" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="reject__end_di" bpmnElement="reject__end"><di:waypoint x="1010" y="440"/><di:waypoint x="1092" y="440"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
