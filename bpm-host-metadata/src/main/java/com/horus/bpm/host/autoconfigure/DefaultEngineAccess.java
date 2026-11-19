@@ -40,6 +40,11 @@ import org.springframework.web.context.request.ServletRequestAttributes;
  * mismatch, or a tenant outside the allowed format, is {@code 403 TENANT_NOT_ALLOWED} with a
  * {@code tenant.switch.refused} security log entry (ADR-0014). The current request is taken from Spring's
  * request context; outside a request (a host job running as a user) there is no header to check.
+ *
+ * <p>Within one request the caller is resolved once: the result, or the refusal, is kept as a request
+ * attribute for the same authentication, so an operation that asks several times (the controller, then
+ * the engine service) runs the resolver once and writes at most one security log entry. A refused
+ * permission writes a {@code permission.denied} entry.
  */
 final class DefaultEngineAccess implements EngineAccess {
 
@@ -47,6 +52,7 @@ final class DefaultEngineAccess implements EngineAccess {
     /** 1 to 64 characters, starting with a letter or digit. */
     static final Pattern TENANT = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
     private static final Log SECURITY_LOG = LogFactory.getLog("com.horus.bpm.security");
+    private static final String RESOLVED_ATTRIBUTE = DefaultEngineAccess.class.getName() + ".resolved";
 
     private final TenantResolver resolver;
     private final String tenantClaim;
@@ -71,6 +77,41 @@ final class DefaultEngineAccess implements EngineAccess {
             throw new EngineAccessDeniedException(Reason.UNAUTHENTICATED, challenge, null);
         }
         HttpServletRequest request = currentRequest();
+        if (request == null) {
+            return resolve(authentication, null);
+        }
+        if (request.getAttribute(RESOLVED_ATTRIBUTE) instanceof Resolved resolved && resolved.authentication() == authentication) {
+            return resolved.outcome();
+        }
+        try {
+            EngineCaller caller = resolve(authentication, request);
+            request.setAttribute(RESOLVED_ATTRIBUTE, new Resolved(authentication, caller, null));
+            return caller;
+        } catch (EngineAccessDeniedException refused) {
+            request.setAttribute(RESOLVED_ATTRIBUTE, new Resolved(authentication, null, refused));
+            throw refused;
+        }
+    }
+
+    /** Logs the refusal on the security logger, then refuses with {@code PERMISSION_DENIED}. */
+    @Override
+    public EngineCaller requirePermission(String permission) {
+        EngineCaller caller = currentCaller();
+        if (hasPermission(caller, permission)) {
+            return caller;
+        }
+        HttpServletRequest request = currentRequest();
+        String correlationId = correlationId(request);
+        // The permission is one an installed engine declares (hasPermission throws otherwise), so it is logged as is
+        SECURITY_LOG.warn("permission.denied permission=" + permission
+                + " user=" + CorrelationIds.loggable(caller.userId())
+                + " tenant=" + CorrelationIds.loggable(caller.tenant())
+                + " correlationId=" + correlationId
+                + " clientCorrelationId=" + clientCorrelationId(request));
+        throw new EngineAccessDeniedException(Reason.PERMISSION_DENIED, null, correlationId);
+    }
+
+    private EngineCaller resolve(Authentication authentication, @Nullable HttpServletRequest request) {
         Map<String, Object> tokenClaims = claims.apply(authentication);
         Set<String> authorities = authorities(authentication.getAuthorities());
         Context context = new Context(authentication.getName(), authentication.getPrincipal(), authorities, tokenClaims);
@@ -173,6 +214,18 @@ final class DefaultEngineAccess implements EngineAccess {
     @Override
     public String toString() {
         return "the engines' default access check";
+    }
+
+    /** The caller resolved for one authentication in this request, or the refusal. */
+    private record Resolved(Authentication authentication, @Nullable EngineCaller caller,
+            @Nullable EngineAccessDeniedException refused) {
+
+        EngineCaller outcome() {
+            if (refused != null) {
+                throw refused;
+            }
+            return java.util.Objects.requireNonNull(caller);
+        }
     }
 
     private record Context(String principalName, Object principal, Set<String> authorities,

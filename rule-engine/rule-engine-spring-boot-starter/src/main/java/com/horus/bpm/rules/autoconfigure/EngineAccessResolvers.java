@@ -14,11 +14,14 @@ import org.jspecify.annotations.Nullable;
  * The engine's caller and tenant from the host contract's {@link EngineAccess}, the same check
  * {@code GET /api/bpm/me} reports from, so what a client is shown is what the services allow.
  *
- * <p>No caller or no tenant is answered with {@code null}, which the services refuse with
- * {@code UNAUTHENTICATED}. A tenant the caller is not signed in for is not swallowed: the
- * {@link EngineAccessDeniedException} reaches the host module, which answers {@code 403 TENANT_NOT_ALLOWED}
- * with the same security log entry as {@code /me}. Without an {@code EngineAccess} bean (a host without
- * servlet or Spring Security) every call is refused. Thread-safe.
+ * <p>No authenticated caller is answered with {@code null}, which the services refuse with
+ * {@code UNAUTHENTICATED}. A caller without a tenant, or with a tenant they are not signed in for, is not
+ * swallowed: the {@link EngineAccessDeniedException} reaches the host module, which answers
+ * {@code 401 UNAUTHENTICATED} with the {@code error="invalid_token"} challenge, or
+ * {@code 403 TENANT_NOT_ALLOWED}, with the same security log entry as {@code /me}. {@code EngineAccess}
+ * resolves the caller once per request, so the several lookups of one operation write one entry. Without
+ * an {@code EngineAccess} bean (a host without servlet or Spring Security) every call is refused.
+ * Thread-safe.
  */
 final class EngineAccessResolvers {
 
@@ -54,7 +57,7 @@ final class EngineAccessResolvers {
         };
     }
 
-    /** The current caller, or {@code null} when there is none; a refused tenant is rethrown. */
+    /** The current caller, or {@code null} without an authenticated principal; tenant refusals are rethrown. */
     private static @Nullable EngineCaller caller(Supplier<@Nullable EngineAccess> access) {
         EngineAccess engineAccess = access.get();
         if (engineAccess == null) {
@@ -63,10 +66,10 @@ final class EngineAccessResolvers {
         try {
             return engineAccess.currentCaller();
         } catch (EngineAccessDeniedException refused) {
-            if (refused.reason() == EngineAccessDeniedException.Reason.TENANT_NOT_ALLOWED) {
-                throw refused;
+            if (refused.reason() == EngineAccessDeniedException.Reason.UNAUTHENTICATED) {
+                return null;
             }
-            return null;
+            throw refused;
         }
     }
 }

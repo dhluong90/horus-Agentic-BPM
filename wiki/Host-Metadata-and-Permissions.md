@@ -147,7 +147,13 @@ flowchart LR
 | `hasPermission(caller, "rules:approve")` | Yes when the caller holds the permission as an authority or through the engine's role mapping. A permission no installed engine declares is a programming error and throws `IllegalArgumentException` |
 | `requirePermission("rules:approve")` | The caller, or `EngineAccessDeniedException` with `PERMISSION_DENIED` |
 
-When an engine endpoint lets the refusal through, the module answers with the same problem body `/me` sends. The engines resolve no tenant and read no role mapping themselves; an architecture test fails the build if engine code does.
+When an engine endpoint lets the refusal through, the module answers with the same problem body `/me` sends. Within one request the caller is resolved once, so an operation that asks several times writes at most one `tenant.switch.refused` or `tenant.unresolved` entry. A refused permission writes one entry too:
+
+```text
+permission.denied permission=rules:approve user=lan tenant=bank-a correlationId=01M7S1RASFFAP0S0R1G9GDDZW3 clientCorrelationId=-
+```
+
+The engines resolve no tenant and read no role mapping themselves; an architecture test fails the build if engine code does.
 
 A host may replace the check with its own `EngineAccess` bean, for example to ask an entitlement service that is kept in memory. `/me` then reports from the host's bean too. The bean must be thread-safe and must not call the network on each request.
 

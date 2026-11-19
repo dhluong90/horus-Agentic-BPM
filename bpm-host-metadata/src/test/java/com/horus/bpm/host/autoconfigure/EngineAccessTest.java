@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -39,9 +41,12 @@ import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequ
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.JsonNode;
 
@@ -69,6 +74,44 @@ class EngineAccessTest {
         @GetMapping({"/api/bpm/rules/v1/probe", "/api/bpm/processes/v1/probe"})
         String probe(@RequestParam String permission) {
             return access.requirePermission(permission).tenant();
+        }
+
+        /** As an engine operation does: the controller asks, then the service asks again. */
+        @GetMapping("/api/bpm/rules/v1/probe-twice")
+        String probeTwice(@RequestParam String permission) {
+            access.currentCaller();
+            return access.requirePermission(permission).tenant();
+        }
+    }
+
+    /** A host resolver that counts its calls, reading the tenant from the token as the default does. */
+    @Configuration(proxyBeanMethods = false)
+    static class CountingHostTenant {
+        static final AtomicInteger CALLS = new AtomicInteger();
+
+        @Bean
+        TenantResolver countingTenantResolver() {
+            return caller -> {
+                CALLS.incrementAndGet();
+                return caller.stringAttribute("tenant_id");
+            };
+        }
+    }
+
+    /** A host advice that answers every RuntimeException with 500, at the default (lowest) order. */
+    @RestControllerAdvice
+    static class BroadHostAdvice {
+        @ExceptionHandler(RuntimeException.class)
+        ResponseEntity<String> any(RuntimeException exception) {
+            return ResponseEntity.status(500).body("host error");
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class WithBroadHostAdvice {
+        @Bean
+        BroadHostAdvice broadHostAdvice() {
+            return new BroadHostAdvice();
         }
     }
 
@@ -328,5 +371,64 @@ class EngineAccessTest {
             assertThatThrownBy(access::currentCaller).isInstanceOfSatisfying(EngineAccessDeniedException.class,
                     refused -> assertThat(refused.status()).isEqualTo(401));
         });
+    }
+
+    @Test
+    void TR_SEC_03_one_operation_resolves_the_caller_once_and_a_refusal_is_logged_once(CapturedOutput output) {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, CountingHostTenant.class,
+                        WithProbeEngineEndpoint.class)
+                .run(context -> {
+                    MockMvc mvc = TestHosts.mockMvc(context);
+
+                    // When an operation asks for the caller twice, as the controller and then the service do
+                    CountingHostTenant.CALLS.set(0);
+                    MvcResult served = call(mvc, get("/api/bpm/rules/v1/probe-twice").param("permission", "rules:read")
+                            .with(lan()));
+
+                    // Then the resolver ran once
+                    assertThat(served.getResponse().getContentAsString()).isEqualTo("bank-a");
+                    assertThat(CountingHostTenant.CALLS).hasValue(1);
+
+                    // And a refused tenant is logged once for the request, not once per lookup
+                    MvcResult refused = call(mvc, get("/api/bpm/rules/v1/probe-twice").param("permission", "rules:read")
+                            .with(lan()).header("X-Tenant-Id", "bank-b"));
+                    String correlationId = refused.getResponse().getHeader("X-Correlation-Id");
+                    assertThat(refused.getResponse().getStatus()).isEqualTo(403);
+                    assertThat(Pattern.compile("tenant\\.switch\\.refused .*correlationId=" + correlationId)
+                            .matcher(output.getAll()).results().count()).isEqualTo(1);
+                });
+    }
+
+    @Test
+    void TR_SEC_03_a_refused_permission_is_logged_with_the_correlation_id_of_the_response(CapturedOutput output) {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, WithProbeEngineEndpoint.class)
+                .run(context -> {
+                    // When lan, a pricing author, tries to approve
+                    MvcResult result = call(TestHosts.mockMvc(context),
+                            get("/api/bpm/rules/v1/probe").param("permission", "rules:approve").with(lan()));
+
+                    // Then 403 PERMISSION_DENIED, and one security log entry that names the permission and the request
+                    String correlationId = result.getResponse().getHeader("X-Correlation-Id");
+                    assertThat(result.getResponse().getStatus()).isEqualTo(403);
+                    assertThat(json(result).path("code").asString()).isEqualTo("PERMISSION_DENIED");
+                    assertThat(json(result).path("correlationId").asString()).isEqualTo(correlationId);
+                    assertThat(output).contains("permission.denied permission=rules:approve user=lan tenant=bank-a "
+                            + "correlationId=" + correlationId + " clientCorrelationId=-");
+                });
+    }
+
+    @Test
+    void TR_SEC_08_a_broad_host_exception_handler_cannot_change_a_refusal() {
+        // Given a host advice that turns every RuntimeException into 500
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, WithProbeEngineEndpoint.class,
+                        WithBroadHostAdvice.class)
+                .run(context -> {
+                    MvcResult result = call(TestHosts.mockMvc(context), get("/api/bpm/rules/v1/probe")
+                            .param("permission", "rules:read").with(lan()).header("X-Tenant-Id", "bank-b"));
+
+                    // Then the refusal still answers 403 TENANT_NOT_ALLOWED as a problem
+                    assertThat(result.getResponse().getStatus()).isEqualTo(403);
+                    assertThat(json(result).path("code").asString()).isEqualTo("TENANT_NOT_ALLOWED");
+                });
     }
 }
