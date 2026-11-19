@@ -20,7 +20,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * Boundary rules of rule-engine-core: the JDK only, no framework, no I/O, no code execution paths.
+ * Boundary rules of rule-engine-core: the JDK and Jackson 3 (internal only), no framework, no I/O, no
+ * code execution paths.
  * Dependency-level bans are also enforced by the Maven Enforcer rule in this module's POM, which
  * catches dependencies ArchUnit cannot see because no class references them.
  */
@@ -71,6 +72,28 @@ class CoreArchitectureTest {
                 .orShould().callMethodWhere(target(name("forName")).and(target(owner(assignableTo(Class.class)))))
                 .orShould().callMethodWhere(target(name("newInstance")).and(target(owner(assignableTo(Class.class)))))
                 .because("rule definitions never execute arbitrary code (TR-SEC-01, ADR-0003)")
+                .check(core);
+    }
+
+    @Test
+    void TR_EMB_07_jackson_3_only_inside_internal_and_never_jackson_2_databind() {
+        noClasses()
+                .that().resideInAnyPackage("com.horus.bpm.rules.api..", "com.horus.bpm.rules.spi..")
+                .should().dependOnClassesThat().resideInAnyPackage("tools.jackson..", "com.fasterxml.jackson..")
+                .because("no JSON library type appears in the public API (ADR-0016, ADR-0021)")
+                .check(core);
+        noClasses()
+                .should().dependOnClassesThat().resideInAnyPackage("com.fasterxml.jackson.databind..")
+                .because("the core uses Jackson 3 only (ADR-0021)")
+                .check(core);
+    }
+
+    @Test
+    void TR_EMB_03_public_api_does_not_depend_on_internal() {
+        noClasses()
+                .that().resideInAnyPackage("com.horus.bpm.rules.api..", "com.horus.bpm.rules.spi..")
+                .should().dependOnClassesThat().resideInAnyPackage("com.horus.bpm.rules.internal..")
+                .because("internal has no compatibility promise (ADR-0016)")
                 .check(core);
     }
 }

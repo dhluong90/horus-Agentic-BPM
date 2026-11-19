@@ -12,13 +12,22 @@
 
   <artifactId>rule-engine-core</artifactId>
   <name>HORUS Rule Engine Core</name>
-  <description>Framework-free model, compiler and evaluator of the Rule Engine. Depends on the JDK only.</description>
+  <description>Framework-free model, compiler and evaluator of the Rule Engine. Depends on the JDK and, inside its internal packages only, Jackson 3.</description>
 
   <!--
-    No compile dependencies. The JSON library major (rule-engine/docs/DESIGN.md, open question 7.1)
-    is added by the first feature that needs it.
+    Jackson 3 (tools.jackson) is the only compile dependency, used in ..internal.. only (ADR-0021).
+    Versions come from the Spring Boot BOM imported by the parent.
   -->
   <dependencies>
+    <dependency>
+      <groupId>tools.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>tools.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-yaml</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -68,7 +77,7 @@
                     <exclude>com.h2database:*</exclude>
                     <exclude>org.hsqldb:*</exclude>
                   </excludes>
-                  <message>rule-engine-core depends on the JDK only (TR-EMB-03): no framework, Jakarta, pool or JDBC driver artifact.</message>
+                  <message>rule-engine-core depends on the JDK and Jackson 3 only (TR-EMB-03, ADR-0021): no framework, Jakarta, pool or JDBC driver artifact.</message>
                 </bannedDependencies>
               </rules>
             </configuration>
