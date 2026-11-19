@@ -192,6 +192,32 @@ class EditorApiIT {
                 .path("allowedActions").toString()).isEqualTo("[\"request-publish\"]");
     }
 
+    /** PD-089 over HTTP: the requester who also holds rules:approve cannot reject their own request and is pointed to :withdraw. */
+    @Test
+    void RLE_025_a_requester_who_rejects_their_own_request_is_pointed_to_withdraw() throws Exception {
+        // Given fx-margin v1 pending, requested by lan, who holds rules:author and rules:approve
+        String t = "bank-self-reject";
+        send(t, "lan", "POST", "/rule-sets", cardFee("fx-margin"), "application/yaml", null, null);
+        Reply pending = send(t, "lan", "POST", "/rule-sets/fx-margin/versions/1:request-publish", null, null, null, null);
+        long before = rows(t);
+
+        // When lan rejects it with a reason and the current If-Match
+        Reply selfReject = send(t, "lan", "POST", "/rule-sets/fx-margin/versions/1:reject",
+                "{\"reason\":\"Wrong margin table attached\"}".getBytes(StandardCharsets.UTF_8), "application/json",
+                "k-sr", pending.etag());
+
+        // Then 403 SELF_APPROVAL_FORBIDDEN whose detail names :withdraw, and nothing changed
+        assertProblem(selfReject, 403, "SELF_APPROVAL_FORBIDDEN");
+        assertThat(selfReject.json().path("detail").asString()).contains(":withdraw");
+        assertThat(rows(t)).isEqualTo(before);
+        assertThat(send(t, "dan", "GET", "/rule-sets/fx-margin/versions/1", null, null, null, null).json().path("status")
+                .asString()).isEqualTo("PENDING_APPROVAL");
+        // and the action it names works for lan
+        Reply withdrawn = send(t, "lan", "POST", "/rule-sets/fx-margin/versions/1:withdraw", null, null, "k-sw", pending.etag());
+        assertThat(withdrawn.status()).as(withdrawn.body()).isEqualTo(200);
+        assertThat(withdrawn.json().path("status").asString()).isEqualTo("DRAFT");
+    }
+
     @Test
     void RLE_025_reject_failure_cases_change_nothing() throws Exception {
         String t = "bank-reject-fail";

@@ -263,6 +263,63 @@ class EditorApiPostgresIT {
         }
     }
 
+    /**
+     * The requester's withdrawal and an approver's rejection of the same pending version race. Both end in DRAFT, so
+     * the history and the outbox prove that exactly one transition was recorded: one WITHDRAWN or one REJECTED row, one
+     * matching event, and the lock version moved on once.
+     */
+    @Test
+    void RLE_046_a_withdrawal_racing_a_rejection_lets_exactly_one_win() throws Exception {
+        PerThreadCaller who = new PerThreadCaller();
+        DataSource db = freshDatabase();
+        new RuleEngineSchemaMigrator(db).migrate();
+        RuleEngines engines = PostgresRuleEngines.create(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)),
+                who, who, clock, EngineSettings.defaults());
+        engines.cursorKeys().load();
+        VersionService service = engines.versionService();
+        JdbcClient sql = JdbcClient.create(db);
+        for (int round = 0; round < 10; round++) {
+            String name = "race-reject-" + round;
+            who.set("bank-a", "alice");
+            service.importRuleSet(ImportRequest.yaml(renamed(name, null)));
+            long lock = service.requestPublish(name, 1, WriteOptions.none()).lockVersion();
+            java.util.concurrent.CyclicBarrier together = new java.util.concurrent.CyclicBarrier(2);
+
+            String withdrawn;
+            String rejected;
+            try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+                var a = pool.submit(() -> outcome(who, "alice", together,
+                        () -> service.withdraw(name, 1, new WriteOptions("w-" + name, lock, "Wrong fee for GOLD"))));
+                var b = pool.submit(() -> outcome(who, "bob", together,
+                        () -> service.reject(name, 1, new WriteOptions("j-" + name, lock, "R2 needs committee minutes"))));
+                withdrawn = a.get();
+                rejected = b.get();
+            }
+
+            assertThat(java.util.List.of(withdrawn, rejected)).as(name).filteredOn("OK"::equals).hasSize(1);
+            assertThat(java.util.List.of(withdrawn, rejected)).as(name).filteredOn(o -> !o.equals("OK"))
+                    .allSatisfy(o -> assertThat(o).isIn("VERSION_CONFLICT", "INVALID_STATE"));
+            String winner = "OK".equals(withdrawn) ? "WITHDRAWN" : "REJECTED";
+            assertThat(sql.sql("""
+                    SELECT v.status || ' ' || v.lock_version FROM rle_version v
+                    JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
+                    WHERE v.tenant_id = 'bank-a' AND s.name = :name""").param("name", name).query(String.class).single())
+                    .as(name).isEqualTo("DRAFT " + (lock + 1));
+            assertThat(sql.sql("""
+                    SELECT string_agg(h.action, ',') FROM rle_version_history h
+                    JOIN rle_version v ON v.tenant_id = h.tenant_id AND v.id = h.version_id
+                    JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
+                    WHERE h.tenant_id = 'bank-a' AND s.name = :name AND h.action IN ('WITHDRAWN', 'REJECTED')""")
+                    .param("name", name).query(String.class).single()).as(name).isEqualTo(winner);
+            assertThat(sql.sql("""
+                    SELECT string_agg(payload->>'eventType', ',') FROM rle_decision_outbox
+                    WHERE tenant_id = 'bank-a' AND payload->>'ruleSet' = :name
+                      AND payload->>'eventType' IN ('rules.version.withdrawn.v1', 'rules.version.rejected.v1')""")
+                    .param("name", name).query(String.class).single()).as(name)
+                    .isEqualTo("WITHDRAWN".equals(winner) ? "rules.version.withdrawn.v1" : "rules.version.rejected.v1");
+        }
+    }
+
     private static String outcome(PerThreadCaller who, String user, java.util.concurrent.CyclicBarrier together,
             Runnable command) throws Exception {
         who.set("bank-a", user);
