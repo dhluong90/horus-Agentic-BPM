@@ -100,8 +100,8 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
      *
      * @param code {@code EVALUATION_ERROR} or {@code UNIQUE_HIT_VIOLATION}
      * @param detail a detail without input values
-     * @param matchedRuleIds for {@code UNIQUE_HIT_VIOLATION} every matched rule (two or more);
-     *     empty for {@code EVALUATION_ERROR}
+     * @param matchedRuleIds for {@code UNIQUE_HIT_VIOLATION} every matched rule (two or more); for an
+     *     {@code EVALUATION_ERROR} from a null under a {@code collect} aggregate, the matched rules; otherwise empty
      */
     public record Failed(String code, String detail, List<String> matchedRuleIds) implements Outcome {
         public Failed {

@@ -157,7 +157,7 @@ class SizeLimitsTest {
     }
 
     @Test
-    void aggregate_folding_keeps_the_null_and_currency_rules() {
+    void aggregate_folding_keeps_the_strict_null_and_currency_rules() {
         RuleEngines engines = engines(EngineSettings.defaults());
         publish(engines, """
                 schemaVersion: 1
@@ -176,9 +176,27 @@ class SizeLimitsTest {
 
         DecisionResult result = engines.ruleEngine().evaluate("fold-rules", DecisionInput.of(Map.of("x", 1)));
 
+        // F2's null under sum fails first (errorMode strict), naming the rule; no partial outputs
         assertThat(((DecisionResult.Failed) result.outcome()).code()).isEqualTo("EVALUATION_ERROR");
-        assertThat(((DecisionResult.Failed) result.outcome()).detail()).contains("currency mismatch");
+        assertThat(((DecisionResult.Failed) result.outcome()).detail()).contains("total").contains("F2");
+        assertThat(result.matchedRuleIds()).containsExactly("F1", "F2", "F3");
         assertThat(result.outputs()).isEmpty();
+
+        // And without the null, the two currencies still fail
+        publish(engines, """
+                schemaVersion: 1
+                ruleSet: fold-currencies
+                hitPolicy: collect
+                inputs:
+                  - { name: x, type: integer }
+                outputs:
+                  - { name: total, type: money, collect: sum }
+                rules:
+                  - { id: F1, when: {}, then: { total: "1000 VND" } }
+                  - { id: F3, when: {}, then: { total: "2.50 USD" } }
+                """, "fold-currencies");
+        DecisionResult mixed = engines.ruleEngine().evaluate("fold-currencies", DecisionInput.of(Map.of("x", 1)));
+        assertThat(((DecisionResult.Failed) mixed.outcome()).detail()).contains("currency mismatch");
     }
 
     @Test

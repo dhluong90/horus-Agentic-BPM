@@ -107,9 +107,9 @@ With rows R1 (`penalty: 10`) and R3 (`penalty: 5`) both matching, `penalty` is `
 | No `collect:` | `list<T>`; each row gives one `T` | The matched rows' values in row order |
 | `collect: sum` | `integer`, `decimal` or `money` | The exact sum. Money must be in one currency; a number sum that needs more than 34 significant digits fails. Either failure is `EVALUATION_ERROR` |
 | `collect: min`, `collect: max` | Any scalar type except `boolean` | The smallest or largest value; strings in Unicode code point order, as `<` |
-| `collect: count` | `integer` | How many matched rows gave a value |
+| `collect: count` | `integer` | How many rules matched, `null` values included |
 
-A list keeps one entry per matched rule, `null` included, so parallel lists line up with each other and with `matchedRuleIds`. Aggregates skip `null` values: `sum`, `min` and `max` are `null` when every value is `null`, and `count` counts the rules whose value is not `null` (`0` when every value is `null`). When no row matches, every output is `null`, lists and `count` included. `collect:` on an output of a `first` or `unique` table, a list output outside `collect`, or a type that does not fit the aggregate is refused at import with `422 VALIDATION_FAILED`.
+A list keeps one entry per matched rule, `null` included, so parallel lists line up with each other and with `matchedRuleIds`. `count` counts every matched rule, `null` values included, as FEEL `count` does. A `null` value under `sum`, `min` or `max` fails the decision with `EVALUATION_ERROR` naming the output and the rule (a v1 rule set evaluates in strict mode), so give every row a value for those outputs, for example `0`. Aggregates are over all matched values, not distinct ones. When no row matches, every output is `null`, lists and `count` included. `collect:` on an output of a `first` or `unique` table, a list output outside `collect`, or a type that does not fit the aggregate is refused at import with `422 VALIDATION_FAILED`.
 
 ### Exactly one row with `unique`
 

@@ -201,7 +201,7 @@ class RuleEnginePostgresIT {
     }
 
     @Test
-    void RLE_003_collect_hit_policy_keeps_null_entries_and_aggregates_non_null_values() {
+    void RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules() {
         publish("/rules/risk-flags.yaml", "risk-flags");
         caller.as("bank-a", "teller-01");
 

@@ -141,7 +141,7 @@ class HitPolicyEdgeCasesQaTest {
     }
 
     @Test
-    void RLE_003_collect_where_every_matched_row_gives_null() {
+    void RLE_003_collect_where_every_matched_row_gives_null_fails_under_sum_and_min() {
         publish("""
                 schemaVersion: 1
                 ruleSet: all-null
@@ -160,14 +160,16 @@ class HitPolicyEdgeCasesQaTest {
 
         DecisionResult result = evaluate("all-null", Map.of("x", 1));
 
+        // Corrected RLE-003 (DMN 1.5 check): a null under sum or min is EVALUATION_ERROR in errorMode strict, with
+        // the matched rules logged and no partial outputs. count and lists alone would give 2 and [null, null].
         assertThat(result.matchedRuleIds()).containsExactly("R1", "R2");
-        assertThat(result.outputs()).containsEntry("s", null).containsEntry("lo", null)
-                .containsEntry("n", BigDecimal.ZERO).containsEntry("l", Arrays.asList(null, null));
+        assertThat(((DecisionResult.Failed) result.outcome()).code()).isEqualTo("EVALUATION_ERROR");
+        assertThat(result.outputs()).isEmpty();
         // One list entry per matched rule, null included (B1 of this review, PD-088), so l is [null, null].
     }
 
     @Test
-    void RLE_003_count_skips_rows_whose_value_is_null_from_a_null_input() {
+    void RLE_003_a_null_from_a_null_input_under_sum_fails_in_strict_mode() {
         publish("""
                 schemaVersion: 1
                 ruleSet: count-nulls
@@ -186,7 +188,10 @@ class HitPolicyEdgeCasesQaTest {
 
         DecisionResult result = evaluate("count-nulls", inputs);
 
-        assertThat(result.outputs()).containsEntry("n", BigDecimal.ONE).containsEntry("s", BigDecimal.valueOf(2));
+        // Corrected RLE-003: count counts every matched rule (2); the null from v + 1 under sum is EVALUATION_ERROR
+        assertThat(((DecisionResult.Failed) result.outcome()).code()).isEqualTo("EVALUATION_ERROR");
+        assertThat(((DecisionResult.Failed) result.outcome()).detail()).contains("R1");
+        assertThat(result.outputs()).isEmpty();
     }
 
     // ---- exact sums ----

@@ -228,7 +228,7 @@ class RuleLifecycleIT {
     }
 
     @Test
-    void RLE_003_collect_hit_policy_keeps_null_entries_and_aggregates_non_null_values() throws Exception {
+    void RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules() throws Exception {
         publishFile("/rules/risk-flags.yaml", "risk-flags");
 
         Reply decision = send("teller", "POST", "/decisions/risk-flags:evaluate",

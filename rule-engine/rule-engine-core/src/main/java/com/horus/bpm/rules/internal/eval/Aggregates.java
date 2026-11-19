@@ -10,7 +10,8 @@ import java.time.LocalDate;
 
 /**
  * Aggregates of a {@code collect} output over the non-null values of the matched rules, in rule order.
- * Sums are exact: money in minor units of one currency, numbers without rounding. A number sum that needs more
+ * Sums are exact: money in minor units of one currency, numbers without rounding. {@code count} counts every matched
+ * rule, nulls included; the caller refuses a null under {@code sum}, {@code min} and {@code max} (errorMode strict). A number sum that needs more
  * than 34 significant digits ({@link MathContext#DECIMAL128}) fails with {@code EVALUATION_ERROR} instead of being
  * rounded silently. Strings order by Unicode code point, as {@code <} does.
  */
@@ -41,9 +42,15 @@ final class Aggregates {
             this.output = output;
         }
 
-        /** Folds in one non-null value. */
+        /** Folds in one value; null is accepted only by {@code count}, which counts every matched rule. */
         void add(Object value) {
             count++;
+            if (value == null) {
+                if (aggregate != OutputClause.Aggregate.COUNT) {
+                    throw new IllegalArgumentException("null reaches " + aggregate + " of output " + output);
+                }
+                return;
+            }
             switch (aggregate) {
                 case COUNT, NONE -> {
                     // count only
@@ -75,7 +82,7 @@ final class Aggregates {
         }
 
         /**
-         * Returns the aggregate: null when no value was added, except {@code count}, which is 0.
+         * Returns the aggregate; the caller never asks without a matched rule, so {@code count} is at least 1.
          *
          * @return the result
          */

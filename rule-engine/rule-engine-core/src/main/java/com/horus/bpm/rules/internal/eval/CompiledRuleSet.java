@@ -201,9 +201,10 @@ public final class CompiledRuleSet {
 
     /**
      * Every matching rule contributes (RLE-003, DMN 1.5): a list output keeps one entry per matched rule, null
-     * included, so parallel lists stay aligned with each other and with the matched rule ids; {@code sum},
-     * {@code min} and {@code max} skip nulls and are null when every value is null; {@code count} counts the
-     * non-null values. With no match every output is null.
+     * included, so parallel lists stay aligned with each other and with the matched rule ids; {@code count} counts
+     * every matched rule, nulls included (FEEL {@code count}); a null under {@code sum}, {@code min} or {@code max}
+     * is {@code EVALUATION_ERROR} (errorMode strict, PD-066). Aggregates are over all values, not distinct ones.
+     * With no match every output is null.
      */
     private DecisionResult.Outcome collect(Object[] slots) {
         List<CompiledRule> matched = matching(slots);
@@ -228,7 +229,14 @@ public final class CompiledRuleSet {
                 if (list) {
                     column.add(value);
                     addBytes(bytes, value);
-                } else if (value != null) {
+                } else if (value == null && output.aggregate() != OutputClause.Aggregate.COUNT) {
+                    // null is outside the domain of FEEL sum, min and max; v1 evaluates in errorMode strict
+                    // (PD-066), so the decision fails, with the matched rules logged (RLE-003 (d)).
+                    return new DecisionResult.Failed("EVALUATION_ERROR", "Output " + output.name() + ": rule "
+                            + rule.id() + " gives null, which collect: "
+                            + output.aggregate().name().toLowerCase(java.util.Locale.ROOT)
+                            + " cannot take (errorMode strict)", matched.stream().map(CompiledRule::id).toList());
+                } else {
                     accumulator.add(value);
                 }
             }

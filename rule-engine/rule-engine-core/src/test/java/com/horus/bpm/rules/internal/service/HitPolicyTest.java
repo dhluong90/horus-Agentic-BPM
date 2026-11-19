@@ -102,13 +102,10 @@ class HitPolicyTest {
                 .containsExactly("OK [\"R1\"]", "OK []", "UNIQUE_HIT_VIOLATION [\"R1\",\"R2\"]");
     }
 
-    /** RLE-003 as the SPEC states it (PD-088). */
-    @Test
-    void RLE_003_collect_hit_policy_keeps_null_entries_and_aggregates_non_null_values() {
-        // Given risk-flags v1 with a list, sum, max and count; R2 gives null for every output
-        publish(yaml("""
+    static String riskFlags(String name, String r2Penalty) {
+        return """
                 schemaVersion: 1
-                ruleSet: risk-flags
+                ruleSet: %s
                 hitPolicy: collect
                 inputs:
                   - { name: velocity,  type: boolean }
@@ -121,30 +118,46 @@ class HitPolicyTest {
                   - { name: hits,    type: integer, collect: count }
                 rules:
                   - { id: R1, when: { velocity: "== true" }, then: { flags: "'HIGH_VELOCITY'", penalty: 10, worst: 10, hits: 1 } }
-                  - { id: R2, when: { unknownIp: "== true" }, then: { flags: null, penalty: null, worst: null, hits: null } }
+                  - { id: R2, when: { unknownIp: "== true" }, then: { flags: null, penalty: %s, worst: 0, hits: null } }
                   - { id: R3, when: { newDevice: "== true" }, then: { flags: "'NEW_DEVICE'", penalty: 5, worst: 5, hits: 1 } }
-                """), "risk-flags");
+                """.formatted(name, r2Penalty);
+    }
 
-        // When (a) all three match, (b) only R2, (c) none
+    /** RLE-003 as the SPEC states it after the DMN 1.5 check (PD-066, PD-088). */
+    @Test
+    void RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules() {
+        // Given risk-flags (R2: flags null, penalty 0, worst 0, hits null) and risk-flags-null (R2: penalty null)
+        publish(yaml(riskFlags("risk-flags", "0")), "risk-flags");
+        publish(yaml(riskFlags("risk-flags-null", "null")), "risk-flags-null");
+
+        // When (a) all three match, (b) only R2, (c) none, (d) risk-flags-null with R1 and R2
         DecisionResult all = evaluate("risk-flags", Map.of("velocity", true, "unknownIp", true, "newDevice", true));
-        DecisionResult onlyNull = evaluate("risk-flags", Map.of("velocity", false, "unknownIp", true, "newDevice", false));
+        DecisionResult onlyR2 = evaluate("risk-flags", Map.of("velocity", false, "unknownIp", true, "newDevice", false));
         DecisionResult none = evaluate("risk-flags", Map.of("velocity", false, "unknownIp", false, "newDevice", false));
+        DecisionResult nullUnderSum = evaluate("risk-flags-null",
+                Map.of("velocity", true, "unknownIp", true, "newDevice", false));
 
-        // Then (a) lists keep the null entry, aligned with matchedRuleIds; aggregates skip it
+        // Then (a) the list keeps R2's null entry; count counts every matched rule; sum and max over all values
         assertThat(all.matchedRuleIds()).containsExactly("R1", "R2", "R3");
         assertThat(all.outputs().get("flags")).isEqualTo(java.util.Arrays.asList("HIGH_VELOCITY", null, "NEW_DEVICE"));
         assertThat(all.outputs()).containsEntry("penalty", BigDecimal.valueOf(15))
-                .containsEntry("worst", BigDecimal.valueOf(10)).containsEntry("hits", BigDecimal.valueOf(2));
-        // (b) every value null: list [null], sum and max null, count 0
-        assertThat(onlyNull.outputs().get("flags")).isEqualTo(java.util.Arrays.asList((Object) null));
-        assertThat(onlyNull.outputs()).containsEntry("penalty", null).containsEntry("worst", null)
-                .containsEntry("hits", BigDecimal.ZERO);
-        // (c) NoMatch, every output null (count included), logged as OK with []
+                .containsEntry("worst", BigDecimal.valueOf(10)).containsEntry("hits", BigDecimal.valueOf(3));
+        // (b)
+        assertThat(onlyR2.outputs().get("flags")).isEqualTo(java.util.Arrays.asList((Object) null));
+        assertThat(onlyR2.outputs()).containsEntry("penalty", BigDecimal.ZERO).containsEntry("worst", BigDecimal.ZERO)
+                .containsEntry("hits", BigDecimal.ONE);
+        // (c) NoMatch, every output null, count included
         assertThat(none.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
         assertThat(none.outputs()).containsEntry("flags", null).containsEntry("penalty", null)
                 .containsEntry("worst", null).containsEntry("hits", null);
+        // (d) a null under sum is EVALUATION_ERROR naming the output and the rule, no partial outputs, rules logged
+        DecisionResult.Failed failed = (DecisionResult.Failed) nullUnderSum.outcome();
+        assertThat(failed.code()).isEqualTo("EVALUATION_ERROR");
+        assertThat(failed.detail()).contains("penalty").contains("R2");
+        assertThat(nullUnderSum.outputs()).isEmpty();
         assertThat(stores.decisions).extracting(r -> r.outcome() + " " + r.matchedRuleIdsJson())
-                .containsExactly("OK [\"R1\",\"R2\",\"R3\"]", "OK [\"R2\"]", "OK []");
+                .containsExactly("OK [\"R1\",\"R2\",\"R3\"]", "OK [\"R2\"]", "OK []",
+                        "EVALUATION_ERROR [\"R1\",\"R2\"]");
     }
 
     @Test
@@ -217,7 +230,8 @@ class HitPolicyTest {
                 .containsEntry("total", Money.ofMinor("VND", 4000))
                 .containsEntry("lowest", Money.ofMinor("VND", 500))
                 .containsEntry("highest", BigDecimal.valueOf(3))
-                .containsEntry("hits", BigDecimal.valueOf(2));
+                .containsEntry("hits", BigDecimal.valueOf(3));
+        // count counts every matched rule, F3 (no hits value) included (RLE-003, FEEL count)
     }
 
     @Test
