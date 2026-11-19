@@ -49,6 +49,16 @@
       });
     }
 
+    // A demo row fills the username and moves on to the password.
+    document.querySelectorAll('.demo__user').forEach(function (row) {
+      row.addEventListener('click', function () {
+        var username = document.getElementById('username');
+        username.value = row.getAttribute('data-username');
+        document.querySelectorAll('.demo__user').forEach(function (other) { other.classList.toggle('is-picked', other === row); });
+        document.getElementById('password').focus();
+      });
+    });
+
     var form = document.getElementById('sign-in-form');
     if (form) {
       form.addEventListener('submit', function (event) {

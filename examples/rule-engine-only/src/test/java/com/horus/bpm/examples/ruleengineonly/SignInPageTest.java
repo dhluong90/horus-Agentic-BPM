@@ -25,7 +25,8 @@ class SignInPageTest {
     void renders_the_product_the_service_and_the_form_with_the_csrf_field_in_english() {
         String html = new SignInPage(TEMPLATE, "Loan origination", "demo", List.of()).render(view("en", false, false));
 
-        assertThat(html).contains("<html lang=\"en\">", "HORUS Cockpit", ">Sign in<", "Loan origination", "<span class=\"chip\">demo</span>")
+        assertThat(html).contains("<html lang=\"en\">", "HORUS Cockpit", ">Sign in<", "Loan origination", "<span class=\"tag tag--env\">demo</span>",
+                        "Use your Loan origination account.")
                 .contains("<form method=\"post\" action=\"/login\"")
                 .contains("name=\"username\"", "name=\"password\"", "autocomplete=\"current-password\"")
                 // The CSRF value is escaped, and the field keeps the shape hosts and tests read.
@@ -39,7 +40,7 @@ class SignInPageTest {
 
         assertThat(html).contains("<html lang=\"vi\">", "Đăng nhập", "Tên đăng nhập", "Mật khẩu")
                 .contains("href=\"/login?lang=vi\" lang=\"vi\" data-lang=\"vi\" hreflang=\"vi\" aria-current=\"true\"")
-                .doesNotContain("Username").doesNotContain("class=\"chip\"");
+                .contains("Dùng tài khoản Khởi tạo khoản vay của bạn.").doesNotContain("Username").doesNotContain("tag--env");
     }
 
     @Test
@@ -62,9 +63,10 @@ class SignInPageTest {
         String withDemo = new SignInPage(TEMPLATE, "Loans", null, DEMO).render(view("en", false, false));
         String withoutDemo = new SignInPage(TEMPLATE, "Loans", null, List.of()).render(view("en", false, false));
 
-        assertThat(withDemo).contains("Demo environment", "<code>lan</code><span>author</span>", "<code>hoa</code><span>author and approver</span>", "<code>tuan</code><span>teller</span>")
+        assertThat(withDemo).contains("tag--demo", "data-username=\"lan\"", "<span class=\"demo__role\">Author</span>",
+                        "<span class=\"demo__role\">Author and approver</span>", "aria-label=\"Sign in as tuan, Teller\"")
                 .doesNotContainIgnoringCase("test-only-password").doesNotContain("HORUS_DEMO_PASSWORD");
-        assertThat(withoutDemo).doesNotContain("Demo environment").doesNotContain("<code>lan</code>");
+        assertThat(withoutDemo).doesNotContain("tag--demo").doesNotContain("data-username");
     }
 
     @Test

@@ -195,7 +195,7 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choos
 
 Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
 
-The cockpit opens on Home, with a left menu of the areas the signed-in user may use: Home, Rules and Approvals for both demo users, and Decisions (preview) for a user with `rules:log:read`. A host can set the landing area with the `cockpit.landing` setting in `/api/bpm/meta`.
+The cockpit opens on Home for every role. Home's content depends on the user: Lan sees her drafts and requests, Minh the requests waiting for his review, and Tuan, who has no rule permission, one line saying so. The menu shows Home, Rules, Approvals and, under Preview, Decisions to anyone with a rule permission; Processes appears only where a Process Engine is registered. A host can open the cockpit on `rules` or `approvals` with the `cockpit.landing` setting in `/api/bpm/meta`.
 
 ### Sign-in page
 
@@ -209,7 +209,8 @@ The sign-in page belongs to the host, not to the cockpit library. This example s
 | Rendering and headers | [`SignInPage`](src/main/java/com/horus/bpm/examples/ruleengineonly/SignInPage.java), [`SignInController`](src/main/java/com/horus/bpm/examples/ruleengineonly/SignInController.java) |
 
 - **Language:** `?lang=en` or `?lang=vi`, otherwise a Vietnamese browser, otherwise `horus.bpm.cockpit.default-locale`. The page also follows the language and theme chosen in the cockpit.
-- **Demo users:** listed by name and role on the `dev` profile, and only when `HORUS_DEMO_PASSWORD` is set. The page never shows a password.
+- **Brand panel:** the service name, what it is for and three points, from the host's own messages. A bank replaces this panel.
+- **Demo users:** listed by name and role on the `dev` profile, and only when `HORUS_DEMO_PASSWORD` is set. Choosing one fills the username. The page never shows a password.
 - **Security:** no inline script or style, so the page has its own strict `Content-Security-Policy`, with `frame-ancestors 'none'` and `Cache-Control: no-store`.
 - **Changing it:** copy the template and set `host.sign-in.template` to your copy, for example `file:/etc/loans/sign-in.html`. An unknown placeholder stops the page with an error that names it.
 

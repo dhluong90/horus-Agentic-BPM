@@ -40,7 +40,7 @@ final class SignInPage {
 
     static final List<String> LANGUAGES = List.of("en", "vi");
 
-    private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{(\\{?)([A-Za-z]+)\\}?\\}\\}");
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{(\\{?)([A-Za-z][A-Za-z0-9]*)\\}?\\}\\}");
     private static final ResourceBundle.Control NO_FALLBACK = ResourceBundle.Control.getNoFallbackControl(ResourceBundle.Control.FORMAT_PROPERTIES);
 
     /** A demo user: name and the host roles shown beside it. */
@@ -85,7 +85,10 @@ final class SignInPage {
         values.put("csrfParameter", escape(view.csrfParameter()));
         values.put("csrfToken", escape(view.csrfToken()));
         values.put("languageLinks", languageLinks(view));
-        values.put("serviceLine", serviceLine());
+        String service = serviceLabel == null || serviceLabel.isBlank() ? messages.getString("poweredBy") : serviceLabel;
+        values.put("service", escape(service));
+        values.put("subtitle", escape(messages.getString("subtitle").replace("{service}", service)));
+        values.put("environmentTag", environment == null || environment.isBlank() ? "" : "<span class=\"tag tag--env\">" + escape(environment) + "</span>");
         values.put("alert", alert(view, messages));
         values.put("usernameInvalid", view.error() ? " aria-invalid=\"true\" aria-describedby=\"sign-in-alert\"" : "");
         values.put("passwordInvalid", view.error() ? " aria-invalid=\"true\" aria-describedby=\"sign-in-alert\"" : "");
@@ -117,14 +120,6 @@ final class SignInPage {
                 .collect(Collectors.joining());
     }
 
-    private String serviceLine() {
-        if (serviceLabel == null || serviceLabel.isBlank()) {
-            return "";
-        }
-        String chip = environment == null || environment.isBlank() ? "" : " <span class=\"chip\">" + escape(environment) + "</span>";
-        return "<p class=\"service\">" + escape(serviceLabel) + chip + "</p>";
-    }
-
     private static String alert(View view, ResourceBundle messages) {
         if (view.error()) {
             return "<p class=\"alert alert--error\" role=\"alert\" id=\"sign-in-alert\"><span class=\"alert__icon\" aria-hidden=\"true\">!</span>"
@@ -141,13 +136,20 @@ final class SignInPage {
         if (demoUsers.isEmpty()) {
             return "";
         }
-        String users = demoUsers.stream()
-                .map(user -> "<li><code>" + escape(user.username()) + "</code><span>" + escape(roles(user, messages)) + "</span></li>")
-                .collect(Collectors.joining());
-        return "<aside class=\"demo\" aria-labelledby=\"demo-title\"><p class=\"demo__title\" id=\"demo-title\">"
-                + escape(messages.getString("demoTitle")) + "</p><p>" + escape(messages.getString("demoBody"))
-                + "</p><ul class=\"demo__users\">" + users + "</ul><p class=\"demo__never\">"
-                + escape(messages.getString("demoNever")) + "</p></aside>";
+        String users = demoUsers.stream().map(user -> {
+            String role = capitalise(roles(user, messages));
+            String pick = messages.getString("demoPick").replace("{user}", user.username()).replace("{role}", role);
+            return "<li><button type=\"button\" class=\"demo__user\" data-username=\"" + escape(user.username()) + "\" aria-label=\""
+                    + escape(pick) + "\"><span class=\"demo__name\">" + escape(user.username()) + "</span><span class=\"demo__role\">"
+                    + escape(role) + "</span></button></li>";
+        }).collect(Collectors.joining());
+        return "<aside class=\"demo\" aria-labelledby=\"demo-body\"><p class=\"demo__head\"><span class=\"tag tag--demo\">"
+                + escape(messages.getString("demoTag")) + "</span><span id=\"demo-body\">" + escape(messages.getString("demoBody"))
+                + "</span></p><ul class=\"demo__users\">" + users + "</ul></aside>";
+    }
+
+    private static String capitalise(String text) {
+        return text.isEmpty() ? text : text.substring(0, 1).toUpperCase(Locale.ROOT) + text.substring(1);
     }
 
     private static String roles(DemoUser user, ResourceBundle messages) {

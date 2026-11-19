@@ -84,7 +84,7 @@ class CockpitEmbeddedIT {
                 HttpResponse.BodyHandlers.ofString());
 
         assertThat(page.statusCode()).isEqualTo(200);
-        assertThat(page.body()).contains("<html lang=\"vi\">", "HORUS Cockpit", "Loan origination", "<code>lan</code>", "<code>minh</code>")
+        assertThat(page.body()).contains("<html lang=\"vi\">", "HORUS Cockpit", "Loan origination", "data-username=\"lan\"", "data-username=\"minh\"")
                 .doesNotContain("test-only-password").doesNotContainPattern("<script(?![^>]*\\ssrc=)").doesNotContain("<style");
         assertThat(page.headers().firstValue("Content-Security-Policy")).hasValueSatisfying(csp ->
                 assertThat(csp).contains("script-src 'self'").contains("frame-ancestors 'none'").doesNotContain("unsafe-inline"));
