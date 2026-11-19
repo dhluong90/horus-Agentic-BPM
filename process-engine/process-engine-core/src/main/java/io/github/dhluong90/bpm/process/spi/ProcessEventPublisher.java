@@ -6,9 +6,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Receives every engine event inside the transaction of the state change it reports, so a host can write it to
- * its outbox atomically. Types follow {@code processes.<aggregate>.<pastTense>.v1} (DESIGN section 6.4). The
- * starter's default hands events to the Spring application event publisher. Must be thread-safe.
+ * Receives every engine event after the transaction of the state change it reports has committed, never for work
+ * that rolled back. Delivery is at most once and not durable in this release: an event is lost if the process stops
+ * between the commit and the call, so hosts must not use events for money movement, audit or cross-service
+ * integration until an engine outbox exists. Types follow {@code processes.<aggregate>.<pastTense>.v1} (DESIGN
+ * section 6.4). The starter's default hands events to the Spring application event publisher. Must be thread-safe.
  */
 @FunctionalInterface
 public interface ProcessEventPublisher {
