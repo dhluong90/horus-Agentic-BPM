@@ -135,7 +135,7 @@ export const vi: Record<MessageKey, string> = {
   'processes.title': 'Quy trình',
   'processes.subtitle': 'Định nghĩa, phiên chạy và tác vụ quy trình có ở bản sau.',
   'processes.empty': 'Dịch vụ này chưa triển khai quy trình nào.',
-  'processes.guide': 'Cách Bộ máy quy trình hoạt động',
+  'processes.guide': 'Cách nhập file BPMN',
 
   'error.problem.title': 'Dịch vụ từ chối yêu cầu',
   'error.problem.body': 'Gửi mã lỗi và mã tham chiếu cho bộ phận hỗ trợ.',

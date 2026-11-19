@@ -22,6 +22,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param query bounds of list reads
  * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
+ * @param authoring how rule changes may be made on this host
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -32,7 +33,18 @@ public record RuleEngineProperties(
         @DefaultValue Evaluation evaluation,
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle,
-        @DefaultValue Security security) {
+        @DefaultValue Security security,
+        @DefaultValue Authoring authoring) {
+
+    /**
+     * How rule changes may be made on this host (PD-075, PD-094).
+     *
+     * @param cockpitDrafts whether the cockpit may create and edit drafts; default false (PD-094). Published to
+     *     clients as the rules setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta}. Import from a
+     *     file is not affected
+     */
+    public record Authoring(Boolean cockpitDrafts) {
+    }
 
     /**
      * The compiled-version cache.
