@@ -1,8 +1,11 @@
 name: Deploy
 
 # Builds the example host image and runs the docker compose smoke test (docs/DEPLOYING.md), then the
-# image gates: no secrets in the layers, no high or critical vulnerability. Runs only when the
-# deployment files or the example hosts change; the CI workflow covers the engines.
+# image gates: no secrets in the layers, no high or critical vulnerability. Runs when the deployment
+# files or the example hosts change, and every week on main, so a new vulnerability in the JRE, busybox
+# or PostgreSQL is found without a commit; the CI workflow covers the engines. The weekly run also checks
+# for a newer Temurin JRE than the Dockerfile pins (deploy/check-jre-release.py); GitHub notifies the
+# owner when a scheduled run fails.
 on:
   pull_request:
     paths:
@@ -23,6 +26,9 @@ on:
       - "docs/DEPLOYING.md"
       - "examples/**"
       - ".github/workflows/deploy.yml"
+  schedule:
+    # Mondays 03:17 UTC.
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 # Actions are pinned by commit SHA; the comment names the release. Update both together.
@@ -30,7 +36,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  # The event is part of the group, so a scheduled run never cancels a push run on main.
+  group: deploy-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -109,3 +116,26 @@ jobs:
       - name: Stop and remove the stack
         if: always()
         run: docker compose down -v
+
+  jre-update-check:
+    name: Temurin JRE update check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Self-test, an older pinned release reports the newer one
+        run: |
+          rc=0
+          GITHUB_STEP_SUMMARY= JRE_RELEASE=jdk-21.0.12+7 deploy/check-jre-release.py > "$RUNNER_TEMP/self-test.txt" || rc=$?
+          cat "$RUNNER_TEMP/self-test.txt"
+          test "$rc" = 1
+          grep -q 'A newer Temurin 21 JRE is published' "$RUNNER_TEMP/self-test.txt"
+
+      # Fails the scheduled and manual runs when a newer JRE exists; on a pull request it only warns,
+      # so an Adoptium release never turns an unrelated pull request red.
+      - name: Newer Temurin 21 JRE than deploy/docker/Dockerfile pins
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        run: deploy/check-jre-release.py

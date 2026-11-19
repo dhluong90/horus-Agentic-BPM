@@ -289,6 +289,25 @@ To move to a new JRE release:
 3. If Adoptium rotates its key, replace `adoptium.asc` and `ADOPTIUM_KEY_FINGERPRINT` only after checking the new fingerprint against the signing key that Adoptium publishes on adoptium.net, in the same pull request as the version bump.
 4. Run steps 6 and 7.
 
+### Weekly rescan and JRE update check
+
+The Deploy workflow also runs every Monday at 03:17 UTC on `main`: it rebuilds the image, runs the smoke test and the image gates, so a vulnerability published since the last change to the deployment files fails a run without anyone touching them. GitHub notifies the repository owner when a scheduled run fails. Run the same jobs at any time from the Actions tab (Deploy, "Run workflow").
+
+The JRE is a build argument with a pinned checksum, which Dependabot does not track. The same workflow runs [`deploy/check-jre-release.py`](../deploy/check-jre-release.py), which asks the Adoptium API for the latest Temurin 21 JRE for Alpine on x64 and aarch64 and compares it with `JRE_RELEASE`. It fails the scheduled run when a newer release exists and only warns on a pull request. It never edits the Dockerfile; follow [Updating the JRE](#updating-the-jre). It also says whether the official `eclipse-temurin` image carries the pinned release for both architectures, the signal to evaluate switching back to it.
+
+```bash
+deploy/check-jre-release.py
+```
+
+```
+Pinned: jdk-21.0.13.1+2 (deploy/docker/Dockerfile)
+Latest Temurin 21 JRE for alpine-linux x64: jdk-21.0.13.1+2 (same)
+Latest Temurin 21 JRE for alpine-linux aarch64: jdk-21.0.13.1+2 (same)
+Official image eclipse-temurin:21.0.13.1_2-jre-alpine: not published yet
+```
+
+With an older pinned release, for example `JRE_RELEASE=jdk-21.0.12+7 deploy/check-jre-release.py`, it names the newer release with its archives and exits 1. Exit 2 means the API could not be reached.
+
 ## Configuration
 
 All values live in `.env` ([`.env.example`](../.env.example) documents each one).
