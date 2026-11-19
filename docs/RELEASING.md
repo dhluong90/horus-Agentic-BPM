@@ -12,11 +12,11 @@ tools/release/release-build.sh
 
 It needs JDK 21 or later, Maven 3.9, Docker (for the Testcontainers tests), Python 3.9, git, and Node.js at exactly the version in `tools/release/node-version` (22.23.5) with npm. It also needs network access to Maven Central and the npm registry.
 
-The workflow "Release (dry run)" (`.github/workflows/release.yml`) runs the same script on every `<module>/vX.Y.Z` tag, on demand, and on pull requests that change the release files. It then scans the release bill of materials for high and critical vulnerabilities. It restores no dependency cache, for Maven or npm.
+The workflow "Release (dry run)" (`.github/workflows/release.yml`) runs the same script on every `vX.Y.Z` tag (one project tag per release, PD-087), on demand, and on pull requests that change the release files. It then scans the release bill of materials for high and critical vulnerabilities. It restores no dependency cache, for Maven or npm.
 
 | Step | What happens | Fails when |
 |---|---|---|
-| 0 | Preflight | Trial mode in CI; a dirty working tree; on a tag, a version other than the tag's or a commit not on `main`; another Node version |
+| 0 | Preflight; on a tag, the release tag guard (`tools/release/check-release-tag.sh`, see Tags) | Trial mode in CI; a dirty working tree; on a tag, any failed tag check; another Node version |
 | 1 | `mvn clean` and `cockpit/web/dist` deleted, so nothing left from another build is packaged; `BUILD-INFO.json` written | |
 | 2 | `tools/release/build-cockpit.sh` (meant for the container image too; see "One cockpit build"): both lockfiles checked by `tools/release/lockfile-check.mjs` (Node built-ins only) before anything is installed; `npm ci --ignore-scripts` then `npm audit signatures`, for the release tools (`tools/release/npm`) and then the cockpit, before any of their code runs; `lockfile-lint` on both lockfiles as a second opinion. npm is offline from here on | A lockfile entry is not from `https://registry.npmjs.org/` or lacks a sha512 integrity, or a registry signature does not verify |
 | 3 | Same script: cockpit licence check, `tsc -b` and the cockpit's `vite build` through `tools/release/cockpit-build.mjs`, which records the npm packages in the bundle and writes the SHA-256 of every bundle file right after the build (`cockpit-bundle.txt`) | A production package is not under Apache 2.0, MIT or BSD |
@@ -64,12 +64,41 @@ target/release/bom-release.json: <n> components, <n> npm package(s) shipped in c
 
 ## Tags
 
-A tag build (`BPM_RELEASE_TAG`, set by the workflow on tag pushes) fails unless:
+A release is one tag for the whole project, `vX.Y.Z`, starting with `v0.1.0` (PD-087). Every module is released at that version, together with `bpm-bom`. To release:
 
-- the tag is `<module>/vX.Y.Z` and `<module>/pom.xml` exists;
-- the reactor version, and the module's version, are exactly `X.Y.Z`, so a `-SNAPSHOT` is never tagged as a release;
-- the group id of the reactor and of the module is `io.github.dhluong90.bpm` (ADR-0022), so no release ships under the old `com.horus.bpm` coordinates; the rename is #21;
+```
+git tag -a v0.1.0 -m "HORUS Agentic BPM 0.1.0" <commit on main>
+git push origin v0.1.0
+```
+
+A tag build (`BPM_RELEASE_TAG`, set by the workflow on tag pushes) runs `tools/release/check-release-tag.sh` and fails unless:
+
+- the tag is `vX.Y.Z`. A per-module tag such as `rule-engine/v0.1.0` is refused with the form to push instead;
+- the root and **every** module of the reactor (read from the effective POM) are at exactly `X.Y.Z`, so a `-SNAPSHOT` is never tagged as a release and no module is left behind;
+- every module has the group id `io.github.dhluong90.bpm` (ADR-0022), so no release ships under the old `com.horus.bpm` coordinates; the rename is #21;
 - the tagged commit is on `main` (`git merge-base --is-ancestor`).
+
+Every check runs and reports before the guard refuses, so one run names every problem. The guard builds nothing, so it can be run on its own before pushing a tag:
+
+```
+tools/release/check-release-tag.sh v0.1.0
+```
+
+On the commit to release it ends with:
+
+```
+Tag check passed: v0.1.0; all 12 module(s) are io.github.dhluong90.bpm at version 0.1.0.
+Tag v0.1.0: commit <sha> is on main.
+Release tag guard passed: v0.1.0.
+```
+
+A per-module tag is refused like this:
+
+```
+ERROR: tag rule-engine/v0.1.0 is a per-module tag; a release is one project tag of the form vX.Y.Z, here v0.1.0 (PD-087). Delete rule-engine/v0.1.0 and push v0.1.0.
+```
+
+The workflow's job "Release tag guard tests" proves each refusal on every pull request that changes the release files. It runs `tools/release/test_release_sbom.py` (unit tests of the check) and `tools/release/test-release-tag.sh`. The second builds a scratch copy of the tree at the release version and group id, commits it as `main`, and runs the guard for five cases: `v0.1.0` on `main` passes; a per-module tag, a module at another version and a commit off `main` are refused; and a per-module tag on a commit off `main` names both problems.
 
 ## Local trial
 

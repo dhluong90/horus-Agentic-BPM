@@ -41,7 +41,7 @@ New runtime dependencies need a one-paragraph justification in the pull request 
 | Area | Choice |
 |---|---|
 | CI | GitHub Actions: Java 21/25 x PostgreSQL 14/16/17, one job through PgBouncer in transaction mode, ArchUnit, benchmark trend, SBOM, licence check, wiki publish |
-| Versioning | Semver per module; tags `<module>/vX.Y.Z`; `bpm-bom` with every release |
+| Versioning | One project-wide semantic version for every module (PD-087); tags `vX.Y.Z`; `bpm-bom` with every release |
 | Distribution | Maven Central via the Sonatype Central Portal, `groupId` `io.github.dhluong90.bpm` (ADR-0022) |
 
 ## Open decisions
