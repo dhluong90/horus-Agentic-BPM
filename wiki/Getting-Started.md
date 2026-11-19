@@ -25,7 +25,7 @@ Supported platform versions are listed in [[Technical Requirements]] (TR-EMB-02)
 
 ## 1. Create the service
 
-Generate a Spring Boot 3.4 project with the Web dependency (for example from `start.spring.io`, group `com.example`, artifact `loans`), or use an existing service.
+Generate a Spring Boot 4.x project (3.5.x also works until release 1.0) with the Web dependency (for example from `start.spring.io`, group `com.example`, artifact `loans`), or use an existing service.
 
 ## 2. Add the starters
 
