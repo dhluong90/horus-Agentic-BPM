@@ -203,6 +203,8 @@ Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ER
 | `rules.version.retired.v1` | `:retire` in `single` mode, `:confirm-retire`, or superseded | `ruleSet`, `version`, `retiredBy` (`system` when superseded; the confirmer in `four-eyes` mode), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the requester in `four-eyes` mode, else null), `retiredAt` |
 | `rules.decision.evaluated.v1` | every decision, off by default (`events.decision-evaluated`) | `decisionId`, `ruleSet`, `version`, `outcome` |
 
+A host that wants tamper evidence for approvals relays these events to a store outside the database administrator's control (an append-only log or a separate audit system) and reconciles the stored versions against it, because rows in the host database, outbox included, can be changed by whoever administers it.
+
 Envelope: `eventId` (ULID), `eventType`, `occurredAt`, `tenantId`, `correlationId`, `causationId`, `producer`, `schemaVersion`, `payload`. Changes are additive within a `.v1` type. Events go through the host's `RuleEventPublisher` inside the same transaction as the state change.
 
 ## Performance targets (0.1)

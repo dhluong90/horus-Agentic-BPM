@@ -101,6 +101,8 @@ Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` 
 | `rules.version.retired.v1` | `ruleSet`, `version`, `retiredBy` (`system` when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version or null), `retiredAt`, `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the four-eyes requester, else null) |
 | `rules.decision.evaluated.v1` | `decisionId`, `ruleSet`, `version`, `outcome` |
 
+A host that wants tamper evidence for approvals relays these events to a store outside the database administrator's control (an append-only log or a separate audit system) and reconciles the stored versions against it, because rows in the host database, outbox included, can be changed by whoever administers it. The publication events carry `canonicalHash`, `effectiveFrom`, `requestedBy` and `approvedBy` for that purpose.
+
 Optimistic locking uses `lockVersion` (column `lock_version`), sent as `If-Match: "<lockVersion>"` or a `lockVersion` body field and returned as `ETag: "<lockVersion>"`. It is unrelated to `version`, the rule set version number.
 
 Approval, cache invalidation after commit, and the epoch fallback when a notification is lost:

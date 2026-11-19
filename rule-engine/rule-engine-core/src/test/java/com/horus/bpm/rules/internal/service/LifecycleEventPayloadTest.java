@@ -100,6 +100,10 @@ class LifecycleEventPayloadTest {
         assertThat(atApproval.path("approvedBy").asString()).isEqualTo("minh");
         assertThat(atApproval.path("actor").asString()).isEqualTo("minh");
         assertThat(scheduled.path("effectiveFrom").asString()).isEqualTo("2027-01-01T00:00:00Z");
+        // and four eyes is visible in the event itself: the approver is never the requester
+        for (JsonNode event : new JsonNode[] {atApproval, scheduled}) {
+            assertThat(event.path("approvedBy").asString()).isNotEqualTo(event.path("requestedBy").asString());
+        }
         conformsTo("rules.version.published.v1.schema.json", atApproval);
         conformsTo("rules.version.published.v1.schema.json", scheduled);
     }
