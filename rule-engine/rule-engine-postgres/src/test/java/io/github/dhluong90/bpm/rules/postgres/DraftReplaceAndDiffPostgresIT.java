@@ -246,7 +246,7 @@ class DraftReplaceAndDiffPostgresIT {
         versions.importRuleSet(ImportRequest.yaml(RuleEnginePostgresIT.cardFee()));
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         who.set("bank-a", "bob");
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
     }
 
     static byte[] withR2(String fee) {
