@@ -53,8 +53,7 @@ public class ProblemDetails {
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
-            Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE),
-            Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE));
+            Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE));
 
     /**
      * Answers an engine exception.
