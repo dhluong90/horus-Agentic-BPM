@@ -20,7 +20,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GRYPE_IMAGE="anchore/grype:v0.122.1@sha256:661583704a253c0448ed63998b5ea2cd9d5a76ee71eedc4aed439b8ce3e93a1c"
 IMAGE="${1:?usage: deploy/scan-image.sh IMAGE}"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# Keep the exit status: bash 3.2 would otherwise exit with the status of the clean-up.
+trap 'status=$?; rm -rf "$WORK"; exit $status' EXIT
 
 env_value() {
   local name="$1"

@@ -30,7 +30,8 @@ BASE="${SMOKE_BASE_URL:-http://127.0.0.1:${PORT}}"
 TIMEOUT="${SMOKE_TIMEOUT:-180}"
 RULES="$BASE/api/bpm/rules/v1"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# Keep the exit status: bash 3.2 would otherwise exit with the status of the clean-up.
+trap 'status=$?; rm -rf "$WORK"; exit $status' EXIT
 skipped=0
 
 pass() { printf 'PASS  %s\n' "$*"; }
