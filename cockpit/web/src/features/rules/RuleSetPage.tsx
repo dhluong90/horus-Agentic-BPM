@@ -191,7 +191,7 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
           </div>
           {can('rules:author') ? (
             <span className="rs-head__import">
-              <ImportFileButton label={t('ruleSet.import')} busyLabel={t('ruleSets.importing')} busy={importVersion.isPending} primary={false} onDocument={(document) => { importVersion.start(document); }} />
+              <ImportFileButton label={t('ruleSet.import')} busyLabel={t('ruleSets.importing')} busy={importVersion.isPending} primary={false} onDocument={(document) => { setNotice(undefined); importVersion.start(document); }} />
             </span>
           ) : null}
         </div>

@@ -67,6 +67,25 @@ async function aboveFold(page: Page, name: string | RegExp) {
 
 const rowHeads = (page: Page) => page.locator('table.dt tbody th[scope=row] .row-id, table.dt tbody th[scope=row] input');
 
+test('CKP_030_live_json_files_import_on_the_list_and_on_the_rule_set_page', async ({ browser }) => {
+  const lan = await signIn(browser, 'lan');
+  await openCockpit(lan, '#/rules');
+  const name = `fx-margin-${Date.now().toString(36)}`;
+  const doc = (fee: string) => JSON.stringify({ schemaVersion: 1, ruleSet: name, hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }],
+    outputs: [{ name: 'fee', type: 'money' }], rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee } }] }, null, 2);
+  const pick = async (button: string, fee: string) => {
+    const chooser = lan.waitForEvent('filechooser');
+    await lan.getByRole('button', { name: button }).click();
+    await (await chooser).setFiles({ name: `${name}.json`, mimeType: 'application/json', buffer: Buffer.from(doc(fee)) });
+  };
+  await pick('Import file', '0 VND');
+  await expect(lan.getByRole('heading', { level: 1 })).toContainText(`${name} Version 1`);
+  await pick('Import new version', '5000 VND');
+  await expect(lan.getByRole('heading', { level: 1 })).toContainText(`${name} Version 2`);
+  await expect(lan.getByText('Draft version 2 created')).toBeVisible();
+  await expect(lan.getByText('5,000 VND')).toBeVisible();
+});
+
 test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ browser }) => {
   test.setTimeout(120_000);
   const lan = await signIn(browser, 'lan');

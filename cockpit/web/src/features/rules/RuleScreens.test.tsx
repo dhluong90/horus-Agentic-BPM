@@ -63,19 +63,17 @@ describe('rule set list and version view', () => {
     expect(await screen.findByRole('table')).toHaveTextContent('kyc-risk');
   });
 
-  it('TR_STD_01_a_json_file_is_sent_as_json', async () => {
+  it('TR_STD_01_a_json_file_is_sent_as_yaml_text_until_the_engine_imports_json', async () => {
     const user = userEvent.setup();
-    const view = { container: document.body };
     open('#/rules');
     await screen.findByRole('table');
-    const input = view.container.querySelector<HTMLInputElement>('input[type=file]');
+    const input = document.body.querySelector<HTMLInputElement>('input[type=file]');
     if (!input) throw new Error('file input missing');
-    await user.upload(input, new File(['{"schemaVersion":1}'], 'card-fee-v3.json', { type: 'application/json' }));
-    // This engine release imports YAML only and says so; the cockpit shows its answer.
-    expect(await screen.findByText('The service did not accept an input.')).toBeInTheDocument();
-    const sent = calls.find((c) => c.method === 'POST');
-    expect(sent?.path).toBe('/rule-sets');
-    expect(contentTypes.at(-1)).toBe('application/json');
+    const document_ = { schemaVersion: 1, ruleSet: 'fx-margin', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }],
+      rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] };
+    await user.upload(input, new File([JSON.stringify(document_)], 'fx-margin.json', { type: 'application/json' }));
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('fx-margin Version 1');
+    expect(contentTypes).toEqual(['application/yaml']);
   });
 
   it('CKP_030_reader_without_author_permission_sees_no_import', async () => {
@@ -277,6 +275,16 @@ describe('import of the next version (CKP-030)', () => {
     expect(screen.getByText(': compares a money with a number')).toBeInTheDocument();
     expect(screen.queryByText(/Draft version 3 created/)).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('card-fee Version 1');
+  });
+
+  it('CKP_030_a_failed_import_clears_the_previous_success_notice', async () => {
+    open('#/rules/card-fee/1');
+    await screen.findByRole('button', { name: 'Import new version' });
+    await upload(v3.replace('>= 50000000', '>= 50000000 VND'), 'card-fee-v3.yaml');
+    expect(await screen.findByText('Draft version 3 created')).toBeInTheDocument();
+    await upload(v3, 'card-fee-bad.yaml');
+    expect(await screen.findByText('Row R4, column balance')).toBeInTheDocument();
+    expect(screen.queryByText('Draft version 3 created')).not.toBeInTheDocument();
   });
 
   it('PD_075_import_stays_available_when_cockpit_drafts_are_off', async () => {

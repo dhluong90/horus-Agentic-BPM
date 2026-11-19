@@ -264,7 +264,7 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choos
 
 To bring in a file prepared elsewhere, open the rule set and choose **Import new version**: the file becomes the next draft. Only a person other than the author and the requester can approve or reject a version; a requester withdraws through the engine's withdraw action once it ships. A host that keeps rule changes in Git sets `horus.bpm.rules.authoring.cockpit-drafts: false`; the cockpit then hides New draft and Edit draft and keeps Import new version.
 
-A save creates a new draft version each time, because the engine has no endpoint to replace a draft yet (issue #165). A `.json` file is sent as JSON; this engine release imports YAML only and answers so.
+A save creates a new draft version each time, because the engine has no endpoint to replace a draft yet (issue #165). A `.json` file is sent as YAML text (JSON is valid YAML), because this engine release imports YAML only.
 
 The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=http://localhost:8080 LIVE_PASSWORD=choose-one npm --prefix cockpit/web run e2e:live`. Started without the two properties, as the Docker Compose deployment is, the host gives the demo roles no `rules:evaluate`: Try it then says "You cannot run rules on this service", and the test checks that and skips the Try it step with a note.
 

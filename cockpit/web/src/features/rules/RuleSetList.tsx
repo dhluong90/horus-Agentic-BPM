@@ -92,7 +92,7 @@ export function RuleSetList() {
         </div>
         {can('rules:author') ? (
           <div className="page-head__actions">
-            <ImportFileButton label={t('ruleSets.import')} busyLabel={t('ruleSets.importing')} busy={importFile.isPending} primary onDocument={(document) => { importFile.start(document); }} />
+            <ImportFileButton label={t('ruleSets.import')} busyLabel={t('ruleSets.importing')} busy={importFile.isPending} primary onDocument={(document) => { setNotice(undefined); importFile.start(document); }} />
           </div>
         ) : null}
       </div>

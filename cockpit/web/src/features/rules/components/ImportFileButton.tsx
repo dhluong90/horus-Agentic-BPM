@@ -3,8 +3,9 @@ import type { RuleDocument } from '../../../api/rules/rulesClient';
 
 async function readDocument(file: File): Promise<RuleDocument> {
   const text = await file.text();
-  // The engine records the source format from the media type, so a JSON file is sent as JSON.
-  return { contentType: /\.json$/i.test(file.name) ? 'application/json' : 'application/yaml', text };
+  // This engine release imports YAML only and refuses application/json. JSON text is valid YAML 1.2, so a
+  // .json file is sent as YAML until the engine accepts JSON; then send it as application/json.
+  return { contentType: 'application/yaml', text };
 }
 
 /** A button that picks a YAML or JSON file and hands its document on; one request per pick. */
