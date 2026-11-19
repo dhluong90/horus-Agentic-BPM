@@ -12,6 +12,11 @@ import org.springframework.core.type.AnnotatedTypeMetadata;
  * both Spring Boot lines: {@code management.health.ruleEngine.enabled}, or else
  * {@code management.health.defaults.enabled}; on by default (ADR-0024). Written here because the
  * {@code @ConditionalOnEnabledHealthIndicator} annotation lives in a different module on each line.
+ *
+ * <p>Values are read as Spring Boot reads them for its own health indicators, through the environment's
+ * conversion service: {@code true}, {@code on}, {@code yes} and {@code 1} enable, {@code false},
+ * {@code off}, {@code no} and {@code 0} disable, an empty value counts as unset, and any other value
+ * fails start-up. A typo never switches the component off silently.
  */
 final class OnRuleEngineHealthEnabledCondition extends SpringBootCondition {
 
@@ -21,15 +26,23 @@ final class OnRuleEngineHealthEnabledCondition extends SpringBootCondition {
     @Override
     public ConditionOutcome getMatchOutcome(ConditionContext context, AnnotatedTypeMetadata metadata) {
         Environment environment = context.getEnvironment();
-        String value = environment.getProperty(ENABLED, environment.getProperty(ENABLED.toLowerCase(Locale.ROOT)));
-        String source = ENABLED;
-        if (value == null) {
-            value = environment.getProperty(DEFAULTS_ENABLED);
-            source = DEFAULTS_ENABLED;
+        Boolean enabled = environment.getProperty(ENABLED, Boolean.class);
+        if (enabled == null) {
+            enabled = environment.getProperty(ENABLED.toLowerCase(Locale.ROOT), Boolean.class);
         }
-        if (value == null || Boolean.parseBoolean(value.strip())) {
-            return ConditionOutcome.match("ruleEngine health contributor enabled");
+        if (enabled != null) {
+            return outcome(enabled, ENABLED);
         }
-        return ConditionOutcome.noMatch("ruleEngine health contributor disabled by " + source);
+        Boolean defaultsEnabled = environment.getProperty(DEFAULTS_ENABLED, Boolean.class);
+        if (defaultsEnabled != null) {
+            return outcome(defaultsEnabled, DEFAULTS_ENABLED);
+        }
+        return ConditionOutcome.match("ruleEngine health contributor enabled by default");
+    }
+
+    private static ConditionOutcome outcome(boolean enabled, String source) {
+        return enabled
+                ? ConditionOutcome.match("ruleEngine health contributor enabled by " + source)
+                : ConditionOutcome.noMatch("ruleEngine health contributor disabled by " + source);
     }
 }

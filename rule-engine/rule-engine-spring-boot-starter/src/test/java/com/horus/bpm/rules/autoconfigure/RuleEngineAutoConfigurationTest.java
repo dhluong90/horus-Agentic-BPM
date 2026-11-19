@@ -23,14 +23,18 @@ import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.TransactionAwareDataSourceProxy;
@@ -258,14 +262,14 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
-    void management_health_rule_engine_enabled_false_reports_no_rule_engine_component() {
+    void TR_EXT_02_management_health_rule_engine_enabled_false_reports_no_rule_engine_component() {
         runner.withUserConfiguration(HostWithEngineStandIns.class)
                 .withPropertyValues("management.health.ruleEngine.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
     }
 
     @Test
-    void management_health_defaults_enabled_false_applies_unless_rule_engine_is_enabled_itself() {
+    void TR_EXT_02_management_health_defaults_enabled_false_applies_unless_rule_engine_is_enabled_itself() {
         runner.withUserConfiguration(HostWithEngineStandIns.class)
                 .withPropertyValues("management.health.defaults.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
@@ -273,6 +277,97 @@ class RuleEngineAutoConfigurationTest {
                 .withPropertyValues(
                         "management.health.defaults.enabled=false", "management.health.ruleEngine.enabled=true")
                 .run(context -> assertThat(context).hasBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    // The off switch reads booleans as Spring Boot does for its own indicators: never silently off.
+
+    @ParameterizedTest
+    @ValueSource(strings = {"on", "yes", "1", "TRUE"})
+    void TR_EXT_02_switch_values_spring_boot_reads_as_true_keep_the_rule_engine_component(String value) {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.ruleEngine.enabled=" + value)
+                .run(context -> assertThat(context).hasNotFailed().hasBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"off", "no", "0"})
+    void TR_EXT_02_switch_values_spring_boot_reads_as_false_remove_the_rule_engine_component(String value) {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.ruleEngine.enabled=" + value)
+                .run(context -> assertThat(context).hasNotFailed()
+                        .doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    @Test
+    void TR_EXT_02_an_empty_switch_counts_as_unset() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.ruleEngine.enabled=")
+                .run(context -> assertThat(context).hasNotFailed().hasBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+        // Unset, so the defaults switch decides.
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.ruleEngine.enabled=", "management.health.defaults.enabled=false")
+                .run(context -> assertThat(context).hasNotFailed()
+                        .doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.defaults.enabled=")
+                .run(context -> assertThat(context).hasNotFailed().hasBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"management.health.ruleEngine.enabled", "management.health.defaults.enabled"})
+    void TR_EXT_02_a_switch_value_that_is_not_a_boolean_fails_start_up(String property) {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues(property + "=ture")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).rootCause().hasMessageContaining("ture");
+                });
+    }
+
+    @Test
+    void TR_EXT_02_the_switch_is_read_from_the_environment_variable() {
+        // MANAGEMENT_HEALTH_RULEENGINE_ENABLED, as a container sets it.
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withInitializer(context -> context.getEnvironment().getPropertySources().addFirst(
+                        new SystemEnvironmentPropertySource("test-env",
+                                Map.of("MANAGEMENT_HEALTH_RULEENGINE_ENABLED", "0"))))
+                .run(context -> assertThat(context).hasNotFailed()
+                        .doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    // Exactly one adapter per host, and none without a health API (TR-EMB-02).
+
+    @Test
+    void TR_EMB_02_no_health_adapter_when_the_host_has_neither_health_api() {
+        // A host without Actuator; on Spring Boot 4 also a host with Actuator but without spring-boot-health,
+        // whose spring-boot-actuator jar has no org.springframework.boot.actuate.health package.
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withClassLoader(new FilteredClassLoader(
+                        "org.springframework.boot.health", "org.springframework.boot.actuate.health"))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(RuleEngineSchemaMigrator.class);
+                    assertThat(context).doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN);
+                });
+    }
+
+    @Test
+    void TR_EMB_02_the_spring_boot_3_5_adapter_backs_off_when_both_health_apis_are_present() {
+        String springBoot35Health = RuleEngineAutoConfiguration.SPRING_BOOT_3_5_HEALTH;
+        if (springBoot4Health()) {
+            // A real check, not an assumption: the 3.5 API is on this leg's test classpath (provided scope).
+            assertThat(ClassUtils.isPresent(springBoot35Health, null)).as(springBoot35Health + " present").isTrue();
+        }
+        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
+            if (springBoot4Health()) {
+                assertThat(context.getBeansOfType(Class.forName(springBoot35Health))).isEmpty();
+                assertThat(context.getBean(RuleEngineAutoConfiguration.HEALTH_BEAN).getClass().getName())
+                        .isEqualTo(PACKAGE + ".RuleEngineHealthIndicator");
+            } else {
+                assertThat(context.getBeansOfType(Class.forName(springBoot35Health)))
+                        .containsOnlyKeys(RuleEngineAutoConfiguration.HEALTH_BEAN);
+            }
+        });
     }
 
     /** True on Spring Boot 4 hosts (the health module is present), false on Spring Boot 3.5 hosts. */
