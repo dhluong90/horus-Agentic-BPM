@@ -48,7 +48,7 @@ export function ServiceOverview({ meta, me }: { meta: BpmMetaV1; me: BpmMeV1 }) 
           <ul className="engine-list">
             {meta.modules.map((module) => (
               <li key={module.module} className="engine">
-                <span className="status-dot status-dot--ok" aria-hidden="true" />
+                <span className="status-dot" aria-hidden="true" />
                 <span className="engine__name">{t(MODULE_LABEL[module.module])}</span>
                 <span className="engine__meta tnum">{t('overview.version', { version: module.engineVersion })}</span>
                 <span className="chip">{t('overview.api', { apiVersion: module.apiVersion })}</span>

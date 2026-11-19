@@ -15,13 +15,12 @@ export function applyTheme(theme: Theme): void {
 
 export function useTheme(): { theme: Theme; toggle: () => void } {
   const [theme, setTheme] = useState<Theme>(() => document.documentElement.dataset['theme'] === 'dark' ? 'dark' : 'light');
+  // Side effects run in the event handler, not in a state updater (StrictMode runs updaters twice).
   const toggle = useCallback(() => {
-    setTheme((current) => {
-      const next: Theme = current === 'dark' ? 'light' : 'dark';
-      applyTheme(next);
-      storeTheme(next);
-      return next;
-    });
-  }, []);
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    storeTheme(next);
+    setTheme(next);
+  }, [theme]);
   return { theme, toggle };
 }

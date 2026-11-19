@@ -39,6 +39,8 @@ export function useHostSession({ fetchImpl }: SessionDependencies = {}): Session
   );
 
   // Query keys start with the host id, so another host's answer can never show here (DESIGN section 12).
+  // These two keys have no tenant on purpose: /meta is host-wide and /me is what tells the cockpit the
+  // tenant. Every tenant-scoped query uses the full key [hostId, tenantId, resource, params].
   const [metaQuery, meQuery] = useQueries({
     queries: [
       {

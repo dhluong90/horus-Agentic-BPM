@@ -29,7 +29,11 @@ export function SessionHeader({ session, banner }: { session: SessionSummary | u
         <BrandMark />
         <span className="brand-name">{t('app.name')}</span>
       </div>
-      {banner !== undefined ? <span className="env-banner">{banner}</span> : null}
+      {banner !== undefined ? (
+        <span className="env-banner" title={banner}>
+          {banner}
+        </span>
+      ) : null}
       {session ? <SessionContext session={session} /> : null}
       <div className="spacer" />
       <PreferenceControls />
@@ -41,20 +45,26 @@ function SessionContext({ session }: { session: SessionSummary }) {
   const { t } = useI18n();
   return (
     <dl className="ctx" aria-label={t('header.session')}>
-      <div className="ctx__item">
+      <div className="ctx__item ctx__item--host">
         <dt>{t('header.service')}</dt>
         <dd>
-          <span data-testid="header-host">{session.hostLabel}</span>
+          <span data-testid="header-host" title={session.hostLabel}>
+            {session.hostLabel}
+          </span>
           {session.environment !== undefined ? (
-            <span className="chip" title={t('header.environment')}>
+            <span className="chip" title={`${t('header.environment')}: ${session.environment}`}>
               {session.environment}
             </span>
           ) : null}
         </dd>
       </div>
-      <div className="ctx__item">
+      <div className="ctx__item ctx__item--tenant">
         <dt>{t('header.tenant')}</dt>
-        <dd data-testid="header-tenant">{session.tenant}</dd>
+        <dd>
+          <span data-testid="header-tenant" title={session.tenant}>
+            {session.tenant}
+          </span>
+        </dd>
       </div>
       <div className="ctx__item ctx__item--user">
         <dt>{t('header.user')}</dt>

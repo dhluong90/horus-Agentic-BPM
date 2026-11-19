@@ -1,12 +1,15 @@
 /*
  * Cockpit design tokens: the approved cockpit palette after its colour review.
- * Light is the default; dark applies with data-theme="dark" on <html>.
+ * Light is the default; dark applies with data-theme="dark" on <html>. Before the script sets
+ * data-theme, a dark system preference already gets the dark values (no light flash); the two dark
+ * blocks must stay identical.
  * Feature styles use these variables only, never raw colours.
  */
 :root {
-  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-label: "IBM Plex Sans Condensed", "IBM Plex Sans", "Arial Narrow", system-ui, sans-serif;
-  --font-data: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* System fonts only: no font files ship and font-src 'self' blocks remote fonts. */
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-label: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-data: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
   --bg: #F4F6F9; --grid: rgba(15, 23, 42, .035);
   --surface: #FFFFFF; --surface-2: #F8FAFC; --surface-3: #EEF1F5; --glass: rgba(255, 255, 255, .88);
@@ -52,4 +55,28 @@
   --select: rgba(14, 165, 233, .12);
   --on-accent-fill: #04131D;
   color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0B0F17; --grid: rgba(148, 163, 184, .035);
+    --surface: #131A27; --surface-2: #182030; --surface-3: #202A3C; --glass: rgba(19, 26, 39, .82);
+    --line: rgba(148, 163, 184, .18); --line-strong: rgba(148, 163, 184, .34); --hi: rgba(255, 255, 255, .06);
+    --ink: #E6EAF2; --ink-2: #C5CCD9; --muted: #9BA6B8; --control: #7C889D;
+    --accent: #38BDF8; --accent-fill: #0C9AD9; --accent-soft: rgba(14, 165, 233, .14); --on-accent: #04131D;
+    --teal: #2DD4BF; --teal-soft: rgba(45, 212, 191, .12);
+    --ok: #34D399; --ok-fill: #0E9F6E; --ok-soft: rgba(16, 185, 129, .14);
+    --warn: #FBBF24; --warn-fill: #E89B0C; --warn-soft: rgba(245, 158, 11, .14);
+    --bad: #F87171; --bad-fill: #EF4444; --bad-soft: rgba(239, 68, 68, .15);
+    --indigo: #A5B4FC; --indigo-soft: rgba(99, 102, 241, .16);
+    --violet: #C4B5FD; --violet-soft: rgba(139, 92, 246, .16);
+    --focus: #93C5FD;
+    --sh-1: 0 1px 0 rgba(255, 255, 255, .05) inset, 0 1px 2px rgba(0, 0, 0, .45);
+    --sh-2: 0 1px 0 rgba(255, 255, 255, .06) inset, 0 12px 28px -12px rgba(0, 0, 0, .75);
+    --sh-3: 0 1px 0 rgba(255, 255, 255, .07) inset, 0 28px 72px -20px rgba(0, 0, 0, .85);
+    --scrim: rgba(2, 6, 12, .66);
+    --select: rgba(14, 165, 233, .12);
+    --on-accent-fill: #04131D;
+    color-scheme: dark;
+  }
 }

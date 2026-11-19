@@ -98,7 +98,7 @@ test.describe('failure paths', () => {
     await expect(header.getByTestId('header-user')).toHaveCount(0);
   });
 
-  test('CKP_001_invalid_registry_shows_the_json_pointer_and_calls_no_host', async ({ page }) => {
+  test('CKP_012_invalid_registry_shows_the_json_pointer_and_calls_no_host', async ({ page }) => {
     const calls = await mockHost(page, 'registry-invalid');
     await page.goto('./');
 
@@ -158,5 +158,46 @@ test.describe('header geometry', () => {
     const ready = await box(page.getByTestId('session-header'));
 
     expect(ready.height).toBe(onError.height);
+  });
+});
+
+test.describe('header with the longest values', () => {
+  test('CKP_001_vietnamese_header_with_longest_label_chip_and_banner_stays_one_line_above_the_fold_at_1440x900', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockHost(page, 'ready-longest-labels');
+    await page.goto('./');
+
+    const header = page.getByTestId('session-header');
+    await expect(header.getByTestId('header-user')).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'vi');
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
+    const rect = await box(header);
+    expect(rect.height).toBe(64);
+    await expectInsideViewport(page, header);
+    for (const id of ['header-host', 'header-tenant', 'header-user']) {
+      await expectInsideViewport(page, header.getByTestId(id));
+    }
+    await expectInsideViewport(page, page.getByRole('button', { name: 'VI' }));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
+    // The full text stays available when it is cut with an ellipsis.
+    await expect(header.getByTestId('header-host')).toHaveAttribute('title', /Hệ thống khởi tạo/);
+    await page.screenshot({ path: 'e2e/screenshots/shell-longest-labels-1440x900-light-vi.png' });
+  });
+});
+
+test.describe('theme before the script runs', () => {
+  test('TR_UI_03_dark_system_preference_applies_without_data_theme', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await mockHost(page);
+    await page.goto('./');
+    await expect(page.getByTestId('header-user')).toBeVisible();
+
+    const background = await page.evaluate(() => {
+      document.documentElement.removeAttribute('data-theme');
+      return getComputedStyle(document.body).backgroundColor;
+    });
+    expect(background).toBe('rgb(11, 15, 23)');
   });
 });
