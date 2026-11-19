@@ -114,6 +114,8 @@ final class RestSupport {
             node.set("supersededBy", entry.supersededBy() == null
                     ? EngineJson.NODES.nullNode() : EngineJson.NODES.numberNode(entry.supersededBy()));
             node.set("approvalMode", EngineValues.value(entry.approvalMode()));
+            node.set("noVersionInEffect", entry.noVersionInEffect() == null
+                    ? EngineJson.NODES.nullNode() : EngineJson.NODES.booleanNode(entry.noVersionInEffect()));
         }
         node.put("lockVersion", entry.lockVersion());
         node.put("occurredAt", entry.occurredAt().toString());

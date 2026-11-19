@@ -139,8 +139,22 @@ class RetireVersionIT {
         assertThat(send(t, "dan", "GET", "/rule-sets/tet-fee-waiver/versions/1", null, null, null, null)
                 .json().path("allowedActions").toString()).isEqualTo("[]");
 
-        // When bob retires it with k-301, If-Match and a reason
-        byte[] reason = body("{\"reason\":\"Tet promotion ended\"}");
+        // When bob retires it, the last version in effect, without confirming that none will remain (PD-101)
+        Reply refused = send(t, "bob", "POST", "/rule-sets/tet-fee-waiver/versions/1:retire",
+                body("{\"reason\":\"Tet promotion ended\"}"), "application/json", "k-301", v1.etag());
+        assertProblem(refused, 409, "LAST_VERSION_IN_EFFECT");
+        assertThat(refused.json().path("ruleSet").asString()).isEqualTo("tet-fee-waiver");
+        assertThat(refused.json().path("version").asInt()).isEqualTo(1);
+        assertThat(refused.json().path("setting").asString()).isEqualTo("confirm");
+        assertThat(refused.json().path("nextEffectiveFrom").isNull()).isTrue();
+        assertThat(refused.json().path("detail").asString()).contains("rule set tet-fee-waiver");
+        assertProblem(send(t, "bob", "POST", "/rule-sets/tet-fee-waiver/versions/1:retire",
+                body("{\"reason\":\"Tet promotion ended\",\"confirmNoVersionInEffect\":\"yes\"}"), "application/json",
+                "k-301", v1.etag()), 400, "INPUT_INVALID");
+        assertThat(retiredEvents(t)).isZero();
+
+        // When he retires it with k-301, If-Match, a reason and the confirmation
+        byte[] reason = body("{\"reason\":\"Tet promotion ended\",\"confirmNoVersionInEffect\":true}");
         Reply retired = send(t, "bob", "POST", "/rule-sets/tet-fee-waiver/versions/1:retire", reason,
                 "application/json", "k-301", v1.etag());
 
@@ -159,6 +173,7 @@ class RetireVersionIT {
         assertThat(last.path("reason").asString()).isEqualTo("Tet promotion ended");
         assertThat(last.path("approvalMode").asString()).isEqualTo("single");
         assertThat(last.path("supersededBy").isNull()).isTrue();
+        assertThat(last.path("noVersionInEffect").asBoolean()).isTrue();
         assertThat(history.get(0).has("approvalMode")).as("only a retirement carries the mode").isFalse();
         assertThat(retiredEvents(t)).isEqualTo(1);
 
@@ -236,6 +251,7 @@ class RetireVersionIT {
                 HttpResponse.BodyHandlers.ofString());
         JsonNode settings = JSON.readTree(meta.body()).path("modules").get(0).path("settings");
         assertThat(settings.path("lifecycle.retire-approval").asString()).isEqualTo("single");
+        assertThat(settings.path("lifecycle.retire-last-version").asString()).isEqualTo("confirm");
     }
 
     long retiredEvents(String tenant) {

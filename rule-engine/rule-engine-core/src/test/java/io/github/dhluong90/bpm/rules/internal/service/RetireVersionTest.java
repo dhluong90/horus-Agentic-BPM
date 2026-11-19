@@ -9,6 +9,7 @@ import io.github.dhluong90.bpm.rules.api.HorusBpmException;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
+import io.github.dhluong90.bpm.rules.api.LastVersionInEffectException;
 import io.github.dhluong90.bpm.rules.api.LifecycleAction;
 import io.github.dhluong90.bpm.rules.api.NoEffectiveVersionException;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
@@ -128,7 +129,7 @@ class RetireVersionTest {
         clock.set(Instant.parse("2027-02-17T08:00:00Z"));
         caller.become("bank-a", "bob", APPROVER);
         WriteOptions command = new WriteOptions("k-301", v1.lockVersion(), "Tet promotion ended");
-        RuleSetVersion retired = versions.retire("tet-fee-waiver", 1, command);
+        RuleSetVersion retired = versions.retire("tet-fee-waiver", 1, command, true);
 
         // Then v1 is RETIRED from that instant, with one history row and one event recording the mode single
         assertThat(retired.status()).isEqualTo(VersionStatus.RETIRED);
@@ -137,7 +138,7 @@ class RetireVersionTest {
         VersionHistoryEntry row = history("bank-a", "tet-fee-waiver", 1).getLast();
         assertThat(row).isEqualTo(new VersionHistoryEntry(LifecycleAction.RETIRED, VersionStatus.PUBLISHED,
                 VersionStatus.RETIRED, "bob", "Tet promotion ended", retired.lockVersion(),
-                Instant.parse("2027-02-17T08:00:00Z"), null, "single"));
+                Instant.parse("2027-02-17T08:00:00Z"), null, "single", true));
         assertThat(retiredEvents()).singleElement().satisfies(event -> {
             assertThat(event.path("ruleSet").asString()).isEqualTo("tet-fee-waiver");
             assertThat(event.path("version").asInt()).isEqualTo(1);
@@ -148,6 +149,7 @@ class RetireVersionTest {
             assertThat(event.path("retiredAt").asString()).isEqualTo("2027-02-17T08:00:00Z");
             assertThat(event.path("approvalMode").asString()).isEqualTo("single");
             assertThat(event.path("supersededBy").isNull()).isTrue();
+            assertThat(event.path("noVersionInEffect").asBoolean()).isTrue();
             LifecycleEventPayloadTest.conformsTo("rules.version.retired.v1.schema.json", event);
         });
 
@@ -169,7 +171,7 @@ class RetireVersionTest {
         // and a replay of k-301 returns the same version and writes no second event or history row
         clock.set(Instant.parse("2027-02-17T08:00:09Z"));
         caller.become("bank-a", "bob", APPROVER);
-        assertThat(versions.retire("tet-fee-waiver", 1, command)).isEqualTo(retired);
+        assertThat(versions.retire("tet-fee-waiver", 1, command, true)).isEqualTo(retired);
         assertThat(retiredEvents()).hasSize(1);
         assertThat(history("bank-a", "tet-fee-waiver", 1)).filteredOn(e -> e.action() == LifecycleAction.RETIRED)
                 .hasSize(1);
@@ -225,7 +227,7 @@ class RetireVersionTest {
 
         // When bob retires v2, the version in force
         caller.become("bank-a", "bob", APPROVER);
-        versions.retire("card-fee", 2, new WriteOptions(null, v2.lockVersion(), "Fee change withdrawn by pricing"));
+        versions.retire("card-fee", 2, new WriteOptions(null, v2.lockVersion(), "Fee change withdrawn by pricing"), true);
 
         // Then v1 retires with it, as superseded by v2, and nothing serves
         assertThat(history("bank-a", "card-fee", 1).getLast()).satisfies(row -> {
@@ -288,16 +290,130 @@ class RetireVersionTest {
                 Instant.parse("2027-01-15T00:00:00Z"));
         clock.set(Instant.parse("2027-02-17T08:00:00Z"));
         caller.become("bank-a", "bob", APPROVER);
-        versions.retire("tet-fee-waiver", 1, new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"));
+        versions.retire("tet-fee-waiver", 1, new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"), true);
 
         // When the second one arrives with the same lock version
         caller.become("bank-a", "minh", APPROVER);
 
         // Then it is refused on the state and no second retirement is written
         assertThatThrownBy(() -> versions.retire("tet-fee-waiver", 1,
-                new WriteOptions(null, v1.lockVersion(), "Tet promotion ended")))
+                new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"), true))
                 .isInstanceOf(InvalidStateException.class).hasMessageContaining("RETIRED");
         assertThat(retiredEvents()).hasSize(1);
+    }
+
+    @Test
+    void RLE_026_retiring_the_last_version_in_effect_needs_an_explicit_confirmation() {
+        // Given tet-fee-waiver v1, the only version, in force (PD-101)
+        RuleSetVersion v1 = publish("bank-a", "tet-fee-waiver", tetFeeWaiver("2027-01-20T00:00:00Z"),
+                Instant.parse("2027-01-15T00:00:00Z"));
+        clock.set(Instant.parse("2027-02-17T08:00:00Z"));
+        int events = stores.outbox.size();
+        int rows = stores.history.size();
+        caller.become("bank-a", "bob", APPROVER);
+        WriteOptions command = new WriteOptions("k-302", v1.lockVersion(), "Tet promotion ended");
+
+        // When bob retires it without the confirmation
+        // Then 409 LAST_VERSION_IN_EFFECT naming the rule set, and nothing is written or remembered under the key
+        assertThatThrownBy(() -> versions.retire("tet-fee-waiver", 1, command))
+                .isInstanceOf(LastVersionInEffectException.class)
+                .hasMessageContaining("rule set tet-fee-waiver").hasMessageContaining("confirmNoVersionInEffect")
+                .extracting(e -> ((HorusBpmException) e).code()).isEqualTo("LAST_VERSION_IN_EFFECT");
+        assertThat(stores.outbox).hasSize(events);
+        assertThat(stores.history).hasSize(rows);
+        assertThat(evaluate(podA, "tet-fee-waiver", Map.of("channel", "CARD")).version()).isEqualTo(1);
+
+        // When he confirms that no version will remain in effect, with the same key
+        caller.become("bank-a", "bob", APPROVER);
+        RuleSetVersion retired = versions.retire("tet-fee-waiver", 1, command, true);
+
+        // Then it is retired and the history row and the event record that no version remains in effect
+        assertThat(retired.status()).isEqualTo(VersionStatus.RETIRED);
+        assertThat(history("bank-a", "tet-fee-waiver", 1).getLast().noVersionInEffect()).isTrue();
+        assertThat(retiredEvents()).singleElement()
+                .satisfies(e -> assertThat(e.path("noVersionInEffect").asBoolean()).isTrue());
+    }
+
+    @Test
+    void RLE_026_a_version_that_only_starts_later_does_not_count_and_the_refusal_names_it() {
+        // Given v1 in force and v2 approved for 1 Dec: retiring v1 on 26 Nov leaves a gap until v2 starts
+        RuleSetVersion v1 = publish("bank-a", "card-fee", cardFee("card-fee", "2026-11-01T00:00:00Z", "50000 VND"),
+                Instant.parse("2026-10-20T00:00:00Z"));
+        publish("bank-a", "card-fee", cardFee("card-fee", "2026-12-01T00:00:00Z", "30000 VND"),
+                Instant.parse("2026-11-25T10:00:00Z"));
+        clock.set(Instant.parse("2026-11-26T09:00:00Z"));
+        caller.become("bank-a", "bob", APPROVER);
+
+        // Then the refusal carries the rule set, the version, the setting and the start of v2
+        assertThatThrownBy(() -> versions.retire("card-fee", 1, new WriteOptions(null, v1.lockVersion(), "Old tariff")))
+                .isInstanceOfSatisfying(LastVersionInEffectException.class, e -> {
+                    assertThat(e.ruleSet()).isEqualTo("card-fee");
+                    assertThat(e.version()).isEqualTo(1);
+                    assertThat(e.setting()).isEqualTo("confirm");
+                    assertThat(e.nextEffectiveFrom()).isEqualTo(Instant.parse("2026-12-01T00:00:00Z"));
+                    assertThat(e.getMessage()).contains("until v2 starts at 2026-12-01T00:00:00Z");
+                });
+        assertThat(retiredEvents()).isEmpty();
+    }
+
+    @Test
+    void RLE_026_a_lone_scheduled_version_is_the_last_one_too() {
+        // Given fx-margin v1 approved for 1 Dec and nothing in effect on 26 Nov
+        RuleSetVersion v1 = publish("bank-a", "fx-margin", cardFee("fx-margin", "2026-12-01T00:00:00Z", "100 VND"),
+                Instant.parse("2026-11-25T10:00:00Z"));
+        clock.set(Instant.parse("2026-11-26T09:00:00Z"));
+        caller.become("bank-a", "bob", APPROVER);
+
+        // Then retiring it needs the confirmation, there is no next start, and with it the gap is recorded
+        assertThatThrownBy(() -> versions.retire("fx-margin", 1, new WriteOptions(null, v1.lockVersion(), "Cancelled")))
+                .isInstanceOfSatisfying(LastVersionInEffectException.class,
+                        e -> assertThat(e.nextEffectiveFrom()).isNull());
+        versions.retire("fx-margin", 1, new WriteOptions(null, v1.lockVersion(), "Cancelled"), true);
+        assertThat(history("bank-a", "fx-margin", 1).getLast().noVersionInEffect()).isTrue();
+    }
+
+    @Test
+    void RLE_026_a_retirement_that_leaves_a_version_in_effect_needs_no_confirmation_and_says_so() {
+        // Given v1 in force and v2 scheduled for 1 Dec: retiring v2 leaves v1 in effect
+        publish("bank-a", "card-fee", cardFee("card-fee", "2026-11-01T00:00:00Z", "50000 VND"),
+                Instant.parse("2026-10-20T00:00:00Z"));
+        RuleSetVersion v2 = publish("bank-a", "card-fee", cardFee("card-fee", "2026-12-01T00:00:00Z", "30000 VND"),
+                Instant.parse("2026-11-25T10:00:00Z"));
+        clock.set(Instant.parse("2026-11-26T09:00:00Z"));
+        caller.become("bank-a", "bob", APPROVER);
+
+        versions.retire("card-fee", 2, new WriteOptions(null, v2.lockVersion(), "December tariff postponed"));
+
+        assertThat(history("bank-a", "card-fee", 2).getLast().noVersionInEffect()).isFalse();
+        assertThat(retiredEvents()).singleElement()
+                .satisfies(e -> assertThat(e.path("noVersionInEffect").asBoolean()).isFalse());
+    }
+
+    @Test
+    void RLE_026_a_host_that_refuses_never_retires_the_last_version_in_effect() {
+        // Given horus.bpm.lifecycle.retire-last-version: refuse
+        RuleEngines refusing = engines(EngineSettings.defaults().withRetireLastVersion("refuse"));
+        RuleSetVersion v1 = publish("bank-a", "tet-fee-waiver", tetFeeWaiver("2027-01-20T00:00:00Z"),
+                Instant.parse("2027-01-15T00:00:00Z"));
+        clock.set(Instant.parse("2027-02-17T08:00:00Z"));
+        caller.become("bank-a", "bob", APPROVER);
+
+        // Then even with the confirmation the last version in effect stays published
+        assertThatThrownBy(() -> refusing.versionService().retire("tet-fee-waiver", 1,
+                new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"), true))
+                .isInstanceOf(LastVersionInEffectException.class).hasMessageContaining("refuse");
+        assertThat(retiredEvents()).isEmpty();
+        // and four-eyes, not built yet, stops start-up like an unknown value
+        assertThatThrownBy(() -> EngineSettings.defaults().withRetireLastVersion("four-eyes"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("horus.bpm.lifecycle.retire-last-version").hasMessageContaining("four-eyes");
+        assertThatThrownBy(() -> EngineSettings.defaults().withRetireLastVersion("ask"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("confirm or refuse");
+        assertThatThrownBy(() -> refusing.versionService().retire("tet-fee-waiver", 1,
+                new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"), true))
+                .isInstanceOfSatisfying(LastVersionInEffectException.class,
+                        e -> assertThat(e.setting()).isEqualTo("refuse"));
+        assertThat(EngineSettings.defaults().retireLastVersion()).isEqualTo("confirm");
     }
 
     // ------------------------------------------------------------------ RLE-027
@@ -407,7 +523,7 @@ class RetireVersionTest {
     void RLE_026_lifecycle_settings_are_validated_at_start_up() {
         assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle("system", "four-eyes"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("horus.bpm.rules.lifecycle.retire-approval").hasMessageContaining("M3");
+                .hasMessageContaining("horus.bpm.lifecycle.retire-approval").hasMessageContaining("M3");
         assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle("system", "dual"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("must be single");
         assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle(" ", "single"))

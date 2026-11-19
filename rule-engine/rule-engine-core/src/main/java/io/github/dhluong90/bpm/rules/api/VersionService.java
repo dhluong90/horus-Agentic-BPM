@@ -97,6 +97,22 @@ public interface VersionService {
     RuleSetVersion retire(String ruleSet, int version, WriteOptions options);
 
     /**
+     * Retires a published version as {@link #retire(String, int, WriteOptions)} does, and lets it be the last version
+     * in effect of its rule set when {@code confirmNoVersionInEffect} is true (PD-101). Without the confirmation, a
+     * retirement that would leave no version in effect is refused with {@link LastVersionInEffectException}; with it,
+     * the history row and the event record that no version remains in effect. A host with
+     * {@code horus.bpm.lifecycle.retire-last-version: refuse} refuses it either way.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key, optimistic lock and the required reason
+     * @param confirmNoVersionInEffect true to accept that no version will be in effect afterwards
+     * @return the version, now retired
+     * @throws LastVersionInEffectException when it is the last version in effect and that is not confirmed or allowed
+     */
+    RuleSetVersion retire(String ruleSet, int version, WriteOptions options, boolean confirmNoVersionInEffect);
+
+    /**
      * Lists the rule sets of the caller's tenant by name, a page at a time.
      *
      * @param page the page to read

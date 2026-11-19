@@ -92,9 +92,11 @@ public class RuleEngineAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(name = "ruleEngineModuleDescriptor")
-    ModuleDescriptor ruleEngineModuleDescriptor(RuleEngineProperties properties) {
+    ModuleDescriptor ruleEngineModuleDescriptor(RuleEngineProperties properties,
+            org.springframework.core.env.Environment environment) {
         return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts(),
-                properties.toSettings().retireApproval());
+                properties.toSettings(environment).retireApproval(),
+                properties.toSettings(environment).retireLastVersion());
     }
 
     /** The host's unique {@code Clock} bean if it has one, otherwise system UTC. Never registered as a bean. */

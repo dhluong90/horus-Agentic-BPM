@@ -101,10 +101,19 @@ public final class EngineDefaults {
     public static final int SYSTEM_ACTOR_MAX_LENGTH = 200;
 
     /**
-     * Default of {@code horus.bpm.rules.lifecycle.retire-approval} (PD-080): one {@code rules:approve} holder with a
+     * Default of {@code horus.bpm.lifecycle.retire-approval} (PD-080): one {@code rules:approve} holder with a
      * reason retires a version. The other value, {@code four-eyes}, arrives in M3 (RLE-038).
      */
     public static final String RETIRE_APPROVAL = "single";
+
+    /**
+     * Default of {@code horus.bpm.lifecycle.retire-last-version} (PD-101): retiring the version in effect, when no other
+     * would remain, needs {@code confirmNoVersionInEffect} on the request.
+     */
+    public static final String RETIRE_LAST_CONFIRM = "confirm";
+
+    /** {@code horus.bpm.lifecycle.retire-last-version: refuse}: the last version in effect is never retired by hand. */
+    public static final String RETIRE_LAST_REFUSE = "refuse";
 
     /** Default of {@code horus.bpm.rules.lifecycle.sweep-interval}: how often superseded versions are retired. */
     public static final java.time.Duration SWEEP_INTERVAL = java.time.Duration.ofMinutes(1);

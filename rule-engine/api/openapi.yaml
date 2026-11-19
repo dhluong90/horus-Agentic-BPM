@@ -435,6 +435,16 @@ paths:
         `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
         `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`, and a stale
         `If-Match` is `409 VERSION_CONFLICT`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+
+        Retiring the version in force when no other would remain leaves the rule set with no version in
+        effect, so every evaluation fails until a new version is approved (PD-101). Under the shared host
+        setting `horus.bpm.lifecycle.retire-last-version: confirm` (default) the request must then carry
+        `confirmNoVersionInEffect: true` with its reason, otherwise it is `409 LAST_VERSION_IN_EFFECT`
+        naming the rule set; under `refuse` it is always `409 LAST_VERSION_IN_EFFECT`. The problem body
+        carries `ruleSet`, `version`, `setting` and `nextEffectiveFrom` (the start of a later approved
+        version, or null). A version that only starts later does not count as in effect. The history
+        entry and the event record `noVersionInEffect: true`. The transaction locks the rule set row first,
+        so two concurrent retirements of its last versions run one after the other.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -805,6 +815,9 @@ components:
           type: [string, 'null']
           enum: [single, four-eyes, system, null]
           description: Present on a `RETIRED` entry only; how the retirement was approved (`system` when superseded)
+        noVersionInEffect:
+          type: [boolean, 'null']
+          description: Present on a `RETIRED` entry only; true when the retirement left the rule set with no version in effect (PD-101)
         lockVersion: { type: integer }
         occurredAt: { type: string, format: date-time }
     VersionHistory:
@@ -824,6 +837,12 @@ components:
           minLength: 1
           maxLength: 2000
           description: Why the version is taken out of service; stored in the history and the event
+        confirmNoVersionInEffect:
+          type: boolean
+          default: false
+          description: |
+            True to accept that the retirement leaves the rule set with no version in effect (PD-101);
+            needed when the version is the last one in effect, unless the host refuses it outright
     RejectRequest:
       type: object
       required: [reason]
@@ -888,7 +907,7 @@ components:
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION,
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
             IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SCHEMA_NOT_READY,
-            PRECONDITION_REQUIRED]
+            PRECONDITION_REQUIRED, LAST_VERSION_IN_EFFECT]
         detail: { type: string }
         correlationId: { type: string }
         violations:
@@ -911,6 +930,20 @@ components:
         decisionId:
           type: string
           description: Present on `EVALUATION_ERROR` and `UNIQUE_HIT_VIOLATION`; the failed decision is logged
+        ruleSet:
+          type: string
+          description: Present on `LAST_VERSION_IN_EFFECT`; the rule set that would be left with no version in effect
+        version:
+          type: integer
+          description: Present on `LAST_VERSION_IN_EFFECT`; the version being retired
+        setting:
+          type: string
+          enum: [confirm, refuse]
+          description: Present on `LAST_VERSION_IN_EFFECT`; the host's `lifecycle.retire-last-version`
+        nextEffectiveFrom:
+          type: [string, 'null']
+          format: date-time
+          description: Present on `LAST_VERSION_IN_EFFECT`; the start of a later approved version, or null
         matchedRuleIds:
           type: array
           items: { type: string }

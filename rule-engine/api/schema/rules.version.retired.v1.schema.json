@@ -4,8 +4,21 @@
   "title": "rules.version.retired.v1",
   "description": "Written to the Rule Engine outbox in the transaction where a published version is retired: by hand (POST .../versions/{v}:retire, RLE-026), or as superseded once a newer approved version is in effect, at approval or by the lifecycle sweep (RLE-027). Written exactly once per retirement across replicas (ADR-0025 decision 2). The outbox row id is the event id. Additive changes only within v1 (DESIGN section 3.3).",
   "type": "object",
-  "required": ["eventType", "ruleSet", "version", "tenantId", "actor", "occurredAt", "retiredBy", "reason",
-    "supersededBy", "retiredAt", "approvalMode", "requestedBy"],
+  "required": [
+    "eventType",
+    "ruleSet",
+    "version",
+    "tenantId",
+    "actor",
+    "occurredAt",
+    "retiredBy",
+    "reason",
+    "supersededBy",
+    "retiredAt",
+    "approvalMode",
+    "requestedBy",
+    "noVersionInEffect"
+  ],
   "additionalProperties": true,
   "properties": {
     "eventType": {
@@ -46,7 +59,10 @@
     },
     "supersededBy": {
       "description": "The version number that took over when superseded; null for a retirement by hand.",
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": 1
     },
     "retiredAt": {
@@ -56,11 +72,22 @@
     },
     "approvalMode": {
       "description": "single for a retirement by one rules:approve holder (lifecycle.retire-approval, PD-080), four-eyes when a second holder confirmed it (from M3), system when superseded.",
-      "enum": ["single", "four-eyes", "system"]
+      "enum": [
+        "single",
+        "four-eyes",
+        "system"
+      ]
     },
     "requestedBy": {
       "description": "The requester in four-eyes mode; null otherwise.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "noVersionInEffect": {
+      "description": "True when the retirement left the rule set with no version in effect, so evaluations fail until a new version is approved (PD-101); false when another version remains in effect or the version was superseded.",
+      "type": "boolean"
     }
   },
   "examples": [
@@ -76,7 +103,8 @@
       "supersededBy": null,
       "retiredAt": "2027-02-17T08:00:00Z",
       "approvalMode": "single",
-      "requestedBy": null
+      "requestedBy": null,
+      "noVersionInEffect": true
     },
     {
       "eventType": "rules.version.retired.v1",
@@ -90,7 +118,8 @@
       "supersededBy": 2,
       "retiredAt": "2026-12-01T00:00:01Z",
       "approvalMode": "system",
-      "requestedBy": null
+      "requestedBy": null,
+      "noVersionInEffect": false
     }
   ]
 }

@@ -223,8 +223,17 @@ public class RuleSetController {
         long lock = RestSupport.requiredIfMatch(ifMatch, ":retire");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         String reason = null;
+        boolean confirm = false;
         if (body.length > 0) {
-            JsonNode value = EngineValues.readRequest(body).get("reason");
+            JsonNode request = EngineValues.readRequest(body);
+            JsonNode flag = request.get("confirmNoVersionInEffect");
+            if (flag != null && !flag.isNull()) {
+                if (!flag.isBoolean()) {
+                    throw new InputInvalidException("confirmNoVersionInEffect must be true or false");
+                }
+                confirm = flag.booleanValue();
+            }
+            JsonNode value = request.get("reason");
             if (value != null && !value.isNull()) {
                 if (!value.isString()) {
                     throw new InputInvalidException("reason must be a string");
@@ -233,7 +242,7 @@ public class RuleSetController {
             }
         }
         WriteOptions options = new WriteOptions(key, lock, reason);
-        return RestSupport.version(HttpStatus.OK, versions.retire(name, version, options), callers);
+        return RestSupport.version(HttpStatus.OK, versions.retire(name, version, options, confirm), callers);
     }
 
     /**

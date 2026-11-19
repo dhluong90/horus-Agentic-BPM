@@ -51,6 +51,7 @@ public class ProblemDetails {
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
+            Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
             Map.entry("PRECONDITION_REQUIRED", HttpStatus.PRECONDITION_REQUIRED),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
@@ -80,6 +81,13 @@ public class ProblemDetails {
                 item.put("message", v.message());
             }
             body.put("violationsTruncated", failed.truncated());
+        }
+        if (e instanceof io.github.dhluong90.bpm.rules.api.LastVersionInEffectException last) {
+            // PD-101: what a client needs to word the warning and to retry with the confirmation
+            body.put("ruleSet", last.ruleSet());
+            body.put("version", last.version());
+            body.put("setting", last.setting());
+            body.set("nextEffectiveFrom", EngineValues.value(last.nextEffectiveFrom()));
         }
         ResponseEntity<byte[]> response = response(status, body);
         if (status == HttpStatus.CONFLICT && "IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {

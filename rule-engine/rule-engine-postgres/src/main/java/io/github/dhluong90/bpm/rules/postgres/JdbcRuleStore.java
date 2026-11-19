@@ -232,10 +232,12 @@ public final class JdbcRuleStore implements RuleStore {
     public void appendHistory(HistoryRow row) {
         jdbc.sql("""
                 INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor,
-                  reason, superseded_by, approval_mode, lock_version, occurred_at)
-                VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :supersededBy, :mode, :lock, :at)
+                  reason, superseded_by, approval_mode, no_version_in_effect, lock_version, occurred_at)
+                VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :supersededBy, :mode, :none,
+                  :lock, :at)
                 """)
                 .param("supersededBy", row.supersededBy()).param("mode", row.approvalMode())
+                .param("none", row.noVersionInEffect())
                 .param("tenant", row.tenantId()).param("id", row.id()).param("versionId", row.versionId())
                 .param("action", row.action().name())
                 .param("from", row.fromStatus() == null ? null : row.fromStatus().name())
@@ -249,7 +251,7 @@ public final class JdbcRuleStore implements RuleStore {
         // Only the actions this release writes; the four-eyes retirement actions arrive with RLE-038.
         return jdbc.sql("""
                 SELECT tenant_id, id, version_id, action, from_status, to_status, actor, reason, superseded_by,
-                  approval_mode, lock_version, occurred_at
+                  approval_mode, no_version_in_effect, lock_version, occurred_at
                 FROM rle_version_history
                 WHERE tenant_id = :tenant AND version_id = :versionId
                   AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED','RETIRED')
@@ -259,12 +261,14 @@ public final class JdbcRuleStore implements RuleStore {
                 .query((rs, row) -> {
                     int supersededBy = rs.getInt("superseded_by");
                     Integer superseded = rs.wasNull() ? null : supersededBy;
+                    boolean none = rs.getBoolean("no_version_in_effect");
+                    Boolean noVersionInEffect = rs.wasNull() ? null : none;
                     return new HistoryRow(rs.getString("tenant_id"), rs.getString("id"), rs.getString("version_id"),
                             LifecycleAction.valueOf(rs.getString("action")),
                             rs.getString("from_status") == null ? null : VersionStatus.valueOf(rs.getString("from_status")),
                             VersionStatus.valueOf(rs.getString("to_status")), rs.getString("actor"),
                             rs.getString("reason"), rs.getLong("lock_version"), instant(rs, "occurred_at"), superseded,
-                            rs.getString("approval_mode"));
+                            rs.getString("approval_mode"), noVersionInEffect);
                 })
                 .list();
     }
@@ -276,6 +280,28 @@ public final class JdbcRuleStore implements RuleStore {
      * lock, re-reads the committed row, finds it {@code RETIRED} and returns nothing, so each version comes back from
      * exactly one call across replicas. No advisory lock and no session state (TR-OPS-05).
      */
+    @Override
+    public void lockRuleSet(String tenantId, String ruleSetId) {
+        jdbc.sql("SELECT id FROM rle_rule_set WHERE tenant_id = :tenant AND id = :id FOR UPDATE")
+                .param("tenant", tenantId).param("id", ruleSetId).query(String.class).single();
+    }
+
+    @Override
+    public Optional<StoredVersion> nextScheduled(String tenantId, String ruleSetId, Instant after,
+            String excludingVersionId) {
+        return jdbc.sql("SELECT " + VERSION_COLUMNS + """
+                FROM rle_version v
+                JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
+                WHERE v.tenant_id = :tenant AND v.rule_set_id = :ruleSetId AND v.id <> :excluded
+                  AND v.approved_at IS NOT NULL AND v.retired_at IS NULL AND v.effective_from > :after
+                ORDER BY v.effective_from, v.version_num DESC
+                LIMIT 1
+                """)
+                .param("tenant", tenantId).param("ruleSetId", ruleSetId).param("excluded", excludingVersionId)
+                .param("after", Timestamp.from(after))
+                .query(JdbcRuleStore::version).optional();
+    }
+
     @Override
     public List<Superseded> retireSuperseded(String tenantId, String ruleSetId, Instant now) {
         if (ruleSetId != null && tenantId == null) {

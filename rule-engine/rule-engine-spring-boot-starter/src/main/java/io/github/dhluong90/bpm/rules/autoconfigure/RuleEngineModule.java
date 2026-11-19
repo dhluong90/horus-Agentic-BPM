@@ -28,7 +28,10 @@ final class RuleEngineModule {
     static final String COCKPIT_DRAFTS = "authoring.cockpit-drafts";
 
     /** The rules setting clients read to show how a retirement is approved (PD-080, ADR-0025). */
-    static final String RETIRE_APPROVAL = "lifecycle.retire-approval";
+    static final String RETIRE_APPROVAL = io.github.dhluong90.bpm.host.autoconfigure.RetireApproval.META_SETTING;
+
+    /** The rules setting clients read before retiring the last version in effect (PD-101). */
+    static final String RETIRE_LAST_VERSION = io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion.META_SETTING;
 
     private static final String VERSION_RESOURCE = "rule-engine.properties";
 
@@ -40,16 +43,18 @@ final class RuleEngineModule {
      *
      * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
      * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}; null (unset) is published as false
-     * @param retireApproval the validated {@code horus.bpm.rules.lifecycle.retire-approval}
+     * @param retireApproval the validated {@code horus.bpm.lifecycle.retire-approval}
+     * @param retireLastVersion the validated {@code horus.bpm.lifecycle.retire-last-version}
      * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
      */
     static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
-            String retireApproval) {
+            String retireApproval, String retireLastVersion) {
         // Always published, so clients never guess: draft editing false unless the host turns it on (PD-094), and
         // the retirement mode in force (PD-080).
         Map<String, Object> settings = new java.util.LinkedHashMap<>();
         settings.put(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
         settings.put(RETIRE_APPROVAL, retireApproval);
+        settings.put(RETIRE_LAST_VERSION, retireLastVersion);
         return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);
     }
 

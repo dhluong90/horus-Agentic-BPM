@@ -72,7 +72,7 @@ class EditorApiQaTest {
             if (status == VersionStatus.PUBLISHED) {
                 return v;
             }
-            return versions.retire("card-fee", 1, new WriteOptions(null, null, "Promotion ended"));
+            return versions.retire("card-fee", 1, new WriteOptions(null, null, "Promotion ended"), true);
         }
     }
 
@@ -128,7 +128,7 @@ class EditorApiQaTest {
                     case VersionActions.REQUEST_PUBLISH -> world.versions.requestPublish("card-fee", 1, WriteOptions.none());
                     case VersionActions.APPROVE -> world.versions.approve("card-fee", 1, WriteOptions.none());
                     case VersionActions.REJECT -> world.versions.reject("card-fee", 1, new WriteOptions(null, null, "qa"));
-                    default -> world.versions.retire("card-fee", 1, new WriteOptions(null, null, "qa"));
+                    default -> world.versions.retire("card-fee", 1, new WriteOptions(null, null, "qa"), true);
                 }
                 accepted.add(action);
             } catch (HorusBpmException refused) {

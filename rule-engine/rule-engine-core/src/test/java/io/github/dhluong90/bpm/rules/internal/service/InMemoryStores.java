@@ -106,6 +106,20 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     @Override
+    public void lockRuleSet(String tenantId, String ruleSetId) {
+        // single-threaded tests: nothing to lock
+    }
+
+    @Override
+    public Optional<StoredVersion> nextScheduled(String tenantId, String ruleSetId, Instant after,
+            String excludingVersionId) {
+        return versions.stream().filter(v -> v.tenantId().equals(tenantId) && v.ruleSetId().equals(ruleSetId)
+                        && !v.id().equals(excludingVersionId) && v.approvedAt() != null && v.retiredAt() == null
+                        && v.effectiveFrom().isAfter(after))
+                .min(Comparator.comparing(StoredVersion::effectiveFrom));
+    }
+
+    @Override
     public synchronized List<Superseded> retireSuperseded(String tenantId, String ruleSetId, Instant now) {
         List<Superseded> retired = new ArrayList<>();
         for (int i = 0; i < versions.size(); i++) {

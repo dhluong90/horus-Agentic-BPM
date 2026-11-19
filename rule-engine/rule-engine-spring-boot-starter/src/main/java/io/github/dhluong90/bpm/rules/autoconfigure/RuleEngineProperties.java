@@ -95,12 +95,8 @@ public record RuleEngineProperties(
      *     {@code PT1S} to {@code PT1H}; default {@code PT1M}. Status only: selection follows the effective date
      * @param systemActor the actor recorded on the history row and event of a superseded version; default
      *     {@code system}
-     * @param retireApproval the approval mode of a retirement by hand (PD-080): {@code single}, the default and the
-     *     only value of this release; {@code four-eyes} arrives in M3 and is refused at start-up until then. Shown
-     *     in {@code /api/bpm/meta} as the rules setting {@code lifecycle.retire-approval}
      */
-    public record Lifecycle(Integer reasonMaxLength, Duration sweepInterval, String systemActor,
-            String retireApproval) {
+    public record Lifecycle(Integer reasonMaxLength, Duration sweepInterval, String systemActor) {
 
         /** Shortest accepted {@code sweep-interval}. */
         static final Duration SWEEP_MIN = Duration.ofSeconds(1);
@@ -129,6 +125,27 @@ public record RuleEngineProperties(
      *
      * @return the engine settings
      */
+    /**
+     * Returns the validated settings, with the retirement settings shared by both engines read from the host
+     * (PD-101, PD-102: {@code horus.bpm.lifecycle.retire-approval} and {@code horus.bpm.lifecycle.retire-last-version},
+     * through bpm-host-metadata); an out-of-range value fails start-up naming the property.
+     *
+     * @param environment the host environment
+     * @return the engine settings
+     */
+    public EngineSettings toSettings(org.springframework.core.env.Environment environment) {
+        EngineSettings settings = toSettings();
+        return settings.withLifecycle(settings.systemActor(),
+                        io.github.dhluong90.bpm.host.autoconfigure.RetireApproval.from(environment).value())
+                .withRetireLastVersion(io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion.from(environment)
+                        .value());
+    }
+
+    /**
+     * Returns the validated settings with the shared retirement settings at their defaults.
+     *
+     * @return the engine settings
+     */
     public EngineSettings toSettings() {
         return new EngineSettings(
                 cache.maxEntries() == null ? EngineDefaults.CACHE_MAX_ENTRIES : cache.maxEntries(),
@@ -143,7 +160,7 @@ public record RuleEngineProperties(
                 evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows())
                 .withLifecycle(
                         lifecycle.systemActor() == null ? EngineDefaults.SYSTEM_ACTOR : lifecycle.systemActor(),
-                        lifecycle.retireApproval() == null ? EngineDefaults.RETIRE_APPROVAL : lifecycle.retireApproval());
+                        EngineDefaults.RETIRE_APPROVAL);
     }
 
     /**

@@ -39,6 +39,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 409 | [INVALID_STATE](#invalid_state) | both | M1 |
 | 409 | [IDEMPOTENCY_IN_FLIGHT](#idempotency_in_flight) | both | M1 |
 | 409 | [RULE_SET_EXISTS](#rule_set_exists) | rules | M1 |
+| 409 | [LAST_VERSION_IN_EFFECT](#last_version_in_effect) | rules | 0.2.0 |
 | 409 | [VERSION_SUPERSEDED](#version_superseded) | processes | M2 |
 | 413 | [PAYLOAD_TOO_LARGE](#payload_too_large) | rules | M1 |
 | 428 | [PRECONDITION_REQUIRED](#precondition_required) | rules | M1 (0.2.0) |
@@ -136,6 +137,9 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 
 ### RULE_SET_EXISTS
 `409`. `POST /rule-sets` with a name already used in this tenant. Add a version to the existing rule set instead.
+
+### LAST_VERSION_IN_EFFECT
+`409`. A `:retire` would leave the rule set with no version in effect, so every evaluation would fail with `NO_EFFECTIVE_VERSION` until a new version is approved (PD-101). The body carries `ruleSet`, `version`, `setting` (the host's `lifecycle.retire-last-version`) and `nextEffectiveFrom` (the start of a later approved version, or null); `detail` names the rule set. Approve a replacement first, or send `confirmNoVersionInEffect: true` with the reason. A host with `horus.bpm.lifecycle.retire-last-version: refuse` refuses it either way. Nothing is written.
 
 ### UNIQUE_HIT_VIOLATION
 `422`. A `unique` table matched several rows for these inputs (`TR-DET-04`). Zero matches is not this error: it is no match, as with `first`. This is an authoring defect in the published rule set, so retrying never helps (ADR-0010). The decision is still logged with this outcome. Remove the overlap, or switch to `first` if order is intended. The problem body carries `decisionId` and `matchedRuleIds`, for example `"matchedRuleIds": ["R1", "R2"]`; it never carries partial outputs.

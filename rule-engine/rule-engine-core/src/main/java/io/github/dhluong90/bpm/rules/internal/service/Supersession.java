@@ -48,16 +48,18 @@ final class Supersession {
         for (RuleStore.Superseded row : retired) {
             store.appendHistory(new HistoryRow(row.tenantId(), Ulid.next(now), row.versionId(), LifecycleAction.RETIRED,
                     VersionStatus.PUBLISHED, VersionStatus.RETIRED, actor, EngineDefaults.REASON_SUPERSEDED,
-                    row.lockVersion(), now, row.supersededBy(), MODE_SYSTEM));
+                    row.lockVersion(), now, row.supersededBy(), MODE_SYSTEM, false));
             outbox.append(row.tenantId(), Ulid.next(now), EngineValues.write(retiredEvent(row.tenantId(), row.ruleSet(),
-                    row.version(), actor, EngineDefaults.REASON_SUPERSEDED, row.supersededBy(), now, MODE_SYSTEM)), now);
+                    row.version(), actor, EngineDefaults.REASON_SUPERSEDED, row.supersededBy(), now, MODE_SYSTEM, false)),
+                    now);
         }
         return retired.size();
     }
 
     /** The payload of {@code rules.version.retired.v1} (DESIGN section 3.3, the event schema of the same name). */
     static tools.jackson.databind.node.ObjectNode retiredEvent(String tenant, String ruleSet, int version,
-            String retiredBy, String reason, Integer supersededBy, Instant at, String approvalMode) {
+            String retiredBy, String reason, Integer supersededBy, Instant at, String approvalMode,
+            boolean noVersionInEffect) {
         tools.jackson.databind.node.ObjectNode payload = EngineJson.NODES.objectNode()
                 .put("eventType", EVENT_RETIRED)
                 .put("ruleSet", ruleSet)
@@ -72,7 +74,8 @@ final class Supersession {
         } else {
             payload.put("supersededBy", supersededBy.intValue());
         }
-        payload.put("retiredAt", at.toString()).put("approvalMode", approvalMode).putNull("requestedBy");
+        payload.put("retiredAt", at.toString()).put("approvalMode", approvalMode).putNull("requestedBy")
+                .put("noVersionInEffect", noVersionInEffect);
         return payload;
     }
 }

@@ -138,14 +138,23 @@ class RetireVersionPostgresIT {
         // When bob retires it on pod A at 2027-02-17T08:00:00Z
         clock.set(Instant.parse("2027-02-17T08:00:00Z"));
         caller.as("bank-a", "bob", APPROVER);
-        podA.versionService().retire("tet-fee-waiver", 1, new WriteOptions("k-301", v1.lockVersion(), "Tet promotion ended"));
+        // without the confirmation the last version in effect stays (PD-101); the key is not used up by the refusal
+        assertThatThrownBy(() -> podA.versionService().retire("tet-fee-waiver", 1,
+                new WriteOptions("k-301", v1.lockVersion(), "Tet promotion ended")))
+                .extracting(e -> ((HorusBpmException) e).code()).isEqualTo("LAST_VERSION_IN_EFFECT");
+        assertThat(retiredEvents()).isZero();
+        podA.versionService().retire("tet-fee-waiver", 1, new WriteOptions("k-301", v1.lockVersion(), "Tet promotion ended"),
+                true);
 
         // Then the row, the history and the event are written in that transaction
         assertThat(jdbc.sql("SELECT status, retired_at FROM rle_version WHERE tenant_id = 'bank-a'")
                 .query((rs, n) -> rs.getString("status") + " " + rs.getTimestamp("retired_at").toInstant()).single())
                 .isEqualTo("RETIRED 2027-02-17T08:00:00Z");
-        assertThat(jdbc.sql("SELECT actor || ' ' || reason || ' ' || approval_mode FROM rle_version_history"
-                + " WHERE action = 'RETIRED'").query(String.class).single()).isEqualTo("bob Tet promotion ended single");
+        assertThat(jdbc.sql("SELECT actor || ' ' || reason || ' ' || approval_mode || ' ' || no_version_in_effect"
+                + " FROM rle_version_history WHERE action = 'RETIRED'").query(String.class).single())
+                .isEqualTo("bob Tet promotion ended single true");
+        assertThat(jdbc.sql("SELECT payload->>'noVersionInEffect' FROM rle_decision_outbox"
+                + " WHERE payload->>'eventType' = 'rules.version.retired.v1'").query(String.class).single()).isEqualTo("true");
         assertThat(retiredEvents()).isEqualTo(1);
         // and 5 s later neither replica serves it; a clock before the retirement still selects it on pod B
         clock.set(Instant.parse("2027-02-17T08:00:05Z"));
@@ -160,6 +169,7 @@ class RetireVersionPostgresIT {
         assertThat(last.action()).isEqualTo(LifecycleAction.RETIRED);
         assertThat(last.approvalMode()).isEqualTo("single");
         assertThat(last.supersededBy()).isNull();
+        assertThat(last.noVersionInEffect()).isTrue();
         assertThat(podB.versionService().findRuleSet("tet-fee-waiver").orElseThrow().publishedVersion()).isNull();
         assertThat(podB.versionService().find("tet-fee-waiver", 1, false).orElseThrow().retiredAt())
                 .isEqualTo(Instant.parse("2027-02-17T08:00:00Z"));
@@ -182,7 +192,7 @@ class RetireVersionPostgresIT {
                     together.await();
                     try {
                         who.getValue().versionService().retire("tet-fee-waiver", 1,
-                                new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"));
+                                new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"), true);
                         outcomes.add("200");
                     } catch (HorusBpmException refused) {
                         outcomes.add(refused.code());
@@ -282,12 +292,52 @@ class RetireVersionPostgresIT {
         assertThat(jdbc.sql("SELECT version_num || ' ' || status FROM rle_version ORDER BY version_num")
                 .query(String.class).list()).containsExactly("1 PUBLISHED", "2 RETIRED");
         assertThat(retiredEvents()).isEqualTo(1);
+        assertThat(jdbc.sql("SELECT no_version_in_effect FROM rle_version_history WHERE action = 'RETIRED'")
+                .query(Boolean.class).single()).isFalse();
         assertThat(evaluate(podB, "card-fee")).isEqualTo(1);
         clock.set(Instant.parse("2026-12-05T00:00:00Z"));
         assertThat(evaluate(podA, "card-fee")).isEqualTo(1);
         assertThat(evaluate(podB, "card-fee")).isEqualTo(1);
         assertThat(podB.lifecycleSweep().run()).isZero();
         assertThat(retiredEvents()).isEqualTo(1);
+    }
+
+    @Test
+    void RLE_026_two_retirements_of_the_last_versions_lock_the_rule_set_and_run_one_after_the_other() throws Exception {
+        // Given card-fee v1 in force and v2 approved for 1 Dec (PD-101: v2 does not count as in effect)
+        RuleSetVersion v1 = publish("bank-a", "card-fee", fee("card-fee", "2026-11-01T00:00:00Z", "50000 VND"),
+                Instant.parse("2026-10-20T00:00:00Z"));
+        RuleSetVersion v2 = publish("bank-a", "card-fee", fee("card-fee", "2026-12-01T00:00:00Z", "30000 VND"),
+                Instant.parse("2026-11-25T10:00:00Z"));
+        clock.set(Instant.parse("2026-11-26T09:00:00Z"));
+        statements.clear();
+
+        // When bob on pod A retires v2 and minh on pod B retires v1 with the confirmation, at the same moment
+        CyclicBarrier together = new CyclicBarrier(2);
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<?> a = pool.submit(() -> {
+                caller.asThread("bank-a", "bob", APPROVER);
+                together.await();
+                podA.versionService().retire("card-fee", 2, new WriteOptions(null, v2.lockVersion(), "Postponed"));
+                return null;
+            });
+            Future<?> b = pool.submit(() -> {
+                caller.asThread("bank-a", "minh", APPROVER);
+                together.await();
+                podB.versionService().retire("card-fee", 1, new WriteOptions(null, v1.lockVersion(), "Withdrawn"), true);
+                return null;
+            });
+            a.get();
+            b.get();
+        }
+
+        // Then both are retired; only v1, the version in force, recorded that none remained; both locked the rule set
+        assertThat(jdbc.sql("SELECT v.version_num || ' ' || h.no_version_in_effect FROM rle_version_history h"
+                + " JOIN rle_version v ON v.tenant_id = h.tenant_id AND v.id = h.version_id WHERE h.action = 'RETIRED'"
+                + " ORDER BY v.version_num").query(String.class).list()).containsExactly("1 true", "2 false");
+        assertThat(statements).filteredOn(sql -> sql.contains("FROM rle_rule_set") && sql.contains("FOR UPDATE"))
+                .hasSizeGreaterThanOrEqualTo(2);
+        assertThatThrownBy(() -> evaluate(podA, "card-fee")).isInstanceOf(NoEffectiveVersionException.class);
     }
 
     @Test

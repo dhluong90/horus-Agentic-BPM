@@ -47,9 +47,10 @@ class RuleEngineServicesConfiguration {
     @Bean
     @ConditionalOnMissingBean
     RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
-            CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties) {
+            CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
+            org.springframework.core.env.Environment environment) {
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings());
+                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(environment));
     }
 
     @Bean

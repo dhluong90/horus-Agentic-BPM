@@ -20,12 +20,15 @@ import java.time.Duration;
  * @param maxRows {@code horus.bpm.rules.evaluation.max-rows}, 1 to {@value EngineDefaults#RULES_MAX}
  * @param systemActor {@code horus.bpm.rules.lifecycle.system-actor}: the actor recorded when a version is superseded,
  *     1 to {@value EngineDefaults#SYSTEM_ACTOR_MAX_LENGTH} characters, not blank
- * @param retireApproval {@code horus.bpm.rules.lifecycle.retire-approval} (PD-080): {@code single}, recorded on every
+ * @param retireApproval {@code horus.bpm.lifecycle.retire-approval} (PD-080): {@code single}, recorded on every
  *     retirement; {@code four-eyes} is refused until it ships in M3 (RLE-038)
+ * @param retireLastVersion {@code horus.bpm.lifecycle.retire-last-version} (PD-101, shared with the Process Engine):
+ *     {@code confirm} (default) lets a retirement leave no version in effect only when the request confirms it with
+ *     {@code confirmNoVersionInEffect}; {@code refuse} never lets it; {@code four-eyes} is refused until it ships
  */
 public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
         boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
-        int maxStringLength, int maxRows, String systemActor, String retireApproval) {
+        int maxStringLength, int maxRows, String systemActor, String retireApproval, String retireLastVersion) {
 
     public EngineSettings {
         if (cacheMaxEntries < 1 || cacheMaxEntries > EngineDefaults.CACHE_MAX_ENTRIES_LIMIT) {
@@ -52,11 +55,20 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
                     + EngineDefaults.SYSTEM_ACTOR_MAX_LENGTH + " characters and not blank, was '" + systemActor + "'");
         }
         if ("four-eyes".equals(retireApproval)) {
-            throw new IllegalArgumentException("horus.bpm.rules.lifecycle.retire-approval: four-eyes arrives in M3"
+            throw new IllegalArgumentException("horus.bpm.lifecycle.retire-approval: four-eyes arrives in M3"
                     + " (RLE-038); this release supports single");
         }
+        if ("four-eyes".equals(retireLastVersion)) {
+            throw new IllegalArgumentException("horus.bpm.lifecycle.retire-last-version: four-eyes is not built in this"
+                    + " release; use confirm or refuse (PD-101)");
+        }
+        if (!EngineDefaults.RETIRE_LAST_CONFIRM.equals(retireLastVersion)
+                && !EngineDefaults.RETIRE_LAST_REFUSE.equals(retireLastVersion)) {
+            throw new IllegalArgumentException("horus.bpm.lifecycle.retire-last-version must be confirm or refuse, was '"
+                    + retireLastVersion + "'");
+        }
         if (!EngineDefaults.RETIRE_APPROVAL.equals(retireApproval)) {
-            throw new IllegalArgumentException("horus.bpm.rules.lifecycle.retire-approval must be single (four-eyes"
+            throw new IllegalArgumentException("horus.bpm.lifecycle.retire-approval must be single (four-eyes"
                     + " arrives in M3), was '" + retireApproval + "'");
         }
     }
@@ -79,7 +91,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
             int maxStringLength, int maxRows) {
         this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
                 reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, EngineDefaults.SYSTEM_ACTOR,
-                EngineDefaults.RETIRE_APPROVAL);
+                EngineDefaults.RETIRE_APPROVAL, EngineDefaults.RETIRE_LAST_CONFIRM);
     }
 
     private static void requireLowerOnly(String property, int value, int ceiling) {
@@ -139,7 +151,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withRejectUndeclaredInputs(boolean reject) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, reject, queryMaxPageSize,
-                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, systemActor, retireApproval);
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, systemActor, retireApproval, retireLastVersion);
     }
 
     /**
@@ -152,7 +164,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withSizeLimits(int outputBytes, int stringLength, int rows) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows, systemActor, retireApproval);
+                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows, systemActor, retireApproval, retireLastVersion);
     }
 
     /**
@@ -164,6 +176,19 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withLifecycle(String actor, String approval) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, actor, approval);
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, actor, approval,
+                retireLastVersion);
+    }
+
+    /**
+     * Returns a copy with {@code horus.bpm.lifecycle.retire-last-version} set.
+     *
+     * @param mode {@code confirm} or {@code refuse}
+     * @return the settings
+     */
+    public EngineSettings withRetireLastVersion(String mode) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, systemActor,
+                retireApproval, mode);
     }
 }

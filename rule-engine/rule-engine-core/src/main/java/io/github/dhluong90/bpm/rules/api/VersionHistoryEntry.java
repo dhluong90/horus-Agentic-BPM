@@ -17,9 +17,12 @@ import java.util.Objects;
  * @param supersededBy on a {@code RETIRED} entry of a superseded version, the version that took over; otherwise null
  * @param approvalMode on a {@code RETIRED} entry, {@code single}, {@code four-eyes} or {@code system} (superseded);
  *     otherwise null
+ * @param noVersionInEffect on a {@code RETIRED} entry, whether the retirement left the rule set with no version in
+ *     effect (PD-101); otherwise null
  */
 public record VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus,
-        String actor, String reason, long lockVersion, Instant occurredAt, Integer supersededBy, String approvalMode) {
+        String actor, String reason, long lockVersion, Instant occurredAt, Integer supersededBy, String approvalMode,
+        Boolean noVersionInEffect) {
 
     public VersionHistoryEntry {
         Objects.requireNonNull(action, "action must not be null");
@@ -41,6 +44,24 @@ public record VersionHistoryEntry(LifecycleAction action, VersionStatus fromStat
      */
     public VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus, String actor,
             String reason, long lockVersion, Instant occurredAt) {
-        this(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, null, null);
+        this(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, null, null, null);
+    }
+
+    /**
+     * Creates an entry without the PD-101 mark.
+     *
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     */
+    public VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus, String actor,
+            String reason, long lockVersion, Instant occurredAt, Integer supersededBy, String approvalMode) {
+        this(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy, approvalMode, null);
     }
 }

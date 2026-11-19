@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.rules.internal.service;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
+import io.github.dhluong90.bpm.rules.api.LastVersionInEffectException;
 import io.github.dhluong90.bpm.rules.api.PayloadTooLargeException;
 import io.github.dhluong90.bpm.rules.api.LifecycleAction;
 import io.github.dhluong90.bpm.rules.api.Page;
@@ -250,13 +251,27 @@ public final class DefaultVersionService implements VersionService {
 
     @Override
     public RuleSetVersion retire(String ruleSet, int version, WriteOptions options) {
+        return retire(ruleSet, version, options, false);
+    }
+
+    @Override
+    public RuleSetVersion retire(String ruleSet, int version, WriteOptions options, boolean confirmNoVersionInEffect) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_APPROVE);
         String reason = requireReason(opts.comment());
-        String requestHash = Hashes.sha256Parts("retire", actor, ruleSet, Integer.toString(version),
-                String.valueOf(opts.expectedLockVersion()), reason);
+        // The confirmation is part of the request only when given, so a key used without it still replays.
+        String requestHash = confirmNoVersionInEffect
+                ? Hashes.sha256Parts("retire", actor, ruleSet, Integer.toString(version),
+                        String.valueOf(opts.expectedLockVersion()), reason, "confirm-no-version-in-effect")
+                : Hashes.sha256Parts("retire", actor, ruleSet, Integer.toString(version),
+                        String.valueOf(opts.expectedLockVersion()), reason);
         return context.idempotent(tenant, "retire", opts.idempotencyKey(), requestHash, 200, () -> {
+            requireRuleSetName(ruleSet);
+            String ruleSetId = store.findRuleSetId(tenant, ruleSet).orElseThrow(() -> new RuleSetNotFoundException(ruleSet));
+            // The rule set row first, then the versions in effect: two concurrent retirements of its last two versions
+            // run one after the other, and the second sees that it is now the last (PD-101).
+            store.lockRuleSet(tenant, ruleSetId);
             StoredVersion current = load(tenant, ruleSet, version);
             if (current.status() != VersionStatus.PUBLISHED) {
                 throw new InvalidStateException(ruleSet, version, current.status(), "retire");
@@ -269,6 +284,19 @@ public final class DefaultVersionService implements VersionService {
             if (inForce.isPresent() && inForce.get().version() > current.version()) {
                 throw InvalidStateException.superseded(ruleSet, version, inForce.get().version());
             }
+            // PD-101: no other version remains in effect afterwards when this one is in force (older versions retire
+            // with it and none comes back) or when nothing is in force at all. A version that only starts later does
+            // not count. That needs an explicit confirmation, or the host refuses it.
+            boolean last = inForce.isEmpty() || inForce.get().version() == current.version();
+            if (last) {
+                String setting = context.settings().retireLastVersion();
+                if (EngineDefaults.RETIRE_LAST_REFUSE.equals(setting) || !confirmNoVersionInEffect) {
+                    Optional<StoredVersion> next = store.nextScheduled(tenant, ruleSetId, now, current.id());
+                    throw new LastVersionInEffectException(ruleSet, version, setting,
+                            next.map(StoredVersion::version).orElse(null),
+                            next.map(StoredVersion::effectiveFrom).orElse(null));
+                }
+            }
             // Retire what it superseded first, while it is still published, so a retire never brings back an older
             // version whose status lags its supersession (ADR-0025 decision 1).
             supersession.retire(tenant, current.ruleSetId(), now);
@@ -276,9 +304,9 @@ public final class DefaultVersionService implements VersionService {
             store.updateVersion(updated, current.lockVersion());
             String mode = context.settings().retireApproval();
             store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.RETIRED,
-                    current.status(), updated.status(), actor, reason, updated.lockVersion(), now, null, mode));
+                    current.status(), updated.status(), actor, reason, updated.lockVersion(), now, null, mode, last));
             outbox.append(tenant, Ulid.next(now), EngineValues.write(Supersession.retiredEvent(tenant, ruleSet,
-                    version, actor, reason, null, now, mode)), now);
+                    version, actor, reason, null, now, mode, last)), now);
             return updated.toView(false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }

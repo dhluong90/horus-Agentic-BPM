@@ -20,10 +20,35 @@ import java.time.Instant;
  * @param occurredAt when it happened
  * @param supersededBy on a {@code RETIRED} row of a superseded version, the version that took over; otherwise null
  * @param approvalMode on a {@code RETIRED} row, {@code single}, {@code four-eyes} or {@code system}; otherwise null
+ * @param noVersionInEffect on a {@code RETIRED} row, whether the retirement left no version in effect (PD-101);
+ *     otherwise null
  */
 public record HistoryRow(String tenantId, String id, String versionId, LifecycleAction action,
         VersionStatus fromStatus, VersionStatus toStatus, String actor, String reason, long lockVersion,
-        Instant occurredAt, Integer supersededBy, String approvalMode) {
+        Instant occurredAt, Integer supersededBy, String approvalMode, Boolean noVersionInEffect) {
+
+    /**
+     * Creates a retirement row without the PD-101 mark.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param versionId see the record
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     */
+    public HistoryRow(String tenantId, String id, String versionId, LifecycleAction action, VersionStatus fromStatus,
+            VersionStatus toStatus, String actor, String reason, long lockVersion, Instant occurredAt,
+            Integer supersededBy, String approvalMode) {
+        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy,
+                approvalMode, null);
+    }
 
     /**
      * Creates a row of a transition other than a retirement.
@@ -41,7 +66,8 @@ public record HistoryRow(String tenantId, String id, String versionId, Lifecycle
      */
     public HistoryRow(String tenantId, String id, String versionId, LifecycleAction action, VersionStatus fromStatus,
             VersionStatus toStatus, String actor, String reason, long lockVersion, Instant occurredAt) {
-        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, null, null);
+        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, null, null,
+                null);
     }
 
     /**
@@ -51,6 +77,6 @@ public record HistoryRow(String tenantId, String id, String versionId, Lifecycle
      */
     public VersionHistoryEntry toEntry() {
         return new VersionHistoryEntry(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt,
-                supersededBy, approvalMode);
+                supersededBy, approvalMode, noVersionInEffect);
     }
 }

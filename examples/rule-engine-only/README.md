@@ -281,8 +281,14 @@ public Money cardFee(String tier, int txCount) {
    # 428 {"code":"PRECONDITION_REQUIRED",...}
    curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
      -H 'Idempotency-Key: demo-retire-1' -H 'If-Match: "2"' -d '{"reason":"Tet promotion ended"}'
-   # 200 {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T15:56:45.001643Z",...}
+   # 409 {"code":"LAST_VERSION_IN_EFFECT","ruleSet":"tet-fee-waiver","version":1,"setting":"confirm","nextEffectiveFrom":null,
+   #      "detail":"tet-fee-waiver v1 is the last version in effect of rule set tet-fee-waiver; ...",...}
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -H 'If-Match: "2"' -d '{"reason":"Tet promotion ended","confirmNoVersionInEffect":true}'
+   # 200 {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T19:31:55.928264Z",...}
    ```
+
+   The waiver is the only version in effect, so retiring it leaves none: the first call is refused until Minh confirms it (PD-101).
 
    An empty reason is `400 INPUT_INVALID`. A caller with `rules:author` only is `403 PERMISSION_DENIED`, before the headers are read. A stale `If-Match` is `409 VERSION_CONFLICT`.
 
@@ -294,17 +300,18 @@ public Money cardFee(String tier, int txCount) {
    # 404 {"code":"NO_EFFECTIVE_VERSION",...}
    curl -s -u minh:demo-only $H/rule-sets/tet-fee-waiver/versions/1/history
    # {"data":[...,{"action":"RETIRED","fromStatus":"PUBLISHED","toStatus":"RETIRED","actor":"minh",
-   #   "reason":"Tet promotion ended","supersededBy":null,"approvalMode":"single","lockVersion":3,...}]}
+   #   "reason":"Tet promotion ended","supersededBy":null,"approvalMode":"single","noVersionInEffect":true,"lockVersion":3,...}]}
    docker exec horus-pg psql -U horus -d horus -tAc "SELECT payload->>'retiredBy', payload->>'reason', \
-     payload->>'approvalMode' FROM rle_decision_outbox WHERE payload->>'eventType' = 'rules.version.retired.v1'"
-   # minh|Tet promotion ended|single
+     payload->>'approvalMode', payload->>'noVersionInEffect' FROM rle_decision_outbox \
+     WHERE payload->>'eventType' = 'rules.version.retired.v1'"
+   # minh|Tet promotion ended|single|true
    ```
 
 4. A newer version in effect at its approval retires the older one in the same transaction. Import [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml) twice, as v1 and v2, and approve both:
 
    ```bash
    curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1
-   # {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T15:56:51.832282Z",...}
+   # {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T19:32:01.858780Z",...}
    curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1/history
    # {"data":[...,{"action":"RETIRED","actor":"system","reason":"SUPERSEDED","supersededBy":2,"approvalMode":"system",...}]}
    ```
@@ -315,7 +322,8 @@ public Money cardFee(String tier, int txCount) {
 
    ```bash
    curl -s -u minh:demo-only localhost:8080/api/bpm/meta
-   # {...,"modules":[{"module":"rules",...,"settings":{"authoring.cockpit-drafts":true,"lifecycle.retire-approval":"single"}}],...}
+   # {...,"modules":[{"module":"rules",...,"settings":{"authoring.cockpit-drafts":true,"lifecycle.retire-approval":"single",
+   #   "lifecycle.retire-last-version":"confirm"}}],...}
    ```
 
 The same steps run as `RetireVersionIT` against a Testcontainers database on every build.

@@ -83,6 +83,26 @@ public interface RuleStore {
     Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at);
 
     /**
+     * Locks the rule set row for this transaction ({@code SELECT ... FOR UPDATE}), so two retirements of its last
+     * versions run one after the other and the second sees that it is now the last (PD-101).
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     */
+    void lockRuleSet(String tenantId, String ruleSetId);
+
+    /**
+     * Finds the approved, not retired version that starts soonest after an instant, other than one version.
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     * @param after the instant
+     * @param excludingVersionId the version left out, usually the one being retired
+     * @return the version, or empty when none is scheduled
+     */
+    Optional<StoredVersion> nextScheduled(String tenantId, String ruleSetId, Instant after, String excludingVersionId);
+
+    /**
      * Retires every {@code PUBLISHED} version that a newer {@code PUBLISHED} version of its rule set, in effect at
      * {@code now}, has superseded (DESIGN section 3.3.2): one conditional {@code UPDATE ... WHERE status = 'PUBLISHED'
      * ... RETURNING}, so across replicas each version is returned exactly once, with no advisory lock. Sets status

@@ -171,7 +171,11 @@ class RuleEngineSchemaMigratorIT {
         assertThat(jdbc.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_rle_version_published'")
                 .query(String.class).single()).contains("WHERE (status = 'PUBLISHED'::text)");
 
+        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE table_name = 'rle_version_history'"
+                + " AND column_name = 'no_version_in_effect'").query(Long.class).single()).isEqualTo(1L);
+
         // When the documented rollback step of V11 runs
+        jdbc.sql("ALTER TABLE rle_version_history DROP COLUMN no_version_in_effect").update();
         jdbc.sql("ALTER TABLE rle_version DROP CONSTRAINT rle_version_retired_at_check").update();
         jdbc.sql("DROP INDEX idx_rle_version_published").update();
         jdbc.sql("ALTER TABLE rle_version DROP COLUMN retired_at").update();
