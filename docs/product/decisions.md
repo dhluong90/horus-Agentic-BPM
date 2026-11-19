@@ -114,6 +114,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-090](#pd-090-property-tests-without-jqwik) | Property tests without jqwik | Decided |
 | [PD-091](#pd-091-no-tag-ruleset-or-immutable-releases-for-now) | No tag ruleset or immutable releases for now | Decided (revisitable) |
 | [PD-092](#pd-092-the-cockpit-opens-on-home-for-every-role) | The cockpit opens on Home for every role | Decided (product manager, delegated, PD-073) |
+| [PD-093](#pd-093-cockpit-menu-for-authors-and-two-changes-to-the-approved-prototype) | Cockpit menu for authors and two changes to the approved prototype | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2795,3 +2796,27 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Consequences.** `CKP-031` changes: the default is `home`, the `by-role` value is retired, and the cases test Home's content per role, including a user with no rule permission. The cockpit DESIGN menu list in section 3 is Home, Rules, Approvals, Decisions (Preview) and Processes (Preview, shown only when a Process Engine host is registered). CK-F-04 is reworded.
 
 **Follow-ups.** Architect: `CKP-031`, the `cockpit.landing` values in `/api/bpm/meta`, and the DESIGN section 3 menu list. Maintainers (engineering): pull request #183. Documentation: the wiki cockpit page.
+
+### PD-093 Cockpit menu for authors and two changes to the approved prototype
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | The designer's critique of the cockpit shell (#183, styleguide #182) asks for three changes. (a) Should an author see the whole menu, or only the items their permissions use? (b) Remove the background grid from the page ground and keep it on diagram canvases only? (c) Write card titles in sentence case instead of upper-case letter-spaced labels? Changes (b) and (c) depart from the approved prototype of PD-056 |
+| Raised by | Designer, review of pull request #183 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19: (a) option 1, (b) accepted, (c) accepted |
+
+**(a) Menu for authors. Options considered**
+
+1. An author sees all five items: Home, Rules, Approvals (their own requests, with Withdraw), and the Preview group, Decisions and Processes (chosen). The Preview pages carry no data in 0.1.0, so showing them reveals nothing. The rule "hidden, never disabled" stays for areas that hold data the user may not read: from 0.2.0, Decisions is shown only to users who may read the decision log. Processes appears only when a Process Engine host is registered. A user with no rule permission sees Home only, with one line saying there is nothing for their role. Consequence: authors and approvers see the same menu, so the product reads the same in every demo. Every visible item has a reason to be opened.
+2. Hide every item the user's permissions do not use. Consequence: an author's menu has three items and an approver's five, so the menu changes between screens in the review video, and the author never discovers the previews.
+
+**(b) No grid on the page ground: accepted.** The grid stays on diagram canvases, where it helps placement. Behind cards and the sign-in form it made the screens read as a developer tool, which is what the product owner reacted to. This changes the prototype's page background only; tokens and colours are unchanged.
+
+**(c) Sentence-case card titles: accepted.** Upper-case, letter-spaced labels are hard to read in Vietnamese (`CHỜ PHÊ DUYỆT`), and one language at a time must read equally well in both (PD-026, PD-056).
+
+**Also confirmed.** A single count badge on the Approvals menu item (the requests this user can review) is allowed. It is the count of the user's own queue, consistent with PD-016, which keeps counts with their queue and rules out a strip of counts.
+
+**Consequences.** The styleguide (#182) and the cockpit shell (#183) follow (a) to (c). The UX design document records (b) and (c) as changes to the approved prototype. Configurable: no.
+
+**Follow-ups.** Designer: the styleguide menu rule matches (a). Maintainers (engineering): #183. Architect: the cockpit DESIGN section 3 menu list, with the PD-092 changes.
