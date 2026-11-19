@@ -370,6 +370,8 @@ class UnmaskedPersonalDataTest {
         // Given bank-a has kyc-routing and started last time with mask-default true, bank-b with false
         caller.become("bank-a", "lan", AUTHOR);
         versions().importRuleSet(yaml(KYC_ROUTING_DECLARED));
+        stores.recordSettingSeen(MaskingStartupCheck.HOST_DEFAULT_ROW, MaskingStartupCheck.MASK_DEFAULT_SETTING,
+                "false", JAN_15);
         stores.recordSettingSeen("bank-a", MaskingStartupCheck.MASK_DEFAULT_SETTING, "true", JAN_15);
         stores.recordSettingSeen("bank-b", MaskingStartupCheck.MASK_DEFAULT_SETTING, "false", JAN_15);
 
@@ -386,15 +388,34 @@ class UnmaskedPersonalDataTest {
     }
 
     @Test
-    void RLE_052_a_tenant_seen_for_the_first_time_is_recorded_with_its_value() {
-        // Given bank-c is named in the host's settings, masks by default, and was never recorded
+    void RLE_052_the_first_start_up_records_the_host_default_and_every_tenant() {
+        // Given bank-c is named in the host's settings and masks by default; nothing was ever recorded
         policy.maskByDefault.add("bank-c");
 
         // When the host starts
         List<String> lines = engines().maskingCheck().recordMaskDefaults(Set.of("bank-c"), JAN_15);
 
-        // Then one line records it as first seen
-        assertThat(lines).containsExactly("decision-log.mask-default for tenant bank-c is true (first recorded)");
-        assertThat(stores.settingsSeen(MaskingStartupCheck.MASK_DEFAULT_SETTING)).containsEntry("bank-c", "true");
+        // Then the host default and bank-c are recorded as first seen
+        assertThat(lines).containsExactly("decision-log.mask-default for the host default is false (first recorded)",
+                "decision-log.mask-default for tenant bank-c is true (first recorded)");
+        assertThat(stores.settingsSeen(MaskingStartupCheck.MASK_DEFAULT_SETTING))
+                .containsEntry(MaskingStartupCheck.HOST_DEFAULT_ROW, "false").containsEntry("bank-c", "true");
+    }
+
+    @Test
+    void RLE_052_a_tenant_new_since_the_last_start_up_is_compared_with_the_host_default_it_followed() {
+        // Given the last start-up recorded the host default false, and bank-d got its first rule set since
+        stores.recordSettingSeen(MaskingStartupCheck.HOST_DEFAULT_ROW, MaskingStartupCheck.MASK_DEFAULT_SETTING,
+                "false", JAN_15);
+        caller.become("bank-d", "lan", AUTHOR);
+        versions().importRuleSet(yaml(KYC_ROUTING_DECLARED));
+
+        // When the host restarts with bank-d masking by default
+        policy.maskByDefault.add("bank-d");
+        List<String> lines = engines().maskingCheck().recordMaskDefaults(Set.of(), JAN_15.plusSeconds(60));
+
+        // Then the change from the default it followed is logged, not hidden as a first record
+        assertThat(lines).containsExactly(
+                "decision-log.mask-default for tenant bank-d changed from false to true since the last start-up");
     }
 }

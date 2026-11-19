@@ -1,9 +1,12 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
+import io.github.dhluong90.bpm.host.spi.TenantModuleSettings;
+import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -28,6 +31,12 @@ final class RuleEngineModule {
     /** The rules setting clients read to offer or hide draft editing (PD-075, PD-094). */
     static final String COCKPIT_DRAFTS = "authoring.cockpit-drafts";
 
+    /** The masking default in force for the caller's tenant (PD-099 mitigation 4, RLE-052). */
+    static final String MASK_DEFAULT = "decision-log.mask-default";
+
+    /** Strict mode in force for the caller's tenant (PD-099 mitigation 2, RLE-050). */
+    static final String REQUIRE_EXPLICIT_MASK = "decision-log.require-explicit-mask";
+
     private static final String VERSION_RESOURCE = "rule-engine.properties";
 
     private RuleEngineModule() {
@@ -44,6 +53,30 @@ final class RuleEngineModule {
         // Always published, false unless the host turns it on (PD-094), so clients never guess.
         Map<String, Object> settings = Map.of(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
         return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);
+    }
+
+    /**
+     * The rules settings that depend on the caller's tenant, read from the masking policy on each {@code /meta}
+     * request: the masking default and strict mode in force. Both are always present and boolean.
+     *
+     * @param policy the host's masking policy
+     * @return the tenant settings of the {@code rules} module
+     */
+    static TenantModuleSettings tenantSettings(MaskingPolicy policy) {
+        return new TenantModuleSettings() {
+            @Override
+            public String module() {
+                return "rules";
+            }
+
+            @Override
+            public Map<String, Object> settings(String tenantId) {
+                Map<String, Object> settings = new LinkedHashMap<>();
+                settings.put(MASK_DEFAULT, policy.maskByDefault(tenantId));
+                settings.put(REQUIRE_EXPLICIT_MASK, policy.requireExplicitMask(tenantId));
+                return settings;
+            }
+        };
     }
 
     static String engineVersion() {

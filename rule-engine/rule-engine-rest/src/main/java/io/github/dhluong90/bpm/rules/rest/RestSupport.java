@@ -222,6 +222,15 @@ final class RestSupport {
             }
         }
         node.put("unchangedCount", diff.unchangedCount());
+        ArrayNode masking = node.putArray("masking");
+        for (io.github.dhluong90.bpm.rules.api.VersionDiff.InputMasking input : diff.masking()) {
+            ObjectNode item = masking.addObject();
+            item.put("input", input.input());
+            item.set("from", EngineValues.value(input.from() == null ? null : input.from().name()));
+            item.set("to", EngineValues.value(input.to() == null ? null : input.to().name()));
+            item.put("changed", input.changed());
+            item.set("personalDataName", EngineValues.value(input.personalDataName()));
+        }
         return node;
     }
 

@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.host.autoconfigure;
 
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
+import io.github.dhluong90.bpm.host.spi.TenantModuleSettings;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -34,7 +35,9 @@ public class HostMetadataAutoConfiguration {
 
     @Bean
     HostMetadataController horusBpmHostMetadataController(
-            ObjectProvider<ModuleDescriptor> modules, HostMetadataProperties properties, EngineAccess access) {
-        return new HostMetadataController(EngineAccessAutoConfiguration.modules(modules), properties, access);
+            ObjectProvider<ModuleDescriptor> modules, ObjectProvider<TenantModuleSettings> tenantSettings,
+            HostMetadataProperties properties, EngineAccess access) {
+        return new HostMetadataController(EngineAccessAutoConfiguration.modules(modules),
+                tenantSettings.orderedStream().toList(), properties, access);
     }
 }

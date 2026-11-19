@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.rules.api.MaskingKey;
+import io.github.dhluong90.bpm.rules.api.PersonalDataNames;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import java.util.ArrayList;
@@ -8,12 +9,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The default {@link MaskingPolicy}: one host key from {@code horus.bpm.rules.masking.hmac-key} (or the shared
  * {@code horus.bpm.masking.hmac-key}), from which each tenant gets its own HKDF subkey, an optional key and masking default per tenant under
  * {@code horus.bpm.rules.masking.tenants.<tenant>}, and the host masking default from
- * {@code horus.bpm.rules.decision-log.mask-default}. A value that is not a valid key is never used and never shown:
+ * {@code horus.bpm.rules.decision-log.mask-default}, and the guards against unmasked personal data: strict mode
+ * ({@code decision-log.require-explicit-mask}) and the personal-data names, each overridable per tenant. A value that is not a valid key is never used and never shown:
  * it is reported by setting name to the start-up check, which then refuses to start. Immutable and thread-safe.
  */
 final class PropertyMaskingPolicy implements MaskingPolicy {
@@ -29,9 +32,31 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
     private final int hostSearchesPerMinute;
     private final Map<String, Integer> tenantSearchesPerMinute;
 
+    /** Strict mode and personal-data names, for the host and per tenant (PD-099). */
+    private final Guards guards;
+
+    /**
+     * The guards against unmasked personal data from the properties.
+     *
+     * @param hostStrict {@code decision-log.require-explicit-mask}
+     * @param tenantStrict tenants with their own strict mode
+     * @param hostNames the host's personal-data names
+     * @param tenantNames tenants with their own list
+     * @param tenants every tenant named under {@code masking.tenants}
+     */
+    private record Guards(boolean hostStrict, Map<String, Boolean> tenantStrict, PersonalDataNames hostNames,
+            Map<String, PersonalDataNames> tenantNames, Set<String> tenants) {
+        Guards {
+            tenantStrict = Map.copyOf(tenantStrict);
+            tenantNames = Map.copyOf(tenantNames);
+            tenants = Set.copyOf(tenants);
+        }
+    }
+
     private PropertyMaskingPolicy(Optional<MaskingKey> hostKey, Map<String, Optional<MaskingKey>> tenantKeys,
             boolean hostDefault, Map<String, Boolean> tenantDefaults, List<String> invalidSettings,
-            int hostSearchesPerMinute, Map<String, Integer> tenantSearchesPerMinute) {
+            int hostSearchesPerMinute, Map<String, Integer> tenantSearchesPerMinute, Guards guards) {
+        this.guards = guards;
         this.hostSearchesPerMinute = hostSearchesPerMinute;
         this.tenantSearchesPerMinute = Map.copyOf(tenantSearchesPerMinute);
         this.hostKey = hostKey;
@@ -76,7 +101,70 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
         checkDistinct(hostKey, tenantKeys, invalid);
         Boolean maskDefault = properties.decisionLog().maskDefault();
         return new PropertyMaskingPolicy(hostKey, tenantKeys, maskDefault == null ? EngineDefaults.MASK_DEFAULT
-                : maskDefault, tenantDefaults, invalid, hostLimit, tenantLimits);
+                : maskDefault, tenantDefaults, invalid, hostLimit, tenantLimits, guards(properties));
+    }
+
+    /**
+     * Reads strict mode and the personal-data names. A tenant's {@code personal-data-names} replaces the host's list
+     * for that tenant only, and {@code additional-personal-data-names} extends whichever list applies. A name that is
+     * blank or too long stops start-up with a message naming the setting.
+     */
+    private static Guards guards(RuleEngineProperties properties) {
+        RuleEngineProperties.DecisionLog log = properties.decisionLog();
+        String prefix = "horus.bpm.rules.decision-log.";
+        PersonalDataNames hostNames = names(PersonalDataNames.builtIn(), log.personalDataNames(),
+                log.additionalPersonalDataNames(), prefix);
+        Map<String, Boolean> tenantStrict = new HashMap<>();
+        Map<String, PersonalDataNames> tenantNames = new HashMap<>();
+        properties.masking().tenants().forEach((tenant, settings) -> {
+            if (settings == null) {
+                return;
+            }
+            if (settings.requireExplicitMask() != null) {
+                tenantStrict.put(tenant, settings.requireExplicitMask());
+            }
+            if (settings.personalDataNames() != null || settings.additionalPersonalDataNames() != null) {
+                tenantNames.put(tenant, names(hostNames, settings.personalDataNames(),
+                        settings.additionalPersonalDataNames(), "horus.bpm.rules.masking.tenants." + tenant + "."));
+            }
+        });
+        return new Guards(Boolean.TRUE.equals(log.requireExplicitMask()), tenantStrict, hostNames, tenantNames,
+                properties.masking().tenants().keySet());
+    }
+
+    private static PersonalDataNames names(PersonalDataNames inherited, List<String> replace, List<String> add,
+            String prefix) {
+        PersonalDataNames base;
+        try {
+            base = replace == null ? inherited : PersonalDataNames.of(replace);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(prefix + "personal-data-names: " + e.getMessage(), e);
+        }
+        try {
+            return add == null ? base : base.plus(add);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(prefix + "additional-personal-data-names: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public boolean requireExplicitMask(String tenantId) {
+        return guards.tenantStrict().getOrDefault(tenantId, guards.hostStrict());
+    }
+
+    @Override
+    public PersonalDataNames personalDataNames(String tenantId) {
+        return guards.tenantNames().getOrDefault(tenantId, guards.hostNames());
+    }
+
+    /**
+     * Returns every tenant named in the masking settings, so the start-up record of the masking default covers them
+     * even before they have a rule set.
+     *
+     * @return the tenant ids
+     */
+    Set<String> configuredTenants() {
+        return guards.tenants();
     }
 
     /**

@@ -4,7 +4,9 @@
 -- and the old and new value when it changed, and records the new value. A changed masking default decides whether
 -- undeclared inputs reach the append-only decision log in plain text, so it must never change unnoticed.
 --
--- One row per tenant and setting; tenant_id leads the primary key (TR-TEN-01). Written only at start-up, outside any
+-- One row per tenant and setting; tenant_id leads the primary key (TR-TEN-01). The row with an empty tenant_id holds
+-- the host default, which a tenant without its own setting follows; no tenant id is ever empty, because the tenant
+-- resolvers refuse a blank tenant. A tenant first seen at a later start-up is compared with that host row. Written only at start-up, outside any
 -- request, with INSERT ... ON CONFLICT DO UPDATE, so replicas that start together neither fail nor block. The runtime
 -- user therefore needs SELECT, INSERT and UPDATE on this table. Holds setting values only, never a key, a secret or
 -- decision data, and is never returned by any API.

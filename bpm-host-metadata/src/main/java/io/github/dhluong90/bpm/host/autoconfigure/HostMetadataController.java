@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException;
 import io.github.dhluong90.bpm.host.spi.EngineCaller;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
+import io.github.dhluong90.bpm.host.spi.TenantModuleSettings;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -27,7 +28,8 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>Both need an authenticated caller and no other permission. Responses follow
  * {@code cockpit/api/schema/bpm-meta.v1.schema.json} and {@code bpm-me.v1.schema.json} field for field,
  * carry a weak {@code ETag} and answer {@code 304} to a matching {@code If-None-Match}. {@code /meta}, the
- * same for every caller of the host, is {@code private, max-age=60}; {@code /me}, which carries the
+ * same for every caller of one tenant (engine settings may depend on the tenant, {@link TenantModuleSettings}), is
+ * {@code private, max-age=60}; {@code /me}, which carries the
  * caller's permissions, is {@code private, no-cache}, so a revoked role or a sign-out on a shared machine
  * is never served from the browser cache without asking the host. Bodies are built as ordered maps and
  * written by the host's own JSON converter, so absent optional fields are omitted rather than written as
@@ -47,20 +49,27 @@ final class HostMetadataController {
     static final int MAX_PAGE_SIZE = 200;
 
     private final List<ModuleDescriptor> modules;
+    private final List<TenantModuleSettings> tenantSettings;
     private final HostMetadataProperties properties;
     private final EngineAccess access;
     /** {@code /me} depends on the caller's credentials and on the switch request header. */
     static final String[] ME_VARY = {HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE, DefaultEngineAccess.TENANT_SWITCH_HEADER};
 
     HostMetadataController(List<ModuleDescriptor> modules, HostMetadataProperties properties, EngineAccess access) {
+        this(modules, List.of(), properties, access);
+    }
+
+    HostMetadataController(List<ModuleDescriptor> modules, List<TenantModuleSettings> tenantSettings,
+            HostMetadataProperties properties, EngineAccess access) {
         this.modules = List.copyOf(modules);
+        this.tenantSettings = List.copyOf(tenantSettings);
         this.properties = properties;
         this.access = access;
     }
 
     @GetMapping("/meta")
     ResponseEntity<Map<String, Object>> meta(HttpServletRequest request) {
-        access.currentCaller();
+        EngineCaller caller = access.currentCaller();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("schemaVersion", 1);
         if (properties.hostId() != null) {
@@ -73,8 +82,9 @@ final class HostMetadataController {
             entry.put("engineVersion", module.engineVersion());
             entry.put("apiVersion", module.apiVersion());
             entry.put("features", module.features());
-            if (!module.settings().isEmpty()) {
-                entry.put("settings", module.settings());
+            Map<String, Object> settings = settings(module, caller.tenant());
+            if (!settings.isEmpty()) {
+                entry.put("settings", settings);
             }
             entries.add(entry);
         }
@@ -103,6 +113,29 @@ final class HostMetadataController {
         body.put("roles", roles(caller));
         body.put("groups", caller.groups());
         return cacheable(request, body, ME_CACHE_CONTROL, ME_VARY);
+    }
+
+    /**
+     * A module's host settings with the settings in force for the caller's tenant on top. A tenant value that is not
+     * a boolean, an integer or a string breaks the published schema, so it fails the request rather than reaching a
+     * client.
+     */
+    private Map<String, Object> settings(ModuleDescriptor module, String tenant) {
+        Map<String, Object> settings = new LinkedHashMap<>(module.settings());
+        for (TenantModuleSettings extra : tenantSettings) {
+            if (!extra.module().equals(module.module())) {
+                continue;
+            }
+            extra.settings(tenant).forEach((key, value) -> {
+                if (!(value instanceof Boolean || value instanceof Integer || value instanceof Long
+                        || value instanceof String)) {
+                    throw new IllegalStateException("Tenant setting '" + key + "' of module " + module.module()
+                            + " must be a boolean, an integer or a string.");
+                }
+                settings.put(key, value);
+            });
+        }
+        return settings;
     }
 
     @ExceptionHandler(EngineAccessDeniedException.class)

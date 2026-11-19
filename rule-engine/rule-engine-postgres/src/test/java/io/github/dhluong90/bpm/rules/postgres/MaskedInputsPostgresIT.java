@@ -156,7 +156,7 @@ class MaskedInputsPostgresIT {
         JdbcClient jdbc = JdbcClient.create(db);
         assertThat(jdbc.sql("SELECT tenant_id || '=' || value FROM rle_setting_seen"
                 + " WHERE setting = 'decision-log.mask-default' ORDER BY tenant_id").query(String.class).list())
-                .containsExactly("bank-a=false", "bank-b=false");
+                .containsExactly("=false", "bank-a=false", "bank-b=false");
 
         // When the host restarts with mask-default true for bank-a only
         RuleEngines restarted = engines(maskByDefault("bank-a"));

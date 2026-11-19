@@ -75,43 +75,58 @@ public final class MaskingStartupCheck {
     public static final String MASK_DEFAULT_SETTING = "decision-log.mask-default";
 
     /**
-     * Logs, for every tenant, a change of {@code decision-log.mask-default} since the previous start-up, with the old
-     * and the new value, and records the value in force (RLE-052). A tenant seen for the first time is recorded with
-     * one information line. Turning the default off stops masking undeclared inputs, so that change is a warning.
-     * Run once after {@link #verify}, outside any request.
+     * The tenant id of the row that holds the host default: empty, which no tenant id ever is (the resolvers refuse a
+     * blank tenant). The host default is what a tenant without its own setting follows.
+     */
+    public static final String HOST_DEFAULT_ROW = "";
+
+    /**
+     * Logs every change of {@code decision-log.mask-default} since the previous start-up, with the old and the new
+     * value, and records the values in force (RLE-052): one line per tenant whose value changed, and one for the host
+     * default when it changed. A tenant with no record of its own is compared with the host default recorded at the
+     * previous start-up, which it followed then; with no record at all it is recorded with one information line.
+     * Turning masking off stops masking undeclared inputs, so that change is a warning. Run once after
+     * {@link #verify}, outside any request.
      *
      * @param configuredTenants tenants named in the host's settings, besides those that have rule sets or were
      *     recorded before
      * @param at the start-up time
-     * @return the lines logged, in tenant order
+     * @return the lines logged: the host default first, then by tenant
      */
     public List<String> recordMaskDefaults(Set<String> configuredTenants, Instant at) {
         Map<String, String> seen = store.settingsSeen(MASK_DEFAULT_SETTING);
+        String hostBefore = seen.get(HOST_DEFAULT_ROW);
         Set<String> tenants = new TreeSet<>(configuredTenants);
         tenants.addAll(seen.keySet());
         store.liveVersionInputs().forEach(version -> tenants.add(version.tenantId()));
+        tenants.remove(HOST_DEFAULT_ROW);
         List<String> lines = new ArrayList<>();
+        record(HOST_DEFAULT_ROW, "the host default", hostBefore, at, lines);
         for (String tenant : tenants) {
-            String now = Boolean.toString(policy.maskByDefault(tenant));
-            String before = seen.get(tenant);
-            if (now.equals(before)) {
-                continue;
-            }
-            String line;
-            System.Logger.Level level;
-            if (before == null) {
-                line = MASK_DEFAULT_SETTING + " for tenant " + tenant + " is " + now + " (first recorded)";
-                level = System.Logger.Level.INFO;
-            } else {
-                line = MASK_DEFAULT_SETTING + " for tenant " + tenant + " changed from " + before + " to " + now
-                        + " since the last start-up";
-                level = Boolean.parseBoolean(now) ? System.Logger.Level.INFO : System.Logger.Level.WARNING;
-            }
-            LOG.log(level, line);
-            lines.add(line);
-            store.recordSettingSeen(tenant, MASK_DEFAULT_SETTING, now, at);
+            record(tenant, "tenant " + tenant, seen.getOrDefault(tenant, hostBefore), at, lines);
         }
         return lines;
+    }
+
+    private void record(String tenant, String label, String before, Instant at, List<String> lines) {
+        String now = Boolean.toString(policy.maskByDefault(tenant));
+        if (now.equals(before)) {
+            store.recordSettingSeen(tenant, MASK_DEFAULT_SETTING, now, at);
+            return;
+        }
+        String line;
+        System.Logger.Level level;
+        if (before == null) {
+            line = MASK_DEFAULT_SETTING + " for " + label + " is " + now + " (first recorded)";
+            level = System.Logger.Level.INFO;
+        } else {
+            line = MASK_DEFAULT_SETTING + " for " + label + " changed from " + before + " to " + now
+                    + " since the last start-up";
+            level = Boolean.parseBoolean(now) ? System.Logger.Level.INFO : System.Logger.Level.WARNING;
+        }
+        LOG.log(level, line);
+        lines.add(line);
+        store.recordSettingSeen(tenant, MASK_DEFAULT_SETTING, now, at);
     }
 
     /** The first input of a version that is masked, or null. */

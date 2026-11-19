@@ -75,6 +75,12 @@ paths:
         extension. Anything else is `422 VALIDATION_FAILED` naming the rule, the column and the line.
         DTDs and entities are refused, and the file must be UTF-8. A body over 1 MB (1,048,576 bytes)
         is `413 PAYLOAD_TOO_LARGE`, for every content type.
+
+        Personal data (PD-099): every input that declares no `mask` and whose name matches the
+        tenant's personal-data names is listed in `warnings` (`UNMASKED_PERSONAL_DATA`, `RLE-049`).
+        With `decision-log.require-explicit-mask` on for the tenant, an input that declares no
+        `mask` is `422 VALIDATION_FAILED` with one violation per input, its `column` naming it, and
+        nothing is stored (`RLE-050`).
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -187,6 +193,12 @@ paths:
         The document's `ruleSet` (for DMN, the decision id) must equal `{name}`. DMN files are read
         as for `importRuleSet`. Permission `rules:author`, checked before the body is read. A body
         over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
+
+        Personal data (PD-099): every input that declares no `mask` and whose name matches the
+        tenant's personal-data names is listed in `warnings` (`UNMASKED_PERSONAL_DATA`, `RLE-049`).
+        With `decision-log.require-explicit-mask` on for the tenant, an input that declares no
+        `mask` is `422 VALIDATION_FAILED` with one violation per input, its `column` naming it, and
+        nothing is stored (`RLE-050`).
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -250,7 +262,8 @@ paths:
         The body is read and validated exactly as for `importVersion`: YAML or DMN 1.2 to 1.5,
         at most 1,048,576 bytes (`413 PAYLOAD_TOO_LARGE`), the document's `ruleSet` must equal
         `{name}` (`400 INPUT_INVALID`), and a refused document is `422 VALIDATION_FAILED` with every
-        cell problem in `violations`. A refused document stores nothing.
+        cell problem in `violations`. A refused document stores nothing. The personal-data warnings and strict
+        mode apply as at import (`RLE-049`, `RLE-050`).
 
         On success the version keeps its number, status `DRAFT`, author and creation time; its
         canonical document, `canonicalHash`, source document, `sourceHash`, `sourceFormat`, hit
@@ -322,6 +335,14 @@ paths:
         byte-identical body. Every changed value whose text holds a character outside printable
         ASCII, or an escaped character such as `\u200B`, has `nonAscii: true` (ADR-0026 decision 6).
 
+        `masking` lists every input of either version with its masking status in `base` (`from`)
+        and in `{version}` (`to`): `MASKED` or `NOT_MASKED` when the input declares `mask: true` or
+        `mask: false`, `MASKED_BY_DEFAULT` or `NOT_MASKED_BY_DEFAULT` when it declares nothing and the
+        tenant's `decision-log.mask-default` in force decides, null when the input is absent from that
+        version. `changed` marks any difference, so an approver sees "nationalId: MASKED to
+        NOT_MASKED" before approving (`RLE-051`). `personalDataName` names the personal-data name an
+        undeclared input of `{version}` matches (`RLE-049`).
+
         No `base`, or `base` equal to `{version}`, is `400 INPUT_INVALID`; a `base` that does not
         exist is `404 VERSION_NOT_FOUND`; a rule set of another tenant is `404 RULE_SET_NOT_FOUND`.
       parameters:
@@ -367,6 +388,9 @@ paths:
                     change: ADDED
                     position: 3
                 unchangedCount: 2
+                masking:
+                  - { input: tier, from: NOT_MASKED, to: NOT_MASKED, changed: false, personalDataName: null }
+                  - { input: nationalId, from: MASKED, to: NOT_MASKED_BY_DEFAULT, changed: true, personalDataName: national id }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -459,7 +483,12 @@ paths:
       tags: [rule-sets]
       operationId: requestPublish
       summary: Move a draft to PENDING_APPROVAL and record the caller as requester
-      description: Permission `rules:author`.
+      description: |
+        Permission `rules:author`. The response lists the personal-data `warnings` of the draft, which
+        the approver also sees on every read of the version (`RLE-049`). With
+        `decision-log.require-explicit-mask` on for the tenant, a draft with an input that declares no
+        `mask` (one imported before strict mode was turned on) is `422 VALIDATION_FAILED` naming the
+        input, and stays a draft (`RLE-050`).
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -894,6 +923,33 @@ components:
         definition:
           type: object
           description: The canonical definition, rule-engine/api/schema/rule-set.v1.schema.json
+        warnings:
+          type: array
+          description: |
+            What the author and the approver should see before publication; empty when none. Computed
+            from the definition and the tenant's settings each time the version is returned, so the
+            approver sees the warning the author saw at import (`RLE-049`). An idempotent replay
+            returns the warnings of the original response.
+          items:
+            $ref: '#/components/schemas/VersionWarning'
+    VersionWarning:
+      type: object
+      required: [code, input, matchedName, message]
+      properties:
+        code:
+          type: string
+          enum: [UNMASKED_PERSONAL_DATA]
+          description: '`UNMASKED_PERSONAL_DATA`: an input that declares no `mask` has a name that looks like personal data (PD-099)'
+        input: { type: string }
+        matchedName:
+          type: [string, 'null']
+          description: The configured personal-data name the input matched, for example `national id`
+        message: { type: string }
+      example:
+        code: UNMASKED_PERSONAL_DATA
+        input: nationalId
+        matchedName: national id
+        message: 'Input nationalId looks like personal data (it matches "national id") but declares no mask. Its values will be stored in plain text in the decision log, which can never be changed. Declare mask: true, or mask: false if it holds no personal data.'
     AllowedActions:
       type: array
       description: |
@@ -1119,6 +1175,39 @@ components:
           type: integer
           minimum: 0
           description: Rows in both versions with the same cells and not moved
+        masking:
+          type: array
+          description: Every input of either version with its masking status, inputs of `{version}` first in its order, then inputs only in `base` (`RLE-051`)
+          items:
+            $ref: '#/components/schemas/InputMasking'
+    InputMasking:
+      type: object
+      required: [input, from, to, changed, personalDataName]
+      properties:
+        input: { type: string }
+        from:
+          description: Status in `base`; null when the input is only in `{version}`
+          oneOf:
+            - $ref: '#/components/schemas/MaskingStatus'
+            - type: 'null'
+        to:
+          description: Status in `{version}`; null when the input is only in `base`
+          oneOf:
+            - $ref: '#/components/schemas/MaskingStatus'
+            - type: 'null'
+        changed:
+          type: boolean
+          description: True when `from` and `to` differ, including an input added or removed
+        personalDataName:
+          type: [string, 'null']
+          description: When the input declares no `mask` in `{version}` and its name looks like personal data, the configured name it matched
+    MaskingStatus:
+      type: string
+      enum: [MASKED, NOT_MASKED, MASKED_BY_DEFAULT, NOT_MASKED_BY_DEFAULT]
+      description: |
+        `MASKED` and `NOT_MASKED`: the input declares `mask: true` or `mask: false`. `MASKED_BY_DEFAULT`
+        and `NOT_MASKED_BY_DEFAULT`: it declares nothing, and the tenant's `decision-log.mask-default`
+        in force when the diff is read decides.
     Violation:
       type: object
       required: [ruleId, column, message]

@@ -74,6 +74,56 @@ class HostMetadataEndpointsTest {
         });
     }
 
+    /** The rules entry with one host setting, and a masking default that bank-b turns on (RLE-052). */
+    @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
+    static class RulesWithTenantSettings {
+
+        @org.springframework.context.annotation.Bean
+        io.github.dhluong90.bpm.host.spi.ModuleDescriptor ruleEngineModuleDescriptor() {
+            io.github.dhluong90.bpm.host.spi.ModuleDescriptor rules = TestHosts.rules(java.util.Map.of());
+            return new io.github.dhluong90.bpm.host.spi.ModuleDescriptor(rules.module(), rules.engineVersion(),
+                    rules.apiVersion(), rules.features(), java.util.Map.of("authoring.cockpit-drafts", false),
+                    rules.permissions(), rules.rolePermissions());
+        }
+
+        @org.springframework.context.annotation.Bean
+        io.github.dhluong90.bpm.host.spi.TenantModuleSettings ruleEngineTenantSettings() {
+            return new io.github.dhluong90.bpm.host.spi.TenantModuleSettings() {
+                @Override
+                public String module() {
+                    return "rules";
+                }
+
+                @Override
+                public java.util.Map<String, Object> settings(String tenantId) {
+                    return java.util.Map.of("decision-log.mask-default", tenantId.equals("bank-b"));
+                }
+            };
+        }
+    }
+
+    @Test
+    void RLE_052_meta_shows_each_caller_the_settings_in_force_for_their_own_tenant() {
+        // Given a host whose rules engine masks undeclared inputs by default for bank-b only
+        TestHosts.runner().withUserConfiguration(RulesWithTenantSettings.class).run(context -> {
+            MockMvc mvc = TestHosts.mockMvc(context);
+
+            // When lan of bank-a and binh of bank-b read /meta
+            MvcResult atBankA = call(mvc, get("/api/bpm/meta").with(lan()));
+            MvcResult atBankB = call(mvc, get("/api/bpm/meta").with(caller("binh", "bank-b", "rules:read")));
+
+            // Then each sees the host setting and the masking default in force for their tenant
+            JsonNode a = json(atBankA).path("modules").get(0).path("settings");
+            JsonNode b = json(atBankB).path("modules").get(0).path("settings");
+            assertThat(a.path("authoring.cockpit-drafts").asBoolean(true)).isFalse();
+            assertThat(a.path("decision-log.mask-default").isBoolean()).isTrue();
+            assertThat(a.path("decision-log.mask-default").asBoolean(true)).isFalse();
+            assertThat(b.path("decision-log.mask-default").asBoolean(false)).isTrue();
+            // And the two bodies differ, so their ETags do too
+            assertThat(atBankA.getResponse().getHeader("ETag")).isNotEqualTo(atBankB.getResponse().getHeader("ETag"));
+        });
+    }
+
     @Test
     void RLE_019_role_mapping_lists_rules_approve_and_removing_it_drops_it() {
         // Given minh holds the host role PRICING_APPROVER and rules:read, and the host maps the role
