@@ -1,6 +1,6 @@
 package io.github.dhluong90.bpm.process.internal.expr;
 
-import com.horus.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.rules.api.Money;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;

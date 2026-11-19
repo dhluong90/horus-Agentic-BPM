@@ -75,7 +75,7 @@ A tag build (`BPM_RELEASE_TAG`, set by the workflow on tag pushes) runs `tools/r
 
 - the tag is `vX.Y.Z`. A per-module tag such as `rule-engine/v0.1.0` is refused with the form to push instead;
 - the root and **every** module of the reactor (read from the effective POM) are at exactly `X.Y.Z`, so a `-SNAPSHOT` is never tagged as a release and no module is left behind;
-- every module has the group id `io.github.dhluong90.bpm` (ADR-0022), so no release ships under the old `com.horus.bpm` coordinates; the rename is #21;
+- every module has the group id `io.github.dhluong90.bpm` (ADR-0022), so no release ships under the old `io.github.dhluong90.bpm` coordinates; the rename is #21;
 - the tagged commit is on `main`: an ancestor of `refs/remotes/origin/main` (`git merge-base --is-ancestor`). The guard reads that full ref name, so a tag or branch named `origin/main` cannot stand in for it, and it assumes the remote `origin` is this repository, as `actions/checkout` sets it.
 
 **The guard catches mistakes; it is not access control.** Anyone who can push a tag can run the workflow. Who may create `v*` tags, and whether a published Release can be changed afterwards, are repository settings. For now the repository has no tag ruleset (PD-091).

@@ -1,8 +1,8 @@
 package io.github.dhluong90.bpm.process.autoconfigure;
 
-import com.horus.bpm.host.spi.EngineAccess;
-import com.horus.bpm.host.spi.ModuleDescriptor;
-import com.horus.bpm.rules.api.RuleEngine;
+import io.github.dhluong90.bpm.host.spi.EngineAccess;
+import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
+import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
@@ -58,10 +58,10 @@ import org.springframework.transaction.PlatformTransactionManager;
     "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration",
     "org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration",
     "org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration",
-    "com.horus.bpm.rules.autoconfigure.RuleEngineAutoConfiguration"
+    "io.github.dhluong90.bpm.rules.autoconfigure.RuleEngineAutoConfiguration"
 }, beforeName = {
-    "com.horus.bpm.host.autoconfigure.EngineAccessAutoConfiguration",
-    "com.horus.bpm.host.autoconfigure.HostMetadataAutoConfiguration"
+    "io.github.dhluong90.bpm.host.autoconfigure.EngineAccessAutoConfiguration",
+    "io.github.dhluong90.bpm.host.autoconfigure.HostMetadataAutoConfiguration"
 })
 @ConditionalOnSingleCandidate(DataSource.class)
 @ConditionalOnProperty(prefix = "horus.bpm.processes", name = "enabled", havingValue = "true", matchIfMissing = true)
