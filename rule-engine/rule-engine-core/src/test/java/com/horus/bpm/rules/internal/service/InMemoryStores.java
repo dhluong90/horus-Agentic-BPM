@@ -96,6 +96,39 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
         throw new IllegalStateException("no such version");
     }
 
+    /** {@code cache_epoch} by tenant and rule set id; 1 for a new rule set, as in the migration. */
+    final Map<String, Long> epochs = new ConcurrentHashMap<>();
+    /** Every epoch notification, as {@code tenant/ruleSet:epoch}, in order. */
+    final List<String> notifications = new ArrayList<>();
+
+    @Override
+    public Optional<EffectiveVersion> findEffectiveForCache(String tenantId, String ruleSet, Instant at) {
+        return findEffective(tenantId, ruleSet, at).map(v -> new EffectiveVersion(v,
+                epochs.getOrDefault(tenantId + "/" + v.ruleSetId(), 1L),
+                versions.stream()
+                        .filter(n -> n.tenantId().equals(tenantId) && n.ruleSetId().equals(v.ruleSetId())
+                                && n.status() == VersionStatus.PUBLISHED && n.effectiveFrom().isAfter(at))
+                        .map(StoredVersion::effectiveFrom).min(Comparator.naturalOrder()).orElse(null)));
+    }
+
+    @Override
+    public long advanceCacheEpoch(String tenantId, String ruleSetId, String ruleSet) {
+        long epoch = epochs.merge(tenantId + "/" + ruleSetId, 2L, (old, ignored) -> old + 1);
+        notifications.add(tenantId + "/" + ruleSet + ":" + epoch);
+        return epoch;
+    }
+
+    @Override
+    public Map<String, Long> cacheEpochs(String tenantId, java.util.Collection<String> names) {
+        Map<String, Long> result = new java.util.HashMap<>();
+        for (RuleSetRow row : ruleSets) {
+            if (row.tenantId().equals(tenantId) && names.contains(row.name())) {
+                result.put(row.name(), epochs.getOrDefault(tenantId + "/" + row.id(), 1L));
+            }
+        }
+        return result;
+    }
+
     @Override
     public Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at) {
         return versions.stream()

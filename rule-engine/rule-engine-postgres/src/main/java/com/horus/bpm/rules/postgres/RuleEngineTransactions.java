@@ -6,6 +6,8 @@ import java.util.function.Supplier;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
@@ -69,6 +71,28 @@ public final class RuleEngineTransactions implements TransactionRunner {
     public <T> T inReadOnlyTransaction(Supplier<T> work) {
         Objects.requireNonNull(work, "work must not be null");
         return readOnlyTransaction.execute(status -> work.get());
+    }
+
+    /**
+     * Runs work after the current Spring transaction commits, or at once when no transaction synchronisation is
+     * active. Work of a transaction that rolls back never runs. A failure of the work is not propagated: the
+     * transaction has committed already.
+     *
+     * @param work the work
+     */
+    @Override
+    public void afterCommit(Runnable work) {
+        Objects.requireNonNull(work, "work must not be null");
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            work.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                work.run();
+            }
+        });
     }
 
     /**

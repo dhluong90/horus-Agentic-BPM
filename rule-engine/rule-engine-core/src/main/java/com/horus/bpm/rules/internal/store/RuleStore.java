@@ -144,4 +144,47 @@ public interface RuleStore {
      * @return the key, or empty
      */
     Optional<byte[]> findEngineKey(String name);
+
+    /**
+     * Returns the version effective at an instant together with what the compiled cache needs to keep it: the rule
+     * set's {@code cache_epoch} and the next instant at which a later published version takes over, read in one
+     * statement so the three agree (ADR-0009).
+     *
+     * @param tenantId the tenant
+     * @param ruleSet the rule set name
+     * @param at the evaluation instant
+     * @return the effective version, or empty when none is effective
+     */
+    Optional<EffectiveVersion> findEffectiveForCache(String tenantId, String ruleSet, Instant at);
+
+    /**
+     * Increments the rule set's {@code cache_epoch} in the current transaction and notifies every replica after
+     * commit (PostgreSQL {@code pg_notify('horus_rle_cache', ...)}).
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     * @param ruleSet the rule set name, carried by the notification
+     * @return the new epoch
+     */
+    long advanceCacheEpoch(String tenantId, String ruleSetId, String ruleSet);
+
+    /**
+     * Returns the current {@code cache_epoch} of rule sets of one tenant; a name the tenant does not have is absent.
+     *
+     * @param tenantId the tenant
+     * @param ruleSets the rule set names, at most {@code cache.max-entries}
+     * @return epoch by rule set name
+     */
+    java.util.Map<String, Long> cacheEpochs(String tenantId, java.util.Collection<String> ruleSets);
+
+    /**
+     * The version effective at an instant, with its cache metadata.
+     *
+     * @param version the effective version
+     * @param cacheEpoch the rule set's {@code cache_epoch} when it was read
+     * @param nextEffectiveFrom the earliest {@code effective_from} after the instant of another published version of
+     *     the rule set, at which selection changes without any epoch change; null when there is none
+     */
+    record EffectiveVersion(StoredVersion version, long cacheEpoch, Instant nextEffectiveFrom) {
+    }
 }

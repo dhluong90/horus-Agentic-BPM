@@ -22,34 +22,38 @@ import com.horus.bpm.rules.internal.store.DecisionRecord;
 import com.horus.bpm.rules.internal.store.RuleStore;
 import com.horus.bpm.rules.internal.store.StoredVersion;
 import java.time.Instant;
-import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 import tools.jackson.databind.node.ArrayNode;
 
 /**
  * Evaluates the effective version and logs one decision row in the caller's transaction (RLE-013).
- * Compiled versions are cached by version id: a stored version never changes, so the cache needs no
- * invalidation. Its size is bounded by {@code cache.max-entries}; a full cache is cleared. Thread-safe.
+ * The effective version of a rule set is served from the {@link CompiledCache} while its window and epoch hold,
+ * so a cached evaluation reads nothing and writes one row; a miss reads the version, its epoch and the next
+ * hand-over instant in one statement (ADR-0009). Thread-safe.
  */
 public final class DefaultRuleEngine implements RuleEngine {
 
     private final EngineContext context;
     private final RuleStore store;
     private final DecisionLog log;
-    private final Map<String, CompiledRuleSet> compiled = new ConcurrentHashMap<>();
+    private final CompiledCache cache;
 
     /**
-     * Creates the engine.
+     * Creates the engine with a cache of its own.
      *
      * @param context shared engine context
      * @param store rule set storage
      * @param log decision log
      */
     public DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log) {
+        this(context, store, log, new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions()));
+    }
+
+    DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.log = Objects.requireNonNull(log, "log must not be null");
+        this.cache = Objects.requireNonNull(cache, "cache must not be null");
     }
 
     @Override
@@ -81,16 +85,22 @@ public final class DefaultRuleEngine implements RuleEngine {
             // Not a possible name (a NUL byte, upper case): not found, without a query the driver would refuse.
             throw new RuleSetNotFoundException("(invalid name)");
         }
-        StoredVersion version = store.findEffective(tenant, request.ruleSet(), now).orElseThrow(() ->
-                store.findRuleSetId(tenant, request.ruleSet()).isPresent()
-                        ? new NoEffectiveVersionException(request.ruleSet())
-                        : new RuleSetNotFoundException(request.ruleSet()));
-        CompiledRuleSet rules;
-        try {
-            rules = compiled(version);
-        } catch (IntegrityFailure failure) {
-            return refuseTampered(tenant, caller, request, version, now, failure.getMessage());
+        CompiledCache.Entry entry = cache.get(tenant, request.ruleSet(), now);
+        if (entry == null) {
+            RuleStore.EffectiveVersion effective = store.findEffectiveForCache(tenant, request.ruleSet(), now)
+                    .orElseThrow(() -> store.findRuleSetId(tenant, request.ruleSet()).isPresent()
+                            ? new NoEffectiveVersionException(request.ruleSet())
+                            : new RuleSetNotFoundException(request.ruleSet()));
+            try {
+                entry = new CompiledCache.Entry(effective.version(), compile(effective.version()),
+                        effective.cacheEpoch(), effective.nextEffectiveFrom());
+            } catch (IntegrityFailure failure) {
+                return refuseTampered(tenant, caller, request, effective.version(), now, failure.getMessage());
+            }
+            cache.put(entry);
         }
+        StoredVersion version = entry.version();
+        CompiledRuleSet rules = entry.compiled();
         if (context.settings().rejectUndeclaredInputs()) {
             rules.requireOnlyDeclared(request.input());
         }
@@ -109,25 +119,15 @@ public final class DefaultRuleEngine implements RuleEngine {
         return result;
     }
 
-    private CompiledRuleSet compiled(StoredVersion version) {
-        String key = version.tenantId() + "/" + version.id();
-        CompiledRuleSet cached = compiled.get(key);
-        if (cached != null) {
-            return cached;
-        }
-        if (compiled.size() >= context.settings().cacheMaxEntries()) {
-            compiled.clear();
-        }
+    private CompiledRuleSet compile(StoredVersion version) {
         // What runs is what was approved: the stored canonical JSON must still hash to canonical_hash (ADR-0026).
         String rehashed = Hashes.sha256(CanonicalJson.write(EngineJson.JSON.readTree(version.canonicalJson())));
         if (!rehashed.equals(version.canonicalHash())) {
             throw new IntegrityFailure("Integrity check failed: the stored canonical document of " + version.ruleSet()
                     + " v" + version.version() + " does not match its canonical_hash; the version is not served");
         }
-        CompiledRuleSet fresh = CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()),
+        return CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()),
                 context.settings().maxOutputBytes(), context.settings().maxStringLength());
-        compiled.put(key, fresh);
-        return fresh;
     }
 
     /**

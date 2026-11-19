@@ -12,8 +12,11 @@ import com.horus.bpm.rules.internal.store.RuleStore;
  * @param ruleEngine evaluation
  * @param versionService import and lifecycle
  * @param cursorKeys the cursor key in memory; {@link CursorKeys#load()} runs at start-up
+ * @param cache the compiled versions of this replica, shared by evaluation and approval; the host's scheduler runs
+ *     {@link CompiledCache#checkEpochs()} and its notification listener calls {@link CompiledCache#evict}
  */
-public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, CursorKeys cursorKeys) {
+public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, CursorKeys cursorKeys,
+        CompiledCache cache) {
 
     /**
      * Builds both entry points.
@@ -26,7 +29,8 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
      */
     public static RuleEngines create(EngineContext context, RuleStore store, DecisionLog log, EventOutbox outbox) {
         CursorKeys keys = new CursorKeys(store, context.transactions(), context.clock());
-        return new RuleEngines(new DefaultRuleEngine(context, store, log),
-                new DefaultVersionService(context, store, outbox, keys), keys);
+        CompiledCache cache = new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions());
+        return new RuleEngines(new DefaultRuleEngine(context, store, log, cache),
+                new DefaultVersionService(context, store, outbox, keys, cache), keys, cache);
     }
 }
