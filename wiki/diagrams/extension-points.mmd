@@ -1,0 +1,33 @@
+flowchart LR
+  subgraph HOST ["Host service (bank code)"]
+    CFG["1. application.yaml<br/>horus.bpm.* typed properties"]
+    BEANS["2. Host beans<br/>replace any default"]
+    DEFS["3. Rule sets and definitions<br/>business logic as data"]
+    LST["4. Event listeners<br/>outbox, notifications"]
+  end
+  subgraph STARTER ["Engine starter"]
+    PROPS["@ConfigurationProperties records<br/>validated, documented, safe defaults"]
+    AUTO["@AutoConfiguration<br/>@ConditionalOnMissingBean defaults"]
+  end
+  subgraph CORE ["Engine core (no bank-specific code)"]
+    SET["EngineSettings<br/>one EngineDefaults class"]
+    SPI["SPI ports<br/>TenantResolver, CallerResolver<br/>RuleFunctionRegistry, CurrencyRegistry<br/>DecisionExplainer, LifecycleGuard<br/>BusinessCalendar, StepRegistry, FormRegistry<br/>AgentAdapter, ServiceAdapter, MessageAdapter<br/>ExpressionLanguage, CompiledCache"]
+    CTRL["Built-in controls<br/>maker-checker, audit, idempotency,<br/>tenant isolation, masking, fail-closed guardrails"]
+    PUB["Event publisher port"]
+  end
+  CFG -->|"1. bind and validate"| PROPS
+  PROPS -->|"2. settings record"| SET
+  BEANS -->|"3. host bean wins"| AUTO
+  AUTO -->|"4. default or host implementation"| SPI
+  DEFS -->|"5. import, four-eyes, publish"| CTRL
+  SPI -->|"6. veto-only guards, never bypass"| CTRL
+  PUB -->|"7. events after each state change"| LST
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class CFG,BEANS,DEFS,LST host
+  class PROPS,AUTO,SET,SPI,PUB engine
+  class CTRL obs
+  style HOST fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style STARTER fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style CORE fill:none,stroke:#1565C0,stroke-dasharray:5 5

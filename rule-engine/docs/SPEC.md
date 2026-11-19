@@ -96,12 +96,12 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Test ID:** `RLE_009_maker_checker_blocks_self_approval`
 
 ### RLE-010 Multi-replica cache invalidates across pods on publication
-- **Traces to:** `TR-DET-01`, `TR-OBS-04`
+- **Traces to:** `TR-ASY-04`, `TR-DET-01`, `TR-OBS-04`
 - **Milestone:** M1
-- **Given:** Two independent Spring Boot replicas (`Pod A`, `Pod B`) sharing one PostgreSQL database, both holding `card-fee` v1 in local compiled cache.
-- **When:** `Pod A` approves `card-fee` v2 (`effectiveFrom <= now`).
-- **Then:** `Pod A` publishes `rules.version.published.v1` and notifies PostgreSQL (`LISTEN/NOTIFY` + `cache_epoch` increment); `Pod B` invalidates its local cache and evaluates `v2` immediately (or within epoch fallback bound).
-- **Example:** `Pod A approves v2 -> Pod B next evaluate() returns version=2`.
+- **Given:** Two independent Spring Boot replicas (`Pod A`, `Pod B`) sharing one PostgreSQL database, both holding `card-fee` v1 in local compiled cache, `cache.epoch-check-interval = PT5S`. The test runs twice: with a direct connection and `cache.listen-notify = true`; and through PgBouncer in transaction mode with `cache.listen-notify = false`.
+- **When:** `Pod A` approves `card-fee` v2 (`effectiveFrom <= now`); `Pod B` evaluates `card-fee` every 100 ms.
+- **Then:** `Pod A` publishes `rules.version.published.v1`, increments `cache_epoch` and notifies after commit; in the direct run `Pod B` evaluates v2 within 1 s of the commit; in the pooler run, with no notification delivered, `Pod B` evaluates v2 within 5 s of the commit (the epoch sweep bound) and never after; neither run opens a session-mode connection behind the pooler.
+- **Example:** `Pod A approves v2 -> Pod B returns version=2 within 1 s (NOTIFY) or within 5 s (PgBouncer, epoch sweep only)`.
 - **Test ID:** `RLE_010_multi_replica_cache_invalidates_on_publish`
 
 ---
@@ -241,3 +241,149 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The model is one `Definitions` named `card-fee` holding one `Decision` `card-fee` whose `DecisionTable` has hit policy `FIRST`, input clauses `tier` and `txCount`, output clause `fee` and rules with ids `R1`, `R2`, `R3` in document order; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document and its SHA-256 equals the pipeline hash and the stored `canonical_hash`.
 - **Example:** `card-fee.yaml -> Definitions(card-fee) / Decision(card-fee) / DecisionTable(FIRST, 2 inputs, 1 output, 3 rules) -> same hash`.
 - **Test ID:** `RLE_024_v1_rule_set_round_trips_through_dmn_model`
+
+---
+
+## Version Lifecycle: Reject, Retire and Diff (RE-F-07, RE-F-08)
+
+### RLE-025 An approver rejects a pending version with a reason and it returns to draft
+- **Traces to:** `TR-OBS-04`, `TR-IDEM-01`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`; `bob` holds `rules:approve`.
+- **When:** `bob` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:reject` with `Idempotency-Key: k-201`, `If-Match: "3"` and body `{ "reason": "R2 waiver needs pricing committee minutes" }`. Failure cases: the same call with body `{ "reason": "" }`; with `If-Match: "2"`; and a reject of `card-fee` v1, which is `PUBLISHED`. Withdrawal case: `fx-margin` v4 is `PENDING_APPROVAL`, requested by `bob`, and `bob` rejects it with reason `"Wrong margin table attached"`.
+- **Then:** `200`; v2 is `DRAFT` with `lockVersion 4`, `requested_by` and `requested_at` cleared, and one `rle_version_history` row `REJECTED` with actor `bob`, the reason, statuses `PENDING_APPROVAL` to `DRAFT` and `lockVersion 4` (`GET .../versions/2/history` returns it after the `CREATED` and `REQUESTED` rows); one `rules.version.rejected.v1` event carries rule set, version, tenant, actor `bob`, reason and timestamp; `alice` can edit v2 again and request publication again. A replay with `k-201` and the same body returns the same `200` and writes no second event. The empty reason returns `400 INPUT_INVALID` naming `reason`; the stale `If-Match` returns `409 VERSION_CONFLICT`; the reject of v1 returns `409 INVALID_STATE`. In each failure case the version, its history and the event count are unchanged. The withdrawal succeeds (`200`, `fx-margin` v4 `DRAFT`, actor `bob`): rejecting one's own request publishes nothing, so `SELF_APPROVAL_FORBIDDEN` does not apply.
+- **Example:** `bob rejects card-fee v2 with a reason -> DRAFT, lockVersion 4, 1 rejected event; reason "" -> 400 INPUT_INVALID; v1 PUBLISHED -> 409 INVALID_STATE`.
+- **Test ID:** `RLE_025_reject_returns_pending_version_to_draft_with_reason`
+
+### RLE-026 Retiring a published version by hand stops every replica serving it
+- **Traces to:** `TR-OBS-04`, `TR-ASY-04`, `TR-DET-05`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; rule set `tet-fee-waiver` has only v1, `PUBLISHED`, effective since `2027-01-20T00:00:00Z`, `lockVersion 1`; decision `D1` was logged against v1 at `2027-02-01T09:00:00Z` with output `waiveFee: true`; two replicas hold v1 compiled; `bob` holds `rules:approve`; `lifecycle.retire-approval` is `single`, the default. The emergency single-approver path (PD-012) is not configured; it is not an M1 feature.
+- **When:** At `2027-02-17T08:00:00Z` `bob` sends `POST /api/bpm/rules/v1/rule-sets/tet-fee-waiver/versions/1:retire` with `Idempotency-Key: k-301`, `If-Match: "1"` and body `{ "reason": "Tet promotion ended" }`; 5 s later each replica evaluates `tet-fee-waiver` with the host clock; then `replay(D1)` runs, and a caller with `rules:simulate` evaluates `tet-fee-waiver` with `clock = 2027-02-01T09:00:00Z`. Failure cases: a retire of a `DRAFT` version; a retire with body `{ "reason": "" }`.
+- **Then:** `200`; v1 is `RETIRED` with `retired_at = 2027-02-17T08:00:00Z` and one history row `RETIRED` (actor `bob`, the reason); one `rules.version.retired.v1` event carries rule set, version, tenant, actor `bob`, the reason and the timestamp; the same transaction increments the cache epoch and notifies after commit; within `cache.epoch-check-interval` (5 s) both replicas return `404 NO_EFFECTIVE_VERSION` for the evaluation. `replay(D1)` still returns v1 and `waiveFee: true`, because a retired version stays readable for explain and replay. The evaluation at `clock = 2027-02-01T09:00:00Z` selects v1 and returns `waiveFee: true`, because v1 was effective at that instant (selection reads `retired_at`, `DESIGN.md` section 3.3.1). The retire of a `DRAFT` returns `409 INVALID_STATE`, the empty reason `400 INPUT_INVALID`; neither changes anything. No second approver is needed in the default `single` mode (ADR-0025, PD-080); the event and the history row record the mode `single`.
+- **Example:** `retire tet-fee-waiver v1 -> RETIRED, 1 retired event; evaluate after 5 s on either replica -> 404 NO_EFFECTIVE_VERSION; replay(D1) -> v1, waiveFee true`.
+- **Test ID:** `RLE_026_manual_retire_stops_every_replica_serving_the_version`
+
+### RLE-027 A published version retires on its own when a newer version becomes effective
+- **Traces to:** `TR-OBS-04`, `TR-DET-01`, `TR-OPS-05`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v1 `PUBLISHED`, effective since `2026-11-01T00:00:00Z`; `card-fee` v2 approved at `2026-11-25T10:00:00Z` with `effectiveFrom: 2026-12-01T00:00:00Z`; two replicas share one database; `TestClock` drives both. Second case: rule set `fx-margin` v3 `PUBLISHED` and v4 approved with `effectiveFrom` equal to the approval instant.
+- **When:** The clock moves from `2026-11-30T23:59:59Z` to `2026-12-01T00:00:01Z`; each replica evaluates `card-fee`; then the lifecycle sweep (`DESIGN.md` section 3.3.2) runs on both replicas at the same moment, through PgBouncer in transaction mode in the pooler leg. In the second case v4's approval commits.
+- **Then:** At `2026-11-30T23:59:59Z` v1 is `PUBLISHED` and evaluation selects v1. At `2026-12-01T00:00:01Z` evaluation selects v2 on both replicas whether or not v1's status has changed yet, because selection follows the effective date (`RLE-008`). After the maintenance run v1 is `RETIRED` and exactly one `rules.version.retired.v1` event exists for it, with actor `system`, reason `SUPERSEDED` and `supersededBy: 2`, and exactly one history row `RETIRED`, although both replicas ran; no advisory lock was taken. An evaluation of v1's decision with `clock = 2026-11-20T10:00:00Z` still selects v1. In the second case v3 is `RETIRED` in the transaction that publishes v4, with one retired event.
+- **Example:** `clock 2026-12-01T00:00:01Z -> evaluate selects v2; after the sweep on 2 replicas -> v1 RETIRED, 1 retired event (actor system, reason SUPERSEDED)`.
+- **Test ID:** `RLE_027_previous_version_retires_once_when_newer_becomes_effective`
+
+### RLE-028 The engine returns a row-level diff between two versions of a rule set
+- **Traces to:** `TR-UI-02`, `TR-STD-28`, `TR-STD-03`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v1 `PUBLISHED` with rows `R1` (`tier == 'GOLD' -> fee: 0 VND`), `R2` (`txCount >= 3 -> fee: 30000 VND`), `R3` (`{} -> fee: 50000 VND`); v2 `PENDING_APPROVAL` with `R1` unchanged, `R2` output changed to `fee: 0 VND`, new row `R6` (`tier == 'PLATINUM' -> fee: 0 VND`) inserted before `R3`, and `R3` unchanged; v3 `DRAFT` imported from a YAML file that differs from v2's source only in comments and in `effectiveFrom`; v4 `DRAFT` with the same rows as v2 but `R2` placed before `R1`. Caller `bob` holds `rules:read`.
+- **When:** `bob` sends `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/2/diff?base=1`, then `.../versions/3/diff?base=2` and `.../versions/4/diff?base=2`. Failure cases: `base=9`, which does not exist; no `base`; a caller of tenant `bank-b`.
+- **Then:** The v2 against v1 diff lists `R2` as `CHANGED` with the field `/then/fee` from `{ "currency": "VND", "amount": 30000 }` to `{ "currency": "VND", "amount": 0 }`, `R6` as `ADDED` at position 3, no `REMOVED` row, no `MOVED` row (the relative order of `R1`, `R2` and `R3` is unchanged), `unchangedCount: 2`, no change to hit policy, inputs or outputs, and both canonical hashes. The v3 against v2 diff has no row or header change, reports equal canonical hashes, `sourceHashChanged: true` and the `effectiveFrom` change as metadata only, because the diff compares the canonical models (`RLE-024`), not the source text. The v4 against v2 diff lists only `R1` as `MOVED` from `basePosition` 1 to `position` 2: the moved set is the common rows outside the longest common subsequence, ties broken by keeping the earlier rows of v4, so `R2`, `R6` and `R3` are not moved. Repeating a request returns a byte-identical body. `base=9` returns `404 VERSION_NOT_FOUND`; no `base` returns `400 INPUT_INVALID`; the `bank-b` caller gets `404 RULE_SET_NOT_FOUND`. The diff writes nothing.
+- **Example:** `diff v2 against v1 -> R2 CHANGED (/then/fee 30000 VND -> 0 VND), R6 ADDED at 3, unchangedCount 2; v3 against v2 -> no change, canonical hashes equal; v4 against v2 -> R1 MOVED 1 -> 2`.
+- **Test ID:** `RLE_028_version_diff_lists_added_changed_removed_and_moved_rows`
+
+---
+
+## Decision Log Search and Explanation (RE-F-17, RE-F-18)
+
+### RLE-029 An auditor lists one rule set's decisions for a period of at most 31 days
+- **Traces to:** `TR-OBS-01`, `TR-SEC-05`, `TR-TEN-01`
+- **Milestone:** M1 (rule set and period only; outcome, rule id and output value filters are the M1 cut candidate, PD-031)
+- **Given:** Tenant `bank-a` has 250 decisions of `card-fee` between `2027-01-01T00:00:00Z` and `2027-01-31T23:00:00Z`, each with masked input `nationalId`, and 40 decisions of `kyc-risk` in the same month; tenant `bank-b` has 10 decisions of its own `card-fee`. Caller `dan` holds `rules:log:read` in `bank-a`.
+- **When:** `dan` sends `GET /api/bpm/rules/v1/decisions?ruleSet=card-fee&from=2027-01-01T00:00:00Z&to=2027-02-01T00:00:00Z`, then follows the returned cursor. Failure cases: `from=2027-01-01T00:00:00Z&to=2027-02-02T00:00:00Z` (32 days); no `ruleSet`; the same first query by a `bank-b` caller; a caller without `rules:log:read`.
+- **Then:** The first page holds 200 `card-fee` decisions of `bank-a`, newest first, and a cursor; the second page holds the other 50 and no cursor; no `kyc-risk` or `bank-b` row appears; every `nationalId` is an `hmac:<hex>` value, never plain text; the query plan reads at most 2 monthly partitions. The 32-day range and the missing rule set return `400 QUERY_INVALID` naming the parameter; the `bank-b` caller gets its own 10 decisions only; the caller without the permission gets `403`. The search writes nothing.
+- **Example:** `card-fee, January 2027 -> page 1: 200 rows + cursor; page 2: 50 rows; 32 days -> 400 QUERY_INVALID`.
+- **Test ID:** `RLE_029_decision_search_by_rule_set_and_period_is_bounded`
+
+### RLE-030 A decision is explained in plain language from its log entry and its version
+- **Traces to:** `TR-OBS-05`, `TR-DET-05`; PD-027 option 1, decided 2026-11-19
+- **Milestone:** M1 (generated explanation, PD-027 option 1; author templates are M3, RE-F-19)
+- **Given:** Tenant `bank-a`; `card-fee` v1 (`hitPolicy: first`) with `R1` (`tier == 'GOLD' -> fee: 0 VND`), `R2` (`txCount >= 3 -> fee: 10000 VND`), `R3` (`{} -> fee: 50000 VND`); decision `D7` logged with inputs `tier: "SILVER"`, `txCount: 5`, `matchedRuleIds: ["R2"]`, output `fee: 10000 VND`, clock `2026-11-20T10:00:00Z`. `risk-flags` v1 (`hitPolicy: collect`) and decision `D8` with `matchedRuleIds: ["R1", "R3"]` as in `RLE-003`. v2 of `card-fee` was published after both decisions. Caller `dan` holds `rules:log:read`.
+- **When:** `dan` sends `GET /api/bpm/rules/v1/decisions/D7/explain`, again, and `GET /api/bpm/rules/v1/decisions/D8/explain`. Failure cases: an unknown id; `D7` requested by a caller of tenant `bank-b`.
+- **Then:** The `D7` response names rule set `card-fee`, version 1, hit policy `FIRST`, outcome `OK` and evaluation clock; lists matched row `R2` with one condition entry (input `txCount`, recorded value `5`, test `>= 3`, result `true`) and its output `fee` `{ "currency": "VND", "amount": 10000 }`; carries `reasons` `[ { "code": "RULE_MATCHED", "params": { "ruleId": "R2", "version": 1 } } ]`, which the cockpit renders in English or Vietnamese; and carries the English `text`, with numbers written without grouping and money in major units with its currency code, "Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Result: fee 10000 VND." The second request returns a byte-identical body. The explanation is built from the decision row and the stored version 1 only: v2 does not change it, nothing is re-evaluated and `rle_decision` gains no row. The `D8` response lists `R1` and `R3` in order with their conditions and the aggregated outputs `flags: [HIGH_VELOCITY, NEW_DEVICE]` and `penalty: 15`. The unknown id and the `bank-b` caller get `404 DECISION_NOT_FOUND`.
+- **Example:** `explain D7 -> "Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Result: fee 10000 VND."`
+- **Test ID:** `RLE_030_explanation_is_generated_from_log_entry_and_version`
+
+### RLE-031 Explanations keep masked inputs masked and explain no match, null inputs and failures
+- **Traces to:** `TR-OBS-05`, `TR-SEC-05`, `TR-STD-02`; PD-027 option 1, decided 2026-11-19
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`. Rule set `minor-review` v1 (`hitPolicy: first`) with input `nationalId` (`mask: true`) and `age`, rows `R1` (`nationalId is not null and age < 18 -> route: "MANUAL"`) and `R2` (`age >= 18 -> route: "AUTO"`); decision `D11` with `nationalId = "079090001234"` and `age = 16`. Decision `D12` of `card-fee` v1 with no matched row (a version without the catch-all `R3`). Decision `D13` of `null-check` v1 (`RLE-006`) with `income = null`, `tier = null`. Decision `D14` of `loan-pricing` v1 with outcome `UNIQUE_HIT_VIOLATION` and `matchedRuleIds: ["R1", "R2"]` (`RLE-002`).
+- **When:** `GET /api/bpm/rules/v1/decisions/{id}/explain` for `D11` to `D14`, with log capture on.
+- **Then:** `D11`: the condition on `nationalId` shows the recorded value as `hmac:<hex>` with `masked: true`, reason `VALUE_MASKED` and the word "masked" in `text`, the condition on `age` shows `16` against `< 18`, and `079090001234` appears in no response field and no log line. `D12`: "No rule of card-fee version 1 matched. No output was produced." `D13`: the `R2` condition has `missing: true`, reason `VALUE_MISSING` and reads "income has no value", and no row is reported as matched through a condition whose result was `null`. No row that did not match is explained, and no expression is evaluated. `D14`: outcome `UNIQUE_HIT_VIOLATION`, `matched` lists `R1` and `R2` from the stored `matched_rule_ids`, "Rules R1 and R2 of loan-pricing version 1 both matched; this table allows one. No output was produced."
+- **Example:** `explain D11 -> nationalId shown as hmac:9f4a... (masked), age 16 < 18, route MANUAL; plain value in 0 fields and 0 log lines`.
+- **Test ID:** `RLE_031_explanation_masks_inputs_and_covers_no_match_null_and_failure`
+
+---
+
+## Import and Export (RE-F-25)
+
+### RLE-032 An exported version imports back as a draft with the same canonical hash
+- **Traces to:** `TR-STD-03`, `TR-STD-28`, `TR-UI-02`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v1 `PUBLISHED`, imported from `card-fee.yaml` with comments and `effectiveFrom: 2026-11-01T00:00:00Z`, canonical hash `H1` (computed without `effectiveFrom`); caller `lan` holds `rules:read` and `rules:author` in `bank-a` and in `bank-a-fin`.
+- **When:** `lan` exports v1 with `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=json` and with `format=yaml`; imports the JSON file with `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` in `bank-a`; and imports the YAML file with `POST /api/bpm/rules/v1/rule-sets` in `bank-a-fin`, where no `card-fee` exists. Failure cases: `format=xlsx`; version 9.
+- **Then:** The JSON export is the RFC 8785 canonical document written from the DMN model (`RLE-024`), byte for byte, with a `Content-Disposition` file name `card-fee-v1.json`; the YAML export holds the same model. Neither file carries tenant, status, `lockVersion`, `effectiveFrom`, requester, approver or decision data. The JSON import creates `card-fee` v2 as `DRAFT` in `bank-a` with canonical hash `H1`; the YAML import creates `card-fee` v1 as `DRAFT` in `bank-a-fin` with canonical hash `H1`. Each import stores its own file as the source document (`RLE-020`); the original comments stay available on v1 through `?include=source`. Both drafts have no `effective_from` until `:request-publish` sets one. `format=xlsx` returns `400 INPUT_INVALID`; version 9 returns `404 VERSION_NOT_FOUND`. Export writes nothing.
+- **Example:** `export card-fee v1 as JSON -> import into bank-a as v2 DRAFT, canonical hash H1 = H1; YAML into bank-a-fin -> v1 DRAFT, hash H1`.
+- **Test ID:** `RLE_032_export_round_trips_to_same_canonical_hash`
+
+### RLE-033 Importing a file as a new version creates the next draft; a mismatched file is refused whole
+- **Traces to:** `TR-STD-01`, `TR-IDEM-01`, `TR-UI-02`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` has v1 `PUBLISHED` and v2 `DRAFT`; caller `lan` holds `rules:author`. Files: `card-fee-v3.yaml` (valid, `ruleSet: card-fee`); `kyc-risk.yaml` (`ruleSet: kyc-risk`); `card-fee-bad.yaml` whose row `R4` has `balance >= 50000000` with no currency.
+- **When:** `lan` posts `card-fee-v3.yaml` to `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` with `Idempotency-Key: k-401`, then repeats the call; posts `kyc-risk.yaml` to the same `card-fee` path; posts `card-fee-bad.yaml` to it; posts `card-fee-v3.yaml` to `POST /api/bpm/rules/v1/rule-sets`, where `card-fee` already exists.
+- **Then:** The first post returns `201` with `card-fee` v3 `DRAFT`; the repeat returns the same `201` and creates no v4. The `kyc-risk` file returns `400 INPUT_INVALID` naming the mismatch between the path and the document's `ruleSet`. The bad file returns `422 VALIDATION_FAILED` naming row `R4` and column `balance`. The post to `/rule-sets` returns `409 RULE_SET_EXISTS`. In every failure case no version and no source document is stored, and v1 and v2 are unchanged.
+- **Example:** `card-fee-v3.yaml -> 201 v3 DRAFT; replay k-401 -> same 201; kyc-risk.yaml on card-fee -> 400; R4 without currency -> 422 at R4/balance`.
+- **Test ID:** `RLE_033_import_as_new_version_creates_next_draft_or_refuses_whole`
+
+---
+
+## Platform Requirements Made Testable (RE-F-10, RE-F-13, X-F-05)
+
+### RLE-034 The compiled cache holds at most `cache.max-entries` versions and heap stays flat
+- **Traces to:** `TR-PERF-06`
+- **Milestone:** M1
+- **Given:** The example host with `cache.max-entries = 50`; tenant `bank-a` has 100 published rule sets `fee-001` to `fee-100`, each with one 200-row `first` table; the eviction counter `horus_rle_cache_evictions_total` (Micrometer `horus.rle.cache.evictions`, tag `cause`) reads 0.
+- **When:** The host evaluates the 100 rule sets in rotation for 10 rounds (1,000 evaluations) after a warm-up round, measuring retained heap after a full garbage collection at the end of round 2 and of round 10.
+- **Then:** The compiled store never holds more than 50 entries; the eviction counter reads at least 950 after the 10 rounds; every evaluation returns the same result as with an unbounded cache; retained heap at the end of round 10 is within 10 percent or 8 MB of the end of round 2, whichever is larger, each the median of three measurements after a full garbage collection; the gauge `horus_rle_cache_size` never exceeds 50.
+- **Example:** `max-entries 50, 100 rule sets x 10 rounds -> size <= 50, evictions >= 950, heap round 10 within max(10%, 8 MB) of round 2`.
+- **Test ID:** `RLE_034_compiled_cache_is_bounded_and_heap_stays_flat`
+
+### RLE-035 The host refuses to start without a valid masking key, and the key never leaks
+- **Traces to:** `TR-SEC-10`
+- **Milestone:** M1
+- **Given:** Rule set `minor-review` with input `nationalId` (`mask: true`) loaded at start-up through `definitions`. Case A: no `horus.bpm.rules.masking.hmac-key`. Case B: a Base64 key that decodes to 31 bytes. Case C: a Base64 key `k32` that decodes to 32 bytes, with log capture on.
+- **When:** The host starts in each case; in case C it evaluates `minor-review` with `nationalId = "079090001234"`, reads the decision through `GET /decisions/{id}` and its explanation, and computes HMAC-SHA256 of `079090001234` under `k32` in the test.
+- **Then:** Cases A and B fail start-up with a message that names `horus.bpm.rules.masking.hmac-key` and the rule set `minor-review`, and no decision is accepted. Case C starts; no log line, response body, problem body, event or metric label contains `k32` or `079090001234`; the stored `masked_inputs.nationalId` equals `hmac:` followed by the hex of the value the test computed, so an exact-match lookup by the masked value finds the decision (`RLE-012`).
+- **Example:** `no key -> start-up fails naming the key setting and minor-review; 31-byte key -> fails; 32-byte key -> starts, 0 occurrences of key or plain value in logs and responses`.
+- **Test ID:** `RLE_035_masking_key_required_at_startup_and_never_leaked`
+
+### RLE-036 Every Rule Engine REST error is a Problem Details body with a stable code
+- **Traces to:** `TR-SEC-08`
+- **Milestone:** M1 (rules; process engine errors are M2)
+- **Given:** The example host with the Rule Engine REST module; the error matrix in `DESIGN.md` section 4.2; a test hook that makes the version repository throw `SQLException("relation rle_version does not exist")` on demand.
+- **When:** Each code in the matrix that exists at merge time is triggered once (for example `RULE_SET_NOT_FOUND`, `VALIDATION_FAILED`, `SELF_APPROVAL_FORBIDDEN`, `VERSION_CONFLICT`, `QUERY_INVALID`), then the injected failure is triggered on `GET /api/bpm/rules/v1/rule-sets/card-fee`.
+- **Then:** Every response has `Content-Type: application/problem+json` with `type` equal to `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#<code in lower case>`, `status`, `code`, `detail` and `correlationId`, and the status matches the matrix. The injected failure returns `500` with code `INTERNAL_ERROR` and a `correlationId` that also appears in the server log; its body contains no stack trace, Java class name, `SQLException` or table name.
+- **Example:** `GET a missing rule set -> 404 {type: ...#rule_set_not_found, code: RULE_SET_NOT_FOUND, correlationId: ...}; injected SQL failure -> 500 INTERNAL_ERROR, no "rle_version" in body`.
+- **Test ID:** `RLE_036_every_rest_error_is_problem_details_with_stable_code`
+
+---
+
+## Tenant Resolution and Four-Eyes Retirement (PD-079, PD-080)
+
+### RLE-037 The tenant comes from the authenticated principal, session or token, never from what the browser sends
+- **Traces to:** `TR-SEC-03`, `TR-TEN-01`, `TR-EXT-02`
+- **Milestone:** M1
+- **Given:** Host A embeds the cockpit in its own web application with a server-side login session; the session principal carries the attribute `tenant_id = bank-a`. Host B uses bearer tokens with claim `tenant_id: bank-a`. Both use the default `TenantResolver` with `tenancy.claim = tenant_id` and switching disabled. Rule set `card-fee` exists in `bank-a` and `bank-b`. Host C registers its own `TenantResolver` bean that returns `bank-c` for every caller. Case D: a session principal without the attribute.
+- **When:** On hosts A and B the caller sends `GET /api/bpm/rules/v1/rule-sets/card-fee`, then `POST /api/bpm/rules/v1/decisions/card-fee:evaluate` with body `{ "tenantId": "bank-b", "inputs": { "tier": "GOLD", "txCount": 5 } }`, then the read again with header `X-Forwarded-Tenant: bank-b`. On host C the same read. In case D the same read.
+- **Then:** Hosts A and B return `bank-a`'s rule set and evaluate `bank-a`'s version; the body `tenantId` and the extra header are ignored and the decision row has `tenant_id = bank-a`. Host C uses its own resolver: the engine's default is not called and the read is served for `bank-c`. Case D returns `401 UNAUTHENTICATED` and reads nothing. The starter registers no resolver that reads a request header.
+- **Example:** `session tenant_id=bank-a, body tenantId=bank-b -> served for bank-a; principal without tenant -> 401`.
+- **Test ID:** `RLE_037_tenant_from_principal_session_or_token_never_from_browser`
+
+### RLE-038 In `four-eyes` mode a manual retirement needs a second approver, and the version serves until it is confirmed
+- **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-EXT-05`
+- **Milestone:** M3
+- **Given:** `lifecycle.retire-approval = four-eyes`; tenant `bank-a`; `tet-fee-waiver` v1 `PUBLISHED`, `lockVersion 1`, the only version; `bob` and `carol` hold `rules:approve`; `/api/bpm/meta` lists the setting `lifecycle.retire-approval: four-eyes`.
+- **When:** `bob` sends `POST .../rule-sets/tet-fee-waiver/versions/1:retire` with `If-Match: "1"` and `{ "reason": "Tet promotion ended" }`; the host evaluates `tet-fee-waiver`; `bob` sends `POST .../versions/1:confirm-retire`; `carol` sends `POST .../versions/1:confirm-retire`. Failure cases: a retire request with `{ "reason": "" }`; a second retire request while one is pending; `:confirm-retire` with no pending request.
+- **Then:** The request returns `200` with v1 still `PUBLISHED` and a pending retirement (`retireRequestedBy: bob`), one history row `RETIRE_REQUESTED` and one `rules.version.retire-requested.v1` event; the evaluation still selects v1. `bob`'s confirmation returns `403 SELF_APPROVAL_FORBIDDEN` and changes nothing. `carol`'s confirmation returns `200`: v1 is `RETIRED` with the same effects as `RLE-026` (retired event, cache epoch, `404 NO_EFFECTIVE_VERSION` on every replica within 5 s), and the event and the history row record `approvalMode: four-eyes`, requester `bob`, confirmer `carol` and the reason. The empty reason returns `400 INPUT_INVALID`; the second request and the confirmation without a request return `409 INVALID_STATE`; none changes anything.
+- **Example:** `bob requests -> still serving; bob confirms -> 403 SELF_APPROVAL_FORBIDDEN; carol confirms -> RETIRED, approvalMode four-eyes`.
+- **Test ID:** `RLE_038_four_eyes_retirement_needs_second_approver`

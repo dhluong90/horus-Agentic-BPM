@@ -13,13 +13,14 @@ HORUS Agentic BPM is a design preview: nothing is released yet. The HORUS column
 | You want AI agents to perform process steps, and their output must be checked before anything else happens | An `agentTask` validates the agent's output against a JSON Schema, then evaluates a rule set on it. A rule that fires routes the step to a human or fails it. See [[Guarded agent steps|Guarded-Agent-Steps]] |
 | Your approval flows need human task queues with SLAs on business hours, four-eyes approval and compensation of earlier service calls | These are part of the planned Process Engine 0.1 scope ([[Process Engine Overview]]) |
 | You cannot run another cluster, search index or identity service for workflow alone | The deployment is your service plus your PostgreSQL plus static cockpit files |
+| You serve several businesses or tenants whose rules, roles and calendars differ, and you will not maintain a fork | Generic by design ([[Principles]] 13): each business behaviour is a setting with a safe default or an extension point; business values live in your definitions and configuration ([[Configuration and Extension Points]]) |
 
 ## Do not use it when
 
 | Situation | Use instead |
 |---|---|
 | You need to run in production before the first release, or need a vendor with years of production references | Camunda 8, a Camunda 7 fork, Flowable, Drools, or Temporal, depending on the rows below |
-| You need full BPMN 2.0 or DMN 1.3 with FEEL, a full BPMN 2.0 modeller, or CMMN | Camunda 8, a Camunda 7 fork, Flowable, or Drools and Kogito for DMN |
+| You need full BPMN 2.0 execution or DMN with FEEL before the staged releases after 1.0, a full BPMN 2.0 modeller, or CMMN | Camunda 8, a Camunda 7 fork, Flowable, or Drools and Kogito for DMN |
 | You run one central orchestration platform for many teams and systems, with a platform team to operate it | Camunda 8 |
 | You orchestrate long-running work across many services written in several languages | Temporal or Camunda 8 |
 | Your stack is not Java and Spring Boot, or your database is not PostgreSQL | Temporal (several language SDKs), Camunda 8 (job workers in several languages) |
@@ -46,8 +47,8 @@ Legend: **Yes** built in. **Partial** possible with limits stated. **No** not pr
 
 | | HORUS Agentic BPM (planned) | Camunda 8 | Camunda 7 forks | Flowable | Drools and Kogito | Temporal | Hand-coded rules |
 |---|---|---|---|---|---|---|---|
-| Decision tables | Yes: `first`, `unique`, `collect` hit policies; own typed expression language with money and dates (not FEEL) | Yes: DMN 1.3 with FEEL, decision requirement diagrams | Yes: DMN with FEEL | Yes: DMN | Yes: DMN with FEEL, plus DRL rules with inference | No | No |
-| Rule change without a code deployment | Yes: import a draft through the API, approve in the API or cockpit (grid editing in Cockpit 0.2) | Partial: a new DMN version is a deployment to the cluster, not a code release | Partial: same model as Camunda 7, a deployment | Partial: a deployment | Partial: depends on how you load rule artifacts | No | No |
+| Decision tables | Yes: `first`, `unique`, `collect` hit policies; own typed expression language with money and dates, following FEEL's null rules from 0.1; FEEL itself on the standards track after 1.0 | Yes: DMN 1.3 with FEEL, decision requirement diagrams | Yes: DMN with FEEL | Yes: DMN | Yes: DMN with FEEL, plus DRL rules with inference | No | No |
+| Rule change without a code deployment | Yes: edit a draft's cells and rows in the cockpit or round-trip it through a spreadsheet (CSV) in 0.1, or import it through the API; approve in the API or cockpit (grid editor in Cockpit 0.2) | Partial: a new DMN version is a deployment to the cluster, not a code release | Partial: same model as Camunda 7, a deployment | Partial: a deployment | Partial: depends on how you load rule artifacts | No | No |
 | Second approver enforced before a rule change takes effect | Yes, in the service layer; also for process definitions from Process Engine 0.1 | No, not out of the box | No in Camunda 7; check each fork | Not assessed | No, not in the engine libraries | No | No, unless you build it |
 | Effective dating of rule versions | Yes | No, not out of the box | No in Camunda 7; check each fork | Not assessed | No, not in the engine libraries | No | No, unless you build it |
 | Simulation of a draft before publishing | Yes: sample inputs in 0.1; replay of past decisions planned for M3 | Partial: Web Modeler can run a model with sample data before deployment | Not assessed | Not assessed | Partial: test tooling | No | Unit tests |
@@ -58,7 +59,7 @@ Legend: **Yes** built in. **Partial** possible with limits stated. **No** not pr
 
 | | HORUS Agentic BPM (planned) | Camunda 8 | Camunda 7 forks | Flowable | Drools and Kogito | Temporal | Hand-coded rules |
 |---|---|---|---|---|---|---|---|
-| Process notation | Documented subset in JSON or YAML: user, service, agent and decision steps, exclusive and parallel gateways, timers, sub-processes. BPMN subset import planned for 1.0; export is a 1.0 candidate | BPMN 2.0, broad coverage | BPMN 2.0, broad coverage; CMMN | BPMN 2.0 and CMMN | BPMN through jBPM and Kogito | Workflows written as code | Status columns in your tables |
+| Process notation | BPMN 2.0 is the model, stored as JSON or YAML (principle 9). 0.1 executes user, service, agent and decision steps, exclusive and parallel gateways, timers and sub-processes. BPMN import planned for 1.0; export is a 1.0 candidate. Full BPMN 2.0.2 execution in stages after 1.0, no CMMN | BPMN 2.0, broad coverage | BPMN 2.0, broad coverage; CMMN | BPMN 2.0 and CMMN | BPMN through jBPM and Kogito | Workflows written as code | Status columns in your tables |
 | Diagrams and graphical modeller | Partial: read-only definition and instance diagrams with live tokens from Cockpit 0.2; a modeller limited to the steps your host registers is planned for M3, every change a draft that needs a second approver | Yes: Desktop Modeler (MIT) and Web Modeler | Yes: Camunda Desktop Modeler works with Camunda 7 models | Yes | Yes: tooling for BPMN and DMN | No | No |
 | Human tasks | Yes: queues by user, role or group, SLA on a business calendar, escalation, four-eyes enforced by the engine | Yes: Tasklist, forms, candidate groups | Yes: Tasklist, forms | Yes | Yes through jBPM | No: you build an inbox on signals or updates | No |
 | Compensation of earlier steps | Yes: `compensate` handlers and `saga` blocks | Yes: BPMN compensation | Yes: BPMN compensation | Yes: BPMN compensation | Partial: depends on runtime | Yes, in your workflow code (saga pattern) | No, unless you build it |
@@ -83,8 +84,8 @@ Legend: **Yes** built in. **Partial** possible with limits stated. **No** not pr
 
 | From | What carries over | What does not |
 |---|---|---|
-| DMN decision tables (Camunda, Flowable, Drools) | Concepts: hit policy, inputs, outputs, rows. DMN decision-table import is planned for 1.0 | FEEL expressions are rewritten in the HORUS expression language; decision requirement diagrams are not supported |
-| BPMN processes (Camunda, Flowable) | Vocabulary: user task, service task, gateway, timer, incident. A BPMN subset import is planned for 1.0 | Symbols outside the documented subset, message correlation between processes (after 1.0), CMMN |
+| DMN decision tables (Camunda, Flowable, Drools) | Concepts: hit policy, inputs, outputs, rows. DMN decision-table import is planned for 1.0 | Until the standards track after 1.0: FEEL expressions are rewritten in the HORUS expression language, and decision requirement diagrams are not executed |
+| BPMN processes (Camunda, Flowable) | Vocabulary: user task, service task, gateway, timer, incident. BPMN import is planned for 1.0 | Elements the release does not execute yet are refused by name and arrive in stages after 1.0, including message correlation between processes; CMMN never |
 | Hand-coded rules and status columns | Your tests become rule set tests with the `rule-engine-test` library | Nothing is migrated automatically |
 
 ## What this comparison does not cover

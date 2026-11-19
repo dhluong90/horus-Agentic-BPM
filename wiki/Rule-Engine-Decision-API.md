@@ -40,7 +40,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | Identifiers | ULID strings, for example `01JD2X5K9T1Q4N8V2M7B3C6D0E` |
 | Timestamps | ISO 8601 UTC, `2026-12-01T00:00:00Z` |
 | Money | `{ "currency": "VND", "amount": 60000000 }`: ISO 4217 code and an integer in minor units. Never a JSON float. In Java, `Money.ofMinor("VND", 60_000_000)` or `Money.ofMajor("USD", "12.50")` |
-| Tenant | Resolved from the security context or a trusted gateway header. A `tenantId` field in any request body is ignored (`TR-SEC-03`, `RLE-011`). With tenant switching on, `X-Tenant-Id` may name another tenant from the token's allowed list; any other value is `403 TENANT_NOT_ALLOWED` |
+| Tenant | Resolved by the `TenantResolver` from the authenticated principal, session or token, never from a header ([[Multi-Tenancy and Security]]). A `tenantId` field in any request body is ignored (`TR-SEC-03`, `RLE-011`). With tenant switching on, `X-Tenant-Id` may name another tenant from the token's allowed list; any other value is `403 TENANT_NOT_ALLOWED` |
 | Authentication | Every endpoint requires an authenticated principal from the host's Spring Security; see [[Multi Tenancy and Security]] |
 | Errors | RFC 9457 `application/problem+json` with a stable `code`; see the error matrix and [[Common Error Codes]]. Clients branch on `code`, never on `type` |
 | Idempotency | `Idempotency-Key` header on every `POST` and `PUT`; semantics below |
@@ -68,7 +68,9 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | Freeze the draft, record the requester | `rules:author` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:approve` | Publish; approver must differ from requester | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:reject` | Back to draft with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
-| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason. In `four-eyes` mode (M3) it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:confirm-retire` | M3, `four-eyes` mode: retire the version a retirement request names; the requester gets `403 SELF_APPROVAL_FORBIDDEN` | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:cancel-retire` | M3: withdraw a pending retirement request, with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `GET /rule-sets/{name}/versions/{v}/export` | YAML export | `rules:read` | |
 | `POST /rule-sets/{name}/versions:import` | Create a draft from YAML or JSON | `rules:author` | `Idempotency-Key` |
 | `GET /decisions/{id}` | One decision; masked inputs stay hashed | `rules:log:read` | |
@@ -98,9 +100,9 @@ Batch request and response wrap items in `{ "items": [ { "inputs": {}, "correlat
 
 | Call | Request | Response |
 |---|---|---|
-| `GET /rule-sets/{name}/versions/{v}/export` | `Accept: application/yaml` (default) or `application/json` | `200` with the canonical definition document, `ETag: "<version>"`, `Content-Disposition: attachment; filename="card-fee-v2.yaml"` |
-| `POST /rule-sets/{name}/versions:import` | `Content-Type: application/yaml` or `application/json`; body is a definition document; `Idempotency-Key` | `201` with the new draft `{ "ruleSet": "card-fee", "version": 3, "status": "DRAFT", "lockVersion": 0, "validation": { "errors": [], "warnings": [] } }`; `422 VALIDATION_FAILED` when the document does not parse; the rule set is created when `{name}` does not exist and the caller has `rules:author` |
-| `GET /rule-sets/{name}/versions/{a}/diff/{b}` | none | `200` `{ "from": 1, "to": 2, "hitPolicyChanged": false, "columns": { "added": [], "removed": [], "changed": [] }, "rows": { "added": ["R5"], "removed": [], "changed": [ { "ruleId": "R2", "cells": [ { "column": "fee", "from": {"currency":"VND","amount":10000}, "to": {"currency":"VND","amount":0} } ] } ] } }` |
+| `GET /rule-sets/{name}/versions/{v}/export?format=yaml` (default) or `?format=json` | none; another `format` is `400 INPUT_INVALID` | `200` with the canonical definition document, without `effectiveFrom`, tenant, status or approvals; `ETag: "<lockVersion>"`, `Content-Disposition: attachment; filename="card-fee-v2.yaml"` |
+| `POST /rule-sets/{name}/versions` (next version) or `POST /rule-sets` (new rule set, version 1) | `Content-Type: application/yaml` or `application/json`; body is a definition document; `Idempotency-Key`. `POST /rule-sets/{name}/versions?copyOf=2` with no body copies version 2 | `201` with the new draft `{ "ruleSet": "card-fee", "version": 3, "status": "DRAFT", "lockVersion": 0, "validation": { "errors": [], "warnings": [] } }`. `400 INPUT_INVALID` when the document's `ruleSet` differs from `{name}`; `409 RULE_SET_EXISTS` on `POST /rule-sets` for an existing name; `422 VALIDATION_FAILED` naming row and column. A refused document stores nothing. An `effectiveFrom` in the document becomes the draft's proposed date and is not part of the hash |
+| `GET /rule-sets/{name}/versions/{v}/diff?base={w}` | none | `200` `{ "ruleSet": "card-fee", "version": 2, "base": 1, "canonicalHash": "...", "baseCanonicalHash": "...", "header": [], "inputs": { "added": [], "removed": [], "changed": [] }, "outputs": { "added": [], "removed": [], "changed": [] }, "rows": [ { "ruleId": "R2", "change": "CHANGED", "position": 2, "basePosition": 2, "fields": [ { "path": "/then/fee", "from": {"currency":"VND","amount":10000}, "to": {"currency":"VND","amount":0} } ] }, { "ruleId": "R5", "change": "ADDED", "position": 3 } ], "unchangedCount": 2 }`. Rows are matched by rule id; `change` is `ADDED`, `REMOVED`, `CHANGED` or `MOVED` (order changed relative to the other rows; under `first` order is behaviour) |
 
 Definition documents carry `schemaVersion`; old schema versions import forever. Simulation of a draft (`:simulate`) uses the same evaluator as `:evaluate` and writes no decision rows:
 
@@ -175,8 +177,9 @@ Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ER
 |---|---|---|
 | `rules.version.publish-requested.v1` | `:request-publish` | `ruleSet`, `version`, `requestedBy` |
 | `rules.version.published.v1` | `:approve` | `ruleSet`, `version`, `effectiveFrom`, `approvedBy`, `requestedBy` |
-| `rules.version.rejected.v1` | `:reject` | `ruleSet`, `version`, `reason` |
-| `rules.version.retired.v1` | `:retire` or superseded | `ruleSet`, `version` |
+| `rules.version.rejected.v1` | `:reject` | `ruleSet`, `version`, `rejectedBy`, `reason` |
+| `rules.version.retire-requested.v1` | `:retire` in `four-eyes` mode (M3) | `ruleSet`, `version`, `requestedBy`, `reason` |
+| `rules.version.retired.v1` | `:retire` in `single` mode, `:confirm-retire`, or superseded | `ruleSet`, `version`, `retiredBy` (`system` when superseded; the confirmer in `four-eyes` mode), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the requester in `four-eyes` mode, else null), `retiredAt` |
 | `rules.decision.evaluated.v1` | every decision, off by default (`events.decision-evaluated`) | `decisionId`, `ruleSet`, `version`, `outcome` |
 
 Envelope: `eventId` (ULID), `eventType`, `occurredAt`, `tenantId`, `correlationId`, `causationId`, `producer`, `schemaVersion`, `payload`. Changes are additive within a `.v1` type. Events go through the host's `RuleEventPublisher` inside the same transaction as the state change.

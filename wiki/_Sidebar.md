@@ -11,6 +11,7 @@
 - [[Concepts]]
 - [[Principles]]
 - [[Architecture]]
+- [[Configuration and extension points|Configuration-and-Extension-Points]]
 
 **Rule Engine**
 - [[Rule Engine: author a decision table|Rule-Engine-Authoring-Decision-Tables]]
@@ -30,6 +31,7 @@
 
 **Security and compliance**
 - [[Multi-tenancy and security|Multi-Tenancy-and-Security]]
+- [[Host metadata and permissions|Host-Metadata-and-Permissions]]
 
 **Reference**
 - [[Common error codes|Common-Error-Codes]]
