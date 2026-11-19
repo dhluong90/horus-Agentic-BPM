@@ -1,3 +1,4 @@
+import { useId, useState } from 'react';
 import { toHostError, type HostError, type Violation } from '../../../api/hostError';
 import { CopyButton } from '../../../components/CopyButton';
 import type { MessageKey } from '../../../i18n/en';
@@ -63,16 +64,24 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true, l
   const correlationId = hostError.kind === 'problem' || hostError.kind === 'unexpected-response' ? hostError.correlationId : undefined;
   const detail = showDetail ? problem?.detail : undefined;
   const hasDetails = problem?.code !== undefined || correlationId !== undefined || detail !== undefined;
+  const [open, setOpen] = useState(false);
+  const detailsId = useId();
   return (
-    <div className="notice notice--bad" role="alert">
-      <p className="notice__title">
-        <span className="status-icon status-icon--bad" aria-hidden="true">✕</span>
-        {t(messageKey(hostError))}
-      </p>
+    <div className="notice notice--bad notice--line" role="alert">
+      <div className="notice__row">
+        <p className="notice__title">
+          <span className="notice__icon" aria-hidden="true">✕</span>
+          {t(messageKey(hostError))}
+        </p>
+        {hasDetails ? (
+          <button type="button" className="notice__toggle hit" aria-expanded={open} aria-controls={detailsId} onClick={() => { setOpen((value) => !value); }}>
+            {t('try.details')} <span aria-hidden="true">{open ? '▴' : '▾'}</span>
+          </button>
+        ) : null}
+      </div>
       {located && problem?.violations ? <Located violations={problem.violations} english={locale === 'en'} /> : null}
       {hasDetails ? (
-        <details className="notice__more">
-          <summary>{t('try.details')}</summary>
+        <div id={detailsId} className="notice__more" hidden={!open}>
           {detail !== undefined && !(located && problem?.violations) ? <p className="notice__detail" lang="en">{detail}</p> : null}
           <dl className="notice__facts">
             {problem?.code !== undefined ? (
@@ -91,7 +100,7 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true, l
               </div>
             ) : null}
           </dl>
-        </details>
+        </div>
       ) : null}
       {onReload && problem?.code === 'VERSION_CONFLICT' ? (
         <button type="button" className="btn btn--small hit" onClick={onReload}>

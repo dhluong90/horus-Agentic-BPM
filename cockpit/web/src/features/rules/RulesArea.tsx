@@ -3,7 +3,7 @@ import type { RuleSetSummary, VersionStatus } from '../../api/rules/schemas';
 import { formatRoute, type Route } from '../../app/route';
 import { AreaError, PageHead } from '../../components/PageParts';
 import { useI18n } from '../../i18n/I18nProvider';
-import { mapLoadable, useEveryRuleSet } from '../overview/useRuleOverview';
+import { mapLoadable, useEveryRuleSet, useRuleSetsCut } from '../overview/useRuleOverview';
 import { useRulesSession } from './api/rulesContext';
 import { useImportRuleSet } from './api/useRules';
 import { ImportFileButton } from './components/ImportFileButton';
@@ -26,6 +26,7 @@ function RuleSetList({ pageLimit }: { pageLimit: number }) {
   const { t } = useI18n();
   const { can } = useRulesSession();
   const ruleSets = useEveryRuleSet(pageLimit);
+  const cut = useRuleSetsCut(pageLimit);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const importFile = useImportRuleSet((version) => {
@@ -59,6 +60,7 @@ function RuleSetList({ pageLimit }: { pageLimit: number }) {
           ))}
         </div>
       </div>
+      {cut !== undefined ? <p className="list-note" role="note">{t('rulesArea.cut', { count: String(cut) })}</p> : null}
       <article className="card card--table">
         <RuleSetTable ruleSets={shown} emptyText={ruleSets.status === 'ready' && ruleSets.data.length > 0 ? t('rulesArea.noMatch') : t('rulesArea.empty')} />
       </article>

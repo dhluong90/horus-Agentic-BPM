@@ -144,7 +144,7 @@ export function DetailsPanel({ version }: { version: RuleSetVersion }) {
 }
 
 /** The sticky save dock at the bottom of the editor: what is unsaved, what is left to fix, Discard and Save draft. */
-export function EditDock({ unsaved, toFix, saving, onSave, onDiscard }: { unsaved: number; toFix: number; saving: boolean; onSave: () => void; onDiscard: () => void }) {
+export function EditDock({ unsaved, toFix, saving, onSave, onDiscard, onViewChanges }: { unsaved: number; toFix: number; saving: boolean; onSave: () => void; onDiscard: () => void; onViewChanges: () => void }) {
   const { t } = useI18n();
   return (
     <div className="edit-dock" role="region" aria-label={t('editor.save')}>
@@ -152,6 +152,7 @@ export function EditDock({ unsaved, toFix, saving, onSave, onDiscard }: { unsave
         {unsaved > 0 ? <span className="edit-dock__dot" aria-hidden="true" /> : null}
         {unsaved === 1 ? t('editor.unsavedOne') : unsaved > 0 ? t('editor.unsavedCount', { count: String(unsaved) }) : t('editor.noChanges')}
         {toFix > 0 ? ` · ${t('editor.toFix', { count: String(toFix) })}` : ''}
+        {unsaved > 0 ? <button type="button" className="linkbtn hit edit-dock__view" onClick={onViewChanges}>{t('editor.viewChanges')}</button> : null}
       </p>
       <button type="button" className="btn btn--ghost" disabled={saving} onClick={onDiscard}>{t('editor.cancel')}</button>
       <button type="button" className="btn btn--primary" disabled={unsaved === 0 || saving} aria-busy={saving} onClick={onSave}>

@@ -88,10 +88,12 @@
 .dt--edit .dt__actions { padding-right: 12px; }
 .cell-edit { display: flex; flex-direction: column; gap: 4px; min-width: 84px; }
 /*
- * Target-size exemption (ux-design section 8, WCAG 2.5.8): the editor's cell controls (pickers, comparison
- * selects, amount fields, the dashed wildcard, text cells; everything inside .cell-edit) draw at 36 px tall in
- * a dense grid. Adjacent cells abut, so an extended hit box would overlap the neighbour; 36 px is above the
- * 24 px minimum and every cell is reachable with Tab. Every other control is at least 44 px.
+ * Target-size exemption (ux-design section 8, WCAG 2.5.8), recorded for these editor cell controls only:
+ * the tier picker (.picker__trigger), the comparison select (.compare__op), the amount field (.amount__input,
+ * which fills its label frame), the dashed wildcard (.cell-any-edit) and the plain text cell (.cell-input).
+ * They draw at 36 px in a dense grid where adjacent cells abut, so an extended hit box would overlap the
+ * neighbour; 36 px is above the 24 px minimum and every cell is reachable with Tab. Every other control,
+ * including the Yes/No toggle and the row menu, has a 44 px hit area.
  */
 .cell-input {
   width: 100%; min-height: 36px; padding: 6px 8px; border-radius: var(--radius-s);
@@ -395,4 +397,24 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 /* In the framed layout the draft table needs the full width: Changes in this draft moves below it. */
 .workbench--editing { grid-template-columns: minmax(0, 1fr); }
 .workbench--editing .workbench__side { position: static; }
-.workbench--editing .draft-changes { max-width: 720px; }
+.workbench--editing .draft-changes { max-width: none; }
+
+/* Compact error line (styleguide: alerts): soft fill, 3 px left edge, Details at the right end. */
+.notice--line { padding: 8px 12px 8px 14px; gap: 4px; border: 0; border-radius: var(--radius-m); background: var(--bad-soft); box-shadow: inset 3px 0 0 var(--bad-fill); }
+.notice__row { display: flex; align-items: center; gap: 12px; }
+.notice--line .notice__title { flex: 1 1 auto; font-weight: 600; font-size: 14px; }
+.notice__icon { color: var(--bad); font-weight: 700; }
+.notice__toggle { border: 0; background: none; color: var(--ink-2); font: 600 13px/1.45 var(--font-ui); cursor: pointer; min-height: 32px; padding: 0 4px; white-space: nowrap; }
+.notice__toggle:hover { color: var(--ink); }
+.notice__more[hidden] { display: none; }
+.notice__more { padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--bad-fill) 25%, transparent); }
+.workbench__main > .notice--line { margin: 12px 16px; }
+.edit-dock__view { margin-left: 8px; }
+.draft-changes:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.workbench--editing { padding-bottom: 8px; }
+
+/* The amount field fills its label frame: a click anywhere in the frame focuses it, at the recorded 36 px. */
+.amount { cursor: text; padding: 0 0 0 8px; min-height: 0; }
+.amount__input { min-height: 36px; align-self: stretch; }
+.amount__code { margin-right: 8px; }
+.list-note { margin: 0 0 12px; color: var(--muted); font-size: 13px; }

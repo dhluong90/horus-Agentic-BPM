@@ -55,7 +55,7 @@ export function DraftChanges({ definition, base, next }: { definition: RuleSetDe
   const { t } = useI18n();
   const rows = diffRules(base, next).filter((row) => row.change !== 'UNCHANGED');
   return (
-    <section className="card draft-changes" aria-labelledby="draft-changes-title">
+    <section id="draft-changes" tabIndex={-1} className="card draft-changes" aria-labelledby="draft-changes-title">
       <h2 id="draft-changes-title" className="rules-card-title">{t('editor.draftChanges')}</h2>
       {rows.length === 0 ? <p className="dock__hint">{t('editor.noDraftChanges')}</p> : (
         <ul className="draft-changes__list">{rows.map((row) => <Line key={`${row.change}-${row.ruleId}`} row={row} definition={definition} />)}</ul>

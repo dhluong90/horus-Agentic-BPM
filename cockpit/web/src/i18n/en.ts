@@ -331,6 +331,10 @@ export const en = {
   'editor.unsavedOne': '1 unsaved change',
   'changes.browserNote': 'Compared in this browser. The stored version is in the Table tab.',
   'changes.nonAsciiCount': 'Characters outside ASCII in {count} changed cells',
+  'crumb.newDraft': 'New draft',
+  'crumb.versionDraft': 'Version {version} draft',
+  'editor.viewChanges': 'View changes',
+  'rulesArea.cut': 'Showing the first {count} rule sets. Use Find to reach the others.',
   'problem.engineDetail': 'Engine message',
 } as const;
 

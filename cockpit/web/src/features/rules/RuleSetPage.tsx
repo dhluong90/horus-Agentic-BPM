@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
+import { setCrumbLabel } from '../../app/crumbs';
 import { toHostError } from '../../api/hostError';
 import type { Rule, RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
 import { useI18n } from '../../i18n/I18nProvider';
@@ -130,6 +131,12 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
     save.start({ contentType: 'application/yaml', text: JSON.stringify(document, null, 2) });
   };
   const tabLens: 'table' | 'changes' | 'history' = lens === 'source' ? 'table' : lens;
+  // The breadcrumb names what is on screen: "New draft" while editing, "Version N draft" for a draft.
+  const crumb = editing ? t('crumb.newDraft') : version.status === 'DRAFT' ? t('crumb.versionDraft', { version: String(version.version) }) : undefined;
+  useEffect(() => {
+    setCrumbLabel(crumb);
+    return () => { setCrumbLabel(undefined); };
+  }, [crumb]);
 
   let main: ReactNode;
   if (editing) {
@@ -203,7 +210,12 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
           ) : null}
         </aside>
       </div>
-      {editing ? <EditDock unsaved={unsaved} toFix={errors.length} saving={save.isPending} onSave={saveDraft} onDiscard={() => { reset(false); }} /> : null}
+      {editing ? <EditDock unsaved={unsaved} toFix={errors.length} saving={save.isPending} onSave={saveDraft} onDiscard={() => { reset(false); }}
+        onViewChanges={() => {
+          const card = window.document.getElementById('draft-changes');
+          card?.scrollIntoView({ block: 'center' });
+          card?.focus({ preventScroll: true });
+        }} /> : null}
     </>
   );
 }

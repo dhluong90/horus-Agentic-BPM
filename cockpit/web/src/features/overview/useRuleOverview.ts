@@ -15,30 +15,46 @@ export type Loadable<T> = { status: 'loading' } | { status: 'error'; error: unkn
 /** A guard against a host that keeps answering with a next page; never reached with a sound engine. */
 const MAX_PAGES = 50;
 
-async function everyRuleSet(client: RulesClient, limit: number, signal: AbortSignal): Promise<RuleSetSummary[]> {
-  const items: RuleSetSummary[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const answer = await client.listRuleSets({ cursor, limit, signal });
-    items.push(...answer.data);
-    if (!answer.hasNext || answer.nextCursor === null) break;
-    cursor = answer.nextCursor;
-  }
-  return items;
+/** The rule sets read, and whether the page guard stopped before the engine's last page. */
+export interface EveryRuleSet {
+  items: RuleSetSummary[];
+  truncated: boolean;
 }
 
-/** Every rule set of the tenant, read with the host's largest page size. */
-export function useEveryRuleSet(pageLimit: number, enabled = true): Loadable<RuleSetSummary[]> {
+export async function everyRuleSet(client: RulesClient, limit: number, signal: AbortSignal | undefined, maxPages = MAX_PAGES): Promise<EveryRuleSet> {
+  const items: RuleSetSummary[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < maxPages; page += 1) {
+    const answer = await client.listRuleSets({ cursor, limit, signal });
+    items.push(...answer.data);
+    if (!answer.hasNext || answer.nextCursor === null) return { items, truncated: false };
+    cursor = answer.nextCursor;
+  }
+  return { items, truncated: true };
+}
+
+function useEveryRuleSetQuery(pageLimit: number, enabled: boolean) {
   const { client, hostId, tenant } = useRulesSession();
-  const query = useQuery({
+  return useQuery({
     queryKey: [hostId, tenant, 'rules', 'every-rule-set', pageLimit],
     queryFn: ({ signal }) => everyRuleSet(client, pageLimit, signal),
     staleTime: 10_000,
     enabled,
   });
+}
+
+/** Every rule set of the tenant, read with the host's largest page size. */
+export function useEveryRuleSet(pageLimit: number, enabled = true): Loadable<RuleSetSummary[]> {
+  const query = useEveryRuleSetQuery(pageLimit, enabled);
   if (query.isError) return { status: 'error', error: query.error };
   if (query.data === undefined) return { status: 'loading' };
-  return { status: 'ready', data: query.data };
+  return { status: 'ready', data: query.data.items };
+}
+
+/** The number of rule sets shown when the page guard stopped early, so the list can say it is incomplete. */
+export function useRuleSetsCut(pageLimit: number): number | undefined {
+  const query = useEveryRuleSetQuery(pageLimit, true);
+  return query.data?.truncated ? query.data.items.length : undefined;
 }
 
 /** Newest change first. Ties keep the engine's order (by name). */

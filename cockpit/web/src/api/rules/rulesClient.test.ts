@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { HostCallError } from '../hostError';
 import { csrfToken } from '../hostCall';
 import { allVersions } from './catalogue';
+import { everyRuleSet } from '../../features/overview/useRuleOverview';
+import type { RulesClient } from './rulesClient';
 import { createRulesClient } from './rulesClient';
 import { createFakeEngine, demoSeed } from '../../mocks/ruleEngine';
 
@@ -104,6 +106,16 @@ describe('rules client', () => {
         { ruleId: 'R1', column: 'fee', message: expect.stringContaining('needs a currency') as unknown },
       ],
     });
+  });
+
+  it('RLE_039_the_page_guard_reports_a_list_cut_short', async () => {
+    let n = 0;
+    const endless = { listRuleSets: () => Promise.resolve({ data: [{ ruleSet: `rs-${String((n += 1))}`, latestVersion: 1, latestStatus: 'DRAFT' as const, publishedVersion: null, lastChangedAt: '2026-11-18T09:00:00Z' }], nextCursor: 'more', hasNext: true }) } as unknown as RulesClient;
+    const cut = await everyRuleSet(endless, 1, undefined, 3);
+    expect(cut).toMatchObject({ truncated: true });
+    expect(cut.items).toHaveLength(3);
+    const { fetchImpl } = engineFetch();
+    expect(await everyRuleSet(createRulesClient('', fetchImpl), 1, undefined)).toMatchObject({ truncated: false });
   });
 
   it('TR_UI_02_csrf_token_is_read_from_the_host_cookie', () => {

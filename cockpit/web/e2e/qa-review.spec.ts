@@ -54,27 +54,32 @@ for (const s of SCREENS) {
         for (const el of Array.from(document.querySelectorAll<HTMLElement>('main button, main a[href], main select, main input:not([type=file]):not([tabindex="-1"]), main summary, main textarea'))) {
           const r = el.getBoundingClientRect();
           if (r.width === 0 || r.height === 0) continue;
-          // Recorded exemption (rules.css): the editor's cell controls draw at 36 px in a dense grid.
-          if (el.closest('.cell-edit')) continue;
           const after = getComputedStyle(el, '::after');
           const aw = after.content !== 'none' ? parseFloat(after.width) || 0 : 0;
           const ah = after.content !== 'none' ? parseFloat(after.height) || 0 : 0;
           const w = Math.max(r.width, aw); const h = Math.max(r.height, ah);
-          if (w < 44 || h < 44) out.push(`${el.tagName.toLowerCase()}.${el.className.split(' ').at(0) ?? ''} "${(el.getAttribute('aria-label') ?? el.textContent).trim().slice(0, 24)}" ${Math.round(w)}x${Math.round(h)}`);
+          // Recorded exemption (rules.css): the editor's cell controls draw at 36 px in a dense grid.
+          const exempt = el.matches('.picker__trigger, .compare__op, .amount__input, .cell-any-edit, .cell-input');
+          const min = exempt ? 36 : 44;
+          if ((exempt ? w < 24 : w < min) || h < min) out.push(`${el.tagName.toLowerCase()}.${el.className.split(' ').at(0) ?? ''} "${(el.getAttribute('aria-label') ?? el.textContent).trim().slice(0, 24)}" ${Math.round(w)}x${Math.round(h)}`);
         }
         return Array.from(new Set(out));
       });
       // Editor cell inputs are the recorded exemption (rules.css): 36 px in a dense grid.
       expect(small).toEqual([]);
 
-      const main = (await page.locator('main').innerText());
+      const main = await page.locator('main').evaluate((m) => {
+        // The stored document in the Source view is machine text, not UI copy; everything else is checked.
+        const copy = m.cloneNode(true) as HTMLElement;
+        copy.querySelectorAll('.source__text').forEach((node) => { node.remove(); });
+        return copy.innerText;
+      });
       // no raw JSON outside the deliberate Source view
       if (s.name !== 'source') expect(main, 'no raw JSON').not.toMatch(/[{[]\s*"[A-Za-z]+"\s*:/);
       expect(main).not.toMatch(/CK-F-|CKP-0|PD-0|RLE-0/);
 
       // one language: on a Vietnamese screen, no English UI string that differs from its Vietnamese one
-      // The Source view shows the stored document (machine text such as "schemaVersion"), not UI strings.
-      if (locale === 'vi' && s.name !== 'source') {
+      if (locale === 'vi') {
         const leaks = (Object.keys(en) as (keyof typeof en)[])
           .filter((k) => en[k] !== vi[k] && !en[k].includes('{') && en[k].length >= 5 && main.includes(en[k]))
           .map((k) => `${k}="${en[k]}"`);
@@ -202,3 +207,33 @@ for (const [name, scenario, hash] of [['table', 'rules-author', '#/rules/card-fe
     expect(axe.violations.flatMap((v) => v.nodes.map((n) => `${n.target.join(' ')} :: ${n.any[0]?.message ?? ''}`))).toEqual([]);
   });
 }
+
+test('QA_query_invalid_on_a_later_page_offers_retry_and_reloads_from_the_first_page', async ({ page }) => {
+  let refuse = true;
+  const calls: string[] = [];
+  await open(page, 'rules-author', '#/');
+  await page.route('**/api/bpm/rules/v1/rule-sets?**', async (route) => {
+    const url = new URL(route.request().url());
+    calls.push(url.searchParams.has('cursor') ? 'next' : 'first');
+    if (url.searchParams.has('cursor')) {
+      if (refuse) {
+        await route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ type: 'about:blank', title: 'Bad Request', status: 400, code: 'QUERY_INVALID', detail: 'cursor was not issued by this list', correlationId: '01JQA2' }) });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ ruleSet: 'zz-last', latestVersion: 1, latestStatus: 'DRAFT', publishedVersion: null, lastChangedAt: '2026-11-18T09:00:00Z' }], nextCursor: null, hasNext: false }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ ruleSet: 'card-fee', latestVersion: 2, latestStatus: 'PENDING_APPROVAL', publishedVersion: 1, lastChangedAt: '2026-11-18T09:00:00Z' }], nextCursor: 'c2', hasNext: true }) });
+  });
+  await page.goto('./#/rules');
+  await page.reload();
+  const alert = page.getByRole('alert').first();
+  await expect(alert).toBeVisible();
+  refuse = false;
+  const before = calls.filter((c) => c === 'first').length;
+  await alert.getByRole('button').last().click();
+  await expect(page.getByRole('table').getByText('zz-last')).toBeVisible();
+  await expect(page.getByRole('table').getByText('card-fee')).toBeVisible();
+  // The retry reads the list again from its first page, not from the refused cursor.
+  expect(calls.filter((c) => c === 'first').length).toBeGreaterThan(before);
+});

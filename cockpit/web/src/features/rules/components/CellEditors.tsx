@@ -134,12 +134,12 @@ export function CompareEditor({ label, error, errorId, model, currency, onText }
           <option value="any">{t('editor.anyValue')}</option>
           {OPERATORS.map((op) => <option key={op} value={op}>{op}</option>)}
         </select>
-        <span className={shownCurrency !== undefined ? 'amount amount--money' : 'amount'}>
+        <label className={shownCurrency !== undefined ? 'amount amount--money' : 'amount'}>
           <input ref={amountRef} className="amount__input tnum" inputMode="decimal" aria-label={label} aria-invalid={error !== undefined}
             {...(describedBy !== undefined ? { 'aria-describedby': describedBy } : {})}
             value={shownAmount(model.amount, locale)} onChange={(e) => { write({ amount: canonicalAmount(e.target.value, locale) }); }} />
           {shownCurrency !== undefined ? <span className="amount__code" aria-hidden="true">{shownCurrency}</span> : null}
-        </span>
+        </label>
       </span>
     </Frame>
   );
@@ -150,12 +150,12 @@ export function MoneyEditor({ label, error, errorId, model, onText }: CellProps 
   const describedBy = error !== undefined ? errorId : undefined;
   return (
     <Frame error={error} errorId={errorId}>
-      <span className="amount amount--money">
+      <label className="amount amount--money">
         <input className="amount__input tnum" inputMode="decimal" aria-label={label} aria-invalid={error !== undefined} placeholder={label.split(', ').at(-1)}
           {...(describedBy !== undefined ? { 'aria-describedby': describedBy } : {})}
           value={shownAmount(model.amount, locale)} onChange={(e) => { onText(writeOutputCell({ ...model, amount: canonicalAmount(e.target.value, locale) })); }} />
         <span className="amount__code" aria-hidden="true">{model.currency}</span>
-      </span>
+      </label>
     </Frame>
   );
 }

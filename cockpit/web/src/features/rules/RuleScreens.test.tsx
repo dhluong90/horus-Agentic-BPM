@@ -62,6 +62,16 @@ describe('rule set list and version view', () => {
     expect(screen.getByRole('button', { name: 'Import rule set' })).toBeInTheDocument();
   });
 
+  it('RLE_039_a_list_cut_short_by_the_page_guard_says_so', async () => {
+    let n = 0;
+    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets', () => HttpResponse.json({
+      data: [{ ruleSet: `rs-${String((n += 1))}`, latestVersion: 1, latestStatus: 'DRAFT', publishedVersion: null, lastChangedAt: '2026-11-18T09:00:00Z' }],
+      nextCursor: 'more', hasNext: true,
+    })));
+    open('#/rules');
+    expect(await screen.findByText(/^Showing the first \d+ rule sets\. Use Find to reach the others\.$/)).toBeInTheDocument();
+  });
+
   it('TR_STD_01_a_json_file_is_sent_as_yaml_text_until_the_engine_imports_json', async () => {
     const user = userEvent.setup();
     open('#/rules');
@@ -120,6 +130,9 @@ describe('minimal draft editing', () => {
     await rowAction(user, 'R6', 'Move row R6 down');
     await rowAction(user, 'R6', 'Move row R6 up');
     expect(screen.getByText('Changes in this draft')).toBeInTheDocument();
+    // The breadcrumb names the new draft, never the published version it starts from.
+    expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('New draft')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View changes' })).toBeInTheDocument();
     // An operator with no amount is refused by the engine: one plain sentence on the cell.
     await user.clear(screen.getByLabelText('Row R6, Balance', { exact: true }));
     await user.dblClick(screen.getByRole('button', { name: 'Save draft' }));
@@ -127,6 +140,11 @@ describe('minimal draft editing', () => {
     const cell = await screen.findByLabelText('Row R6, Balance', { exact: true });
     await waitFor(() => { expect(cell).toHaveAttribute('aria-invalid', 'true'); });
     expect(cell).toHaveAccessibleDescription(/Enter a value\./);
+    // One compact line; the code and reference open from Details at its end.
+    const details = screen.getByRole('button', { name: /Details/ });
+    expect(details).toHaveAttribute('aria-expanded', 'false');
+    await user.click(details);
+    expect(screen.getByTestId('problem-code')).toBeVisible();
     expect(screen.getByText('1 to fix', { exact: false })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Row R1, Tier: Gold, Platinum' })).toBeInTheDocument();
     expect(new Set(writes().map((c) => c.key)).size).toBe(1);
@@ -136,6 +154,7 @@ describe('minimal draft editing', () => {
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await versionLine(3)).toBeInTheDocument();
     expect(screen.getByText('Saved as draft version 3')).toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('Version 3 draft')).toBeInTheDocument();
     const ids = screen.getAllByRole('rowheader').map((th) => th.textContent);
     expect(ids).toEqual(['R1', 'R2', 'R6', 'R3', 'R4', 'R5']);
     expect(screen.getByText('20,000,000 VND')).toBeInTheDocument();

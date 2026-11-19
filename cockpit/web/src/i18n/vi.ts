@@ -333,5 +333,9 @@ export const vi: Record<MessageKey, string> = {
   'editor.unsavedOne': '1 thay đổi chưa lưu',
   'changes.browserNote': 'So sánh trong trình duyệt. Phiên bản đã lưu nằm ở thẻ Bảng.',
   'changes.nonAsciiCount': 'Ký tự ngoài ASCII trong {count} ô đã sửa',
+  'crumb.newDraft': 'Bản nháp mới',
+  'crumb.versionDraft': 'Bản nháp phiên bản {version}',
+  'editor.viewChanges': 'Xem thay đổi',
+  'rulesArea.cut': 'Đang hiện {count} bộ quy tắc đầu tiên. Dùng ô tìm kiếm để thấy các bộ khác.',
   'problem.engineDetail': 'Thông báo gốc của hệ thống (tiếng Anh)',
 };
