@@ -11,21 +11,34 @@ export interface HostClient {
 
 type Fetch = typeof fetch;
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * CSRF in host-session mode (cockpit DESIGN section 13): the host keeps its token in the readable cookie
+ * XSRF-TOKEN, and every request that changes data sends it back in X-XSRF-TOKEN. Safe methods send nothing.
+ */
+export function csrfHeaders(method: string, cookies: string = document.cookie): Record<string, string> {
+  if (SAFE_METHODS.has(method.toUpperCase())) return {};
+  const pair = cookies.split(';').map((part) => part.trim()).find((part) => part.startsWith('XSRF-TOKEN='));
+  if (pair === undefined) return {};
+  return { 'X-XSRF-TOKEN': decodeURIComponent(pair.slice('XSRF-TOKEN='.length)) };
+}
+
 /**
  * The one place the cockpit calls a host. This release supports host-session authentication only:
  * the host's own session cookie on the same origin (embedded mode). Every response is validated against the generated schema;
  * a body that does not match is an error, never rendered partially (cockpit DESIGN section 12).
  */
 export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): HostClient {
-  async function getJson<T>(path: string, schema: z.ZodType<T>, signal: AbortSignal | undefined): Promise<T> {
+  async function requestJson<T>(method: string, path: string, schema: z.ZodType<T>, signal: AbortSignal | undefined): Promise<T> {
     let response: Response;
     try {
       response = await fetchImpl(`${baseUrl}${path}`, {
-        method: 'GET',
+        method,
         credentials: 'same-origin',
         // A redirect means the host wants its sign-in page; never follow it into an HTML body.
         redirect: 'manual',
-        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...csrfHeaders(method) },
         ...(signal ? { signal } : {}),
       });
     } catch (cause) {
@@ -56,7 +69,7 @@ export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): Hos
 
   return {
     baseUrl,
-    getMeta: (signal) => getJson('/api/bpm/meta', bpmMetaV1, signal),
-    getMe: (signal) => getJson('/api/bpm/me', bpmMeV1, signal),
+    getMeta: (signal) => requestJson('GET', '/api/bpm/meta', bpmMetaV1, signal),
+    getMe: (signal) => requestJson('GET', '/api/bpm/me', bpmMeV1, signal),
   };
 }

@@ -18,6 +18,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,7 +28,8 @@ import org.springframework.web.context.WebApplicationContext;
 
 /**
  * The host-session CSRF contract (DESIGN section 13): the host keeps its token in the readable cookie
- * XSRF-TOKEN (here through csrf.spa()), the starter makes sure the cookie exists once the cockpit page
+ * XSRF-TOKEN (configured here the way that works on Spring Security 6.5 and 7), the starter makes sure the
+ * cookie exists once the cockpit page
  * has loaded, and a mutating call with that value in X-XSRF-TOKEN is accepted.
  */
 @SpringBootTest(classes = CockpitCsrfContractTest.SpaCsrfHost.class, webEnvironment = SpringBootTest.WebEnvironment.MOCK)
@@ -39,7 +42,9 @@ class CockpitCsrfContractTest {
         SecurityFilterChain hostSecurity(HttpSecurity http) throws Exception {
             http.authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
                     .formLogin(Customizer.withDefaults())
-                    .csrf(csrf -> csrf.spa());
+                    .csrf(csrf -> csrf
+                            .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                            .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()));
             return http.build();
         }
 

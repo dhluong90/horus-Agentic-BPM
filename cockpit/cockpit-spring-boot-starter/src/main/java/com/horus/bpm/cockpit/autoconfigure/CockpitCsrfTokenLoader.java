@@ -8,7 +8,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 /**
  * CSRF contract of {@code host-session} mode (DESIGN section 13): the host keeps its CSRF token in a
  * cookie the cockpit can read ({@code CookieCsrfTokenRepository.withHttpOnlyFalse()}, cookie
- * {@code XSRF-TOKEN}, for example through {@code csrf(csrf -> csrf.spa())}), and the cockpit sends it in
+ * {@code XSRF-TOKEN}, with a handler that accepts the raw value in the header), and the cockpit sends it in
  * {@code X-XSRF-TOKEN} on every mutating request.
  *
  * <p>Spring Security loads the token lazily, so the cookie would only be written once something reads

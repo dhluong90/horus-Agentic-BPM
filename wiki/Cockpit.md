@@ -68,7 +68,7 @@ What the starter sends with every cockpit file:
 
 A cockpit route such as `/bpm/cockpit/rules/card-fee`, reloaded or bookmarked, gets the cockpit page; a missing file under the path stays `404`.
 
-**CSRF in `host-session` mode.** Keep the CSRF token in a cookie the cockpit can read and accept it in the `X-XSRF-TOKEN` header. With Spring Security that is one line: `http.csrf(csrf -> csrf.spa())` (cookie `XSRF-TOKEN`). The starter loads the token whenever a cockpit file is served, so the cookie exists before the cockpit's first change request.
+**CSRF in `host-session` mode.** Keep the CSRF token in a cookie the cockpit can read and accept it in the `X-XSRF-TOKEN` header. With Spring Security: `CookieCsrfTokenRepository.withHttpOnlyFalse()` (cookie `XSRF-TOKEN`) and a token handler that accepts the raw value in the header; `examples/rule-engine-only` shows one (`SpaCsrfTokenRequestHandler`) that works on Spring Security 6.5 and 7. On Spring Security 7 alone, `http.csrf(csrf -> csrf.spa())` does the same. The starter loads the token whenever a cockpit file is served, so the cookie exists before the cockpit's first change request.
 
 **Tenant in `host-session` mode.** The tenant comes from your session principal, through your `TenantResolver` bean, and never from a header the browser sets.
 

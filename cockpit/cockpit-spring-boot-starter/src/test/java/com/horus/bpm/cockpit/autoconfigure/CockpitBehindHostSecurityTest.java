@@ -1,11 +1,11 @@
 package com.horus.bpm.cockpit.autoconfigure;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.endsWith;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -39,7 +39,8 @@ class CockpitBehindHostSecurityTest {
     void TR_SEC_09_without_a_host_session_the_host_sign_in_is_required_and_nothing_is_served() throws Exception {
         mvc.perform(get("/bpm/cockpit/index.html").header("Accept", "text/html"))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrl("/login"))
+                // Spring Security 7 redirects to "/login", 6.5 to "http://localhost/login"; both are the sign-in page.
+                .andExpect(header().string("Location", endsWith("/login")))
                 .andExpect(content().string(""));
         mvc.perform(get("/bpm/cockpit/cockpit-hosts.json").header("Accept", "text/html"))
                 .andExpect(status().is3xxRedirection());

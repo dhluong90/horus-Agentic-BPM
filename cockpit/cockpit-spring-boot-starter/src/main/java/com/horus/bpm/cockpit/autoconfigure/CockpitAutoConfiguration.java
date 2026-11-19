@@ -21,8 +21,8 @@ import org.springframework.web.servlet.DispatcherServlet;
  *
  * <p>The cockpit is static files with no state; the host's own authentication protects it and its
  * REST layer is the only thing it calls. Registered through {@code AutoConfiguration.imports}; nothing
- * is component-scanned. Main code uses Spring MVC only and optional Spring Security, so it is meant to run
- * on both supported Spring Boot lines (ADR-0011); until the Spring Boot 3.5.x CI leg runs, only 4.x is tested.
+ * is component-scanned. Main code uses Spring MVC only and optional Spring Security, so the same jar runs on
+ * both supported Spring Boot lines (ADR-0011); the CI matrix runs its tests on 4.x, 4.0.x and 3.5.x.
  */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
