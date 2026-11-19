@@ -15,6 +15,7 @@ import com.horus.bpm.rules.internal.model.OutputClause;
 import com.horus.bpm.rules.internal.model.Rule;
 import com.horus.bpm.rules.internal.model.ValueType;
 import com.horus.bpm.rules.internal.model.When;
+import io.github.dhluong90.bpm.rules.internal.dmn.ruleset.CanonicalCells;
 import io.github.dhluong90.bpm.rules.internal.dmn.ruleset.DmnReader;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -97,6 +98,9 @@ public final class RuleSetReader {
         if (tree == null || !tree.isObject()) {
             throw new ValidationFailedException("Document must be a mapping");
         }
+        model(tree);
+        // The behaviour hash covers the model as the engine prints it: one normal form per cell (ADR-0026).
+        CanonicalCells.normalize((tools.jackson.databind.node.ObjectNode) tree);
         Definitions model = model(tree);
         requireExactNumbers(tree, "");
         String canonical = CanonicalJson.write(tree);

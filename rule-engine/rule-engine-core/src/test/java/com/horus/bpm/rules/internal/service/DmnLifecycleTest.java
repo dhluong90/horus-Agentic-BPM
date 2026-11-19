@@ -122,4 +122,24 @@ class DmnLifecycleTest {
                 .hasMessageContaining("larger than 1048576 bytes");
         assertThat(stores.versions).isEmpty();
     }
+
+    @Test
+    void RLE_039_the_same_table_in_two_styles_has_one_canonical_hash_and_keeps_its_own_source() {
+        // Given style A in bank-a and style B (normal form) in bank-b
+        byte[] a = io.github.dhluong90.bpm.rules.internal.dmn.ruleset.StyleCheck.A.getBytes(StandardCharsets.UTF_8);
+        byte[] b = io.github.dhluong90.bpm.rules.internal.dmn.ruleset.StyleCheck.B.getBytes(StandardCharsets.UTF_8);
+
+        // When
+        RuleSetVersion inA = engines.versionService().importRuleSet(ImportRequest.yaml(a));
+        caller.become("bank-b", "alice");
+        RuleSetVersion inB = engines.versionService().importRuleSet(ImportRequest.yaml(b));
+        caller.become("bank-a", "alice");
+        RuleSetVersion sourceA = engines.versionService().find("style-check", 1, true).orElseThrow();
+
+        // Then
+        assertThat(inA.canonicalHash()).isEqualTo(inB.canonicalHash());
+        assertThat(inA.sourceHash()).isNotEqualTo(inB.sourceHash()).isEqualTo(Hashes.sha256(a));
+        assertThat(sourceA.sourceDocument().getBytes(StandardCharsets.UTF_8)).isEqualTo(a);
+        assertThat(sourceA.canonicalDocument()).contains("\">= 3\"").doesNotContain("x >= 3");
+    }
 }

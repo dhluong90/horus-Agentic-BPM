@@ -343,7 +343,15 @@ final class Feel {
                         }
                         cursor.expect(")");
                         BigDecimal value = new BigDecimal(amount.text);
-                        return new Value.Money(negative ? value.negate() : value, currency.text);
+                        // Stored at the currency scale, as Money prints it, so export and import again keep the hash.
+                        try {
+                            com.horus.bpm.rules.api.Money money = com.horus.bpm.rules.api.Money.ofMajor(currency.text,
+                                    (negative ? value.negate() : value).toPlainString());
+                            return new Value.Money(money.toMajor(), currency.text);
+                        } catch (IllegalArgumentException | ArithmeticException e) {
+                            throw new UnsupportedException("money(" + Quote.text(amount.text) + ", \"" + currency.text
+                                    + "\"): " + Quote.text(e.getMessage()));
+                        }
                     }
                     case "null" -> throw new UnsupportedException("null is not allowed here");
                     default -> {
