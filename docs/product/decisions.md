@@ -3120,4 +3120,6 @@ The value in force is shown in `/api/bpm/meta`. In the `four-eyes` retirement mo
 
 The acknowledgement therefore covers exactly the inputs that will be logged in clear under the tenant's masking in force at the approval.
 
+**Amended 2026-11-20 (security finding, architect's ruling).** The approve request carries the exact `{code, input}` pairs the approver was shown, not codes alone. A mismatch with the set the engine recomputes at approval is refused with `409 WARNINGS_NOT_ACKNOWLEDGED`, so a changed pattern list can never let one code cover inputs the approver never saw.
+
 **Follow-ups.** Architect: a statement in the rule engine SPEC for the approve request, the error code and the history and event fields, and the setting in DESIGN 4.4. Maintainers (engineering): the implementation issue (engine and cockpit). Documentation: the approval how-to.
