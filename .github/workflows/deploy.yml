@@ -93,6 +93,9 @@ jobs:
       - name: Image gates, no secrets in layers and no high or critical vulnerability
         run: deploy/scan-image.sh "$IMAGE"
 
+      - name: Secrets gate canaries, a planted key file and a value inside a jar must fail
+        run: deploy/scan-image-canaries.sh "$IMAGE"
+
       - name: Container logs
         if: failure()
         run: docker compose logs --no-color
