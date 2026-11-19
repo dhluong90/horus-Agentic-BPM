@@ -1,4 +1,4 @@
-package com.horus.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.rules.internal.expr;
 
 /**
  * Bounds of one regular expression match (TR-SEC-02, RLE-007): the longest text {@code matches} looks at and the

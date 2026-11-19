@@ -1,6 +1,6 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
-import com.horus.bpm.rules.internal.expr.RegexLimits;
+import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import java.time.Duration;
 
 /**

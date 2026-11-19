@@ -1,17 +1,17 @@
-package com.horus.bpm.rules.internal.service;
+package io.github.dhluong90.bpm.rules.internal.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.DecisionInput;
-import com.horus.bpm.rules.api.DecisionResult;
-import com.horus.bpm.rules.api.ImportRequest;
-import com.horus.bpm.rules.api.SourceFormat;
-import com.horus.bpm.rules.api.ValidationFailedException;
-import com.horus.bpm.rules.api.WriteOptions;
-import com.horus.bpm.rules.internal.eval.CompiledRuleSet;
-import com.horus.bpm.rules.internal.expr.RegexLimits;
-import com.horus.bpm.rules.internal.read.RuleSetReader;
+import io.github.dhluong90.bpm.rules.api.DecisionInput;
+import io.github.dhluong90.bpm.rules.api.DecisionResult;
+import io.github.dhluong90.bpm.rules.api.ImportRequest;
+import io.github.dhluong90.bpm.rules.api.SourceFormat;
+import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
+import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
+import io.github.dhluong90.bpm.rules.internal.read.RuleSetReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
@@ -72,8 +72,8 @@ class RegexBoundsTest {
 
     static CompiledRuleSet compiled(String yaml, RegexLimits limits) {
         return CompiledRuleSet.compile(RuleSetReader.read(SourceFormat.YAML, yaml.getBytes(StandardCharsets.UTF_8))
-                .model(), com.horus.bpm.rules.internal.service.EngineDefaults.OUTPUT_MAX_BYTES,
-                com.horus.bpm.rules.internal.service.EngineDefaults.STRING_MAX_LENGTH, limits);
+                .model(), io.github.dhluong90.bpm.rules.internal.service.EngineDefaults.OUTPUT_MAX_BYTES,
+                io.github.dhluong90.bpm.rules.internal.service.EngineDefaults.STRING_MAX_LENGTH, limits);
     }
 
     @Test
