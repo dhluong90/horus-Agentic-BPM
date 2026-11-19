@@ -18,6 +18,26 @@
   <description>Pins the version of every HORUS Agentic BPM module.</description>
   <url>https://github.com/dhluong90/horus-Agentic-BPM</url>
 
+  <!-- TR-LIC-02: same notice as the parent POM, repeated because this BOM has no parent. -->
+  <licenses>
+    <license>
+      <name>PolyForm-Noncommercial-1.0.0</name>
+      <url>https://polyformproject.org/licenses/noncommercial/1.0.0</url>
+      <distribution>repo</distribution>
+    </license>
+    <license>
+      <name>LicenseRef-HORUS-Commercial</name>
+      <url>https://github.com/dhluong90/horus-Agentic-BPM/blob/main/COMMERCIAL-LICENSE.md</url>
+      <distribution>manual</distribution>
+      <comments>Any use not permitted by the PolyForm Noncommercial License needs a separate written agreement with HORUS.</comments>
+    </license>
+  </licenses>
+
+  <organization>
+    <name>HORUS</name>
+    <url>https://github.com/dhluong90/horus-Agentic-BPM</url>
+  </organization>
+
   <dependencyManagement>
     <dependencies>
       <dependency>

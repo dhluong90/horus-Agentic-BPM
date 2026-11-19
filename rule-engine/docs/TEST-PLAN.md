@@ -59,4 +59,4 @@ Tests that prove a platform requirement directly, before any `SPEC.md` statement
 | Gap | Plan |
 |---|---|
 | Jackson 3 inside the core is conditional on the Spring Boot 3.5 coexistence test (ADR-0021) | `RLE-023` runs in the first parsing pull request of Sprint 1; if it fails, option 3 of ADR-0021 returns before that pull request merges; the contract suite runs on both Spring Boot lines |
-| The licence scope for JUnit, jqwik and JMH is pending PD-053 | Tests are written now; the CI licence check is configured after the decision |
+| The licence scope for JUnit, jqwik and JMH is pending PD-053 | Tests are written now. The CI licence check (`TR-LIC-01`) covers compile, runtime and provided scopes of the shipped modules; test scope joins it after the decision. Test-scope dependencies are already scanned for critical vulnerabilities |
