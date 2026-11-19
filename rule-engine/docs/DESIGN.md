@@ -159,7 +159,7 @@ Source: [`diagrams/retire-and-supersede.mmd`](diagrams/retire-and-supersede.mmd)
 
 #### 3.3.4 Retiring the last version in effect (PD-101, `RLE-026`)
 
-A version is the last in effect when no other approved version of the rule set is in effect at the retirement instant: `status = 'PUBLISHED'`, `effective_from <= now` and not the version being retired. A version that is approved with a future `effective_from` does not count, because evaluations fail until it starts. The problem detail then names it and its start.
+A version is the last in effect when, at the retirement instant, the version selected by section 3.3.1 is this one or there is none. Lower-numbered versions it supersedes are retired in the same transaction, before it, so they do not count; a version approved with a future `effective_from` does not count either, because evaluations fail until it starts. The problem detail then names it and its start.
 
 - **Setting.** The host property is `horus.bpm.lifecycle.retire-last-version`, shared with the Process Engine and published as `lifecycle.retire-last-version` in `/api/bpm/meta` (section 4.4). Its values are `confirm` (default), `four-eyes` and `refuse`.
 - **Refusal.** The refusal is `409 LAST_VERSION_IN_EFFECT`. Its problem body carries:
