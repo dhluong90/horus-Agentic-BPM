@@ -494,7 +494,7 @@ class EditorApiTest {
     }
 
     @Test
-    void RLE_039_a_cursor_replayed_in_another_tenant_returns_only_that_tenants_rule_sets() {
+    void RLE_039_a_cursor_replayed_in_another_tenant_is_query_invalid() {
         // Given bank-a has card-fee and fx-margin, bank-b has aml-score and zz-limits
         publishedCardFee();
         caller.become("bank-a", "lan", AUTHOR_APPROVER);
@@ -504,13 +504,47 @@ class EditorApiTest {
         versions.importRuleSet(ImportRequest.yaml(cardFee("10000 VND", "zz-limits")));
         caller.become("bank-a", "dan", READER);
         String cursor = versions.listRuleSets(new PageRequest(1, null)).nextCursor();
+        assertThat(versions.listRuleSets(new PageRequest(1, cursor)).items()).extracting(RuleSetSummary::ruleSet)
+                .containsExactly("fx-margin");
 
-        // When a bank-b reader replays bank-a's cursor (key card-fee)
+        // When a bank-b reader replays bank-a's cursor, then it was not issued to bank-b
         caller.become("bank-b", "dan", READER);
-        Page<RuleSetSummary> replayed = versions.listRuleSets(new PageRequest(10, cursor));
+        assertThatThrownBy(() -> versions.listRuleSets(new PageRequest(10, cursor)))
+                .isInstanceOf(QueryInvalidException.class);
+    }
 
-        // Then only bank-b rows after the key, never bank-a's fx-margin
-        assertThat(replayed.items()).extracting(RuleSetSummary::ruleSet).containsExactly("zz-limits");
+    @Test
+    void RLE_039_an_edited_or_cross_list_cursor_is_query_invalid() {
+        publishedCardFee();
+        caller.become("bank-a", "lan", AUTHOR_APPROVER);
+        versions.importVersion("card-fee", ImportRequest.yaml(cardFee("10000 VND", "card-fee")));
+        versions.importRuleSet(ImportRequest.yaml(cardFee("10000 VND", "fx-margin")));
+        versions.importVersion("fx-margin", ImportRequest.yaml(cardFee("10000 VND", "fx-margin")));
+        caller.become("bank-a", "dan", READER);
+        String versionsCursor = versions.listVersions("card-fee", new PageRequest(1, null)).nextCursor();
+        String ruleSetsCursor = versions.listRuleSets(new PageRequest(1, null)).nextCursor();
+        String edited = Cursors.encode("rule-sets", "d-not-a-rule-set") + ruleSetsCursor.substring(ruleSetsCursor.indexOf('.'));
+
+        assertThat(versions.listVersions("card-fee", new PageRequest(1, versionsCursor)).items())
+                .extracting(VersionSummary::version).containsExactly(1);
+        assertThatThrownBy(() -> versions.listVersions("fx-margin", new PageRequest(1, versionsCursor)))
+                .as("a card-fee cursor on fx-margin").isInstanceOf(QueryInvalidException.class);
+        assertThatThrownBy(() -> versions.listRuleSets(new PageRequest(1, versionsCursor)))
+                .as("a versions cursor on the rule set list").isInstanceOf(QueryInvalidException.class);
+        assertThatThrownBy(() -> versions.listRuleSets(new PageRequest(1, edited)))
+                .as("payload edited, signature kept").isInstanceOf(QueryInvalidException.class);
+    }
+
+    @Test
+    void RLE_039_a_name_that_cannot_be_a_rule_set_is_not_found() {
+        publishedCardFee();
+        caller.become("bank-a", "dan", READER);
+
+        assertThat(versions.findRuleSet("card\u0000fee")).isEmpty();
+        assertThat(versions.find("card\u0000fee", 1, false)).isEmpty();
+        assertThatThrownBy(() -> versions.listVersions("Card-Fee", PageRequest.first()))
+                .isInstanceOf(RuleSetNotFoundException.class);
+        assertThatThrownBy(() -> versions.history("card\u0000fee", 1)).isInstanceOf(RuleSetNotFoundException.class);
     }
 
     @Test

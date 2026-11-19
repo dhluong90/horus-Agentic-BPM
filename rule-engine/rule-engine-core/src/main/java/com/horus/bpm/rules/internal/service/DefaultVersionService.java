@@ -58,9 +58,14 @@ public final class DefaultVersionService implements VersionService {
     private static final String CURSOR_RULE_SETS = "rule-sets";
     private static final String CURSOR_VERSIONS = "versions";
 
+    private static final String CURSOR_KEY = "cursor-hmac";
+    private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
+
     private final EngineContext context;
     private final RuleStore store;
     private final EventOutbox outbox;
+    /** Loaded on first list read from rle_engine_key; the same on every replica. */
+    private volatile Cursors cursors;
 
     /**
      * Creates the service.
@@ -214,10 +219,11 @@ public final class DefaultVersionService implements VersionService {
         context.callerWith(PERMISSION_READ);
         PageRequest request = page == null ? PageRequest.first() : page;
         int limit = limit(request);
-        String after = Cursors.ruleSetName(Cursors.decode(CURSOR_RULE_SETS, request.cursor()));
         return context.withoutDooming(() -> {
+            Cursors codec = cursors();
+            String after = Cursors.ruleSetName(codec.verify(tenant, "", CURSOR_RULE_SETS, request.cursor()));
             List<RuleSetSummary> rows = store.listRuleSets(tenant, after, limit + 1, context.clock().instant());
-            return page(rows, limit, last -> Cursors.encode(CURSOR_RULE_SETS, last.ruleSet()));
+            return page(rows, limit, last -> codec.sign(tenant, "", CURSOR_RULE_SETS, last.ruleSet()));
         });
     }
 
@@ -225,6 +231,9 @@ public final class DefaultVersionService implements VersionService {
     public Optional<RuleSetSummary> findRuleSet(String ruleSet) {
         String tenant = context.tenant();
         context.callerWith(PERMISSION_READ);
+        if (!RuleSetReader.isRuleSetName(ruleSet)) {
+            return Optional.empty();
+        }
         return context.withoutDooming(() -> store.findRuleSetSummary(tenant, ruleSet, context.clock().instant()));
     }
 
@@ -234,12 +243,14 @@ public final class DefaultVersionService implements VersionService {
         context.callerWith(PERMISSION_READ);
         PageRequest request = page == null ? PageRequest.first() : page;
         int limit = limit(request);
-        String before = Cursors.decode(CURSOR_VERSIONS, request.cursor());
-        Integer beforeVersion = before == null ? null : Cursors.positiveInt(before);
+        requireRuleSetName(ruleSet);
         return context.withoutDooming(() -> {
+            Cursors codec = cursors();
+            String before = codec.verify(tenant, ruleSet, CURSOR_VERSIONS, request.cursor());
+            Integer beforeVersion = before == null ? null : Cursors.positiveInt(before);
             String ruleSetId = store.findRuleSetId(tenant, ruleSet).orElseThrow(() -> new RuleSetNotFoundException(ruleSet));
             List<VersionSummary> rows = store.listVersions(tenant, ruleSetId, beforeVersion, limit + 1);
-            return page(rows, limit, last -> Cursors.encode(CURSOR_VERSIONS, Integer.toString(last.version())));
+            return page(rows, limit, last -> codec.sign(tenant, ruleSet, CURSOR_VERSIONS, Integer.toString(last.version())));
         });
     }
 
@@ -247,6 +258,7 @@ public final class DefaultVersionService implements VersionService {
     public List<VersionHistoryEntry> history(String ruleSet, int version) {
         String tenant = context.tenant();
         context.callerWith(PERMISSION_READ);
+        requireRuleSetName(ruleSet);
         return context.withoutDooming(() -> {
             StoredVersion stored = store.findVersion(tenant, ruleSet, version, false).orElseThrow(() ->
                     store.findRuleSetId(tenant, ruleSet).isPresent()
@@ -304,11 +316,36 @@ public final class DefaultVersionService implements VersionService {
     public Optional<RuleSetVersion> find(String ruleSet, int version, boolean includeSource) {
         String tenant = context.tenant();
         context.callerWith(PERMISSION_READ);
+        if (!RuleSetReader.isRuleSetName(ruleSet)) {
+            return Optional.empty();
+        }
         return context.withoutDooming(() ->
                 store.findVersion(tenant, ruleSet, version, false).map(v -> v.toView(includeSource)));
     }
 
+    private Cursors cursors() {
+        Cursors codec = cursors;
+        if (codec == null) {
+            byte[] candidate = new byte[32];
+            RANDOM.nextBytes(candidate);
+            codec = new Cursors(store.engineKey(CURSOR_KEY, candidate, context.clock().instant()));
+            cursors = codec;
+        }
+        return codec;
+    }
+
+    /**
+     * A name that cannot be a rule set name (a NUL byte, upper case, over 100 characters) is not found, before it
+     * reaches the database, which would refuse a NUL byte with a driver error (QA review F1).
+     */
+    private static void requireRuleSetName(String ruleSet) {
+        if (!RuleSetReader.isRuleSetName(ruleSet)) {
+            throw new RuleSetNotFoundException("(invalid name)");
+        }
+    }
+
     private StoredVersion load(String tenant, String ruleSet, int version) {
+        requireRuleSetName(ruleSet);
         return store.findVersion(tenant, ruleSet, version, true).orElseThrow(() ->
                 store.findRuleSetId(tenant, ruleSet).isPresent()
                         ? new VersionNotFoundException(ruleSet, version)

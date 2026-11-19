@@ -88,13 +88,24 @@ public final class CompiledRuleSet {
                     ? new Expr.Literal(null) : output(output.defaultValue(), output, slots, table.inputs(), null, problems));
         }
         List<CompiledRule> rules = new ArrayList<>();
+        Map<String, OutputClause> declared = new LinkedHashMap<>();
+        table.outputs().forEach(output -> declared.put(output.name(), output));
         for (Rule rule : table.rules()) {
             Expr condition = when(rule.when(), slots, table.inputs(), rule.id(), problems);
+            // Output cells are checked in the order they are written, so violations follow the document (RLE-041),
+            // and placed by declaration order for evaluation.
+            Map<String, Expr> written = new HashMap<>();
+            for (Map.Entry<String, Cell> cell : rule.then().entrySet()) {
+                OutputClause output = declared.get(cell.getKey());
+                if (output == null) {
+                    problems.add(new Violation(rule.id(), cell.getKey(), "unknown output '" + cell.getKey() + "'"));
+                } else {
+                    written.put(output.name(), output(cell.getValue(), output, slots, table.inputs(), rule.id(), problems));
+                }
+            }
             List<Expr> thens = new ArrayList<>();
             for (OutputClause output : table.outputs()) {
-                Cell cell = rule.then().get(output.name());
-                thens.add(cell == null ? defaults.get(output.name())
-                        : output(cell, output, slots, table.inputs(), rule.id(), problems));
+                thens.add(written.getOrDefault(output.name(), defaults.get(output.name())));
             }
             rules.add(new CompiledRule(rule.id(), condition, thens));
         }
@@ -300,6 +311,14 @@ public final class CompiledRuleSet {
     /** Parses and type-checks one condition cell; a problem is recorded on its cell and a placeholder returned. */
     private static Expr condition(String input, String text, Map<String, Integer> slots, List<InputClause> inputs,
             String ruleId, Problems problems) {
+        if (!slots.containsKey(input)) {
+            problems.add(new Violation(ruleId, input, "unknown input '" + input + "'"));
+            return new Expr.Literal(Boolean.FALSE);
+        }
+        if (text == null) {
+            problems.add(new Violation(ruleId, input, "the condition must be a non-empty string"));
+            return new Expr.Literal(Boolean.FALSE);
+        }
         String trimmed = text.strip();
         boolean shorthand = SHORTHAND_PREFIXES.stream().anyMatch(trimmed::startsWith);
         String source = shorthand ? input + " " + trimmed : trimmed;
@@ -322,6 +341,10 @@ public final class CompiledRuleSet {
             String ruleId, Problems problems) {
         Expr expr = switch (cell) {
             case Cell.Literal literal -> new Expr.Literal(literal.value());
+            case Cell.Expression expression when expression.source() == null -> {
+                problems.add(new Violation(ruleId, output.name(), "a cell must be a string, number, boolean or null"));
+                yield new Expr.Literal(null);
+            }
             case Cell.Expression expression -> {
                 try {
                     yield Parser.parse(expression.source(), name -> slots.getOrDefault(name, -1));

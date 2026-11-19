@@ -447,7 +447,10 @@ components:
       name: cursor
       in: query
       required: false
-      description: The `nextCursor` of the previous page, unchanged. A cursor that was not issued by this endpoint is `400 QUERY_INVALID`.
+      description: |
+        The `nextCursor` of the previous page, unchanged. Cursors are signed for the tenant and the
+        list: a cursor not issued by this endpoint to this tenant (forged, edited, from another list
+        or another tenant) is `400 QUERY_INVALID`.
       schema:
         type: string
         maxLength: 400
@@ -721,14 +724,15 @@ components:
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION,
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
-            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, PAYLOAD_TOO_LARGE]
+            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, PAYLOAD_TOO_LARGE, INTERNAL_ERROR]
         detail: { type: string }
         correlationId: { type: string }
         violations:
           type: array
           description: |
             Present on `VALIDATION_FAILED` only, with at least one entry. Every cell problem of the
-            document is listed, in document order, up to 100 entries, so a screen can mark each cell
+            document is listed, in document order (rule by rule; conditions, then outputs, each as
+            written), up to 100 entries, so a screen can mark each cell
             at once; `violationsTruncated` says whether more were found. A problem in the
             document's structure (a missing key, an unknown property) stops reading and is the only
             entry.

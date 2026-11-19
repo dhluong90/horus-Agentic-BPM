@@ -192,7 +192,7 @@ public final class RuleSetReader {
             if (!outputNames.add(outputName)) {
                 throw invalid("Duplicate output '" + outputName + "'");
             }
-            Cell defaultValue = output.has("default") ? cell(output.get("default"), null, outputName) : null;
+            Cell defaultValue = output.has("default") ? cell(output.get("default")) : null;
             outputs.add(new OutputClause(outputName, type(output, outputName), defaultValue));
         }
         List<Rule> rules = new ArrayList<>();
@@ -218,12 +218,11 @@ public final class RuleSetReader {
             if (!thenNode.isObject()) {
                 throw invalidAt(id, null, "then must be a mapping");
             }
+            // Cell-level problems (an unknown output, a cell of the wrong JSON type) are kept in the model in written
+            // order and reported by the compiler, so they never hide the problems of later cells (RLE-041).
             Map<String, Cell> then = new LinkedHashMap<>();
             for (Map.Entry<String, JsonNode> entry : thenNode.properties()) {
-                if (!outputNames.contains(entry.getKey())) {
-                    throw invalidAt(id, entry.getKey(), "unknown output '" + entry.getKey() + "'");
-                }
-                then.put(entry.getKey(), cell(entry.getValue(), id, entry.getKey()));
+                then.put(entry.getKey(), cell(entry.getValue()));
             }
             rules.add(new Rule(id, when, then));
         }
@@ -305,19 +304,16 @@ public final class RuleSetReader {
                     (key.equals("any") ? any : all).add(when(nested, inputNames, ruleId));
                 }
             } else {
-                if (!inputNames.contains(key)) {
-                    throw invalidAt(ruleId, key, "unknown input '" + key + "'");
-                }
-                if (!value.isString() || value.stringValue().isBlank()) {
-                    throw invalidAt(ruleId, key, "the condition must be a non-empty string");
-                }
-                cells.put(key, value.stringValue());
+                // An unknown input or a condition that is not a non-empty string is kept (null for the latter) and
+                // reported by the compiler on its cell, so later cells are still checked (RLE-041).
+                cells.put(key, value.isString() && !value.stringValue().isBlank() ? value.stringValue() : null);
             }
         }
         return new When(cells, any, all);
     }
 
-    private static Cell cell(JsonNode value, String ruleId, String column) {
+    /** Reads a cell; an array or object becomes {@code Expression(null)}, which the compiler reports on its cell. */
+    private static Cell cell(JsonNode value) {
         if (value.isNull()) {
             return new Cell.Literal(null);
         }
@@ -330,7 +326,7 @@ public final class RuleSetReader {
         if (value.isString()) {
             return new Cell.Expression(value.stringValue());
         }
-        throw invalidAt(ruleId, column, "a cell must be a string, number, boolean or null");
+        return new Cell.Expression(null);
     }
 
     private static ValueType type(JsonNode clause, String name) {

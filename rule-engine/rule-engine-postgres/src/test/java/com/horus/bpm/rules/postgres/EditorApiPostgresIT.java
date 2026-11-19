@@ -219,7 +219,7 @@ class EditorApiPostgresIT {
     }
 
     @Test
-    void RLE_039_a_cursor_replayed_in_another_tenant_returns_only_that_tenants_rule_sets() {
+    void RLE_039_a_cursor_replayed_in_another_tenant_is_query_invalid() {
         publish("card-fee", null);
         imported("fx-margin");
         caller.as("bank-b", "lan");
@@ -228,9 +228,14 @@ class EditorApiPostgresIT {
         caller.as("bank-a", "dan");
         String cursor = versions.listRuleSets(new PageRequest(1, null)).nextCursor();
 
-        caller.as("bank-b", "dan");
+        // The key is stored once in rle_engine_key, so the cursor works for its own tenant on any replica
         assertThat(versions.listRuleSets(new PageRequest(10, cursor)).items()).extracting(RuleSetSummary::ruleSet)
-                .containsExactly("zz-limits");
+                .containsExactly("fx-margin");
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_engine_key WHERE name = 'cursor-hmac' AND octet_length(key_bytes) = 32")
+                .query(Long.class).single()).isEqualTo(1L);
+        caller.as("bank-b", "dan");
+        assertThatThrownBy(() -> versions.listRuleSets(new PageRequest(10, cursor)))
+                .isInstanceOf(com.horus.bpm.rules.api.QueryInvalidException.class);
     }
 
     /** V3 backfills one CREATED row per version that existed before it, so their history starts at creation. */

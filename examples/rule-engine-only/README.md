@@ -44,7 +44,7 @@ curl -s localhost:8080/actuator/health
 docker exec horus-pg psql -U horus -d horus -c '\dt'
 # flyway_schema_history, loan_application, rle_decision (partitioned), rle_decision_YYYY_MM (this month and next),
 # rle_decision_default, rle_decision_outbox, rle_idempotency, rle_rule, rle_rule_set, rle_schema_history, rle_version,
-# rle_version_history
+# rle_version_history, rle_engine_key
 
 docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_schema_history ORDER BY installed_rank'
 #  0       | Rule Engine baseline
@@ -52,6 +52,7 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  2       | V2__rle_version_created_by.sql
 #  3       | V3__rle_version_history.sql
 #  4       | V4__rle_version_history_append_only.sql
+#  5       | V5__rle_engine_key.sql
 ```
 
 ### Protect the audit tables
