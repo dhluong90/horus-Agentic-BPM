@@ -446,7 +446,7 @@ CREATE TABLE rle_version_history (
   action            TEXT        NOT NULL CHECK (action IN ('CREATED','REQUESTED','APPROVED','REJECTED','WITHDRAWN','RETIRE_REQUESTED','RETIRE_CANCELLED','RETIRED')),
   from_status       TEXT,
   to_status         TEXT        NOT NULL,
-  actor             TEXT        NOT NULL,        -- caller id, or 'system' for supersession
+  actor             TEXT        NOT NULL,        -- caller id, or lifecycle.system-actor (default system:supersession) for supersession
   reason            TEXT,                        -- reject and retire reason, approval comment, or 'SUPERSEDED'
   superseded_by     INT,                         -- version_num, for automatic retirement
   approval_mode     TEXT        CHECK (approval_mode IN ('single','four-eyes','system')),  -- RETIRED rows: mode in force (PD-080)
