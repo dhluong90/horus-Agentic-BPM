@@ -116,6 +116,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-092](#pd-092-the-cockpit-opens-on-home-for-every-role) | The cockpit opens on Home for every role | Decided (product manager, delegated, PD-073) |
 | [PD-093](#pd-093-cockpit-menu-for-authors-and-two-changes-to-the-approved-prototype) | Cockpit menu for authors and two changes to the approved prototype | Decided (product manager, delegated, PD-073) |
 | [PD-094](#pd-094-cockpit-draft-editing-is-off-by-default-in-010) | Cockpit draft editing is off by default in 0.1.0 | Decided (product manager, delegated, PD-073) |
+| [PD-098](#pd-098-reference-feel-engine-as-a-test-only-oracle) | Reference FEEL engine as a test-only oracle | Decided (product manager, delegated, PD-073) |
+| [PD-099](#pd-099-inputs-are-not-masked-unless-declared-or-set-by-the-host) | Inputs are not masked unless declared or set by the host | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2857,3 +2859,55 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - **Import button:** the cockpit's "Import rule set" action depends on `rules:author` only, not on this setting.
 
 **Follow-ups.** Maintainers (engineering): the cockpit default, the example host setting and the import action. Architect: DESIGN section 4.4. Documentation: the release notes and the wiki Rule Engine Configuration page.
+
+### PD-098 Reference FEEL engine as a test-only oracle
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Pull request #252 checks the project's own FEEL semantics against a reference implementation, `org.camunda.feel:feel-engine` 1.22.1, in test scope only (ADR-0019 decision 5, `RLE-021`). May it and its runtime be named on the `TR-LIC-01` allow-list? |
+| Raised by | Architect, pull request #252 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Facts.** `feel-engine` 1.22.1 is Apache 2.0. Its runtime dependencies, from its published POM, are:
+- `scala-library` (Apache 2.0);
+- `fastparse` 3.1.1 and its `sourcecode` and `geny` dependencies (MIT);
+- `jackson-module-scala` and `java-uuid-generator` (Apache 2.0);
+- `slf4j-api` (MIT).
+
+The enforcer bans every `org.camunda.feel` and `org.scala-lang` artifact outside test scope, and ArchUnit keeps the oracle out of engine code.
+
+**Options considered**
+
+1. Allow it by name, in test scope only (chosen). Consequence: FEEL behaviour is checked against an independent implementation on generated cases, which catches mistakes our own tests share with our own code. Nothing reaches adopters.
+2. Do without an oracle. Consequence: the FEEL semantics rest on our own tests and the TCK cases only.
+
+**Recommendation and decision.** Option 1, on the PD-053 pattern: every licence is permissive, and naming the entries keeps the list reviewable. This concerns third-party test material, not the project's own licence.
+
+**Kill criterion.** If the licence check finds any of these artifacts in a shipped module, or a non-permissive licence appears in their dependency tree on an upgrade, the entry is withdrawn until it is reviewed again.
+
+**Consequences.** `TR-LIC-01` names the oracle and its runtime, in test scope only (applied in this change). The architect notes in #252 that the test classpath now carries a second Jackson major, through `jackson-module-scala`. The Jackson 3 coexistence test (PD-071) covers the engine cores, not this test-only path.
+
+**Follow-ups.** Maintainers (engineering): the allow-list file in the build, and a test that the release bill of materials lists none of these artifacts. Architect: confirm the dependency tree in #252 matches the list.
+
+### PD-099 Inputs are not masked unless declared or set by the host
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Masking (#24, pull request #255) stores an input marked `mask: true` as a keyed fingerprint. Should inputs that are not declared `mask` be masked by default too? |
+| Raised by | Architect, pull request #255 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Not masked by default; the host or a tenant can mask every undeclared input with `decision-log.mask-default: true` (chosen). An input declared `mask: true` is always masked, and `mask: false` always opts out. Consequence: auditors and support staff read amounts, tiers and dates in plain form, which the explanations and replays need. A bank that treats every input as sensitive turns one setting on per host or tenant, without a fork.
+2. Mask every input by default. Consequence: the safest default for personal data, but most decision inputs (amounts, product codes, tiers) are not personal data. Explanations, decision search by value and the cockpit's decision page would show fingerprints everywhere, and authors would mark most inputs `mask: false` to undo it.
+
+**Recommendation and decision.** Option 1, as the architect recommends. Masking a declared field is a guarantee and is never a setting: a rule set that masks an input in a tenant without a key fails closed (`MASKING_KEY_MISSING`), and start-up stops (`RLE-035`). What to treat as sensitive is a business choice per bank, so it is a setting (PD-074).
+
+**Guidance.** The authoring guide tells authors to mark every input that holds personal data, such as national ids, names, account numbers and contact details, with `mask: true`. The example rule sets do the same. The `/api/bpm/meta` settings show the masking default in force for the tenant.
+
+**Kill criterion.** If a pilot bank's review finds unmasked personal data in the decision log because an author did not mark an input, the default is revisited, and a publish-time warning for likely personal-data input names is the first candidate.
+
+**Follow-ups.** Maintainers (engineering): #255 as built. Documentation: the authoring guide and the wiki Rule Engine Configuration page (the setting and its per-tenant override). Architect: the setting in DESIGN section 4.4.
