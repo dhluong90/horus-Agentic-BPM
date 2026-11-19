@@ -80,7 +80,7 @@ class RuleAndProcessIT {
         }
     }
 
-    /** Records engine events as the host sees them: after commit only. */
+    /** A notification listener: AFTER_COMMIT, so it never sees rolled-back work. */
     @TestConfiguration(proxyBeanMethods = false)
     static class EventRecorder {
         static final List<io.github.dhluong90.bpm.process.spi.ProcessEventPublisher.Event> EVENTS =
@@ -89,7 +89,8 @@ class RuleAndProcessIT {
         @Bean
         Object processEventRecorder() {
             return new Object() {
-                @org.springframework.context.event.EventListener
+                @org.springframework.transaction.event.TransactionalEventListener(
+                        phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT)
                 void on(io.github.dhluong90.bpm.process.spi.ProcessEventPublisher.Event event) {
                     EVENTS.add(event);
                 }
@@ -141,6 +142,13 @@ class RuleAndProcessIT {
         assertThat(instance.at("/variables/pricing/fee/currency").stringValue()).isEqualTo("VND");
         assertThat(instance.get("tokens")).allSatisfy(t -> assertThat(t.get("status").stringValue()).isEqualTo("COMPLETED"));
         assertThat(get("tuan", "/api/cards/applications/IT-1001").get("status").stringValue()).isEqualTo("AUTO_APPROVED");
+        // The in-transaction listener's outbox rows committed with the steps; the AFTER_COMMIT listener saw them too.
+        assertThat(jdbc.sql("SELECT event_type FROM event_outbox WHERE tenant_id = 'bank-a' AND business_key = 'IT-1001' "
+                + "ORDER BY id").query(String.class).list())
+                .containsExactly("processes.instance.started.v1", "processes.instance.completed.v1");
+        assertThat(EventRecorder.EVENTS).filteredOn(e -> "IT-1001".equals(e.payload().get("businessKey")))
+                .extracting(io.github.dhluong90.bpm.process.spi.ProcessEventPublisher.Event::type)
+                .containsExactly("processes.instance.started.v1", "processes.instance.completed.v1");
         String decisionId = instance.at("/variables/pricing/decisionId").stringValue();
         assertThat(jdbc.sql("SELECT rule_set_name FROM rle_decision WHERE tenant_id = 'bank-a' AND id = ?").param(decisionId)
                 .query(String.class).single()).isEqualTo("card-fee");
@@ -200,8 +208,10 @@ class RuleAndProcessIT {
                 .single()).isZero();
         assertThat(jdbc.sql("SELECT count(*) FROM pre_token t JOIN pre_instance i ON i.tenant_id = t.tenant_id "
                 + "AND i.id = t.instance_id WHERE i.business_key = 'IT-1099'").query(Long.class).single()).isZero();
-        assertThat(EventRecorder.EVENTS).as("rolled-back work emits no event")
+        assertThat(EventRecorder.EVENTS).as("an AFTER_COMMIT listener sees nothing for a rolled-back step")
                 .noneMatch(e -> "IT-1099".equals(e.payload().get("businessKey")));
+        assertThat(jdbc.sql("SELECT count(*) FROM event_outbox WHERE business_key = 'IT-1099'").query(Long.class).single())
+                .as("the in-transaction listener's outbox row rolled back with the step").isZero();
     }
 
     @Test

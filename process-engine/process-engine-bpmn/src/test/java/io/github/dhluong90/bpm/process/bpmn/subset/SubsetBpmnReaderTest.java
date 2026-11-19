@@ -113,6 +113,22 @@ class SubsetBpmnReaderTest {
     }
 
     @Test
+    void an_unresolved_event_definition_ref_is_refused_naming_the_reference_element_and_line() {
+        byte[] bpmn = (HEAD + "\n<bpmn:startEvent id=\"start\">\n<bpmn:eventDefinitionRef>missing-timer</bpmn:eventDefinitionRef>"
+                + "\n</bpmn:startEvent>" + TAIL).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> reader.read(bpmn))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.ValidationFailedException.class)
+                .satisfies(e -> assertThat(((io.github.dhluong90.bpm.process.api.ValidationFailedException) e).problems())
+                        .anySatisfy(p -> {
+                            assertThat(p.code()).isEqualTo("EVENT_DEFINITION_REF_UNRESOLVED");
+                            assertThat(p.message()).contains("missing-timer");
+                            assertThat(p.element()).isEqualTo("startEvent");
+                            assertThat(p.elementId()).isEqualTo("start");
+                            assertThat(p.line()).isEqualTo(3);
+                        }));
+    }
+
+    @Test
     void a_user_task_without_a_result_variable_is_refused() {
         assertThatThrownBy(() -> reader.read(doc("<bpmn:userTask id=\"u\" horus:assignee=\"role:OFFICER\"/>")))
                 .isInstanceOf(io.github.dhluong90.bpm.process.api.ValidationFailedException.class)

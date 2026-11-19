@@ -122,6 +122,13 @@ public final class ProcessCompiler {
                 problems.add(DefinitionProblem.of("RESULT_VARIABLE_REQUIRED", "A userTask needs horus:resultVariable, so"
                         + " a completion result can never overwrite other process variables", node.id()));
             }
+            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event) {
+                // A process carries no shared definitions, so every reference is unresolved here.
+                for (String ref : event.eventDefinitionRefs()) {
+                    problems.add(DefinitionProblem.of("EVENT_DEFINITION_REF_UNRESOLVED", "eventDefinitionRef '" + ref
+                            + "' does not resolve to an event definition", node.id()));
+                }
+            }
             if (behaviors.behaviorFor(node).isEmpty()) {
                 problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "has no behaviour in this release",
                         node.getClass().getSimpleName(), node.id(), 0));

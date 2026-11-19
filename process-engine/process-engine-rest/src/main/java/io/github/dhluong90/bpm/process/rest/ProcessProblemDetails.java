@@ -29,7 +29,7 @@ public class ProcessProblemDetails {
     private static final String TYPE_BASE = "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#";
     private static final Pattern CORRELATION = Pattern.compile("^[A-Za-z0-9._:-]{1,64}$");
     private static final HttpStatus UNPROCESSABLE = HttpStatus.valueOf(422);
-    private static final Map<String, HttpStatus> STATUS = Map.ofEntries(
+    static final Map<String, HttpStatus> STATUS = Map.ofEntries(
             Map.entry("INPUT_INVALID", HttpStatus.BAD_REQUEST),
             Map.entry("UNAUTHENTICATED", HttpStatus.UNAUTHORIZED),
             Map.entry("PERMISSION_DENIED", HttpStatus.FORBIDDEN),

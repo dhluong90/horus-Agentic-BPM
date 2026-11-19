@@ -1,0 +1,337 @@
+openapi: 3.1.0
+info:
+  title: HORUS Process Engine REST API
+  version: 0.1.0
+  description: |
+    REST API of the Process Engine, served by the host application under `/api/bpm/processes/v1`.
+    Preview in 0.1.0: this file covers the endpoints of the walking skeleton (import a BPMN document, start an
+    instance, read it, complete a user task). Outside the `dev` profile an imported definition stays `DRAFT` and
+    nothing in this release can activate it; the approval flow and the remaining endpoints of
+    process-engine/docs/DESIGN.md section 6.2 follow with the features that implement them.
+
+    The tenant is never part of a request: it comes from the host's authenticated context (`EngineAccess`). Money is
+    `{currency, amount}` with the amount in minor units. Errors are RFC 9457 `application/problem+json`; clients
+    branch on `code`. Request bodies are read bounded: a BPMN document above `definitions.max-bytes` (1 MB) or a
+    JSON body above 256 KB is `413 PAYLOAD_TOO_LARGE` before it is read.
+  license:
+    name: PolyForm Noncommercial 1.0.0
+    url: https://polyformproject.org/licenses/noncommercial/1.0.0/
+servers:
+  - url: /api/bpm/processes/v1
+security:
+  - hostAuth: []
+tags:
+  - name: definitions
+    description: Import of BPMN process definitions
+  - name: instances
+    description: Start and read process instances
+  - name: tasks
+    description: Complete user tasks
+paths:
+  /definitions:
+    post:
+      tags: [definitions]
+      operationId: importDefinition
+      summary: Import a BPMN 2.0 document as the next version of its process key
+      description: |
+        Reads the executable subset (none start and end events, local `serviceTask`, `businessRuleTask`,
+        `userTask` with `horus:resultVariable`, `exclusiveGateway` with conditions and a default flow) from a UTF-8
+        document. DTDs and entities are refused (`BPMN_UNSAFE_XML`), every element outside the subset is named with
+        its id and line (`BPMN_UNSUPPORTED_ELEMENT`), and a condition in another expression language is
+        `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`. The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A
+        document identical to the latest version of its key returns that version, also with `201`. Permission
+        `processes:deploy`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema: { type: string }
+          text/xml:
+            schema: { type: string }
+          application/bpmn+xml:
+            schema: { type: string }
+      responses:
+        '201':
+          description: The stored version
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DefinitionVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /instances:
+    post:
+      tags: [instances]
+      operationId: startInstance
+      summary: Start an instance on the effective version of a process key
+      description: |
+        Runs every synchronous step up to the first user task or the end in one transaction. A step that fails
+        rolls everything back (`422 STEP_FAILED`, with `nodeId` and `reason`). A request needs a `businessKey` or
+        an `Idempotency-Key` (`428 PRECONDITION_REQUIRED` without either), so a retry can never start a second
+        instance. An instance that already exists for the business key is returned with `200`; a new one with
+        `201`; a replay of the same `Idempotency-Key` returns the first answer. Permission `processes:start`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartRequest' }
+            example:
+              definitionKey: card-fee-review
+              businessKey: APP-1002
+              variables: { applicationId: APP-1002, customerId: C-002 }
+      responses:
+        '200':
+          $ref: '#/components/responses/Instance'
+        '201':
+          $ref: '#/components/responses/Instance'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /instances/{id}:
+    get:
+      tags: [instances]
+      operationId: getInstance
+      summary: Read an instance with its execution tree and tasks
+      description: |
+        Variables are returned unmasked in 0.1.0 (masking of declared fields follows with the variable
+        declarations). Permission `processes:read`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, minLength: 26, maxLength: 26 }
+      responses:
+        '200':
+          $ref: '#/components/responses/Instance'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}:complete:
+    post:
+      tags: [tasks]
+      operationId: completeTask
+      summary: Complete an open user task
+      description: |
+        The caller must hold `processes:task:work` and be the assigned user, hold the assigned role or belong to
+        the assigned group (`403 TASK_NOT_ASSIGNED`). On a four-eyes task the identity that started the instance or
+        completed an earlier task of it is refused (`403 SELF_APPROVAL_FORBIDDEN`, PRE-007). The result is stored
+        in the task's result variable. The following synchronous steps run in the same transaction.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, minLength: 26, maxLength: 26 }
+        - name: If-Match
+          in: header
+          required: true
+          description: |
+            The task's `lockVersion` from the instance view (not the instance `ETag`), quoted. Missing is
+            `428 PRECONDITION_REQUIRED`; stale is `409 VERSION_CONFLICT`.
+          schema: { type: string, example: '"0"' }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Required on completion; missing is `428 PRECONDITION_REQUIRED`. See the IdempotencyKey parameter.
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                result:
+                  type: object
+                  additionalProperties: true
+            example: { result: { approved: true } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Instance'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    hostAuth:
+      type: http
+      scheme: bearer
+      description: The host's own authentication. The engine reads the caller and tenant from the host's security context.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        A replay with the same request returns the original result and changes nothing; a concurrent request with
+        the same key waits for the first and then replays its answer. The same key with a different request is
+        `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; a request that finds the key still pending is
+        `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`. Remembered for `idempotency-retention` (24 hours).
+      schema: { type: string, minLength: 1, maxLength: 200 }
+  responses:
+    Instance:
+      description: The instance after the call
+      headers:
+        ETag:
+          description: The instance's `lockVersion`, quoted. Task completion uses the task's own `lockVersion`.
+          schema: { type: string }
+        Location:
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ProcessInstance' }
+    Problem:
+      description: >-
+        RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `401 UNAUTHENTICATED`
+        carries a `WWW-Authenticate` challenge. `403` is `PERMISSION_DENIED` (missing engine permission),
+        `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
+        the caller's, or a decision step whose caller tenant is not the instance tenant). `409` is
+        `VERSION_CONFLICT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
+        `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
+        `IDEMPOTENCY_KEY_REUSE_MISMATCH` or `STEP_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`
+        or `DEFINITION_INTEGRITY_FAILED`, with a correlation id only.
+      headers:
+        WWW-Authenticate:
+          description: Sent with every `401`
+          schema: { type: string }
+        Retry-After:
+          description: Seconds to wait; sent with `409 IDEMPOTENCY_IN_FLIGHT`
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Money:
+      type: object
+      required: [currency, amount]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        amount:
+          type: integer
+          description: Minor units
+    StartRequest:
+      type: object
+      required: [definitionKey]
+      properties:
+        definitionKey: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' }
+        businessKey: { type: string, minLength: 1, maxLength: 200 }
+        variables:
+          type: object
+          additionalProperties: true
+          description: At most 256 KB of JSON. Floating-point numbers are read as decimals; money is a Money object.
+    DefinitionVersion:
+      type: object
+      required: [id, key, version, status, definitionHash, sourceFormat, sourceHash, nodeCount, createdBy, createdAt]
+      properties:
+        id: { type: string }
+        key: { type: string }
+        version: { type: integer, minimum: 1 }
+        status: { type: string, enum: [DRAFT, PENDING_APPROVAL, ACTIVE, RETIRED] }
+        name: { type: [string, 'null'] }
+        definitionHash:
+          type: string
+          description: SHA-256 of the RFC 8785 form of the canonical v1 profile; checked before every compile
+        sourceFormat: { type: string, enum: [BPMN_XML, JSON, YAML] }
+        sourceHash:
+          type: string
+          description: SHA-256 of the stored source document; checked before every compile
+        nodeCount: { type: integer }
+        approvedBy: { type: [string, 'null'] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    ProcessInstance:
+      type: object
+      required: [id, definitionKey, definitionVersion, status, variables, tokens, tasks, lockVersion, startedAt]
+      properties:
+        id: { type: string }
+        definitionKey: { type: string }
+        definitionVersion: { type: integer }
+        businessKey: { type: [string, 'null'] }
+        status: { type: string, enum: [RUNNING, COMPLETED, CANCELLED, COMPENSATING, FAILED] }
+        variables: { type: object, additionalProperties: true }
+        tokens:
+          type: array
+          items:
+            type: object
+            required: [id, kind, nodeId, status]
+            properties:
+              id: { type: string }
+              kind: { type: string, enum: [SCOPE, MI_BODY, FLOW] }
+              scopeTokenId: { type: [string, 'null'] }
+              nodeId: { type: string }
+              status:
+                type: string
+                enum: [ACTIVE, WAITING_USER, WAITING_ASYNC, WAITING_TIMER, WAITING_EVENT, WAITING_SCOPE, JOINED,
+                  COMPLETED, CANCELLED, COMPENSATED]
+        tasks:
+          type: array
+          items:
+            type: object
+            required: [id, nodeId, assignee, status, lockVersion]
+            properties:
+              id: { type: string }
+              nodeId: { type: string }
+              name: { type: [string, 'null'] }
+              assignee: { type: string, description: 'user:<id>, role:<role> or group:<group>' }
+              status: { type: string, enum: [OPEN, CLAIMED, COMPLETED, CANCELLED] }
+              lockVersion: { type: integer, description: The value to send as If-Match when completing the task }
+              completedBy: { type: [string, 'null'] }
+        lockVersion: { type: integer }
+        startedBy: { type: [string, 'null'] }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: [string, 'null'], format: date-time }
+    DefinitionProblemItem:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        element: { type: [string, 'null'] }
+        elementId: { type: [string, 'null'], description: At most 80 characters, control characters escaped }
+        line: { type: integer }
+    Problem:
+      type: object
+      required: [type, title, status, code, correlationId]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        code:
+          type: string
+          enum: [INPUT_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED, SELF_APPROVAL_FORBIDDEN,
+            TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, INSTANCE_NOT_FOUND, TASK_NOT_FOUND, INVALID_STATE,
+            VERSION_CONFLICT, IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
+            BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, PRECONDITION_REQUIRED,
+            DEFINITION_INTEGRITY_FAILED, INTERNAL]
+        detail: { type: string }
+        correlationId: { type: string }
+        problems:
+          type: array
+          description: Present on `VALIDATION_FAILED` and `BPMN_UNSUPPORTED_ELEMENT`
+          items: { $ref: '#/components/schemas/DefinitionProblemItem' }
+        nodeId: { type: string, description: Present on `STEP_FAILED` }
+        reason:
+          type: string
+          description: Present on `STEP_FAILED`, for example `UNHANDLED_BUSINESS_ERROR`, `DECISION_NO_MATCH`, `STEP_LIMIT`

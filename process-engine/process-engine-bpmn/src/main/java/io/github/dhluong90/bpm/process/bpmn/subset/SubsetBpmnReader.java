@@ -138,6 +138,8 @@ public final class SubsetBpmnReader {
         private int previousLine;
         private int startLine;
         private String documentLanguage;
+        private final Set<String> sharedDefinitionIds = new HashSet<>();
+        private final List<DefinitionProblem> unresolvedRefs = new ArrayList<>();
 
         Pass(XMLStreamReader xml) {
             this.xml = xml;
@@ -162,10 +164,19 @@ public final class SubsetBpmnReader {
                         process = process();
                     }
                 } else if (BPMN.equals(ns)) {
+                    if (local.endsWith("EventDefinition") && attr("id") != null) {
+                        sharedDefinitionIds.add(attr("id"));
+                    }
                     unsupported(local, attr("id"), "S1 (collaboration and shared root elements)");
                     skip();
                 } else {
                     skip();
+                }
+            }
+            for (DefinitionProblem ref : unresolvedRefs) {
+                if (!sharedDefinitionIds.contains(ref.message().substring(ref.message().indexOf('\'') + 1,
+                        ref.message().indexOf('\'', ref.message().indexOf('\'') + 1)))) {
+                    invalid.add(ref);
                 }
             }
             if (!unsupported.isEmpty()) {
@@ -230,7 +241,15 @@ public final class SubsetBpmnReader {
             String name = attr("name");
             while (nextChild()) {
                 String local = xml.getLocalName();
-                if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
+                if (BPMN.equals(xml.getNamespaceURI()) && "eventDefinitionRef".equals(local)) {
+                    // A reference that does not resolve is a broken document: 422 naming the reference, not
+                    // "not executable" at activation.
+                    int line = line();
+                    String ref = text().strip();
+                    unresolvedRefs.add(new DefinitionProblem("EVENT_DEFINITION_REF_UNRESOLVED", "eventDefinitionRef '"
+                            + safe(ref) + "' does not resolve to an event definition of this document", element,
+                            safe(id), line));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     unsupported(element + " with " + local, id, "S1 or S2 (event definitions)");
                     skip();
                 } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)

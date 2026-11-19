@@ -219,17 +219,22 @@ class ProcessServicesQaTest {
     }
 
     @Test
-    void a_listener_that_throws_after_commit_does_not_fail_the_committed_start() {
+    void a_plain_listener_that_throws_fails_the_start_so_the_transaction_rolls_back() {
         AtomicInteger delivered = new AtomicInteger();
         ProcessServices services = services(pricing(), () -> "bank-a", Optional.of(ruleEngine(new AtomicInteger())),
                 event -> {
-                    delivered.incrementAndGet();
-                    throw new IllegalStateException("listener down");
+                    if (event.type().startsWith("processes.instance.")) {
+                        delivered.incrementAndGet();
+                        throw new IllegalStateException("listener down");
+                    }
                 });
         services.importAtStartup("bank-a", new ImportRequest(SourceFormat.BPMN_XML, "p".getBytes(StandardCharsets.UTF_8), null));
 
-        assertThat(services.start(StartRequest.of("pricing").withIdempotencyKey("k2")).status()).isEqualTo("COMPLETED");
-        assertThat(delivered.get()).as("every event was still offered").isGreaterThan(1);
+        // Events are handed over inside the transaction (DESIGN 6.4, #173): the exception reaches the caller, and the
+        // host's transaction manager rolls the state change back with it.
+        assertThatThrownBy(() -> services.start(StartRequest.of("pricing").withIdempotencyKey("k2")))
+                .isInstanceOf(IllegalStateException.class).hasMessage("listener down");
+        assertThat(delivered.get()).isEqualTo(1);
     }
 
     // ---- wiring ---------------------------------------------------------------------------------------------

@@ -202,7 +202,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     ProcessEventPublisher.Event event = new ProcessEventPublisher.Event(active
                             ? "processes.definition.approved.v1" : "processes.definition.imported.v1", tenant, now,
                             Map.of("definitionKey", stored.key(), "version", stored.version(), "definitionHash", hash));
-                    transactions.afterCommit(() -> deliver(event));
+                    publisher.publish(event);
                     return view(stored);
                 }, Views::definitionToJson, Views::definitionFromJson));
     }
@@ -327,19 +327,6 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }, Views::instanceToJson, Views::instanceFromJson));
     }
 
-    /**
-     * Hands an event to the publisher after commit. The work is committed, so a failing listener is logged and never
-     * turns the successful request into an error.
-     */
-    private void deliver(ProcessEventPublisher.Event event) {
-        try {
-            publisher.publish(event);
-        } catch (RuntimeException e) {
-            LOG.log(System.Logger.Level.WARNING, "process.event.listener.failed type={0} exception={1}", event.type(),
-                    e.getClass().getName());
-        }
-    }
-
     /** Four-eyes participants: the starter and everyone who completed a task of the instance (PRE-007). */
     private java.util.Set<String> participants(String tenant, InstanceRow row) {
         java.util.Set<String> out = new java.util.LinkedHashSet<>();
@@ -428,7 +415,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             }
                             ProcessEventPublisher.Event published = new ProcessEventPublisher.Event(event.type(),
                                     state.tenantId(), clock.instant(), payload);
-                            transactions.afterCommit(() -> deliver(published));
+                            publisher.publish(published);
                         }
                         default -> throw new ExecutionException("EFFECT_NOT_SUPPORTED", null,
                                 effect.getClass().getSimpleName() + " is not supported in this release");
