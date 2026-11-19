@@ -259,10 +259,27 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Traces to:** `TR-OBS-04`, `TR-IDEM-01`
 - **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`; `bob` holds `rules:approve`.
-- **When:** `bob` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:reject` with `Idempotency-Key: k-201`, `If-Match: "3"` and body `{ "reason": "R2 waiver needs pricing committee minutes" }`. Failure cases: the same call with body `{ "reason": "" }`; with `If-Match: "2"`; and a reject of `card-fee` v1, which is `PUBLISHED`. Withdrawal case: `fx-margin` v4 is `PENDING_APPROVAL`, requested by `bob`, and `bob` rejects it with reason `"Wrong margin table attached"`.
-- **Then:** `200`; v2 is `DRAFT` with `lockVersion 4`, `requested_by` and `requested_at` cleared, and one `rle_version_history` row `REJECTED` with actor `bob`, the reason, statuses `PENDING_APPROVAL` to `DRAFT` and `lockVersion 4` (`GET .../versions/2/history` returns it after the `CREATED` and `REQUESTED` rows); one `rules.version.rejected.v1` event carries rule set, version, tenant, actor `bob`, reason and timestamp; `alice` can edit v2 again and request publication again. A replay with `k-201` and the same body returns the same `200` and writes no second event. The empty reason returns `400 INPUT_INVALID` naming `reason`; the stale `If-Match` returns `409 VERSION_CONFLICT`; the reject of v1 returns `409 INVALID_STATE`. In each failure case the version, its history and the event count are unchanged. The withdrawal succeeds (`200`, `fx-margin` v4 `DRAFT`, actor `bob`): rejecting one's own request publishes nothing, so `SELF_APPROVAL_FORBIDDEN` does not apply.
+- **When:** `bob` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:reject` with `Idempotency-Key: k-201`, `If-Match: "3"` and body `{ "reason": "R2 waiver needs pricing committee minutes" }`. Failure cases: the same call with body `{ "reason": "" }`; with `If-Match: "2"`; and a reject of `card-fee` v1, which is `PUBLISHED`. Self-reject case: `fx-margin` v4 is `PENDING_APPROVAL`, requested by `bob`, and `bob` rejects it with reason `"Wrong margin table attached"`.
+- **Then:** `200`; v2 is `DRAFT` with `lockVersion 4`, `requested_by` and `requested_at` cleared, and one `rle_version_history` row `REJECTED` with actor `bob`, the reason, statuses `PENDING_APPROVAL` to `DRAFT` and `lockVersion 4` (`GET .../versions/2/history` returns it after the `CREATED` and `REQUESTED` rows); one `rules.version.rejected.v1` event carries rule set, version, tenant, actor `bob`, reason and timestamp; `alice` can edit v2 again and request publication again. A replay with `k-201` and the same body returns the same `200` and writes no second event. The empty reason returns `400 INPUT_INVALID` naming `reason`; the stale `If-Match` returns `409 VERSION_CONFLICT`; the reject of v1 returns `409 INVALID_STATE`. In each failure case the version, its history and the event count are unchanged. The self-reject returns `403 SELF_APPROVAL_FORBIDDEN` with a detail pointing to `:withdraw`, and `fx-margin` v4 stays `PENDING_APPROVAL` (PD-089; the requester withdraws instead, `RLE-046`).
 - **Example:** `bob rejects card-fee v2 with a reason -> DRAFT, lockVersion 4, 1 rejected event; reason "" -> 400 INPUT_INVALID; v1 PUBLISHED -> 409 INVALID_STATE`.
 - **Test ID:** `RLE_025_reject_returns_pending_version_to_draft_with_reason`
+
+### RLE-046 The requester withdraws their own pending request, and it returns to draft without a rejection
+- **Traces to:** `TR-OBS-04`, `TR-IDEM-01`, `TR-SEC-04`, PD-089
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`, who holds `rules:author` only; `card-fee` v1 is `PUBLISHED` and in effect; `bob` holds `rules:approve`; `carol` holds `rules:author`.
+- **When:** `alice` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:withdraw` with `Idempotency-Key: k-301`, `If-Match: "3"` and body `{ "reason": "Wrong fee for GOLD" }`; then she edits v2 and requests publication again. Failure cases: `bob` withdraws v2; `carol` withdraws v2; `alice` withdraws with `If-Match: "2"`; `alice` withdraws `card-fee` v1 (`PUBLISHED`); `alice` withdraws with a 2,001-character reason.
+- **Then:**
+  - `200`; v2 is `DRAFT` with `lockVersion 4`, and `requested_by` and `requested_at` are cleared.
+  - One `rle_version_history` row `WITHDRAWN` is written, with actor `alice`, the reason, and statuses `PENDING_APPROVAL` to `DRAFT`.
+  - One `rules.version.withdrawn.v1` event carries rule set, version, tenant, `withdrawnBy: alice`, the reason and the timestamp. No `rules.version.rejected.v1` event is written.
+  - Evaluation still selects v1, and nothing is published.
+  - A replay with `k-301` and the same body returns the same `200` and writes no second event. A body without `reason` is also accepted, with `reason` null in the history row and the event.
+  - The new request publication starts a new approval: a new `REQUESTED` history row, and `bob` may approve it.
+  - `bob` and `carol` get `403 PERMISSION_DENIED` (an approver uses `:reject`). The stale `If-Match` returns `409 VERSION_CONFLICT`. The withdrawal of v1 returns `409 INVALID_STATE`. The long reason returns `400 INPUT_INVALID` naming `reason`. In each failure case the version, its history and the event count are unchanged.
+  - `allowedActions` on v2, read by `alice` while it is pending, contains `withdraw` and not `approve` or `reject`.
+- **Example:** `alice withdraws her own pending v2 -> DRAFT, WITHDRAWN row, withdrawn event, v1 still in effect; bob or carol withdraws -> 403; stale If-Match -> 409`.
+- **Test ID:** `RLE_046_requester_withdraws_own_pending_request_to_draft`
 
 ### RLE-026 Retiring a published version by hand stops every replica serving it
 - **Traces to:** `TR-OBS-04`, `TR-ASY-04`, `TR-DET-05`
@@ -416,6 +433,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - **(n5)** `country != 'VN'` against the same text with a Cyrillic `В` in place of `V`. The canonical document shows it unchanged, because no normalisation is applied, and the diff marks the changed literal as containing non-ASCII characters.
   - **(n6)** `country != 'V\u200BN'` (a zero-width space) is printed with the `\u200B` escape and has its own hash. `country != 'V\u202EN'` (a bidirectional override) is refused at import with `422` naming the line.
   - **(n7)** A source that is not valid UTF-8, contains NUL, or starts with a byte order mark is refused at import with `422`, and nothing is stored.
+  - **(n8)** For an output with `default: 0`, a rule with an explicit `null` output and the same rule with the cell omitted have different hashes; for an output without a default the two have one hash.
 - **Then (integrity):**
   - A model whose printed form does not parse back to an equal tree is refused at import with `422` and nothing stored. This is tested with a deliberately broken printer in the test harness.
   - A stored version whose `canonical_json` is altered in the database so that it no longer hashes to `canonical_hash` is not served. Evaluation returns `EVALUATION_ERROR` with a detail naming the integrity check, and one audit entry and one alert are written.
