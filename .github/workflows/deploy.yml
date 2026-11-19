@@ -24,6 +24,11 @@ on:
       - "examples/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
+    inputs:
+      no-cache:
+        description: "Build the image with no layer cache, to compare its content digest with a cached build"
+        type: boolean
+        default: false
 
 # Actions are pinned by commit SHA; the comment names the release. Update both together.
 permissions:
@@ -73,14 +78,33 @@ jobs:
           load: true
           push: false
           provenance: false
+          no-cache: ${{ inputs.no-cache == true }}
           cache-from: type=gha,scope=deploy-rule-engine-only
           cache-to: type=gha,scope=deploy-rule-engine-only,mode=max
 
-      - name: Content digest of the application files (compare across runs)
+      # The engine jars in BOOT-INF/lib carry their build time in zip entry timestamps, so their bytes
+      # differ between any two builds. The digest covers what they contain: the name and SHA-256 of every
+      # file under /app, and of every entry inside each jar.
+      - name: Content digest of the application files and jar entries (compare across runs)
         run: |
-          docker run --rm --entrypoint sh "$IMAGE" -c \
-            'cd /app && find . -type f | sort | xargs sha256sum' > "$RUNNER_TEMP/app-files.txt"
-          echo "$(wc -l < "$RUNNER_TEMP/app-files.txt") files, digest $(sha256sum < "$RUNNER_TEMP/app-files.txt" | cut -d' ' -f1)" \
+          set -euo pipefail
+          cid="$(docker create "$IMAGE")"; docker cp "$cid:/app" "$RUNNER_TEMP/app"; docker rm "$cid" > /dev/null
+          python3 - "$RUNNER_TEMP/app" > "$RUNNER_TEMP/app-content.txt" <<'PY'
+          import hashlib, os, sys, zipfile
+          root = sys.argv[1]
+          for folder, _, files in sorted(os.walk(root)):
+              for name in sorted(files):
+                  path = os.path.join(folder, name); rel = os.path.relpath(path, root)
+                  if name.endswith(".jar"):
+                      with zipfile.ZipFile(path) as jar:
+                          for entry in sorted(jar.namelist()):
+                              if not entry.endswith("/"):
+                                  print(hashlib.sha256(jar.read(entry)).hexdigest(), f"{rel}!{entry}")
+                  else:
+                      with open(path, "rb") as f:
+                          print(hashlib.sha256(f.read()).hexdigest(), rel)
+          PY
+          echo "Built with no-cache: ${{ inputs.no-cache == true }}. $(wc -l < "$RUNNER_TEMP/app-content.txt") files and jar entries, content digest $(sha256sum < "$RUNNER_TEMP/app-content.txt" | cut -d' ' -f1)" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Start PostgreSQL and the host, wait for healthy

@@ -278,7 +278,7 @@ The build stage resolves Maven dependencies in a layer of their own, before the 
 | The normal build, reusing layers | `docker compose build` |
 | A build with no cache at all, as a release would | `docker compose build --no-cache` |
 
-The Deploy workflow keeps the layers between runs in the GitHub Actions cache (`docker/build-push-action`, `cache-from` and `cache-to` of type `gha`). Its log shows the dependency layer as `CACHED` after a source-only change, and the step summary prints a SHA-256 digest of every file under `/app`, so a cached and an uncached build can be compared. The release workflow builds no image.
+The Deploy workflow keeps the layers between runs in the GitHub Actions cache (`docker/build-push-action`, `cache-from` and `cache-to` of type `gha`). Its log shows the dependency layer as `CACHED` after a source-only change, and the step summary prints a content digest of `/app`: the SHA-256 of every file and of every entry inside each jar (the engine jars carry their build time in zip timestamps, so their bytes always differ). A manual run with the `no-cache` input builds with no layer cache, for comparison with a cached build of the same commit. The release workflow builds no image.
 
 ### Updating the JRE
 
