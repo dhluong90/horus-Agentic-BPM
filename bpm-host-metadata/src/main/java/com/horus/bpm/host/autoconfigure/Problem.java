@@ -1,5 +1,6 @@
 package com.horus.bpm.host.autoconfigure;
 
+import com.horus.bpm.host.spi.EngineAccessDeniedException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -36,6 +37,16 @@ record Problem(int status, String code, String title, String detail) {
     static Problem tenantNotAllowed() {
         return new Problem(403, "TENANT_NOT_ALLOWED", "Tenant not allowed",
                 "The request names a tenant the caller is not signed in for, and tenant switching is off.");
+    }
+
+    /** The problem for a refusal of {@code EngineAccess}. */
+    static Problem of(EngineAccessDeniedException.Reason reason) {
+        return switch (reason) {
+            case UNAUTHENTICATED -> unauthenticated();
+            case NO_TENANT -> noTenant();
+            case TENANT_NOT_ALLOWED -> tenantNotAllowed();
+            case PERMISSION_DENIED -> permissionDenied();
+        };
     }
 
     /** The JSON body for this request. */

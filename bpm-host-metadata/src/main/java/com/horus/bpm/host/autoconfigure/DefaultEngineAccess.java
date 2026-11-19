@@ -1,6 +1,11 @@
 package com.horus.bpm.host.autoconfigure;
 
 import com.horus.bpm.host.spi.CallerContext;
+import com.horus.bpm.host.spi.EngineAccess;
+import com.horus.bpm.host.spi.EngineAccessDeniedException;
+import com.horus.bpm.host.spi.EngineAccessDeniedException.Reason;
+import com.horus.bpm.host.spi.EngineCaller;
+import com.horus.bpm.host.spi.ModuleDescriptor;
 import com.horus.bpm.host.spi.TenantResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
@@ -20,19 +25,23 @@ import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 /**
- * Resolves the caller and tenant of a request from the authenticated principal, never from a request body
- * or query parameter (TR-SEC-03).
+ * The default {@link EngineAccess}: the caller from the host's Spring Security context, the tenant from the
+ * {@link TenantResolver}, never from a request body or query parameter (TR-SEC-03), and permissions from
+ * the authorities and the engines' role mappings.
  *
- * <p>The {@link TenantResolver} finds the tenant (PD-079). Two checks then apply to every resolver, the
- * host's own included: when the principal carries the tenant attribute, the resolved tenant must equal it;
- * and while tenant switching is off, an {@code X-Tenant-Id} header, the switch request of ADR-0014
- * decision 5, must equal the resolved tenant. A mismatch, or a tenant outside the allowed
- * format, is {@code 403 TENANT_NOT_ALLOWED} with a {@code tenant.switch.refused} security log entry
- * (ADR-0014).
+ * <p>Two checks then apply to every resolver, the host's own included: when the principal carries the
+ * tenant attribute, the resolved tenant must equal it; and while tenant switching is off, an
+ * {@code X-Tenant-Id} header, the switch request of ADR-0014 decision 5, must equal the resolved tenant. A
+ * mismatch, or a tenant outside the allowed format, is {@code 403 TENANT_NOT_ALLOWED} with a
+ * {@code tenant.switch.refused} security log entry (ADR-0014). The current request is taken from Spring's
+ * request context; outside a request (a host job running as a user) there is no header to check.
  */
-final class CallerResolution {
+final class DefaultEngineAccess implements EngineAccess {
 
     static final String TENANT_SWITCH_HEADER = "X-Tenant-Id";
     /** 1 to 64 characters, starting with a letter or digit. */
@@ -43,27 +52,25 @@ final class CallerResolution {
     private final String tenantClaim;
     private final Function<Authentication, Map<String, Object>> claims;
     private final String challenge;
+    private final List<ModuleDescriptor> modules;
 
-    CallerResolution(TenantResolver resolver, String tenantClaim, Function<Authentication, Map<String, Object>> claims,
-            String challenge) {
+    DefaultEngineAccess(TenantResolver resolver, String tenantClaim, Function<Authentication, Map<String, Object>> claims,
+            String challenge, List<ModuleDescriptor> modules) {
         this.resolver = resolver;
         this.tenantClaim = tenantClaim;
         this.claims = claims;
         this.challenge = challenge;
+        this.modules = List.copyOf(modules);
     }
 
-    /**
-     * The caller of the current request.
-     *
-     * @throws ProblemException {@code 401 UNAUTHENTICATED} without a principal or without a tenant,
-     *     {@code 403 TENANT_NOT_ALLOWED} for a tenant the caller is not signed in for
-     */
-    Caller resolve(HttpServletRequest request) {
+    @Override
+    public EngineCaller currentCaller() {
         Authentication authentication = SecurityContextHolder.getContextHolderStrategy().getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()
                 || authentication instanceof AnonymousAuthenticationToken) {
-            throw new ProblemException(Problem.unauthenticated(), challenge);
+            throw new EngineAccessDeniedException(Reason.UNAUTHENTICATED, challenge, null);
         }
+        HttpServletRequest request = currentRequest();
         Map<String, Object> tokenClaims = claims.apply(authentication);
         Set<String> authorities = authorities(authentication.getAuthorities());
         Context context = new Context(authentication.getName(), authentication.getPrincipal(), authorities, tokenClaims);
@@ -71,11 +78,12 @@ final class CallerResolution {
 
         Optional<String> resolved = resolver.resolve(context);
         if (resolved.isEmpty()) {
+            String correlationId = correlationId(request);
             SECURITY_LOG.warn("tenant.unresolved user=" + CorrelationIds.loggable(authentication.getName())
                     + " source=" + CorrelationIds.loggable(resolver.toString())
-                    + " correlationId=" + CorrelationIds.of(request)
-                    + " clientCorrelationId=" + CorrelationIds.clientValue(request));
-            throw new ProblemException(Problem.noTenant(), invalidTokenChallenge());
+                    + " correlationId=" + correlationId
+                    + " clientCorrelationId=" + clientCorrelationId(request));
+            throw new EngineAccessDeniedException(Reason.NO_TENANT, invalidTokenChallenge(), correlationId);
         }
         String tenant = resolved.get();
         if (!TENANT.matcher(tenant).matches()) {
@@ -84,23 +92,53 @@ final class CallerResolution {
         if (tokenTenant != null && !tokenTenant.equals(tenant)) {
             throw refused(request, authentication, tokenTenant, tenant, "differs-from-token-tenant");
         }
-        String requested = request.getHeader(TENANT_SWITCH_HEADER);
+        String requested = request == null ? null : request.getHeader(TENANT_SWITCH_HEADER);
         if (requested != null && !requested.equals(tenant)) {
             throw refused(request, authentication, tokenTenant, requested, "switching-off");
         }
-        return new Caller(authentication.getName(), displayName(context), tenant, authorities,
+        return new EngineCaller(authentication.getName(), displayName(context), tenant, authorities,
                 stringList(tokenClaims.get("groups")));
     }
 
-    private static ProblemException refused(HttpServletRequest request, Authentication authentication,
+    /**
+     * An authority equal to the permission, or a host authority the declaring engine's role mapping grants
+     * it for. Only the engine that declares a permission can grant it.
+     */
+    @Override
+    public boolean hasPermission(EngineCaller caller, String permission) {
+        for (ModuleDescriptor module : modules) {
+            if (module.permissions().contains(permission)) {
+                return caller.authorities().contains(permission)
+                        || module.rolePermissions().entrySet().stream().anyMatch(mapping ->
+                                caller.authorities().contains(mapping.getKey()) && mapping.getValue().contains(permission));
+            }
+        }
+        throw new IllegalArgumentException("No installed engine declares the permission '" + permission + "'.");
+    }
+
+    private EngineAccessDeniedException refused(@Nullable HttpServletRequest request, Authentication authentication,
             @Nullable String tokenTenant, String requested, String reason) {
+        String correlationId = correlationId(request);
         SECURITY_LOG.warn("tenant.switch.refused reason=" + reason
                 + " user=" + CorrelationIds.loggable(authentication.getName())
                 + " tokenTenant=" + CorrelationIds.loggable(tokenTenant)
                 + " requestedTenant=" + CorrelationIds.loggable(requested)
-                + " correlationId=" + CorrelationIds.of(request)
-                + " clientCorrelationId=" + CorrelationIds.clientValue(request));
-        return new ProblemException(Problem.tenantNotAllowed());
+                + " correlationId=" + correlationId
+                + " clientCorrelationId=" + clientCorrelationId(request));
+        return new EngineAccessDeniedException(Reason.TENANT_NOT_ALLOWED, null, correlationId);
+    }
+
+    private static @Nullable HttpServletRequest currentRequest() {
+        RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
+        return attributes instanceof ServletRequestAttributes servlet ? servlet.getRequest() : null;
+    }
+
+    private static String correlationId(@Nullable HttpServletRequest request) {
+        return request == null ? CorrelationIds.newUlid(System.currentTimeMillis()) : CorrelationIds.of(request);
+    }
+
+    private static String clientCorrelationId(@Nullable HttpServletRequest request) {
+        return request == null ? "-" : CorrelationIds.clientValue(request);
     }
 
     /** A bearer challenge says the token is the problem, so a client knows a fresh sign-in will not help. */
@@ -130,6 +168,11 @@ final class CallerResolution {
             }
         }
         return strings;
+    }
+
+    @Override
+    public String toString() {
+        return "the engines' default access check";
     }
 
     private record Context(String principalName, Object principal, Set<String> authorities,
