@@ -444,10 +444,10 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:**
   - **Step 1** returns `409 WARNINGS_NOT_ACKNOWLEDGED`. Its body carries `warnings: [{ code: UNMASKED_PERSONAL_DATA, input: nationalId, matchedName: "national id" }]` and `setting: [UNMASKED_PERSONAL_DATA]`. v1 stays `PENDING_APPROVAL` at `lockVersion 2`, and no history row or event is written.
   - **Step 2** returns `200`, and v1 is `PUBLISHED`.
-    - The history row `APPROVED` stores `acknowledged_warnings = [{ code: UNMASKED_PERSONAL_DATA, input: nationalId }]` and `masked_by_default = []`.
-    - `rules.version.published.v1` carries `acknowledgedWarnings` with the same entry and `maskedByDefault: []`.
+    - The history row `APPROVED` stores `acknowledged_warnings = [{ code: UNMASKED_PERSONAL_DATA, input: nationalId }]` and `masked_by_default_inputs = []`.
+    - `rules.version.published.v1` carries `acknowledgedWarnings` with the same entry and `maskedByDefaultInputs: []`.
   - **Step 3** returns the same answer and writes nothing.
-  - **Step 4** returns `200`, because `nationalId` is masked by `bank-c`'s default. The history row and the event carry `acknowledgedWarnings: []` and `maskedByDefault: [nationalId]`, so an auditor sees why no acknowledgement was asked.
+  - **Step 4** returns `200`, because `nationalId` is masked by `bank-c`'s default. The history row and the event carry `acknowledgedWarnings: []` and `maskedByDefaultInputs: [nationalId]`, so an auditor sees why no acknowledgement was asked.
 - **Example:** `approve with a nationalId warning -> 409 WARNINGS_NOT_ACKNOWLEDGED, nothing written; with acknowledgedWarnings -> PUBLISHED, acknowledgement on the history row and the event; masked by default -> no acknowledgement needed`.
 - **Test ID:** `RLE_053_approval_with_an_unmasked_personal_data_warning_needs_an_acknowledgement`
 
