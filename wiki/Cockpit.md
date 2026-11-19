@@ -40,7 +40,7 @@ An embedded cockpit also works when your web application signs users in with a s
 
 ### Where the cockpit opens
 
-A link into a screen always opens that screen. Otherwise the cockpit opens on a landing area chosen by the user's role. This is the host setting `cockpit.landing`, default `by-role`, which the cockpit reads from `/api/bpm/meta`; the host can set another landing area.
+A link into a screen always opens that screen. Otherwise the cockpit opens on a landing area chosen by the user's role. This is the host property `horus.bpm.cockpit.landing`, default `by-role`, which the cockpit reads from `/api/bpm/meta` as `cockpit.landing`; the host can set another landing area.
 
 | User | Cockpit 0.1 opens on |
 |---|---|
@@ -99,7 +99,7 @@ Authoring in 0.1 is by cell and row editing in the cockpit, a CSV round trip, or
 
 Readings are plain-language sentences by default. The host can choose the shorthand style instead, and can override or extend the sentence patterns per language. If the 8 Jan 2027 checkpoint fails, Cockpit 0.1 ships the shorthand style only and sentences follow in 0.2.
 
-A host that keeps production rule changes in Git can turn off cockpit editing per environment; it is on by default. Imports, approvals and reading still work. The property name will be listed in [[Rule Engine Configuration]] with the 0.1 specification.
+A host that keeps production rule changes in Git can turn off cockpit editing per environment; it is on by default. Imports, approvals and reading still work. The property is `horus.bpm.rules.authoring.cockpit-drafts` ([[Rule Engine Configuration]]).
 
 ## Rule Engine tasks added in Cockpit 0.2
 

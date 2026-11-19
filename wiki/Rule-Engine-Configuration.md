@@ -29,7 +29,7 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `decision-log.mode` | `transactional` | `transactional` 0.1 (M1); `async` M2 (March 2027), may move to M3 | `transactional`: one `INSERT` in the caller's transaction. `async`: insert into `rle_decision_outbox`, relayed by the scheduler thread, for high-volume hosts. Until `async` ships, setting it stops start-up with a message naming the milestone |
 | `decision-log.async.batch-size` | `100` | M2, may move to M3 | Outbox rows relayed per poll in `async` mode |
 | `decision-log.partitions-ahead` | `P7D` | 0.1 (M1) | How far ahead the scheduler creates monthly `rle_decision` partitions. See [Decision log partitions](#decision-log-partitions) |
-| `decision-log.retention` | unset | M3 | ISO 8601 period in whole months, at least `P12M`, for example `P60M`. Required outside the `dev` profile from M3: the engine refuses to start until it is set. The scheduler drops whole monthly partitions that end before `now() - retention`. Before M3 nothing is deleted. No decision row is ever deleted by date |
+| `decision-log.retention` | unset; required outside `dev` from M3 | M3 | ISO 8601 period in whole months, at least `decision-log.retention-floor`, for example `P12M` or `P120M`. From M3, outside the `dev` profile, the engine refuses to start until it is set, and refuses a value below the floor or not in whole months, naming the property. The scheduler drops whole monthly partitions that end before `now() - retention`. Nothing is deleted in the `dev` profile or before M3; before M3 the property is ignored with a start-up note. No decision row is ever deleted by date |
 | `decision-log.mask-default` | `false` | 0.1 (M1) | Mask every input unless the rule set says `mask: false` |
 | `masking.hmac-key` | unset | 0.1 (M1) | Base64 key, 32 bytes or more, for HMAC-SHA256 of masked inputs. Supply from an environment variable or secret store. Start-up fails if any loaded rule set masks an input and no key is set |
 | `evaluation.max-rows` | `5000` | 0.1 (M1) | Largest table a version may contain |
@@ -43,12 +43,14 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `idempotency.retention` | `PT24H` | 0.1 (M1) | Lifetime of `rle_idempotency` rows |
 | `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | 0.1 (M1) | Bounds of `GET /decisions` and list reads; range and page size may be lowered, never raised |
 | `lifecycle.sweep-interval` | `PT1M` | 0.1 (M1) | How often superseded versions are marked retired; evaluation already switches at `effectiveFrom` |
+| `authoring.cockpit-drafts` | `true` | 0.1 (M1) | `false`: authors (`rules:author`) get `403 DRAFT_AUTHORING_DISABLED` when they create or edit a draft from the cockpit, and the cockpit hides the edit actions. Import of a document, approvals and simulation still work. Set it per environment when production rule changes come from Git. Shown in `/api/bpm/meta` as `rules.authoring.cockpit-drafts` |
+| `readings.style` | `sentence` | 0.1 (M1) | Style of the plain-language readings of rules and of explanation `text`: `sentence` (patterns from the message catalogue) or `shorthand` (for example `tier: GOLD, PLATINUM`). If sentences miss the 8 Jan 2027 checkpoint, 0.1 accepts only `shorthand` until sentences ship. Shown in `/api/bpm/meta` as `rules.readings.style` |
 | `lifecycle.reason-required`, `lifecycle.reason-max-length` | `true`, `2000` | 0.1 (M1) | Reason on reject and retire; may be made optional for reject only |
 | `lifecycle.system-actor` | `system` | 0.1 (M1) | Actor recorded when the engine retires a superseded version |
 | `lifecycle.retire-approval` | `single` | 0.1 (M1); `four-eyes` M3 (May 2027), may move to 1.1 | Approval mode for retiring a published version by hand. `single`: one `rules:approve` holder retires it with a mandatory reason. `four-eyes`: `:retire` only records a request and the version keeps serving; a second `rules:approve` holder confirms with `:confirm-retire`, and the requester's own confirmation is refused with `403 SELF_APPROVAL_FORBIDDEN`; any holder can withdraw the request with `:cancel-retire` and a reason. The mode in force is shown in `/api/bpm/meta` and recorded on every retirement event and history row. Independent of the emergency single-approver path, which governs publication only. See [[Rule Engine Versioning and Publishing]] |
 | `explain.default-language` | `en` | 0.1 (M1) | Language of the explanation `text` when the request asks for none, or for a language without a catalogue. English (`en`) and Vietnamese (`vi`) catalogues ship; a host can override or extend them |
 | `publication.require-simulation-report` | `false` | M3 (May 2027) | `true`: `:request-publish` is refused with `422 VALIDATION_FAILED` unless a stored simulation report of the draft is attached. Applies to the whole host, or only to the rule sets listed in `publication.require-simulation-report.rule-sets`. Until M3 the approver runs the simulation herself |
-| `decision-log.retention-floor` | `P12M` | M3 | Shortest `decision-log.retention` accepted; you may raise it, not lower it below `P12M` |
+| `decision-log.retention-floor` | `P12M` | M3 | Shortest `decision-log.retention` accepted. You may raise it to your own policy, never set it below `P12M` |
 | `maker-checker.enabled` | `true` | 0.1 (M1) | `false` is refused unless the `dev` profile is active |
 | `tenancy.claim` | `tenant_id` | 0.1 (M1) | Claim or principal attribute read by the default `TenantResolver`, for a token or a server-side session login alike |
 | `tenancy.dev-tenant` | unset | 0.1 (M1) | Fixed tenant for local work without an identity provider. `dev` profile only: start-up is refused when it is set outside `dev` |
@@ -62,11 +64,9 @@ These settings are decided. Their property names and ranges arrive with the spec
 
 | Setting | Default | Milestone | What it does |
 |---|---|---|---|
-| Cockpit editing per environment | On | 0.1 (M1) | Off: the cockpit cannot create or edit rule drafts in this environment. Imports, approvals and reading still work. For hosts that keep production rule changes in Git |
-| Reading style | `sentence` | 0.1 (M1) | How the cockpit reads each row: `sentence` (plain-language policy sentence) or `shorthand` (the condition shorthand). If the 8 Jan 2027 checkpoint fails, 0.1 ships `shorthand` only. Sentence patterns are a message catalogue per language that the host can override or extend |
 | Emergency single-approver path | Off | Set by its ADR | On: a logged path lets one person publish in an emergency; every use is reviewed afterwards. Never applies to retirement |
 
-The cockpit's own landing area is the cockpit setting `cockpit.landing` (default `by-role`); see [[Cockpit]].
+The cockpit's landing area is the host property `horus.bpm.cockpit.landing` (default `by-role`), published as `cockpit.landing` in `/api/bpm/meta`; see [[Cockpit]].
 
 ### Process Engine properties decided so far
 
@@ -111,7 +111,7 @@ On the next start both partitions exist, so only the first line appears, with `0
 | Create the partitions of the current and the next month | Every start-up, after the engine's migrations. The month comes from the host `Clock` bean, or system UTC when the host has none, never from the database clock | Built |
 | Move rows of a month out of `rle_decision_default` | When that month's partition is created, in the same transaction, before it is attached | Built |
 | Create partitions up to `now() + decision-log.partitions-ahead` | Daily, from the scheduler thread | 0.1 (M1) |
-| Drop partitions older than `decision-log.retention` | From the scheduler thread | M3 |
+| Drop partitions older than `decision-log.retention` | From the scheduler thread, outside the `dev` profile | M3 |
 
 Several replicas can start at once: a transaction-scoped advisory lock lets one replica create the partitions at a time, and the others find them present. Each creation waits at most 5 s for locks (`lock_timeout`).
 
