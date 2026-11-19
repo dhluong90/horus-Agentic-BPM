@@ -79,10 +79,14 @@ public record RuleEngineProperties(
      *     4096. A longer text fails the decision without running the match, reason {@code REGEX_INPUT_TOO_LONG}
      * @param regexMaxReads characters one {@code matches()} may read, 1 to 1000000; default 1000000. The deterministic
      *     primary bound, the same on every machine; past it the decision fails with {@code REGEX_TIMEOUT}. Lower only
+     * @param regexMaxReadsPerDecision characters all the {@code matches()} of one decision may read together, 1 to
+     *     5000000; default 5000000. Counted the same deterministic way as {@code regex-max-reads}, so a rule set of
+     *     many {@code matches()} rows stops at this total; past it the decision fails with {@code REGEX_TIMEOUT}.
+     *     Lower only
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
             Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
-            Integer regexMaxReads) {
+            Integer regexMaxReads, Integer regexMaxReadsPerDecision) {
     }
 
     /**
@@ -127,7 +131,9 @@ public record RuleEngineProperties(
                                 // an invalid max-string-length is reported by the settings, naming that property.
                                 : Math.max(1, Math.min(RegexLimits.MAX_INPUT_LENGTH, evaluation.maxStringLength() == null
                                         ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength())),
-                        evaluation.regexMaxReads() == null ? RegexLimits.MAX_READS : evaluation.regexMaxReads()));
+                        evaluation.regexMaxReads() == null ? RegexLimits.MAX_READS : evaluation.regexMaxReads(),
+                        evaluation.regexMaxReadsPerDecision() == null
+                                ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision()));
     }
 
     /**

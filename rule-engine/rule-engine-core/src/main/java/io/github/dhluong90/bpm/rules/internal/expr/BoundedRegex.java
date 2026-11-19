@@ -17,6 +17,9 @@ import java.util.regex.PatternSyntaxException;
  *   <li>the primary bound is deterministic: the matcher reads its text through a {@link CharSequence} that counts
  *       every character read and stops at {@code evaluation.regex-max-reads} (1,000,000 by default), so a decision
  *       that stops replays the same on every machine ({@value #REGEX_TIMEOUT});</li>
+ *   <li>the same reads are charged to the decision: every match of one evaluation reads from
+ *       {@code evaluation.regex-max-reads-per-decision} (5,000,000 by default), so a rule set of many {@code matches}
+ *       rows stops at that total, deterministically too ({@value #REGEX_TIMEOUT});</li>
  *   <li>the wall-clock {@code evaluation.regex-timeout-ms} is the backstop on a slow machine, checked every
  *       {@value #CHECK_EVERY} reads ({@value #REGEX_TIMEOUT});</li>
  *   <li>a pattern whose backtracking recurses past the thread's stack fails the decision instead of the thread
@@ -154,26 +157,48 @@ public final class BoundedRegex {
     }
 
     /**
-     * Runs an unanchored search of a compiled pattern in a text, within the limits.
+     * Runs an unanchored search of a compiled pattern in a text, within the limits, as the only match of its decision.
      *
      * @param pattern the compiled pattern
      * @param text the text
      * @param limits the bounds
      * @return true when the pattern is found
+     * @throws EvaluationException see {@link #find(Pattern, String, RegexLimits, DecisionReads)}
+     */
+    static boolean find(Pattern pattern, String text, RegexLimits limits) {
+        return find(pattern, text, limits, limits.newDecision());
+    }
+
+    /**
+     * Runs an unanchored search of a compiled pattern in a text, within the limits, charging its reads to its
+     * decision.
+     *
+     * @param pattern the compiled pattern
+     * @param text the text
+     * @param limits the bounds
+     * @param decision the reads left to the decision this match belongs to; charged with the reads it makes
+     * @return true when the pattern is found
      * @throws EvaluationException with reason {@value #REGEX_INPUT_TOO_LONG}, {@value #REGEX_TIMEOUT} or
      *     {@value #REGEX_TOO_DEEP}; the detail never contains the text
      */
-    static boolean find(Pattern pattern, String text, RegexLimits limits) {
+    static boolean find(Pattern pattern, String text, RegexLimits limits, DecisionReads decision) {
         if (text.length() > limits.maxInputLength()) {
             throw new EvaluationException(REGEX_INPUT_TOO_LONG, "matches() was given " + text.length()
                     + " characters; the limit is " + limits.maxInputLength() + " (evaluation.regex-max-input-length)");
         }
-        Budget budget = new Budget(limits.maxReads(), System.nanoTime() + limits.timeoutMillis() * 1_000_000L);
+        // The decision's remainder binds when it is below one match's own cap.
+        boolean decisionBinds = decision.left() < limits.maxReads();
+        int reads = decisionBinds ? (int) decision.left() : limits.maxReads();
+        Budget budget = new Budget(reads, System.nanoTime() + limits.timeoutMillis() * 1_000_000L);
         try {
             return pattern.matcher(new BudgetedText(text, budget, 0, text.length())).find();
         } catch (ReadsSpent e) {
-            throw new EvaluationException(REGEX_TIMEOUT, "matches() stopped after reading " + limits.maxReads()
-                    + " characters (evaluation.regex-max-reads); simplify the pattern");
+            throw new EvaluationException(REGEX_TIMEOUT, decisionBinds
+                    ? "matches() stopped: the decision's regular expressions read " + limits.maxReadsPerDecision()
+                            + " characters in all (evaluation.regex-max-reads-per-decision); simplify the patterns"
+                            + " or use fewer matches() rows"
+                    : "matches() stopped after reading " + limits.maxReads()
+                            + " characters (evaluation.regex-max-reads); simplify the pattern");
         } catch (Expired e) {
             throw new EvaluationException(REGEX_TIMEOUT, "matches() ran longer than " + limits.timeoutMillis()
                     + " ms and was stopped (evaluation.regex-timeout-ms)");
@@ -182,18 +207,27 @@ public final class BoundedRegex {
             // unwound by the time we are here, so the thread carries on and only this decision fails.
             throw new EvaluationException(REGEX_TOO_DEEP, "matches() ran out of thread stack on a text of "
                     + text.length() + " characters; simplify the pattern or lower evaluation.regex-max-input-length");
+        } finally {
+            decision.spend(budget.used());
         }
     }
 
     /** Reads left and the deadline of one match, shared by every view of its text. */
     private static final class Budget {
+        private final int reads;
         private int readsLeft;
         private int untilClock = CHECK_EVERY;
         private final long deadline;
 
         Budget(int reads, long deadline) {
+            this.reads = reads;
             this.readsLeft = reads;
             this.deadline = deadline;
+        }
+
+        /** Characters read so far, at most the budget. */
+        int used() {
+            return reads - Math.max(0, readsLeft);
         }
 
         void read() {

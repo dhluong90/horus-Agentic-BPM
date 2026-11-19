@@ -13,14 +13,18 @@ import java.time.LocalDate;
  * arithmetic and {@code between} with a null operand give null; {@code ==} and {@code !=} are
  * two-valued; {@code in} is false for a null target; {@code and}, {@code or} and {@code not} follow
  * the FEEL truth tables. Mixed currencies and division by zero raise {@link EvaluationException}, as does a
- * {@code matches} past its length or time bound ({@link BoundedRegex}).
- * Stateless and thread-safe.
+ * {@code matches} past its length, read or time bound ({@link BoundedRegex}).
+ * An evaluator made by a constructor is stateless and thread-safe, and gives each {@code matches} a decision budget
+ * of its own. An evaluator made by {@link #forDecision()} charges every {@code matches} it runs to one budget of
+ * {@code evaluation.regex-max-reads-per-decision} and belongs to the thread evaluating that decision.
  */
 public final class Evaluator {
 
     private final RoundingMode moneyRounding;
     private final int maxStringLength;
     private final RegexLimits regexLimits;
+    /** The read budget of the decision this evaluator is scoped to, or null for a shared evaluator. */
+    private final DecisionReads decision;
 
     /**
      * Creates an evaluator with the default string bound.
@@ -52,6 +56,24 @@ public final class Evaluator {
         this.moneyRounding = moneyRounding;
         this.maxStringLength = maxStringLength;
         this.regexLimits = java.util.Objects.requireNonNull(regexLimits, "regexLimits must not be null");
+        this.decision = null;
+    }
+
+    private Evaluator(Evaluator shared, DecisionReads decision) {
+        this.moneyRounding = shared.moneyRounding;
+        this.maxStringLength = shared.maxStringLength;
+        this.regexLimits = shared.regexLimits;
+        this.decision = decision;
+    }
+
+    /**
+     * Returns an evaluator for one decision: every {@code matches} it runs reads from one budget of
+     * {@code evaluation.regex-max-reads-per-decision} characters (RLE-007). Use it on one thread, for one decision.
+     *
+     * @return an evaluator scoped to a fresh decision budget
+     */
+    public Evaluator forDecision() {
+        return new Evaluator(this, regexLimits.newDecision());
     }
 
     /**
@@ -85,7 +107,8 @@ public final class Evaluator {
             case Expr.Matches matches -> {
                 // FEEL: a null or non-string text gives null, which never matches.
                 Object text = evaluate(matches.target(), slots);
-                yield text instanceof String string ? BoundedRegex.find(matches.compiled(), string, regexLimits) : null;
+                yield text instanceof String string ? BoundedRegex.find(matches.compiled(), string, regexLimits,
+                        decision == null ? regexLimits.newDecision() : decision) : null;
             }
         };
     }
