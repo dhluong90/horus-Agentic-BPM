@@ -7,7 +7,6 @@ import java.math.BigDecimal;
 import java.math.MathContext;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.List;
 
 /**
  * Aggregates of a {@code collect} output over the non-null values of the matched rules, in rule order.
@@ -20,58 +19,93 @@ final class Aggregates {
     private Aggregates() {
     }
 
-    static Object apply(OutputClause.Aggregate aggregate, List<Object> values, String output) {
-        return switch (aggregate) {
-            case NONE -> java.util.Collections.unmodifiableList(new java.util.ArrayList<>(values));
-            case COUNT -> BigDecimal.valueOf(values.size());
-            case SUM -> sum(values, output);
-            case MIN -> extreme(values, output, -1);
-            case MAX -> extreme(values, output, 1);
-        };
-    }
+    /**
+     * A streaming aggregate of one {@code collect} output: each matched rule's value is folded in as it is read, so
+     * {@code sum}, {@code min}, {@code max} and {@code count} hold one accumulator, never a column of values.
+     */
+    static final class Accumulator {
 
-    private static Object sum(List<Object> values, String output) {
-        if (values.isEmpty()) {
-            return null;
+        private final OutputClause.Aggregate aggregate;
+        private final String output;
+        private long count;
+        private Object best;
+        private String currency;
+        private long minorTotal;
+        private BigDecimal numberTotal;
+
+        Accumulator(OutputClause.Aggregate aggregate, String output) {
+            if (aggregate == OutputClause.Aggregate.NONE) {
+                throw new IllegalArgumentException("a list output is not aggregated");
+            }
+            this.aggregate = aggregate;
+            this.output = output;
         }
-        if (values.getFirst() instanceof Money first) {
-            long total = 0;
-            for (Object value : values) {
-                Money money = (Money) value;
-                if (!money.currency().equals(first.currency())) {
-                    throw new EvaluationException("Output " + output + ": currency mismatch: "
-                            + first.currency() + " and " + money.currency());
+
+        /** Folds in one non-null value. */
+        void add(Object value) {
+            count++;
+            switch (aggregate) {
+                case COUNT, NONE -> {
+                    // count only
                 }
+                case MIN -> best = best == null || compare(value, best, output) < 0 ? value : best;
+                case MAX -> best = best == null || compare(value, best, output) > 0 ? value : best;
+                case SUM -> addToSum(value);
+            }
+        }
+
+        private void addToSum(Object value) {
+            if (value instanceof Money money) {
+                if (numberTotal != null || (currency != null && !currency.equals(money.currency()))) {
+                    throw new EvaluationException("Output " + output + ": currency mismatch: "
+                            + (currency == null ? "number" : currency) + " and " + money.currency());
+                }
+                currency = money.currency();
                 try {
-                    total = Math.addExact(total, money.minorUnits());
+                    minorTotal = Math.addExact(minorTotal, money.minorUnits());
                 } catch (ArithmeticException e) {
                     throw new EvaluationException("Output " + output + ": money amount out of range");
                 }
+                return;
             }
-            if (Math.abs(total) > Money.MAX_JSON_SAFE) {
-                throw new EvaluationException("Output " + output + ": money amount beyond what JSON clients read exactly");
+            if (currency != null) {
+                throw new EvaluationException("Output " + output + ": a sum cannot mix money and numbers");
             }
-            return Money.ofMinor(first.currency(), total);
+            numberTotal = (numberTotal == null ? BigDecimal.ZERO : numberTotal).add((BigDecimal) value);
         }
-        BigDecimal total = BigDecimal.ZERO;
-        for (Object value : values) {
-            total = total.add((BigDecimal) value);
-        }
-        if (total.signum() != 0 && total.stripTrailingZeros().precision() > MathContext.DECIMAL128.getPrecision()) {
-            throw new EvaluationException("Output " + output + ": the sum needs more than "
-                    + MathContext.DECIMAL128.getPrecision() + " significant digits");
-        }
-        return total;
-    }
 
-    private static Object extreme(List<Object> values, String output, int sign) {
-        Object best = null;
-        for (Object value : values) {
-            if (best == null || Integer.signum(compare(value, best, output)) == sign) {
-                best = value;
-            }
+        /**
+         * Returns the aggregate: null when no value was added, except {@code count}, which is 0.
+         *
+         * @return the result
+         */
+        Object result() {
+            return switch (aggregate) {
+                case COUNT -> BigDecimal.valueOf(count);
+                case MIN, MAX -> best;
+                case SUM -> sumResult();
+                case NONE -> throw new IllegalStateException("a list output is not aggregated");
+            };
         }
-        return best;
+
+        private Object sumResult() {
+            if (count == 0) {
+                return null;
+            }
+            if (currency != null) {
+                if (Math.abs(minorTotal) > Money.MAX_JSON_SAFE) {
+                    throw new EvaluationException("Output " + output
+                            + ": money amount beyond what JSON clients read exactly");
+                }
+                return Money.ofMinor(currency, minorTotal);
+            }
+            if (numberTotal.signum() != 0
+                    && numberTotal.stripTrailingZeros().precision() > MathContext.DECIMAL128.getPrecision()) {
+                throw new EvaluationException("Output " + output + ": the sum needs more than "
+                        + MathContext.DECIMAL128.getPrecision() + " significant digits");
+            }
+            return numberTotal;
+        }
     }
 
     private static int compare(Object a, Object b, String output) {

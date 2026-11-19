@@ -216,23 +216,23 @@ public final class CompiledRuleSet {
             OutputClause output = outputs.get(i);
             ValueType element = new ValueType(output.type().kind(), false);
             boolean list = output.aggregate() == OutputClause.Aggregate.NONE;
-            List<Object> column = new ArrayList<>();
+            // A list keeps one entry per matched rule and counts against max-output-bytes as it grows; an
+            // aggregate folds each value in at once, so no column of values is ever held (security review of #18).
+            List<Object> column = list ? new ArrayList<>() : null;
+            Aggregates.Accumulator accumulator = list ? null : new Aggregates.Accumulator(output.aggregate(), output.name());
             for (CompiledRule rule : matched) {
                 Object value = evaluator.evaluate(rule.thens().get(i), slots);
-                if (value == null) {
-                    if (list) {
-                        column.add(null);
-                        addBytes(bytes, null);
-                    }
-                    continue;
+                if (value != null && output.aggregate() != OutputClause.Aggregate.COUNT) {
+                    value = checkType(output.name(), element, value, rule.id());
                 }
-                column.add(output.aggregate() == OutputClause.Aggregate.COUNT
-                        ? value : checkType(output.name(), element, value, rule.id()));
                 if (list) {
+                    column.add(value);
                     addBytes(bytes, value);
+                } else if (value != null) {
+                    accumulator.add(value);
                 }
             }
-            Object result = Aggregates.apply(output.aggregate(), column, output.name());
+            Object result = list ? java.util.Collections.unmodifiableList(column) : accumulator.result();
             if (!list) {
                 addBytes(bytes, result);
             }

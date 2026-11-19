@@ -124,6 +124,64 @@ class SizeLimitsTest {
     }
 
     @Test
+    void aggregated_outputs_fold_each_value_in_and_never_hold_a_column_of_values() {
+        // Given 5,000 rules whose min, max and count outputs each build a new 60,001-character string: holding them
+        // as a column would retain about 600 MB for one request (security re-review of #18)
+        StringBuilder yaml = new StringBuilder("""
+                schemaVersion: 1
+                ruleSet: big-aggregates
+                hitPolicy: collect
+                inputs:
+                  - { name: note, type: string }
+                outputs:
+                  - { name: shortest, type: string,  collect: min }
+                  - { name: longest,  type: string,  collect: max }
+                  - { name: rows,     type: integer, collect: count }
+                rules:
+                """);
+        for (int i = 0; i < 5_000; i++) {
+            yaml.append("  - { id: B").append(i).append(", when: {}, then: { shortest: \"note + 'a'\", longest: \"note + 'b'\", rows: \"note + 'c'\" } }\n");
+        }
+        RuleEngines engines = engines(EngineSettings.defaults());
+        publish(engines, yaml.toString(), "big-aggregates");
+
+        // When
+        DecisionResult result = engines.ruleEngine().evaluate("big-aggregates",
+                DecisionInput.of(Map.of("note", "x".repeat(60_000))));
+
+        // Then the aggregates are right and small: only the two winning strings are kept
+        assertThat(result.matchedRuleIds()).hasSize(5_000);
+        assertThat((String) result.outputs().get("shortest")).hasSize(60_001).endsWith("a");
+        assertThat((String) result.outputs().get("longest")).hasSize(60_001).endsWith("b");
+        assertThat(result.outputs()).containsEntry("rows", java.math.BigDecimal.valueOf(5_000));
+    }
+
+    @Test
+    void aggregate_folding_keeps_the_null_and_currency_rules() {
+        RuleEngines engines = engines(EngineSettings.defaults());
+        publish(engines, """
+                schemaVersion: 1
+                ruleSet: fold-rules
+                hitPolicy: collect
+                inputs:
+                  - { name: x, type: integer }
+                outputs:
+                  - { name: total, type: money,   collect: sum }
+                  - { name: hits,  type: integer, collect: count }
+                rules:
+                  - { id: F1, when: {}, then: { total: "1000 VND", hits: 1 } }
+                  - { id: F2, when: {}, then: { total: null, hits: null } }
+                  - { id: F3, when: {}, then: { total: "2.50 USD", hits: 1 } }
+                """, "fold-rules");
+
+        DecisionResult result = engines.ruleEngine().evaluate("fold-rules", DecisionInput.of(Map.of("x", 1)));
+
+        assertThat(((DecisionResult.Failed) result.outcome()).code()).isEqualTo("EVALUATION_ERROR");
+        assertThat(((DecisionResult.Failed) result.outcome()).detail()).contains("currency mismatch");
+        assertThat(result.outputs()).isEmpty();
+    }
+
+    @Test
     void TR_EXT_03_a_rule_set_with_more_rules_than_max_rows_is_refused_at_import() {
         RuleEngines engines = engines(EngineSettings.defaults().withSizeLimits(1_048_576, 65_536, 19));
 
