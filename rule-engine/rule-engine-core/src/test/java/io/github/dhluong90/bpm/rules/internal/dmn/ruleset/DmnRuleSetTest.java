@@ -142,6 +142,22 @@ class DmnRuleSetTest {
                         .isEqualTo(List.of("HIGH_VELOCITY", "NEW_DEVICE")));
     }
 
+    @Test
+    void TR_STD_25_export_writes_the_v1_extension_namespace_and_import_reads_both_spellings() {
+        // Given card-fee.yaml, whose money and integer columns need horus:type
+        ParsedRuleSet yaml = RuleSetReader.read(SourceFormat.YAML, resource("/rules/card-fee.yaml"));
+
+        // When
+        String dmn = DmnWriter.write(yaml.canonicalJson());
+        String development = dmn.replace("urn:horus-bpm:dmn:extensions:v1", "urn:horus-bpm:dmn:extensions:1");
+
+        // Then: process engine DESIGN 5.8 spelling on export; the development spelling still imports until v0.1.0
+        assertThat(dmn).contains("xmlns:horus=\"urn:horus-bpm:dmn:extensions:v1\"")
+                .doesNotContain("urn:horus-bpm:dmn:extensions:1\"");
+        assertThat(RuleSetReader.read(SourceFormat.DMN_XML, utf8(dmn)).canonicalHash()).isEqualTo(yaml.canonicalHash());
+        assertThat(RuleSetReader.read(SourceFormat.DMN_XML, utf8(development)).canonicalHash()).isEqualTo(yaml.canonicalHash());
+    }
+
     // ------------------------------------------------------------------ the FEEL subset and null semantics
 
     @ParameterizedTest(name = "{0} -> {1}")

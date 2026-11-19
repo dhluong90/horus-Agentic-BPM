@@ -22,7 +22,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 class DmnRuleSetQaTest {
 
     static final String DMN15 = "<definitions xmlns=\"https://www.omg.org/spec/DMN/20230324/MODEL/\" id=\"d\" name=\"d\""
-            + " namespace=\"urn:test\" xmlns:horus=\"urn:horus-bpm:dmn:extensions:1\">";
+            + " namespace=\"urn:test\" xmlns:horus=\"urn:horus-bpm:dmn:extensions:v1\">";
 
     static String table(String hit, String inputs, String outputs, String rules) {
         return DMN15 + "<decision id=\"qa-table\" name=\"qa-table\"><decisionTable" + hit + ">" + inputs + outputs

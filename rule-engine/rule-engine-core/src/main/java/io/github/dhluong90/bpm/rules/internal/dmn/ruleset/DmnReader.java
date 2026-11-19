@@ -105,8 +105,8 @@ public final class DmnReader {
         doc.put("ruleSet", ruleSetName(root, decision));
         Optional<String> description = description(decision).or(() -> description(root));
         description.ifPresent(d -> doc.put("description", d));
-        root.attribute(Dmn.HORUS_NAMESPACE, "timeZone").ifPresent(zone -> doc.put("timeZone", zone));
-        root.attribute(Dmn.HORUS_NAMESPACE, "moneyRounding").ifPresent(r -> doc.put("moneyRounding", r));
+        horus(root, "timeZone").ifPresent(zone -> doc.put("timeZone", zone));
+        horus(root, "moneyRounding").ifPresent(r -> doc.put("moneyRounding", r));
 
         XmlTree table = null;
         for (XmlTree child : decision.children()) {
@@ -205,7 +205,7 @@ public final class DmnReader {
         }
         ObjectNode node = inputs.addObject();
         node.put("name", name);
-        node.put("type", type(expression.attribute("typeRef"), input.attribute(Dmn.HORUS_NAMESPACE, "type"),
+        node.put("type", type(expression.attribute("typeRef"), horus(input, "type"),
                 "input '" + name + "'", expression));
         columnDescription(input, name).ifPresent(d -> node.put("description", d));
         Optional<XmlTree> values = input.child("inputValues");
@@ -231,7 +231,7 @@ public final class DmnReader {
                 }
             }
         }
-        input.attribute(Dmn.HORUS_NAMESPACE, "mask").ifPresent(mask -> {
+        horus(input, "mask").ifPresent(mask -> {
             if (!mask.equals("true") && !mask.equals("false")) {
                 throw invalid("horus:mask of input '" + name + "' must be true or false", input);
             }
@@ -254,7 +254,7 @@ public final class DmnReader {
         }
         ObjectNode node = outputs.addObject();
         node.put("name", name);
-        node.put("type", type(output.attribute("typeRef"), output.attribute(Dmn.HORUS_NAMESPACE, "type"),
+        node.put("type", type(output.attribute("typeRef"), horus(output, "type"),
                 "output '" + name + "'", output));
         columnDescription(output, name).ifPresent(d -> node.put("description", d));
         return name;
@@ -389,6 +389,11 @@ public final class DmnReader {
         }
         // A label other than the name is kept as the description, so no author text is lost.
         return column.attribute("label").map(String::strip).filter(l -> !l.isEmpty() && !l.equals(name));
+    }
+
+    /** A {@code horus:} extension attribute, under the current namespace or the development spelling (#186). */
+    private static Optional<String> horus(XmlTree element, String local) {
+        return element.attribute(Dmn.HORUS_NAMESPACE, local).or(() -> element.attribute(Dmn.HORUS_NAMESPACE_DEV, local));
     }
 
     private static Optional<String> description(XmlTree element) {
