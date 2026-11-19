@@ -1,3 +1,4 @@
+import { useCrumbLabel } from '../app/crumbs';
 import { formatRoute, useRoute, type Route } from '../app/route';
 import type { MessageKey } from '../i18n/en';
 import { useI18n } from '../i18n/I18nProvider';
@@ -13,7 +14,10 @@ const AREA_TITLE: Record<Exclude<Route['name'], 'home' | 'rule-set'>, MessageKey
 export function Breadcrumb() {
   const { t } = useI18n();
   const [route] = useRoute();
+  const override = useCrumbLabel();
   const crumbs = trail(route, t);
+  const last = crumbs.at(-1);
+  if (override !== undefined && route.name === 'rule-set' && last) crumbs[crumbs.length - 1] = { label: override };
   if (crumbs.length === 0) return null;
   return (
     <nav aria-label={t('header.breadcrumb')} className="crumbs">

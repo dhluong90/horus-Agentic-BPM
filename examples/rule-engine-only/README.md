@@ -337,6 +337,29 @@ The sign-in page belongs to the host, not to the cockpit library. This example s
 
 ![Sign-in page](../../cockpit/docs/images/screenshots/example-host-signin-1440x900-light-en.png)
 
+### Edit rules in the cockpit
+
+The cockpit lists rule sets, shows a version as a decision table, edits a draft, sends it for approval and lets a second person approve or reject it. "Try it" runs sample inputs; it needs `rules:evaluate`, which the demo roles do not hold, so add it on the command line for this walkthrough:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate' \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:evaluate'
+```
+
+1. As `lan`, open Rules, choose **Import file** and pick [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml). Version 1 opens as a draft table. Choose **Request publish**: the dock shows "Approve is unavailable. You requested this change. Another approver must decide."
+2. In a private window, sign in as `minh` and open the same address (the link in the address bar works as is). Version 1 opens on Changes. Add a comment and choose **Approve and publish**.
+3. Back as `lan`, reload and choose **New draft**. Cells edit as values: pick tiers, choose a comparison and type an amount (VND sits inside the field), toggle Yes or No. Add a row from **Add row** and move it with its ⋯ menu. Choose a comparison for the new row's balance but leave the amount empty, then **Save draft**: the cell says "Enter a value." and your other edits stay. Type the amount and save again. Version 2 opens as a draft. **Request publish**.
+4. As `minh`, open version 2: Changes lists the added and changed rows with the same labels and amounts as the table. Write a reason and choose **Reject**: version 2 goes back to `lan` as a draft, and **History** under the approval dock shows who rejected it and why. As `lan`, **Request publish** again; as `minh`, approve it.
+5. As either user, use **Try it**: tier `GOLD` matches R1 and the table marks the row.
+
+To bring in a file prepared elsewhere, open the rule set and choose **Import new version**: the file becomes the next draft. Only a person other than the author and the requester can approve or reject a version; a requester withdraws through the engine's withdraw action once it ships. A host that keeps rule changes in Git sets `horus.bpm.rules.authoring.cockpit-drafts: false`; the cockpit then hides New draft and Edit draft and keeps Import new version.
+
+A save creates a new draft version each time, because the engine has no endpoint to replace a draft yet (issue #165). A `.json` file is sent as YAML text (JSON is valid YAML), because this engine release imports YAML only.
+
+The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=http://localhost:8080 LIVE_PASSWORD=choose-one npm --prefix cockpit/web run e2e:live`. Started without the two properties, as the Docker Compose deployment is, the host gives the demo roles no `rules:evaluate`: Try it then says "You cannot run rules on this service", and the test checks that and skips the Try it step with a note.
+
 ## Rule Engine properties
 
 | Property | Default | Meaning |

@@ -1,6 +1,6 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
-import { allVersions, PAGE_SIZE } from '../../../api/rules/catalogue';
+import { allVersions } from '../../../api/rules/catalogue';
 import type { RuleDocument } from '../../../api/rules/rulesClient';
 import type { DecisionResult, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
@@ -25,19 +25,6 @@ function useKeys() {
     history: (name: string, version: number) => [...rules, name, 'history', version] as const,
     source: (name: string, version: number) => [...rules, name, 'source', version] as const,
   };
-}
-
-/** The rule sets of the tenant, one page at a time, following the engine's cursor. */
-export function useRuleSets() {
-  const { client } = useRulesSession();
-  const keys = useKeys();
-  return useInfiniteQuery({
-    queryKey: keys.list,
-    queryFn: ({ pageParam, signal }) => client.listRuleSets({ cursor: pageParam, limit: PAGE_SIZE, signal }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => (last.hasNext && last.nextCursor !== null ? last.nextCursor : undefined),
-    staleTime: 10_000,
-  });
 }
 
 /** Every version of a rule set, newest first, without definitions. */

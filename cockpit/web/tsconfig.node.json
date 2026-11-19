@@ -28,6 +28,8 @@
     "e2e",
     "playwright.config.ts",
     "playwright.demo.config.ts",
+    "playwright.live.config.ts",
+    "e2e-live",
     "security-headers.ts",
     "vite.config.ts",
     "vitest.config.ts"
