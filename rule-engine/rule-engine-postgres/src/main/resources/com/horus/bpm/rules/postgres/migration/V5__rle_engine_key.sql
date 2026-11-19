@@ -1,11 +1,13 @@
 -- Engine-internal secrets, one row per purpose (rule-engine/docs/DESIGN.md section 4.2). The only purpose today is
 -- 'cursor-hmac', the key that signs list cursors (RLE-039) so a cursor is accepted only from the engine that
 -- issued it, for the same tenant and list. The engine creates the row on first use with 32 bytes from
--- SecureRandom (INSERT ... ON CONFLICT DO NOTHING, then SELECT), so every replica of a host uses the same key.
+-- SecureRandom (INSERT ... ON CONFLICT DO NOTHING, then SELECT) in a transaction of its own, so every replica of
+-- a host uses the same committed key whatever the caller's transaction does.
 --
 -- Not tenant data, like rle_schema_history: one key per database serves every tenant, and the MAC itself covers
--- the tenant. Never returned by any API, never logged. To rotate, delete the row; the next request creates a new
--- key and cursors issued before it answer 400 QUERY_INVALID, so clients start again from the first page.
+-- the tenant. Never returned by any API, never logged. To rotate, delete the row: the next request creates a new
+-- key, every replica re-reads within 5 minutes (at once when a cursor fails to verify), and cursors issued before
+-- answer 400 QUERY_INVALID, so clients start again from the first page.
 --
 -- Additive and forward-only. Rollback, if ever needed, is a new forward migration: DROP TABLE rle_engine_key;
 

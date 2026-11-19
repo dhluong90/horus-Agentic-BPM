@@ -267,7 +267,7 @@ class EditorApiIT {
         send(t, "lan", "POST", "/rule-sets/card-fee/versions/2:request-publish", null, null, null, null);
         send(t, "lan", "POST", "/rule-sets/card-fee/versions", cardFee("card-fee"), "application/yaml", null, null);
 
-        assertThat(actions(t, "lan", 2)).isEqualTo("[\"reject\"]");
+        assertThat(actions(t, "lan", 2)).isEqualTo("[]");
         assertThat(actions(t, "minh", 2)).isEqualTo("[\"approve\",\"reject\"]");
         assertThat(actions(t, "dan", 2)).isEqualTo("[]");
         assertThat(actions(t, "lan", 3)).isEqualTo("[\"request-publish\"]");

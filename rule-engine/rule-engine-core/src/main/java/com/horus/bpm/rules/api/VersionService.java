@@ -66,7 +66,7 @@ public interface VersionService {
 
     /**
      * Sends a pending version back to {@code DRAFT} with a reason (DESIGN section 3.3, RLE-025). The requester may
-     * reject their own request: that withdraws it and publishes nothing, so four eyes does not apply.
+     * not reject their own request; they withdraw it instead (PD-089).
      *
      * @param ruleSet the rule set name
      * @param version the version number
@@ -74,6 +74,7 @@ public interface VersionService {
      * @return the version, now a draft
      * @throws InputInvalidException when the reason is blank or longer than {@code lifecycle.reason-max-length}
      * @throws InvalidStateException when the version is not pending approval
+     * @throws SelfApprovalForbiddenException when the caller requested the publication
      */
     RuleSetVersion reject(String ruleSet, int version, WriteOptions options);
 

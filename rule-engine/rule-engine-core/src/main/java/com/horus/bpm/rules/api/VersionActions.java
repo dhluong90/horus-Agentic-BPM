@@ -42,10 +42,10 @@ public final class VersionActions {
                 }
             }
             case PENDING_APPROVAL -> {
-                if (permissions.contains(Permissions.APPROVE)) {
-                    // Four eyes: neither the requester nor the author may approve. Rejecting one's own request
-                    // withdraws it and publishes nothing, so it stays allowed (DESIGN section 3.3).
-                    if (caller != null && !caller.equals(requestedBy) && !caller.equals(createdBy)) {
+                if (permissions.contains(Permissions.APPROVE) && caller != null && !caller.equals(requestedBy)) {
+                    // Four eyes: neither the requester nor the author may approve. The requester may not reject
+                    // either; they take the request back with :withdraw (PD-089), which arrives with RLE-046.
+                    if (!caller.equals(createdBy)) {
                         actions.add(APPROVE);
                     }
                     actions.add(REJECT);
