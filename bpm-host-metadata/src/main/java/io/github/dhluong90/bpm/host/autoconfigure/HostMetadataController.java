@@ -29,7 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code cockpit/api/schema/bpm-meta.v1.schema.json} and {@code bpm-me.v1.schema.json} field for field,
  * carry a weak {@code ETag} and answer {@code 304} to a matching {@code If-None-Match}. {@code /meta}, the
  * same for every caller of one tenant (engine settings may depend on the tenant, {@link TenantModuleSettings}), is
- * {@code private, max-age=60}; {@code /me}, which carries the
+ * {@code private, max-age=60} and varies like {@code /me}, with the tenant in its ETag; {@code /me}, which carries the
  * caller's permissions, is {@code private, no-cache}, so a revoked role or a sign-out on a shared machine
  * is never served from the browser cache without asking the host. Bodies are built as ordered maps and
  * written by the host's own JSON converter, so absent optional fields are omitted rather than written as
@@ -91,7 +91,9 @@ final class HostMetadataController {
         body.put("modules", entries);
         body.put("tenancy", Map.of("switching", false));
         body.put("limits", Map.of("maxPageSize", MAX_PAGE_SIZE));
-        return cacheable(request, body, META_CACHE_CONTROL, new String[0]);
+        // Settings may depend on the tenant: vary like /me, and the tenant is part of the validator, so a cached
+        // body or a 304 of one tenant is never served to another, even when their bodies are equal.
+        return cacheable(request, body, caller.tenant(), META_CACHE_CONTROL, ME_VARY);
     }
 
     @GetMapping("/me")
@@ -112,7 +114,7 @@ final class HostMetadataController {
         body.put("permissions", permissions(caller));
         body.put("roles", roles(caller));
         body.put("groups", caller.groups());
-        return cacheable(request, body, ME_CACHE_CONTROL, ME_VARY);
+        return cacheable(request, body, caller.tenant(), ME_CACHE_CONTROL, ME_VARY);
     }
 
     /**
@@ -171,14 +173,15 @@ final class HostMetadataController {
     }
 
     /**
-     * Wraps a body with the caching headers. The weak ETag is a hash of the body's content, so it changes
-     * exactly when the data changes; Spring MVC answers {@code 304} when {@code If-None-Match} matches.
+     * Wraps a body with the caching headers. The weak ETag is a hash of the caller's tenant and the body's content,
+     * so it changes exactly when the data changes and always differs between tenants; Spring MVC answers
+     * {@code 304} when {@code If-None-Match} matches.
      */
-    private static ResponseEntity<Map<String, Object>> cacheable(
-            HttpServletRequest request, Map<String, Object> body, String cacheControl, String[] vary) {
+    private static ResponseEntity<Map<String, Object>> cacheable(HttpServletRequest request,
+            Map<String, Object> body, String tenant, String cacheControl, String[] vary) {
         ResponseEntity.BodyBuilder response = ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, cacheControl)
-                .eTag("W/\"" + contentHash(body) + "\"")
+                .eTag("W/\"" + contentHash(tenant, body) + "\"")
                 .header(CorrelationIds.HEADER, CorrelationIds.of(request));
         if (vary.length > 0) {
             response.varyBy(vary);
@@ -186,9 +189,12 @@ final class HostMetadataController {
         return response.body(body);
     }
 
-    private static String contentHash(Map<String, Object> body) {
+    private static String contentHash(String tenant, Map<String, Object> body) {
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(body.toString().getBytes(StandardCharsets.UTF_8));
+            MessageDigest sha = MessageDigest.getInstance("SHA-256");
+            // Length-prefixed, so no tenant id and body can be confused with another pair.
+            sha.update((tenant.length() + ":" + tenant + "\n").getBytes(StandardCharsets.UTF_8));
+            byte[] digest = sha.digest(body.toString().getBytes(StandardCharsets.UTF_8));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(Arrays.copyOf(digest, 16));
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("SHA-256 is required by every Java platform", impossible);

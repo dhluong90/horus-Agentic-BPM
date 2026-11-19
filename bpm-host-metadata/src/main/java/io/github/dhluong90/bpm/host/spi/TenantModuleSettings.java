@@ -8,8 +8,10 @@ import java.util.Map;
  * per module, beside its {@link ModuleDescriptor}; a host never implements it. A tenant setting with the same name as
  * a host setting of the descriptor replaces it.
  *
- * <p>Implementations are called on every {@code /meta} request, so they must be cheap and thread-safe, and must
- * return only values clients may see: never a key, a secret or another tenant's data.
+ * <p>Implementations are called on every {@code /meta} request, so they must be cheap and thread-safe, with no
+ * database query per request: read settings held in memory. They must return only values clients may see: never
+ * a key, a secret or another tenant's data. Because these values differ per tenant, {@code /meta} varies like
+ * {@code /me} and carries the tenant in its ETag.
  */
 public interface TenantModuleSettings {
 
