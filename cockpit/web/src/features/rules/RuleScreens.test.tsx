@@ -184,6 +184,8 @@ describe('four eyes', () => {
     open('#/rules/card-fee/2', 'rules-approver');
     expect(await screen.findByText('Compared with Version 1, in effect now')).toBeInTheDocument();
     expect(screen.getByText('1 added, 2 changed, 0 removed, 3 unchanged')).toBeInTheDocument();
+    expect(screen.getByText('Compared in this browser. The stored version is in the Table tab.')).toBeInTheDocument();
+    expect(screen.queryByText(/Characters outside ASCII/)).not.toBeInTheDocument();
     // One table: the stored version is the Table tab; Details carries its content hash.
     expect(screen.getAllByRole('table')).toHaveLength(1);
     expect(screen.getByText('Content hash')).toBeInTheDocument();

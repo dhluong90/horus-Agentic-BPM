@@ -21,6 +21,8 @@ describe('approver changes', () => {
     );
     expect(screen.getByText('Non-ASCII: О U+041E')).toBeInTheDocument();
     expect(screen.getAllByText(/Non-ASCII/)).toHaveLength(1);
+    expect(screen.getByText('Characters outside ASCII in 1 changed cells')).toBeInTheDocument();
+    expect(screen.getByText('Compared in this browser. The stored version is in the Table tab.')).toBeInTheDocument();
     expect(screen.getByText('0 added, 1 changed, 0 removed, 1 unchanged')).toBeInTheDocument();
     expect(screen.getByText('Compared with Version 1, in effect now')).toBeInTheDocument();
     expect(screen.queryByText(/Aid:/)).not.toBeInTheDocument();

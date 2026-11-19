@@ -88,10 +88,16 @@ export function ChangesView({ definition, base, baseVersion, baseInEffect }: {
 }) {
   const { t, locale } = useI18n();
   const rows = diffRules(base?.rules ?? [], definition.rules);
+  // Changed cells whose new literal holds characters outside ASCII, so the summary can flag them too.
+  const nonAscii = rows.reduce((total, row) => total + [...row.changedCells].filter((cell) => {
+    const [part, name] = cell.split('.') as ['when' | 'then', string];
+    return nonAsciiCharacters(cellText(row.rule?.[part][name])).length > 0;
+  }).length, 0);
   const count = (change: RowDiff['change']) => String(rows.filter((row) => row.change === change || (change === 'MOVED' && row.moved && row.change === 'CHANGED')).length);
   const empty: Rule = { id: '', when: {}, then: {} };
   return (
     <div className="changes">
+      {base ? <p className="changes__note">{t('changes.browserNote')}</p> : null}
       <p className="changes__summary">
         {base && baseVersion !== undefined ? (
           <>
@@ -101,6 +107,9 @@ export function ChangesView({ definition, base, baseVersion, baseInEffect }: {
         ) : (
           <strong>{t('changes.first')}</strong>
         )}
+        {nonAscii > 0 ? (
+          <span className="nonascii-mark"><span aria-hidden="true">▲</span> {t('changes.nonAsciiCount', { count: String(nonAscii) })}</span>
+        ) : null}
       </p>
       <div className="dt-scroll" role="region" tabIndex={0} aria-label={t('changes.tableLabel')}>
         <table className="dt dt--diff">

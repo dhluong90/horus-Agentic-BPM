@@ -282,6 +282,8 @@ export const en = {
   'list.version': 'Version {version}',
   'toast.close': 'Close',
   'editor.unsavedOne': '1 unsaved change',
+  'changes.browserNote': 'Compared in this browser. The stored version is in the Table tab.',
+  'changes.nonAsciiCount': 'Characters outside ASCII in {count} changed cells',
   'problem.engineDetail': 'Engine message',
 } as const;
 

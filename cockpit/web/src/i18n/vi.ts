@@ -284,5 +284,7 @@ export const vi: Record<MessageKey, string> = {
   'list.version': 'Phiên bản {version}',
   'toast.close': 'Đóng',
   'editor.unsavedOne': '1 thay đổi chưa lưu',
+  'changes.browserNote': 'So sánh trong trình duyệt. Phiên bản đã lưu nằm ở thẻ Bảng.',
+  'changes.nonAsciiCount': 'Ký tự ngoài ASCII trong {count} ô đã sửa',
   'problem.engineDetail': 'Thông báo gốc của hệ thống (tiếng Anh)',
 };
