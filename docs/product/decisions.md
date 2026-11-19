@@ -112,6 +112,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-088](#pd-088-unique-and-collect-follow-dmn-15) | `unique` and `collect` follow DMN 1.5 | Decided (product manager, delegated, PD-073) |
 | [PD-089](#pd-089-a-requester-withdraws-their-own-pending-request) | A requester withdraws their own pending request | Decided (product manager, delegated, PD-073) |
 | [PD-090](#pd-090-property-tests-without-jqwik) | Property tests without jqwik | Decided |
+| [PD-091](#pd-091-no-tag-ruleset-or-immutable-releases-for-now) | No tag ruleset or immutable releases for now | Decided (revisitable) |
 
 ---
 
@@ -2742,3 +2743,30 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Consequences.** Every property test keeps its specification id in its name and its coverage (`TR-QA-01`); only the generator changes. Each run uses a recorded seed, and a failing case prints it. The PD-053 allow-list keeps the JUnit Jupiter API and JMH. Nothing that ships changes.
 
 **Follow-ups.** Maintainers (engineering): the removal and the in-house generator. Architect: remove jqwik from `TR-LIC-01` in [requirements](requirements.md), the allow-list in the build and the test plans that name it. Documentation: wiki pages that mention jqwik.
+
+### PD-091 No tag ruleset or immutable releases for now
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Should release tags (`v*`) be protected by a repository ruleset, and should published GitHub Releases be made immutable? |
+| Raised by | Security review of the release workflow |
+| Decision | Decided by the product owner, 2026-11-19, option 2. Revisitable |
+
+**The product owner's words.** "Not needed for now; team velocity and self-operation come first."
+
+**Options considered**
+
+1. A tag ruleset for `v*` (only the release workflow or named maintainers may create release tags) and immutable releases. Consequence: a release tag and its assets cannot be created or replaced by mistake; every release needs an admin-configured path, which slows the team in the release week.
+2. Neither, for now (chosen). Consequence: the team tags and publishes on its own; the protection rests on the release workflow's checks and on the rule below, not on repository settings.
+
+**Residual risk (security review).** Anyone with write access can push a `v*` tag and publish a Release, and the assets of a published Release can be replaced.
+
+**Mitigations in place.**
+- The tag guard of the release workflow (#166) refuses a tag that is not on `main`, does not match every module's version, or is not of the form `vX.Y.Z`.
+- Verification before publishing (#168): checksums, the bill of materials and the build information are checked before the Release is published.
+- A bad release is fixed with a new patch release (`v0.1.1`); a published tag is never moved, deleted and re-created, and published assets are never replaced.
+
+**Revisit when** any of these happens: an outside contributor gets write access; a tag or Release asset is created or changed outside the release workflow; or an adopter or bank review asks for tamper-evident releases. The product manager then brings option 1 back to the product owner. Same pattern as PD-081 for branch protection.
+
+**Follow-ups.** Maintainers (engineering): the "never re-tag, release a patch" rule in `CONTRIBUTING.md` and the release runbook. Security: confirm the guard and the verification cover the risk above at the Fri 20 Nov review.
