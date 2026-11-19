@@ -46,7 +46,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-022](#pd-022-conflict-simulation-report-in-cockpit-01-approvals) | Conflict: simulation report in Cockpit 0.1 approvals | Decided (product manager, delegated, PD-073) |
 | [PD-023](#pd-023-conflict-milestone-of-the-instance-migration-screen) | Conflict: milestone of the instance migration screen | Decided (product manager, delegated, PD-073) |
 | [PD-024](#pd-024-conflict-compensation-runs-view-and-sla-breach-list) | Conflict: compensation runs view and SLA breach list | Decided (product manager, delegated, PD-073) |
-| [PD-025](#pd-025-conflict-process-engine-version-label) | Conflict: Process Engine version label | Decided (product manager, delegated, PD-073) |
+| [PD-025](#pd-025-conflict-process-engine-version-label) | Conflict: Process Engine version label | Decided (superseded by PD-087) |
 | [PD-026](#pd-026-conflict-should-requirements-used-as-release-gates) | Conflict: Should requirements used as release gates | Decided (product manager, delegated, PD-073) |
 | [PD-027](#pd-027-conflict-decision-explanation-in-m1) | Conflict: decision explanation in M1 | Decided (product manager, delegated, PD-073) |
 | [PD-028](#pd-028-conflict-agent-chosen-steps-in-m3-or-after-10) | Conflict: agent-chosen steps in M3 or after 1.0 | Decided |
@@ -74,16 +74,16 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-050](#pd-050-retention-default-for-the-decision-log-and-history) | Retention default for the decision log and history | Decided |
 | [PD-051](#pd-051-tenant-exit-export-and-purge) | Tenant exit: export and purge | Decided (product manager, delegated, PD-073) |
 | [PD-052](#pd-052-tamper-evidence-beyond-append-only) | Tamper evidence beyond append-only | Decided (product manager, delegated, PD-073) |
-| [PD-053](#pd-053-licence-rule-for-test-and-build-tools) | Licence rule for test and build tools | Decided (product manager, delegated, PD-073) |
+| [PD-053](#pd-053-licence-rule-for-test-and-build-tools) | Licence rule for test and build tools | Decided (product manager, delegated, PD-073; jqwik allowance superseded by PD-090) |
 | [PD-054](#pd-054-deprecation-length) | Deprecation length | Decided (product manager, delegated, PD-073) |
 | [PD-055](#pd-055-postgresql-version-range) | PostgreSQL version range | Decided (product manager, delegated, PD-073) |
 | [PD-056](#pd-056-rule-management-ux-direction) | Rule management UX direction | Decided |
-| [PD-057](#pd-057-full-bpmn-20-and-dmn-support-no-cmmn) | Full BPMN 2.0 and DMN support, no CMMN | Decided |
+| [PD-057](#pd-057-full-bpmn-20-and-dmn-support-no-cmmn) | Full BPMN 2.0 and DMN support, no CMMN | Decided (staging superseded by PD-084 and PD-085) |
 | [PD-058](#pd-058-feel-null-semantics-in-the-expression-language-from-m1) | FEEL null semantics in the expression language from M1 | Decided |
 | [PD-059](#pd-059-execution-tree-with-scope-tokens-in-m2) | Execution tree with scope tokens in M2 | Decided |
 | [PD-060](#pd-060-canonical-model-bpmn-and-dmn-semantic-models) | Canonical model: BPMN and DMN semantic models | Decided |
 | [PD-061](#pd-061-horus-built-feel) | HORUS-built FEEL | Decided |
-| [PD-062](#pd-062-release-targets-for-the-standards-track) | Release targets for the standards track | Pending product owner (escalated 2026-11-19) |
+| [PD-062](#pd-062-release-targets-for-the-standards-track) | Release targets for the standards track | Pending product owner (dates superseded by PD-085; announcement of each stage still open) |
 | [PD-063](#pd-063-principle-9-wording-and-the-standards-non-goals) | Principle 9 wording and the standards non-goals | Decided (product manager, delegated, PD-073) |
 | [PD-064](#pd-064-bpmn-miwg-test-data-licence) | BPMN MIWG test data licence | Decided (product manager, delegated, PD-073) |
 | [PD-065](#pd-065-choreography-and-conversation-diagrams-not-targeted) | Choreography and conversation diagrams not targeted | Decided (product manager, delegated, PD-073) |
@@ -102,6 +102,16 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-078](#pd-078-cockpit-home-screen-in-cockpit-01) | Cockpit home screen in Cockpit 0.1 | Decided (product manager, delegated, PD-073) |
 | [PD-079](#pd-079-tenant-resolution-when-the-cockpit-runs-inside-a-host-web-app) | Tenant resolution when the cockpit runs inside a host web app | Decided (product manager, delegated, PD-073) |
 | [PD-080](#pd-080-second-approver-for-retiring-a-live-rule-version-by-hand) | Second approver for retiring a live rule version by hand | Decided (product manager, delegated, PD-073) |
+| [PD-081](#pd-081-no-branch-protection-on-main-gates-are-advisory) | No branch protection on main; gates are advisory | Decided |
+| [PD-082](#pd-082-first-release-reviewed-by-fri-20-nov-shipped-by-sun-22-nov-2026) | First release: reviewed by Fri 20 Nov, shipped by Sun 22 Nov 2026 | Decided (scope and checklist by the product manager, delegated, PD-073) |
+| [PD-083](#pd-083-version-label-of-the-first-release) | Version label of the first release | Decided (0.1.0) |
+| [PD-084](#pd-084-first-bpmn-and-dmn-subset-in-the-first-release) | First BPMN and DMN subset in the first release | Decided |
+| [PD-085](#pd-085-target-full-bpmn-20-and-dmn-by-sun-22-nov-2026) | Target: full BPMN 2.0 and DMN by Sun 22 Nov 2026 | Decided |
+| [PD-086](#pd-086-dmn-tck-test-cases-as-build-time-test-data) | DMN TCK test cases as build-time test data | Decided (product manager, delegated, PD-073) |
+| [PD-087](#pd-087-release-labels-after-010) | Release labels after 0.1.0 | Decided (product manager, delegated, PD-073) |
+| [PD-088](#pd-088-unique-and-collect-follow-dmn-15) | `unique` and `collect` follow DMN 1.5 | Decided (product manager, delegated, PD-073) |
+| [PD-089](#pd-089-a-requester-withdraws-their-own-pending-request) | A requester withdraws their own pending request | Decided (product manager, delegated, PD-073) |
+| [PD-090](#pd-090-property-tests-without-jqwik) | Property tests without jqwik | Decided |
 
 ---
 
@@ -258,6 +268,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 **Follow-ups.** Architect: fix the Jackson major in both DESIGN files before M1 code; update `TR-EMB-02`. Product manager: vision and PRD platform lines updated (done 2026-11-18).
 
 ### PD-008 `UNIQUE_HIT_VIOLATION` returns 422
+
+Superseded in part by [PD-088](#pd-088-unique-and-collect-follow-dmn-15): zero matches under `unique` is no longer an error; several matches still return `422 UNIQUE_HIT_VIOLATION`.
 
 | Field | Value |
 |---|---|
@@ -709,6 +721,8 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 2. Align all modules on one version number. Consequence: Process Engine would start at 0.2 with no 0.1, which confuses release notes and tags.
 
 **Recommendation.** Option 1.
+
+Superseded by [PD-087](#pd-087-release-labels-after-010) on 2026-11-19: one project-wide version and one project tag (`v0.1.0`), so module versions are no longer independent.
 
 **Rationale.** Each module is tagged separately (`process-engine/v0.1.0`); Release Notes already say so.
 
@@ -1602,6 +1616,8 @@ The architect reviewed the technical, non-functional and developer requirements 
 
 ### PD-053 Licence rule for test and build tools
 
+The jqwik allowance in this entry is superseded by [PD-090](#pd-090-property-tests-without-jqwik). The rest of the entry stands.
+
 | Field | Value |
 |---|---|
 | Date | 2026-11-18 |
@@ -1769,6 +1785,7 @@ Applied now: [prd-cockpit.md](prd-cockpit.md), the [feature map](feature-map.md)
 | Question | Do the engines support BPMN 2.0 and DMN in full, or only the documented subset of PD-034 and principle 9? Is CMMN in scope? |
 | Raised by | Product owner |
 | Decision | Decided by the product owner, 2026-11-18: BPMN 2.0 and DMN are fully supported on the roadmap; full support is not required for the MVP (M1, M2); the architecture is designed now so the engines reach it without a rewrite; CMMN is out of scope. Recorded as [ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md) (accepted) |
+| Superseded in part | The staging after 1.0 is superseded by [PD-084](#pd-084-first-bpmn-and-dmn-subset-in-the-first-release) (a first subset in the first release) and [PD-085](#pd-085-target-full-bpmn-20-and-dmn-by-sun-22-nov-2026) (full compliance targeted for 22 Nov 2026). The definition of full support, no CMMN and no conformance claim before the suites pass still stand |
 
 **What "full support" means.** BPMN 2.0.2 Process Modeling Conformance and Process Execution Conformance, and DMN 1.5 Conformance Level 3, each with a published deviation register ([standards compliance](../architecture/standards-compliance.md) sections 1 and 12). Proof is the BPMN MIWG round trip, a HORUS executable conformance suite and the DMN TCK (`TR-STD-10`, `TR-STD-11`, `TR-STD-20`, `TR-STD-21`).
 
@@ -1923,9 +1940,11 @@ Effort (assumption): S1 about 24 engineer-weeks (BPMN 12, DMN 8, cockpit 4), S2 
 
 **Consequences if accepted.** The roadmap keeps "dates pending PD-062" until the M3 exit review.
 
-**Follow-ups.** Product manager: dates proposal at the M3 exit review.
+**Follow-ups.** Product manager: dates proposal at the review right after the first release (revised 2026-11-19, see the update below).
 
 **Escalated, 2026-11-19.** This entry sets the public dates of 1.1, 1.2 and 1.3, which stay with the product owner under PD-073. The product manager's recommendation is unchanged (option 2: publish order, content and exit criteria now; set dates at the M3 exit review from measured throughput) and goes to the product owner. Under PD-074 nothing in this entry is a setting. X-F-29 and X-F-30 (PD-051, PD-052) are targeted at 1.1 and wait for this entry to set its content and date.
+
+**Update, 2026-11-19 (later).** The product owner set a target of full BPMN 2.0 and DMN compliance for Sun 22 Nov 2026 ([PD-085](#pd-085-target-full-bpmn-20-and-dmn-by-sun-22-nov-2026)), which supersedes the dates question of this entry. What stays open is how each stage is announced as shipped. The review that sets it is no longer the M3 exit review in May. **Revised recommendation (product manager):** set the announcement dates for the 1.1 to 1.3 stage content at the review right after the first release, from measured speed: the daily conformance pass rates and the merged throughput of the release week. Pending with the product owner.
 
 ### PD-063 Principle 9 wording and the standards non-goals
 
@@ -2417,3 +2436,309 @@ PD-074 rule 2 (a setting that relaxes a control is off by default) does not appl
 - `RLE-026`: the Given adds "`lifecycle.retire-approval` is `single`, the default"; the Then replaces "No second approver is needed (ADR-0025)" with "No second approver is needed in the default `single` mode (ADR-0025, PD-080); the event and the history row record the mode `single`".
 - A new M3 statement for the `four-eyes` mode: a retire request leaves the version `PUBLISHED` and serving; the requester's confirmation is refused with `403 SELF_APPROVAL_FORBIDDEN`; a second holder's confirmation retires it with the same effects as `RLE-026`; a retire request with an empty reason is refused as today.
 - The rule engine DESIGN and the wiki Rule Engine Configuration page (documentation) list the setting and its default.
+
+## Decided: the first release
+
+On 2026-11-19 the product owner set the first release: no branch protection on `main` (PD-081), a reliable, deployable first release reviewed by Fri 20 Nov 2026 and shipped by Sun 22 Nov 2026 (PD-082), a first BPMN and DMN subset in it (PD-084) and a target of full BPMN 2.0 and DMN for the same Sunday (PD-085). The product manager defined the release scope, the cut order and the readiness checklist under delegated authority (PD-073). The product owner decided the version label `0.1.0` (PD-083); the later labels follow (PD-087). PD-062 is superseded in part. The DMN TCK licence question raised by the conformance work is decided under delegated authority (PD-086).
+
+```mermaid
+flowchart LR
+  A["Release scope frozen<br/>Thu 19 Nov"]:::host --> B["Readiness checklist met<br/>by Fri 20 Nov"]:::host
+  B --> C{"Go or no-go review<br/>product owner, Fri 20 Nov"}:::external
+  C -- "go" --> D["Tag and GitHub Release<br/>no later than Sun 22 Nov"]:::client
+  C -- "no-go" --> E["Apply the cut order<br/>or the product owner sets a new date"]:::obs
+  E --> C
+  F["Conformance pass rates<br/>reported daily (PD-085)"]:::obs -. "informs, does not gate" .-> C
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+```
+
+### PD-081 No branch protection on main; gates are advisory
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Is `main` protected so that a pull request cannot merge until every CI gate is green and a review is approved? |
+| Raised by | Maintainers (engineering), release preparation |
+| Decision | Decided by the product owner, 2026-11-19, option 2 |
+
+**Options considered**
+
+1. Turn on branch protection: required status checks for every CI job and one approving review. Consequence: a red gate cannot be merged by mistake; every merge waits for the slowest leg of the matrix, and a flaky leg blocks the release path until someone with admin rights intervenes.
+2. No branch protection. Gates stay advisory; whoever merges checks by hand that every CI job is green at the head commit and that a reviewer other than the author approved (chosen). Consequence: merges stay fast in the release week; a red gate can reach `main` if the merger skips the check, so the check moves into the merge routine and the release review.
+
+**Recommendation (product manager).** Either option keeps the definition of done; option 2 is acceptable for this week only if the manual check leaves evidence. Every merge comment links the green CI run at the merged head commit, and the release readiness checklist (PD-082) checks that every pull request in the release has that link.
+
+**Kill criterion.** If a red gate reaches `main` twice before 1.0, the product manager brings option 1 back to the product owner.
+
+**Consequences.** `CONTRIBUTING.md` and the pull request template say that the merger confirms green CI at the head commit and links the run. No setting changes on the repository.
+
+**Follow-ups.** Maintainers (engineering): the merge routine and the template line. Product manager: the merged-with-green-CI item on the PD-082 checklist.
+
+### PD-082 First release: reviewed by Fri 20 Nov, shipped by Sun 22 Nov 2026
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | When does the first public release ship, what is in it, and what must be true before it ships? |
+| Raised by | Product owner |
+| Decision | Decided by the product owner, 2026-11-19: the first release ships by the end of this week, Sun 22 Nov 2026, reliable and deployable; the release review takes place at the latest on Fri 20 Nov 2026, and the release ships right after the product owner accepts it. Scope, cut order and readiness checklist decided by the product manager under delegated authority (PD-073), 2026-11-19 |
+
+**The product owner's words.** "The launch version must be out by the end of this week: highly reliable and deployable, like Camunda." Then: "The review for the launch is on Friday at the latest."
+
+**What this release is.** A small, reliable, deployable first release of the Rule Engine with the host contract, the embedded cockpit, the Spring Boot starter and an example host that runs with Docker Compose, plus the first BPMN and DMN subset of PD-084. It is not Camunda parity: the Process Engine beyond the subset, the full cockpit of Cockpit 0.1 and the rest of M1 follow. The fuller M1 release stays on 15 Jan 2027 as `0.2.0` (PD-087). The label of this release is `0.1.0` (PD-083).
+
+**Options considered**
+
+1. Ship on Sun 22 Nov with the scope below and a go or no-go review by Fri 20 Nov (chosen). Consequence: a public, installable artifact two months earlier than M1; the scope is cut to what can be reviewed in two days.
+2. Keep the first public release on 15 Jan 2027 (M1) and show a demo build this week. Consequence: no reliability risk to the public name; nothing an evaluator can install before January.
+
+**Scope (product manager, delegated).** Only work that is merged or in review today, plus the PD-084 subset, is in. Everything else moves to `0.2.0` on 15 Jan 2027 (PD-087).
+
+Committed: the release does not ship without these.
+
+| Issue | What ships | Feature map |
+|---|---|---|
+| #1 (pull request #87) | Import a rule set from YAML, request publication, approval by a second person (self-approval refused through Java and REST), evaluation in the host transaction with the `first` hit policy, one decision log row per evaluation, tenant from the resolver only, idempotency keys on import and evaluate | RE-F-25 (YAML import only), RE-F-38, RE-F-01 (`first` only), RE-F-06, RE-F-11, RE-F-14, RE-F-20 (Java API and the lifecycle endpoints) |
+| #4 (merged) | `/api/bpm/meta` and `/api/bpm/me`, role to permission mapping | X-F-22, X-F-06 (rules) |
+| #133 | One permission seam for every engine endpoint; no-store and the tenant resolver always on. Merges before #87 | X-F-06 |
+| #27 | `Cache-Control: no-store` on every engine answer, verified with #133 | CK-F-01 security headers, `TR-SEC-09` |
+| #131 | Development tenant refused beside any other profile and for real tokens; safe example defaults | X-F-22 |
+| #5 (pull request #17) | Embedded cockpit shell with host, tenant and user in the header, security headers, errors with code and `correlationId` | CK-F-01 (embedded only) |
+| #21 | Maven `groupId` and package root `io.github.dhluong90.bpm` before the first artifact (PD-070) | |
+| #6, #7, #8, #9, #116, #127 (merged) | Build skeleton and example host, licence and vulnerability gates with a bill of materials, spec-to-test gate, Java 21 and 25 with Spring Boot 4.x and 3.5.x, health check on 3.5 | X-F-01, X-F-12, X-F-13, X-F-02, X-F-03 |
+| #26 (pull request #126) | Release build from a clean checkout with the cockpit bundle built from source and npm packages in the bill of materials | X-F-12 |
+| New issue: Docker Compose example | The example host and PostgreSQL start with one command from a fresh clone | X-F-14 (deployable part) |
+| New issue: release review and GitHub Release | The go or no-go review and the GitHub Release with artifacts, checksums, bill of materials and release notes | X-F-09, X-F-19 |
+
+Pulled in by PD-084: in the release only if each meets the same readiness bar at the Fri 20 Nov review; otherwise cut in the order below.
+
+| Issue | What ships | Feature map |
+|---|---|---|
+| #121 (extended to export), #20 | DMN 1.5 decision table import and export with a FEEL subset; anything outside the subset refused by name; regular expressions in FEEL run only with the time limit of #20 | RE-F-30 (subset), RE-F-04 |
+| #111 with #46, #48, #63, #49 | BPMN 2.0 XML import of `startEvent`, `serviceTask`, `businessRuleTask`, `userTask`, `exclusiveGateway` and `endEvent`, and a process that runs them: a local service step, a rule decision, a human task completed through the API, one exclusive gateway | PE-F-41 (subset), PE-F-01, PE-F-02, PE-F-04, PE-F-07, PE-F-08 (local only), PE-F-09 |
+| #42 | Cockpit editing of a draft rule table (cells and rows), saved as a draft that still needs a second approver | CK-F-43 |
+
+Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24, #25, #28 to #41, #43, #44, #134 and CK-F-44. Process Engine features beyond the subset keep their M2 and M3 milestones.
+
+**Cut order at the Fri 20 Nov review (product manager, delegated).** Applied in this order until every remaining item meets the checklist. The committed scope is never cut; a committed item that fails moves the date, which is the product owner's call.
+
+1. The BPMN subset and the process that runs it (#111, #46, #48, #63, #49): ships later, or in the release as a preview module that is off by default and named so in the release notes.
+2. Cockpit editing of a draft (#42): the release keeps import through the API.
+3. DMN export (#121, export half): the release keeps DMN import.
+4. DMN import (#121): the release keeps YAML import.
+
+**Readiness checklist.** Every item is met, with linked evidence, before the Fri 20 Nov review.
+
+- [ ] Every issue in the release is merged into `main` through a pull request approved by a reviewer other than the author.
+- [ ] No BLOCKING finding from the architecture, security or QA reviews is open; each one closed with a test that fails without the fix. Every open SHOULD-FIX is listed in the release notes as a known limit.
+- [ ] Each merged pull request links a green CI run at its head commit (PD-081), and the last run on `main` at the release commit is green on every leg: Java 21 and 25, Spring Boot 4.x, 4.0.x and 3.5.x, PostgreSQL 14 and 18.
+- [ ] The spec-to-test gate, the licence gate and the vulnerability scan are green at the release commit; no high or critical finding.
+- [ ] The package rename (#21) is merged before the `v0.1.0` tag, and the search for `com.horus` in the repository returns nothing (PD-070). The tag guard of the release workflow (#126) refuses the tag otherwise.
+- [ ] The release workflow builds from a clean checkout of the release commit; the cockpit bundle is built from source; the bill of materials lists the Java and npm packages; `shasum -c SHA256SUMS` verifies every artifact.
+- [ ] From a fresh clone on a clean machine with Docker only, `docker compose up` reaches a first logged decision by following the README; done by someone other than the author, with the time and every deviation recorded.
+- [ ] The security behaviour is shown by tests in CI: another tenant's rule set answers `404`; self-approval answers `403` through Java and REST; a reused idempotency key with another body answers `422`; no-store holds with the metadata endpoints switched off; the development tenant is refused beside a production profile; the container runs as a non-root user and holds no secret.
+- [ ] The cockpit screens in the release are checked at 1440x900, with the primary action and its result visible without scrolling, and at 1440x1200, in one language.
+- [ ] Every BPMN element and DMN feature outside the subset is refused at import with its name; the release notes list the supported subset.
+- [ ] The README, Getting Started and release notes claim only what ships: "first BPMN and DMN subset", no conformance claim (`TR-STD-05`), unsupported features named as later, the forward-only migrations listed (X-F-09), and no compatibility promise before 1.0.
+- [x] The version label is decided: `0.1.0` (PD-083, 2026-11-19).
+- [ ] A recorded walkthrough of the release journey exists for the review.
+- [ ] The GitHub Release upload (#153) is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the release of the `v0.1.0` tag, the one project tag for 0.1.0 (PD-087, #163).
+- [ ] The release notes call the Process Engine a preview (ADR-0027, process DESIGN 5.8): outside `dev`, imports stay drafts, activation is by the development auto-approve setting only, and there is no claim step.
+
+**Assumption to test.** [ASSUMPTION] Pull requests #87, #17 and #126 and issues #133, #131 and #21 can all be reviewed and merged by Fri 20 Nov without a new BLOCKING finding. Cheap test: a merge-order check on Thu 19 Nov evening (#133, then #87, then #21, then #17 and #126) with the count of open findings; if more than two BLOCKING findings are open on Fri 20 Nov 08:00 ICT, the product manager tells the product owner before the review, not at it.
+
+**Consequences.** The [roadmap](roadmap.md) adds the release on 22 Nov 2026 before M1; the [feature map](feature-map.md) marks the features in it; the README states the release scope. Maven Central waits for the namespace registration on the owner's account; the GitHub Release is the distribution channel for this release.
+
+**Follow-ups.** Maintainers (engineering): the two new issues, the merge order and the release build. Security and QA: close or downgrade every open BLOCKING finding by Fri 20 Nov. Documentation: release notes, Getting Started and the wiki Roadmap page. Product manager: run the readiness review with the product owner.
+
+### PD-083 Version label of the first release
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | The product owner called the first release "version 1.0". Is it published as 1.0 or as 0.1.0? |
+| Raised by | Product manager |
+| Decision | Decided by the product owner, 2026-11-19, option 1: the first release is `0.1.0` |
+
+**Facts.** On this roadmap 1.0 means a frozen API with a deprecation policy (X-F-18) and every Must requirement green; most M1 Musts, for example masking, cache refresh across replicas and decision log search, are not in this release. Under semantic versioning a version below 1.0 makes no compatibility promise.
+
+**Options considered**
+
+1. Publish as `0.1.0`. Consequence: honest for the scope; breaking changes before 1.0 remain allowed; the 15 Jan 2027 release becomes 0.2 and 1.0 keeps its meaning (frozen API, May 2027). Evaluators may read 0.x as early.
+2. Publish as `1.0.0`. Consequence: bank reviewers and dependency tools read it as production-ready with a stable API; every breaking change after it needs a new major version, so January and May become 2.0 and 3.0, or breaking changes are blocked for a year; the roadmap, the requirements tied to 1.0 and the public wiki must be renumbered; a later gap between the label and the content costs trust in the name.
+
+**Recommendation (product manager).** Option 1, `0.1.0`, announced as "the first release". It keeps the reliability promise of PD-082 credible and keeps 1.0 for the frozen API.
+
+**Decided, 2026-11-19.** The product owner: "0.1.0 is fine too." The first release is `0.1.0`. 1.0 keeps its meaning on the roadmap: a frozen API with a deprecation policy and every Must requirement green. The labels of the later releases follow in PD-087.
+
+**Consequences if decided.** Option 1: no document changes beyond this release. Option 2: the product manager renumbers the roadmap and the feature map, and the architect re-states the 1.0 API freeze for the next major version.
+
+### PD-084 First BPMN and DMN subset in the first release
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Does the first release include any BPMN or DMN support, which PD-057 staged after 1.0? |
+| Raised by | Product owner |
+| Decision | Decided by the product owner, 2026-11-19: the release reviewed on Fri 20 Nov includes a first BPMN and DMN subset. Supersedes in part the staging of PD-057 |
+
+**The product owner's words.** "Put the whole code line, every ticket and the project on track to finish on schedule tomorrow. A first BPMN and DMN version."
+
+**What is in the subset.**
+
+- BPMN 2.0 XML import for a process made of `startEvent`, `serviceTask`, `businessRuleTask`, `userTask`, `exclusiveGateway` and `endEvent`.
+- DMN 1.5 decision table import and export with a FEEL subset.
+- Every other element or feature is refused at import with its name. Nothing is claimed beyond the subset.
+
+**Options considered**
+
+1. Pull the subset into the first release (chosen). Consequence: evaluators can bring a simple standard model on day one; the release carries two new import paths and a first Process Engine, which raises the delivery risk of PD-082; the cut order in PD-082 applies.
+2. Keep PD-057 as staged: no BPMN or DMN before 1.0. Consequence: the smallest release; the "standard models in" message waits.
+
+**What it supersedes.** PD-057 staged BPMN import in M3 (PE-F-41) and DMN import in M3 (RE-F-30), with the rest after 1.0. The subset of these two features moves to the first release; the rest of PD-057 stands, including no CMMN and no conformance claim before the suites pass (`TR-STD-05`).
+
+**Consequences.** Issues #111, #46, #48, #49, #63, #121 and #20 are in the first release, subject to the PD-082 cut order; #20 comes with the FEEL work because a regular expression without a time limit is never shipped. The roadmap and the feature map say "first BPMN and DMN subset", never "BPMN 2.0 and DMN support". [Standards compliance](../architecture/standards-compliance.md) records the subset as an early stage.
+
+**Follow-ups.** Architect: the subset boundary, the refusal list and its tests. Maintainers (engineering): extend #121 to export rather than open a second issue. Documentation: the supported subset page and the release notes.
+
+### PD-085 Target: full BPMN 2.0 and DMN by Sun 22 Nov 2026
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | When is full BPMN 2.0 and DMN compliance targeted, and with what capacity? |
+| Raised by | Product owner |
+| Decision | Decided by the product owner, 2026-11-19: full BPMN 2.0 and DMN compliance is targeted for Sun 22 Nov 2026; more agents and teams are authorised. Supersedes the staging of PD-057 and the dates question of PD-062 |
+
+**The product owner's words.** "The whole system, fully compliant with the standards, must be done on Sunday. If needed, add more agents and more teams."
+
+**How it is stated.** A target, not a claim. Progress is measured by the DMN TCK and BPMN MIWG pass rates, plus the executable conformance suite, and reported daily. No document, release note or page says "BPMN 2.0 conformant" or "DMN conformant" until the suites of that level pass (`TR-STD-05` stays). Full compliance means what PD-057 defined: BPMN 2.0.2 process modelling and execution conformance and DMN 1.5 Conformance Level 3, each with a published deviation register.
+
+**Options considered**
+
+1. Target full compliance for Sun 22 Nov with added capacity, measured by pass rates (chosen). Consequence: the work runs in parallel streams now; the earlier estimate was about 60 engineer-weeks after 1.0 [ASSUMPTION], so the daily pass rates show quickly how far the target is from the evidence.
+2. Keep PD-057 staging with dates set later (PD-062). Consequence: no change to the plan; the standards work waits for 1.0.
+
+**Product manager's view.** Recorded as decided. Two conditions protect PD-082: the conformance streams do not gate the Fri 20 Nov review or the reliability checklist, and whatever passes on Sunday ships only behind the same checklist. Conformance is still not a moat; positioning keeps leading with governed change inside the host transaction.
+
+**Consequences.** The architect's work breakdown becomes one issue per stream on the project board with the release set to the first release. The roadmap shows the standards track as a target for 22 Nov, with daily pass rates as its measure, and keeps the S1 to S3 stage content as the order of work. PD-062 is superseded for the dates; how each stage is announced is set at the review right after the first release.
+
+**Architect's estimate for Sunday 18:00 (19 Nov, ranges, not commitments).** DMN TCK Level 2 about 75 percent of test cases (55 to 90); Level 3 about 40 percent (25 to 55); all 151 TCK models read (140 to 151); BPMN MIWG 18 of 22 models on all three checks (14 to 22); BPMN execution of the first stage's element groups in memory only, reported as the project's own scenarios, not an industry suite; persistence of the new elements not by Sunday. On this estimate Sunday shows BPMN modelling conformance close to complete and DMN at a measured partial score. It is not full compliance, and no document says it is.
+
+**Effect on work in flight.** The conformance streams take most engineering capacity until Sunday. M1 work outside the first release pauses and keeps its release value, `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #19, #22 to #25, #28 to #41, #43, #44 and #134. #18 (pull request #132) lands in the first release only if it merges with its definition of done met. Committed first-release work keeps review priority over stream pull requests (roadmap kill assumption K28).
+
+**Follow-ups.** Architect: the stream breakdown, the conformance harness that produces the daily pass rates, and the amendment of ADR-0017 decision 3 (staging) to link this entry. QA: the daily report. Product manager: one issue per stream on the project board with the release set to the first release, and the roadmap update.
+
+### PD-086 DMN TCK test cases as build-time test data
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | The DMN TCK is the measure for the PD-085 target, but it is not on the `TR-LIC-01` allow-list, so the licence gate would reject it. May its test cases be used as test data under the PD-053 rule, as the BPMN MIWG models are (PD-064)? |
+| Raised by | Architect, conformance work breakdown |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1 |
+
+**Facts.** The TCK repository root holds an Apache 2.0 licence file, while its README offers the test cases under a Creative Commons share-alike licence with attribution. The two statements disagree, so the stricter reading is applied.
+
+**Options considered**
+
+1. Allow the test cases as build-time test data only, on the stricter reading (chosen): fetched at build time at a pinned commit, the archive checked against a recorded SHA-256, never committed to this repository, never in any artifact, with attribution in the conformance module's README; the harness code is the project's own. Consequence: the DMN pass rates of PD-085 can be measured in CI; share-alike has nothing to attach to, because nothing derived from the test cases is distributed.
+2. Refuse until the TCK maintainers clarify the licence. Consequence: no DMN evidence in CI; the PD-085 target cannot be measured, and any DMN claim rests on our own tests only.
+
+**Recommendation and decision.** Option 1, written into the `TR-LIC-01` allow-list by name, on the PD-053 and PD-064 pattern. Like those entries, this concerns third-party material, not the project's own licence. Configurable: no.
+
+**Kill criterion.** If the TCK maintainers state that the test cases may not be used in automated test runs, or if any test case file is found committed or inside an artifact, the CI job is turned off until the entry is revisited.
+
+**Consequences.** The conformance CI job can run on `main` once the allow-list entry exists. Published results use the TCK results format and carry the attribution.
+
+**Follow-ups.** Architect: add the DMN TCK test cases to `TR-LIC-01` in [requirements](requirements.md) and to the allow-list file in the build. QA: the pinned fetch, the hash check, a check that no TCK file is committed or packaged, and the attribution. Open, not decided here: the licence of the BPMN 2.0.2 schema files used to validate exports (the architect checks it; if it is not permissive, it comes back here).
+
+### PD-087 Release labels after 0.1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | With the first release labelled `0.1.0` (PD-083), the January release can no longer be called "Rule Engine 0.1, Cockpit 0.1", and "Cockpit 0.2" in March would clash with a project-wide 0.2. What are the labels of the next releases? |
+| Raised by | Product manager, after PD-083 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1. The dates do not change; the product owner can overrule |
+
+**Options considered**
+
+1. One project-wide semantic version for every module, published together under one BOM (chosen): `0.1.0` on 22 Nov 2026, `0.2.0` on 15 Jan 2027 (the fuller Rule Engine and Cockpit release, milestone M1), `0.3.0` on 26 Mar 2027 (Process Engine with agent steps and the operations cockpit, milestone M2), `1.0.0` on 21 May 2027 (milestone M3: frozen API, every Must green). Consequence: one number tells an adopter which engine and cockpit versions work together; milestone names M1 to M3 stay as working names, and the module versions in their titles ("Rule Engine 0.1", "Cockpit 0.2") are no longer release labels.
+2. Separate versions per module (Rule Engine, Process Engine, Cockpit). Consequence: modules could move at their own pace, but adopters need a compatibility table, and the first release already numbered all modules `0.1.0`.
+
+**Recommendation and decision.** Option 1. The modules share one build, one BOM and one release workflow, so one version is the honest description. 1.0 keeps its meaning (PD-083).
+
+**Consequences.** The roadmap and feature map name the releases `0.2.0`, `0.3.0` and `1.0.0` next to M1, M2 and M3. The project board's Release options are renamed: "Rule Engine 0.1 / Cockpit 0.1 (Jan)" to "0.2.0 (15 Jan)" and "Process Engine 0.1 / Cockpit 0.2 (Mar)" to "0.3.0 (26 Mar)"; renaming an option keeps every value already set. The GitHub milestones keep their titles until the maintainers rename them. The release tag is one project tag, `vX.Y.Z`, starting with `v0.1.0` (#163). PD-025 (independent module versions and per-module tags) is superseded.
+
+**Follow-ups.** Maintainers (engineering): rename the two board options and, if wanted, the milestone titles. Documentation: the wiki Roadmap page uses the new labels.
+
+### PD-088 `unique` and `collect` follow DMN 1.5
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | The v1 hit policies differ from DMN 1.5 in two places. Under `unique`, zero matches is an error (`RLE-002`), while DMN `U` returns null. Under `collect`, null outputs are dropped, while DMN `C` keeps them, so the output lists fall out of step with `matchedRuleIds`. Adopt DMN behaviour now, or keep v1 and record deviations? |
+| Raised by | Architect and QA, review of pull request #132 (the `collect` point is a blocking QA finding) |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1. Supersedes PD-008 in part |
+
+**Options considered**
+
+1. Adopt DMN 1.5 behaviour now, before 0.1.0 writes v1 behaviour into logged decisions (chosen). `unique` with zero matches is no match with null outputs, exactly as `first`: `DecisionResult.NoMatch` in Java, `matched: false` over REST, and a decision log row with outcome `OK` and `matched_rule_ids = []`; `unique` with several matches stays `UNIQUE_HIT_VIOLATION` (`422`, no partial outputs). `collect` keeps a null output as a null entry, so every output list has one entry per matched rule, in the order of `matchedRuleIds`. Aggregations follow DMN 1.5 over all matched rules, not distinct values: `count` counts every matched rule, nulls included; `sum`, `min` and `max` meeting a null value give `EVALUATION_ERROR` for v1 rule sets, which evaluate in `errorMode: strict` (PD-066), and null with a warning only for models in `errorMode: spec`; no match gives null for every output. Consequence: one behaviour for YAML and DMN tables; exported tables mean the same thing in other DMN engines; no logged decision ever carries the v1 behaviour.
+2. Keep the v1 behaviour, record both differences in the deviation register and map them on export (`TR-STD-25`). Consequence: two behaviours to explain and test forever; replaying a 0.1.0 decision under a DMN table could differ; the `collect` lists stay out of step with the matched rules, which QA found misleading for auditors.
+
+**Recommendation and decision.** Option 1, under PD-074 and PD-085: the product targets the standard, nothing is logged yet with either behaviour, and later the change would break replay of logged decisions. Not a setting: a hit policy has one meaning. A host that wants "no match is an error" adds a catch-all row or checks for no match.
+
+**Consequences.** RE-F-01 is reworded. `RLE-002` changes: zero matches is no match with null outputs, logged as outcome `OK` with `matched_rule_ids = []`, so the decision log schema does not change; several matches are unchanged. `RLE-003` states the DMN 1.5 rules: null entries kept and aligned with `matchedRuleIds`; `count` includes nulls; a null under `sum`, `min` or `max` is `EVALUATION_ERROR` in strict mode; no match is `NoMatch` with null outputs, logged as outcome `OK` with `matched_rule_ids = []`, exactly as for `first`. Pull request #132 implements both before it merges. The deviation register gets no entry for either point.
+
+**Follow-ups.** Architect: `RLE-002` and `RLE-003` in the rule engine SPEC (applied in this change), the error matrix (ADR-0010), and the `collect` aggregation rules, checked against DMN 1.5 sections 8.2.11, 10.3.2.10 and 10.3.4.4 and applied to `RLE-003` in this change. Maintainers (engineering): pull request #132 and its tests. Documentation: the wiki hit policy page.
+
+### PD-089 A requester withdraws their own pending request
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Only a holder of `rules:approve` can reject a pending version (rule engine DESIGN 3.3). An author who holds only `rules:author` cannot take back their own publication request, and sees no action on it. Should the requester be able to withdraw it? |
+| Raised by | Maintainers (engineering), review of the reject slice (pull request #152) |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1 |
+
+**Options considered**
+
+1. The requester withdraws their own pending request with `rules:author`, as a separate action named withdraw (chosen). The version returns to `DRAFT`, nothing is published, the effective version is unchanged, and a history row and an event record the withdrawal with who and when; a reason is optional. Only the identity that requested publication may withdraw it. Consequence: an author fixes a mistake without asking an approver to reject it; four-eyes is untouched, because withdrawing publishes nothing; the audit trail keeps "the author took it back" apart from "an approver refused it".
+2. Keep it approver-only: the author asks an approver to reject. Consequence: no new action; approvers spend time on requests the author already knows are wrong, and the log records a rejection that was really a withdrawal.
+
+**Recommendation and decision.** Option 1. It is the common maker-checker pattern and it relaxes no control, so under PD-074 it is not a setting. Reject stays the approver's action, with a mandatory comment.
+
+**Rules for the specification.**
+- Withdraw is allowed only on a `PENDING_APPROVAL` version, only by its requester, and needs `rules:author`. Anyone else, an approver included, gets `403`; an approver uses reject.
+- A withdrawn version is a `DRAFT` again: editable, and it can be requested again, which starts a new approval.
+- Withdraw accepts an idempotency key like every mutation, and a stale `If-Match` gets the usual conflict.
+- The cockpit shows Withdraw to the requester on their own pending version and never shows Approve to them.
+
+**Consequences.** RE-F-35 moves from later to M1 as a spec gap (feature map M1 from 57 to 58, later from 13 to 12). It reaches 0.1.0 only if it meets the readiness bar. Otherwise it ships in 0.2.0. It is not on any cut list.
+
+**Follow-ups.** Architect: a new SPEC statement for withdraw, the state transition `PENDING_APPROVAL` to `DRAFT` in DESIGN 3.3, the endpoint `:withdraw` in `openapi.yaml`, and the event and history row. Maintainers (engineering): an issue for the withdraw action, separate from reject in pull request #152. Documentation: the wiki approval how-to.
+
+**Applied, 2026-11-19 (pull request #161).** `RLE-046` specifies withdraw as decided above. The same change also refuses a requester's reject of their own request with `403 SELF_APPROVAL_FORBIDDEN`, with a detail pointing to `:withdraw` (`RLE-025`). This reverses the earlier design answer (rule engine DESIGN Q5), which allowed self-reject. The product manager accepts the reversal under this entry. With withdraw available, a self-reject would record an author taking a request back as an approver's refusal, which is the audit confusion this decision removes. Reject therefore stays the action of a second person, like approve. A requester who holds `rules:approve` but not `rules:author` cannot take their own request back and asks another approver to reject it, an accepted edge case.
+
+### PD-090 Property tests without jqwik
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | jqwik is the property-testing library on the PD-053 allow-list. Version 1.10.2 ships a notice that restricts how the library may be used. Does the project keep it? |
+| Raised by | Maintainers (engineering) |
+| Decision | Decided by the product owner, 2026-11-19, option 1. Supersedes the jqwik allowance of PD-053 |
+
+**Options considered**
+
+1. Remove jqwik and add no other property-testing library (chosen). Property tests are written in plain JUnit 5 with a small seeded generator kept in the project's test sources. Consequence: the notice is respected, and one test-scope dependency fewer is on the allow-list. The project now maintains its own generators, shrinking and seed reporting, so a failure must print its seed and be reproducible from it.
+2. Replace jqwik with another property-testing library. Consequence: less code to maintain; a new dependency to review under `TR-LIC-01`, and test changes all the same.
+3. Keep jqwik at a version before the notice. Consequence: no test changes now; the project stays pinned to an old release.
+
+**Consequences.** Every property test keeps its specification id in its name and its coverage (`TR-QA-01`); only the generator changes. Each run uses a recorded seed, and a failing case prints it. The PD-053 allow-list keeps the JUnit Jupiter API and JMH. Nothing that ships changes.
+
+**Follow-ups.** Maintainers (engineering): the removal and the in-house generator. Architect: remove jqwik from `TR-LIC-01` in [requirements](requirements.md), the allow-list in the build and the test plans that name it. Documentation: wiki pages that mention jqwik.
