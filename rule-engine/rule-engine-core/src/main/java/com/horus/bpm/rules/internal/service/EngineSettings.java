@@ -1,5 +1,6 @@
 package com.horus.bpm.rules.internal.service;
 
+import com.horus.bpm.rules.internal.expr.RegexLimits;
 import java.time.Duration;
 
 /**
@@ -18,12 +19,17 @@ import java.time.Duration;
  * @param maxOutputBytes {@code horus.bpm.rules.evaluation.max-output-bytes}, 1 to {@value EngineDefaults#OUTPUT_MAX_BYTES}
  * @param maxStringLength {@code horus.bpm.rules.evaluation.max-string-length}, 1 to {@value EngineDefaults#STRING_MAX_LENGTH}
  * @param maxRows {@code horus.bpm.rules.evaluation.max-rows}, 1 to {@value EngineDefaults#RULES_MAX}
+ * @param regexLimits {@code horus.bpm.rules.evaluation.regex-timeout-ms} and {@code regex-max-input-length}
+ *     (TR-SEC-02); the length is at most {@code max-string-length}
  */
 public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
         boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
-        int maxStringLength, int maxRows) {
+        int maxStringLength, int maxRows, RegexLimits regexLimits) {
 
     public EngineSettings {
+        if (regexLimits == null) {
+            throw new IllegalArgumentException("regexLimits must not be null");
+        }
         if (cacheMaxEntries < 1 || cacheMaxEntries > EngineDefaults.CACHE_MAX_ENTRIES_LIMIT) {
             throw new IllegalArgumentException("horus.bpm.rules.cache.max-entries must be 1 to "
                     + EngineDefaults.CACHE_MAX_ENTRIES_LIMIT + ", was " + cacheMaxEntries);
@@ -43,6 +49,32 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         requireLowerOnly("horus.bpm.rules.evaluation.max-output-bytes", maxOutputBytes, EngineDefaults.OUTPUT_MAX_BYTES);
         requireLowerOnly("horus.bpm.rules.evaluation.max-string-length", maxStringLength, EngineDefaults.STRING_MAX_LENGTH);
         requireLowerOnly("horus.bpm.rules.evaluation.max-rows", maxRows, EngineDefaults.RULES_MAX);
+        if (regexLimits.maxInputLength() > maxStringLength) {
+            throw new IllegalArgumentException("horus.bpm.rules.evaluation.regex-max-input-length must be at most "
+                    + "horus.bpm.rules.evaluation.max-string-length (" + maxStringLength + "), was "
+                    + regexLimits.maxInputLength());
+        }
+    }
+
+    /**
+     * Creates settings with the default regular expression bounds.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     * @param queryMaxPageSize see the record
+     * @param reasonMaxLength see the record
+     * @param maxOutputBytes see the record
+     * @param maxStringLength see the record
+     * @param maxRows see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
+            int maxStringLength, int maxRows) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows,
+                new RegexLimits(RegexLimits.TIMEOUT_MILLIS, Math.min(RegexLimits.MAX_INPUT_LENGTH, maxStringLength)));
     }
 
     private static void requireLowerOnly(String property, int value, int ceiling) {
@@ -102,7 +134,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withRejectUndeclaredInputs(boolean reject) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, reject, queryMaxPageSize,
-                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows);
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits);
     }
 
     /**
@@ -115,6 +147,21 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withSizeLimits(int outputBytes, int stringLength, int rows) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows);
+                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows,
+                regexLimits.maxInputLength() <= stringLength ? regexLimits
+                        : new RegexLimits(regexLimits.timeoutMillis(), stringLength));
+    }
+
+    /**
+     * Returns a copy with the regular expression bounds set.
+     *
+     * @param timeoutMillis {@code evaluation.regex-timeout-ms}
+     * @param maxInputLength {@code evaluation.regex-max-input-length}
+     * @return the settings
+     */
+    public EngineSettings withRegexLimits(int timeoutMillis, int maxInputLength) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows,
+                new RegexLimits(timeoutMillis, maxInputLength));
     }
 }

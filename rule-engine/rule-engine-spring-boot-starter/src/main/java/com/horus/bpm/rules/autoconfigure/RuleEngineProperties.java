@@ -1,5 +1,6 @@
 package com.horus.bpm.rules.autoconfigure;
 
+import com.horus.bpm.rules.internal.expr.RegexLimits;
 import com.horus.bpm.rules.internal.service.EngineDefaults;
 import com.horus.bpm.rules.internal.service.EngineSettings;
 import java.time.Duration;
@@ -72,9 +73,13 @@ public record RuleEngineProperties(
      * @param maxOutputBytes estimated JSON size of one decision's outputs, 1 to 1048576; default 1048576. Lower only
      * @param maxStringLength longest string input or string built by {@code +}, 1 to 65536; default 65536. Lower only
      * @param maxRows most rules a version may contain, checked at import, 1 to 5000; default 5000. Lower only
+     * @param regexTimeoutMs longest time one {@code matches()} may run, in milliseconds, 1 to 1000; default 50. A
+     *     match past it fails the decision with {@code EVALUATION_ERROR}, reason {@code REGEX_TIMEOUT}
+     * @param regexMaxInputLength longest text {@code matches()} looks at, 1 to {@code max-string-length}; default
+     *     4096. A longer text fails the decision without running the match, reason {@code REGEX_INPUT_TOO_LONG}
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
-            Integer maxStringLength, Integer maxRows) {
+            Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength) {
     }
 
     /**
@@ -111,7 +116,13 @@ public record RuleEngineProperties(
                 lifecycle.reasonMaxLength() == null ? EngineDefaults.REASON_MAX_LENGTH : lifecycle.reasonMaxLength(),
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
-                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows());
+                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows(),
+                new RegexLimits(
+                        evaluation.regexTimeoutMs() == null ? RegexLimits.TIMEOUT_MILLIS : evaluation.regexTimeoutMs(),
+                        evaluation.regexMaxInputLength() != null ? evaluation.regexMaxInputLength()
+                                // A host that lowers max-string-length lowers the default regex length with it.
+                                : Math.min(RegexLimits.MAX_INPUT_LENGTH, evaluation.maxStringLength() == null
+                                        ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength())));
     }
 
     /**

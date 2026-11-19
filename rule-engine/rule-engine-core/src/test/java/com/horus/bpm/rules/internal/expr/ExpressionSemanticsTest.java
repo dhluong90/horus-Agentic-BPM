@@ -100,4 +100,23 @@ class ExpressionSemanticsTest {
         assertThatThrownBy(() -> Parser.parse(deep, name -> -1)).isInstanceOf(ExpressionException.class)
                 .hasMessageContaining("nested deeper");
     }
+
+    @Test
+    void matches_is_an_unanchored_search_and_null_text_gives_null() {
+        assertThat(eval("matches('ab12', '[0-9]+')")).isEqualTo(true);
+        assertThat(eval("matches('ab12', '^[0-9]+$')")).isEqualTo(false);
+        assertThat(eval("matches(tier, 'GOLD')", null, "PLATINUM-GOLD")).isEqualTo(true);
+        assertThat(eval("matches(tier, 'GOLD')", null, null)).isNull();
+        assertThat(eval("not(matches(tier, 'GOLD'))", null, null)).isNull();
+        assertThat(Parser.parse("matches(tier, 'G')", name -> SLOTS.getOrDefault(name, -1)))
+                .isEqualTo(Parser.parse("matches(tier, 'G')", name -> SLOTS.getOrDefault(name, -1)));
+    }
+
+    @Test
+    void matches_with_one_argument_needs_a_condition_cell() {
+        assertThatThrownBy(() -> Parser.parse("matches('GOLD')", name -> SLOTS.getOrDefault(name, -1)))
+                .isInstanceOf(ExpressionException.class).hasMessageContaining("matches(input, 'pattern')");
+        assertThat(evaluator.evaluate(Parser.parse("matches('^GO')", name -> SLOTS.getOrDefault(name, -1), "tier"),
+                new Object[] {null, "GOLD", null, null})).isEqualTo(true);
+    }
 }

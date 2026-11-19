@@ -52,6 +52,11 @@ final class ConditionTypes {
             case Expr.Between between -> firstOf(comparableProblem(between.target(), between.low(), inputs),
                     comparableProblem(between.target(), between.high(), inputs));
             case Expr.IsNull ignored -> null;
+            case Expr.Matches matches -> {
+                Kind text = kindOf(matches.text(), inputs);
+                yield text == Kind.STRING || text == Kind.UNKNOWN || text == Kind.NULL ? null
+                        : "matches() tests text, but it is given a " + name(text);
+            }
         };
     }
 
@@ -137,6 +142,7 @@ final class ConditionTypes {
             case Expr.InList ignored -> Kind.BOOLEAN;
             case Expr.Between ignored -> Kind.BOOLEAN;
             case Expr.IsNull ignored -> Kind.BOOLEAN;
+            case Expr.Matches ignored -> Kind.BOOLEAN;
         };
     }
 
