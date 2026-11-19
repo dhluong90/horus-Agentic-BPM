@@ -1,6 +1,6 @@
 # How to use the cockpit
 
-Embed the cockpit in your service or host it standalone, then perform the operator tasks it offers: review and approve rule versions, simulate, read the decision log, and (from 0.2) edit tables and operate processes on their diagrams from one inbox.
+Embed the cockpit in your service or host it standalone, then perform the operator tasks it offers: edit rule drafts, review and approve rule versions, simulate, read the decision log, and (from 0.2) edit tables in a grid and operate processes on their diagrams from one inbox.
 
 Design preview: Rule Engine screens and the host registry describe the Cockpit 0.1 target (M1, 15 Jan 2027). The grid editor, diagrams, merged inbox, tenant switcher and Process Engine screens describe the Cockpit 0.2 target (M2, 26 Mar 2027). Process approval screens and the modeller describe the M3 target (21 May 2027). Scope per version is owned by the [[Roadmap]].
 
@@ -11,6 +11,8 @@ A React application built to static assets. It keeps no state and has no backend
 Screens sit in three tiers: the shell (sign-in, host and tenant), one area per job (Rules, Processes, Work), and the screens inside each area. The version after each screen is the first cockpit version that has it.
 
 ![Cockpit screen hierarchy in three tiers: shell, areas, screens](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/cockpit-screen-hierarchy.svg)
+
+There is no dashboard of counts (a "pulse strip") before 1.0. Each queue shows its own count in its header, for example the number of pending approvals or open incidents.
 
 ## Embed it in your service
 
@@ -76,6 +78,21 @@ Theming is through CSS variables, in a light and a dark theme. Labels exist in E
 
 An embedded cockpit shows only the service that serves it. To see several services in one cockpit, host it standalone.
 
+An embedded cockpit also works when your web application signs users in with a server-side session and no bearer token. The engine asks its `TenantResolver` for the tenant; the default reads it from the authenticated principal in your Spring Security context, so a session login and a validated token behave the same. The engine never takes the tenant from anything the browser sends. See [[Multi-Tenancy and Security]].
+
+### Where the cockpit opens
+
+A link into a screen always opens that screen. Otherwise the cockpit opens on a landing area chosen by the user's role. This is the host property `horus.bpm.cockpit.landing`, default `by-role`, which the cockpit reads from `/api/bpm/meta` as `cockpit.landing`; the host can set another landing area.
+
+| User | Cockpit 0.1 opens on |
+|---|---|
+| Approver (`rules:approve`) | Approvals: the queue of pending changes |
+| Author (`rules:author`) | Approvals, filtered to the user's own drafts and requests |
+| Auditor or support (`rules:log:read` only) | Decisions |
+| Anyone else | Rule sets |
+
+From 0.2 the process diagram is the default landing area, but only on a host that runs the Process Engine. A host that runs only the Rule Engine never opens on an empty diagram.
+
 ## Host it standalone
 
 ![Deployment shapes](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/deployment-shapes.svg)
@@ -110,21 +127,27 @@ In Cockpit 0.1 you work with one host at a time and switch between hosts from th
 | Task | Screen | What you do | What you see |
 |---|---|---|---|
 | Check which version is live | Rule sets | Open the list | Effective version, pending approvals, last change per rule set |
-| Read a version | Editor | Open a version | YAML or JSON view; import and export buttons |
+| Read a version | Editor | Open a version | The table, each row also readable as a plain-language sentence; YAML or JSON view; import and export buttons |
+| Edit a draft | Editor | On a draft of an existing rule set, change a cell using the condition shorthand (for example `< 5000000 VND`); add, copy, delete or move a row; save | The draft is validated on save, and each error is shown on its cell |
+| Edit in a spreadsheet | Editor | Export the rows as CSV, edit them in a spreadsheet, import the file | A new draft. Errors name the row and column in plain language |
 | Compare two versions | Editor, Diff | Pick two versions | Added, removed and changed rows and columns side by side |
 | Try a draft | Simulation | Paste rows or upload a CSV, run | Outputs and matched rule id per row; nothing is logged |
-| Approve or reject a change | Approvals | Open a pending version, read the diff, approve or reject with a comment | Status changes to published or back to draft. Your own request shows a disabled Approve button; the API refuses it regardless (TR-SEC-04) |
+| Approve or reject a change | Approvals | Open a pending version as one dossier: effective date, the maker's note, the diff, the old reading struck and the new reading added, and checks. Run the sample simulation yourself if you hold `rules:simulate`. Approve, or reject with a comment | Status changes to published or back to draft. Your own request shows a disabled Approve button; the API refuses it regardless (TR-SEC-04) |
 | Investigate a decision | Decisions | Filter by rule set, period, outcome, rule id or output value; open an entry | The rule table with the matched row highlighted, and the plain-language explanation. Masked inputs stay masked |
 | Bring back a retired version | Editor | Export the retired version, then import the file as a new draft | A new draft with the retired version's rules, which goes through approval like any draft |
 | Copy a rule set to another tenant | Editor | Export it under one tenant, then import the file under the other tenant | A new draft in the other tenant; the two copies then change independently |
 
-Authoring in 0.1 is by YAML or JSON import; see [[Rule Engine Authoring Decision Tables]].
+Authoring in 0.1 is by cell and row editing in the cockpit, a CSV round trip, or YAML or JSON import; see [[Rule Engine Authoring Decision Tables]]. Creating a new rule set is done by import.
+
+Readings are plain-language sentences by default. The host can choose the shorthand style instead, and can override or extend the sentence patterns per language. If the 8 Jan 2027 checkpoint fails, Cockpit 0.1 ships the shorthand style only and sentences follow in 0.2.
+
+A host that keeps production rule changes in Git can turn off cockpit editing per environment; it is on by default. Imports, approvals and reading still work. The property is `horus.bpm.rules.authoring.cockpit-drafts` ([[Rule Engine Configuration]]).
 
 ## Rule Engine tasks added in Cockpit 0.2
 
 | Task | What you do | What you see |
 |---|---|---|
-| Edit a table in a grid | Change typed cells, validate | Validation messages bound to the row and cell; publication request blocked until errors are fixed |
+| Edit a table in a grid | Change typed cells, start from a template, validate | Validation messages bound to the row and cell; publication request blocked until errors are fixed |
 
 ## Process Engine tasks (Cockpit 0.2)
 
@@ -168,7 +191,10 @@ Moving a box on a diagram changes only the layout. It needs no approval; see pri
 |---|---|
 | Replay history through a draft | Choose "Replay last N decisions" in Simulation; count and breakdown of changed outcomes |
 | Edit business calendars | Working hours and holidays per tenant. Moves after 1.0 if the M3 checkpoint fails |
-| Instance migration | Create a plan, run the dry run, execute in batches with progress; the plan shows as two diagrams side by side with the mapped steps |
+| Instance migration | Create a plan, map renamed steps, run the dry run, execute in batches with progress; the plan shows as two diagrams side by side with the mapped steps. Until M3, engineers run migrations through the REST API |
+| Read a stored simulation report | The report attached to a publication request, in the dossier. A host can require a report before a request is accepted, per rule set; off by default |
+| Confirm a retirement | Only when the host sets the retirement approval mode to `four-eyes`: a second `rules:approve` holder confirms a retire request, never the requester. The version keeps serving until then. Moves to 1.1 if the M3 checkpoint fails |
+| Edit nested conditions | An optional condition builder lens for And, Or and Not groups in one row, off by default; the host turns it on. Moves after 1.0 if the M3 checkpoint fails |
 | See where processes slow down | A heatmap on the definition diagram: counts, incidents and p50 and p95 durations per step for a chosen window. Moves after 1.0 if the M3 checkpoint fails |
 
 ## Troubleshooting
@@ -179,6 +205,7 @@ Moving a box on a diagram changes only the layout. It needs no approval; see pri
 | Standalone cockpit shows "cannot reach service" | CORS not allowed, or wrong base URL | Allow the cockpit origin in the host; check the base URL in the host registry |
 | A screen is missing for one host | The host's engine version does not support it, or you lack the permission | Check `/api/bpm/meta` and `/api/bpm/me` on that host |
 | Approve button disabled for you | You requested this publication | Ask a different identity with `rules:approve` |
+| No edit controls on a draft | Cockpit editing is turned off in this environment, or you lack `rules:author` | Change the rule set in Git and import it, or map the permission to your role |
 | Decisions screen is empty or forbidden | You lack `rules:log:read` | Map the permission to your role |
 | A tenant is not offered in the tenant switcher | It is not in your token's list of allowed tenants | Ask your identity provider administrator to add it |
 | Inputs shown as `***` | They are declared `mask: true` | Expected; the plaintext is never stored (TR-SEC-05) |

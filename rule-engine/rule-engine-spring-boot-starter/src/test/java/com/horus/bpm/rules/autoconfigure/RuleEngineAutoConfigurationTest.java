@@ -17,27 +17,30 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
-import org.springframework.boot.health.contributor.Health;
-import org.springframework.boot.health.contributor.HealthIndicator;
-import org.springframework.boot.health.contributor.Status;
+import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.TransactionAwareDataSourceProxy;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionOperations;
+import org.springframework.util.ClassUtils;
 
 /**
  * Wiring of the starter without a database. The migrator and the partition step are replaced by
@@ -45,6 +48,8 @@ import org.springframework.transaction.support.TransactionOperations;
  */
 @ExtendWith(OutputCaptureExtension.class)
 class RuleEngineAutoConfigurationTest {
+
+    private static final String PACKAGE = RuleEngineAutoConfiguration.class.getPackageName();
 
     private static final Instant JAN_26_2027 = Instant.parse("2027-01-26T00:00:00Z");
 
@@ -60,6 +65,39 @@ class RuleEngineAutoConfigurationTest {
             assertThat(context.getBean(RuleEngineTransactions.class).transactionManager())
                     .isSameAs(context.getBean(PlatformTransactionManager.class));
         });
+    }
+
+    @Test
+    void TR_EXT_02_host_beans_replace_the_engine_defaults_of_every_spi() {
+        com.horus.bpm.rules.spi.TenantResolver tenants = () -> "bank-a";
+        com.horus.bpm.rules.spi.CallerResolver callers = new com.horus.bpm.rules.spi.CallerResolver() {
+            @Override
+            public String currentCallerId() {
+                return "alice";
+            }
+
+            @Override
+            public java.util.Set<String> currentPermissions() {
+                return java.util.Set.of();
+            }
+        };
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withBean(com.horus.bpm.rules.spi.TenantResolver.class, () -> tenants)
+                .withBean(com.horus.bpm.rules.spi.CallerResolver.class, () -> callers)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(com.horus.bpm.rules.spi.TenantResolver.class)).isSameAs(tenants);
+                    assertThat(context.getBean(com.horus.bpm.rules.spi.CallerResolver.class)).isSameAs(callers);
+                    assertThat(context).hasSingleBean(com.horus.bpm.rules.api.RuleEngine.class);
+                });
+    }
+
+    @Test
+    void TR_EXT_03_an_out_of_range_setting_stops_start_up() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("horus.bpm.rules.cache.max-entries=0")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.cache.max-entries"));
     }
 
     @Test
@@ -160,15 +198,18 @@ class RuleEngineAutoConfigurationTest {
         assertThat(output).contains("Rule Engine schema is not current");
     }
 
+    // The shared health check, line-neutral (#116): the adapters only translate its result.
+
     @Test
     void health_is_down_while_migrations_are_pending() {
         RuleEngineSchemaMigrator migrator = mock(RuleEngineSchemaMigrator.class);
         when(migrator.status()).thenReturn(new SchemaStatus("1", 2));
 
-        Health health = new RuleEngineHealthIndicator(migrator, mock(DecisionLogPartitions.class), fixedClock()).health();
+        RuleEngineHealthCheck.Result result =
+                new RuleEngineHealthCheck(migrator, mock(DecisionLogPartitions.class), fixedClock()).check();
 
-        assertThat(health.getStatus()).isEqualTo(Status.DOWN);
-        assertThat(health.getDetails()).containsEntry("pendingMigrations", 2).containsEntry("schemaVersion", "1");
+        assertThat(result.up()).isFalse();
+        assertThat(result.details()).containsEntry("pendingMigrations", 2).containsEntry("schemaVersion", "1");
     }
 
     @Test
@@ -176,10 +217,11 @@ class RuleEngineAutoConfigurationTest {
         RuleEngineSchemaMigrator migrator = mock(RuleEngineSchemaMigrator.class);
         when(migrator.status()).thenReturn(new SchemaStatus(null, 1));
 
-        Health health = new RuleEngineHealthIndicator(migrator, mock(DecisionLogPartitions.class), fixedClock()).health();
+        RuleEngineHealthCheck.Result result =
+                new RuleEngineHealthCheck(migrator, mock(DecisionLogPartitions.class), fixedClock()).check();
 
-        assertThat(health.getStatus()).isEqualTo(Status.DOWN);
-        assertThat(health.getDetails()).containsEntry("pendingMigrations", 1);
+        assertThat(result.up()).isFalse();
+        assertThat(result.details()).containsEntry("pendingMigrations", 1);
     }
 
     @Test
@@ -189,10 +231,10 @@ class RuleEngineAutoConfigurationTest {
         DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
         when(partitions.exists(YearMonth.of(2027, 2))).thenReturn(false);
 
-        Health health = new RuleEngineHealthIndicator(migrator, partitions, fixedClock()).health();
+        RuleEngineHealthCheck.Result result = new RuleEngineHealthCheck(migrator, partitions, fixedClock()).check();
 
-        assertThat(health.getStatus()).isEqualTo(Status.UP);
-        assertThat(health.getDetails())
+        assertThat(result.up()).isTrue();
+        assertThat(result.details())
                 .containsEntry("schemaVersion", "1")
                 .containsEntry("nextMonthPartition", "rle_decision_2027_02")
                 .containsEntry("nextMonthPartitionPresent", false);
@@ -203,25 +245,184 @@ class RuleEngineAutoConfigurationTest {
         RuleEngineSchemaMigrator migrator = mock(RuleEngineSchemaMigrator.class);
         when(migrator.status()).thenReturn(new SchemaStatus("1", 0));
         AtomicLong nanos = new AtomicLong();
-        RuleEngineHealthIndicator indicator =
-                new RuleEngineHealthIndicator(migrator, mock(DecisionLogPartitions.class), fixedClock(), nanos::get);
+        RuleEngineHealthCheck check =
+                new RuleEngineHealthCheck(migrator, mock(DecisionLogPartitions.class), fixedClock(), nanos::get);
 
-        indicator.health();
-        nanos.addAndGet(RuleEngineHealthIndicator.CACHE_TTL.toNanos() - 1);
-        indicator.health();
+        check.check();
+        nanos.addAndGet(RuleEngineHealthCheck.CACHE_TTL.toNanos() - 1);
+        check.check();
         verify(migrator, times(1)).status();
 
         nanos.addAndGet(1);
-        indicator.health();
+        check.check();
         verify(migrator, times(2)).status();
     }
 
+    // The adapter of the running Spring Boot line, read through that line's own health API.
+
     @Test
-    void health_contributor_is_registered_as_rule_engine() {
+    void TR_EMB_01_one_health_adapter_for_this_spring_boot_line_is_registered_as_rule_engine() {
         runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
-            assertThat(context).hasBean("ruleEngineHealthIndicator");
-            assertThat(context.getBean("ruleEngineHealthIndicator")).isInstanceOf(HealthIndicator.class);
+            assertThat(context).hasBean(RuleEngineAutoConfiguration.HEALTH_BEAN);
+            Object indicator = context.getBean(RuleEngineAutoConfiguration.HEALTH_BEAN);
+            assertThat(indicator.getClass().getName()).isEqualTo(PACKAGE + (springBoot4Health()
+                    ? ".RuleEngineHealthIndicator" : ".RuleEngineSpringBoot35HealthIndicator"));
+            assertThat(context.getBeansOfType(Class.forName(activeHealthApi()))).hasSize(1);
+            assertThat(health(indicator).status()).isEqualTo("UP");
         });
+    }
+
+    @Test
+    void TR_EMB_01_health_is_down_with_pending_migrations_on_this_spring_boot_line() {
+        runner.withUserConfiguration(HostWithPendingSchema.class)
+                .withPropertyValues("horus.bpm.rules.migrate-on-start=false")
+                .run(context -> {
+                    HealthView health = health(context.getBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+                    assertThat(health.status()).isEqualTo("DOWN");
+                    assertThat(health.details()).containsEntry("pendingMigrations", 1);
+                });
+    }
+
+    @Test
+    void TR_EXT_02_a_host_bean_named_rule_engine_health_indicator_replaces_the_engine_adapter() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class, HostHealthIndicator.class).run(context -> {
+            assertThat(context.getBean(RuleEngineAutoConfiguration.HEALTH_BEAN))
+                    .isEqualTo(HostHealthIndicator.HOST_BEAN);
+            // By class name: the adapter of the other line cannot be loaded on this one.
+            assertThat(context.getBeansOfType(Object.class).values()).extracting(bean -> bean.getClass().getName())
+                    .doesNotContain(PACKAGE + ".RuleEngineHealthIndicator", PACKAGE + ".RuleEngineSpringBoot35HealthIndicator");
+        });
+    }
+
+    @Test
+    void TR_EXT_02_management_health_rule_engine_enabled_false_reports_no_rule_engine_component() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.ruleEngine.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    @Test
+    void TR_EXT_02_management_health_defaults_enabled_false_applies_unless_rule_engine_is_enabled_itself() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.defaults.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues(
+                        "management.health.defaults.enabled=false", "management.health.ruleEngine.enabled=true")
+                .run(context -> assertThat(context).hasBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    // The off switch reads booleans as Spring Boot does for its own indicators: never silently off.
+
+    @ParameterizedTest
+    @ValueSource(strings = {"on", "yes", "1", "TRUE"})
+    void TR_EXT_02_switch_values_spring_boot_reads_as_true_keep_the_rule_engine_component(String value) {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.ruleEngine.enabled=" + value)
+                .run(context -> assertThat(context).hasNotFailed().hasBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"off", "no", "0"})
+    void TR_EXT_02_switch_values_spring_boot_reads_as_false_remove_the_rule_engine_component(String value) {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.ruleEngine.enabled=" + value)
+                .run(context -> assertThat(context).hasNotFailed()
+                        .doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    @Test
+    void TR_EXT_02_an_empty_switch_counts_as_unset() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.ruleEngine.enabled=")
+                .run(context -> assertThat(context).hasNotFailed().hasBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+        // Unset, so the defaults switch decides.
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.ruleEngine.enabled=", "management.health.defaults.enabled=false")
+                .run(context -> assertThat(context).hasNotFailed()
+                        .doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("management.health.defaults.enabled=")
+                .run(context -> assertThat(context).hasNotFailed().hasBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"management.health.ruleEngine.enabled", "management.health.defaults.enabled"})
+    void TR_EXT_02_a_switch_value_that_is_not_a_boolean_fails_start_up(String property) {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues(property + "=ture")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).rootCause().hasMessageContaining("ture");
+                });
+    }
+
+    @Test
+    void TR_EXT_02_the_switch_is_read_from_the_environment_variable() {
+        // MANAGEMENT_HEALTH_RULEENGINE_ENABLED, as a container sets it.
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withInitializer(context -> context.getEnvironment().getPropertySources().addFirst(
+                        new SystemEnvironmentPropertySource("test-env",
+                                Map.of("MANAGEMENT_HEALTH_RULEENGINE_ENABLED", "0"))))
+                .run(context -> assertThat(context).hasNotFailed()
+                        .doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN));
+    }
+
+    // Exactly one adapter per host, and none without a health API (TR-EMB-02).
+
+    @Test
+    void TR_EMB_02_no_health_adapter_when_the_host_has_neither_health_api() {
+        // A host without Actuator; on Spring Boot 4 also a host with Actuator but without spring-boot-health,
+        // whose spring-boot-actuator jar has no org.springframework.boot.actuate.health package.
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withClassLoader(new FilteredClassLoader(
+                        "org.springframework.boot.health", "org.springframework.boot.actuate.health"))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(RuleEngineSchemaMigrator.class);
+                    assertThat(context).doesNotHaveBean(RuleEngineAutoConfiguration.HEALTH_BEAN);
+                });
+    }
+
+    @Test
+    void TR_EMB_02_the_spring_boot_3_5_adapter_backs_off_when_both_health_apis_are_present() {
+        String springBoot35Health = RuleEngineAutoConfiguration.SPRING_BOOT_3_5_HEALTH;
+        if (springBoot4Health()) {
+            // A real check, not an assumption: the 3.5 API is on this leg's test classpath (provided scope).
+            assertThat(ClassUtils.isPresent(springBoot35Health, null)).as(springBoot35Health + " present").isTrue();
+        }
+        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
+            if (springBoot4Health()) {
+                assertThat(context.getBeansOfType(Class.forName(springBoot35Health))).isEmpty();
+                assertThat(context.getBean(RuleEngineAutoConfiguration.HEALTH_BEAN).getClass().getName())
+                        .isEqualTo(PACKAGE + ".RuleEngineHealthIndicator");
+            } else {
+                assertThat(context.getBeansOfType(Class.forName(springBoot35Health)))
+                        .containsOnlyKeys(RuleEngineAutoConfiguration.HEALTH_BEAN);
+            }
+        });
+    }
+
+    /** True on Spring Boot 4 hosts (the health module is present), false on Spring Boot 3.5 hosts. */
+    private static boolean springBoot4Health() {
+        return ClassUtils.isPresent(RuleEngineAutoConfiguration.SPRING_BOOT_4_HEALTH, null);
+    }
+
+    private static String activeHealthApi() {
+        return springBoot4Health()
+                ? RuleEngineAutoConfiguration.SPRING_BOOT_4_HEALTH : RuleEngineAutoConfiguration.SPRING_BOOT_3_5_HEALTH;
+    }
+
+    private record HealthView(String status, Map<String, Object> details) {
+    }
+
+    /** Reads a health indicator through the running line's public health API, without compiling against it. */
+    @SuppressWarnings("unchecked")
+    private static HealthView health(Object indicator) throws ReflectiveOperationException {
+        Object health = Class.forName(activeHealthApi()).getMethod("health").invoke(indicator);
+        Object status = health.getClass().getMethod("getStatus").invoke(health);
+        String code = (String) status.getClass().getMethod("getCode").invoke(status);
+        return new HealthView(code, (Map<String, Object>) health.getClass().getMethod("getDetails").invoke(health));
     }
 
     private static Clock fixedClock() {
@@ -264,6 +465,16 @@ class RuleEngineAutoConfigurationTest {
     @Configuration(proxyBeanMethods = false)
     @Import({HostJdbc.class, EngineStandIns.class})
     static class HostWithEngineStandIns {
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class HostHealthIndicator {
+        static final Object HOST_BEAN = "the host's own ruleEngine health indicator";
+
+        @Bean(RuleEngineAutoConfiguration.HEALTH_BEAN)
+        Object ruleEngineHealthIndicator() {
+            return HOST_BEAN;
+        }
     }
 
     @Configuration(proxyBeanMethods = false)

@@ -18,26 +18,26 @@ Design preview: describes the 0.1 target.
 
 | Step | Who | Call | Expected |
 |---|---|---|---|
-| 1. Create a draft from the current version | alice | `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` | `201`, body contains `"version": 3, "status": "DRAFT"` |
+| 1. Create a draft from the current version | alice | `POST /api/bpm/rules/v1/rule-sets/card-fee/versions?copyOf=2` (or post an edited file as the body) | `201`, body contains `"version": 3, "status": "DRAFT"` |
 | 2. Edit the draft | alice | `PUT /api/bpm/rules/v1/rule-sets/card-fee/versions/3` with the full document | `200`; validation errors come back as `422 VALIDATION_FAILED` with row ids |
 | 3. Check it | alice | Simulate as in [[Rule Engine Simulation and Testing]] | Report of outputs per sample row |
 | 4. Request publication | alice | `POST .../versions/3:request-publish` | `200`, `"status": "PENDING_APPROVAL"`; the draft is now frozen |
-| 5. Review the diff | bob | `GET .../versions/2/diff/3`, or the Approvals screen in the [[Cockpit]] | Added, removed and changed rows and columns |
+| 5. Review the diff | bob | `GET .../versions/3/diff?base=2`, or the Approvals screen in the [[Cockpit]] | Added, removed, changed and moved rows, and changed columns |
 | 6. Approve | bob | `POST .../versions/3:approve` with `{ "comment": "Fee change agreed with product" }` | `200`, `"status": "PUBLISHED"`; event `rules.version.published` emitted |
 
 From step 6 the new version is effective immediately, unless it carries a future `effectiveFrom`. The previous version stays readable and still explains its past decisions.
 
-To reject instead of approve: `POST .../versions/3:reject` with a comment. The version returns to draft.
+To reject instead of approve: `POST .../versions/3:reject` with `{ "reason": "..." }`; the reason is required. The version returns to draft and the reason stays in its history (`GET .../versions/3/history`). The requester may reject their own request to withdraw it; that publishes nothing, so it needs no second identity.
 
 ## Schedule a change for a date
 
-Set `effectiveFrom` in the document before requesting publication:
+Set `effectiveFrom` in the document, or in the `:request-publish` body, before requesting publication:
 
 ```yaml
 effectiveFrom: 2027-01-01T00:00:00+07:00
 ```
 
-After approval the version is published but not yet effective. Evaluation always selects the version with the latest `effectiveFrom` at or before the decision's clock, so the change takes effect at that instant on every replica without a wake-up. The engine's scheduler thread only retires the superseded version and emits `rules.version.retired` at that time. A decision made at 23:59 on 31 Dec 2026 logs version 2; one made at 00:00 on 1 Jan 2027 logs version 3.
+The date is stored with the version, not in its content: it is frozen at request-publish and shown to the approver, but it is not part of the content hash and is not exported, so the same rules scheduled for different dates in two environments keep one hash. After approval the version is published but not yet effective. Evaluation always selects the version with the latest `effectiveFrom` at or before the decision's clock, so the change takes effect at that instant on every replica without a wake-up. The engine only records the change of status: a sweep every `lifecycle.sweep-interval` (1 minute by default) retires the superseded version once and emits `rules.version.retired` with reason `SUPERSEDED`. A decision made at 23:59 on 31 Dec 2026 logs version 2; one made at 00:00 on 1 Jan 2027 logs version 3.
 
 ## Roll back
 
@@ -48,7 +48,29 @@ History is never rewritten, so a rollback is a new version with old content.
 
 ## Retire a rule set
 
-`POST .../versions/3:retire` by an identity with `rules:approve`. Callers then receive `404 NO_EFFECTIVE_VERSION`. Decisions already logged keep pointing at version 3.
+How many people a retirement needs depends on `horus.bpm.rules.lifecycle.retire-approval` ([[Rule Engine Configuration]]). `/api/bpm/meta` shows the mode in force.
+
+### Default mode: `single`
+
+`POST .../versions/3:retire` with `{ "reason": "Tet promotion ended" }` by an identity with `rules:approve`. One identity is enough, because a retire only stops behaviour and nothing is deleted. The reason, the actor, the time and the mode `single` are recorded in the history row, and `rules.version.retired.v1` is emitted with `approvalMode: "single"`.
+
+### Four-eyes mode (M3, May 2027)
+
+With `lifecycle.retire-approval: four-eyes`:
+
+| Step | Call | Who | Result |
+|---|---|---|---|
+| 1 | `POST .../versions/3:retire` with `{ "reason": "Tet promotion ended" }` | `rules:approve` | Version 3 stays published and keeps serving. History row `RETIRE_REQUESTED`; event `rules.version.retire-requested.v1` |
+| 2a | `POST .../versions/3:confirm-retire` | `rules:approve`, not the requester | Version 3 is retired. History row `RETIRED` with the mode `four-eyes`; event `rules.version.retired.v1` with `approvalMode: "four-eyes"`. The requester's own confirmation gets `403 SELF_APPROVAL_FORBIDDEN` |
+| 2b | `POST .../versions/3:cancel-retire` with `{ "reason": "..." }` | `rules:approve` | The request is withdrawn and version 3 stays published. History row `RETIRE_CANCELLED` |
+
+A second retire request while one is pending gets `409 INVALID_STATE`. `:confirm-retire` in `single` mode, or with no pending request, also gets `409 INVALID_STATE`. Every call takes `Idempotency-Key` and `If-Match`.
+
+The emergency single-approver path is not involved in either mode: it governs publication only, and neither setting changes the other.
+
+### What a retirement does
+
+Older published versions are retired with it, so none comes back. Callers then receive `404 NO_EFFECTIVE_VERSION`. Decisions already logged keep pointing at version 3 and replay; an evaluation with a clock before the retirement still selects version 3 (ADR-0025).
 
 ## Give one tenant different rules
 

@@ -25,7 +25,7 @@ Supported platform versions are listed in [[Technical Requirements]] (TR-EMB-02)
 
 ## 1. Create the service
 
-Generate a Spring Boot 4.x project (Spring Boot 4.x now; 3.5.x support lands with the compatibility matrix, [#9](https://github.com/dhluong90/horus-Agentic-BPM/issues/9)) with the Web dependency (for example from `start.spring.io`, group `com.example`, artifact `loans`), or use an existing service.
+Generate a Spring Boot 4.x or 3.5.x project with the Web dependency (for example from `start.spring.io`, group `com.example`, artifact `loans`), or use an existing service.
 
 ## 2. Add the starters
 
@@ -57,6 +57,8 @@ The engine reads definitions and REST bodies with its own JSON library (Jackson 
 
 ```yaml
 spring:
+  profiles:
+    active: dev                             # development only; see the note below
   datasource:
     url: jdbc:postgresql://localhost:5432/loans
     username: postgres
@@ -66,12 +68,13 @@ horus:
   bpm:
     rules:
       definitions: classpath:rules/**/*.yaml
-      definitions-auto-publish: true        # development only; see the note below
-      tenancy:
-        resolver: header:X-Tenant-Id        # development only; the default reads the security context
+      definitions-tenant: demo
+      definitions-auto-publish: true        # dev profile only; see the note below
+    tenancy:                                # shared by both engines, so under horus.bpm
+      dev-tenant: demo                      # dev profile only; every call without a tenant runs as tenant demo
 ```
 
-`definitions-auto-publish: true` publishes the files you load at start-up without the maker-checker approval. Use it only on a developer machine. In every other environment a version becomes effective only through the steps in [[Rule Engine Versioning and Publishing]]. All properties are listed in [[Rule Engine Configuration]].
+`definitions-auto-publish: true` publishes the files you load at start-up without the maker-checker approval, and `tenancy.dev-tenant: demo` runs every call as tenant `demo` without an identity provider. The starter accepts both only in the `dev` profile and refuses to start with them anywhere else. Outside `dev` the tenant comes from the signed-in user ([[Multi-Tenancy and Security]]). In every other environment a version becomes effective only through the steps in [[Rule Engine Versioning and Publishing]]. All properties are listed in [[Rule Engine Configuration]].
 
 ## 4. Write the decision table
 
@@ -167,7 +170,6 @@ Evaluate the effective version:
 ```bash
 curl -s -X POST http://localhost:8080/api/bpm/rules/v1/decisions/loan-eligibility:evaluate \
   -H 'Content-Type: application/json' \
-  -H 'X-Tenant-Id: demo' \
   -d '{ "inputs": { "age": 25, "income": { "currency": "VND", "amount": 8000000 }, "country": "VN" } }'
 ```
 
@@ -207,11 +209,11 @@ The decision is written to the decision log in your transaction. Both the HTTP c
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `404 NO_EFFECTIVE_VERSION` | The file was loaded as a draft but not published, or the tenant in `X-Tenant-Id` has no published version | Check `definitions-auto-publish: true` and the tenant header; or publish through [[Rule Engine Versioning and Publishing]] |
+| `404 NO_EFFECTIVE_VERSION` | The file was loaded as a draft but not published, or it was loaded under another tenant | Check `definitions-auto-publish: true`, and that `definitions-tenant` equals `tenancy.dev-tenant`; or publish through [[Rule Engine Versioning and Publishing]] |
 | `400 INPUT_INVALID` | An input is missing or has the wrong type, for example `income` sent as a number instead of `{ "currency", "amount" }` | Match the `inputs` declared in the table |
 | `401` or `403` on the curl call | No principal, or the principal lacks `rules:evaluate` | Pass credentials of a user with the permission; see [[Rule Engine Configuration]] |
 | Flyway fails at start-up | The database user cannot create tables | Grant `CREATE` on the schema, or set `migrate-on-start: false` and run the migrations yourself |
-| The host's own Flyway fails with "Found non-empty schema(s) without schema history table" | The host added Flyway after the engine's `rle_*` tables existed | See "Install order" below |
+| The host's own Flyway fails with "Found non-empty schema(s) ... but no schema history table" | The host added Flyway after the engine's `rle_*` tables existed | See "Install order" below |
 
 ## Install order
 

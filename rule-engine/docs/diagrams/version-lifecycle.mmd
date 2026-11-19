@@ -1,11 +1,11 @@
 stateDiagram-v2
   direction LR
-  [*] --> DRAFT: createDraft or import
+  [*] --> DRAFT: import a document or copyOf
   DRAFT --> DRAFT: updateDraft (If-Match)
   DRAFT --> PENDING_APPROVAL: requestPublish, zero validation errors
-  PENDING_APPROVAL --> DRAFT: reject with comment
+  PENDING_APPROVAL --> DRAFT: reject with reason (requester may withdraw)
   PENDING_APPROVAL --> PUBLISHED: approve by another identity
-  PUBLISHED --> RETIRED: newer version effective, or retire
+  PUBLISHED --> RETIRED: superseded (system, exactly once) or retire with reason
   RETIRED --> [*]
   classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
   classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F

@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.core.env.Environment;
 import org.testcontainers.junit.jupiter.Container;
@@ -22,6 +23,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /** The example host with the cockpit starter, over real HTTP with the host's form sign-in. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "HORUS_DEMO_PASSWORD=test-only-password")
+@ActiveProfiles("dev")
 @Testcontainers
 class CockpitEmbeddedIT {
 

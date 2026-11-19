@@ -36,15 +36,27 @@ jobs:
         run: python3 tools/spec-coverage.py
 
   verify:
-    # Java 21 baseline on the Spring Boot 4.x version set in pom.xml (ADR-0011).
-    # Further legs (Java 25, Spring Boot 3.5.x, PostgreSQL 14 and 17) join this matrix in a later change.
-    name: Build and test (Java ${{ matrix.java }}, Spring Boot 4.x)
+    # TR-EMB-02: the supported matrix (ADR-0011). Each Java version runs on both Spring Boot lines and
+    # each Spring Boot line on both PostgreSQL versions (14 and the newest release), pairwise; Spring
+    # Boot 4.0.x has one leg while it is in open-source support.
+    # The 3.5.x legs test the jars built on the 4.x baseline, as an adopter receives them: the same
+    # compiled tests run on a Spring Boot 3.5 runtime classpath (-Dspring-boot.line=3.5, pom.xml).
+    name: Java ${{ matrix.java }}, Spring Boot ${{ matrix.boot }}, PostgreSQL ${{ matrix.postgres }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        java: ["21"]
+        include:
+          - { java: "21", boot: "4.x", postgres: "18" }
+          - { java: "21", boot: "3.5.x", postgres: "14" }
+          - { java: "25", boot: "4.x", postgres: "14" }
+          - { java: "25", boot: "3.5.x", postgres: "18" }
+          # ADR-0011 tests every 4.x minor in open-source support. Remove this leg, and the
+          # spring-boot-4.0 profile in pom.xml, after Spring Boot 4.0 leaves it on 2026-12-31.
+          - { java: "21", boot: "4.0.x", postgres: "16" }
+    env:
+      POSTGRES_IMAGE: postgres:${{ matrix.postgres }}-alpine
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -69,17 +81,52 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build, unit and ArchUnit tests, Testcontainers integration tests
-        run: mvn -B -ntp verify
+      - name: Build, unit and ArchUnit tests, Testcontainers integration tests (Spring Boot 4.x)
+        if: matrix.boot == '4.x'
+        run: mvn -B -ntp verify -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
+
+      - name: Build the engine on the Spring Boot 4.x baseline, tests compiled but not run
+        if: matrix.boot != '4.x'
+        run: mvn -B -ntp install -DskipTests
+
+      # The dependency bans and convergence rules, evaluated against this line's dependency tree.
+      - name: Enforcer rules on the Spring Boot ${{ matrix.boot }} dependency tree
+        if: matrix.boot != '4.x'
+        run: |
+          mvn -B -ntp -Dspring-boot.line="$LINE" -pl "!bpm-bom" enforcer:enforce@enforce-build-baseline
+          mvn -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core,rule-engine/rule-engine-postgres \
+            enforcer:enforce@enforce-no-network-client
+          mvn -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core \
+            enforcer:enforce@enforce-framework-free-core
+        env:
+          LINE: ${{ matrix.boot == '3.5.x' && '3.5' || '4.0' }}
+
+      - name: Run the same tests on Spring Boot ${{ matrix.boot }}
+        if: matrix.boot != '4.x'
+        run: >-
+          mvn -B -ntp -Dspring-boot.line="$LINE" -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
+          surefire:test failsafe:integration-test failsafe:verify
+        env:
+          LINE: ${{ matrix.boot == '3.5.x' && '3.5' || '4.0' }}
+
+      - name: Jackson 3 resolves beside the host's own Jackson 2 (TR-EMB-07, PD-071)
+        if: matrix.boot == '3.5.x'
+        run: |
+          mvn -B -ntp -q -Dspring-boot.line=3.5 -pl examples/rule-engine-only \
+            org.apache.maven.plugins:maven-dependency-plugin:3.11.0:tree \
+            -Dincludes=com.fasterxml.jackson.core,tools.jackson.core -DoutputFile=target/jackson-tree.txt
+          python3 tools/check-jackson-coexistence.py examples/rule-engine-only/target/jackson-tree.txt \
+            "$(mvn -B -ntp -q help:evaluate -Dexpression=settings.localRepository -DforceStdout)"
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-reports-java-${{ matrix.java }}
+          name: test-reports-java-${{ matrix.java }}-boot-${{ matrix.boot }}-pg-${{ matrix.postgres }}
           path: |
             **/target/surefire-reports/
             **/target/failsafe-reports/
+            examples/rule-engine-only/target/jackson-tree.txt
           if-no-files-found: ignore
           retention-days: 14
 
@@ -170,7 +217,7 @@ jobs:
 
       - name: Upload SBOMs and scan reports
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-cyclonedx
           path: |

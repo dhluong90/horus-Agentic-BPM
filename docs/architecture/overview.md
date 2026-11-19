@@ -48,6 +48,8 @@ Contents: 1 Goals and constraints. 2 Context and boundaries. 3 Building blocks. 
 | Java API conventions: one interface per job, records, JSpecify nullness, unchecked exceptions with codes, no library types in `api` and `spi`, japicmp from 1.0 | [ADR-0016](../adr/0016-java-api-conventions.md) |
 | The cores parse with Jackson 3 as a private dependency; engine REST bodies use the engine's mapper (conditional on the Spring Boot 3.5 coexistence test) | [ADR-0021](../adr/0021-jackson-3-inside-engine-cores.md) |
 | Maven `groupId` and Java package root `io.github.dhluong90.bpm` | [ADR-0022](../adr/0022-maven-coordinates-and-package-root.md) |
+| Generic by design: business behaviour is a validated property with a safe default, an SPI with a replaceable default, a rule set or a definition; nothing bank-specific in core; controls are tightened, never switched off ([diagram](images/extension-points.svg)) | [ADR-0024](../adr/0024-configuration-and-extension-points-over-built-in-business-logic.md) |
+| Rule set versions: single-approver retire with a reason, exactly-once supersession, time-aware effective selection | [ADR-0025](../adr/0025-rule-set-version-retirement-and-effective-selection.md) |
 | Runtime dependencies carry Apache 2.0, MIT or BSD licences only | `TR-LIC-01` |
 
 ### 1.3 Non-goals
@@ -106,7 +108,7 @@ Each engine is a functional core with an imperative shell. Domain code takes the
 | `ProcessEngine`, `TaskService`, `MigrationService` | Inbound | Process | Core implementation | No |
 | Storage ports, one per aggregate | Outbound | Both | `*-postgres` | Not in 0.x (storage SPI kept for later backends, ADR-0001) |
 | `CompiledCache` | Outbound | Both | Caffeine in the starter; small bounded LRU in `*-core` | Yes |
-| `TenantResolver`, `CallerResolver` | Outbound | Both | JWT claim or trusted header; principal name | Yes |
+| `TenantResolver`, `CallerResolver` | Outbound | Both | Attribute of the authenticated principal (session or token, PD-079); principal name | Yes |
 | Event publisher (`RuleEventPublisher` and the process equivalent) | Outbound | Both | Spring `ApplicationEventPublisher` | Yes, for an outbox |
 | `RuleFunctionRegistry` | Outbound | Rule | Built-in pure functions | Yes, pure functions only |
 | `ExpressionLanguage` | Inbound to the Rule Engine core, used by the Process Engine | Rule (API), Process (caller) | `horus-expr-v1` (M1); FEEL from S1 (ADR-0019) | No; the Process Engine evaluates gateway conditions and, later, mappings and script tasks only through it |
@@ -332,7 +334,7 @@ Hosts behind a transaction-mode pooler set `cache.listen-notify=false` and accep
 
 | Control | Where | Verified by |
 |---|---|---|
-| Tenant from the host security context (JWT claim by default, trusted gateway header, or a host `TenantResolver`); a `tenantId` in a request body is ignored | `TenantResolver` port, REST layer | `RLE-011` (`TR-SEC-03`) |
+| Tenant from the host security context: the principal's `tenancy.claim` attribute by default (session or token), or a host `TenantResolver`; never a header set upstream or a `tenantId` in a request body (PD-079) | `TenantResolver` port, REST layer | `RLE-011`, `RLE-037` (`TR-SEC-03`) |
 | Another tenant's resource answers `404`, never `403` | Every query filters `tenant_id` | Two-tenant integration tests (`TR-TEN-02`) |
 | One permission string per endpoint, named `<module>:<action>` or `<module>:<resource>:<action>` with modules `rules` and `processes` (`rules:approve`, `rules:log:read`, `processes:start`, `processes:task:work`, `processes:incident:manage`; full list in ADR-0010); the host maps strings to roles | `@PreAuthorize` in `*-rest` | REST tests |
 | Maker-checker on publication and four-eyes on tasks, in the service layer | `VersionService`, `TaskService` | `RLE-009`, `PRE-007` |
@@ -467,7 +469,7 @@ Items the maintainers settle before the milestone named; each change lands in th
 | Topic | Document |
 |---|---|
 | Rule Engine internals, money contract, DDL, REST table | [`rule-engine/docs/DESIGN.md`](../../rule-engine/docs/DESIGN.md) |
-| Rule Engine behaviour (`RLE-001` to `RLE-024`) | [`rule-engine/docs/SPEC.md`](../../rule-engine/docs/SPEC.md) |
+| Rule Engine behaviour (`RLE-001` to `RLE-036`) | [`rule-engine/docs/SPEC.md`](../../rule-engine/docs/SPEC.md) |
 | Rule set definition format | [`rule-engine/api/schema/rule-set.v1.schema.json`](../../rule-engine/api/schema/rule-set.v1.schema.json) |
 | Process Engine internals, guardrail contract, DDL, REST table | [`process-engine/docs/DESIGN.md`](../../process-engine/docs/DESIGN.md) |
 | Process Engine behaviour (`PRE-001` to `PRE-045`) | [`process-engine/docs/SPEC.md`](../../process-engine/docs/SPEC.md) |
@@ -475,9 +477,9 @@ Items the maintainers settle before the milestone named; each change lands in th
 | Full BPMN 2.0 and DMN: canonical model, FEEL, execution model, staging, conformance proof, do-now list | [`standards-compliance.md`](standards-compliance.md) |
 | Diagram layout and task form formats | [`definition-layout.v1.schema.json`](../../process-engine/api/schema/definition-layout.v1.schema.json), [`task-form.v1.schema.json`](../../process-engine/api/schema/task-form.v1.schema.json) |
 | Cockpit structure and release scope | [`cockpit/docs/DESIGN.md`](../../cockpit/docs/DESIGN.md) |
-| Cockpit behaviour (`CKP-001` to `CKP-029`) | [`cockpit/docs/SPEC.md`](../../cockpit/docs/SPEC.md) |
+| Cockpit behaviour (`CKP-001` to `CKP-030`) | [`cockpit/docs/SPEC.md`](../../cockpit/docs/SPEC.md) |
 | Cockpit host registry and host metadata formats | [`cockpit-hosts.v1.schema.json`](../../cockpit/api/schema/cockpit-hosts.v1.schema.json), [`bpm-meta.v1.schema.json`](../../cockpit/api/schema/bpm-meta.v1.schema.json), [`bpm-me.v1.schema.json`](../../cockpit/api/schema/bpm-me.v1.schema.json) |
-| Decisions | [`docs/adr/`](../adr/): [0001](../adr/0001-java-spring-boot-postgresql.md), [0002](../adr/0002-state-in-host-database.md), [0003](../adr/0003-own-expression-language.md), [0004](../adr/0004-no-standalone-server.md), [0005](../adr/0005-cockpit-as-static-assets.md), [0006](../adr/0006-idempotency-and-business-keys.md), [0007](../adr/0007-compensation-instead-of-distributed-transactions.md), [0008](../adr/0008-async-wait-state-for-external-steps.md), [0009](../adr/0009-cache-coherence-listen-notify-and-epoch.md), [0010](../adr/0010-engine-contract-conventions.md), [0011](../adr/0011-spring-boot-4-baseline.md), [0012](../adr/0012-process-definition-lifecycle-and-maker-checker.md), [0013](../adr/0013-diagram-notation-layout-and-library.md), [0014](../adr/0014-multi-host-cockpit-federation.md), [0015](../adr/0015-operational-read-models-and-query-limits.md), [0016](../adr/0016-java-api-conventions.md), [0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md), [0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md), [0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md), [0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md), [0021](../adr/0021-jackson-3-inside-engine-cores.md), [0022](../adr/0022-maven-coordinates-and-package-root.md), [0023](../adr/0023-fixed-rule-engine-table-names.md) |
+| Decisions | [`docs/adr/`](../adr/): [0001](../adr/0001-java-spring-boot-postgresql.md), [0002](../adr/0002-state-in-host-database.md), [0003](../adr/0003-own-expression-language.md), [0004](../adr/0004-no-standalone-server.md), [0005](../adr/0005-cockpit-as-static-assets.md), [0006](../adr/0006-idempotency-and-business-keys.md), [0007](../adr/0007-compensation-instead-of-distributed-transactions.md), [0008](../adr/0008-async-wait-state-for-external-steps.md), [0009](../adr/0009-cache-coherence-listen-notify-and-epoch.md), [0010](../adr/0010-engine-contract-conventions.md), [0011](../adr/0011-spring-boot-4-baseline.md), [0012](../adr/0012-process-definition-lifecycle-and-maker-checker.md), [0013](../adr/0013-diagram-notation-layout-and-library.md), [0014](../adr/0014-multi-host-cockpit-federation.md), [0015](../adr/0015-operational-read-models-and-query-limits.md), [0016](../adr/0016-java-api-conventions.md), [0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md), [0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md), [0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md), [0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md), [0021](../adr/0021-jackson-3-inside-engine-cores.md), [0022](../adr/0022-maven-coordinates-and-package-root.md), [0023](../adr/0023-fixed-rule-engine-table-names.md), [0024](../adr/0024-configuration-and-extension-points-over-built-in-business-logic.md), [0025](../adr/0025-rule-set-version-retirement-and-effective-selection.md) |
 | Requirements (`TR-*`) | [`docs/product/requirements.md`](../product/requirements.md) |
 | Proposing a new feature | [`docs/proposals/README.md`](../proposals/README.md) |
 | Diagram sources | [`diagrams/`](diagrams/), rendered to [`images/`](images/) with `wiki/diagrams/theme.json` |

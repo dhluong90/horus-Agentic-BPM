@@ -1,8 +1,8 @@
 # ADR-0014: Multi-host cockpit federation
 
-- Status: accepted
-- Date: 2026-11-18
-- Deciders: product owner (PD-035, PD-037), maintainers
+- Status: accepted; amended 2026-11-19 by PD-079 (tenant resolution, decision 6)
+- Date: 2026-11-18; amended 2026-11-19
+- Deciders: product owner (PD-035, PD-037), product manager under delegated authority (PD-079), maintainers
 - Module: cockpit, project
 - Amends: ADR-0005 (cockpit as static assets) and `TR-UI-01`
 
@@ -15,6 +15,7 @@ ADR-0005 makes the cockpit static assets with no state, served by a host or stan
 3. **Merged lists.** Inbox and incident lists merge across hosts in the browser in M2, with an exact k-way merge on a shared sort key, per-host cursors, `ETag` and `304`, a per-host timeout and a visible "incomplete" banner.
 4. **Host security.** CORS is off by default and lists exact origins; a host validates the token audience and rejects tokens for another host with `401`; when CORS is configured, the starter refuses to start outside `dev` without an audience setting.
 5. **Tenant switching (PD-037).** The cockpit may send `X-Tenant-Id`; with `tenancy.switching.enabled` the host accepts it only for a tenant in the token's allowed-tenants claim (`tenancy.allowed-tenants-claim`, default `allowed_tenants`). Anything else is `403 TENANT_NOT_ALLOWED`, with a security log entry. No screen or API call combines tenants. M2.
+6. **Tenant resolution (PD-079, 2026-11-19).** The engines ask one extension point, `TenantResolver`, for the tenant of every call. The default reads it from the authenticated principal in the host's security context, so a server-side login session (the cockpit embedded in a bank's own web application) and a validated bearer token are handled alike; the attribute or claim name is `tenancy.claim` (default `tenant_id`). A host may supply its own resolver bean, for example one that reads its user directory. The engines never take the tenant from anything the browser sends: a body field is ignored, and `X-Tenant-Id` is only the switch request of decision 5, honoured for a tenant in the caller's allowed list. No trusted-header resolver is shipped; a host that writes one owns that risk, and the documentation says so. A call whose tenant cannot be resolved is refused with `401 UNAUTHENTICATED` and touches no data. M1 (`RLE-037`); the Process Engine uses the same module in M2.
 
 ## Options considered
 1. A: embedded only. Works today; one bookmark and one inbox per service.
@@ -26,6 +27,11 @@ Token audience, within option 2:
 - a. One token with every host in its audience (`shared`). Fewer identity provider requests; a token leaked from one host is valid at all of them. Allowed as an explicit choice.
 - b. One token per host (chosen default). A leaked token is valid at one host; costs one refresh grant per host per token lifetime.
 
+Tenant source, within decision 6 (PD-079):
+- a. Resolver extension point with a session-principal default (chosen). One boundary for every login style.
+- b. A trusted header set by the bank's gateway as the default. Simple; a misconfigured gateway lets one tenant's operator see another tenant's data. Not shipped.
+- c. Bearer tokens only. No work; excludes banks whose web applications use server-side sessions.
+
 Refused tenant status:
 - a. `404`, as for another tenant's resource. Hides a misconfigured identity provider behind "not found".
 - b. `403 TENANT_NOT_ALLOWED` (chosen). Reveals only what the caller's own token already says.
@@ -34,6 +40,10 @@ Refused tenant status:
 - ADR-0005 stands, with three additions: the registry file, sign-in across hosts, and version skew handling. The cockpit still has no server and no state.
 - A small shared module serves `/meta` and `/me` once per host; each engine contributes its entry.
 - The identity provider is the first shared component to feel load: with 5-minute per-host tokens, 2,000 operators and 15 hosts make about 125 refresh requests per second (cockpit DESIGN section 9). Banks size it or choose `shared` mode.
-- The supported envelope (proposed 15 hosts, 2,000 operators, merged p95 300 ms) is pending PD-046.
+- The supported envelope (15 hosts, 2,000 operators, merged p95 300 ms) is a tested envelope, not a coded limit (PD-046): the registry accepts a sixteenth host.
 - Dependency: `oidc-client-ts` (Apache 2.0), justified in the cockpit DESIGN section 2.
-- Requirements: `TR-UI-01` (amended), `TR-UI-05` (proposed, pending PD-046), `TR-UI-08`, `TR-SEC-03` (amended), `TR-SEC-12`. Verified by `CKP-001`, `CKP-012` to `CKP-015`, `CKP-019`, `CKP-020`, `CKP-022`, `PRE-038`, `RLE-018`, `RLE-019`.
+- Requirements: `TR-UI-01` (amended), `TR-UI-05`, `TR-UI-08`, `TR-SEC-03` (amended twice, the second time by PD-079), `TR-SEC-12`. Verified by `CKP-001`, `CKP-012` to `CKP-015`, `CKP-019`, `CKP-020`, `CKP-022`, `PRE-038`, `RLE-018`, `RLE-019`, `RLE-037`.
+
+## History
+- 2026-11-18: accepted (PD-035, PD-037).
+- 2026-11-19: decision 6 added by PD-079 (tenant resolver with a session-principal default; the trusted-header gateway mode is removed); the envelope wording follows PD-046.

@@ -90,19 +90,19 @@ Capabilities on the Roadmap or in TR with no `RLE-*` statement yet:
 | Capability | Milestone | Requirement |
 |---|---|---|
 | YAML and JSON import and export | M1 | none |
-| Batch evaluate (up to 1 000 items) and version pinning by number | M1 | TR-DET-01 |
+| Batch evaluate (up to 1 000 items, M2 by PD-043) and version pinning by number (M1) | M1, M2 | TR-DET-01 |
 | Host-registered pure functions | M1 | TR-SEC-01 |
 | Version diff in the engine API (only the cockpit view, CKP-002, is specified) | M1 | none |
 | Reject and retire transitions, and automatic retirement when a newer version becomes effective | M1 | TR-OBS-04 |
-| Async decision-log mode | M1 | TR-OBS-01 |
-| Decision log query and explain endpoint | M1 | TR-OBS-05 |
+| Decision log write mode as a host setting: synchronous by default, asynchronous for high-volume hosts ([PD-075](decisions.md#pd-075-minimal-cockpit-editing-in-m1-async-decision-log-to-m2)) | M2 | TR-OBS-01 |
+| Decision log query and explain endpoint; the generated sentence uses a message catalogue per language that the host can override ([PD-027](decisions.md#pd-027-conflict-decision-explanation-in-m1)) | M1 | TR-OBS-05 |
 | `rule-engine-test` JUnit extension and row coverage report | M1 | TR-QA-01 |
 | Start-up failure when masking is declared and no key is set | M1 | TR-SEC-10 |
 | Metrics names and the full event list | M1 | TR-OBS-02, TR-OBS-04 |
 | Monthly partitions of `rle_decision` created ahead by the scheduler (PD-004) | M1 | TR-OPS-04 |
 | Compiled cache bounded by `cache.max-entries` | M1 | TR-PERF-06 |
 | Decision log retention by configuration, required outside `dev`, at least 12 months (PD-020, PD-050) | M3 | TR-OPS-04 |
-| Explain templates; reports attached to publication requests; what-if over a period | M3 | TR-OBS-05 |
+| Explain templates; reports attached to publication requests, which a host can require per rule set, off by default ([PD-022](decisions.md#pd-022-conflict-simulation-report-in-cockpit-01-approvals)); replay limits as host settings ([PD-018](decisions.md#pd-018-replay-simulation-in-m1)); what-if over a period | M3 | TR-OBS-05 |
 
 ### 7.4 Assumptions and open questions
 
@@ -110,6 +110,7 @@ Capabilities on the Roadmap or in TR with no `RLE-*` statement yet:
 - Decided: an emergency single-approver path is allowed only when the bank turns it on by configuration; it is off by default, every use is logged and reviewed afterwards ([PD-012](decisions.md#pd-012-emergency-single-approver-path), 2026-11-19, RE-F-48). The architect's ADR sets its milestone and controls. Four-eyes stays engine-enforced unless a bank turns the path on.
 - Resolved: `rle_decision` is partitioned monthly from the first migration ([PD-004](decisions.md#pd-004-the-decision-log-is-partitioned-monthly-from-the-first-migration)). Retention is required outside the `dev` profile, at least 12 months, and the engine refuses to start until it is set ([PD-050](decisions.md#pd-050-retention-default-for-the-decision-log-and-history), 2026-11-19); the setting, the start-up check and the purge arrive together in M3, and nothing is deleted before ([PD-020](decisions.md#pd-020-conflict-partitioning-milestone-on-the-roadmap), 2026-11-19).
 - Decided: authoring without YAML for business users through a spreadsheet round-trip in M1 and the grid with templates in M2, judged against seven testable criteria U1 to U7 ([PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml), 2026-11-19).
+- Decided under delegated authority on 2026-11-19 ([PD-073](decisions.md#pd-073-decision-rights-for-business-and-use-case-questions)), following the principle "generic by design" ([PD-074](decisions.md#pd-074-product-principle-generic-by-design)): replay stays in M3 unless the week 3 approver session fails (PD-018); the generated explanation ships in M1 and gates it (PD-027); the FEEL error mode is a declared property of each decision model, `strict` by default for v1 rule sets and `spec` for imported DMN, while guardrails fail closed in every mode (PD-066); PostgreSQL 15 or later from 1.0, 14 tested until then (PD-055); retiring a live version by hand needs one `rules:approve` holder with a reason by default, and a host can require a second approver by setting, with that mode in M3 (RE-F-49, [PD-080](decisions.md#pd-080-second-approver-for-retiring-a-live-rule-version-by-hand)); this setting is separate from the PD-012 emergency path.
 - Open question for the architect (gap G3 in the journeys page): what happens when a version is approved after its requested effective date.
 - Open question for the architect (gap G4): a masked input used in a condition cannot be replayed from the log alone; should the validator warn?
 
@@ -118,15 +119,15 @@ Capabilities on the Roadmap or in TR with no `RLE-*` statement yet:
 | Milestone | In scope |
 |---|---|
 | M1 (Rule Engine 0.1) | Everything in 7.2; sample-input simulation; YAML and JSON authoring; decision log partitioned monthly from the first migration; spreadsheet round-trip with plain shorthand and plain errors (CK-F-35) and restore an earlier version as a draft (RE-F-33) ([PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml)) |
-| M2 | Grid editor in Cockpit 0.2 with templates, a new rule set flow and drop-downs (CK-F-36, CK-F-37); batch evaluate (RE-F-26) and finding decisions by correlation id or input value (RE-F-34), both moved here or added by PD-043 |
-| M3 (1.0) | Replay of logged decisions through a draft (RLE-015), moved from M2 by [PD-042](decisions.md#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted); explain templates; simulation reports on publication requests; what-if comparison; decision log retention by configuration, required outside `dev` with a 12-month minimum (PD-050, PD-020); OpenTelemetry spans; DMN decision-table import; API freeze |
+| M2 | Grid editor in Cockpit 0.2 with templates, a new rule set flow and drop-downs (CK-F-36, CK-F-37); batch evaluate (RE-F-26) and finding decisions by correlation id or input value (RE-F-34), both moved here or added by PD-043; the decision log write mode setting (RE-F-15, first M2 cut, PD-075) |
+| M3 (1.0) | Replay of logged decisions through a draft (RLE-015), moved from M2 by [PD-042](decisions.md#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted); explain templates; simulation reports on publication requests; what-if comparison; decision log retention by configuration, required outside `dev` with a 12-month minimum (PD-050, PD-020); the `four-eyes` mode for manual retirement (RE-F-49, PD-080, last M3 cut); OpenTelemetry spans; DMN decision-table import; API freeze |
 | 1.1 (S1, dates pending PD-062) | Every DMN hit policy; decision requirement graphs with input data and item definitions; DMN 1.2 to 1.5 import and export with DMNDI; S-FEEL in the HORUS FEEL engine; DMN TCK Level 2 at 100 percent (RE-F-43 to RE-F-45) |
 | 1.2 (S2) | Full FEEL, every boxed expression, business knowledge models and decision services; DMN TCK Level 3 at least 95 percent (RE-F-46) |
 | 1.3 (S3) | DMN `import` of other models, DMNDI for every element, TCK Level 3 at 100 percent except the policy exclusions (RE-F-47) |
 
 Standards foundations in M1 ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)): the imported file is kept as received with its hash (RE-F-38); the rule set time zone (RE-F-39); number, rounding, regex and string rules aligned with FEEL (RE-F-40); a rule set is a DMN model with one decision and names its expression language, and the decision request accepts an optional decision id before the 1.0 freeze (RE-F-42). Decided on 2026-11-19: null logic follows FEEL from M1, checked by a differential test against a reference FEEL implementation in test scope, so every logged decision stays replayable under FEEL ([PD-058](decisions.md#pd-058-feel-null-semantics-in-the-expression-language-from-m1), RE-F-41); the rule set model is the DMN semantic model, with our JSON as its canonical serialisation, YAML authoring unchanged and hashes that never change ([PD-060](decisions.md#pd-060-canonical-model-bpmn-and-dmn-semantic-models), X-F-28); and FEEL for the standards track is built here, deterministic and sandboxed, with an existing FEEL engine used only as a test oracle ([PD-061](decisions.md#pd-061-horus-built-feel)).
 
-Non-goals: DMN conformance before 1.1 (it arrives in stages after 1.0, [PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)); DMN external Java and PMML functions, which are refused at import (principle 4); inference, rule chaining or complex event processing; scripting in expressions (principle 4); cross-tenant rule inheritance at evaluation time; any network I/O from the evaluator (`TR-EMB-05`); a standalone decision server ([ADR-0004](../adr/0004-no-standalone-server.md)).
+Non-goals: business values coded into the engine, such as currencies, tiers, fee or reason codes, roles or languages (they come from rule sets, configuration or host extensions, [PD-074](decisions.md#pd-074-product-principle-generic-by-design)); DMN conformance before 1.1 (it arrives in stages after 1.0, [PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)); DMN external Java and PMML functions, which are refused at import (principle 4); inference, rule chaining or complex event processing; scripting in expressions (principle 4); cross-tenant rule inheritance at evaluation time; any network I/O from the evaluator (`TR-EMB-05`); a standalone decision server ([ADR-0004](../adr/0004-no-standalone-server.md)).
 
 ## Red-team
 

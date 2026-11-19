@@ -1,0 +1,167 @@
+openapi: 3.1.0
+info:
+  title: HORUS Agentic BPM host contract
+  version: 1.0.0
+  summary: What a host's engines are, and who the caller is.
+  description: |
+    Every host that embeds an engine serves these two endpoints once, whatever engines it runs
+    (ADR-0014). Both need an authenticated caller and no other permission. The response bodies are
+    owned by the JSON Schemas in `cockpit/api/schema/`; this document references them and adds the
+    headers and errors. Changes are additive within schema version 1.
+  license:
+    name: PolyForm Noncommercial License 1.0.0
+    url: https://polyformproject.org/licenses/noncommercial/1.0.0/
+servers:
+  - url: /
+security:
+  - bearer: []
+paths:
+  /api/bpm/meta:
+    get:
+      operationId: getHostMeta
+      summary: Engines, versions, features, tenancy and limits of this host
+      parameters:
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: The host's engines.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/MetaCacheControl' }
+            ETag: { $ref: '#/components/headers/ETag' }
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+          content:
+            application/json:
+              schema:
+                $ref: '../../cockpit/api/schema/bpm-meta.v1.schema.json'
+              example:
+                schemaVersion: 1
+                hostId: loans
+                modules:
+                  - module: rules
+                    engineVersion: 0.1.0
+                    apiVersion: v1
+                    features: []
+                tenancy: { switching: false }
+                limits: { maxPageSize: 200 }
+        '304': { $ref: '#/components/responses/NotModified' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/TenantNotAllowed' }
+  /api/bpm/me:
+    get:
+      operationId: getCurrentCaller
+      summary: The caller, the tenant the request resolved to, and the caller's engine permissions
+      parameters:
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: The caller as this host sees it.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/MeCacheControl' }
+            ETag: { $ref: '#/components/headers/ETag' }
+            Vary:
+              description: '`Authorization, Cookie, X-Tenant-Id`: the body depends on the caller.'
+              schema: { type: string }
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+          content:
+            application/json:
+              schema:
+                $ref: '../../cockpit/api/schema/bpm-me.v1.schema.json'
+              example:
+                schemaVersion: 1
+                user: { id: lan, displayName: Lan Nguyen }
+                tenant: { current: bank-a, allowed: [bank-a] }
+                permissions: ['rules:read', 'rules:author']
+                roles: [ROLE_PRICING_ANALYST]
+                groups: []
+        '304': { $ref: '#/components/responses/NotModified' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/TenantNotAllowed' }
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: An `ETag` from an earlier response; a match answers `304`.
+      schema: { type: string }
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Your own id for the request. The host logs it as `clientCorrelationId` and always issues its own ULID, returned in the `X-Correlation-Id` response header and every problem body.
+      schema: { type: string }
+    TenantId:
+      name: X-Tenant-Id
+      in: header
+      required: false
+      description: |
+        Tenant switching is not available yet (`tenancy.switching: false`). A value other than the
+        tenant the request resolved to is refused with `403 TENANT_NOT_ALLOWED`.
+      schema: { type: string }
+  headers:
+    MetaCacheControl:
+      description: '`private, max-age=60`: the same for every caller of the host.'
+      schema: { type: string, const: 'private, max-age=60' }
+    MeCacheControl:
+      description: '`private, no-cache`: the body carries the caller''s permissions, so the browser revalidates with `If-None-Match` every time.'
+      schema: { type: string, const: 'private, no-cache' }
+    ETag:
+      description: Weak validator of the body's content.
+      schema: { type: string }
+    CorrelationId:
+      description: The ULID this host issued for the request, also in every problem body.
+      schema: { type: string }
+  responses:
+    NotModified:
+      description: The body has not changed since the `ETag` in `If-None-Match`.
+    Unauthenticated:
+      description: |
+        `UNAUTHENTICATED`: no principal, or no tenant could be resolved from it (PD-079: the tenant
+        comes from the principal, session or token, never from a header). Always carries
+        `WWW-Authenticate`; for a missing tenant a bearer challenge adds `error="invalid_token"`, and a
+        client must not repeat the sign-in more than once, because the same account gets the same token.
+      headers:
+        WWW-Authenticate:
+          description: '`Bearer` by default (`horus.bpm.security.challenge`).'
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#unauthenticated
+            title: Authentication required
+            status: 401
+            code: UNAUTHENTICATED
+            detail: Sign in, or send a token issued for this host.
+            instance: /api/bpm/me
+            correlationId: 01KAF3N8Q4V6W2Y9Z0A1B2C3D4
+    TenantNotAllowed:
+      description: '`TENANT_NOT_ALLOWED`: `X-Tenant-Id` names a tenant other than the principal''s, or the tenant is outside the allowed format.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      description: RFC 9457 problem details with the engine contract's `code` and `correlationId` (ADR-0010).
+      type: object
+      required: [type, title, status, code, correlationId]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: '`https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#<code in lower case>`. Branch on `code`, never on `type`.'
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string, pattern: '^[A-Z][A-Z_]*$' }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }

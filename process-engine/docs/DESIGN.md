@@ -170,7 +170,7 @@ Source: [`diagrams/async-wait-state.mmd`](diagrams/async-wait-state.mmd). TX2 re
 
 1. Bounded inputs: `${instance.<path>}` references (schema `$defs/variableRef`) resolve into an explicit input map; fields marked `mask: true` are hashed before any history write.
 2. TX1 claims; the adapter `AgentAdapter.execute(AgentInvocation)` runs with no connection, under the step `timeout`. The engine never embeds a model SDK.
-3. TX2 validates the output against `outputSchema`. A violation is a failed attempt; after `retry.max` the incident `AGENT_SCHEMA_INVALID` opens.
+3. TX2 validates the output against `outputSchema`. The result may carry optional labels (PD-014, M2): `AgentResult.labels()` is a `Map<String, String>` recorded in history and never acted on; `model` and `promptVersion` are reserved and documented, a host may add its own keys; at most `agents.labels.max-count` (16) entries, keys up to `agents.labels.max-key-length` (64) and values up to `agents.labels.max-value-length` (256) characters, which may be lowered only; a result above the bounds is a failed attempt with `AGENT_LABELS_INVALID` (`TR-AGT-02`). A violation is a failed attempt; after `retry.max` the incident `AGENT_SCHEMA_INVALID` opens.
 4. TX2 evaluates `guardrails.decision` with `RuleEngine.evaluate`. Contract: hit policy `first` or `unique`, output `allow: boolean`, optional `reasons: list<string>`. Checked at import, at request-approval and at approval (`422 GUARDRAIL_CONTRACT_INVALID`). At run time a decision error or a non-complying later version counts as `allow == false` with reason `GUARDRAIL_EVALUATION_ERROR` (fail closed).
 5. `allow == true` advances and records `guardrailDecisionId`. `allow == false` with `route-to-human` opens an approval task with inputs, output, `reasons` and matched rule ids; with `fail` opens an incident or starts compensation.
 6. A reviewer's change to the agent output is stored as `human_override` in history for offline evaluation.
@@ -356,12 +356,24 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `authoring.cockpit-drafts` | `true` | `false` refuses draft creation and draft edits through `processes:author` endpoints with `403 DRAFT_AUTHORING_DISABLED`; imports with `processes:deploy`, approvals and layout writes still work (PD-036) |
 | `definitions.max-nodes`, `definitions.max-bytes` | `500`, `1MB` | May be lowered, never raised (`TR-DEF-05`) |
 | `tasks.form-link-origins` | empty | Origins allowed in form links; relative links are always allowed |
-| `stats.live-cache-ttl`, `stats.live-cache-ttl-large` | `PT5S`, `PT15S` | Live count cache per replica; the large TTL applies when the last count exceeded 100,000 tokens |
+| `stats.live-cache-ttl`, `stats.live-cache-ttl-large` | `PT5S`, `PT15S` | Live count cache per replica; the large TTL applies when the last count exceeded `stats.live-cache-large-threshold` |
 | `stats.rollup-interval`, `stats.rollup-lag`, `stats.rollup-max-slice` | `PT5M`, `PT5M`, `PT1M` | Rollup cadence, safety lag, history time per transaction |
 | `stats.rollup-retention` | `P13M` | Drops whole monthly partitions of the derived rollup table |
 | `query.max-page-size`, `query.statement-timeout` | `200`, `PT2S` | Page size may be lowered only; timeout per read transaction |
 | `jobs.lease-margin`, `adapters.default-timeout` | `30s`, `PT30S` | ADR-0008 |
-| `history.retention` | unset (keep everything) | Drops whole monthly partitions of `pre_history`; the default and the floor are pending PD-050 |
+| `history.retention` | none; required outside `dev` | Whole months; drops whole monthly partitions of `pre_history` older than the period. Outside the `dev` profile start-up is refused until it is set, and a value below `history.retention-floor` or not in whole months is refused (PD-050). The process history ships in M2 and retention applies with the rule engine's in M3; before M3 nothing is deleted |
+| `history.retention-floor` | `P12M` | Shortest `history.retention` accepted; a host may raise it, never lower it below the engine floor (ADR-0024, `TR-EXT-05`) |
+| `jobs.timer-lease` | `60s` | Lease of timer, SLA and effective-date jobs, which make no external call (ADR-0008) |
+| `adapters.executor-threads` | `16` | Adapter executor size per replica; a job is claimed only when a slot is free (section 4) |
+| `migration.batch-size` | `100` | Instances per migration batch, one instance lock at a time (section 4.3); may be lowered only |
+| `tokens.cleanup-after`, `tokens.cleanup-batch` | unset (keep), `10000` | When set, the scheduler deletes `pre_token` rows of instances ended longer ago, in batches; history keeps every transition (open question 11.3) |
+| `stats.live-cache-large-threshold` | `100000` | Token count above which `stats.live-cache-ttl-large` applies |
+| `query.max-range` | `P31D` | Longest time range of a list query (ADR-0015); may be lowered only |
+| `idempotency.retention` | `PT24H` | How long an idempotency record answers replays |
+| `agents.labels.max-count`, `agents.labels.max-key-length`, `agents.labels.max-value-length` | `16`, `64`, `256` | Bounds of agent result labels (section 4.1, PD-014); may be lowered only |
+| `tenancy.claim`, `tenancy.dev-tenant` | `tenant_id`, unset | Shared with the Rule Engine under `horus.bpm.*`; session-principal default resolver (ADR-0014 decision 6, PD-079) |
+
+Extension points (ADR-0024, `TR-EXT-02`), each with an engine default registered `@ConditionalOnMissingBean`: `TenantResolver`, `CallerResolver`, `BusinessCalendar` (default 24x7), `StepRegistry`, `FormRegistry`, `RoleCatalogue` (default none), `AgentAdapter` and `ServiceAdapter` (no default; required only by definitions that use them), `OutputSchemaValidator`, `MessageAdapter` (S2), the process event publisher, and `LifecycleGuard` (default allows everything; a host guard may veto a definition, task or incident transition with its own code and can never make a refused transition succeed, `TR-EXT-06`). Approval rules, assignees, SLA durations, escalation targets, retries, timeouts and guardrails are per definition, not engine settings.
 
 ## 7. Storage model (`process-engine-postgres`)
 
@@ -719,6 +731,7 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | Replica dies before the effective-date job runs | One key, until the lease expires | Lease on `pre_timer` | Another replica claims the job after `jobs.timer-lease`; the previous version stays effective until then because effective selection reads `effective_from`, not the job |
 | Concurrent layout saves | One layout | Duplicate primary key on `revision` | `409 VERSION_CONFLICT`; the cockpit reloads and shows the newer revision |
 | Malicious BPMN (entity expansion, deep nesting) | One request | Reader limits, DTD refused | `422 BPMN_UNSAFE_XML`; no transaction was opened |
+| Host database restored to an earlier point in time (PD-044, `TR-DR-01`, `TR-DR-02`) | Every instance changed after the restore point | Jobs `CLAIMED` with `locked_until` from before the restore; adapter calls whose TX2 was lost | No engine step: start-up adds at most 5 s; expired leases are reclaimed by the normal poller and retried with a new `attemptId`, so adapters must be idempotent by `attemptId`; the host reconciles side effects and consumers tolerate events for state the restore removed. Proven by the 1.0 restore test |
 | Instance cancelled while an adapter call runs | One step | TX2 finds the job `CANCELLED` | Result discarded and recorded as `LATE_RESULT_DISCARDED` with the attempt id; the external effect, if any, is the host's to reconcile by `attemptId` (DN-10) |
 | Handler returns a business error before S1 | One step | `HandlerResult.BusinessError` | Incident `UNHANDLED_BUSINESS_ERROR` with the code; retry or resolve as any incident (DN-09) |
 | Rollup slice times out | Statistics only | `statement_timeout` | Rollback; watermark unchanged; next run repeats; metric `horus_pre_rollup_lag_seconds` alerts above 15 min |
@@ -748,7 +761,7 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 |---|---|---|---|
 | 11.1 | Nested `callProcess` compensation: does a parent's failure compensate a completed child automatically? | Only through an explicit `saga` scope in the parent | Maintainers, M2 start |
 | 11.2 | Should the approver also differ from every identity that edited the draft, for both engines? | Yes, for both engines at once; record editors in a JSONB list. **Decision needed** by the product owner because it changes `TR-SEC-04` for rules as well | Architect, M2 start |
-| 11.3 | Remove tokens of instances ended more than 30 days ago? `pre_token` is not an audit table; history keeps every transition | Yes, by the scheduler in batches of 10,000, configurable | Maintainers, M2 |
+| 11.3 | Remove tokens of instances ended more than 30 days ago? `pre_token` is not an audit table; history keeps every transition | Made configurable on 2026-11-19 (`tokens.cleanup-after`, unset by default, ADR-0024); recommended value `P30D` | Maintainers, M2 |
 | 11.4 | Windows longer than 31 days for the heatmap need a daily rollup table | Defer to after 1.0 unless a pilot asks | Architect, M3 |
 | 11.5 | Migration plan storage (`pre_migration`) has no DDL yet | DDL before M2 execution work | Maintainers, M2 |
 | 11.6 | Which JSON library major `*-core` uses (ADR-0011) | **Decided** 2026-11-19 (PD-071 option 1, ADR-0021): Jackson 3 in `internal` only; engine REST bodies use the engine's mapper (`PRE-045`). Condition: the Spring Boot 3.5 coexistence test passes in Sprint 1, or option 3 (no JSON library in the core) returns | Closed; the condition is checked by the maintainers in the first parsing pull request |
