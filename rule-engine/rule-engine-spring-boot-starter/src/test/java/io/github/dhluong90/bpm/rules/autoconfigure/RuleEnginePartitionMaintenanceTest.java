@@ -102,7 +102,7 @@ class RuleEnginePartitionMaintenanceTest {
         }
 
         // Then the failure was logged with the retry, and the schedule kept running
-        assertThat(output).contains("could not create decision log partitions; the next run");
+        assertThat(output).contains("could not create decision log partitions").contains("the next run");
     }
 
     @Test
@@ -120,5 +120,76 @@ class RuleEnginePartitionMaintenanceTest {
         assertThat(gauge.value()).isEqualTo(1.0);
         assertThat(gauge.value()).isZero();
         assertThat(gauge.value()).isNaN();
+    }
+
+    @Test
+    void TR_OPS_05_an_error_in_one_run_does_not_end_the_loop_and_the_next_run_happens(CapturedOutput output) {
+        // Given a run that throws an Error from a library, then one that succeeds
+        DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
+        when(partitions.ensureAhead(JAN_26_2027, Duration.ofDays(7)))
+                .thenThrow(new NoClassDefFoundError("org/example/MissingDriverClass"))
+                .thenReturn(List.of());
+        RuleEnginePartitionMaintenance maintenance =
+                new RuleEnginePartitionMaintenance(partitions, clock, Duration.ofDays(7), Duration.ofMillis(50));
+
+        // When the scheduled runs happen
+        maintenance.start();
+        try {
+            verify(partitions, timeout(5_000).atLeast(2)).ensureAhead(JAN_26_2027, Duration.ofDays(7));
+        } finally {
+            maintenance.destroy();
+        }
+
+        // Then the Error was logged, the loop kept running, and the last success is recorded
+        assertThat(output).contains("could not create decision log partitions").contains("NoClassDefFoundError");
+        assertThat(maintenance.stopped()).isFalse();
+        assertThat(maintenance.lastSuccess()).isEqualTo(JAN_26_2027);
+    }
+
+    @Test
+    void TR_OPS_05_a_virtual_machine_error_stops_the_loop_and_health_reports_down() throws Exception {
+        // Given a run that throws OutOfMemoryError
+        DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
+        when(partitions.ensureAhead(JAN_26_2027, Duration.ofDays(7))).thenThrow(new OutOfMemoryError("test"));
+        RuleEnginePartitionMaintenance maintenance =
+                new RuleEnginePartitionMaintenance(partitions, clock, Duration.ofDays(7), Duration.ofMillis(20));
+        io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator migrator =
+                mock(io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator.class);
+        when(migrator.status()).thenReturn(new io.github.dhluong90.bpm.rules.postgres.SchemaStatus("5", 0));
+        RuleEngineHealthCheck health = new RuleEngineHealthCheck(migrator, partitions, clock, System::nanoTime,
+                List.of(maintenance));
+        assertThat(health.check().up()).isTrue();
+        assertThat(health.check().details()).containsEntry("partitionMaintenanceLastSuccess", "never");
+
+        // When the scheduled run fails
+        maintenance.start();
+        try {
+            verify(partitions, timeout(5_000)).ensureAhead(JAN_26_2027, Duration.ofDays(7));
+            Thread.sleep(300);   // several periods: a stopped loop must not run again
+        } finally {
+            maintenance.destroy();
+        }
+
+        // Then the loop ran once and stopped, and health is DOWN naming the job
+        verify(partitions, org.mockito.Mockito.times(1)).ensureAhead(JAN_26_2027, Duration.ofDays(7));
+        assertThat(maintenance.stopped()).isTrue();
+        assertThat(health.check().up()).isFalse();
+        assertThat(health.check().details()).containsEntry("partitionMaintenance", "STOPPED");
+    }
+
+    @Test
+    void RLE_017_health_shows_the_time_of_the_last_successful_run() {
+        DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
+        when(partitions.ensureAhead(JAN_26_2027, Duration.ofDays(7))).thenReturn(List.of());
+        RuleEnginePartitionMaintenance maintenance = new RuleEnginePartitionMaintenance(partitions, clock,
+                Duration.ofDays(7));
+        io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator migrator =
+                mock(io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator.class);
+        when(migrator.status()).thenReturn(new io.github.dhluong90.bpm.rules.postgres.SchemaStatus("5", 0));
+
+        maintenance.runOnce();
+
+        assertThat(new RuleEngineHealthCheck(migrator, partitions, clock, System::nanoTime, List.of(maintenance))
+                .check().details()).containsEntry("partitionMaintenanceLastSuccess", "2027-01-26T00:00:00Z");
     }
 }

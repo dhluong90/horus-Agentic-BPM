@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executors;
@@ -21,7 +22,7 @@ import org.springframework.beans.factory.DisposableBean;
  * the 5 s lock timeout logs a warning and the next run retries, so no run fails the host (TR-OPS-05). A host may
  * replace this bean.
  */
-public final class RuleEnginePartitionMaintenance implements DisposableBean {
+public final class RuleEnginePartitionMaintenance implements DisposableBean, RuleEngineBackgroundJob {
 
     private static final Log LOG = LogFactory.getLog(RuleEnginePartitionMaintenance.class);
 
@@ -30,6 +31,8 @@ public final class RuleEnginePartitionMaintenance implements DisposableBean {
     private final Duration ahead;
     private final Duration interval;
     private ScheduledExecutorService scheduler;
+    private volatile Instant lastSuccess;
+    private volatile boolean stopped;
 
     RuleEnginePartitionMaintenance(DecisionLogPartitions partitions, Clock clock, Duration ahead) {
         this(partitions, clock, ahead, EngineDefaults.PARTITION_MAINTENANCE_INTERVAL);
@@ -50,6 +53,7 @@ public final class RuleEnginePartitionMaintenance implements DisposableBean {
      */
     List<String> runOnce() {
         List<String> created = partitions.ensureAhead(clock.instant(), ahead);
+        lastSuccess = clock.instant();
         if (!created.isEmpty()) {
             LOG.info("Rule Engine created decision log partitions " + created);
         }
@@ -70,13 +74,45 @@ public final class RuleEnginePartitionMaintenance implements DisposableBean {
         scheduler.scheduleWithFixedDelay(this::runQuietly, period, period, TimeUnit.MILLISECONDS);
     }
 
-    private void runQuietly() {
+    /**
+     * One scheduled iteration. The boundary catches every {@code Throwable}, so an {@code Error} from a library
+     * (for example {@code NoClassDefFoundError}) never ends the loop silently: it is logged with the months the run
+     * was creating and the next run retries. A {@link VirtualMachineError} is logged, the loop stops and the health
+     * contributor reports {@code DOWN}, so the orchestrator restarts the host rather than it running on degraded.
+     */
+    void runQuietly() {
+        if (stopped) {
+            return;
+        }
         try {
             runOnce();
-        } catch (RuntimeException e) {
-            LOG.warn("Rule Engine could not create decision log partitions; the next run in " + interval
-                    + " retries, and " + ahead + " of months ahead leave time for it", e);
+        } catch (VirtualMachineError fatal) {
+            stopped = true;
+            LOG.fatal("Rule Engine stopped decision log partition maintenance after a JVM error; health is DOWN "
+                    + "until the host restarts", fatal);
+            ScheduledExecutorService running = scheduler;
+            if (running != null) {
+                running.shutdown();
+            }
+        } catch (Throwable e) {
+            LOG.warn("Rule Engine could not create decision log partitions up to " + ahead + " ahead of "
+                    + clock.instant() + "; the next run in " + interval + " retries", e);
         }
+    }
+
+    @Override
+    public String jobName() {
+        return "partitionMaintenance";
+    }
+
+    @Override
+    public Instant lastSuccess() {
+        return lastSuccess;
+    }
+
+    @Override
+    public boolean stopped() {
+        return stopped;
     }
 
     @Override
