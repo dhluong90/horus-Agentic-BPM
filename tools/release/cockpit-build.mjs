@@ -1,10 +1,15 @@
 // Release build of the cockpit bundle with a record of what is in it (TR-SEC-06, TR-LIC-01).
 //
 // Usage (from cockpit/web, after `npm ci --ignore-scripts` and `tsc -b`):
-//   node ../../tools/release/cockpit-build.mjs OUT.json
+//   node ../../tools/release/cockpit-build.mjs MODULES.json BUNDLE.txt
+// Normally called through tools/release/build-cockpit.sh, which the release build and the container
+// image both use.
 //
-// Runs the cockpit's own `vite build` (its vite.config.ts, its installed Vite) with one extra plugin
-// that writes OUT.json, outside dist/, so nothing is added to the jar:
+// Runs the cockpit's own `vite build` (its vite.config.ts, its installed Vite) with one extra plugin,
+// then writes two files outside dist/, so nothing is added to the jar:
+// BUNDLE.txt is the SHA-256 of every file of dist/ (cockpit-hosts.json excepted, as in the starter's
+// resource rule), written right after the build in the `shasum -a 256` format, sorted by path.
+// MODULES.json records what is in the bundle:
 //   packages        every node_modules package with at least one module in the bundle: name, version,
 //                   licence and the package directory
 //   bundlerRuntime  packages whose runtime helpers the bundler injected (virtual modules such as
@@ -16,7 +21,8 @@
 // The cockpit's "build" script must stay "tsc -b && vite build"; this file fails if it changes, so the
 // release build and `npm run build` cannot drift apart.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -30,9 +36,10 @@ const VIRTUAL_OWNERS = [
   ['plugin-react', '@vitejs/plugin-react'],
 ];
 
-const [out] = process.argv.slice(2);
-if (!out) {
-  console.error('Usage: node cockpit-build.mjs OUT.json (run from cockpit/web)');
+const NOT_PACKAGED = new Set(['cockpit-hosts.json']);
+const [out, bundleOut] = process.argv.slice(2);
+if (!out || !bundleOut) {
+  console.error('Usage: node cockpit-build.mjs MODULES.json BUNDLE.txt (run from cockpit/web)');
   process.exit(2);
 }
 const web = process.cwd();
@@ -122,6 +129,27 @@ const recorder = {
 };
 
 await vite.build({ root: web, plugins: [recorder] });
+
+// The bundle's fingerprint, taken before anything else runs. Paths compare by UTF-16 code unit, which is
+// byte order for the ASCII names Vite writes.
+const dist = join(web, 'dist');
+const files = readdirSync(dist, { recursive: true, withFileTypes: true })
+  .filter((entry) => entry.isFile() && !NOT_PACKAGED.has(entry.name))
+  .map((entry) => join(entry.parentPath ?? entry.path, entry.name).slice(dist.length + 1).split(sep).join('/'))
+  .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+for (const file of files) {
+  if (/[\r\n]/.test(file)) {
+    console.error(`dist/ has a file name with a line break: ${JSON.stringify(file)}`);
+    process.exit(1);
+  }
+}
+if (!files.includes('index.html')) {
+  console.error('dist/index.html is missing: the cockpit bundle was not built');
+  process.exit(1);
+}
+const lines = files.map((file) => `${createHash('sha256').update(readFileSync(join(dist, file))).digest('hex')}  ./${file}\n`);
+writeFileSync(bundleOut, lines.join(''));
+console.log(`${bundleOut}: SHA-256 of ${files.length} file(s) under dist/`);
 
 const sorted = (map) => [...map.values()].sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
 const result = {

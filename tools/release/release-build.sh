@@ -26,10 +26,10 @@
 #   0. Preflight: trial mode refused in CI; clean working tree; tag version and branch; Node version.
 #   1. mvn clean and delete cockpit/web/dist, so nothing left from another build can be packaged.
 #      BUILD-INFO.json is written.
-#   2. Release tools and cockpit dependencies from their lockfiles, with no install scripts; lockfile
-#      hosts and integrity checked; registry signatures checked. npm is offline from here on.
-#   3. Cockpit bundle: licence check of the production packages, tsc -b and vite build, recording the
-#      packages in the bundle; SHA-256 of every bundle file right after the build.
+#   2-3. tools/release/build-cockpit.sh, shared with the container image: release tools and cockpit
+#      dependencies from their lockfiles with no install scripts; lockfile hosts and integrity; registry
+#      signatures; npm offline from then on; licence check, tsc -b and vite build, recording the packages
+#      in the bundle and the SHA-256 of every bundle file right after the build.
 #   4. Publishing guard, then mvn deploy into target/release/maven-repo with every test and gate.
 #   5. The staged starter jar must carry exactly the bundle recorded in step 3.
 #   6. npm SBOM, after the jar is sealed: every bundled package must be a production dependency with an
@@ -111,27 +111,19 @@ rm -rf "$WEB/dist" "$OUT"
 mkdir -p "$OUT"
 python3 "$SBOM_PY" build-info "$OUT/BUILD-INFO.json" --trial "$trial" --tag "$tag"
 
-step "2. npm dependencies from the lockfiles, no install scripts; lockfile hosts and registry signatures"
-(cd "$TOOLS" && "${NPM_CI[@]}")
-lockfiles=("$TOOLS/package-lock.json")
-[[ "$cockpit" == true ]] && lockfiles+=("$WEB/package-lock.json")
-for lockfile in "${lockfiles[@]}"; do
-  (cd "$TOOLS" && npm exec --offline -- "${LOCKFILE_LINT[@]}" --path "$lockfile")
-done
-(cd "$TOOLS" && npm audit signatures)
 if [[ "$cockpit" == true ]]; then
-  (cd "$WEB" && "${NPM_CI[@]}" && npm audit signatures)
+  step "2-3. Cockpit bundle: tools/release/build-cockpit.sh (the same script the container image uses)"
+  # Lockfile installs with no install scripts, lockfile-lint, npm audit signatures, then licences,
+  # tsc -b and vite build with the bundle record and its SHA-256 written right after the build.
+  "$ROOT/tools/release/build-cockpit.sh" "$OUT"
+else
+  step "2-3. No cockpit sources (cockpit/web/package.json): Java-only release, no npm SBOM"
+  (cd "$TOOLS" && "${NPM_CI[@]}")
+  (cd "$TOOLS" && npm exec --offline -- "${LOCKFILE_LINT[@]}" --path "$TOOLS/package-lock.json")
+  (cd "$TOOLS" && npm audit signatures)
 fi
 # Nothing more is fetched from the npm registry in this build.
 export npm_config_offline=true
-
-if [[ "$cockpit" == true ]]; then
-  step "3. Build the cockpit bundle from these sources with Node $(node --version)"
-  (cd "$WEB" && npm run licences && npm exec -- tsc -b && node "$ROOT/tools/release/cockpit-build.mjs" "$OUT/cockpit-modules.json")
-  python3 "$SBOM_PY" manifest "$WEB/dist" "$OUT/cockpit-bundle.txt" --exclude cockpit-hosts.json
-else
-  step "3. No cockpit sources (cockpit/web/package.json): Java-only release, no npm SBOM"
-fi
 
 step "4. Publishing guard, then build, test and stage every artifact (mvn deploy into target/release/maven-repo)"
 "${MVN[@]}" -q "$HELP_PLUGIN:effective-pom" -Doutput="$ROOT/target/release-effective-pom.xml"
