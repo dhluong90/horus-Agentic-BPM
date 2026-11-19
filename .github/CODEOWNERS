@@ -14,3 +14,4 @@
 /tools/spec-coverage.ini        @dhluong90
 /tools/test_spec_coverage.py    @dhluong90
 **/docs/spec-pending.txt        @dhluong90
+/tools/release/               @dhluong90
