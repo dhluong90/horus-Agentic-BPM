@@ -88,20 +88,20 @@ jobs:
 
       - name: Build, unit and ArchUnit tests, Testcontainers integration tests (Spring Boot 4.x)
         if: matrix.boot == '4.x'
-        run: mvn -B -ntp verify -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
+        run: tools/mvn-retry.sh -B -ntp verify -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
 
       - name: Build the engine on the Spring Boot 4.x baseline, tests compiled but not run
         if: matrix.boot != '4.x'
-        run: mvn -B -ntp install -DskipTests
+        run: tools/mvn-retry.sh -B -ntp install -DskipTests
 
       # The dependency bans and convergence rules, evaluated against this line's dependency tree.
       - name: Enforcer rules on the Spring Boot ${{ matrix.boot }} dependency tree
         if: matrix.boot != '4.x'
         run: |
-          mvn -B -ntp -Dspring-boot.line="$LINE" -pl "!bpm-bom" enforcer:enforce@enforce-build-baseline
-          mvn -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core,rule-engine/rule-engine-postgres \
+          tools/mvn-retry.sh -B -ntp -Dspring-boot.line="$LINE" -pl "!bpm-bom" enforcer:enforce@enforce-build-baseline
+          tools/mvn-retry.sh -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core,rule-engine/rule-engine-postgres \
             enforcer:enforce@enforce-no-network-client
-          mvn -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core \
+          tools/mvn-retry.sh -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core \
             enforcer:enforce@enforce-framework-free-core
         env:
           LINE: ${{ matrix.boot == '3.5.x' && '3.5' || '4.0' }}
@@ -109,7 +109,7 @@ jobs:
       - name: Run the same tests on Spring Boot ${{ matrix.boot }}
         if: matrix.boot != '4.x'
         run: >-
-          mvn -B -ntp -Dspring-boot.line="$LINE" -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
+          tools/mvn-retry.sh -B -ntp -Dspring-boot.line="$LINE" -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
           surefire:test failsafe:integration-test failsafe:verify
         env:
           LINE: ${{ matrix.boot == '3.5.x' && '3.5' || '4.0' }}
@@ -117,7 +117,7 @@ jobs:
       - name: Jackson 3 resolves beside the host's own Jackson 2 (TR-EMB-07, PD-071)
         if: matrix.boot == '3.5.x'
         run: |
-          mvn -B -ntp -q -Dspring-boot.line=3.5 -pl examples/rule-engine-only \
+          tools/mvn-retry.sh -B -ntp -q -Dspring-boot.line=3.5 -pl examples/rule-engine-only \
             org.apache.maven.plugins:maven-dependency-plugin:3.11.0:tree \
             -Dincludes=com.fasterxml.jackson.core,tools.jackson.core -DoutputFile=target/jackson-tree.txt
           python3 tools/check-jackson-coexistence.py examples/rule-engine-only/target/jackson-tree.txt \
@@ -194,7 +194,7 @@ jobs:
           npm run build
 
       - name: Licence gate (TR-LIC-01) and CycloneDX SBOMs (TR-SEC-06)
-        run: mvn -B -ntp verify -DskipTests
+        run: tools/mvn-retry.sh -B -ntp verify -DskipTests
 
       - name: Licence files and manifest entries in every engine jar (TR-LIC-02)
         if: ${{ !cancelled() && hashFiles('target/bom.json') != '' }}
@@ -203,7 +203,7 @@ jobs:
       - name: Add annotation processors to the build SBOM
         if: ${{ !cancelled() && hashFiles('target/bom-build.json') != '' }}
         run: |
-          mvn -B -ntp -q org.apache.maven.plugins:maven-help-plugin:3.6.0:effective-pom -Doutput=target/effective-pom.xml
+          tools/mvn-retry.sh -B -ntp -q org.apache.maven.plugins:maven-help-plugin:3.6.0:effective-pom -Doutput=target/effective-pom.xml
           python3 tools/check-dependency-policy.py add-processors
 
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
