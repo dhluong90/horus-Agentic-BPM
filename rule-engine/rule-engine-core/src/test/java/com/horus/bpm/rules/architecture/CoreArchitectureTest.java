@@ -26,6 +26,31 @@ import org.junit.jupiter.api.Test;
  */
 class CoreArchitectureTest {
 
+    /** HTTP and model client libraries: the engine never calls a model or a remote service itself. */
+    static final String[] HTTP_AND_MODEL_CLIENTS = {
+            "java.net.http..",
+            "org.springframework.web.client..",
+            "org.springframework.web.reactive.function.client..",
+            "org.springframework.ai..",
+            "org.apache.hc..",
+            "org.apache.http..",
+            "okhttp3..",
+            "retrofit2..",
+            "feign..",
+            "io.netty..",
+            "reactor.netty..",
+            "org.asynchttpclient..",
+            "org.eclipse.jetty.client..",
+            "jakarta.ws.rs.client..",
+            "dev.langchain4j..",
+            "com.openai..",
+            "com.anthropic..",
+            "com.azure.ai..",
+            "com.google.cloud.vertexai..",
+            "com.google.genai..",
+            "software.amazon.awssdk.."
+    };
+
     private static JavaClasses core;
 
     @BeforeAll
@@ -71,6 +96,23 @@ class CoreArchitectureTest {
                 .orShould().callMethodWhere(target(name("forName")).and(target(owner(assignableTo(Class.class)))))
                 .orShould().callMethodWhere(target(name("newInstance")).and(target(owner(assignableTo(Class.class)))))
                 .because("rule definitions never execute arbitrary code (TR-SEC-01, ADR-0003)")
+                .check(core);
+    }
+
+    @Test
+    void TR_AGT_03_core_uses_no_http_or_model_client_library() {
+        noClasses()
+                .should().dependOnClassesThat().resideInAnyPackage(HTTP_AND_MODEL_CLIENTS)
+                .because("the engine never embeds or calls a model, and adapters live in the host (TR-AGT-03, TR-EMB-05)")
+                .check(core);
+    }
+
+    @Test
+    void TR_EMB_07_core_uses_no_jackson_2_databind() {
+        noClasses()
+                .should().dependOnClassesThat()
+                .resideInAnyPackage("com.fasterxml.jackson.databind..", "com.fasterxml.jackson.core..")
+                .because("the cores parse with Jackson 3 only, one JSON major on every Spring Boot line (ADR-0021)")
                 .check(core);
     }
 }

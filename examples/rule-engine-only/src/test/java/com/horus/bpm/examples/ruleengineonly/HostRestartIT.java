@@ -1,6 +1,7 @@
 package com.horus.bpm.examples.ruleengineonly;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,12 +14,17 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-/** Failure paths of TR-EMB-06: the host and the engine restart on a database where both histories exist. */
+/**
+ * Failure paths of TR-EMB-06: the host and the engine restart on a database where both histories exist,
+ * and the reverse install order, where the engine's tables exist before the host adds its own Flyway
+ * (wiki Getting Started, "Install order").
+ */
 @Testcontainers
 class HostRestartIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES =
+            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
 
     private static final AtomicInteger DATABASES = new AtomicInteger();
 
@@ -56,6 +62,61 @@ class HostRestartIT {
                     .containsExactly("1", "2");
             assertThat(history(jdbc, "rle_schema_history")).isEqualTo(engineBefore);
         }
+    }
+
+    @Test
+    void TR_EMB_06_engine_first_then_host_flyway_with_baseline_version_0_runs_the_host_v1() {
+        String db = freshDatabase();
+        List<String> engineBefore = installEngineWithoutHostFlyway(db);
+
+        try (ConfigurableApplicationContext withHostFlyway = start(db,
+                "spring.flyway.baseline-on-migrate=true", "spring.flyway.baseline-version=0")) {
+            JdbcClient jdbc = withHostFlyway.getBean(JdbcClient.class);
+            assertThat(jdbc.sql("SELECT version || ' ' || type FROM flyway_schema_history ORDER BY installed_rank")
+                    .query(String.class).list())
+                    .containsExactly("0 BASELINE", "1 SQL");
+            assertThat(tableExists(jdbc, "loan_application")).isTrue();
+            assertThat(history(jdbc, "rle_schema_history")).isEqualTo(engineBefore);
+        }
+    }
+
+    @Test
+    void TR_EMB_06_engine_first_then_host_flyway_with_the_default_baseline_silently_skips_the_host_v1() {
+        // The hazard the wiki warns about: Spring's default baseline version 1 records the host's V1 as done.
+        String db = freshDatabase();
+        installEngineWithoutHostFlyway(db);
+
+        try (ConfigurableApplicationContext withHostFlyway = start(db, "spring.flyway.baseline-on-migrate=true")) {
+            JdbcClient jdbc = withHostFlyway.getBean(JdbcClient.class);
+            assertThat(jdbc.sql("SELECT version || ' ' || type FROM flyway_schema_history ORDER BY installed_rank")
+                    .query(String.class).list())
+                    .containsExactly("1 BASELINE");
+            assertThat(tableExists(jdbc, "loan_application")).isFalse();
+        }
+    }
+
+    @Test
+    void TR_EMB_06_engine_first_then_host_flyway_without_baseline_refuses_to_start() {
+        String db = freshDatabase();
+        installEngineWithoutHostFlyway(db);
+
+        assertThatThrownBy(() -> start(db).close())
+                .hasStackTraceContaining("non-empty schema")
+                .hasStackTraceContaining("schema history table");
+    }
+
+    /** The engine alone on an empty database: its tables and history exist, the host has no Flyway yet. */
+    private static List<String> installEngineWithoutHostFlyway(String database) {
+        try (ConfigurableApplicationContext engineOnly = start(database, "spring.flyway.enabled=false")) {
+            JdbcClient jdbc = engineOnly.getBean(JdbcClient.class);
+            assertThat(tableExists(jdbc, "flyway_schema_history")).isFalse();
+            assertThat(tableExists(jdbc, "rle_rule_set")).isTrue();
+            return history(jdbc, "rle_schema_history");
+        }
+    }
+
+    private static boolean tableExists(JdbcClient jdbc, String table) {
+        return jdbc.sql("SELECT to_regclass(?) IS NOT NULL").param(table).query(Boolean.class).single();
     }
 
     private static ConfigurableApplicationContext start(String database, String... extraProperties) {
