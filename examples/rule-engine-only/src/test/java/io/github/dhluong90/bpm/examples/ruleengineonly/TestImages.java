@@ -26,6 +26,10 @@ public final class TestImages {
             throw new IllegalStateException(property + " is not set. Run the tests through Maven, which sets it from the"
                     + " root pom.xml, or pass -D" + property + "=<name>@sha256:<digest>.");
         }
+        if (!image.matches("[^@:]+(?::[0-9]+/[^@:]+)?@sha256:[0-9a-f]{64}")) {
+            throw new IllegalStateException(property + "=" + image + " is not pinned by digest. Use <name>@sha256:<digest>,"
+                    + " without a tag, which Testcontainers 2 refuses beside a digest (PD-100).");
+        }
         return image;
     }
 }

@@ -8,14 +8,14 @@ Where:   Java, properties and YAML under src/test/ of every module; .github/work
          tools/*.sh. node_modules, target and examples' runtime images (deploy/, docker-compose.yml, which
          the image gates cover) are not read.
 What:    an image reference is
-           - in a workflow: the value of an `image:` key or of an environment variable whose name ends in
-             IMAGE;
+           - in a workflow: the value of an `image:` key, of the shorthand `container: <image>`, of
+             `uses: docker://<image>`, or of an environment variable whose name ends in IMAGE;
            - in a POM: the value of a property whose name ends in `image`;
            - in test code: a string literal on a line that starts a container or names an image
              (Container, DockerImageName, image);
            - in a tool script: the default or value of a variable whose name ends in IMAGE.
-         A value that is only an expression (${...}) is skipped: it names a value pinned elsewhere. A line with the comment
-         "pin-exempt: <reason>" is skipped; it is meant for an image built in the same job.
+         A value that is only an expression (${...}) is skipped: it names a value pinned elsewhere. A reference tagged :local on a
+         line with the comment "pin-exempt: <reason>" is skipped: an image built in the same job.
          It fails when a reference has no @sha256:<64 hex digits>, and when a reference that Testcontainers
          reads (test code, POM properties, workflow *IMAGE variables) carries a tag and a digest together,
          which Testcontainers 2 refuses: write <name>@sha256:<digest> and name the tag in a comment.
@@ -33,13 +33,16 @@ DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 IMAGE_LIKE = re.compile(r"^(?:[a-z0-9.-]+(?::[0-9]+)?/)*[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[A-Za-z0-9._-]+)?(?:@sha256:[0-9a-fA-F]*)?$")
 TAG_AND_DIGEST = re.compile(r"^(?:[^/@]+/)*[^/:@]+:[^/@]+@sha256:")
 
+WORKFLOW_CONTAINER = re.compile(r"^\s*container:\s*(?P<value>[^\s#]+)\s*(?:#.*)?$")
+WORKFLOW_DOCKER_ACTION = re.compile(r"\buses:\s*['\"]?docker://(?P<value>[^\s#'\"]+)")
 WORKFLOW_IMAGE_KEY = re.compile(r"^\s*-?\s*image:\s*(?P<value>[^#]*?)\s*(?:#.*)?$")
 WORKFLOW_IMAGE_VAR = re.compile(r"^\s*(?P<name>[A-Za-z0-9_]*IMAGE):\s*(?P<value>[^#]*?)\s*(?:#.*)?$")
 POM_IMAGE = re.compile(r"<(?P<name>[\w.-]*image)>\s*(?P<value>[^<\s]+)\s*</(?P=name)>")
 JAVA_HINT = re.compile(r"Container|DockerImageName|image", re.IGNORECASE)
 STRING_LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
 SHELL_IMAGE = re.compile(r"\b[A-Za-z0-9_]*IMAGE(?::-|=)(?P<value>[^\s}\"')]+)")
-# A trailing comment "pin-exempt: <reason>" exempts one line, for an image built in the same job.
+# A trailing comment "pin-exempt: <reason>" exempts an image tagged :local on that line, one built in the
+# same job and never pulled. It exempts nothing else.
 EXEMPT = "pin-exempt:"
 SKIP_DIRS = {"node_modules", "target", ".git", "dist"}
 
@@ -70,6 +73,12 @@ def references(kind: str, line: str):
         match = WORKFLOW_IMAGE_KEY.match(line)
         if match:
             yield match["value"].strip("'\""), False
+        match = WORKFLOW_CONTAINER.match(line)
+        if match and kind == "workflow":
+            yield match["value"].strip("'\""), False
+        match = WORKFLOW_DOCKER_ACTION.search(line)
+        if match and kind == "workflow":
+            yield match["value"], False
         match = WORKFLOW_IMAGE_VAR.match(line)
         if match:
             yield match["value"].strip("'\""), True
@@ -103,11 +112,11 @@ def check(root: Path) -> list[str]:
     errors: list[str] = []
     for path, rel, kind in files(root):
         for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
-            if EXEMPT in line:
-                continue
             for value, testcontainers in references(kind, line):
                 if not value or value.startswith("$"):
                     continue  # the whole value is an expression naming a value pinned elsewhere
+                if EXEMPT in line and value.endswith(":local"):
+                    continue  # an image built earlier in the same job, never pulled
                 if not DIGEST.search(value):
                     errors.append(f"{rel}:{number}: image '{value}' is not pinned by digest. Write "
                                   f"<name>@sha256:<digest> and name the tag in a comment (PD-100).")

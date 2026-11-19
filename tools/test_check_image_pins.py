@@ -88,6 +88,31 @@ class ImagePinsTest(unittest.TestCase):
             ".github/workflows/ci.yml": "      # image: postgres:16\n      POSTGRES_IMAGE: ${{ env.PINNED }}\n",
         }))
 
+    def test_exemption_covers_only_a_local_image_built_in_the_job(self) -> None:
+        errors = self.errors({".github/workflows/deploy.yml":
+                              "      IMAGE: postgres:16-alpine # pin-exempt: not built here\n"
+                              "      OTHER_IMAGE: horus/host:local # pin-exempt: built in this job\n"})
+        self.assertEqual(1, len(errors), errors)
+        self.assertIn("deploy.yml:1: image 'postgres:16-alpine'", errors[0])
+
+    def test_container_shorthand_and_docker_actions_are_scanned(self) -> None:
+        errors = self.errors({".github/workflows/ci.yml":
+                              "    container: node:22-alpine\n"
+                              "      - uses: docker://alpine:3.24\n"
+                              f"    container: node:22-alpine@{DIGEST}\n"
+                              f"      - uses: docker://alpine:3.24@{DIGEST}\n"
+                              "    container:\n"})
+        self.assertEqual(2, len(errors), errors)
+        self.assertIn("ci.yml:1: image 'node:22-alpine'", errors[0])
+        self.assertIn("ci.yml:2: image 'alpine:3.24'", errors[1])
+
+    def test_testcontainers_properties_are_scanned(self) -> None:
+        errors = self.errors({"examples/host/src/test/resources/testcontainers.properties":
+                              "ryuk.container.image=testcontainers/ryuk:0.14.0\n"
+                              "image.substitutor=io.example.DigestPinnedImages\n"})
+        self.assertEqual(1, len(errors), errors)
+        self.assertIn("testcontainers.properties:1: image 'testcontainers/ryuk:0.14.0'", errors[0])
+
     def test_exempt_line_and_paths_outside_the_scope_are_skipped(self) -> None:
         self.assertEqual([], self.errors({
             ".github/workflows/deploy.yml": "      IMAGE: horus/host:local # pin-exempt: built in this job\n",
