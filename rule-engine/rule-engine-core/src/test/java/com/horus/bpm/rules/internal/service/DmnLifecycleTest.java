@@ -142,4 +142,51 @@ class DmnLifecycleTest {
         assertThat(sourceA.sourceDocument().getBytes(StandardCharsets.UTF_8)).isEqualTo(a);
         assertThat(sourceA.canonicalDocument()).contains("\">= 3\"").doesNotContain("x >= 3");
     }
+
+    @Test
+    void RLE_039_a_version_whose_stored_canonical_document_was_altered_is_not_served() {
+        // Given card-fee published, then its canonical_json altered in the store (fee of R1 from 0 VND to 1 VND)
+        engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
+        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        caller.become("bank-a", "bob");
+        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        var stored = stores.versions.getFirst();
+        stores.versions.set(0, new com.horus.bpm.rules.internal.store.StoredVersion(stored.tenantId(), stored.id(),
+                stored.ruleSetId(), stored.ruleSet(), stored.version(), stored.status(), stored.hitPolicy(),
+                stored.effectiveFrom(), stored.canonicalJson().replace("\"0 VND\"", "\"1 VND\""), stored.canonicalHash(),
+                stored.sourceFormat(), stored.sourceDocument(), stored.sourceHash(), stored.lockVersion(),
+                stored.requestedBy(), stored.requestedAt(), stored.approvedBy(), stored.approvedAt(), stored.approvalComment(),
+                stored.createdBy(), stored.createdAt()));
+        caller.become("bank-a", "teller-01");
+
+        // When
+        DecisionResult result = engines.ruleEngine().evaluate("card-fee", DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5)));
+
+        // Then: refused, recorded once as EVALUATION_ERROR (the audit entry), no output
+        assertThat(result.isError()).isTrue();
+        assertThat(result.outcome()).isInstanceOfSatisfying(DecisionResult.Failed.class, failed -> {
+            assertThat(failed.code()).isEqualTo("EVALUATION_ERROR");
+            assertThat(failed.detail()).contains("Integrity check failed", "card-fee v1");
+        });
+        assertThat(result.outputs()).isEmpty();
+        assertThat(stores.decisions).singleElement().satisfies(row -> assertThat(row.outcome()).isEqualTo("EVALUATION_ERROR"));
+    }
+
+    @Test
+    void RLE_039_a_source_that_is_not_clean_utf_8_is_refused_and_nothing_is_stored() {
+        byte[] yaml = CardFee.yaml();
+        byte[] latin1 = new String(yaml, StandardCharsets.UTF_8).replace("Monthly", "Mont\u00e9ly").getBytes(StandardCharsets.ISO_8859_1);
+        byte[] nul = new byte[yaml.length + 1];
+        System.arraycopy(yaml, 0, nul, 0, yaml.length);
+        byte[] bom = new byte[yaml.length + 3];
+        bom[0] = (byte) 0xEF;
+        bom[1] = (byte) 0xBB;
+        bom[2] = (byte) 0xBF;
+        System.arraycopy(yaml, 0, bom, 3, yaml.length);
+
+        assertThatThrownBy(() -> engines.versionService().importRuleSet(ImportRequest.yaml(latin1))).hasMessageContaining("not valid UTF-8");
+        assertThatThrownBy(() -> engines.versionService().importRuleSet(ImportRequest.yaml(nul))).hasMessageContaining("NUL");
+        assertThatThrownBy(() -> engines.versionService().importRuleSet(ImportRequest.yaml(bom))).hasMessageContaining("byte order mark");
+        assertThat(stores.versions).isEmpty();
+    }
 }

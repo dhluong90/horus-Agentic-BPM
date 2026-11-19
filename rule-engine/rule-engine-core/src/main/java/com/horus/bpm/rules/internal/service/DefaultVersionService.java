@@ -110,7 +110,7 @@ public final class DefaultVersionService implements VersionService {
         }
         String sourceText = utf8(source);
         ParsedRuleSet parsed = RuleSetReader.read(format, source);
-        CompiledRuleSet.compile(parsed.model());
+        CompiledRuleSet.compile(RuleSetReader.readCanonical(parsed.canonicalJson())); // compiled from what is stored (ADR-0026)
         String name = parsed.model().name();
         Instant now = context.clock().instant();
         String ruleSetId;

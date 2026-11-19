@@ -147,9 +147,13 @@ class RuleSetReaderAcceptanceTest {
 
     @Test
     void RLE_020_source_with_bom_crlf_and_vietnamese_comments_has_the_card_fee_canonical_hash() {
-        // Given the card-fee file saved by a Windows editor: BOM, CRLF and a Vietnamese comment
+        // Given the card-fee file saved by a Windows editor: CRLF and a Vietnamese comment; a BOM is refused
+        // (ADR-0026 decision 5), so the stored source is exactly the bytes source_hash was taken over
         String unix = new String(resource("/rules/card-fee.yaml"), StandardCharsets.UTF_8);
-        byte[] windows = ("﻿# Phí thẻ hằng tháng\r\n" + unix.replace("\n", "\r\n")).getBytes(StandardCharsets.UTF_8);
+        byte[] windows = ("# Phí thẻ hằng tháng\r\n" + unix.replace("\n", "\r\n")).getBytes(StandardCharsets.UTF_8);
+        byte[] withBom = ("﻿" + unix).getBytes(StandardCharsets.UTF_8);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> RuleSetReader.read(SourceFormat.YAML, withBom))
+                .hasMessageContaining("byte order mark");
 
         // When
         ParsedRuleSet fromWindows = RuleSetReader.read(SourceFormat.YAML, windows);

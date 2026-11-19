@@ -49,6 +49,14 @@ class NormalFormTest {
     @MethodSource("golden")
     void RLE_039_the_v1_printer_is_frozen_by_the_golden_file(Golden row) {
         // When
+        if (row.normal().equals("<omitted>")) {
+            // an explicit null output, without a default, is the omitted cell
+            ObjectNode doc = (ObjectNode) EngineJson.JSON.readTree(document("then", "string", "x"));
+            ((ObjectNode) doc.get("rules").get(0).get("then")).putNull("o");
+            ParsedRuleSet nulled = RuleSetReader.read(SourceFormat.JSON, EngineJson.JSON.writeValueAsBytes(doc));
+            assertThat(cell(nulled, "then")).isNull();
+            return;
+        }
         ParsedRuleSet parsed = RuleSetReader.read(SourceFormat.JSON, document(row.kind(), row.type(), row.cell()));
         JsonNode printed = cell(parsed, row.kind());
 
@@ -121,6 +129,72 @@ class NormalFormTest {
                 .hasMessageContaining("more fraction digits than USD allows")
                 .hasMessageContaining("(line 2)");
     }
+
+    // ------------------------------------------------------------------ RLE-039: different behaviour never shares a hash
+
+    static String hashOf(String yaml) {
+        return RuleSetReader.read(SourceFormat.YAML, yaml.getBytes(StandardCharsets.UTF_8)).canonicalHash();
+    }
+
+    static String withRate(String rate) {
+        return StyleCheck.B.replace("rate: \"0.10\"", "rate: " + rate);
+    }
+
+    static String withCell(String column, String cell) {
+        return StyleCheck.B.replace("{ id: R1, when: { x: \">= 3\" }", "{ id: R1, when: { " + column + ": \"" + cell + "\" }");
+    }
+
+    @Test
+    void RLE_039_one_hash_per_behaviour_in_any_style_and_never_for_different_behaviour() {
+        String base = hashOf(StyleCheck.B);
+
+        // n1: a JSON number that does not survive an exact round trip is refused with its line; as a string it is accepted
+        assertThatThrownBy(() -> hashOf(withRate("0.1000000000000000055511151231257827")))
+                .isInstanceOf(ValidationFailedException.class)
+                .hasMessageContaining("cannot be stored exactly").hasMessageContaining("(line 14)");
+        assertThat(hashOf(withRate("\"0.1000000000000000055511151231257827\""))).isNotEqualTo(hashOf(withRate("0.1")));
+        // n2: the scale is kept
+        assertThat(hashOf(withRate("\"0.1\""))).isNotEqualTo(base);
+        assertThat(hashOf(withRate("0.10"))).isEqualTo(base); // the JSON number 0.10 is the string "0.10"
+        // n3: an integer beyond 2^53 - 1 as a JSON number is refused; as a string it keeps its digits
+        assertThatThrownBy(() -> hashOf(withRate("9007199254740993"))).isInstanceOf(ValidationFailedException.class);
+        assertThat(hashOf(withRate("\"9007199254740993\""))).isNotEqualTo(hashOf(withRate("\"9007199254740992\"")));
+        // n4: the column name is dropped only for the column's own input
+        assertThat(hashOf(withCell("x", "y >= 3"))).isNotEqualTo(base);
+        assertThat(hashOf(withCell("x", "x > y"))).isNotEqualTo(hashOf(withCell("x", "> y")));
+        // n5: a Cyrillic look-alike is a different literal, printed as written
+        String cyrillic = StyleCheck.B.replace("\"!= 'VN'\"", "\"!= '\u0412N'\"");
+        ParsedRuleSet lookalike = RuleSetReader.read(SourceFormat.YAML, cyrillic.getBytes(StandardCharsets.UTF_8));
+        assertThat(lookalike.canonicalHash()).isNotEqualTo(base);
+        assertThat(lookalike.canonicalJson()).contains("\"!= '\u0412N'\"");
+        // n6: a zero-width space is printed as an escape and has its own hash; a bidirectional override is refused
+        String zeroWidth = StyleCheck.B.replace("\"!= 'VN'\"", "\"!= 'V\u200BN'\"");
+        ParsedRuleSet invisible = RuleSetReader.read(SourceFormat.YAML, zeroWidth.getBytes(StandardCharsets.UTF_8));
+        assertThat(invisible.canonicalJson()).contains("!= 'V\\\\u200BN'");
+        assertThat(invisible.canonicalHash()).isNotEqualTo(base);
+        String override = StyleCheck.B.replace("\"!= 'VN'\"", "\"!= 'V\u202EN'\"");
+        assertThatThrownBy(() -> hashOf(override)).isInstanceOf(ValidationFailedException.class)
+                .hasMessageContaining("Rule R4, input country").hasMessageContaining("U+202E");
+    }
+
+    @Test
+    void RLE_039_a_bidirectional_control_in_a_dmn_cell_is_refused_with_its_line() {
+        String xml = DmnRuleSetTest.table("<input><inputExpression typeRef=\"string\"><text>c</text></inputExpression></input>",
+                "\n<rule id=\"R1\"><inputEntry><text>\"V\u202EN\"</text></inputEntry><outputEntry><text>true</text></outputEntry></rule>");
+
+        assertThatThrownBy(() -> RuleSetReader.read(SourceFormat.DMN_XML, xml.getBytes(StandardCharsets.UTF_8)))
+                .hasMessageContaining("Rule R1, input c").hasMessageContaining("U+202E").hasMessageContaining("(line 2)");
+    }
+
+    @Test
+    void RLE_039_the_golden_file_is_pinned_to_schema_version_1() throws Exception {
+        // Any edit of the golden file is a new schema version (ADR-0026 decision 3); this pin fails on any change.
+        byte[] golden = DmnRuleSetTest.resource("/rules/normal-form.v1.txt");
+        String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(golden));
+        assertThat(sha).isEqualTo(GOLDEN_V1_SHA256);
+    }
+
+    static final String GOLDEN_V1_SHA256 = "dc44beae55cd278fe820d7c9e22def959b854655946bbfa4711387ca6f7eb40f";
 
     // ------------------------------------------------------------------ helpers
 

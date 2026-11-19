@@ -12,13 +12,15 @@ public final class StyleCheck {
             hitPolicy: first
             inputs:
               - { name: x, type: integer }
+              - { name: y, type: integer }
               - { name: country, type: string }
               - { name: at, type: datetime }
               - { name: amount, type: money }
             outputs:
               - { name: o, type: string }
+              - { name: rate, type: decimal }
             rules:
-              - { id: R1, when: { x: "x >= 3" }, then: { o: "'R1'" } }
+              - { id: R1, when: { x: "x >= 3" }, then: { o: "'R1'", rate: "0.10" } }
               - { id: R2, when: { x: "x between 1 and 5" }, then: { o: "'R2'" } }
               - { id: R3, when: { x: "x is not null" }, then: { o: "'R3'" } }
               - { id: R4, when: { country: "country != 'VN'" }, then: { o: "'R4'" } }

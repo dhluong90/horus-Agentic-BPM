@@ -35,7 +35,7 @@ class XmlHardeningTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"<?xml version=\"1.0\" encoding=\"UTF-8\"?>", "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
-        "<?xml version=\"1.0\"?>", "", "﻿<?xml version=\"1.0\" encoding=\"UTF-8\"?>"})
+        "<?xml version=\"1.0\"?>", ""})
     void TR_STD_25_utf_8_documents_parse_to_exactly_the_stored_text(String prolog) {
         byte[] file = (prolog + CELL_TABLE).getBytes(StandardCharsets.UTF_8);
 

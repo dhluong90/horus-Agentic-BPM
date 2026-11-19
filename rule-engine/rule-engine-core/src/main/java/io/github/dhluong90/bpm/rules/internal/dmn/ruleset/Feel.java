@@ -226,7 +226,13 @@ final class Feel {
                 case '\n' -> out.append("\\n");
                 case '\r' -> out.append("\\r");
                 case '\t' -> out.append("\\t");
-                default -> out.append(c);
+                default -> {
+                    if (V1Forms.needsUnicodeEscape(c)) {
+                        out.append(String.format("\\u%04X", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+                }
             }
         }
         return out.append('"').toString();
