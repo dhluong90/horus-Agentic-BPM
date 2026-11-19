@@ -28,7 +28,7 @@ Read these before doing product, design, or implementation work:
 
 ## Build
 - `mvn -B verify` from the repository root builds every module and runs unit, ArchUnit and Testcontainers tests (needs JDK 21 or later and Docker). CI runs the same command (`.github/workflows/ci.yml`).
-- Layout: `pom.xml` (parent, Spring Boot BOM import), `bpm-bom/` (pins engine modules for hosts, no parent), `bpm-host-metadata/` (serves `/api/bpm/meta` and `/api/bpm/me` once per host; each engine starter contributes a `ModuleDescriptor`), `rule-engine/rule-engine-{core,postgres,spring-boot-starter}`, `examples/rule-engine-only/`. Java packages `com.horus.bpm.rules.*`; groupId `com.horus.bpm` (set once in the parent, rule-engine DESIGN open question 7.2).
+- Layout: `pom.xml` (parent, Spring Boot BOM import), `bpm-bom/` (pins engine modules for hosts, no parent), `bpm-host-metadata/` (serves `/api/bpm/meta` and `/api/bpm/me` once per host; each engine starter contributes a `ModuleDescriptor`), `rule-engine/rule-engine-{core,postgres,spring-boot-starter}`, `examples/rule-engine-only/`. Java packages `io.github.dhluong90.bpm.rules.*`; groupId `io.github.dhluong90.bpm` (set once in the parent, ADR-0022).
 - Test names start with the id they prove, upper case, hyphens as underscores: `RLE_013_...` for a `SPEC.md` statement, `TR_EMB_01_...` for a requirement. This is the prefix the spec-to-test gate (TR-QA-01) matches; tests that prove no id carry no prefix. See `rule-engine/docs/TEST-PLAN.md`.
 
 ## Conventions
