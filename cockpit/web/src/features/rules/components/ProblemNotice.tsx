@@ -1,4 +1,4 @@
-import { toHostError, type HostError } from '../../../api/hostError';
+import { toHostError, type HostError, type Violation } from '../../../api/hostError';
 import { CopyButton } from '../../../components/CopyButton';
 import type { MessageKey } from '../../../i18n/en';
 import { useI18n } from '../../../i18n/I18nProvider';
@@ -37,7 +37,27 @@ function messageKey(error: HostError): MessageKey {
  * error code and the correlation id with Copy. The engine's own sentence is in English in this release, so it
  * shows directly in English and behind a disclosure in Vietnamese, keeping one language on screen.
  */
-export function ProblemNotice({ error, onReload, onRestart, showDetail = true }: { error: unknown; onReload?: () => void; onRestart?: () => void; showDetail?: boolean }) {
+function Located({ violations, english }: { violations: readonly Violation[]; english: boolean }) {
+  const { t } = useI18n();
+  const place = (v: Violation) =>
+    v.ruleId !== null && v.column !== null ? t('editor.errorCell', { row: v.ruleId, column: v.column }) : v.ruleId !== null ? t('editor.errorRow', { row: v.ruleId }) : undefined;
+  return (
+    <ul className="notice__located" aria-label={t('problem.locatedTitle')}>
+      {violations.map((v, index) => {
+        const where = place(v);
+        return (
+          <li key={index}>
+            {where !== undefined ? <strong>{where}</strong> : null}
+            {english ? <span>{where !== undefined ? `: ${v.message}` : v.message}</span> : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** `located` lists every violation of a refused document by row and column, for screens without the editor grid. */
+export function ProblemNotice({ error, onReload, onRestart, showDetail = true, located = false }: { error: unknown; onReload?: () => void; onRestart?: () => void; showDetail?: boolean; located?: boolean }) {
   const { t, locale } = useI18n();
   const hostError = toHostError(error);
   const problem = hostError.kind === 'problem' ? hostError : undefined;
@@ -49,7 +69,8 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true }:
         <span className="status-icon status-icon--bad" aria-hidden="true">!</span>
         {t(messageKey(hostError))}
       </p>
-      {detail !== undefined && locale === 'en' ? <p className="notice__detail">{detail}</p> : null}
+      {located && problem?.violations ? <Located violations={problem.violations} english={locale === 'en'} /> : null}
+      {detail !== undefined && locale === 'en' && !(located && problem?.violations) ? <p className="notice__detail">{detail}</p> : null}
       {detail !== undefined && locale !== 'en' ? (
         <details className="notice__more">
           <summary>{t('problem.engineDetail')}</summary>

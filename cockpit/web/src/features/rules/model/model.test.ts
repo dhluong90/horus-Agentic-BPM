@@ -3,6 +3,7 @@ import type { Rule, RuleSetDefinition } from '../../../api/rules/schemas';
 import { diffRules } from './diff';
 import { draftReducer, initialDraft } from './draft';
 import { placeError } from './engineErrors';
+import { nonAsciiCharacters } from './nonAscii';
 import { formatDecimalText, formatMoney, groupWhileTyping, toMinorUnits } from './money';
 import { columnLabel, readCondition, readOutput, readResult } from './reading';
 import { nextRowId, sameRows, toDocument, toRows } from './table';
@@ -123,5 +124,30 @@ describe('version diff', () => {
       ['R3', 'REMOVED', false],
     ]);
     expect([...(diff[1]?.changedCells ?? [])]).toEqual(['then.fee', 'then.waived']);
+  });
+});
+
+describe('non-ASCII literals', () => {
+  it('ADR_0026_look_alike_characters_are_named_by_code_point', () => {
+    expect(nonAsciiCharacters("== 'GОLD'")).toEqual(['О U+041E']);
+    expect(nonAsciiCharacters("== 'GOLD'")).toEqual([]);
+    expect(nonAsciiCharacters("'Phí thường niên'")).toEqual(['í U+00ED', 'ư U+01B0', 'ờ U+1EDD', 'ê U+00EA']);
+  });
+});
+
+describe('Try it currencies', () => {
+  it('CKP_030_an_input_takes_its_currency_from_its_own_cells_only', async () => {
+    const { currencyOfInput } = await import('../components/TryItPanel');
+    const mixed: RuleSetDefinition = {
+      ...definition,
+      rules: [
+        { id: 'R1', when: { balance: '>= 1000 USD' }, then: { fee: '0 VND' } },
+        { id: 'R2', when: {}, then: { fee: '50000 VND' } },
+      ],
+    };
+    expect(currencyOfInput(mixed, 'balance')).toEqual({ kind: 'known', code: 'USD' });
+    expect(currencyOfInput(mixed, 'tier')).toEqual({ kind: 'unknown' });
+    const disagree: RuleSetDefinition = { ...mixed, rules: [...mixed.rules, { id: 'R3', when: { balance: '< 5000000 VND' }, then: {} }] };
+    expect(currencyOfInput(disagree, 'balance')).toEqual({ kind: 'mixed' });
   });
 });

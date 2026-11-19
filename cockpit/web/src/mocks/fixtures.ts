@@ -71,7 +71,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -96,6 +96,12 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       return { ...ok, me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }) };
     case 'rules-approver':
       return { ...ok, me: json({ ...meMinh, permissions: [...meMinh.permissions, 'rules:evaluate'] }) };
+    case 'rules-author-drafts-off':
+      return {
+        ...ok,
+        meta: json({ ...metaRulesOnly, modules: [{ ...metaRulesOnly.modules[0], settings: { 'authoring.cockpit-drafts': false } }] }),
+        me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }),
+      };
     case 'rules-author-approver':
       return { ...ok, me: json({ ...meLan, permissions: ['rules:read', 'rules:author', 'rules:approve', 'rules:evaluate'] }) };
     case 'me-forbidden':

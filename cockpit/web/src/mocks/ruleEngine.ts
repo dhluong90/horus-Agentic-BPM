@@ -56,8 +56,9 @@ function actionsFor(v: StoredVersion, request: FakeRequest): string[] {
   const can = (permission: string) => request.permissions.includes(permission);
   if (v.status === 'DRAFT') return can('rules:author') ? ['request-publish'] : [];
   if (v.status !== 'PENDING_APPROVAL' || !can('rules:approve')) return [];
+  // PD-089: neither the requester nor the author may approve or reject; withdrawing is its own action.
   const self = v.requestedBy === request.user || v.createdBy === request.user;
-  return self ? ['reject'] : ['approve', 'reject'];
+  return self ? [] : ['approve', 'reject'];
 }
 
 function lifecycle(v: StoredVersion, request: FakeRequest) {
@@ -105,6 +106,7 @@ function validate(definition: Definition): Violation[] {
 
 const COMMAND_LIMIT = 16_384;
 const EVALUATE_LIMIT = 1_048_576;
+const IMPORT_LIMIT = 1_048_576;
 
 type PageQuery = { ok: true; limit: number; after: string | undefined } | { ok: false; response: FakeResponse };
 
@@ -170,6 +172,10 @@ export function createFakeEngine(seed: StoredVersion[]) {
   const versionsOf = (name: string) => store.filter((v) => v.ruleSet === name);
 
   function importVersion(name: string | undefined, request: FakeRequest): FakeResponse {
+    // The import limit as #145 answers it (an engine before #145 says 422 "Document larger than ...").
+    if (request.body.length > IMPORT_LIMIT) return problem(413, 'PAYLOAD_TOO_LARGE', `The document is larger than ${String(IMPORT_LIMIT)} bytes`);
+    // As the engine of this release: the media type names the source format, and only YAML is imported.
+    if ((request.headers['content-type'] ?? '').includes('json')) return problem(400, 'INPUT_INVALID', 'Only YAML import is available in this release');
     const parsed = parseDocument(request.body);
     if (typeof parsed === 'string') return problem(422, 'VALIDATION_FAILED', parsed);
     if (name !== undefined && parsed.ruleSet !== name) return problem(400, 'INPUT_INVALID', `Document ruleSet ${parsed.ruleSet} differs from ${name}`);
@@ -212,6 +218,7 @@ export function createFakeEngine(seed: StoredVersion[]) {
     if (v.status !== 'PENDING_APPROVAL') return problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`);
     const body = request.body === '' ? {} : (JSON.parse(request.body) as { comment?: string; reason?: string });
     if (action === 'reject') {
+      if (v.requestedBy === request.user || v.createdBy === request.user) return problem(403, 'SELF_APPROVAL_FORBIDDEN', `The requester or author of ${v.ruleSet} v${String(v.version)} cannot reject it`);
       const reason = (body.reason ?? '').trim();
       if (reason === '') return problem(400, 'INPUT_INVALID', 'reason is required and must not be blank');
       if (reason.length > 2000) return problem(400, 'INPUT_INVALID', 'reason is longer than 2000 characters');

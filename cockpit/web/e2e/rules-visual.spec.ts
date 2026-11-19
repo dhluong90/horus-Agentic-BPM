@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import type { Scenario } from '../src/mocks/fixtures';
 import { cspViolations, mockHost, mockRuleEngine, rememberLocale } from './mockHost';
@@ -111,6 +112,9 @@ for (const screen of SCREENS) {
           await page.evaluate(async () => { await document.fonts.ready; });
           await page.screenshot({ path: `e2e/screenshots/${file}`, fullPage: false });
           expect(violations).toEqual([]);
+          // WCAG 2.2 AA through axe-core, in both themes and both languages.
+          const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
+          expect(axe.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).slice(0, 3).join(' | ')}`)).toEqual([]);
         });
       }
     }

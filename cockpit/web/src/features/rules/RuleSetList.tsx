@@ -1,21 +1,16 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { toHostError } from '../../api/hostError';
-import type { RuleDocument } from '../../api/rules/rulesClient';
 import type { RuleSetSummary } from '../../api/rules/schemas';
 import type { Route } from '../../app/route';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useRulesSession } from './api/rulesContext';
 import { useImportRuleSet, useRuleSets } from './api/useRules';
+import { ImportFileButton } from './components/ImportFileButton';
 import { ProblemNotice } from './components/ProblemNotice';
 import { StatusBadge } from './components/StatusBadge';
 import { formatDateTime } from './model/dates';
 
-async function readDocument(file: File): Promise<RuleDocument> {
-  const text = await file.text();
-  // JSON is valid YAML 1.2, and this engine release imports YAML only, so every file is sent as YAML.
-  return { contentType: 'application/yaml', text };
-}
 
 function SummaryRow({ summary }: { summary: RuleSetSummary }) {
   const { t, locale } = useI18n();
@@ -81,7 +76,6 @@ export function RuleSetList({ navigate }: { navigate: (route: Route) => void }) 
   const { t } = useI18n();
   const { can } = useRulesSession();
   const [notice, setNotice] = useState<string | undefined>(undefined);
-  const fileInput = useRef<HTMLInputElement>(null);
   const importFile = useImportRuleSet((version) => {
     setNotice(t('ruleSets.imported', { version: String(version.version), name: version.ruleSet }));
     navigate({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'table' });
@@ -96,19 +90,11 @@ export function RuleSetList({ navigate }: { navigate: (route: Route) => void }) 
         </div>
         {can('rules:author') ? (
           <div className="page-head__actions">
-            <input ref={fileInput} type="file" accept=".yaml,.yml,.json" className="sr-only" tabIndex={-1} aria-hidden="true"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = '';
-                if (file) void readDocument(file).then((document) => { importFile.start(document); });
-              }} />
-            <button type="button" className="btn btn--primary" disabled={importFile.isPending} onClick={() => fileInput.current?.click()}>
-              {importFile.isPending ? t('ruleSets.importing') : t('ruleSets.import')}
-            </button>
+            <ImportFileButton label={t('ruleSets.import')} busyLabel={t('ruleSets.importing')} busy={importFile.isPending} primary onDocument={(document) => { importFile.start(document); }} />
           </div>
         ) : null}
       </div>
-      {importFile.isError ? <ProblemNotice error={importFile.error} /> : null}
+      {importFile.isError ? <ProblemNotice error={importFile.error} located /> : null}
       <p className="sr-only" role="status" aria-live="polite">{notice ?? ''}</p>
       <div className="card list-card">
         <ListBody />

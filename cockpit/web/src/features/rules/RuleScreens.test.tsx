@@ -8,11 +8,14 @@ import { mockHost, setScenario } from '../../mocks/node';
 
 /** Engine calls the screens made, in order: method and path. */
 let calls: { method: string; path: string; key: string | null }[] = [];
+let contentTypes: string[] = [];
 
 beforeEach(() => {
   calls = [];
+  contentTypes = [];
   mockHost.events.on('request:start', ({ request }) => {
     const path = decodeURIComponent(new URL(request.url).pathname);
+    if (path.startsWith('/api/bpm/rules') && request.method === 'POST') contentTypes.push(request.headers.get('Content-Type') ?? '');
     if (path.startsWith('/api/bpm/rules')) calls.push({ method: request.method, path: path.replace('/api/bpm/rules/v1', ''), key: request.headers.get('Idempotency-Key') });
   });
   return () => { mockHost.events.removeAllListeners(); };
@@ -23,6 +26,15 @@ function open(hash: string, scenario: Scenario = 'rules-author', locale?: 'vi') 
   window.location.hash = hash;
   render(<App {...(locale ? { initialLocale: locale } : {})} />);
 }
+
+/** card-fee v2 as the engine answers it, for overrides that change one field. */
+const pendingV2 = {
+  ruleSet: 'card-fee', version: 2, status: 'PENDING_APPROVAL', hitPolicy: 'FIRST', effectiveFrom: null, lockVersion: 1, canonicalHash: 'c'.repeat(64),
+  sourceFormat: 'YAML', sourceHash: 'd'.repeat(64), requestedBy: 'lan', requestedAt: '2026-11-18T08:30:00Z', approvedBy: null, approvedAt: null,
+  createdBy: 'lan', createdAt: '2026-11-18T08:00:00Z',
+  definition: { schemaVersion: 1, ruleSet: 'card-fee', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }],
+    rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] },
+};
 
 const writes = () => calls.filter((c) => c.method === 'POST');
 
@@ -49,6 +61,21 @@ describe('rule set list and version view', () => {
     expect(await screen.findByText('The list changed while you were reading it.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Start the list again' }));
     expect(await screen.findByRole('table')).toHaveTextContent('kyc-risk');
+  });
+
+  it('TR_STD_01_a_json_file_is_sent_as_json', async () => {
+    const user = userEvent.setup();
+    const view = { container: document.body };
+    open('#/rule-sets');
+    await screen.findByRole('table');
+    const input = view.container.querySelector<HTMLInputElement>('input[type=file]');
+    if (!input) throw new Error('file input missing');
+    await user.upload(input, new File(['{"schemaVersion":1}'], 'card-fee-v3.json', { type: 'application/json' }));
+    // This engine release imports YAML only and says so; the cockpit shows its answer.
+    expect(await screen.findByText('The service did not accept an input.')).toBeInTheDocument();
+    const sent = calls.find((c) => c.method === 'POST');
+    expect(sent?.path).toBe('/rule-sets');
+    expect(contentTypes.at(-1)).toBe('application/json');
   });
 
   it('CKP_030_reader_without_author_permission_sees_no_import', async () => {
@@ -145,6 +172,8 @@ describe('four eyes', () => {
     open('#/rule-sets/card-fee/2', 'rules-approver');
     expect(await screen.findByText('Compared with version 1')).toBeInTheDocument();
     expect(screen.getByText('1 added, 2 changed, 0 moved, 0 removed')).toBeInTheDocument();
+    expect(screen.getByText(/Aid: compared in this browser/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Record: version 2 as stored by the engine' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled();
     await user.type(screen.getByLabelText('Comment or reason'), 'Matches the tariff');
     await user.click(screen.getByRole('button', { name: 'Approve and publish' }));
@@ -167,13 +196,29 @@ describe('four eyes', () => {
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.path)).toEqual(['/rule-sets/card-fee/versions/2:reject']);
   });
 
-  it('RLE_043_buttons_follow_allowed_actions_for_the_caller', async () => {
+  it('RLE_043_PD_089_the_requester_never_rejects_their_own_request', async () => {
     open('#/rule-sets/card-fee/2', 'rules-author-approver');
-    // Lan holds rules:approve here but wrote and requested v2: the engine allows reject (withdraw), not approve.
+    // Lan holds rules:approve here but wrote and requested v2: no Approve, and no Reject either.
     expect(await screen.findByRole('button', { name: 'Approve and publish' })).toBeDisabled();
     expect(screen.getByText(/Approve is unavailable\. You requested this change/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
-    expect(screen.getByText('You may withdraw your own request with Reject.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Comment or reason')).not.toBeInTheDocument();
+  });
+
+  it('RLE_043_a_disabled_approve_always_says_why', async () => {
+    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/card-fee/versions/2', () => HttpResponse.json({ ...pendingV2, allowedActions: ['reject'] })));
+    open('#/rule-sets/card-fee/2', 'rules-approver');
+    const approve = await screen.findByRole('button', { name: 'Approve and publish' });
+    expect(approve).toBeDisabled();
+    expect(approve).toHaveAccessibleDescription(/Approve is not available to you for this version\./);
+  });
+
+  it('PD_075_cockpit_drafts_off_hides_editing_and_keeps_import', async () => {
+    open('#/rule-sets/card-fee/1', 'rules-author-drafts-off');
+    expect(await screen.findByText('Changes to this environment arrive through your release pipeline.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('link', { name: /All rule sets/ }));
+    expect(await screen.findByRole('button', { name: 'Import file' })).toBeInTheDocument();
   });
 
   it('TR_UI_02_a_stale_click_gets_the_engine_403_with_code_and_reference', async () => {
@@ -203,6 +248,83 @@ describe('four eyes', () => {
   });
 });
 
+describe('import of the next version (CKP-030)', () => {
+  const v3 = JSON.stringify({ schemaVersion: 1, ruleSet: 'card-fee', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }, { name: 'balance', type: 'money' }],
+    outputs: [{ name: 'fee', type: 'money' }], rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }, { id: 'R4', when: { balance: '>= 50000000' }, then: { fee: '1000 VND' } }] });
+  const upload = async (content: string, name: string) => {
+    const input = document.body.querySelector<HTMLInputElement>('.rs-head input[type=file]');
+    if (!input) throw new Error('file input missing');
+    await userEvent.setup().upload(input, new File([content], name, { type: 'application/yaml' }));
+  };
+
+  it('CKP_030_import_a_file_as_the_next_version_from_the_rule_set_page', async () => {
+    open('#/rule-sets/card-fee/1');
+    await screen.findByRole('button', { name: 'Import new version' });
+    await upload(v3.replace('>= 50000000', '>= 50000000 VND'), 'card-fee-v3.yaml');
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee Version 3');
+    expect(screen.getByText('Draft version 3 created')).toBeInTheDocument();
+    const posts = calls.filter((c) => c.method === 'POST');
+    expect(posts.map((c) => c.path)).toEqual(['/rule-sets/card-fee/versions']);
+    expect(posts[0]?.key).toBeTruthy();
+    expect(contentTypes).toEqual(['application/yaml']);
+  });
+
+  it('CKP_030_a_bad_file_is_located_by_row_and_column_and_creates_nothing', async () => {
+    open('#/rule-sets/card-fee/1');
+    await screen.findByRole('button', { name: 'Import new version' });
+    await upload(v3, 'card-fee-bad.yaml');
+    expect(await screen.findByText('Row R4, column balance')).toBeInTheDocument();
+    expect(screen.getByText(': compares a money with a number')).toBeInTheDocument();
+    expect(screen.queryByText(/Draft version 3 created/)).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('card-fee Version 1');
+  });
+
+  it('PD_075_import_stays_available_when_cockpit_drafts_are_off', async () => {
+    open('#/rule-sets/card-fee/1', 'rules-author-drafts-off');
+    expect(await screen.findByRole('button', { name: 'Import new version' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
+  });
+});
+
+describe('payload limits (413)', () => {
+  const tooLarge = (path: string) => http.post(path, () => HttpResponse.json(
+    { type: 'x', title: 'Content Too Large', status: 413, code: 'PAYLOAD_TOO_LARGE', detail: 'The document is larger than 16384 bytes', correlationId: '01JTOOLARGE0000000000000000' },
+    { status: 413, headers: { 'Content-Type': 'application/problem+json' } },
+  ));
+
+  it('RLE_044_an_import_over_the_limit_is_shown_in_plain_words', async () => {
+    open('#/rule-sets/card-fee/1');
+    await screen.findByRole('button', { name: 'Import new version' });
+    const input = document.body.querySelector<HTMLInputElement>('.rs-head input[type=file]');
+    if (!input) throw new Error('file input missing');
+    await userEvent.setup().upload(input, new File(['#'.repeat(1_048_577)], 'huge.yaml', { type: 'application/yaml' }));
+    expect(await screen.findByText('The text is too long for the service.')).toBeInTheDocument();
+    expect(screen.getByTestId('problem-code')).toHaveTextContent('PAYLOAD_TOO_LARGE');
+  });
+
+  it('RLE_044_a_save_over_the_limit_keeps_the_edits', async () => {
+    const user = userEvent.setup();
+    mockHost.use(tooLarge('*/api/bpm/rules/v1/rule-sets/card-fee/versions'));
+    open('#/rule-sets/card-fee/1');
+    await user.click(await screen.findByRole('button', { name: 'New draft' }));
+    await user.clear(screen.getByLabelText('Row R3, Fee'));
+    await user.type(screen.getByLabelText('Row R3, Fee'), '35000 VND');
+    await user.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(await screen.findByText('The text is too long for the service.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Row R3, Fee')).toHaveValue('35000 VND');
+  });
+
+  it('RLE_044_a_reject_reason_over_the_limit_is_shown_in_plain_words', async () => {
+    const user = userEvent.setup();
+    open('#/rule-sets/card-fee/2', 'rules-approver');
+    await user.click(await screen.findByLabelText('Comment or reason'));
+    await user.paste('x'.repeat(16_500));
+    await user.click(screen.getByRole('button', { name: 'Reject' }));
+    expect(await screen.findByText('The text is too long for the service.')).toBeInTheDocument();
+    expect(screen.getByTestId('problem-code')).toHaveTextContent('PAYLOAD_TOO_LARGE');
+  });
+});
+
 describe('Try it', () => {
   it('CKP_030_try_it_shows_the_matched_row_and_formatted_outputs', async () => {
     const user = userEvent.setup();
@@ -214,6 +336,9 @@ describe('Try it', () => {
     expect(await screen.findByText('Matched row R2')).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'Try it' })).getByText('0 VND')).toBeInTheDocument();
     await waitFor(() => { expect(screen.getByText('Matched', { selector: '.match-mark' })).toBeInTheDocument(); });
+    expect(screen.getByText('Version in effect: 1')).toBeInTheDocument();
+    // The raw decision id is not on screen until Details is opened.
+    expect(screen.getByText('Details').closest('details')).not.toHaveAttribute('open');
     const evaluate = calls.find((c) => c.path === '/decisions/card-fee:evaluate');
     expect(evaluate?.key).toBeTruthy();
   });

@@ -142,7 +142,7 @@ body {
   border-radius: var(--radius-m); border: 1px solid var(--control); background: var(--surface); color: var(--ink);
   cursor: pointer; font-weight: 600; line-height: 1.4;
 }
-.btn--primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent-fill); }
+.btn--primary { background: var(--primary-fill); border-color: var(--primary-fill); color: var(--on-primary); }
 .btn--quiet { border-color: var(--line-strong); color: var(--ink-2); font-weight: 500; }
 .btn--small { min-height: 32px; padding: 4px 10px; font-size: 12.5px; }
 

@@ -5,23 +5,38 @@ import { useRulesSession } from '../api/rulesContext';
 import { useEvaluate } from '../api/useRules';
 import { groupWhileTyping, toMinorUnits } from '../model/money';
 import { columnLabel, readResult } from '../model/reading';
+import { CopyButton } from '../../../components/CopyButton';
 import { ValueText } from './CellValue';
 import { ProblemNotice } from './ProblemNotice';
 
-/** The currency the rule set's money literals use, so the amount field can show it. */
-function currencyOf(definition: RuleSetDefinition): string {
-  const text = JSON.stringify(definition.rules);
-  return /\d\s+([A-Z]{3})\b/.exec(text)?.[1] ?? '';
+/**
+ * The currency of a money input, read from that input's own condition cells only (an output's literal never
+ * decides it): unknown when no cell names one, mixed when the cells disagree.
+ */
+export type InputCurrency = { kind: 'known'; code: string } | { kind: 'unknown' } | { kind: 'mixed' };
+
+export function currencyOfInput(definition: RuleSetDefinition, input: string): InputCurrency {
+  const found = new Set<string>();
+  for (const rule of definition.rules) {
+    const cell = rule.when[input];
+    if (typeof cell !== 'string') continue;
+    for (const match of cell.matchAll(/\d\s+([A-Z]{3})\b/g)) if (match[1]) found.add(match[1]);
+  }
+  const [code] = [...found];
+  if (found.size > 1) return { kind: 'mixed' };
+  return code === undefined ? { kind: 'unknown' } : { kind: 'known', code };
 }
 
 type Built = { ok: true; inputs: Record<string, unknown> } | { ok: false; field: string };
 
-function build(definition: RuleSetDefinition, values: Record<string, string>, currency: string, locale: Locale): Built {
+function build(definition: RuleSetDefinition, values: Record<string, string>, currencies: Readonly<Record<string, string>>, locale: Locale): Built {
   const inputs: Record<string, unknown> = {};
   for (const input of definition.inputs) {
     const text = (values[input.name] ?? '').trim();
     if (text === '') continue;
     if (input.type === 'money') {
+      const currency = (currencies[input.name] ?? '').trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(currency)) return { ok: false, field: input.name };
       const minor = toMinorUnits(text, currency, locale);
       if (!minor.ok) return { ok: false, field: input.name };
       inputs[input.name] = { currency, amount: minor.amount };
@@ -36,7 +51,14 @@ function build(definition: RuleSetDefinition, values: Record<string, string>, cu
   return { ok: true, inputs };
 }
 
-function Field({ input, value, currency, invalid, onChange }: { input: InputClause; value: string; currency: string; invalid: boolean; onChange: (text: string) => void }) {
+function Field({ input, value, currency, invalid, onChange, onCurrency }: {
+  input: InputClause;
+  value: string;
+  currency: InputCurrency;
+  invalid: boolean;
+  onChange: (text: string) => void;
+  onCurrency: (code: string) => void;
+}) {
   const { t, locale } = useI18n();
   const id = useId();
   const label = columnLabel(input.name, input.description);
@@ -50,11 +72,19 @@ function Field({ input, value, currency, invalid, onChange }: { input: InputClau
         {options.map(([v, text]) => <option key={v} value={v}>{text}</option>)}
       </select>
     );
+  } else if (input.type === 'money' && currency.kind === 'mixed') {
+    // The rule set compares this input in more than one currency: the panel cannot choose for the user.
+    control = <p className="cell-error">{t('try.mixedCurrency')}</p>;
   } else if (input.type === 'money') {
     control = (
       <span className="money-input">
         <input {...common} inputMode="decimal" className="field__input tnum" value={value} onChange={(e) => { onChange(groupWhileTyping(e.target.value, locale)); }} />
-        <span className="money-input__code" aria-label={t('try.currency', { name: label })}>{currency}</span>
+        {currency.kind === 'known' ? (
+          <span className="money-input__code" aria-label={t('try.currency', { name: label })}>{currency.code}</span>
+        ) : (
+          <input className="money-input__code money-input__code--edit" aria-label={t('try.currency', { name: label })} maxLength={3} placeholder="VND"
+            onChange={(e) => { onCurrency(e.target.value); }} />
+        )}
       </span>
     );
   } else {
@@ -76,8 +106,15 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
   const evaluate = useEvaluate(version.ruleSet, (answer) => { onMatched(answer.matchedRuleIds); });
   const [values, setValues] = useState<Record<string, string>>({});
   const [invalid, setInvalid] = useState<string | undefined>(undefined);
+  const [typedCurrency, setTypedCurrency] = useState<Record<string, string>>({});
   const definition = version.definition;
-  const currency = currencyOf(definition);
+  const currencyFor = (name: string) => currencyOfInput(definition, name);
+  const currencies: Record<string, string> = {};
+  for (const input of definition.inputs) {
+    const known = currencyFor(input.name);
+    if (known.kind === 'known') currencies[input.name] = known.code;
+    else if (known.kind === 'unknown') currencies[input.name] = typedCurrency[input.name] ?? '';
+  }
 
   if (!can('rules:evaluate')) {
     return (
@@ -90,7 +127,7 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const built = build(definition, values, currency, locale);
+    const built = build(definition, values, currencies, locale);
     if (!built.ok) {
       setInvalid(built.field);
       return;
@@ -106,8 +143,9 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
       <p className="dock__hint">{version.status === 'PUBLISHED' ? t('try.hint') : t('try.draftNote')}</p>
       <form className="try__form" onSubmit={submit}>
         {definition.inputs.map((input) => (
-          <Field key={input.name} input={input} currency={currency} value={values[input.name] ?? ''} invalid={invalid === input.name}
-            onChange={(text) => { setValues((current) => ({ ...current, [input.name]: text })); }} />
+          <Field key={input.name} input={input} currency={currencyFor(input.name)} value={values[input.name] ?? ''} invalid={invalid === input.name}
+            onChange={(text) => { setValues((current) => ({ ...current, [input.name]: text })); }}
+            onCurrency={(code) => { setTypedCurrency((current) => ({ ...current, [input.name]: code })); }} />
         ))}
         <button type="submit" className="btn btn--primary" disabled={evaluate.isPending}>{evaluate.isPending ? t('try.running') : t('try.run')}</button>
       </form>
@@ -115,10 +153,13 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
       <div role="status" aria-live="polite">
         {result ? (
           <div className="try__result">
+            <div className="try__outcome">
             <p className={result.outcome === 'MATCHED' ? 'badge badge--ok' : 'badge badge--muted'}>
               <span aria-hidden="true">{result.outcome === 'MATCHED' ? '✓' : '✕'}</span>{' '}
               {result.outcome === 'MATCHED' ? t('try.matched', { rows: result.matchedRuleIds.join(', ') }) : t('try.noMatch')}
             </p>
+            <p className="badge badge--accent">{t('try.inEffect', { version: String(result.version) })}</p>
+            </div>
             <dl className="dock__facts">
               {definition.outputs.filter((o) => o.name in result.outputs).map((output) => (
                 <div key={output.name}>
@@ -127,7 +168,14 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
                 </div>
               ))}
             </dl>
-            <p className="dock__hint">{t('try.version', { version: String(result.version) })} · <span className="mono">{result.decisionId}</span></p>
+            <details className="try__details">
+              <summary className="hit">{t('try.details')}</summary>
+              <p className="facts__with-action">
+                <span className="dock__hint">{t('try.decision')}</span>
+                <span className="mono">{result.decisionId}</span>
+                <CopyButton value={result.decisionId} />
+              </p>
+            </details>
           </div>
         ) : null}
       </div>

@@ -87,6 +87,11 @@
 .dt--edit td:first-of-type, .dt--edit th:first-child { padding-left: 12px; }
 .dt--edit .dt__actions { padding-right: 12px; }
 .cell-edit { display: flex; flex-direction: column; gap: 4px; min-width: 84px; }
+/*
+ * Target-size exemption (ux-design section 8, WCAG 2.5.8): editor cell inputs draw at 36 px tall in a dense
+ * grid. Adjacent cells abut, so an extended hit box would overlap the neighbour; 36 px is above the 24 px
+ * minimum and every cell is reachable with Tab and the arrow keys. Every other control is at least 44 px.
+ */
 .cell-input {
   width: 100%; min-height: 36px; padding: 6px 8px; border-radius: var(--radius-s);
   border: 1px solid var(--control); background: var(--surface); color: var(--ink); font-size: 13px;
@@ -150,7 +155,7 @@
   min-height: var(--target-min); padding: 8px 10px; border-radius: var(--radius-m);
   border: 1px solid var(--control); background: var(--surface); color: var(--ink); width: 100%;
 }
-.field__input--compact { min-height: 36px; width: auto; padding: 4px 8px; }
+.field__input--compact { min-height: var(--target-min); width: auto; padding: 4px 8px; }
 textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .field__input[aria-invalid="true"] { border-color: var(--bad-fill); }
 .money-input { display: flex; align-items: stretch; }
@@ -170,14 +175,14 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .notice--bad { border-color: var(--bad-fill); background: var(--bad-soft); }
 .notice__title { display: flex; align-items: center; gap: 8px; font-weight: 650; color: var(--ink); }
 .notice__detail { color: var(--ink-2); font-size: 13px; }
-.notice__more summary { cursor: pointer; color: var(--ink-2); font-size: 13px; min-height: 28px; display: flex; align-items: center; }
+.notice__more summary { cursor: pointer; color: var(--ink-2); font-size: 13px; min-height: var(--target-min); display: flex; align-items: center; }
 .notice__facts { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
 .notice__facts > div { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .notice__facts dt { color: var(--muted); }
 .workspace > .notice { margin-bottom: 12px; }
 
 /* ---------- History ---------- */
-.history summary { cursor: pointer; color: var(--ink-2); font-size: 13px; font-weight: 600; min-height: 32px; display: flex; align-items: center; gap: 6px; }
+.history summary { cursor: pointer; color: var(--ink-2); font-size: 13px; font-weight: 600; min-height: var(--target-min); display: flex; align-items: center; gap: 6px; }
 .history__list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; }
 .history__entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.45; }
 .history__what { color: var(--ink); font-weight: 600; }
@@ -190,3 +195,25 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .history summary::-webkit-details-marker { display: none; }
 .history summary::before { content: "▸"; color: var(--muted); }
 .history[open] summary::before { content: "▾"; }
+
+/* ---------- Changes: aid label, record, non-ASCII marks ---------- */
+.changes__aid { display: flex; gap: 8px; align-items: baseline; padding: 10px 16px; background: var(--accent-soft); color: var(--ink-2); font-size: 13px; border-bottom: 1px solid var(--line); }
+.changes__aid > span { color: var(--accent); }
+.changes__record { border-top: 1px solid var(--line-strong); margin-top: 8px; }
+.changes__record-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 6px; flex-wrap: wrap; }
+.changes__hash { color: var(--muted); font-size: 12.5px; }
+.nonascii-mark { display: inline-flex; gap: 4px; margin-top: 4px; padding: 0 6px; border-radius: var(--radius-s); background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-fill); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.diff-td--mod .nonascii-mark { display: flex; width: max-content; }
+.try__outcome { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.try__outcome .badge { margin-top: 0; }
+
+.rs-head__import { margin-left: auto; }
+.notice__located { margin: 0; padding-left: 18px; list-style: disc; display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--ink-2); }
+.notice__located strong { color: var(--ink); }
+.money-input__code--edit { width: 64px; text-transform: uppercase; font-family: var(--font-ui); }
+.try__details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; min-height: var(--target-min); display: flex; align-items: center; }
+.try__details .facts__with-action { font-size: 12.5px; }
+.try__details summary { list-style: none; gap: 6px; }
+.try__details summary::-webkit-details-marker { display: none; }
+.try__details summary::before { content: "▸"; }
+.try__details[open] summary::before { content: "▾"; }

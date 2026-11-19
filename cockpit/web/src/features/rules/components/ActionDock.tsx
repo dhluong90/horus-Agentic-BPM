@@ -45,9 +45,8 @@ function Fact({ label, value }: { label: string; value: string | null | undefine
 }
 
 /**
- * The four-eyes gate. What the user may do comes from the engine's allowedActions for this caller; the dock
- * only explains a missing Approve to the person who wrote or requested the change. A stale click still gets
- * the engine's answer, shown with its code.
+ * The four-eyes gate. What the user may do comes from the engine's allowedActions for this caller, and a
+ * disabled Approve always carries its reason. A stale click still gets the engine's answer, shown with its code.
  */
 function FourEyesGate({ version, approve, reject }: Pick<DockProps, 'version' | 'approve' | 'reject'>) {
   const { t } = useI18n();
@@ -57,16 +56,19 @@ function FourEyesGate({ version, approve, reject }: Pick<DockProps, 'version' | 
   const reasonId = useId();
   const hintId = useId();
   const allowed = new Set(version.allowedActions);
-  const canApprove = allowed.has('approve');
-  const canReject = allowed.has('reject');
-  const self = canApprove ? undefined : version.requestedBy === userId ? 'dock.selfRequested' : version.createdBy === userId ? 'dock.selfAuthored' : undefined;
+  const self = version.requestedBy === userId ? 'dock.selfRequested' : version.createdBy === userId ? 'dock.selfAuthored' : undefined;
+  const canApprove = allowed.has('approve') && self === undefined;
+  // PD-089: a requester never rejects their own request; withdrawing gets its own action (:withdraw).
+  const canReject = allowed.has('reject') && self === undefined;
   if (!canApprove && !canReject && self === undefined) return <p className="dock__note">{t('dock.waiting')}</p>;
+  // A disabled Approve always says why: four eyes for the maker, otherwise the engine withheld it.
+  const unavailable = canApprove ? undefined : self ?? 'dock.approveUnavailable';
   const busy = approve.isPending || reject.isPending;
   return (
     <div className="gate">
-      {self !== undefined ? (
+      {unavailable !== undefined ? (
         <p id={reasonId} className="gate__reason">
-          <span aria-hidden="true">⊘</span> {t(self)}
+          <span aria-hidden="true">⊘</span> {t(unavailable)}
         </p>
       ) : null}
       {canApprove || canReject ? (
@@ -80,7 +82,7 @@ function FourEyesGate({ version, approve, reject }: Pick<DockProps, 'version' | 
           type="button"
           className="btn btn--primary btn--ok"
           disabled={!canApprove || busy}
-          {...(self !== undefined ? { 'aria-describedby': reasonId } : {})}
+          {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : {})}
           onClick={() => { approve.start(text.trim()); }}
         >
           {approve.isPending ? t('dock.approving') : t('dock.approve')}
@@ -91,14 +93,17 @@ function FourEyesGate({ version, approve, reject }: Pick<DockProps, 'version' | 
           </button>
         ) : null}
       </div>
-      {canReject ? <p id={hintId} className="dock__hint">{self !== undefined ? t('dock.selfReject') : t('dock.reasonHint')}</p> : null}
+      {canReject ? <p id={hintId} className="dock__hint">{t('dock.reasonHint')}</p> : null}
     </div>
   );
 }
 
 function Actions({ version, editing, onEdit, requestPublish, approve, reject }: Pick<DockProps, 'version' | 'editing' | 'onEdit' | 'requestPublish' | 'approve' | 'reject'>): ReactNode {
   const { t } = useI18n();
-  const { can } = useRulesSession();
+  const { can, cockpitDrafts } = useRulesSession();
+  // Editing imports a new draft: it needs rules:author, and the host may keep changes in its release pipeline.
+  const canEdit = can('rules:author') && cockpitDrafts;
+  const draftsOff = can('rules:author') && !cockpitDrafts ? <p className="dock__hint">{t('dock.draftsOff')}</p> : null;
   if (editing) {
     return (
       <div className="dock__buttons">
@@ -114,9 +119,7 @@ function Actions({ version, editing, onEdit, requestPublish, approve, reject }: 
   switch (version.status) {
     case 'DRAFT': {
       const canRequest = version.allowedActions.includes('request-publish');
-      // Editing imports a new draft, which needs rules:author; there is no lifecycle action for it.
-      const canEdit = can('rules:author');
-      if (!canRequest && !canEdit) return <p className="dock__note">{t('dock.readOnly')}</p>;
+      if (!canRequest && !canEdit) return draftsOff ?? <p className="dock__note">{t('dock.readOnly')}</p>;
       return (
         <div className="dock__buttons">
           {canRequest ? (
@@ -125,6 +128,7 @@ function Actions({ version, editing, onEdit, requestPublish, approve, reject }: 
             </button>
           ) : null}
           {canEdit ? <button type="button" className="btn" onClick={onEdit}>{t('editor.edit')}</button> : null}
+          {draftsOff}
         </div>
       );
     }
@@ -133,8 +137,8 @@ function Actions({ version, editing, onEdit, requestPublish, approve, reject }: 
     case 'PUBLISHED':
       return (
         <div className="dock__buttons">
-          {can('rules:author') ? <button type="button" className="btn btn--primary" onClick={onEdit}>{t('editor.newDraft')}</button> : null}
-          <p className="dock__hint">{t('dock.publishedNote')}</p>
+          {canEdit ? <button type="button" className="btn btn--primary" onClick={onEdit}>{t('editor.newDraft')}</button> : null}
+          {draftsOff ?? <p className="dock__hint">{t('dock.publishedNote')}</p>}
         </div>
       );
     case 'RETIRED':

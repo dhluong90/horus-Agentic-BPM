@@ -9,6 +9,8 @@ export interface RulesSession {
   tenant: string;
   userId: string;
   can: (permission: string) => boolean;
+  /** False when the host keeps rule changes in its release pipeline (/meta setting authoring.cockpit-drafts). */
+  cockpitDrafts: boolean;
 }
 
 const RulesContext = createContext<RulesSession | undefined>(undefined);
@@ -17,12 +19,14 @@ export function RulesProvider({
   baseUrl,
   hostId,
   me,
+  cockpitDrafts,
   fetchImpl,
   children,
 }: {
   baseUrl: string;
   hostId: string;
   me: BpmMeV1;
+  cockpitDrafts: boolean;
   fetchImpl?: typeof fetch | undefined;
   children: ReactNode;
 }) {
@@ -37,8 +41,9 @@ export function RulesProvider({
       tenant,
       userId,
       can: (permission) => granted.has(permission),
+      cockpitDrafts,
     };
-  }, [baseUrl, hostId, permissions, tenant, userId, fetchImpl]);
+  }, [baseUrl, hostId, permissions, tenant, userId, cockpitDrafts, fetchImpl]);
   return <RulesContext.Provider value={value}>{children}</RulesContext.Provider>;
 }
 

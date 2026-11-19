@@ -3,9 +3,11 @@ import { toHostError } from '../../api/hostError';
 import type { RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
 import { LENSES, type Lens, type Route } from '../../app/route';
 import { useI18n } from '../../i18n/I18nProvider';
+import { useRulesSession } from './api/rulesContext';
 import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersions } from './api/useRules';
 import { ActionDock } from './components/ActionDock';
 import { ChangesView } from './components/ChangesView';
+import { ImportFileButton } from './components/ImportFileButton';
 import { DecisionTable } from './components/DecisionTable';
 import { DraftEditor } from './components/DraftEditor';
 import { ProblemNotice } from './components/ProblemNotice';
@@ -103,7 +105,7 @@ function ChangesLens({ version, base }: { version: RuleSetVersion; base: Version
   const baseVersion = useVersion(version.ruleSet, base?.version);
   if (base && baseVersion.isPending) return <p className="empty" role="status">{t('ruleSets.loading')}</p>;
   if (baseVersion.isError) return <ProblemNotice error={baseVersion.error} />;
-  return <ChangesView definition={version.definition} base={baseVersion.data?.definition} baseVersion={base?.version} />;
+  return <ChangesView definition={version.definition} base={baseVersion.data?.definition} baseVersion={base?.version} record={{ version: version.version, canonicalHash: version.canonicalHash }} />;
 }
 
 function LensContent({ lens, version, base, matched }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string> }) {
@@ -119,8 +121,14 @@ function LensContent({ lens, version, base, matched }: { lens: Lens; version: Ru
 
 export function RuleSetPage({ name, versionNumber, lens, navigate }: { name: string; versionNumber: number | undefined; lens: Lens | undefined; navigate: Navigate }) {
   const { t } = useI18n();
+  const { can } = useRulesSession();
   const versions = useVersions(name);
   const [notice, setNotice] = useState<Notice | undefined>(undefined);
+  // Import of the next version from a file (CKP-030); it stays available when cockpit drafts are off (PD-075).
+  const importVersion = useSaveDraft(name, (created) => {
+    setNotice({ version: created.version, text: t('ruleSet.imported', { version: String(created.version) }) });
+    navigate({ name: 'rule-set', ruleSet: created.ruleSet, version: created.version, lens: 'table' });
+  });
   const latest = versions.data?.[0];
   const selected = versionNumber ?? latest?.version;
   const known = selected !== undefined && versions.data?.some((v) => v.version === selected) === true;
@@ -180,7 +188,13 @@ export function RuleSetPage({ name, versionNumber, lens, navigate }: { name: str
               <button key={item} type="button" aria-pressed={item === activeLens} className="hit" onClick={() => { go({ lens: item }); }}>{t(`lens.${item}`)}</button>
             ))}
           </div>
+          {can('rules:author') ? (
+            <span className="rs-head__import">
+              <ImportFileButton label={t('ruleSet.import')} busyLabel={t('ruleSets.importing')} busy={importVersion.isPending} primary={false} onDocument={(document) => { importVersion.start(document); }} />
+            </span>
+          ) : null}
         </div>
+        {importVersion.isError ? <ProblemNotice error={importVersion.error} located /> : null}
       </div>
       <Workbench
         key={`${name}-${String(current.version)}-${String(current.lockVersion)}`}
