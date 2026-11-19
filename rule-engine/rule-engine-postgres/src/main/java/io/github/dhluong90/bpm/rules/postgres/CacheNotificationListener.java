@@ -33,6 +33,7 @@ public final class CacheNotificationListener {
     private volatile boolean running;
     private volatile boolean listening;
     private volatile Connection connection;
+    private volatile boolean stopped;
     private Thread thread;
 
     /**
@@ -83,6 +84,15 @@ public final class CacheNotificationListener {
         return listening;
     }
 
+    /**
+     * Tells whether the listener stopped after a {@link VirtualMachineError}.
+     *
+     * @return true once stopped for good
+     */
+    public boolean stopped() {
+        return stopped;
+    }
+
     private void run() {
         boolean lost = false;
         while (running) {
@@ -108,7 +118,15 @@ public final class CacheNotificationListener {
                         }
                     }
                 }
-            } catch (SQLException | RuntimeException e) {
+            } catch (VirtualMachineError fatal) {
+                // JVM-fatal: stop for good and let health report DOWN, so the orchestrator restarts the host.
+                listening = false;
+                stopped = true;
+                running = false;
+                LOG.log(System.Logger.Level.ERROR, "Rule Engine cache listener stopped after a JVM error", fatal);
+                return;
+            } catch (Throwable e) {
+                // Any other failure, an Error from a library included, never ends the loop: log once, reconnect.
                 listening = false;
                 if (!running) {
                     return;
@@ -116,7 +134,7 @@ public final class CacheNotificationListener {
                 if (!lost) {
                     LOG.log(System.Logger.Level.WARNING, "Rule Engine cache listener lost its connection; retrying every "
                             + reconnectDelay + ", and the epoch check keeps replicas within cache.epoch-check-interval "
-                            + "meanwhile: " + e.getMessage());
+                            + "meanwhile: " + e);
                     lost = true;
                 }
                 pause();

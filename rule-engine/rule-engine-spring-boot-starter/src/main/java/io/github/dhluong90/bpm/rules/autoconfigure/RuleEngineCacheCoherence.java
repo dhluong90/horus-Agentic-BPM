@@ -9,7 +9,7 @@ import org.springframework.context.SmartLifecycle;
  * check every {@code cache.epoch-check-interval} and, when {@code cache.listen-notify} is true, the listener on
  * {@code horus_rle_cache}. A host may replace this bean, for example to run the check on its own scheduler.
  */
-public final class RuleEngineCacheCoherence implements SmartLifecycle {
+public final class RuleEngineCacheCoherence implements SmartLifecycle, RuleEngineBackgroundJob {
 
     private final CacheCoherence coherence;
     private volatile boolean running;
@@ -42,5 +42,20 @@ public final class RuleEngineCacheCoherence implements SmartLifecycle {
      */
     public boolean listening() {
         return coherence.listening();
+    }
+
+    @Override
+    public String jobName() {
+        return "cacheEpochCheck";
+    }
+
+    @Override
+    public java.time.Instant lastSuccess() {
+        return coherence.lastCheck();
+    }
+
+    @Override
+    public boolean stopped() {
+        return coherence.stopped();
     }
 }

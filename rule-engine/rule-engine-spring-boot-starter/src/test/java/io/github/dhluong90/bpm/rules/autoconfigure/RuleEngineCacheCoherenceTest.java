@@ -69,6 +69,34 @@ class RuleEngineCacheCoherenceTest {
     }
 
     @Test
+    void TR_ASY_04_health_shows_the_last_successful_epoch_check() throws Exception {
+        RuleEngines engines = engines(50);
+        RuleEngineCacheCoherence lifecycle = new RuleEngineCacheCoherence(
+                new CacheCoherence(mock(DataSource.class), engines.cache(), Duration.ofMillis(100), false));
+        io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator migrator =
+                mock(io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator.class);
+        org.mockito.Mockito.when(migrator.status())
+                .thenReturn(new io.github.dhluong90.bpm.rules.postgres.SchemaStatus("5", 0));
+        RuleEngineHealthCheck health = new RuleEngineHealthCheck(migrator,
+                mock(io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions.class), Clock.systemUTC(),
+                System::nanoTime, java.util.List.of(lifecycle));
+        assertThat(health.check().details()).containsEntry("cacheEpochCheckLastSuccess", "never");
+
+        lifecycle.start();
+        try {
+            long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+            while (lifecycle.lastSuccess() == null && System.nanoTime() < deadline) {
+                Thread.sleep(20);
+            }
+        } finally {
+            lifecycle.stop();
+        }
+
+        assertThat(health.check().up()).isTrue();
+        assertThat(health.check().details().get("cacheEpochCheckLastSuccess")).asString().endsWith("Z");
+    }
+
+    @Test
     void RLE_034_cache_size_gauge_and_eviction_counters_by_cause_are_bound() {
         RuleEngines engines = engines(50);
         SimpleMeterRegistry registry = new SimpleMeterRegistry();

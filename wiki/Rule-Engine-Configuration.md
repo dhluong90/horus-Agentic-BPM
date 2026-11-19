@@ -157,6 +157,8 @@ Behind PgBouncer or another pooler in transaction mode, `LISTEN` does not work: 
 
 If the listener loses its connection (a failover, a restart of PostgreSQL), it logs one warning, retries every second, and logs one line when it listens again; it runs one epoch check on reconnect, because PostgreSQL does not replay notifications sent while it was away.
 
+No failure of one iteration ends the listener or the epoch check: any error, including an `Error` from a library, is logged and the loop carries on. Only a JVM-fatal error (`OutOfMemoryError`, `StackOverflowError`) stops them; the `ruleEngine` health contributor then reports `DOWN` with `cacheEpochCheck: STOPPED`, so the orchestrator restarts the host. The detail `cacheEpochCheckLastSuccess` shows the time of the last successful epoch check (`never` before the first).
+
 | Meter | Prometheus | Meaning |
 |---|---|---|
 | `horus.rle.cache.size` | `horus_rle_cache_size` | Compiled entries held; at most `cache.max-entries` |

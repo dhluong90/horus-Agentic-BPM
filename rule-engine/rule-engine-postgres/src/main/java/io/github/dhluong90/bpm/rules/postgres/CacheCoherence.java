@@ -21,10 +21,12 @@ public final class CacheCoherence {
     /** Pause between reconnection attempts of the listener. */
     static final Duration RECONNECT_DELAY = Duration.ofSeconds(1);
 
-    private final CompiledCache cache;
+    private final Runnable check;
     private final Duration checkInterval;
     private final CacheNotificationListener listener;
     private ScheduledExecutorService scheduler;
+    private volatile java.time.Instant lastCheck;
+    private volatile boolean stopped;
 
     /**
      * Creates the coherence of one replica.
@@ -40,13 +42,19 @@ public final class CacheCoherence {
 
     CacheCoherence(DataSource dataSource, CompiledCache cache, Duration checkInterval, boolean listenNotify,
             Duration reconnectDelay) {
-        Objects.requireNonNull(dataSource, "dataSource must not be null");
-        this.cache = Objects.requireNonNull(cache, "cache must not be null");
+        this(Objects.requireNonNull(cache, "cache must not be null")::checkEpochs, checkInterval,
+                listenNotify ? new CacheNotificationListener(
+                        Objects.requireNonNull(dataSource, "dataSource must not be null"), cache, reconnectDelay) : null);
+    }
+
+    /** For tests: any check and an optional listener. */
+    CacheCoherence(Runnable check, Duration checkInterval, CacheNotificationListener listener) {
+        this.check = Objects.requireNonNull(check, "check must not be null");
         this.checkInterval = Objects.requireNonNull(checkInterval, "checkInterval must not be null");
         if (checkInterval.isNegative() || checkInterval.isZero()) {
             throw new IllegalArgumentException("checkInterval must be positive, was " + checkInterval);
         }
-        this.listener = listenNotify ? new CacheNotificationListener(dataSource, cache, reconnectDelay) : null;
+        this.listener = listener;
     }
 
     /** Starts the epoch check and, when configured, the listener; a second call does nothing. */
@@ -87,12 +95,46 @@ public final class CacheCoherence {
         return listener != null && listener.listening();
     }
 
-    private void checkQuietly() {
+    /**
+     * One epoch check. The boundary catches every {@code Throwable}: an {@code Error} from a library never ends the
+     * schedule; it is logged and the next run retries. A {@link VirtualMachineError} is logged, the schedule stops
+     * and {@link #stopped()} turns true, so the host's health reports {@code DOWN}.
+     */
+    void checkQuietly() {
+        if (stopped) {
+            return;
+        }
         try {
-            cache.checkEpochs();
-        } catch (RuntimeException e) {
+            check.run();
+            lastCheck = java.time.Instant.now();
+        } catch (VirtualMachineError fatal) {
+            stopped = true;
+            LOG.log(System.Logger.Level.ERROR, "Rule Engine stopped the cache epoch check after a JVM error", fatal);
+            ScheduledExecutorService running = scheduler;
+            if (running != null) {
+                running.shutdown();
+            }
+        } catch (Throwable e) {
             // The next run retries; requests are served from the cache meanwhile, stale for at most one more interval.
             LOG.log(System.Logger.Level.WARNING, "Rule Engine epoch check failed; retrying in " + checkInterval, e);
         }
+    }
+
+    /**
+     * Returns when the epoch check last succeeded.
+     *
+     * @return the wall-clock instant, or null before the first success
+     */
+    public java.time.Instant lastCheck() {
+        return lastCheck;
+    }
+
+    /**
+     * Tells whether the epoch check or the listener stopped after a {@link VirtualMachineError}.
+     *
+     * @return true once either stopped for good
+     */
+    public boolean stopped() {
+        return stopped || (listener != null && listener.stopped());
     }
 }
