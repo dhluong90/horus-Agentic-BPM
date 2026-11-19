@@ -53,13 +53,19 @@ export function useSource(name: string, version: number, enabled: boolean) {
 }
 
 /**
- * A mutation that sends one request per user intent: a second click while the first runs is ignored, and
- * the Idempotency-Key is made once per intent, so a retry by the network layer cannot create a second version.
+ * A mutation that sends one request per user intent. A second click while the first runs is ignored, and the
+ * same request repeated (a double click after a fast answer, a retry after a timeout) reuses its
+ * Idempotency-Key, so the engine replays the first answer instead of creating a second version.
  */
 function useSingleFlight<TArgs, TResult>(run: (args: TArgs, key: string) => Promise<TResult>, onSuccess: (result: TResult) => Promise<void> | void) {
   const running = useRef(false);
+  const last = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
   const mutation = useMutation({
-    mutationFn: async (args: TArgs) => run(args, newIdempotencyKey()),
+    mutationFn: async (args: TArgs) => {
+      const fingerprint = JSON.stringify(args);
+      if (last.current?.fingerprint !== fingerprint) last.current = { fingerprint, key: newIdempotencyKey() };
+      return run(args, last.current.key);
+    },
     onSuccess,
     onSettled: () => {
       running.current = false;

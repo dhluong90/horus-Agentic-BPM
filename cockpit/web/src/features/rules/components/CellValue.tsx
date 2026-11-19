@@ -39,7 +39,7 @@ export function CellValue({ reading }: { reading: CellReading }) {
       );
     case 'compare':
       return (
-        <span className="cell-values">
+        <span className="cell-values cell-values--compare">
           <span className="cell-op">{reading.operator}</span>
           <span className="value-pill tnum">
             <ValueText value={reading.value} />

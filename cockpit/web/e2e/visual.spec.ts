@@ -24,7 +24,7 @@ for (const { name, scenario } of STATES) {
           await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
           await rememberLocale(page, locale);
           await mockHost(page, scenario);
-          await page.goto('./');
+          await page.goto('./#/service');
           await expect(name === 'ready' ? page.getByTestId('header-user') : page.getByRole('alert')).toBeVisible();
           await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
           await expect(page.locator('html')).toHaveAttribute('lang', locale);

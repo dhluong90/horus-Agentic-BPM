@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll } from 'vitest';
+import { resetRuleEngine } from '../mocks/handlers';
 import { mockHost, setScenario } from '../mocks/node';
 
 beforeAll(() => {
@@ -11,6 +12,8 @@ afterEach(() => {
   setScenario('ready');
   mockHost.resetHandlers();
   window.localStorage.clear();
+  window.location.hash = '';
+  resetRuleEngine();
 });
 afterAll(() => {
   mockHost.close();

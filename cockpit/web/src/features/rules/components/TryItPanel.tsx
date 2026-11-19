@@ -61,7 +61,7 @@ function Field({ input, value, currency, invalid, onChange }: { input: InputClau
     control = <input {...common} type={input.type === 'date' ? 'date' : 'text'} inputMode={input.type === 'integer' ? 'numeric' : undefined} value={value} onChange={(e) => { onChange(e.target.value); }} />;
   }
   return (
-    <div className="field">
+    <div className={input.type === 'money' ? 'field field--wide' : 'field'}>
       <label className="field__label" htmlFor={id}>{label}</label>
       {control}
       {invalid ? <span className="cell-error">{t('try.invalidAmount', { example: locale === 'vi' ? '60.000.000' : '60,000,000' })}</span> : null}

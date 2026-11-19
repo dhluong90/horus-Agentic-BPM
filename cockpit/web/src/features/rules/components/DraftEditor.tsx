@@ -26,6 +26,15 @@ function cellError(error: ErrorPlace | undefined, row: EditableRow, column: stri
   return error?.kind === 'cell' && error.ruleId === row.id && error.column === column ? error.message : undefined;
 }
 
+/**
+ * The engine's sentence is English in this release. On an English screen it shows on the cell; on a
+ * Vietnamese screen the cell says so in Vietnamese and the sentence stays in the notice's disclosure.
+ */
+function useCellMessage(): (message: string | undefined) => string | undefined {
+  const { t, locale } = useI18n();
+  return (message) => (message === undefined || locale === 'en' ? message : t('editor.cellRefused'));
+}
+
 function CellInput({ row, index, part, column, label, error, dispatch }: {
   row: EditableRow;
   index: number;
@@ -42,6 +51,7 @@ function CellInput({ row, index, part, column, label, error, dispatch }: {
       <input
         className="cell-input mono"
         value={row[part][column] ?? ''}
+        title={row[part][column] ?? ''}
         aria-label={t('editor.cellLabel', { row: row.id, column: label })}
         aria-invalid={error !== undefined}
         {...(error !== undefined ? { 'aria-describedby': errorId } : {})}
@@ -83,13 +93,14 @@ export function DraftEditor({ definition, draft, dispatch, error }: {
   error: ErrorPlace | undefined;
 }) {
   const { t } = useI18n();
+  const cellMessage = useCellMessage();
   return (
     <div className="dt-scroll">
       <table className="dt dt--edit">
         <TableHead definition={definition} extra={t('editor.actions')} />
         <tbody onKeyDown={moveFocus}>
           {draft.rows.map((row, index) => {
-            const rowError = error?.kind === 'row' && error.ruleId === row.id ? error.message : undefined;
+            const rowError = cellMessage(error?.kind === 'row' && error.ruleId === row.id ? error.message : undefined);
             return (
               <tr key={row.key} className={rowError !== undefined ? 'dt__row--bad' : undefined}>
                 <th scope="row" className="dt__rowhead">
@@ -109,7 +120,7 @@ export function DraftEditor({ definition, draft, dispatch, error }: {
                     {row.groups[input.name] !== undefined ? (
                       <span className="cell-raw">{t('table.group')}</span>
                     ) : (
-                      <CellInput row={row} index={index} part="when" column={input.name} label={columnLabel(input.name, input.description)} error={cellError(error, row, input.name)} dispatch={dispatch} />
+                      <CellInput row={row} index={index} part="when" column={input.name} label={columnLabel(input.name, input.description)} error={cellMessage(cellError(error, row, input.name))} dispatch={dispatch} />
                     )}
                   </td>
                 ))}

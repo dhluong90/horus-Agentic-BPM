@@ -72,7 +72,7 @@ class CockpitEmbeddedIT {
                 HttpResponse.BodyHandlers.ofString());
         assertThat(registry.statusCode()).isEqualTo(200);
         assertThat(registry.body()).isEqualTo("{\"schemaVersion\":1,\"auth\":{\"mode\":\"host-session\"},"
-                + "\"hosts\":[{\"id\":\"loans\",\"label\":\"Loan origination\",\"baseUrl\":\"\",\"environment\":\"demo\"}],"
+                + "\"hosts\":[{\"id\":\"rule-engine-only\",\"label\":\"Loan origination\",\"baseUrl\":\"\",\"environment\":\"demo\"}],"
                 + "\"ui\":{\"defaultLocale\":\"en\"}}");
     }
 

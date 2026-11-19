@@ -18,6 +18,12 @@ import { sameRows, toDocument, toRows } from './model/table';
 
 type Navigate = (route: Route) => void;
 
+/** A confirmation from the engine, shown only on the version it is about. */
+interface Notice {
+  version: number;
+  text: string;
+}
+
 /** The version the diff compares with: the newest earlier version that was published, else the one before. */
 function baseOf(versions: readonly RuleSetVersion[], current: RuleSetVersion): RuleSetVersion | undefined {
   const earlier = versions.filter((v) => v.version < current.version);
@@ -29,10 +35,10 @@ function Workbench({ versions, version, lens, navigate, notice, setNotice }: {
   version: RuleSetVersion;
   lens: Lens;
   navigate: Navigate;
-  notice: string | undefined;
-  setNotice: (text: string | undefined) => void;
+  notice: Notice | undefined;
+  setNotice: (notice: Notice) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [editing, setEditing] = useState(false);
   const [draft, dispatch] = useReducer(draftReducer, version.definition, (definition) => initialDraft(toRows(definition)));
   const [matched, setMatched] = useState<ReadonlySet<string>>(new Set());
@@ -40,11 +46,11 @@ function Workbench({ versions, version, lens, navigate, notice, setNotice }: {
     navigate({ name: 'rule-set', ruleSet: target.ruleSet, version: target.version, lens: nextLens });
   };
   const save = useSaveDraft(version.ruleSet, (saved) => {
-    setNotice(t('editor.saved', { version: String(saved.version) }));
+    setNotice({ version: saved.version, text: t('editor.saved', { version: String(saved.version) }) });
     open(saved, 'table');
   });
-  const requestPublish = useRequestPublish((updated) => { setNotice(t('dock.requested', { version: String(updated.version) })); });
-  const approve = useApprove((updated) => { setNotice(t('dock.approved', { version: String(updated.version) })); });
+  const requestPublish = useRequestPublish((updated) => { setNotice({ version: updated.version, text: t('dock.requested', { version: String(updated.version) }) }); });
+  const approve = useApprove((updated) => { setNotice({ version: updated.version, text: t('dock.approved', { version: String(updated.version) }) }); });
   const latest = versions.at(-1) ?? version;
   const base = baseOf(versions, version);
   const dirty = !sameRows(draft.rows, toRows(version.definition));
@@ -72,7 +78,7 @@ function Workbench({ versions, version, lens, navigate, notice, setNotice }: {
         {editing ? (
           <>
             <p className="editor-title">{t('editor.title', { version: String(version.version) })}</p>
-            {save.error ? <ProblemNotice error={save.error} showDetail={errorPlace === undefined || errorPlace.kind === 'table'} /> : null}
+            {save.error ? <ProblemNotice error={save.error} showDetail={locale !== 'en' || errorPlace === undefined || errorPlace.kind === 'table'} /> : null}
             <DraftEditor definition={version.definition} draft={draft} dispatch={dispatch} error={errorPlace} />
           </>
         ) : (
@@ -84,7 +90,7 @@ function Workbench({ versions, version, lens, navigate, notice, setNotice }: {
           version={version}
           latestVersion={latest.version}
           editing={editing ? { dirty, saving: save.isPending, error: save.error, onSave: saveDraft, onCancel: cancelEdit } : undefined}
-          notice={notice}
+          notice={notice?.version === version.version ? notice.text : undefined}
           onEdit={startEdit}
           onOpen={(number) => { navigate({ name: 'rule-set', ruleSet: version.ruleSet, version: number, lens: undefined }); }}
           onReload={() => { window.location.reload(); }}
@@ -111,7 +117,7 @@ function LensContent({ lens, version, base, matched }: { lens: Lens; version: Ru
 export function RuleSetPage({ name, versionNumber, lens, navigate }: { name: string; versionNumber: number | undefined; lens: Lens | undefined; navigate: Navigate }) {
   const { t } = useI18n();
   const query = useVersions(name);
-  const [notice, setNotice] = useState<string | undefined>(undefined);
+  const [notice, setNotice] = useState<Notice | undefined>(undefined);
   // A link to a version newer than the cached list (someone else just saved it): read the list again, once.
   const refetchedFor = useRef<string | undefined>(undefined);
   const missing = versionNumber !== undefined && query.data !== undefined && !query.data.some((v) => v.version === versionNumber);

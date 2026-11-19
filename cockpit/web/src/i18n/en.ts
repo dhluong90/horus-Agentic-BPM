@@ -141,6 +141,7 @@ export const en = {
   'editor.unsaved': 'Unsaved changes',
   'editor.noChanges': 'No changes yet',
   'editor.saved': 'Saved as draft version {version}',
+  'editor.cellRefused': 'The engine refused this value.',
   'editor.errorsTitle': 'The engine refused the draft',
   'editor.errorCell': 'Row {row}, column {column}',
   'editor.errorRow': 'Row {row}',

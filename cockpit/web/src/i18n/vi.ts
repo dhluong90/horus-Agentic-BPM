@@ -143,6 +143,7 @@ export const vi: Record<MessageKey, string> = {
   'editor.unsaved': 'Có thay đổi chưa lưu',
   'editor.noChanges': 'Chưa có thay đổi',
   'editor.saved': 'Đã lưu thành bản nháp phiên bản {version}',
+  'editor.cellRefused': 'Hệ thống từ chối giá trị này.',
   'editor.errorsTitle': 'Hệ thống từ chối bản nháp',
   'editor.errorCell': 'Dòng {row}, cột {column}',
   'editor.errorRow': 'Dòng {row}',

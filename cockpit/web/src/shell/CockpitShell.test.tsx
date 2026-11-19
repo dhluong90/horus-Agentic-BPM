@@ -12,6 +12,8 @@ const record = ({ request }: { request: Request }) => {
 };
 
 beforeEach(() => {
+  // These tests are about the shell; the service overview is its own area since the rule screens arrived.
+  window.location.hash = '#/service';
   requested = [];
   mockHost.events.on('request:start', record);
 });

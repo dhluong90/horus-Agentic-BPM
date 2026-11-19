@@ -1,7 +1,8 @@
 /* Rule screens: rule set list, version view, minimal draft editor, changes, approval dock, Try it.
  * Tokens only (tokens.css); no raw colours. Workbench and inspector stay side by side down to 1180 px. */
 
-.main:has(.layout) { max-width: 1440px; padding-top: 20px; }
+/* One width in every state, so the workspace arriving after the loading panel shifts nothing. */
+.main { max-width: 1440px; }
 .layout { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 20px; align-items: start; }
 .layout__content { min-width: 0; }
 .rail { position: sticky; top: 84px; display: flex; flex-direction: column; gap: 4px; }
@@ -62,6 +63,7 @@
 
 .cell-any { color: var(--muted); display: inline-block; min-width: 1.5em; text-align: center; }
 .cell-values { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.cell-values--compare { flex-wrap: nowrap; white-space: nowrap; }
 .cell-op { color: var(--muted); font-weight: 600; }
 .value-pill {
   display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 999px; line-height: 1.5;
@@ -158,7 +160,8 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
   border-radius: 0 var(--radius-m) var(--radius-m) 0; background: var(--surface-3); color: var(--ink-2); font-weight: 600; font-size: 12.5px;
 }
 .try__form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; align-items: end; }
-.try__form .btn { grid-column: 1 / -1; justify-self: start; }
+.try__form .btn { align-self: end; justify-self: start; }
+.try__form .field--wide { grid-column: 1 / -1; }
 .try__result { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; border-top: 1px solid var(--line); margin-top: 4px; }
 .try__result .badge { align-self: flex-start; margin-top: 8px; }
 

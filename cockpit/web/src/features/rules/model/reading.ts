@@ -102,7 +102,7 @@ function valueText(value: Value): string {
 
 /** A column label from an attribute name: its description when present, else the name in words. */
 export function columnLabel(name: string, description: string | undefined): string {
-  if (description !== undefined && description.trim() !== '' && description.length <= 40) return description;
+  if (description !== undefined && description.trim() !== '' && description.length <= 40) return description.charAt(0).toUpperCase() + description.slice(1);
   const words = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replaceAll('_', ' ').toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
