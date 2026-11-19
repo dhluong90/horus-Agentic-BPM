@@ -449,8 +449,8 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-045 Engine REST bodies ignore the host's JSON settings
 - **Traces to:** `TR-EMB-07`, `TR-API-06`
 - **Milestone:** M2
-- **Given:** A host with the Process Engine starter and REST module, and host properties `spring.jackson.property-naming-strategy=SNAKE_CASE` and `spring.jackson.serialization.write-dates-as-timestamps=true`; the same test runs in the Spring Boot 4.x leg and in the Spring Boot 3.5 leg, where the host's own Jackson 2 stays at the version its dependency management pins.
-- **When:** `POST /api/bpm/processes/v1/instances` with `Idempotency-Key: 01JD2X5K9T1Q4N8V2M7B3C6D0E` and body `{ "definition": "kyc-onboarding", "businessKey": "APP-1001", "variables": { "applicantName": "Tran Thi B" } }`, then `GET /api/bpm/processes/v1/instances/{id}`.
+- **Given:** A host with the Process Engine starter and REST module, and host properties `spring.jackson.property-naming-strategy=SNAKE_CASE` and dates written as timestamps (`spring.jackson.serialization.write-dates-as-timestamps=true` on Spring Boot 3.5, `spring.jackson.datatype.datetime.write-dates-as-timestamps=true` on Spring Boot 4, where Jackson 3 moved the switch); the same test runs in the Spring Boot 4.x leg and in the Spring Boot 3.5 leg, where the host's own Jackson 2 stays at the version its dependency management pins.
+- **When:** `POST /api/bpm/processes/v1/instances` with `Idempotency-Key: 01JD2X5K9T1Q4N8V2M7B3C6D0E` and body `{ "definitionKey": "card-fee-review", "businessKey": "APP-1001", "variables": { "applicationId": "APP-1001", "customerId": "C-002", "applicantName": "Tran Thi B" } }`, then `GET /api/bpm/processes/v1/instances/{id}`.
 - **Then:** The start is accepted (`201`) because the engine reads the camelCase body with its own Jackson 3 mapper; the response keys are camelCase (`businessKey`, `startedAt`), `startedAt` is an ISO 8601 string, and the host's own controllers still answer in snake case; the dependency tree of the 3.5 leg shows Jackson 3 from the engine next to the host's Jackson 2, with no host version override.
 - **Example:** `host SNAKE_CASE -> engine response {"businessKey":"APP-1001","startedAt":"2027-02-01T09:00:00Z"}`.
 - **Test ID:** `PRE_045_engine_rest_bodies_ignore_host_json_settings`
@@ -488,3 +488,20 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `source swapped with a matching row hash -> refused, incident, audit, alert; reader upgraded -> runs, WARN`.
 - **Test ID:** `PRE_048_kernel_runs_only_the_approved_source`
 
+### PRE-049 Definition and instance lists are keyset pages with cursors signed for the tenant and the list
+- **Traces to:** `TR-TEN-01`, `TR-PERF-07`, ADR-0015
+- **Milestone:** M2
+- **Given:** Tenant `bank-a` with definitions `card-fee-review` (v1 `ACTIVE`) and `card-limit-review`, and five running instances of `card-fee-review` started one after another; tenant `bank-b` with none. `query.max-page-size = 200`, `query.max-range = P31D`.
+- **When:** A `bank-a` caller with `processes:read` reads `GET /definitions?limit=1` and `GET /instances?definitionKey=card-fee-review&limit=2`, following `nextCursor` until `hasNext` is false; then sends `limit=0`, `limit=201`, `status=OPEN`, a 32-day range, `startedTo` before `startedFrom`, a cursor with an edited payload, a cursor with other filters; and a `bank-b` caller replays a `bank-a` cursor.
+- **Then:** Pages are `{data, nextCursor, hasNext}`; definitions come ordered by key with `latestVersion`, `latestStatus`, `effectiveVersion` and `lastChangedAt`; instances come newest first (`startedAt`, then `id`, both descending) with no gap and no duplicate across pages and no variables, tokens or tasks; every refused query is `400 QUERY_INVALID`; the `bank-b` caller gets `400 QUERY_INVALID`, lists no `bank-a` row and reads no `bank-a` version (`404 DEFINITION_NOT_FOUND`). `GET /definitions/{key}/versions/{v}` answers the version with its definition hash as `ETag`, which is the `Location` an import returns.
+- **Example:** `5 instances, limit=2 -> pages of 2, 2, 1, newest first; bank-a cursor sent by bank-b -> 400 QUERY_INVALID`.
+- **Test ID:** `PRE_049_definition_and_instance_lists_are_signed_keyset_pages`
+
+### PRE-050 Cancelling an instance is idempotent, optimistically locked and ends every live token and open task
+- **Traces to:** `TR-IDEM-01`, `TR-IDEM-03`, `TR-OBS-04`
+- **Milestone:** M2
+- **Given:** Instance `I1` of `card-fee-review` in `bank-a`, waiting at the officer review task, `lockVersion = 1`; caller `tuan` with `processes:start`.
+- **When:** (a) `tuan` posts `POST /instances/I1:cancel` with `If-Match: "1"`, `Idempotency-Key: k1` and `{ "reason": "Customer withdrew the card application" }`, then replays it, then sends `k1` with another reason, then cancels again with a new key. (b) Two requests cancel another running instance at the same moment with the same `If-Match` and different keys. (c) Four requests cancel a third instance at the same moment with one key. (d) `If-Match` is stale, the caller lacks `processes:start`, or `If-Match` or `Idempotency-Key` is missing.
+- **Then:** (a) `200` with status `CANCELLED`, the task `CANCELLED` and `endedAt` set; one `INSTANCE_ENDED` history entry carrying the reason and one `processes.instance.cancelled.v1`, both in the transaction of the change; the replay returns the same body and writes nothing; the other reason is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; the second cancel is `409 INVALID_STATE`. (b) One `200` and one `409 VERSION_CONFLICT`, one history entry. (c) Four `200` with one body, one history entry. (d) `409 VERSION_CONFLICT`, `403 PERMISSION_DENIED`, `428 PRECONDITION_REQUIRED`; nothing is written.
+- **Example:** `cancel(I1, If-Match "1", k1) -> 200 CANCELLED; replay -> same body; second cancel -> 409 INVALID_STATE`.
+- **Test ID:** `PRE_050_cancel_is_idempotent_locked_and_ends_tokens_and_tasks`

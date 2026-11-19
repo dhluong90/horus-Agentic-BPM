@@ -60,10 +60,14 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-042 | `PRE_042_bpmn_style_step_ids_kept` | Unit, integration | M2 | `TR-STD-03`, `TR-DEF-01` | Planned |
 | PRE-043 | `PRE_043_v1_definition_round_trips_through_bpmn_model` | Unit over every example definition, RFC 8785 vectors | M2 | `TR-STD-28`, `TR-STD-03`, `TR-DEF-04` | Planned |
 | PRE-044 | `PRE_044_joins_and_compensation_keyed_by_scope_token` | Testcontainers integration, SQL capture of `pre_token` and `pre_compensation_stack` | M2 | `TR-STD-29`, `TR-ASY-03`, `TR-COMP-01` | Planned |
-| PRE-045 | `PRE_045_engine_rest_bodies_ignore_host_json_settings` | WebMvc in the Spring Boot 4.x and 3.5 legs, dependency-tree check | M2 | `TR-EMB-07`, `TR-API-06` | Planned |
+| PRE-045 | `PRE_045_engine_rest_bodies_ignore_host_json_settings` in `EngineJsonSettingsIT` | Testcontainers host over HTTP in the Spring Boot 4.x and 3.5 legs, dependency-tree check of `examples/rule-and-process` in the 3.5 legs | M2 | `TR-EMB-07`, `TR-API-06` | Done |
 | PRE-046 | `PRE_046_decision_step_uses_the_instance_tenant_and_the_engine_identity` | Service with both engines, no-principal harness, Testcontainers two tenants | M2 | `TR-TEN-01`, `TR-IDEM-04` | Planned |
 | PRE-047 | `PRE_047_decision_port_refuses_a_request_tenant_other_than_the_instance_tenant` | Service, security log capture | M2 | `TR-TEN-01` | Planned |
 | PRE-048 | `PRE_048_kernel_runs_only_the_approved_source` | Testcontainers with a tampered row, event and audit capture | M2 | `TR-DEF-04`, `TR-STD-01` | Planned |
+| PRE-049 | `PRE_049_*` in `ProcessRestApiIT` | Testcontainers host over HTTP, two tenants | M2 | `TR-TEN-01`, `TR-PERF-07` | Done (the query-plan check of `TR-PERF-07` is still planned) |
+| PRE-050 | `PRE_050_*` in `ProcessRestApiIT` | Testcontainers host over HTTP, concurrent requests, event capture after commit | M2 | `TR-IDEM-01`, `TR-IDEM-03`, `TR-OBS-04` | Done |
+
+The error matrix of the REST layer (`TR-SEC-08`) is `ProcessRestErrorMatrixTest` in `process-engine-rest`: MockMvc over the controller with in-memory services, every code of `ProcessProblemDetails.STATUS` answered as `application/problem+json` with `code`, `correlationId` and `type`, and an injected failure answered `500 INTERNAL` with no message, class name or SQL. Tenant isolation over HTTP (`TR-TEN-01`) is `ProcessRestApiIT.TR_TEN_01_*`: another tenant's read, list and cancel are not found and write nothing, and a tenant header for another tenant is `403 TENANT_NOT_ALLOWED`.
 
 ## Known gaps
 | Gap | Plan |

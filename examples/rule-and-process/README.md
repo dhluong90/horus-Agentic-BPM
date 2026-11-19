@@ -81,6 +81,8 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=demo-pass HORUS_DB_PASSWORD=chang
 | `HORUS_DEMO_PASSWORD` | empty | Password of the demo users, `dev` profile only |
 | `PORT` | `8080` | HTTP port |
 | `HORUS_BPM_PROCESSES_HANDLERS_SLOW_CALL_WARNING` | `200ms` | A local handler or decision slower than this is logged at WARN as `process.step.slow`: it holds the instance row lock and a connection, which usually means a network call in a handler |
+| `HORUS_BPM_PROCESSES_QUERY_MAX_PAGE_SIZE` | `200` | Most items per page of the process lists; may be lowered, never raised |
+| `HORUS_BPM_PROCESSES_QUERY_MAX_RANGE` | `P31D` | Longest start-time range of `GET /api/bpm/processes/v1/instances`; may be lowered, never raised |
 | `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the demo users, the fixed tenant `bank-a`, the start-up import and auto-approval of the sample process |
 
 At start-up the log shows, in order: the host's own migration, the Rule Engine schema (`rle_schema_history`), the Process Engine schema (`pre_schema_history`), the sample process imported as version 1 `ACTIVE` for `bank-a`, and the `card-fee` rule set published by two seed identities (one requests, the other approves).
@@ -157,6 +159,35 @@ curl -s -u tuan:$P localhost:8080/api/cards/applications/APP-1002
 ```
 
 `POST /api/bpm/processes/v1/instances` needs a `businessKey` or an `Idempotency-Key` (`428` without either), so a client retry can never start a second instance. Starting again with the same `businessKey` returns the existing instance with `200` (a new instance is `201`), and a retry with the same `Idempotency-Key` returns the first answer, also when the two requests run at the same time.
+
+List what is running and what is deployed. Pages carry `nextCursor`; pass it back unchanged as `cursor`:
+
+```bash
+curl -s -u an:$P "localhost:8080/api/bpm/processes/v1/instances?definitionKey=card-fee-review&limit=2"
+# {"data":[{"id":"01M7S2PPTM395C88YQ14BX2E6F","definitionKey":"card-fee-review","definitionVersion":1,"businessKey":"APP-1002",
+#   "status":"RUNNING","lockVersion":1,"startedBy":"tuan","startedAt":"2027-02-01T09:00:00.120Z","endedAt":null}],
+#  "nextCursor":null,"hasNext":false}
+curl -s -u an:$P "localhost:8080/api/bpm/processes/v1/instances?status=COMPLETED,CANCELLED&startedFrom=2027-02-01T00:00:00Z"
+curl -s -u an:$P localhost:8080/api/bpm/processes/v1/definitions
+# {"data":[{"key":"card-fee-review","name":"Card fee review","latestVersion":1,"latestStatus":"ACTIVE","effectiveVersion":1,
+#   "lastChangedAt":"2027-02-01T08:59:58.004Z"}],"nextCursor":null,"hasNext":false}
+curl -s -u an:$P "localhost:8080/api/bpm/processes/v1/instances?limit=500"
+# {"status":400,"code":"QUERY_INVALID","detail":"limit must be 1 to 200 (query.max-page-size)",...}
+```
+
+A teller may cancel a running application. `If-Match` carries the instance `ETag` (its `lockVersion`), and `Idempotency-Key` makes a retry safe:
+
+```bash
+curl -s -u tuan:$P -H 'Content-Type: application/json' \
+  -d '{"applicationId":"APP-1003","customerId":"C-002"}' localhost:8080/api/cards/applications
+# {"instanceStatus":"RUNNING","instanceId":"01M7S2Q4B1XWJ3T7N9D2E5K8H0",...}
+I=01M7S2Q4B1XWJ3T7N9D2E5K8H0
+curl -s -u tuan:$P -H 'Content-Type: application/json' -H 'If-Match: "1"' -H 'Idempotency-Key: cancel-1003' \
+  -d '{"reason":"Customer withdrew the card application"}' "localhost:8080/api/bpm/processes/v1/instances/${I}:cancel"
+# {"id":"01M7S2Q4B1XWJ3T7N9D2E5K8H0",...,"status":"CANCELLED","tasks":[{...,"status":"CANCELLED"}],"lockVersion":2,...}
+curl -s -u tuan:$P -H 'If-Match: "2"' -H 'Idempotency-Key: cancel-1003b' "localhost:8080/api/bpm/processes/v1/instances/${I}:cancel" -X POST
+# {"status":409,"code":"INVALID_STATE","detail":"Instance 01M7S2Q4B1XWJ3T7N9D2E5K8H0 is CANCELLED",...}
+```
 
 An unknown customer fails the first step, and the host's row rolls back with the engine's:
 

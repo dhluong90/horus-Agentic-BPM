@@ -339,6 +339,8 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `POST /incidents/{id}:retry`, `:resolve` | `processes:incident:manage` | Retry or resolve | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
 | `POST /migrations`, `/{id}:validate`, `/{id}:execute` | `processes:migration:manage` | Plan, dry run, execute | `Idempotency-Key` | | M2 |
 
+Implemented in 0.2.0 (`PRE-049`, `PRE-050`): `GET /definitions`, `GET /definitions/{key}/versions/{v}` without `include` (its `ETag` is the definition hash), `GET /instances`, `POST /instances/{id}:cancel` (both `If-Match` and `Idempotency-Key` required, `428` without), besides the import, start, read and complete of 0.1.0. List cursors are signed with HMAC-SHA256 over tenant, filters and the last key, with one random key per database in `pre_engine_key` (section 7), so a cursor issued to another tenant or for other filters is `400 QUERY_INVALID`.
+
 Common set on every endpoint: `400 INPUT_INVALID`, `401`, `403 FORBIDDEN` (permission), `403 TENANT_NOT_ALLOWED` (ADR-0014), `409 VERSION_CONFLICT` where `If-Match` applies, `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` where `Idempotency-Key` applies (ADR-0006), `500 INTERNAL` with `correlationId` only. Bodies are RFC 9457 with `code`; `type` URIs follow ADR-0010. `lockVersion` travels as `If-Match: "<lockVersion>"` and `ETag`; `version` always means the definition version number. `/api/bpm/meta` and `/api/bpm/me` are host-level endpoints owned by [`cockpit/docs/DESIGN.md`](../../cockpit/docs/DESIGN.md) section 6; this engine contributes its feature flags there.
 
 ### 6.3 Permissions
@@ -656,6 +658,14 @@ CREATE TABLE pre_idempotency (
   response_body   JSONB       NOT NULL,
   expires_at      TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, operation, idempotency_key)
+);
+
+-- Engine secrets, one row per purpose; 'cursor-hmac' signs list cursors (section 6.2). Not tenant data: the MAC
+-- covers the tenant. Created at start-up after the migrations; never returned or logged.
+CREATE TABLE pre_engine_key (
+  name        TEXT        NOT NULL PRIMARY KEY,
+  key_bytes   BYTEA       NOT NULL CHECK (octet_length(key_bytes) >= 32),
+  created_at  TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE pre_calendar (

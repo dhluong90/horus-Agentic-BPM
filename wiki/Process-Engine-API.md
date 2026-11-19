@@ -2,30 +2,57 @@
 
 Reference for the Process Engine's two surfaces: the in-process Java API and the REST API under `/api/bpm/processes/v1`. The contract file is [`process-engine/api/openapi.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/process-engine/api/openapi.yaml).
 
-**Preview in 0.1.0.** The Process Engine ships as a walking skeleton. Outside the `dev` profile an imported definition stays `DRAFT`, and nothing in this release can activate it, because the approval flow comes later. On `dev`, `horus.bpm.processes.definitions.auto-approve` activates imports without approval. Claims, forms, incidents, timers, asynchronous steps and masking of instance variables are not in this release.
+**Preview.** The Process Engine ships as a walking skeleton (0.1.0) with the read and cancel endpoints of 0.2.0. Outside the `dev` profile an imported definition stays `DRAFT`, and nothing in this release can activate it, because the approval flow comes later. On `dev`, `horus.bpm.processes.definitions.auto-approve` activates imports without approval. Claims, forms, incidents, timers, asynchronous steps and masking of instance variables are not in this release.
 
 ## Endpoints
 
 | Method and path | Java | Permission | Notes |
 |---|---|---|---|
 | `POST /definitions` | `DefinitionService.importDefinition(ImportRequest)` | `processes:deploy` | Body is a BPMN 2.0 document (`application/xml`), UTF-8 only, at most 1 MB. A document identical to the latest version returns that version, also with `201` |
+| `GET /definitions` | `ProcessQueryService.definitions(PageRequest)` | `processes:read` | One item per key, ordered by key: `latestVersion`, `latestStatus`, `effectiveVersion` (the version a start uses now, or `null`), `lastChangedAt`. Since 0.2.0 |
+| `GET /definitions/{key}/versions/{version}` | `DefinitionService.version(key, version)` | `processes:read` | Status, hashes, `approvedBy`, `approvedAt`, `effectiveFrom`; no source document. `ETag` is the definition hash. This is the `Location` an import returns. `404 DEFINITION_NOT_FOUND`. Since 0.2.0 |
 | `POST /instances` | `ProcessEngine.start(StartRequest)` | `processes:start` | Needs a `businessKey` or an `Idempotency-Key` (`428` without either). `201` for a new instance, `200` when one exists for the business key |
 | `GET /instances/{id}` | `ProcessEngine.instance(id)` | `processes:read` | Execution tree (root scope token and flow tokens) and tasks; variables unmasked in 0.1.0 |
+| `GET /instances` | `ProcessQueryService.instances(InstanceQuery)` | `processes:read` | `status` (comma separated, `RUNNING` when absent), `definitionKey`, `startedFrom` (inclusive) and `startedTo` (exclusive), at most 31 days apart; with one bound the other is 31 days away. Newest first. Items carry no variables, tokens or tasks. Since 0.2.0 |
+| `POST /instances/{id}:cancel` | `ProcessEngine.cancel(id, lockVersion, reason, idempotencyKey)` | `processes:start` | `If-Match` (the instance `ETag`) and `Idempotency-Key` are required (`428`). Optional body `{"reason": "..."}`, at most 1000 characters. Cancels every live token and open task; `409 INVALID_STATE` when the instance is not running. Since 0.2.0 |
 | `POST /tasks/{id}:complete` | `TaskService.complete(id, result, lockVersion, idempotencyKey)` | `processes:task:work` | `If-Match` (the task's `lockVersion`) and `Idempotency-Key` are required (`428`). The caller must be an assignee; a four-eyes task refuses the starter and earlier completers (`403 SELF_APPROVAL_FORBIDDEN`) |
 
-The tenant always comes from the authenticated caller, never from a body. Every endpoint answers errors as RFC 9457 problem details with a `code`:
+The tenant always comes from the authenticated caller, never from a body; another tenant's definition, instance or task is answered as not found, and nothing is written. Bodies are read and written with the engine's own JSON mapper, so the host's `spring.jackson.*` settings (snake case, dates as timestamps) never change an engine payload: keys are camelCase and times ISO 8601 strings in UTC.
+
+## Lists
+
+Lists are keyset pages:
+
+```json
+{ "data": [ { "id": "01JD2X5K9T1Q4N8V2M7B3C6D0E", "definitionKey": "card-fee-review", "status": "RUNNING", "lockVersion": 1, "startedAt": "2027-02-01T09:00:00Z" } ], "nextCursor": "aW5zdGFuY2Vz...", "hasNext": true }
+```
+
+`limit` is 1 to `query.max-page-size` (200), 50 when absent. Pass `nextCursor` back unchanged as `cursor`, with the same filters. A cursor is signed for the tenant, the list and its filters, so an edited cursor, one issued to another tenant, or one sent with other filters is `400 QUERY_INVALID`. There is no total count.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `horus.bpm.processes.query.max-page-size` | `200` | Most items per page; may be lowered, never raised |
+| `horus.bpm.processes.query.max-range` | `P31D` | Longest start-time range of `GET /instances`; may be lowered, never raised |
+
+The cursor key is one random 32-byte secret per database, in `pre_engine_key`, created at start-up after the migrations. The runtime database user needs `SELECT` and `INSERT` on it.
+
+## Errors
+
+Every endpoint answers errors as RFC 9457 problem details with a `code`:
 
 | Status | Codes |
 |---|---|
-| 400 | `INPUT_INVALID` |
+| 400 | `INPUT_INVALID`, `QUERY_INVALID` |
 | 401 | `UNAUTHENTICATED` |
 | 403 | `PERMISSION_DENIED`, `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN`, `TENANT_NOT_ALLOWED` |
-| 404 | `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` |
+| 404 | `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` |
 | 409 | `VERSION_CONFLICT`, `INVALID_STATE`, `IDEMPOTENCY_IN_FLIGHT` (with `Retry-After: 1`) |
 | 413 | `PAYLOAD_TOO_LARGE` |
 | 422 | `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`, `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED` |
 | 428 | `PRECONDITION_REQUIRED` |
 | 500 | `INTERNAL`, `DEFINITION_INTEGRITY_FAILED`, `EVENT_LISTENER_FAILED` (correlation id only) |
+
+A request the framework refuses before the engine runs (an unreadable body, an unsupported media type) keeps its 4xx status with code `INPUT_INVALID`. `403 TENANT_NOT_ALLOWED` and `401 UNAUTHENTICATED` from the host contract carry the host's correlation id and, on a `401`, the `WWW-Authenticate` challenge. No body ever carries a stack trace, a class name or SQL.
 
 `BPMN_UNSUPPORTED_ELEMENT` and `VALIDATION_FAILED` carry a `problems` list, each with element, id and line. `STEP_FAILED` carries `nodeId` and `reason` (for example `UNHANDLED_BUSINESS_ERROR`, `DECISION_NO_MATCH`, `STEP_LIMIT`); handler texts stay in the log.
 
@@ -35,7 +62,7 @@ A start or a completion runs every synchronous step, up to the next user task or
 
 ## Events and the listener contract
 
-Every state change hands an event (`processes.instance.started.v1`, `processes.task.created.v1`, `processes.task.completed.v1`, `processes.instance.completed.v1`, `processes.definition.approved.v1`) to the host's `ProcessEventPublisher` **inside the transaction of the state change**. The default implementation is the Spring `ApplicationEventPublisher`. So the event and the state change commit or roll back together.
+Every state change hands an event (`processes.instance.started.v1`, `processes.task.created.v1`, `processes.task.completed.v1`, `processes.instance.completed.v1`, `processes.instance.cancelled.v1`, `processes.definition.approved.v1`) to the host's `ProcessEventPublisher` **inside the transaction of the state change**. The default implementation is the Spring `ApplicationEventPublisher`. So the event and the state change commit or roll back together.
 
 ```mermaid
 sequenceDiagram
