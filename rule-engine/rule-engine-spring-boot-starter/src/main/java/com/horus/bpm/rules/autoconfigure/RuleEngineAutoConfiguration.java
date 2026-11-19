@@ -17,6 +17,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
@@ -45,6 +46,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 @ConditionalOnSingleCandidate(DataSource.class)
 @ConditionalOnProperty(prefix = "horus.bpm.rules", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(RuleEngineProperties.class)
+@Import(RuleEngineServicesConfiguration.class)
 public class RuleEngineAutoConfiguration {
 
     @Bean

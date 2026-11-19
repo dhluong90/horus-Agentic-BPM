@@ -1,0 +1,35 @@
+*, *::before, *::after { box-sizing: border-box; }
+/* Ink is set on the root and on headings too, so no text depends on a long inheritance chain after a theme change. */
+html { -webkit-text-size-adjust: 100%; color: var(--ink); background: var(--bg); }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  /* 1.5 keeps stacked Vietnamese diacritics clear of the line above. */
+  line-height: 1.5;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+h1, h2, h3 { margin: 0; line-height: 1.4; text-wrap: balance; color: var(--ink); }
+p { margin: 0; }
+dl, dd { margin: 0; }
+ul { margin: 0; padding: 0; list-style: none; }
+a { color: var(--accent); }
+.mono { font-family: var(--font-data); font-size: .92em; }
+.tnum { font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.skip {
+  position: absolute; left: 12px; top: -60px; z-index: 100;
+  display: inline-flex; align-items: center; min-height: var(--target-min);
+  background: var(--surface); color: var(--ink); padding: 8px 12px;
+  border-radius: var(--radius-s); box-shadow: var(--sh-2);
+}
+.skip:focus { top: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

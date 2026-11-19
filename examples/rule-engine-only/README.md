@@ -18,7 +18,7 @@ sequenceDiagram
     Host->>HF: migrate db/migration
     HF->>DB: V1 loan_application, recorded in flyway_schema_history
     Host->>RE: all singletons created
-    RE->>DB: baseline 0 and V1 rle_* tables, recorded in rle_schema_history
+    RE->>DB: baseline 0, V1 rle_* tables and V2, recorded in rle_schema_history
     RE->>DB: partitions for the Clock month and the next, in one transaction
     Host->>DB: GET /actuator/health checks db and ruleEngine
 ```
@@ -48,6 +48,7 @@ docker exec horus-pg psql -U horus -d horus -c '\dt'
 docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_schema_history ORDER BY installed_rank'
 #  0       | Rule Engine baseline
 #  1       | V1__rle_baseline.sql
+#  2       | V2__rle_version_created_by.sql
 ```
 
 ### Host metadata with two demo users
@@ -81,6 +82,93 @@ The demo users exist only on the `dev` profile, and the host refuses to start on
 
 To see the `ruleEngine` component locally, start with `--management.endpoint.health.show-components=always`. It reports the schema version, `pendingMigrations`, and whether next month's partition exists.
 
+## Demo: import, approve as a second person, evaluate
+
+This walkthrough uses the demo users of the `dev` profile, in tenant `bank-a` (the profile's `dev-tenant`), with the password in `HORUS_DEMO_PASSWORD`. Their roles reach engine permissions through `horus.bpm.rules.security.role-permissions` in [`application.yml`](src/main/resources/application.yml), the same mapping `GET /api/bpm/me` lists. On the `dev` profile only they may also send HTTP Basic credentials, which keeps the curl steps short.
+
+| User | Roles | Engine permissions |
+|---|---|---|
+| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve` |
+| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
+| `tuan` | `TELLER` | `rules:evaluate` |
+
+Start PostgreSQL as above, then start the host on the `dev` profile:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+H=localhost:8080/api/bpm/rules/v1
+```
+
+1. Hoa imports the card fee table from [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml). It is stored as a draft with the file kept byte for byte:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+     -H 'Idempotency-Key: demo-import-1' --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee.yaml
+   # 201 {"ruleSet":"card-fee","version":1,"status":"DRAFT","sourceFormat":"YAML",
+   #      "canonicalHash":"596414cd75b2ef85719562ae8014a3f26bad0527ee2d6ef191377aec572f9142",...}
+   ```
+
+   Sending the same request again with the same `Idempotency-Key` returns the same `201` and creates nothing. The same key with a changed file returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+
+2. Hoa requests publication:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:request-publish
+   # 200 {"status":"PENDING_APPROVAL","requestedBy":"hoa",...}
+   ```
+
+3. Hoa tries to approve her own request and is refused:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
+   # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
+   ```
+
+4. Minh approves; the version is published and takes effect now:
+
+   ```bash
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve \
+     -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
+   # 200 {"status":"PUBLISHED","requestedBy":"hoa","approvedBy":"minh",...}
+   ```
+
+5. Tuan, a teller, prices a Gold customer's card. Rule `R1` matches and the fee is 0 VND:
+
+   ```bash
+   curl -s -u tuan:demo-only -X POST $H/decisions/card-fee:evaluate \
+     -H 'Content-Type: application/json' -d '{"inputs":{"tier":"GOLD","txCount":5}}'
+   # 200 {"decisionId":"01M7RVDNER5T0V2T4QH6SE2C25","ruleSet":"card-fee","version":1,"outcome":"MATCHED",
+   #      "matchedRuleIds":["R1"],"outputs":{"fee":{"currency":"VND","amount":0}},...}
+   ```
+
+6. The decision is in the log, written in the same transaction as the request:
+
+   ```bash
+   docker exec horus-pg psql -U horus -d horus -c \
+     'SELECT rule_set_name, version_num, outcome, matched_rule_ids, outputs, caller_id FROM rle_decision'
+   #  card-fee | 1 | OK | ["R1"] | {"fee": {"amount": 0, "currency": "VND"}} | tuan
+   ```
+
+7. A user of another tenant cannot reach the rule set, even when the body names the tenant. The `dev` profile has one tenant, so this step runs with bearer tokens for `bank-a` and `tenant-b` in `RuleLifecycleIT.RLE_011_*`: the answer is `404 RULE_SET_NOT_FOUND` and no decision row.
+
+8. The original file, comments included, is returned with `?include=source`:
+
+   ```bash
+   curl -s -u hoa:demo-only "$H/rule-sets/card-fee/versions/1?include=source"
+   # {..., "sourceDocument":"# Monthly card fee, the rule set of the Rule Engine walking skeleton (RLE-001).\n...", ...}
+   ```
+
+The same path in Java, inside the host's own transaction:
+
+```java
+@Transactional
+public Money cardFee(String tier, int txCount) {
+    DecisionResult result = ruleEngine.evaluate("card-fee", DecisionInput.of(Map.of("tier", tier, "txCount", txCount)));
+    return (Money) result.outputs().get("fee");   // rolls back with the host's work; one rle_decision row on commit
+}
+```
+
 ## Environment variables
 
 | Variable | Default | Meaning |
@@ -93,6 +181,19 @@ To see the `ruleEngine` component locally, start with `--management.endpoint.hea
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES` | none | Audience this host requires in every token, for example `rule-engine-only`. Required whenever an issuer, JWK set or public key is set: without it the host does not start (TR-SEC-12) |
 | `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the two demo users. Never in a shared environment |
 | `HORUS_DEMO_PASSWORD` | none | Password of the demo users `lan` and `minh` on the `dev` profile. Without it nobody can sign in |
+
+## Open the cockpit
+
+The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`), on the `dev` profile with the demo users. Build the cockpit bundle before packaging:
+
+```bash
+npm --prefix cockpit/web ci && npm --prefix cockpit/web run build      # from the repository root
+mvn -B -pl examples/rule-engine-only -am package -DskipTests
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+```
+
+Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
 
 ## Rule Engine properties
 
@@ -107,7 +208,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 
 ## Run in CI
 
-`.github/workflows/ci.yml` runs these tests on every pull request on Java 21 and 25, Spring Boot 4.x and 3.5.x, and PostgreSQL 14 and 18 (see [Technical Requirements](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Technical-Requirements) on the wiki). In this module, Surefire runs `HostSecurityConfigurationTest` (start-up guards) and Failsafe runs four Testcontainers suites on the image in `bpm.test.postgres.image` (`postgres:16-alpine` locally). On Spring Boot 3.5 the host uses `spring-boot-starter-web` and `flyway-core` (profile `host-spring-boot-3.5`); the code is the same. To run that leg locally: `mvn -B install -DskipTests`, then `mvn -B -Dspring-boot.line=3.5 surefire:test failsafe:integration-test failsafe:verify`. `RuleEngineOnlyHostIT` fixes the host's clock at 26 January 2027.
+`.github/workflows/ci.yml` runs these tests on every pull request on Java 21 and 25, Spring Boot 4.x and 3.5.x, and PostgreSQL 14 and 18 (see [Technical Requirements](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Technical-Requirements) on the wiki). In this module, Surefire runs `HostSecurityConfigurationTest` (start-up guards) and Failsafe runs five Testcontainers suites on the image in `bpm.test.postgres.image` (`postgres:16-alpine` locally). On Spring Boot 3.5 the host uses `spring-boot-starter-web` and `flyway-core` (profile `host-spring-boot-3.5`); the code is the same. To run that leg locally: `mvn -B install -DskipTests`, then `mvn -B -Dspring-boot.line=3.5 surefire:test failsafe:integration-test failsafe:verify`. `RuleEngineOnlyHostIT` fixes the host's clock at 26 January 2027.
 
 | Test | Proves |
 |---|---|
@@ -119,7 +220,10 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `HostMetadataIT.TR_SEC_03_*`, `HostMetadataIT.demo_users_*` | A bearer token for `bank-a` with `X-Tenant-Id: bank-b` gets `403`; on the default profile the demo users cannot sign in even with `HORUS_DEMO_PASSWORD` set |
 | `SessionSignInIT.RLE_019_*` | The curl demo above on the `dev` profile: form sign-in, then `200` from `/meta` and `/me` with the session for both users |
 | `SessionSignInIT.TR_SEC_03_*`, `SessionSignInIT.session_*` | A session caller cannot choose its tenant with a header; a state-changing call with the session needs the CSRF token; other pages still redirect to `/login` |
+| `CockpitEmbeddedIT.TR_SEC_09_*` | Without a session the cockpit path redirects to the host's sign-in and serves no file; the cockpit page carries the strict CSP and `X-Frame-Options: SAMEORIGIN` |
+| `CockpitEmbeddedIT.CKP_001_*` | On the `dev` profile: form sign-in, the cockpit page and its one-host registry, then `200` from `/api/bpm/meta` and `/api/bpm/me` with the session, valid against the cockpit schemas; a call that changes data needs `X-XSRF-TOKEN` from the cookie |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
+| `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.
 
