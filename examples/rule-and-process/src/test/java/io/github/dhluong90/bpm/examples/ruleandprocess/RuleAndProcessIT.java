@@ -329,6 +329,14 @@ class RuleAndProcessIT {
         String big = "{\"definitionKey\":\"card-fee-review\",\"variables\":{\"pad\":\"" + "x".repeat(300_000) + "\"}}";
         assertThat(send("tuan", "/api/bpm/processes/v1/instances", big, null).statusCode()).isEqualTo(413);
 
+        // No business key and no Idempotency-Key: a retry could start a second instance, so the start is refused.
+        String bare = "{\"definitionKey\":\"card-fee-review\",\"variables\":{\"applicationId\":\"IT-7002\",\"customerId\":\"C-002\"}}";
+        HttpResponse<String> noKey = send("tuan", "/api/bpm/processes/v1/instances", bare, null);
+        assertThat(noKey.statusCode()).isEqualTo(428);
+        assertThat(JSON.readTree(noKey.body()).get("code").stringValue()).isEqualTo("PRECONDITION_REQUIRED");
+        assertThat(jdbc.sql("SELECT count(*) FROM pre_instance WHERE variables->>'applicationId' = 'IT-7002'")
+                .query(Long.class).single()).isZero();
+
         JsonNode submitted = post("tuan", "/api/cards/applications", "{\"applicationId\":\"IT-7001\",\"customerId\":\"C-003\"}", 201);
         String taskId = get("an", "/api/bpm/processes/v1/instances/" + submitted.get("instanceId").stringValue())
                 .at("/tasks/0/id").stringValue();

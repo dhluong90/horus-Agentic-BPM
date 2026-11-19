@@ -74,7 +74,10 @@ public class ProcessController {
                 BASE + "/definitions/" + version.key() + "/versions/" + version.version());
     }
 
-    /** Starts an instance ({@code processes:start}). Body: {@code definitionKey}, {@code businessKey}, {@code variables}. */
+    /**
+     * Starts an instance ({@code processes:start}). Body: {@code definitionKey}, {@code businessKey}, {@code variables}.
+     * A request without a {@code businessKey} needs an {@code Idempotency-Key} ({@code 428 PRECONDITION_REQUIRED}).
+     */
     @PostMapping(value = "/instances", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<byte[]> start(HttpServletRequest http,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
@@ -84,6 +87,12 @@ public class ProcessController {
             throw new InputInvalidException("definitionKey is required");
         }
         JsonNode businessKey = request.get("businessKey");
+        boolean hasBusinessKey = businessKey != null && businessKey.isString() && !businessKey.stringValue().isBlank();
+        if (!hasBusinessKey && (idempotencyKey == null || idempotencyKey.isBlank())) {
+            // Without either, a client retry after a timeout would start a second instance and run its steps twice.
+            throw new PreconditionRequiredException("Send an Idempotency-Key, or a businessKey, so a retry cannot start "
+                    + "a second instance");
+        }
         Map<String, Object> variables = Views.variables(request.get("variables"));
         StartRequest start = new StartRequest(key.stringValue(),
                 businessKey == null || businessKey.isNull() ? null : businessKey.stringValue(), variables, idempotencyKey);

@@ -174,7 +174,85 @@ class ProcessServicesQaTest {
         assertThat(calls.get()).isLessThanOrEqualTo(10_000);
     }
 
+    // ---- tenant guard and event delivery (security re-review, lows 2 and 4) ----------------------------------
+
+    private static Process pricing() {
+        return BpmnModelBuilder.process("pricing")
+                .startEvent("start")
+                .businessRuleTask("price", "card-fee", Map.of("tier", "GOLD"), "pricing")
+                .endEvent("end")
+                .chain("start", "price", "end")
+                .build();
+    }
+
+    private static com.horus.bpm.rules.api.RuleEngine ruleEngine(AtomicInteger evaluations) {
+        return new com.horus.bpm.rules.api.RuleEngine() {
+            @Override
+            public com.horus.bpm.rules.api.DecisionResult evaluate(String ruleSet, com.horus.bpm.rules.api.DecisionInput input) {
+                return evaluate(com.horus.bpm.rules.api.DecisionRequest.of(ruleSet, input));
+            }
+
+            @Override
+            public com.horus.bpm.rules.api.DecisionResult evaluate(com.horus.bpm.rules.api.DecisionRequest request) {
+                evaluations.incrementAndGet();
+                return new com.horus.bpm.rules.api.DecisionResult("01JDDECISION00000000000000", request.ruleSet(), 1,
+                        Instant.parse("2027-01-04T09:00:00Z"), new com.horus.bpm.rules.api.DecisionResult.Matched(
+                                List.of("R1"), Map.of("fee", Money.ofMinor("VND", 0))));
+            }
+        };
+    }
+
+    @Test
+    void a_decision_is_refused_with_TENANT_NOT_ALLOWED_when_the_caller_tenant_is_not_the_instance_tenant() {
+        // The instance belongs to bank-a; by the time the businessRuleTask runs, the caller resolves to bank-b.
+        AtomicInteger calls = new AtomicInteger();
+        AtomicInteger evaluations = new AtomicInteger();
+        io.github.dhluong90.bpm.process.spi.TenantResolver switching = () -> calls.getAndIncrement() == 0 ? "bank-a" : "bank-b";
+        ProcessServices services = services(pricing(), switching, Optional.of(ruleEngine(evaluations)), event -> { });
+        services.importAtStartup("bank-a", new ImportRequest(SourceFormat.BPMN_XML, "p".getBytes(StandardCharsets.UTF_8), null));
+
+        assertThatThrownBy(() -> services.start(StartRequest.of("pricing").withIdempotencyKey("k1")))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.TenantNotAllowedException.class)
+                .satisfies(e -> assertThat(((io.github.dhluong90.bpm.process.api.ProcessException) e).code())
+                        .isEqualTo("TENANT_NOT_ALLOWED"));
+        assertThat(evaluations.get()).as("the Rule Engine was never called").isZero();
+    }
+
+    @Test
+    void a_listener_that_throws_after_commit_does_not_fail_the_committed_start() {
+        AtomicInteger delivered = new AtomicInteger();
+        ProcessServices services = services(pricing(), () -> "bank-a", Optional.of(ruleEngine(new AtomicInteger())),
+                event -> {
+                    delivered.incrementAndGet();
+                    throw new IllegalStateException("listener down");
+                });
+        services.importAtStartup("bank-a", new ImportRequest(SourceFormat.BPMN_XML, "p".getBytes(StandardCharsets.UTF_8), null));
+
+        assertThat(services.start(StartRequest.of("pricing").withIdempotencyKey("k2")).status()).isEqualTo("COMPLETED");
+        assertThat(delivered.get()).as("every event was still offered").isGreaterThan(1);
+    }
+
     // ---- wiring ---------------------------------------------------------------------------------------------
+
+    private ProcessServices services(Process process, io.github.dhluong90.bpm.process.spi.TenantResolver tenants,
+            Optional<com.horus.bpm.rules.api.RuleEngine> rules, io.github.dhluong90.bpm.process.spi.ProcessEventPublisher events) {
+        CallerResolver caller = new CallerResolver() {
+            @Override
+            public String currentCallerId() {
+                return "tuan";
+            }
+
+            @Override
+            public Set<String> currentPermissions() {
+                return Set.of("processes:start", "processes:read", "processes:task:work", "processes:deploy");
+            }
+        };
+        return new ProcessServices(tenants, caller, clock, new Supplier0(), new MemoryStore(),
+                Map.of(SourceFormat.BPMN_XML, bytes -> process),
+                new LocalServiceInvoker(Map.of(), rules, Duration.ofSeconds(5)),
+                events, new EngineSettings(true, 500, 1_048_576, Duration.ofDays(1)), BehaviorCatalog.registry(),
+                new V1ExpressionEvaluator(100));
+    }
 
     private ProcessServices services(Process process, ServiceTaskHandler handler) {
         CallerResolver caller = new CallerResolver() {

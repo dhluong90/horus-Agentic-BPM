@@ -156,7 +156,7 @@ curl -s -u tuan:$P localhost:8080/api/cards/applications/APP-1002
 # {"applicationId":"APP-1002","customerId":"C-002","status":"APPROVED","fee":{"currency":"VND","amount":10000}}
 ```
 
-Starting again with the same `businessKey` returns the existing instance with `200` (a new instance is `201`), and a retry with the same `Idempotency-Key` returns the first answer, also when the two requests run at the same time.
+`POST /api/bpm/processes/v1/instances` needs a `businessKey` or an `Idempotency-Key` (`428` without either), so a client retry can never start a second instance. Starting again with the same `businessKey` returns the existing instance with `200` (a new instance is `201`), and a retry with the same `Idempotency-Key` returns the first answer, also when the two requests run at the same time.
 
 An unknown customer fails the first step, and the host's row rolls back with the engine's:
 
@@ -204,7 +204,7 @@ curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Ide
 # {"status":403,"code":"SELF_APPROVAL_FORBIDDEN",...}
 ```
 
-Engine events (`processes.instance.started.v1` and the others) reach Spring `@EventListener`s after the transaction commits, never for work that rolled back. In this release they are at most once and not durable; do not use them for money movement, audit or integration between services.
+Engine events (`processes.instance.started.v1` and the others) reach Spring `@EventListener`s after the transaction commits, never for work that rolled back; a listener that throws is logged and does not fail the committed request. In this release they are at most once and not durable; do not use them for money movement, audit or integration between services.
 
 ## Import a BPMN file
 
