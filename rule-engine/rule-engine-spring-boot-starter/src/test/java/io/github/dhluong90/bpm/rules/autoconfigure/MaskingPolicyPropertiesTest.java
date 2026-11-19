@@ -88,6 +88,25 @@ class MaskingPolicyPropertiesTest {
                 });
     }
 
+    @Test
+    void RLE_012_key_ids_come_from_the_settings_and_default_to_k1() {
+        runner.withPropertyValues(
+                        "horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-b.hmac-key=" + TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-b.hmac-key-id=bank-b-2027")
+                .run(context -> {
+                    PropertyMaskingPolicy policy = context.getBean(PropertyMaskingPolicy.class);
+                    assertThat(policy.hmacKey("bank-a").orElseThrow().keyId()).isEqualTo("k1");
+                    assertThat(fingerprint(policy, "bank-b")).startsWith("hmac:bank-b-2027:");
+                    assertThat(policy.searchKeys("bank-b")).extracting(MaskingKey::keyId).containsExactly("bank-b-2027");
+                });
+        runner.withPropertyValues("horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.hmac-key-id=not a label")
+                .run(context -> assertThat(context.getBean(PropertyMaskingPolicy.class).invalidSettings())
+                        .singleElement().asString().contains("horus.bpm.rules.masking.hmac-key", "key id")
+                        .doesNotContain(HOST_KEY));
+    }
+
     static String fingerprint(PropertyMaskingPolicy policy, String tenant) {
         return policy.hmacKey(tenant).orElseThrow().fingerprint("x");
     }

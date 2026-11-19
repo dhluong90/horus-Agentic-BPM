@@ -52,7 +52,7 @@ Filters: `ruleSet`, `from`, `to`, `outcome`, matched rule id, and any output val
 
 To change the wording or add a language, place your own catalogue resource on the host's classpath; no code is needed. To replace the renderer entirely, declare a `DecisionExplainer` bean ([[Configuration and Extension Points]]). `reasons` never change.
 
-The explanation is built from the log entry and the stored version only: nothing is evaluated again, rows that did not match are not explained, masked inputs show as `hmac:<hex>` and missing inputs as "has no value". Templates per rule set can override the wording in M3 (see [[Roadmap]]).
+The explanation is built from the log entry and the stored version only: nothing is evaluated again, rows that did not match are not explained, masked inputs show as `hmac:<keyId>:<hex>` and missing inputs as "has no value". Templates per rule set can override the wording in M3 (see [[Roadmap]]).
 
 ## Mask personal data
 
@@ -76,10 +76,12 @@ curl -s -X POST "$HOST/api/bpm/rules/v1/decisions:find-by-masked-input" \
 
 ```json
 { "data": [ { "decisionId": "01KF2Q8Z0RQ6V2Y8M1C4N5P7T9", "ruleSet": "minor-review", "version": 1,
-              "outcome": "OK", "inputs": { "nationalId": "hmac:7d8c2f0a…", "age": 16 },
+              "outcome": "OK", "inputs": { "nationalId": "hmac:k1:7d8c2f0a…", "age": 16 },
               "outputs": { "route": "MANUAL" }, "matchedRuleIds": ["R1"] } ],
   "truncated": false }
 ```
+
+Every search writes one audit entry, the event `rules.decision-log.masked-input-searched.v1`, in the same transaction: who searched, which rule set and input, the period, how many decisions were found, the key ids used and the correlation id. It never holds the value or its fingerprint. Each token carries the id of the key that made it, `hmac:<keyId>:<hex>`, and the search tries every key your tenant holds.
 
 Each tenant can have its own key, so two banks on one host store different tokens for the same id and never find each other's decisions. To mask every input that declares nothing, set `decision-log.mask-default: true` for the host or `masking.tenants.<tenant>.mask-default: true` for one tenant; `mask: false` keeps an input in plain text.
 
@@ -105,6 +107,7 @@ Retention is the host's decision; no product default deletes audit data. The tab
 | `rules.version.published` | A version was approved |
 | `rules.version.retired` | A version was retired |
 | `rules.decision.evaluated` | Every decision; off by default because of volume |
+| `rules.decision-log.masked-input-searched` | Every search by a masked input's plain value; the audit entry of that lookup, without the value |
 
 Events are delivered through the `RuleEventPublisher` SPI, which the host implements to forward them to its own audit or messaging system. The engine itself never calls the network (TR-EMB-05).
 

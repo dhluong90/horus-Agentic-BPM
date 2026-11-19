@@ -64,21 +64,21 @@ public final class JdbcDecisionLog implements DecisionLog {
     }
 
     @Override
-    public List<DecisionRecord> findByLoggedInput(String tenantId, String ruleSet, String input, String text,
+    public List<DecisionRecord> findByLoggedInput(String tenantId, String ruleSet, String input, List<String> texts,
             Instant from, Instant to, int limit) {
         // Range on idx_rle_decision_lookup within at most two monthly partitions (ADR-0015); the input is compared
-        // as text, so a masked input is found by its fingerprint only.
+        // as text, so a masked input is found by its fingerprints only, one per key the tenant holds.
         return jdbc.sql("SELECT " + COLUMNS + """
                  FROM rle_decision
                 WHERE tenant_id = :tenant AND rule_set_name = :ruleSet
                   AND created_at >= :from AND created_at < :to
-                  AND masked_inputs ->> CAST(:input AS text) = :text
+                  AND masked_inputs ->> CAST(:input AS text) IN (:texts)
                 ORDER BY created_at DESC, id DESC
                 LIMIT :limit
                 """)
                 .param("tenant", tenantId).param("ruleSet", ruleSet)
                 .param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
-                .param("input", input).param("text", text).param("limit", limit)
+                .param("input", input).param("texts", texts).param("limit", limit)
                 .query(JdbcDecisionLog::record).list();
     }
 

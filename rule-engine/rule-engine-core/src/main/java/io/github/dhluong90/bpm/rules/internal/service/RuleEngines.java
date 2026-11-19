@@ -33,6 +33,6 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
         CursorKeys keys = new CursorKeys(store, context.transactions(), context.clock());
         return new RuleEngines(new DefaultRuleEngine(context, store, log),
                 new DefaultVersionService(context, store, outbox, keys), keys,
-                new DefaultDecisionLogService(context, log), new MaskingStartupCheck(store, context.masking()));
+                new DefaultDecisionLogService(context, log, outbox), new MaskingStartupCheck(store, context.masking()));
     }
 }

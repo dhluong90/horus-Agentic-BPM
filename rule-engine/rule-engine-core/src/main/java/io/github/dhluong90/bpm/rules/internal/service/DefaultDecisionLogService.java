@@ -7,20 +7,27 @@ import io.github.dhluong90.bpm.rules.api.LoggedDecision;
 import io.github.dhluong90.bpm.rules.api.MaskedInputQuery;
 import io.github.dhluong90.bpm.rules.api.MaskingKey;
 import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
+import io.github.dhluong90.bpm.rules.internal.json.Ulid;
 import io.github.dhluong90.bpm.rules.internal.read.RuleSetReader;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionLog;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionRecord;
+import io.github.dhluong90.bpm.rules.internal.store.EventOutbox;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Reads the decision log of the caller's tenant (RLE-012). The plain value of a masked-input search is fingerprinted
- * here, with the caller's tenant key, before any query: the database only ever compares fingerprints, and a tenant's
+ * here, with every key the caller's tenant holds, before any query, and every search leaves one audit entry in the
+ * outbox: the database only ever compares fingerprints, and a tenant's
  * fingerprint never matches another tenant's rows, because every query is filtered by the resolved tenant and
  * tenants may hold different keys. Thread-safe.
  */
@@ -32,18 +39,24 @@ public final class DefaultDecisionLogService implements DecisionLogService {
     private static final Pattern DECISION_ID = Pattern.compile("^[0-9A-HJKMNP-TV-Z]{26}$");
     private static final Pattern INPUT_NAME = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]{0,63}$");
 
+    /** Event type of the audit entry every masked-input search writes. */
+    static final String EVENT_MASKED_SEARCH = "rules.decision-log.masked-input-searched.v1";
+
     private final EngineContext context;
     private final DecisionLog log;
+    private final EventOutbox outbox;
 
     /**
      * Creates the service.
      *
      * @param context shared engine context
      * @param log the decision log
+     * @param outbox where the audit entry of each masked-input search is written
      */
-    public DefaultDecisionLogService(EngineContext context, DecisionLog log) {
+    public DefaultDecisionLogService(EngineContext context, DecisionLog log, EventOutbox outbox) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.log = Objects.requireNonNull(log, "log must not be null");
+        this.outbox = Objects.requireNonNull(outbox, "outbox must not be null");
     }
 
     @Override
@@ -63,7 +76,10 @@ public final class DefaultDecisionLogService implements DecisionLogService {
     public DecisionSearchResult findByMaskedInput(MaskedInputQuery query) {
         Objects.requireNonNull(query, "query must not be null");
         String tenant = context.tenant();
-        context.callerWith(PERMISSION_LOG_READ);
+        String caller = context.callerWith(PERMISSION_LOG_READ);
+        if (!RuleSetReader.isRuleSetName(query.ruleSet())) {
+            throw new QueryInvalidException("ruleSet must be a rule set name");
+        }
         if (!INPUT_NAME.matcher(query.input()).matches()) {
             throw new QueryInvalidException("input must be an input name");
         }
@@ -82,23 +98,55 @@ public final class DefaultDecisionLogService implements DecisionLogService {
             throw new QueryInvalidException("value is longer than " + context.settings().maxStringLength()
                     + " characters");
         }
-        MaskingKey key = context.masking().hmacKey(tenant).orElseThrow(() -> new QueryInvalidException(
-                "No masking key is configured for this tenant, so masked inputs cannot be searched; set "
-                        + EngineDefaults.MASKING_KEY_PROPERTY));
-        if (!RuleSetReader.isRuleSetName(query.ruleSet())) {
-            return new DecisionSearchResult(List.of(), false);
+        List<MaskingKey> keys = context.masking().searchKeys(tenant);
+        if (keys.isEmpty()) {
+            throw new QueryInvalidException("No masking key is configured for this tenant, so masked inputs cannot be"
+                    + " searched; set " + EngineDefaults.MASKING_KEY_PROPERTY);
         }
-        String fingerprint = fingerprint(key, query.value());
+        // One fingerprint per key the tenant holds, so rows written under an earlier key are found too.
+        List<String> fingerprints = new ArrayList<>();
+        for (MaskingKey key : keys) {
+            fingerprints.add(fingerprint(key, query.value()));
+        }
+        String correlation = query.correlationId() != null
+                && io.github.dhluong90.bpm.rules.internal.json.CorrelationIds.isValid(query.correlationId())
+                ? query.correlationId() : null;
         return context.withoutDooming(() -> {
-            List<DecisionRecord> rows = log.findByLoggedInput(tenant, query.ruleSet(), query.input(), fingerprint,
+            List<DecisionRecord> rows = log.findByLoggedInput(tenant, query.ruleSet(), query.input(), fingerprints,
                     query.from(), query.to(), query.limit() + 1);
             boolean truncated = rows.size() > query.limit();
             List<LoggedDecision> items = new ArrayList<>();
             for (DecisionRecord row : truncated ? rows.subList(0, query.limit()) : rows) {
                 items.add(view(row));
             }
+            audit(tenant, caller, query, keys, items.size(), truncated, correlation);
             return new DecisionSearchResult(items, truncated);
         });
+    }
+
+    /**
+     * Writes the audit entry of one search to the outbox, in the search's transaction: who searched which input of
+     * which rule set over which period, and how many decisions were found. Never the value or its fingerprint, so the
+     * audit trail is not a second place to look the person up.
+     */
+    private void audit(String tenant, String caller, MaskedInputQuery query, List<MaskingKey> keys, int matches,
+            boolean truncated, String correlationId) {
+        Instant now = context.clock().instant();
+        ObjectNode payload = EngineJson.NODES.objectNode()
+                .put("eventType", EVENT_MASKED_SEARCH)
+                .put("tenantId", tenant)
+                .put("actor", caller)
+                .put("occurredAt", now.toString())
+                .put("ruleSet", query.ruleSet())
+                .put("input", query.input())
+                .put("from", query.from().toString())
+                .put("to", query.to().toString())
+                .put("matches", matches)
+                .put("truncated", truncated);
+        ArrayNode keyIds = payload.putArray("keyIds");
+        keys.forEach(key -> keyIds.add(key.keyId()));
+        payload.put("correlationId", correlationId);
+        outbox.append(tenant, Ulid.next(now), EngineValues.write(payload), now);
     }
 
     private static String fingerprint(MaskingKey key, Object value) {

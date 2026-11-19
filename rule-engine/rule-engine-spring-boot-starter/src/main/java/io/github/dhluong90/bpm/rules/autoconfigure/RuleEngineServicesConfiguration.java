@@ -56,7 +56,8 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     MaskingPolicy ruleEngineMaskingPolicy(RuleEngineProperties properties, Environment environment) {
         return PropertyMaskingPolicy.from(properties,
-                environment.getProperty(PropertyMaskingPolicy.SHARED_KEY_PROPERTY));
+                environment.getProperty(PropertyMaskingPolicy.SHARED_KEY_PROPERTY),
+                environment.getProperty(PropertyMaskingPolicy.SHARED_KEY_ID_PROPERTY));
     }
 
     @Bean

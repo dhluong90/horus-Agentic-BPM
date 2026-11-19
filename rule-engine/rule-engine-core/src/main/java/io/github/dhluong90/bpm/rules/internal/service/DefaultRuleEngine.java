@@ -38,6 +38,9 @@ public final class DefaultRuleEngine implements RuleEngine {
     /** {@code error_code} of a decision refused because its tenant has no masking key. */
     static final String MASKING_KEY_MISSING = "MASKING_KEY_MISSING";
 
+    /** {@code error_code} of a decision refused because an output reads an input that is masked for the tenant. */
+    static final String MASKED_INPUT_IN_OUTPUT = "MASKED_INPUT_IN_OUTPUT";
+
     private final EngineContext context;
     private final RuleStore store;
     private final DecisionLog log;
@@ -110,6 +113,15 @@ public final class DefaultRuleEngine implements RuleEngine {
             return refuse(tenant, caller, request, version, now, MASKING_KEY_MISSING, "No masking key is configured"
                     + " for this tenant, so the inputs of " + version.ruleSet() + " cannot be logged; set "
                     + EngineDefaults.MASKING_KEY_PROPERTY);
+        }
+        String echoed = rules.inputs().stream()
+                .filter(clause -> clause.masked(maskByDefault) && rules.inputsInOutputs().contains(clause.name()))
+                .map(clause -> clause.name()).findFirst().orElse(null);
+        if (echoed != null) {
+            // Import refuses an output that reads a declared mask: true input; this covers the tenant's mask default.
+            return refuse(tenant, caller, request, version, now, MASKED_INPUT_IN_OUTPUT, "Input " + echoed + " of "
+                    + version.ruleSet() + " is masked for this tenant, but an output reads it; the decision is refused"
+                    + " so the plain value is not logged");
         }
         long started = System.nanoTime();
         DecisionResult.Outcome outcome = rules.evaluate(request.input());

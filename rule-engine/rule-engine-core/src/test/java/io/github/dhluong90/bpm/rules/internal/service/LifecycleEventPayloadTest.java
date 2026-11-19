@@ -137,7 +137,7 @@ class LifecycleEventPayloadTest {
             }
             if (!types.isEmpty()) {
                 String actual = value.isNull() ? "null" : value.isString() ? "string" : value.isIntegralNumber() ? "integer"
-                        : value.isBoolean() ? "boolean" : value.isObject() ? "object" : "other";
+                        : value.isBoolean() ? "boolean" : value.isObject() ? "object" : value.isArray() ? "array" : "other";
                 assertThat(types).as("%s of %s", property.getKey(), schemaFile).contains(actual);
             }
             if (rule.has("pattern") && value.isString()) {

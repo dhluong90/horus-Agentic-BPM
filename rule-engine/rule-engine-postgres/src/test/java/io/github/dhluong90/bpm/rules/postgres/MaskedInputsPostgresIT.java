@@ -51,8 +51,9 @@ class MaskedInputsPostgresIT {
 
     static final Instant NOW = Instant.parse("2027-01-15T02:00:00Z");
     static final String NATIONAL_ID = "079090001234";
-    static final byte[] KEY_A = filled('a');
-    static final byte[] KEY_B = filled('b');
+    /** Non-uniform keys: a key read in the wrong byte order would give a different fingerprint. */
+    static final byte[] KEY_A = seeded(11L);
+    static final byte[] KEY_B = seeded(22L);
     private static final AtomicInteger DATABASES = new AtomicInteger();
 
     static final String MINOR_REVIEW = """
@@ -94,16 +95,22 @@ class MaskedInputsPostgresIT {
         List<String> rows = JdbcClient.create(db)
                 .sql("SELECT masked_inputs ->> 'nationalId' FROM rle_decision WHERE tenant_id = 'bank-a'")
                 .query(String.class).list();
-        assertThat(rows).containsOnly("hmac:" + hmacHex(KEY_A, NATIONAL_ID)).hasSize(2);
+        assertThat(rows).containsOnly("hmac:k1:" + hmacHex(KEY_A, NATIONAL_ID)).hasSize(2);
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_decision WHERE masked_inputs::text LIKE :plain")
                 .param("plain", "%" + NATIONAL_ID + "%").query(Long.class).single()).isZero();
 
         caller.as("bank-a", "auditor");
         LoggedDecision read = engines.decisionLog().get(first);
-        assertThat(read.inputsJson()).contains("hmac:" + hmacHex(KEY_A, NATIONAL_ID)).doesNotContain(NATIONAL_ID);
+        assertThat(read.inputsJson()).contains("hmac:k1:" + hmacHex(KEY_A, NATIONAL_ID)).doesNotContain(NATIONAL_ID);
         assertThat(read.outputsJson()).contains("MANUAL");
         assertThat(engines.decisionLog().findByMaskedInput(query()).items())
                 .extracting(LoggedDecision::decisionId).containsExactly(second, first);
+        // The search left one audit entry in the outbox, in the tenant, without the value or its fingerprint.
+        String audit = JdbcClient.create(db).sql("SELECT payload::text FROM rle_decision_outbox WHERE tenant_id = "
+                + "'bank-a' AND payload ->> 'eventType' = 'rules.decision-log.masked-input-searched.v1'")
+                .query(String.class).single();
+        assertThat(audit).contains("\"matches\": 2", "\"actor\": \"auditor\"")
+                .doesNotContain(NATIONAL_ID, hmacHex(KEY_A, NATIONAL_ID));
     }
 
     @Test
@@ -115,7 +122,7 @@ class MaskedInputsPostgresIT {
 
         assertThat(JdbcClient.create(db)
                 .sql("SELECT masked_inputs ->> 'nationalId' FROM rle_decision WHERE tenant_id = 'bank-b'")
-                .query(String.class).single()).isEqualTo("hmac:" + hmacHex(KEY_B, NATIONAL_ID));
+                .query(String.class).single()).isEqualTo("hmac:k1:" + hmacHex(KEY_B, NATIONAL_ID));
 
         caller.as("bank-b", "auditor");
         assertThat(engines.decisionLog().findByMaskedInput(query()).items())
@@ -164,6 +171,12 @@ class MaskedInputsPostgresIT {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
         return HexFormat.of().formatHex(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    static byte[] seeded(long seed) {
+        byte[] bytes = new byte[32];
+        new java.util.Random(seed).nextBytes(bytes);
+        return bytes;
     }
 
     static byte[] filled(char c) {

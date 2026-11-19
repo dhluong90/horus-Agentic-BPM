@@ -55,6 +55,7 @@ public final class CompiledRuleSet {
     private final List<CompiledRule> rules;
     private final Evaluator evaluator;
     private final int maxOutputBytes;
+    private final Set<String> inputsInOutputs;
 
     private CompiledRuleSet(Definitions model, List<CompiledRule> rules, int maxOutputBytes, int maxStringLength) {
         DecisionTable table = model.decision().table();
@@ -63,6 +64,9 @@ public final class CompiledRuleSet {
         this.inputs = table.inputs();
         this.outputs = table.outputs();
         this.rules = List.copyOf(rules);
+        Set<String> referenced = new java.util.TreeSet<>();
+        rules.forEach(rule -> rule.thens().forEach(then -> collectInputs(then, referenced)));
+        this.inputsInOutputs = java.util.Collections.unmodifiableSet(referenced);
         this.evaluator = new Evaluator(table.moneyRounding(), maxStringLength);
         this.maxOutputBytes = maxOutputBytes;
     }
@@ -515,6 +519,39 @@ public final class CompiledRuleSet {
         return shorthand ? input + " " + trimmed : trimmed;
     }
 
+    /**
+     * Returns the inputs that output cells or output defaults read. A masked input may never be one of them, or its
+     * plain value would reach the decision log through the outputs (RLE-012).
+     *
+     * @return the input names, sorted
+     */
+    public Set<String> inputsInOutputs() {
+        return inputsInOutputs;
+    }
+
+    /** Adds the input names an expression reads. Exhaustive on purpose: a new node type must say what it reads. */
+    static void collectInputs(Expr expr, Set<String> names) {
+        switch (expr) {
+            case Expr.Literal ignored -> { }
+            case Expr.Var var -> names.add(var.name());
+            case Expr.Unary unary -> collectInputs(unary.operand(), names);
+            case Expr.Binary binary -> {
+                collectInputs(binary.left(), names);
+                collectInputs(binary.right(), names);
+            }
+            case Expr.InList inList -> {
+                collectInputs(inList.target(), names);
+                inList.elements().forEach(element -> collectInputs(element, names));
+            }
+            case Expr.Between between -> {
+                collectInputs(between.target(), names);
+                collectInputs(between.low(), names);
+                collectInputs(between.high(), names);
+            }
+            case Expr.IsNull isNull -> collectInputs(isNull.target(), names);
+        }
+    }
+
     /** Parses one output cell (or an output default, with no rule id) and checks it against the output's type. */
     private static Expr output(Cell cell, OutputClause output, Map<String, Integer> slots, List<InputClause> inputs,
             String ruleId, Problems problems) {
@@ -536,6 +573,14 @@ public final class CompiledRuleSet {
         String problem = ConditionTypes.outputProblem(expr, output, inputs);
         if (problem != null) {
             problems.add(new Violation(ruleId, output.name(), problem));
+        }
+        Set<String> read = new java.util.TreeSet<>();
+        collectInputs(expr, read);
+        for (InputClause input : inputs) {
+            if (input.masked() && read.contains(input.name())) {
+                problems.add(new Violation(ruleId, output.name(), "output " + output.name() + " uses input "
+                        + input.name() + ", which is masked; a masked input can never be copied to an output"));
+            }
         }
         return expr;
     }

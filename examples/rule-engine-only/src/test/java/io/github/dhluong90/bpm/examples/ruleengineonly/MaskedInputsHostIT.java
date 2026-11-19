@@ -46,7 +46,9 @@ class MaskedInputsHostIT {
     static final JsonMapper JSON = JsonMapper.builder().build();
     static final HttpClient HTTP = HttpClient.newHttpClient();
     static final String NATIONAL_ID = "079090001234";
-    static final byte[] K32 = filled(32, 'k');
+    /** A non-uniform key (RFC 4231 style counting bytes), so byte-order bugs change the fingerprint. */
+    static final byte[] K32 = counting(32);
+    static final String K32_HEX = HexFormat.of().formatHex(K32);
     static final String K32_BASE64 = Base64.getEncoder().encodeToString(K32);
     static final String KEY_SETTING = "horus.bpm.rules.masking.hmac-key";
     private static final AtomicInteger DATABASES = new AtomicInteger();
@@ -90,7 +92,7 @@ class MaskedInputsHostIT {
             send(port, TestTokens.bearer("teller"), "POST", "/decisions/minor-review:evaluate",
                     "{\"inputs\": {\"nationalId\": \"" + NATIONAL_ID + "\", \"age\": 40}}", "application/json");
 
-            String fingerprint = "hmac:" + hmacHex(K32, NATIONAL_ID);
+            String fingerprint = "hmac:k1:" + hmacHex(K32, NATIONAL_ID);
             JdbcClient jdbc = host.getBean(JdbcClient.class);
             assertThat(jdbc.sql("SELECT masked_inputs ->> 'nationalId' FROM rle_decision WHERE id = :id")
                     .param("id", decisionId).query(String.class).single()).isEqualTo(fingerprint);
@@ -143,8 +145,8 @@ class MaskedInputsHostIT {
                         .doesNotContain(k31));
 
         // No log line and no response body carries the key or the plain value.
-        assertThat(output.getAll()).doesNotContain(K32_BASE64).doesNotContain(NATIONAL_ID).doesNotContain(k31);
-        assertThat(bodies).allSatisfy(body -> assertThat(body).doesNotContain(K32_BASE64).doesNotContain(NATIONAL_ID));
+        assertThat(output.getAll()).doesNotContain(K32_BASE64, K32_HEX, NATIONAL_ID, k31);
+        assertThat(bodies).allSatisfy(body -> assertThat(body).doesNotContain(K32_BASE64, K32_HEX, NATIONAL_ID));
     }
 
     @Test
@@ -208,6 +210,14 @@ class MaskedInputsHostIT {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
         return HexFormat.of().formatHex(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    static byte[] counting(int length) {
+        byte[] bytes = new byte[length];
+        for (int i = 0; i < length; i++) {
+            bytes[i] = (byte) (i + 1);
+        }
+        return bytes;
     }
 
     static byte[] filled(int length, char c) {

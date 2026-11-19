@@ -475,7 +475,7 @@ paths:
       description: |
         Permission `rules:log:read`. Returns the `rle_decision` row as stored. An input declared
         `mask: true` (or masked by the host's or tenant's `decision-log.mask-default`) appears as
-        `hmac:<hex>`, the HMAC-SHA256 of its plain value under the tenant's masking key; the plain
+        `hmac:<keyId>:<hex>`, the HMAC-SHA256 of its plain value under the tenant's masking key; the plain
         value is not available anywhere after evaluation (RLE-012). A decision of another tenant is
         `404 DECISION_NOT_FOUND`. Writes nothing.
       parameters:
@@ -499,7 +499,7 @@ paths:
                 outcome: OK
                 errorCode: null
                 inputs:
-                  nationalId: hmac:7d8c2f0a9b6e4d1c3a5f7e9b0d2c4a6e8f1b3d5c7a9e0f2b4d6c8a0e2f4b6d8c
+                  nationalId: hmac:k1:7d8c2f0a9b6e4d1c3a5f7e9b0d2c4a6e8f1b3d5c7a9e0f2b4d6c8a0e2f4b6d8c
                   age: 16
                 outputs:
                   route: MANUAL
@@ -524,7 +524,9 @@ paths:
         The period is at most 31 days and `limit` (default 50) at most `query.max-page-size`
         (200); `truncated` is true when more decisions match, so narrow the period. A tenant
         without a masking key, a period over 31 days or an unknown member is `400 QUERY_INVALID`.
-        Writes nothing.
+        The value is fingerprinted with every key the tenant holds, so rows written before a key
+        rotation are found. Writes nothing to the decision log; each search writes one audit entry,
+        `rules.decision-log.masked-input-searched.v1`, without the value or its fingerprint.
       requestBody:
         required: true
         content:
@@ -883,13 +885,14 @@ components:
           description: |
             Why a decision failed: `EVALUATION_ERROR`, `UNIQUE_HIT_VIOLATION`, or
             `MASKING_KEY_MISSING` when the rule set masks an input and the tenant has no masking
-            key (the decision was refused and no input was logged)
+            key, or `MASKED_INPUT_IN_OUTPUT` when an output reads an input masked by the tenant
+            default (the decision was refused and no input was logged)
         inputs:
           type: object
           additionalProperties: true
           description: |
             The declared inputs as logged. A masked input with a value is a string
-            `hmac:<64 hex digits>`; money is `Money`
+            `hmac:<keyId>:<64 hex digits>`; money is `Money`
         outputs:
           type: [object, 'null']
           additionalProperties: true

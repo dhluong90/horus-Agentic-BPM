@@ -9,8 +9,10 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
- * A host-provided key for the keyed fingerprints of masked decision inputs (HMAC-SHA256, TR-SEC-05). The key bytes
- * never leave this object: it computes fingerprints itself, its {@link #toString()} is redacted and it has no
+ * A host-provided key for the keyed fingerprints of masked decision inputs (HMAC-SHA256, TR-SEC-05), with a short
+ * key id that every fingerprint carries ({@code hmac:<keyId>:<hex>}), so a row in the permanent decision log always
+ * says which key made it and a tenant can rotate keys without stranding old rows. The key bytes never leave this
+ * object: it computes fingerprints itself, its {@link #toString()} is redacted and it has no
  * accessor, so the key cannot reach a log line, a response or an event by accident (TR-SEC-10). Thread-safe.
  */
 public final class MaskingKey {
@@ -21,28 +23,72 @@ public final class MaskingKey {
     /** Prefix of every fingerprint, as stored in the decision log. */
     public static final String PREFIX = "hmac:";
 
-    private static final String ALGORITHM = "HmacSHA256";
+    /** Key id of a key configured without one. */
+    public static final String DEFAULT_KEY_ID = "k1";
 
+    private static final String ALGORITHM = "HmacSHA256";
+    private static final java.util.regex.Pattern KEY_ID = java.util.regex.Pattern.compile("^[A-Za-z0-9_-]{1,32}$");
+    private static final java.util.regex.Pattern FINGERPRINT =
+            java.util.regex.Pattern.compile("^hmac:[A-Za-z0-9_-]{1,32}:[0-9a-f]{64}$");
+
+    private final String keyId;
     private final SecretKeySpec key;
 
-    private MaskingKey(byte[] bytes) {
+    private MaskingKey(String keyId, byte[] bytes) {
+        this.keyId = keyId;
         this.key = new SecretKeySpec(bytes, ALGORITHM);
     }
 
     /**
-     * Creates a key from its bytes.
+     * Creates a key from its id and bytes.
      *
+     * @param keyId the key id, 1 to 32 characters of letters, digits, {@code _} and {@code -}; not secret
      * @param bytes the key, at least {@value #MIN_BYTES} bytes; copied
      * @return the key
-     * @throws IllegalArgumentException when the key is shorter, with a message that never contains the key
+     * @throws IllegalArgumentException for an invalid id or a short key, with a message that never contains the key
      */
-    public static MaskingKey of(byte[] bytes) {
+    public static MaskingKey of(String keyId, byte[] bytes) {
+        if (keyId == null || !KEY_ID.matcher(keyId).matches()) {
+            throw new IllegalArgumentException("a masking key id must be 1 to 32 letters, digits, '_' or '-'");
+        }
         Objects.requireNonNull(bytes, "bytes must not be null");
         if (bytes.length < MIN_BYTES) {
             throw new IllegalArgumentException("a masking key must be at least " + MIN_BYTES
                     + " bytes after Base64 decoding, this one has " + bytes.length);
         }
-        return new MaskingKey(bytes.clone());
+        return new MaskingKey(keyId, bytes.clone());
+    }
+
+    /**
+     * Creates a key from its id and Base64 text.
+     *
+     * @param keyId the key id
+     * @param base64 the encoded key
+     * @return the key
+     * @throws IllegalArgumentException as {@link #fromBase64(String)} and {@link #of(String, byte[])}
+     */
+    public static MaskingKey fromBase64(String keyId, String base64) {
+        return of(keyId, decode(base64));
+    }
+
+    /**
+     * Returns the key id, which every fingerprint of this key carries. Not secret.
+     *
+     * @return the key id
+     */
+    public String keyId() {
+        return keyId;
+    }
+
+    /**
+     * Creates a key with id {@value #DEFAULT_KEY_ID} from its bytes.
+     *
+     * @param bytes the key, at least {@value #MIN_BYTES} bytes; copied
+     * @return the key, with id {@value #DEFAULT_KEY_ID}
+     * @throws IllegalArgumentException when the key is shorter, with a message that never contains the key
+     */
+    public static MaskingKey of(byte[] bytes) {
+        return of(DEFAULT_KEY_ID, bytes);
     }
 
     /**
@@ -54,22 +100,25 @@ public final class MaskingKey {
      *     {@value #MIN_BYTES} bytes; the message never contains the text
      */
     public static MaskingKey fromBase64(String base64) {
+        return of(DEFAULT_KEY_ID, decode(base64));
+    }
+
+    private static byte[] decode(String base64) {
         if (base64 == null || base64.isBlank()) {
             throw new IllegalArgumentException("a masking key is required");
         }
         String text = base64.strip();
-        byte[] bytes;
         try {
-            bytes = text.indexOf('-') >= 0 || text.indexOf('_') >= 0
+            return text.indexOf('-') >= 0 || text.indexOf('_') >= 0
                     ? Base64.getUrlDecoder().decode(text) : Base64.getDecoder().decode(text);
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("a masking key must be Base64 text");
         }
-        return of(bytes);
     }
 
     /**
-     * Returns the fingerprint of a message: {@value #PREFIX} followed by the lower-case hex of its HMAC-SHA256.
+     * Returns the fingerprint of a message: {@value #PREFIX}, the key id, a colon and the lower-case hex of its
+     * HMAC-SHA256.
      *
      * @param message the bytes to fingerprint
      * @return the fingerprint
@@ -79,7 +128,7 @@ public final class MaskingKey {
         try {
             Mac mac = Mac.getInstance(ALGORITHM);
             mac.init(key);
-            return PREFIX + HexFormat.of().formatHex(mac.doFinal(message));
+            return PREFIX + keyId + ":" + HexFormat.of().formatHex(mac.doFinal(message));
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("HmacSHA256 is not available in this JVM", e);
         }
@@ -96,17 +145,17 @@ public final class MaskingKey {
     }
 
     /**
-     * Tells whether a text has the form of a fingerprint: the prefix and 64 lower-case hex digits.
+     * Tells whether a text has the form of a fingerprint: the prefix, a key id, a colon and 64 lower-case hex digits.
      *
      * @param text the text
-     * @return true for {@code hmac:<64 hex digits>}
+     * @return true for {@code hmac:<keyId>:<64 hex digits>}
      */
     public static boolean isFingerprint(String text) {
-        return text != null && text.matches("hmac:[0-9a-f]{64}");
+        return text != null && FINGERPRINT.matcher(text).matches();
     }
 
     @Override
     public String toString() {
-        return "MaskingKey[redacted]";
+        return "MaskingKey[keyId=" + keyId + ", key=redacted]";
     }
 }

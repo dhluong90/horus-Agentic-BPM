@@ -21,6 +21,17 @@ public interface MaskingPolicy {
     Optional<MaskingKey> hmacKey(String tenantId);
 
     /**
+     * Returns every key a tenant still holds, the current one first. A masked-input search fingerprints the plain
+     * value with each of them, so rows written before a key rotation are still found.
+     *
+     * @param tenantId the tenant
+     * @return the keys, possibly empty; the default is the current key only
+     */
+    default java.util.List<MaskingKey> searchKeys(String tenantId) {
+        return hmacKey(tenantId).map(java.util.List::of).orElse(java.util.List.of());
+    }
+
+    /**
      * Tells whether an input that does not declare {@code mask} is masked for a tenant. An input with
      * {@code mask: false} is never masked by this default; one with {@code mask: true} always is.
      *

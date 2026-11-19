@@ -116,14 +116,14 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     @Override
-    public List<DecisionRecord> findByLoggedInput(String tenantId, String ruleSet, String input, String text,
+    public List<DecisionRecord> findByLoggedInput(String tenantId, String ruleSet, String input, List<String> texts,
             Instant from, Instant to, int limit) {
         return decisions.stream()
                 .filter(d -> d.tenantId().equals(tenantId) && d.ruleSet().equals(ruleSet)
                         && !d.createdAt().isBefore(from) && d.createdAt().isBefore(to))
                 .filter(d -> {
                     var value = io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(d.maskedInputsJson()).get(input);
-                    return value != null && value.isString() && value.stringValue().equals(text);
+                    return value != null && value.isString() && texts.contains(value.stringValue());
                 })
                 .sorted(Comparator.comparing(DecisionRecord::createdAt).thenComparing(DecisionRecord::id).reversed())
                 .limit(limit)

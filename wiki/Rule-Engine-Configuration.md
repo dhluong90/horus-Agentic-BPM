@@ -32,6 +32,7 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `decision-log.retention` | unset; required outside `dev` from M3 | M3 | ISO 8601 period in whole months, at least `decision-log.retention-floor`, for example `P12M` or `P120M`. From M3, outside the `dev` profile, the engine refuses to start until it is set, and refuses a value below the floor or not in whole months, naming the property. The scheduler drops whole monthly partitions that end before `now() - retention`. Nothing is deleted in the `dev` profile or before M3; before M3 the property is ignored with a start-up note. No decision row is ever deleted by date |
 | `decision-log.mask-default` | `false` | Built | Mask every input that declares no `mask`; an input with `mask: false` is never masked by this default |
 | `masking.hmac-key` | unset | Built | Base64 key, 32 bytes or more after decoding, for HMAC-SHA256 of masked inputs, used by every tenant without its own key. Supply it from an environment variable (`HORUS_BPM_RULES_MASKING_HMAC_KEY`) or a secret store. When unset, the shared `horus.bpm.masking.hmac-key` is used. See [Masking keys](#masking-keys) |
+| `masking.hmac-key-id`, `masking.tenants.<tenant>.hmac-key-id` | `k1` | Built | Label of the key, 1 to 32 letters, digits, `_` or `-`, stored in every fingerprint as `hmac:<keyId>:<hex>`, so each row says which key made it. Not secret; change it whenever you change the key. When unset, the shared `horus.bpm.masking.hmac-key-id` is used |
 | `masking.tenants.<tenant>.hmac-key` | unset | Built | The tenant's own key, same format. A tenant with this setting never uses the host key, even when its own value is invalid |
 | `masking.tenants.<tenant>.mask-default` | `decision-log.mask-default` | Built | The masking default of one tenant |
 | `evaluation.max-rows` | `5000` | Built | Most rules a version may contain, checked at import (`422 VALIDATION_FAILED`). `1` to `5000`; may be lowered, never raised |
@@ -66,13 +67,15 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 
 ### Masking keys
 
-A rule set marks personal data with `mask: true`; the decision log then stores `hmac:<hex>`, the HMAC-SHA256 of the value under a key the host provides, never the value (`RLE-012`). The engine checks the keys once at start-up, after its migrations:
+A rule set marks personal data with `mask: true`; the decision log then stores `hmac:<keyId>:<hex>`, the HMAC-SHA256 of the value under a key the host provides, never the value (`RLE-012`). The engine checks the keys once at start-up, after its migrations:
 
 | Situation | What happens |
 |---|---|
 | A version that is not retired masks an input (by `mask: true` or by the tenant's masking default) and its tenant has no key | Start-up fails with a message that names `horus.bpm.rules.masking.hmac-key`, the tenant and the rule set |
 | A key setting holds a value that is not Base64 or decodes to fewer than 32 bytes | Start-up fails naming the setting; the value is never printed |
 | No rule set masks anything and no key is set | The host starts |
+| An output cell or default reads an input declared `mask: true` | Import is refused with `422 VALIDATION_FAILED` naming the output and the input |
+| An output reads an input that only the tenant's masking default masks | Its decisions fail closed: `422 EVALUATION_ERROR`, `error_code = MASKED_INPUT_IN_OUTPUT`, no inputs or outputs logged |
 | A rule set that masks an input is imported later into a tenant without a key | Its decisions fail closed: `422 EVALUATION_ERROR`, the row has `error_code = MASKING_KEY_MISSING` and no inputs, so nothing is logged in plain text |
 
 ```bash
@@ -80,7 +83,7 @@ A rule set marks personal data with `mask: true`; the decision log then stores `
 export HORUS_BPM_RULES_MASKING_HMAC_KEY="$(openssl rand -base64 32)"
 ```
 
-To keep one key per tenant, either set `masking.tenants.<tenant>.hmac-key` for each tenant, or declare a `MaskingPolicy` bean that reads the tenant's key from your vault; the bean replaces every `masking.*` setting. The key never appears in a log line, a response, an event or a metric. Rotation is not offered: decisions keep the fingerprint of the key in force when they were made.
+To keep one key per tenant, either set `masking.tenants.<tenant>.hmac-key` for each tenant, or declare a `MaskingPolicy` bean that reads the tenant's key from your vault; the bean replaces every `masking.*` setting. The key never appears in a log line, a response, an event or a metric. Rotation is not offered by these settings yet: decisions keep the fingerprint, and the key id, of the key in force when they were made. A `MaskingPolicy` bean can already hold earlier keys in `searchKeys`, and the search fingerprints the value with each of them.
 
 ## Host-wide properties
 

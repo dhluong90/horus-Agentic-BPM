@@ -27,17 +27,18 @@ public interface DecisionLog {
     Optional<DecisionRecord> find(String tenantId, String id);
 
     /**
-     * Reads the decisions of one rule set in a period whose logged input has exactly a given text, newest first.
+     * Reads the decisions of one rule set in a period whose logged input has exactly one of the given texts, newest
+     * first.
      *
      * @param tenantId the tenant
      * @param ruleSet the rule set name
      * @param input the input name
-     * @param text the logged text, for a masked input its fingerprint
+     * @param texts the logged texts, for a masked input its fingerprint under each key the tenant holds; not empty
      * @param from start of the period, inclusive
      * @param to end of the period, exclusive
      * @param limit most rows returned
      * @return the rows
      */
-    List<DecisionRecord> findByLoggedInput(String tenantId, String ruleSet, String input, String text, Instant from,
+    List<DecisionRecord> findByLoggedInput(String tenantId, String ruleSet, String input, List<String> texts, Instant from,
             Instant to, int limit);
 }

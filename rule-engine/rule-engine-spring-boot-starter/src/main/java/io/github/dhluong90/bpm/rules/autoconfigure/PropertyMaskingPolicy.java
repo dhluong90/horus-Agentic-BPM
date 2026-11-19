@@ -19,6 +19,7 @@ import java.util.Optional;
 final class PropertyMaskingPolicy implements MaskingPolicy {
 
     static final String SHARED_KEY_PROPERTY = "horus.bpm.masking.hmac-key";
+    static final String SHARED_KEY_ID_PROPERTY = "horus.bpm.masking.hmac-key-id";
 
     private final Optional<MaskingKey> hostKey;
     private final Map<String, Optional<MaskingKey>> tenantKeys;
@@ -36,11 +37,17 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
     }
 
     static PropertyMaskingPolicy from(RuleEngineProperties properties, String sharedKey) {
+        return from(properties, sharedKey, null);
+    }
+
+    static PropertyMaskingPolicy from(RuleEngineProperties properties, String sharedKey, String sharedKeyId) {
         List<String> invalid = new ArrayList<>();
         RuleEngineProperties.Masking masking = properties.masking();
         String hostText = masking.hmacKey() != null ? masking.hmacKey() : sharedKey;
         String hostProperty = masking.hmacKey() != null ? EngineDefaults.MASKING_KEY_PROPERTY : SHARED_KEY_PROPERTY;
-        Optional<MaskingKey> hostKey = decode(hostText, hostProperty, invalid);
+        String hostKeyId = masking.hmacKey() != null ? masking.hmacKeyId()
+                : masking.hmacKeyId() != null ? masking.hmacKeyId() : sharedKeyId;
+        Optional<MaskingKey> hostKey = decode(hostText, hostKeyId, hostProperty, invalid);
         Map<String, Optional<MaskingKey>> tenantKeys = new HashMap<>();
         Map<String, Boolean> tenantDefaults = new HashMap<>();
         masking.tenants().forEach((tenant, settings) -> {
@@ -48,7 +55,7 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
                 return;
             }
             if (settings.hmacKey() != null) {
-                tenantKeys.put(tenant, decode(settings.hmacKey(),
+                tenantKeys.put(tenant, decode(settings.hmacKey(), settings.hmacKeyId(),
                         "horus.bpm.rules.masking.tenants." + tenant + ".hmac-key", invalid));
             }
             if (settings.maskDefault() != null) {
@@ -60,12 +67,12 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
                 : maskDefault, tenantDefaults, invalid);
     }
 
-    private static Optional<MaskingKey> decode(String text, String property, List<String> invalid) {
+    private static Optional<MaskingKey> decode(String text, String keyId, String property, List<String> invalid) {
         if (text == null) {
             return Optional.empty();
         }
         try {
-            return Optional.of(MaskingKey.fromBase64(text));
+            return Optional.of(MaskingKey.fromBase64(keyId == null ? MaskingKey.DEFAULT_KEY_ID : keyId, text));
         } catch (IllegalArgumentException e) {
             // The message names the property and the rule, never the value.
             invalid.add(property + " (" + e.getMessage() + ")");

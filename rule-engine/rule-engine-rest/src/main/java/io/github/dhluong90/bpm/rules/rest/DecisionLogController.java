@@ -68,7 +68,9 @@ public class DecisionLogController {
     @PostMapping("/decisions:find-by-masked-input")
     public ResponseEntity<byte[]> findByMaskedInput(
             InputStream requestBody,
-            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength) throws IOException {
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId)
+            throws IOException {
         RestSupport.require(callers, "rules:log:read");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         JsonNode request = EngineValues.readRequest(body);
@@ -94,7 +96,8 @@ public class DecisionLogController {
         }
         MaskedInputQuery query = new MaskedInputQuery(text(request, "ruleSet"), text(request, "input"), value,
                 instant(request, "from"), instant(request, "to"),
-                limit == null ? EngineDefaults.QUERY_DEFAULT_PAGE_SIZE : limit.asInt());
+                limit == null ? EngineDefaults.QUERY_DEFAULT_PAGE_SIZE : limit.asInt(),
+                ProblemDetails.correlationId(correlationId));
         DecisionSearchResult result = decisions.findByMaskedInput(query);
         ObjectNode json = EngineJson.NODES.objectNode();
         ArrayNode data = json.putArray("data");

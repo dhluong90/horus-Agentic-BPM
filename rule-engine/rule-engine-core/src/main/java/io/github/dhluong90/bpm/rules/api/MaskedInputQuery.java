@@ -16,8 +16,24 @@ import java.util.Objects;
  * @param from start of the period, inclusive
  * @param to end of the period, exclusive
  * @param limit most decisions returned, 1 to {@code query.max-page-size}
+ * @param correlationId the caller's correlation id, recorded on the search's audit entry, or null
  */
-public record MaskedInputQuery(String ruleSet, String input, Object value, Instant from, Instant to, int limit) {
+public record MaskedInputQuery(String ruleSet, String input, Object value, Instant from, Instant to, int limit,
+        String correlationId) {
+
+    /**
+     * Creates a query without a correlation id.
+     *
+     * @param ruleSet the rule set name
+     * @param input the masked input name
+     * @param value the plain value
+     * @param from start of the period, inclusive
+     * @param to end of the period, exclusive
+     * @param limit most decisions returned
+     */
+    public MaskedInputQuery(String ruleSet, String input, Object value, Instant from, Instant to, int limit) {
+        this(ruleSet, input, value, from, to, limit, null);
+    }
 
     public MaskedInputQuery {
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
@@ -35,6 +51,6 @@ public record MaskedInputQuery(String ruleSet, String input, Object value, Insta
     @Override
     public String toString() {
         return "MaskedInputQuery[ruleSet=" + ruleSet + ", input=" + input + ", value=(masked), from=" + from
-                + ", to=" + to + ", limit=" + limit + "]";
+                + ", to=" + to + ", limit=" + limit + ", correlationId=" + correlationId + "]";
     }
 }

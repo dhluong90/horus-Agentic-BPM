@@ -48,9 +48,11 @@ public record RuleEngineProperties(
      * @param hmacKey Base64 key of at least 32 bytes after decoding, for every tenant without its own key. When
      *     unset, the shared {@code horus.bpm.masking.hmac-key} is used. Start-up fails when a rule set masks an input
      *     and its tenant has no valid key
+     * @param hmacKeyId the id stored in every fingerprint of {@code hmacKey} ({@code hmac:<keyId>:<hex>}), 1 to 32
+     *     letters, digits, {@code _} or {@code -}; default {@code k1}. Not secret. Change it together with the key
      * @param tenants per-tenant settings, by tenant id; a tenant listed here with a key never uses the host key
      */
-    public record Masking(String hmacKey, Map<String, TenantMasking> tenants) {
+    public record Masking(String hmacKey, String hmacKeyId, Map<String, TenantMasking> tenants) {
 
         /** Copies the tenants; unset is empty. */
         public Masking {
@@ -60,7 +62,8 @@ public record RuleEngineProperties(
         /** Never prints a key. */
         @Override
         public String toString() {
-            return "Masking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", tenants=" + tenants.keySet() + "]";
+            return "Masking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", hmacKeyId=" + hmacKeyId + ", tenants="
+                    + tenants.keySet() + "]";
         }
     }
 
@@ -68,16 +71,17 @@ public record RuleEngineProperties(
      * Masking settings of one tenant.
      *
      * @param hmacKey the tenant's Base64 key of at least 32 bytes after decoding; unset uses the host key
+     * @param hmacKeyId the id stored in every fingerprint of the tenant's key; default {@code k1}
      * @param maskDefault whether this tenant's inputs that declare no {@code mask} are masked; unset uses
      *     {@code decision-log.mask-default}
      */
-    public record TenantMasking(String hmacKey, Boolean maskDefault) {
+    public record TenantMasking(String hmacKey, String hmacKeyId, Boolean maskDefault) {
 
         /** Never prints a key. */
         @Override
         public String toString() {
-            return "TenantMasking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", maskDefault=" + maskDefault
-                    + "]";
+            return "TenantMasking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", hmacKeyId=" + hmacKeyId
+                    + ", maskDefault=" + maskDefault + "]";
         }
     }
 

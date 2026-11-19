@@ -9,7 +9,7 @@ sequenceDiagram
     participant L as DecisionLogService
   end
   box rgb(255,248,225) Host PostgreSQL
-    participant DB as rle_version, rle_decision
+    participant DB as rle_version, rle_decision, rle_decision_outbox
   end
   rect rgb(255,248,225)
     Note over P,DB: Start-up, after the migrations, outside any request
@@ -25,15 +25,18 @@ sequenceDiagram
     E->>P: hmacKey(tenant from resolver)
     alt no key for this tenant
       E->>DB: INSERT rle_decision EVALUATION_ERROR, error_code MASKING_KEY_MISSING, inputs {}
+    else an output reads an input masked by the tenant default
+      E->>DB: INSERT rle_decision EVALUATION_ERROR, error_code MASKED_INPUT_IN_OUTPUT, inputs {}
     else key present
-      E->>E: nationalId becomes hmac:hex, HMAC-SHA256 of the plain value
+      E->>E: nationalId becomes hmac:keyId:hex, HMAC-SHA256 of the plain value
       E->>DB: INSERT rle_decision, masked_inputs holds the fingerprint only
     end
   end
   rect rgb(224,242,241)
     Note over H,DB: Audit lookup, rules:log:read, read only
     H->>L: find-by-masked-input(minor-review, nationalId, plain value, period at most 31 days)
-    L->>P: hmacKey(tenant from resolver)
-    L->>DB: SELECT WHERE tenant_id AND rule_set_name AND created_at range AND masked_inputs ->> nationalId = hmac:hex
+    L->>P: searchKeys(tenant from resolver), current key first
+    L->>DB: SELECT WHERE tenant_id AND rule_set_name AND created_at range AND masked_inputs ->> nationalId IN one hmac:keyId:hex per key the tenant holds
+    L->>DB: INSERT rle_decision_outbox audit entry, no value and no fingerprint
     L-->>H: decisions of this tenant only, plain value never echoed
   end
