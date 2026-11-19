@@ -16,5 +16,8 @@
     <module>process-engine-core</module>
     <module>process-engine-bpmn</module>
     <module>process-engine-test</module>
+    <module>process-engine-postgres</module>
+    <module>process-engine-rest</module>
+    <module>process-engine-spring-boot-starter</module>
   </modules>
 </project>
