@@ -2873,9 +2873,10 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - `scala-library` (Apache 2.0);
 - `fastparse` 3.1.1 and its `sourcecode` and `geny` dependencies (MIT);
 - `jackson-module-scala` and `java-uuid-generator` (Apache 2.0);
-- `slf4j-api` (MIT).
+- `slf4j-api` (MIT);
+- the Jackson 2 libraries that `jackson-module-scala` brings in: `jackson-databind`, `jackson-core` and `jackson-annotations` (Apache 2.0), test scope only.
 
-The enforcer bans every `org.camunda.feel` and `org.scala-lang` artifact outside test scope, and ArchUnit keeps the oracle out of engine code.
+Their versions are the ones `feel-engine` 1.22.1 pulls in. They are recorded in the build's allow-list file, so an unannounced version change fails the licence check. The enforcer bans every `org.camunda.feel` and `org.scala-lang` artifact outside test scope, and ArchUnit keeps the oracle out of engine code.
 
 **Options considered**
 
