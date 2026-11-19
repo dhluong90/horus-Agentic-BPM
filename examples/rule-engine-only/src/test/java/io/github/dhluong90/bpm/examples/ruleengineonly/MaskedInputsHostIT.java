@@ -216,6 +216,10 @@ class MaskedInputsHostIT {
         if (contentType != null) {
             request.header("Content-Type", contentType);
         }
+        if (path.endsWith(":approve")) {
+            // An approval names the lock version it was based on: 1, just after the request (#234).
+            request.header("If-Match", "\"1\"");
+        }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.body());
     }

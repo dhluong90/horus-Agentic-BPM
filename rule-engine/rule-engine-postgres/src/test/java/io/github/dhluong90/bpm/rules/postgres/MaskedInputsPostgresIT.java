@@ -158,7 +158,7 @@ class MaskedInputsPostgresIT {
         engines.versionService().importRuleSet(ImportRequest.yaml(MINOR_REVIEW.getBytes(StandardCharsets.UTF_8)));
         engines.versionService().requestPublish("minor-review", 1, WriteOptions.none());
         caller.as(tenant, "bob");
-        engines.versionService().approve("minor-review", 1, WriteOptions.none());
+        engines.versionService().approve("minor-review", 1, new WriteOptions(null, 1L, null));
     }
 
     String evaluate(String tenant, int age) {
