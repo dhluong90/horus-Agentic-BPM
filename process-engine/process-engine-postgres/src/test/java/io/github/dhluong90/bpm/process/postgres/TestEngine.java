@@ -88,7 +88,7 @@ final class TestEngine {
                 jobSettings.maxAttempts(), b.retryBackoff);
         EngineSettings settings = new EngineSettings(b.autoApprove, EngineDefaults.MAX_NODES, EngineDefaults.MAX_BYTES,
                 EngineDefaults.IDEMPOTENCY_RETENTION, EngineDefaults.SLOW_CALL_WARNING, b.makerChecker,
-                EngineSettings.DEFAULT_REASON_MAX_LENGTH, b.approverRule, b.retireLastVersion);
+                EngineDefaults.MAX_REASON_LENGTH, b.approverRule, b.retireLastVersion);
         Identity id = identity;
         ProcessEventPublisher publisher = b.publisher != null ? b.publisher : events::add;
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, new JdbcProcessStore(ds),

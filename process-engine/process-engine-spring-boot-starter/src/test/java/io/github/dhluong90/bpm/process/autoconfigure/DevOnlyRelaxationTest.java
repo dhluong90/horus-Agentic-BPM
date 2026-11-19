@@ -111,6 +111,29 @@ class DevOnlyRelaxationTest {
                 .containsEntry("lifecycle.retire-last-version", "confirm");
     }
 
+    @Test
+    void reason_max_length_defaults_to_2000_may_be_lowered_and_is_refused_above_2000() {
+        org.springframework.boot.context.properties.bind.Binder defaults = new org.springframework.boot.context
+                .properties.bind.Binder(new org.springframework.boot.context.properties.source
+                        .MapConfigurationPropertySource(java.util.Map.of()));
+        assertThat(defaults.bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class).lifecycle()
+                .reasonMaxLength()).isEqualTo(2000);
+        assertThat(bindReasonLength("500").lifecycle().reasonMaxLength()).isEqualTo(500);
+        assertThatThrownBy(() -> bindReasonLength("2001"))
+                .hasStackTraceContaining("horus.bpm.processes.lifecycle.reason-max-length must be 1 to 2000");
+        assertThatThrownBy(() -> bindReasonLength("0")).hasStackTraceContaining("reason-max-length");
+        assertThatThrownBy(() -> new io.github.dhluong90.bpm.process.internal.service.EngineSettings(false, 500,
+                1_048_576, java.time.Duration.ofHours(24), java.time.Duration.ofMillis(200), true, 2001))
+                .hasMessageContaining("lifecycle.reason-max-length must be 1 to 2000");
+    }
+
+    private static ProcessEngineProperties bindReasonLength(String value) {
+        return new org.springframework.boot.context.properties.bind.Binder(
+                new org.springframework.boot.context.properties.source.MapConfigurationPropertySource(
+                        java.util.Map.of("horus.bpm.processes.lifecycle.reason-max-length", value)))
+                .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class);
+    }
+
     private static void startUp(String[] profiles, String property, String value) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(profiles);

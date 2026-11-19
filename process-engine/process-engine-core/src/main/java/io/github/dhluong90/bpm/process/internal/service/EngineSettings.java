@@ -14,7 +14,8 @@ import java.util.Objects;
  * @param slowCallWarning {@code handlers.slow-call-warning}: local steps and event listeners slower than this are logged
  * @param makerChecker {@code maker-checker.enabled}: when false (dev profile only, PRE-022) a requester may approve
  *     their own definition version, recorded as approver {@code system:dev-auto-approve}
- * @param reasonMaxLength {@code lifecycle.reason-max-length}: longest rejection reason or approval comment
+ * @param reasonMaxLength {@code lifecycle.reason-max-length}: longest reason or approval comment, 1 to
+ *     {@link EngineDefaults#MAX_REASON_LENGTH} (PD-103)
  * @param approverRule {@code horus.bpm.lifecycle.approver-must-differ-from}, the shared host setting (PD-096): {@code MAKERS}, the default, or the
  *     relaxation {@code REQUESTER}
  */
@@ -84,8 +85,6 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
                 reasonMaxLength, ApproverRule.MAKERS, RetireLastVersionRule.CONFIRM);
     }
 
-    /** Default longest rejection reason or approval comment. */
-    public static final int DEFAULT_REASON_MAX_LENGTH = 1_000;
 
     /**
      * Settings with maker-checker on and the default reason length.
@@ -99,7 +98,7 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
     public EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
             Duration slowCallWarning) {
         this(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning, true,
-                DEFAULT_REASON_MAX_LENGTH);
+                EngineDefaults.MAX_REASON_LENGTH);
     }
 
     public EngineSettings {
@@ -122,8 +121,8 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
         if (retireLastVersion == null) {
             retireLastVersion = RetireLastVersionRule.CONFIRM;
         }
-        if (reasonMaxLength < 1 || reasonMaxLength > 10_000) {
-            throw new IllegalArgumentException("lifecycle.reason-max-length must be 1 to 10000");
+        if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.MAX_REASON_LENGTH) {
+            throw new IllegalArgumentException("lifecycle.reason-max-length must be 1 to " + EngineDefaults.MAX_REASON_LENGTH);
         }
     }
 

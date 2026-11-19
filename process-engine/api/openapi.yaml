@@ -175,7 +175,7 @@ paths:
             schema:
               type: object
               properties:
-                comment: { type: [string, 'null'], maxLength: 1000 }
+                comment: { type: [string, 'null'], maxLength: 2000 }
       responses:
         '200': { $ref: '#/components/responses/Definition' }
         '400': { $ref: '#/components/responses/Problem' }
@@ -209,7 +209,7 @@ paths:
               type: object
               required: [reason]
               properties:
-                reason: { type: string, minLength: 1, maxLength: 1000 }
+                reason: { type: string, minLength: 1, maxLength: 2000 }
             example: { reason: missing fraud check }
       responses:
         '200': { $ref: '#/components/responses/Definition' }
@@ -246,7 +246,7 @@ paths:
             schema:
               type: object
               properties:
-                reason: { type: [string, 'null'], maxLength: 1000 }
+                reason: { type: [string, 'null'], maxLength: 2000 }
                 confirmNoVersionInEffect: { type: boolean, default: false }
             example: { reason: fraud check bypass found, confirmNoVersionInEffect: true }
       responses:

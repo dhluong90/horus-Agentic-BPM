@@ -273,6 +273,8 @@ class DefinitionLifecycleTest {
         assertThatThrownBy(() -> engine.services.reject(v3.ref(), v3.lockVersion(), " ", null))
                 .isInstanceOf(InputInvalidException.class)
                 .extracting(e -> ((ProcessException) e).code()).isEqualTo("INPUT_INVALID");
+        assertThatThrownBy(() -> engine.services.reject(v3.ref(), v3.lockVersion(), "x".repeat(2001), null))
+                .as("a reason above lifecycle.reason-max-length (2,000)").isInstanceOf(InputInvalidException.class);
         DefinitionVersion rejected = engine.services.reject(v3.ref(), v3.lockVersion(), "missing fraud check", null);
 
         // Then v3 is a draft again with the reason stored, and rejected.v1 is published

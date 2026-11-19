@@ -95,13 +95,15 @@ public record ProcessEngineProperties(
      * {@code horus.bpm.lifecycle.approver-must-differ-from} (PD-096), read for both engines by
      * {@code ApproverMustDifferFrom} in the host module.
      *
-     * @param reasonMaxLength longest rejection reason or approval comment, which land in the immutable history
+     * @param reasonMaxLength longest reason or approval comment, which land in the immutable history; 2,000 by
+     *     default, may be lowered, never raised (PD-103)
      */
-    public record Lifecycle(@DefaultValue("1000") int reasonMaxLength) {
+    public record Lifecycle(@DefaultValue("2000") int reasonMaxLength) {
 
         public Lifecycle {
-            if (reasonMaxLength < 1 || reasonMaxLength > 10_000) {
-                throw new IllegalArgumentException("horus.bpm.processes.lifecycle.reason-max-length must be 1 to 10000");
+            if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.MAX_REASON_LENGTH) {
+                throw new IllegalArgumentException("horus.bpm.processes.lifecycle.reason-max-length must be 1 to "
+                        + EngineDefaults.MAX_REASON_LENGTH + " (it may be lowered, never raised, PD-103)");
             }
         }
     }

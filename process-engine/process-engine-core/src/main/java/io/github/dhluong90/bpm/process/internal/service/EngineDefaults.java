@@ -30,6 +30,9 @@ public final class EngineDefaults {
     public static final int MAX_JSON_BODY_BYTES = 262_144;
     /** Most kernel commands one start or completion may apply (local steps included); a loop without a wait state stops here. */
     public static final int MAX_COMMANDS_PER_CALL = 1_000;
+    /** {@code lifecycle.reason-max-length}: longest cancellation reason (PD-103); may be lowered, never raised. */
+    public static final int MAX_REASON_LENGTH = 2_000;
+
     /** Longest business key. */
     public static final int MAX_BUSINESS_KEY_LENGTH = 200;
 
