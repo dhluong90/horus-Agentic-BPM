@@ -42,8 +42,8 @@ Subcommands (standard library only, Python 3.9 or later):
                           problem at once, when TAG has another form (a per-module tag <module>/vX.Y.Z is
                           refused with the vX.Y.Z form to use), or when the root or any module of the
                           reactor in EFFECTIVE_POM is not at exactly X.Y.Z (so a -SNAPSHOT always fails) or
-                          not under GROUP. tools/release/check-release-tag.sh adds the check that the
-                          commit is on main.
+                          not under GROUP. EFFECTIVE_POM "-" checks the tag form only. tools/release/
+                          check-release-tag.sh adds the check that the commit is on main.
 
 Exit status: 0 when the check passes, 1 when it fails, 2 on a usage error.
 """
@@ -512,7 +512,11 @@ def reactor_projects(effective_pom: Path) -> List[Tuple[str, str, str]]:
              (project.findtext(f"{POM_NS}version") or "?").strip()) for project in projects]
 
 
-def release_tag(tag: str, effective_pom: Path, group_id: str) -> int:
+def release_tag(tag: str, effective_pom: Optional[Path], group_id: str) -> int:
+    if effective_pom is None:
+        # No effective POM: only the tag form can be checked.
+        return fail(release_tag_errors(tag, [("-", group_id, "-")], group_id)[:1]
+                    if not TAG_FORM.fullmatch(tag) else [])
     projects = reactor_projects(effective_pom)
     errors = release_tag_errors(tag, projects, group_id)
     if errors:
@@ -562,7 +566,7 @@ def main(argv: List[str]) -> int:
     if command == "release-tag":
         group = option(args, "--group-id")
         if len(args) == 2 and group:
-            return release_tag(args[0], Path(args[1]), group)
+            return release_tag(args[0], None if args[1] == "-" else Path(args[1]), group)
     print(__doc__)
     return 2
 

@@ -28,16 +28,32 @@ RELEASE_GROUP_ID="io.github.dhluong90.bpm"
 
 cd "$ROOT"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+# Keep the exit status: bash 3.2 would otherwise exit with the status of the clean-up.
+trap 'status=$?; rm -rf "$work"; exit $status' EXIT
 ok=true
 
-# 1 and 2: the tag form, and the version and group id of the root and every module.
-if "${MVN[@]}" -q "$HELP_PLUGIN:effective-pom" -Doutput="$work/effective-pom.xml" > "$work/mvn.log" 2>&1; then
+# 1 and 2: the tag form, and the version and group id of the root and every module. Maven resolves the
+# imported BOMs to write the effective POM; a dropped or throttled download is tried again with -U, which
+# also re-asks Central for an artifact an earlier attempt recorded as missing.
+pom_ok=false
+for attempt in 1 2 3; do
+  update=()
+  [[ "$attempt" == 1 ]] || update=(-U)
+  if "${MVN[@]}" -q ${update[@]+"${update[@]}"} "$HELP_PLUGIN:effective-pom" -Doutput="$work/effective-pom.xml" > "$work/mvn.log" 2>&1; then
+    pom_ok=true
+    break
+  fi
+  echo "Maven could not write the effective POM (attempt $attempt of 3)." >&2
+  [[ "$attempt" == 3 ]] || sleep $((attempt * 10))
+done
+if [[ "$pom_ok" == true ]]; then
   python3 "$ROOT/tools/release/release-sbom.py" release-tag "$tag" "$work/effective-pom.xml" \
     --group-id "$RELEASE_GROUP_ID" || ok=false
 else
   cat "$work/mvn.log" >&2
-  echo "ERROR: tag $tag: Maven could not write the effective POM (above), so no module could be checked." >&2
+  echo "ERROR: tag $tag: Maven could not write the effective POM (above), so no module version or group id was checked." >&2
+  # The tag form needs no POM: still name a wrong form in this run.
+  python3 "$ROOT/tools/release/release-sbom.py" release-tag "$tag" - --group-id "$RELEASE_GROUP_ID" || true
   ok=false
 fi
 
