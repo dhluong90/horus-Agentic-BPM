@@ -166,7 +166,7 @@ final class RestSupport {
     static long requiredIfMatch(String header, String operation) {
         Long lock = ifMatch(header);
         if (lock == null) {
-            throw new com.horus.bpm.rules.api.PreconditionRequiredException(operation);
+            throw new io.github.dhluong90.bpm.rules.api.PreconditionRequiredException(operation);
         }
         return lock;
     }
@@ -180,7 +180,7 @@ final class RestSupport {
      */
     static String requiredIdempotencyKey(String key, String operation) {
         if (key == null || key.isBlank()) {
-            throw new com.horus.bpm.rules.api.InputInvalidException(operation + " requires an Idempotency-Key header");
+            throw new io.github.dhluong90.bpm.rules.api.InputInvalidException(operation + " requires an Idempotency-Key header");
         }
         return key;
     }
@@ -189,7 +189,7 @@ final class RestSupport {
      * Writes a version diff (RLE-028, RLE-048). Field values are the canonical JSON the engine computed, embedded as
      * JSON; member order is fixed, so a repeated request returns a byte-identical body.
      */
-    static ObjectNode diff(com.horus.bpm.rules.api.VersionDiff diff) {
+    static ObjectNode diff(io.github.dhluong90.bpm.rules.api.VersionDiff diff) {
         ObjectNode node = EngineJson.NODES.objectNode();
         node.put("ruleSet", diff.ruleSet());
         node.put("version", diff.version());
@@ -205,7 +205,7 @@ final class RestSupport {
         node.set("inputs", columns(diff.inputs()));
         node.set("outputs", columns(diff.outputs()));
         ArrayNode rows = node.putArray("rows");
-        for (com.horus.bpm.rules.api.VersionDiff.RowChange row : diff.rows()) {
+        for (io.github.dhluong90.bpm.rules.api.VersionDiff.RowChange row : diff.rows()) {
             ObjectNode item = rows.addObject();
             item.put("ruleId", row.ruleId());
             item.put("change", row.change().name());
@@ -215,7 +215,7 @@ final class RestSupport {
             if (row.basePosition() != null) {
                 item.put("basePosition", row.basePosition());
             }
-            if (row.change() == com.horus.bpm.rules.api.VersionDiff.Change.CHANGED) {
+            if (row.change() == io.github.dhluong90.bpm.rules.api.VersionDiff.Change.CHANGED) {
                 item.put("moved", row.moved());
                 ArrayNode fields = item.putArray("fields");
                 row.fields().forEach(f -> fields.add(field(f)));
@@ -225,14 +225,14 @@ final class RestSupport {
         return node;
     }
 
-    private static ObjectNode columns(com.horus.bpm.rules.api.VersionDiff.ColumnChanges changes) {
+    private static ObjectNode columns(io.github.dhluong90.bpm.rules.api.VersionDiff.ColumnChanges changes) {
         ObjectNode node = EngineJson.NODES.objectNode();
         ArrayNode added = node.putArray("added");
         changes.added().forEach(added::add);
         ArrayNode removed = node.putArray("removed");
         changes.removed().forEach(removed::add);
         ArrayNode changed = node.putArray("changed");
-        for (com.horus.bpm.rules.api.VersionDiff.ColumnChange column : changes.changed()) {
+        for (io.github.dhluong90.bpm.rules.api.VersionDiff.ColumnChange column : changes.changed()) {
             ObjectNode item = changed.addObject();
             item.put("name", column.name());
             ArrayNode fields = item.putArray("fields");
@@ -242,7 +242,7 @@ final class RestSupport {
         return node;
     }
 
-    private static ObjectNode field(com.horus.bpm.rules.api.VersionDiff.FieldChange change) {
+    private static ObjectNode field(io.github.dhluong90.bpm.rules.api.VersionDiff.FieldChange change) {
         ObjectNode node = EngineJson.NODES.objectNode();
         node.put("path", change.path());
         node.set("from", change.from() == null ? EngineJson.NODES.nullNode() : EngineValues.read(change.from()));

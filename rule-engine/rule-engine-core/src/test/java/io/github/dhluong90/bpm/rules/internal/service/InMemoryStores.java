@@ -101,7 +101,7 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
         for (int i = 0; i < versions.size(); i++) {
             StoredVersion v = versions.get(i);
             if (v.tenantId().equals(updated.tenantId()) && v.id().equals(updated.id())) {
-                if (v.lockVersion() != expectedLockVersion || v.status() != com.horus.bpm.rules.api.VersionStatus.DRAFT) {
+                if (v.lockVersion() != expectedLockVersion || v.status() != io.github.dhluong90.bpm.rules.api.VersionStatus.DRAFT) {
                     throw new VersionConflictException("stale");
                 }
                 versions.set(i, updated);

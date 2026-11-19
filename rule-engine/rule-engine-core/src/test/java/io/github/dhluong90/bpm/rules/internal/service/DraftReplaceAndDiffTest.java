@@ -1,30 +1,30 @@
-package com.horus.bpm.rules.internal.service;
+package io.github.dhluong90.bpm.rules.internal.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.DecisionInput;
-import com.horus.bpm.rules.api.DecisionResult;
-import com.horus.bpm.rules.api.DraftAuthoringDisabledException;
-import com.horus.bpm.rules.api.IdempotencyKeyReuseException;
-import com.horus.bpm.rules.api.ImportRequest;
-import com.horus.bpm.rules.api.InputInvalidException;
-import com.horus.bpm.rules.api.InvalidStateException;
-import com.horus.bpm.rules.api.Money;
-import com.horus.bpm.rules.api.PermissionDeniedException;
-import com.horus.bpm.rules.api.RuleSetNotFoundException;
-import com.horus.bpm.rules.api.RuleSetVersion;
-import com.horus.bpm.rules.api.ValidationFailedException;
-import com.horus.bpm.rules.api.VersionConflictException;
-import com.horus.bpm.rules.api.VersionDiff;
-import com.horus.bpm.rules.api.VersionDiff.Change;
-import com.horus.bpm.rules.api.VersionDiff.FieldChange;
-import com.horus.bpm.rules.api.VersionDiff.RowChange;
-import com.horus.bpm.rules.api.VersionNotFoundException;
-import com.horus.bpm.rules.api.VersionService;
-import com.horus.bpm.rules.api.VersionStatus;
-import com.horus.bpm.rules.api.Violation;
-import com.horus.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.api.DecisionInput;
+import io.github.dhluong90.bpm.rules.api.DecisionResult;
+import io.github.dhluong90.bpm.rules.api.DraftAuthoringDisabledException;
+import io.github.dhluong90.bpm.rules.api.IdempotencyKeyReuseException;
+import io.github.dhluong90.bpm.rules.api.ImportRequest;
+import io.github.dhluong90.bpm.rules.api.InputInvalidException;
+import io.github.dhluong90.bpm.rules.api.InvalidStateException;
+import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
+import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
+import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.api.VersionConflictException;
+import io.github.dhluong90.bpm.rules.api.VersionDiff;
+import io.github.dhluong90.bpm.rules.api.VersionDiff.Change;
+import io.github.dhluong90.bpm.rules.api.VersionDiff.FieldChange;
+import io.github.dhluong90.bpm.rules.api.VersionDiff.RowChange;
+import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
+import io.github.dhluong90.bpm.rules.api.VersionService;
+import io.github.dhluong90.bpm.rules.api.VersionStatus;
+import io.github.dhluong90.bpm.rules.api.Violation;
+import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -91,15 +91,15 @@ class DraftReplaceAndDiffTest {
         assertThat(replaced.createdAt()).isEqualTo(draft.createdAt());
         assertThat(replaced.lockVersion()).isEqualTo(draft.lockVersion() + 1);
         assertThat(replaced.canonicalHash()).isNotEqualTo(draft.canonicalHash())
-                .isEqualTo(com.horus.bpm.rules.internal.json.Hashes.sha256(replaced.canonicalDocument()));
-        assertThat(replaced.sourceHash()).isEqualTo(com.horus.bpm.rules.internal.json.Hashes.sha256(r2Zero()));
+                .isEqualTo(io.github.dhluong90.bpm.rules.internal.json.Hashes.sha256(replaced.canonicalDocument()));
+        assertThat(replaced.sourceHash()).isEqualTo(io.github.dhluong90.bpm.rules.internal.json.Hashes.sha256(r2Zero()));
         assertThat(versions.find("card-fee", 2, true).orElseThrow().sourceDocument())
                 .isEqualTo(new String(r2Zero(), StandardCharsets.UTF_8));
         // and no new version, one DRAFT_UPDATED history row with both hashes, one draft-updated event
         assertThat(versions.find("card-fee", 3, false)).isEmpty();
         assertThat(stores.history).hasSize(history + 1);
-        com.horus.bpm.rules.api.VersionHistoryEntry audit = versions.history("card-fee", 2).getLast();
-        assertThat(audit.action()).isEqualTo(com.horus.bpm.rules.api.LifecycleAction.DRAFT_UPDATED);
+        io.github.dhluong90.bpm.rules.api.VersionHistoryEntry audit = versions.history("card-fee", 2).getLast();
+        assertThat(audit.action()).isEqualTo(io.github.dhluong90.bpm.rules.api.LifecycleAction.DRAFT_UPDATED);
         assertThat(audit.actor()).isEqualTo("lan");
         assertThat(audit.fromStatus()).isEqualTo(VersionStatus.DRAFT);
         assertThat(audit.toStatus()).isEqualTo(VersionStatus.DRAFT);
@@ -411,13 +411,13 @@ class DraftReplaceAndDiffTest {
 
     @Test
     void RLE_048_printable_ascii_is_not_marked_and_escapes_are() {
-        assertThat(VersionDiffs.nonAscii(com.horus.bpm.rules.internal.json.EngineJson.NODES.stringNode("== 'GOLD'")))
+        assertThat(VersionDiffs.nonAscii(io.github.dhluong90.bpm.rules.internal.json.EngineJson.NODES.stringNode("== 'GOLD'")))
                 .isFalse();
-        assertThat(VersionDiffs.nonAscii(com.horus.bpm.rules.internal.json.EngineJson.NODES.stringNode("== 'GÖLD'")))
+        assertThat(VersionDiffs.nonAscii(io.github.dhluong90.bpm.rules.internal.json.EngineJson.NODES.stringNode("== 'GÖLD'")))
                 .isTrue();
-        assertThat(VersionDiffs.nonAscii(com.horus.bpm.rules.internal.json.EngineJson.NODES.stringNode("== 'G\\u200BOLD'")))
+        assertThat(VersionDiffs.nonAscii(io.github.dhluong90.bpm.rules.internal.json.EngineJson.NODES.stringNode("== 'G\\u200BOLD'")))
                 .isTrue();
-        assertThat(VersionDiffs.nonAscii(com.horus.bpm.rules.internal.json.EngineJson.NODES.stringNode("== 'a\\\\b'")))
+        assertThat(VersionDiffs.nonAscii(io.github.dhluong90.bpm.rules.internal.json.EngineJson.NODES.stringNode("== 'a\\\\b'")))
                 .isFalse();
         assertThat(VersionDiffs.nonAscii(null)).isFalse();
     }

@@ -1,4 +1,4 @@
-package com.horus.bpm.rules.api;
+package io.github.dhluong90.bpm.rules.api;
 
 /**
  * {@code 428 PRECONDITION_REQUIRED}: a command that must be conditional was sent without {@code If-Match} (RFC 6585),

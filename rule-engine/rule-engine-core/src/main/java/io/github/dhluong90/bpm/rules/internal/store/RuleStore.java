@@ -74,7 +74,7 @@ public interface RuleStore {
      *
      * @param updated the new state, from {@link StoredVersion#replaced}
      * @param expectedLockVersion the lock version the change was based on
-     * @throws com.horus.bpm.rules.api.VersionConflictException when the row changed meanwhile
+     * @throws io.github.dhluong90.bpm.rules.api.VersionConflictException when the row changed meanwhile
      */
     void replaceDraft(StoredVersion updated, long expectedLockVersion);
 

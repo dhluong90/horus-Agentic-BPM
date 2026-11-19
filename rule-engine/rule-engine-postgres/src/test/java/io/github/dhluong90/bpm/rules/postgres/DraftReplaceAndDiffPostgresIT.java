@@ -1,23 +1,23 @@
-package com.horus.bpm.rules.postgres;
+package io.github.dhluong90.bpm.rules.postgres;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.HorusBpmException;
-import com.horus.bpm.rules.api.ImportRequest;
-import com.horus.bpm.rules.api.RuleSetNotFoundException;
-import com.horus.bpm.rules.api.RuleSetVersion;
-import com.horus.bpm.rules.api.ValidationFailedException;
-import com.horus.bpm.rules.api.VersionDiff;
-import com.horus.bpm.rules.api.VersionDiff.Change;
-import com.horus.bpm.rules.api.VersionDiff.FieldChange;
-import com.horus.bpm.rules.api.VersionDiff.RowChange;
-import com.horus.bpm.rules.api.VersionService;
-import com.horus.bpm.rules.api.WriteOptions;
-import com.horus.bpm.rules.internal.service.EngineSettings;
-import com.horus.bpm.rules.internal.service.RuleEngines;
-import com.horus.bpm.rules.spi.CallerResolver;
-import com.horus.bpm.rules.spi.TenantResolver;
+import io.github.dhluong90.bpm.rules.api.HorusBpmException;
+import io.github.dhluong90.bpm.rules.api.ImportRequest;
+import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
+import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.api.VersionDiff;
+import io.github.dhluong90.bpm.rules.api.VersionDiff.Change;
+import io.github.dhluong90.bpm.rules.api.VersionDiff.FieldChange;
+import io.github.dhluong90.bpm.rules.api.VersionDiff.RowChange;
+import io.github.dhluong90.bpm.rules.api.VersionService;
+import io.github.dhluong90.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
+import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
+import io.github.dhluong90.bpm.rules.spi.CallerResolver;
+import io.github.dhluong90.bpm.rules.spi.TenantResolver;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
@@ -115,7 +115,7 @@ class DraftReplaceAndDiffPostgresIT {
                 FROM rle_decision_outbox WHERE tenant_id = 'bank-a' AND payload->>'eventType' = 'rules.version.draft-updated.v1'
                 """).query(String.class).single()).isEqualTo("lan " + draft.canonicalHash() + " " + replaced.canonicalHash());
         assertThat(versions.history("card-fee", 2).getLast().action())
-                .isEqualTo(com.horus.bpm.rules.api.LifecycleAction.DRAFT_UPDATED);
+                .isEqualTo(io.github.dhluong90.bpm.rules.api.LifecycleAction.DRAFT_UPDATED);
         assertThat(jdbc.sql("SELECT count(*) FROM rle_idempotency WHERE tenant_id = 'bank-a' AND operation = 'replace-draft'")
                 .query(Long.class).single()).isEqualTo(1L);
 
@@ -206,7 +206,7 @@ class DraftReplaceAndDiffPostgresIT {
         assertThat(versions.diff("card-fee", 2, 1)).isEqualTo(diff);
         // bank-b's v3 exists only in bank-b
         assertThatThrownBy(() -> versions.diff("card-fee", 3, 1))
-                .isInstanceOf(com.horus.bpm.rules.api.VersionNotFoundException.class);
+                .isInstanceOf(io.github.dhluong90.bpm.rules.api.VersionNotFoundException.class);
         // and nothing was written
         assertThat(count("rle_decision_outbox")).isEqualTo(outbox);
     }

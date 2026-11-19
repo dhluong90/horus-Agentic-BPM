@@ -1,4 +1,4 @@
-package com.horus.bpm.rules.api;
+package io.github.dhluong90.bpm.rules.api;
 
 /**
  * {@code 403 DRAFT_AUTHORING_DISABLED}: the host keeps rule changes in its release pipeline
