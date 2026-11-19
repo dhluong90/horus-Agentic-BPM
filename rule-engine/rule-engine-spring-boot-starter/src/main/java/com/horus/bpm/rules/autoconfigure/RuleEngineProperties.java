@@ -53,8 +53,12 @@ public record RuleEngineProperties(
      *     never raised
      * @param rejectUndeclaredInputs refuse input names the rule set does not declare; default true. When false,
      *     undeclared inputs are ignored and never logged
+     * @param maxOutputBytes estimated JSON size of one decision's outputs, 1 to 1048576; default 1048576. Lower only
+     * @param maxStringLength longest string input or string built by {@code +}, 1 to 65536; default 65536. Lower only
+     * @param maxRows most rules a version may contain, checked at import, 1 to 5000; default 5000. Lower only
      */
-    public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs) {
+    public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
+            Integer maxStringLength, Integer maxRows) {
     }
 
     /**
@@ -68,7 +72,10 @@ public record RuleEngineProperties(
                 idempotency.retention() == null ? EngineDefaults.IDEMPOTENCY_RETENTION : idempotency.retention(),
                 evaluation.maxInputScale() == null ? EngineDefaults.INPUT_MAX_SCALE : evaluation.maxInputScale(),
                 evaluation.rejectUndeclaredInputs() == null
-                        ? EngineDefaults.REJECT_UNDECLARED_INPUTS : evaluation.rejectUndeclaredInputs());
+                        ? EngineDefaults.REJECT_UNDECLARED_INPUTS : evaluation.rejectUndeclaredInputs(),
+                evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
+                evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
+                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows());
     }
 
     /**

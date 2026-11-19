@@ -11,7 +11,9 @@ import java.util.List;
 
 /**
  * Aggregates of a {@code collect} output over the non-null values of the matched rules, in rule order.
- * Sums are exact: numbers in {@link MathContext#DECIMAL128}, money in minor units of one currency.
+ * Sums are exact: money in minor units of one currency, numbers without rounding. A number sum that needs more
+ * than 34 significant digits ({@link MathContext#DECIMAL128}) fails with {@code EVALUATION_ERROR} instead of being
+ * rounded silently. Strings order by Unicode code point, as {@code <} does.
  */
 final class Aggregates {
 
@@ -20,7 +22,7 @@ final class Aggregates {
 
     static Object apply(OutputClause.Aggregate aggregate, List<Object> values, String output) {
         return switch (aggregate) {
-            case NONE -> List.copyOf(values);
+            case NONE -> java.util.Collections.unmodifiableList(new java.util.ArrayList<>(values));
             case COUNT -> BigDecimal.valueOf(values.size());
             case SUM -> sum(values, output);
             case MIN -> extreme(values, output, -1);
@@ -53,7 +55,11 @@ final class Aggregates {
         }
         BigDecimal total = BigDecimal.ZERO;
         for (Object value : values) {
-            total = total.add((BigDecimal) value, MathContext.DECIMAL128);
+            total = total.add((BigDecimal) value);
+        }
+        if (total.signum() != 0 && total.stripTrailingZeros().precision() > MathContext.DECIMAL128.getPrecision()) {
+            throw new EvaluationException("Output " + output + ": the sum needs more than "
+                    + MathContext.DECIMAL128.getPrecision() + " significant digits");
         }
         return total;
     }
@@ -79,7 +85,7 @@ final class Aggregates {
                 }
                 yield Long.compare(x.minorUnits(), y.minorUnits());
             }
-            case String x -> x.compareTo((String) b);
+            case String x -> com.horus.bpm.rules.internal.expr.Evaluator.compareCodePoints(x, (String) b);
             case LocalDate x -> x.compareTo((LocalDate) b);
             case Instant x -> x.compareTo((Instant) b);
             default -> throw new EvaluationException("Output " + output + ": values cannot be ordered");

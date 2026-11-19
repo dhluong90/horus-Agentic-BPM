@@ -91,7 +91,12 @@ public final class DefaultVersionService implements VersionService {
         }
         String sourceText = utf8(source);
         ParsedRuleSet parsed = RuleSetReader.read(format, source);
-        CompiledRuleSet.compile(parsed.model());
+        int rows = parsed.model().decision().table().rules().size();
+        if (rows > context.settings().maxRows()) {
+            throw new ValidationFailedException("The rule set has " + rows + " rules; evaluation.max-rows allows "
+                    + context.settings().maxRows());
+        }
+        CompiledRuleSet.compile(parsed.model(), context.settings().maxOutputBytes(), context.settings().maxStringLength());
         String name = parsed.model().name();
         Instant now = context.clock().instant();
         String ruleSetId;

@@ -47,15 +47,17 @@ public final class CompiledRuleSet {
     private final List<OutputClause> outputs;
     private final List<CompiledRule> rules;
     private final Evaluator evaluator;
+    private final int maxOutputBytes;
 
-    private CompiledRuleSet(Definitions model, List<CompiledRule> rules) {
+    private CompiledRuleSet(Definitions model, List<CompiledRule> rules, int maxOutputBytes, int maxStringLength) {
         DecisionTable table = model.decision().table();
         this.name = model.name();
         this.hitPolicy = table.hitPolicy();
         this.inputs = table.inputs();
         this.outputs = table.outputs();
         this.rules = List.copyOf(rules);
-        this.evaluator = new Evaluator(table.moneyRounding());
+        this.evaluator = new Evaluator(table.moneyRounding(), maxStringLength);
+        this.maxOutputBytes = maxOutputBytes;
     }
 
     /**
@@ -66,6 +68,19 @@ public final class CompiledRuleSet {
      * @throws ValidationFailedException when a cell does not parse, with the rule id
      */
     public static CompiledRuleSet compile(Definitions model) {
+        return compile(model, com.horus.bpm.rules.internal.service.EngineDefaults.OUTPUT_MAX_BYTES,
+                com.horus.bpm.rules.internal.service.EngineDefaults.STRING_MAX_LENGTH);
+    }
+
+    /**
+     * Compiles a model with size limits on the outputs of one decision and on built strings.
+     *
+     * @param model the decision model
+     * @param maxOutputBytes the largest estimated JSON size of one decision's outputs
+     * @param maxStringLength the longest string {@code +} may build
+     * @return the compiled rule set
+     */
+    public static CompiledRuleSet compile(Definitions model, int maxOutputBytes, int maxStringLength) {
         DecisionTable table = model.decision().table();
         for (OutputClause output : table.outputs()) {
             checkOutput(table.hitPolicy(), output);
@@ -89,7 +104,7 @@ public final class CompiledRuleSet {
             }
             rules.add(new CompiledRule(rule.id(), condition, thens));
         }
-        return new CompiledRuleSet(model, rules);
+        return new CompiledRuleSet(model, rules, maxOutputBytes, maxStringLength);
     }
 
     /**
@@ -166,39 +181,61 @@ public final class CompiledRuleSet {
         return new DecisionResult.NoMatch();
     }
 
-    /** Exactly one rule must match; zero or several is {@code UNIQUE_HIT_VIOLATION} with no outputs (RLE-002). */
+    /**
+     * Exactly one rule must match (RLE-002, DMN 1.5 as decided in PD-088): no match is {@code NoMatch}, as under
+     * {@code first}; several matches are {@code UNIQUE_HIT_VIOLATION} with every matched rule id and no outputs.
+     */
     private DecisionResult.Outcome unique(Object[] slots) {
         List<CompiledRule> matched = matching(slots);
-        if (matched.size() != 1) {
-            List<String> ids = matched.stream().map(CompiledRule::id).toList();
-            String detail = matched.isEmpty()
-                    ? "No rule matched; a unique table must match exactly one rule"
-                    : matched.size() + " rules matched " + ids + "; a unique table must match exactly one rule";
-            return new DecisionResult.Failed("UNIQUE_HIT_VIOLATION", detail, ids);
+        if (matched.isEmpty()) {
+            return new DecisionResult.NoMatch();
+        }
+        if (matched.size() > 1) {
+            return new DecisionResult.Failed("UNIQUE_HIT_VIOLATION",
+                    matched.size() + " rules matched; a unique table must match exactly one rule",
+                    matched.stream().map(CompiledRule::id).toList());
         }
         CompiledRule rule = matched.getFirst();
         return new DecisionResult.Matched(List.of(rule.id()), rowOutputs(rule, slots));
     }
 
-    /** Every matching rule contributes: a list in rule order, or the output's aggregate (RLE-003). */
+    /**
+     * Every matching rule contributes (RLE-003, DMN 1.5): a list output keeps one entry per matched rule, null
+     * included, so parallel lists stay aligned with each other and with the matched rule ids; an aggregate skips
+     * null values. With no match: an empty list per list output and null per aggregate.
+     */
     private DecisionResult.Outcome collect(Object[] slots) {
         List<CompiledRule> matched = matching(slots);
-        if (matched.isEmpty()) {
-            return new DecisionResult.NoMatch();
-        }
         Map<String, Object> values = new LinkedHashMap<>();
+        long[] bytes = {0};
         for (int i = 0; i < outputs.size(); i++) {
             OutputClause output = outputs.get(i);
             ValueType element = new ValueType(output.type().kind(), false);
+            boolean list = output.aggregate() == OutputClause.Aggregate.NONE;
             List<Object> column = new ArrayList<>();
             for (CompiledRule rule : matched) {
                 Object value = evaluator.evaluate(rule.thens().get(i), slots);
-                if (value != null) {
-                    column.add(output.aggregate() == OutputClause.Aggregate.COUNT
-                            ? value : checkType(output.name(), element, value, rule.id()));
+                if (value == null) {
+                    if (list) {
+                        column.add(null);
+                        addBytes(bytes, null);
+                    }
+                    continue;
+                }
+                column.add(output.aggregate() == OutputClause.Aggregate.COUNT
+                        ? value : checkType(output.name(), element, value, rule.id()));
+                if (list) {
+                    addBytes(bytes, value);
                 }
             }
-            values.put(output.name(), Aggregates.apply(output.aggregate(), column, output.name()));
+            Object result = matched.isEmpty() && !list ? null : Aggregates.apply(output.aggregate(), column, output.name());
+            if (!list) {
+                addBytes(bytes, result);
+            }
+            values.put(output.name(), result);
+        }
+        if (matched.isEmpty()) {
+            return new DecisionResult.NoMatch(values);
         }
         return new DecisionResult.Matched(matched.stream().map(CompiledRule::id).toList(), values);
     }
@@ -213,8 +250,33 @@ public final class CompiledRuleSet {
         return matched;
     }
 
+    /** Adds a value's estimated JSON size and fails once the decision's outputs exceed {@code max-output-bytes}. */
+    private void addBytes(long[] total, Object value) {
+        total[0] += estimatedBytes(value);
+        if (total[0] > maxOutputBytes) {
+            throw new EvaluationException("Outputs larger than " + maxOutputBytes + " bytes");
+        }
+    }
+
+    private static long estimatedBytes(Object value) {
+        return switch (value) {
+            case null -> 4;
+            // UTF-8 needs at most 3 bytes per UTF-16 code unit; 2 for the quotes.
+            case String s -> 2L + 3L * s.length();
+            case java.util.List<?> list -> {
+                long sum = 2;
+                for (Object element : list) {
+                    sum += 1 + estimatedBytes(element);
+                }
+                yield sum;
+            }
+            default -> 48;
+        };
+    }
+
     private Map<String, Object> rowOutputs(CompiledRule rule, Object[] slots) {
         Map<String, Object> values = new LinkedHashMap<>();
+        long[] bytes = {0};
         for (int i = 0; i < outputs.size(); i++) {
             OutputClause output = outputs.get(i);
             Object value = evaluator.evaluate(rule.thens().get(i), slots);
@@ -223,6 +285,7 @@ public final class CompiledRuleSet {
                         + " is available under the collect hit policy only");
             }
             values.put(output.name(), value == null ? null : checkType(output.name(), output.type(), value, rule.id()));
+            addBytes(bytes, value);
         }
         return values;
     }

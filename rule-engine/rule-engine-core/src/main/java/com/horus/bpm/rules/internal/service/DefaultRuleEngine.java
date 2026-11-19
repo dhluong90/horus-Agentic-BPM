@@ -65,7 +65,8 @@ public final class DefaultRuleEngine implements RuleEngine {
             throw new InputInvalidException("correlationId must be 1 to " + EngineDefaults.CORRELATION_ID_MAX_LENGTH
                     + " characters of A-Z, a-z, 0-9, '.', '_', ':' or '-'");
         }
-        InputLimits.check(request.input(), EngineDefaults.DECIMAL_PRECISION, context.settings().maxInputScale());
+        InputLimits.check(request.input(), EngineDefaults.DECIMAL_PRECISION, context.settings().maxInputScale(),
+                context.settings().maxStringLength());
         String requestHash = Hashes.sha256Parts("evaluate", caller, request.ruleSet(), ExactForm.of(request.input()));
         return context.idempotent(tenant, "evaluate", request.idempotencyKey(), requestHash, 200,
                 () -> doEvaluate(tenant, caller, request),
@@ -91,7 +92,8 @@ public final class DefaultRuleEngine implements RuleEngine {
         result.matchedRuleIds().forEach(matched::add);
         String errorCode = outcome instanceof DecisionResult.Failed failed ? failed.code() : null;
         log.append(new DecisionRecord(tenant, result.decisionId(), now, version.ruleSet(), version.version(),
-                version.hitPolicy(), errorCode == null ? "OK" : errorCode, errorCode,
+                version.hitPolicy(), errorCode != null ? errorCode : outcome instanceof DecisionResult.NoMatch ? "NO_MATCH" : "OK",
+                errorCode,
                 EngineValues.write(EngineValues.loggedInputs(request.input(), rules.inputs())),
                 errorCode == null ? EngineValues.write(EngineValues.decision(result).get("outputs")) : null,
                 EngineValues.write(matched), caller, request.correlationId(), now, micros));
@@ -107,7 +109,8 @@ public final class DefaultRuleEngine implements RuleEngine {
         if (compiled.size() >= context.settings().cacheMaxEntries()) {
             compiled.clear();
         }
-        CompiledRuleSet fresh = CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()));
+        CompiledRuleSet fresh = CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()),
+                context.settings().maxOutputBytes(), context.settings().maxStringLength());
         compiled.put(key, fresh);
         return fresh;
     }

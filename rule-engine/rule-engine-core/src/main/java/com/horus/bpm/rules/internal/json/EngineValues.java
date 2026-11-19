@@ -133,8 +133,8 @@ public final class EngineValues {
         }
         if (node.isArray()) {
             List<Object> list = new ArrayList<>();
-            node.forEach(element -> list.add(outputFromJson(element, name)));
-            return List.copyOf(list);
+            node.forEach(element -> list.add(element.isNull() ? null : outputFromJson(element, name)));
+            return java.util.Collections.unmodifiableList(list);
         }
         return fromJson(node, name);
     }
@@ -259,10 +259,11 @@ public final class EngineValues {
                 ObjectNode outputs = node.putObject("outputs");
                 matched.outputs().forEach((name, v) -> outputs.set(name, value(v)));
             }
-            case DecisionResult.NoMatch ignored -> {
+            case DecisionResult.NoMatch noMatch -> {
                 node.put("outcome", "NO_MATCH");
                 node.set("matchedRuleIds", EngineJson.NODES.arrayNode());
-                node.putObject("outputs");
+                ObjectNode outputs = node.putObject("outputs");
+                noMatch.outputs().forEach((name, v) -> outputs.set(name, value(v)));
             }
             case DecisionResult.Failed failed -> {
                 node.put("outcome", "FAILED");
@@ -290,7 +291,11 @@ public final class EngineValues {
                 node.get("outputs").properties().forEach(e -> outputs.put(e.getKey(), outputFromJson(e.getValue(), e.getKey())));
                 yield new DecisionResult.Matched(ids, outputs);
             }
-            case "NO_MATCH" -> new DecisionResult.NoMatch();
+            case "NO_MATCH" -> {
+                Map<String, Object> outputs = new LinkedHashMap<>();
+                node.get("outputs").properties().forEach(e -> outputs.put(e.getKey(), outputFromJson(e.getValue(), e.getKey())));
+                yield new DecisionResult.NoMatch(outputs);
+            }
             default -> {
                 List<String> ids = new ArrayList<>();
                 node.get("matchedRuleIds").forEach(id -> ids.add(id.stringValue()));

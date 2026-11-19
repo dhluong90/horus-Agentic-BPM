@@ -259,7 +259,7 @@ class RuleEnginePostgresIT {
         caller.as("bank-a", "teller-01");
 
         RuleEngines lenient = PostgresRuleEngines.create(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)),
-                caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), new EngineSettings(1000, java.time.Duration.ofHours(24), 34, false));
+                caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), EngineSettings.defaults().withRejectUndeclaredInputs(false));
         assertThatThrownBy(() -> engines.ruleEngine().evaluate("card-fee",
                 DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5, "nationalId", "079090001234"))))
                 .isInstanceOf(com.horus.bpm.rules.api.InputInvalidException.class);

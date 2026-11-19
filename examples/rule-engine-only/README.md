@@ -168,7 +168,7 @@ Two more rule sets ship with the example. [`loan-pricing.yaml`](src/main/resourc
    ```bash
    curl -s -u tuan:demo-only -X POST $H/decisions/loan-pricing:evaluate -H 'Content-Type: application/json' \
      -d '{"inputs":{"score":750,"income":{"currency":"VND","amount":25000000}}}'
-   # 422 {"code":"UNIQUE_HIT_VIOLATION","detail":"2 rules matched [R1, R2]; a unique table must match exactly one rule",
+   # 422 {"code":"UNIQUE_HIT_VIOLATION","detail":"2 rules matched; a unique table must match exactly one rule",
    #      "decisionId":"...","matchedRuleIds":["R1","R2"],...}
    ```
 

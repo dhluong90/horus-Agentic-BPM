@@ -40,12 +40,17 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
     }
 
     /**
-     * Returns the outputs; empty unless the outcome is {@link Matched}.
+     * Returns the outputs: those of {@link Matched}; for a {@code collect} table with no match, an empty list for
+     * each list output and null for each aggregate (DMN 1.5); empty otherwise.
      *
      * @return the outputs by output name
      */
     public Map<String, Object> outputs() {
-        return outcome instanceof Matched matched ? matched.outputs() : Map.of();
+        return switch (outcome) {
+            case Matched matched -> matched.outputs();
+            case NoMatch noMatch -> noMatch.outputs();
+            case Failed ignored -> Map.of();
+        };
     }
 
     /**
@@ -74,8 +79,20 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
         }
     }
 
-    /** No rule matched. */
-    public record NoMatch() implements Outcome {
+    /**
+     * No rule matched.
+     *
+     * @param outputs empty, except for a {@code collect} table: an empty list per list output and null per aggregate
+     */
+    public record NoMatch(Map<String, Object> outputs) implements Outcome {
+        public NoMatch {
+            outputs = Collections.unmodifiableMap(new LinkedHashMap<>(outputs));
+        }
+
+        /** No rule matched and there are no outputs. */
+        public NoMatch() {
+            this(Map.of());
+        }
     }
 
     /**
@@ -83,7 +100,7 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
      *
      * @param code {@code EVALUATION_ERROR} or {@code UNIQUE_HIT_VIOLATION}
      * @param detail a detail without input values
-     * @param matchedRuleIds for {@code UNIQUE_HIT_VIOLATION} every matched rule (empty for zero matches);
+     * @param matchedRuleIds for {@code UNIQUE_HIT_VIOLATION} every matched rule (two or more);
      *     empty for {@code EVALUATION_ERROR}
      */
     public record Failed(String code, String detail, List<String> matchedRuleIds) implements Outcome {
