@@ -204,7 +204,7 @@ curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Ide
 # {"status":403,"code":"SELF_APPROVAL_FORBIDDEN",...}
 ```
 
-Engine events (`processes.instance.started.v1` and the others) are handed to the host inside the transaction of the state change. [`ProcessEventOutbox`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/ProcessEventOutbox.java) shows both kinds of listener. Its in-transaction listener writes the host's `event_outbox` row, which commits or rolls back with the step; this is the durable path for integration. Its `@TransactionalEventListener(phase = AFTER_COMMIT)` notification runs at most once, and never for rolled-back work. A plain listener does no network I/O, and an exception it throws rolls the step back.
+Engine events (`processes.instance.started.v1` and the others) are handed to the host inside the transaction of the state change. [`ProcessEventOutbox`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/ProcessEventOutbox.java) shows both kinds of listener. Its in-transaction listener writes the host's `event_outbox` row, with the event's `eventId` (unique per tenant, for deduplication) and the payload as JSON, scoped by the event's tenant; the row commits or rolls back with the step, which makes it the durable path for integration. An idempotent replay publishes nothing. Its `@TransactionalEventListener(phase = AFTER_COMMIT)` notification runs at most once, and never for rolled-back work. A plain listener does no network I/O, and an exception it throws rolls the step back.
 
 ## Import a BPMN file
 

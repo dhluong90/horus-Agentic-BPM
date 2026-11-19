@@ -210,8 +210,9 @@ components:
         the caller's, or a decision step whose caller tenant is not the instance tenant). `409` is
         `VERSION_CONFLICT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
         `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
-        `IDEMPOTENCY_KEY_REUSE_MISMATCH` or `STEP_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`
-        or `DEFINITION_INTEGRITY_FAILED`, with a correlation id only.
+        `IDEMPOTENCY_KEY_REUSE_MISMATCH` or `STEP_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
+        `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
+        back), with a correlation id only.
       headers:
         WWW-Authenticate:
           description: Sent with every `401`
@@ -324,7 +325,7 @@ components:
             TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, INSTANCE_NOT_FOUND, TASK_NOT_FOUND, INVALID_STATE,
             VERSION_CONFLICT, IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
             BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, PRECONDITION_REQUIRED,
-            DEFINITION_INTEGRITY_FAILED, INTERNAL]
+            DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
         problems:

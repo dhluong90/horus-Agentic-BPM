@@ -60,7 +60,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         ctx.addParticipant(start.actor());
         Token root = ctx.createToken(TokenKind.SCOPE, process.process().id(), null);
         ctx.history("INSTANCE_STARTED", root, Map.of("definitionId", process.definitionId()));
-        ctx.effect(new Effect.EmitEvent("processes.instance.started.v1",
+        ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.instance.started.v1",
                 Map.of("instanceId", ctx.snapshot().instanceId(), "definitionId", process.definitionId())));
         StartEvent startEvent = process.nodes().stream().filter(StartEvent.class::isInstance)
                 .map(StartEvent.class::cast).filter(s -> s.eventDefinitions().isEmpty()).findFirst()
@@ -99,7 +99,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         ctx.cancelSubtree(root);
         ctx.status(InstanceStatus.CANCELLED);
         ctx.history("INSTANCE_ENDED", null, Map.of("status", "CANCELLED", "reason", String.valueOf(cancel.reason())));
-        ctx.effect(new Effect.EmitEvent("processes.instance.cancelled.v1", Map.of("instanceId", ctx.snapshot().instanceId())));
+        ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.instance.cancelled.v1", Map.of("instanceId", ctx.snapshot().instanceId())));
     }
 
     private void drain(WorkingContext ctx) {

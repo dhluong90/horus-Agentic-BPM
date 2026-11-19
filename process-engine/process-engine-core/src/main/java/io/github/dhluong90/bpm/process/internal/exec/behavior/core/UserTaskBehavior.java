@@ -29,7 +29,7 @@ final class UserTaskBehavior implements FlowNodeBehavior<UserTask> {
                 taskId, token.locals()));
         ctx.effect(new Effect.CreateUserTask(taskId, token.id(), node.id(), node.name(), assignment.assignee(),
                 assignment.fourEyes(), Map.of()));
-        ctx.effect(new Effect.EmitEvent("processes.task.created.v1", Map.of("taskId", taskId, "nodeId", node.id(),
+        ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.task.created.v1", Map.of("taskId", taskId, "nodeId", node.id(),
                 "assignee", assignment.assignee())));
     }
 
@@ -47,7 +47,7 @@ final class UserTaskBehavior implements FlowNodeBehavior<UserTask> {
         ctx.update(active);
         ctx.history("TASK_COMPLETED", token, Map.of("taskId", complete.taskId()));
         ctx.history("NODE_COMPLETED", token, Map.of());
-        ctx.effect(new Effect.EmitEvent("processes.task.completed.v1", Map.of("taskId", complete.taskId(),
+        ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.task.completed.v1", Map.of("taskId", complete.taskId(),
                 "nodeId", node.id(), "completedBy", String.valueOf(complete.actor()))));
         ctx.takeOutgoing(active, node);
     }

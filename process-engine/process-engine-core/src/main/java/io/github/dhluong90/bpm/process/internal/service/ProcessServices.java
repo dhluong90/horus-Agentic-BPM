@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.process.internal.service;
 
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
+import io.github.dhluong90.bpm.process.api.EventListenerFailedException;
 import io.github.dhluong90.bpm.process.api.IdempotencyInFlightException;
 import io.github.dhluong90.bpm.process.api.DefinitionIntegrityException;
 import io.github.dhluong90.bpm.process.api.TenantNotAllowedException;
@@ -199,10 +200,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
                             active ? DEV_APPROVER : null, active ? now : null);
                     store.insertDefinition(stored);
-                    ProcessEventPublisher.Event event = new ProcessEventPublisher.Event(active
-                            ? "processes.definition.approved.v1" : "processes.definition.imported.v1", tenant, now,
-                            Map.of("definitionKey", stored.key(), "version", stored.version(), "definitionHash", hash));
-                    publisher.publish(event);
+                    // One event per stored version, so its id is derived from the version id.
+                    publish(new ProcessEventPublisher.Event(io.github.dhluong90.bpm.process.internal.exec.Ids.child(
+                            stored.id(), 0), active ? "processes.definition.approved.v1"
+                            : "processes.definition.imported.v1", tenant, now,
+                            Map.of("definitionKey", stored.key(), "version", stored.version(), "definitionHash", hash)), null);
                     return view(stored);
                 }, Views::definitionToJson, Views::definitionFromJson));
     }
@@ -327,6 +329,29 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }, Views::instanceToJson, Views::instanceFromJson));
     }
 
+    /**
+     * Hands an event to the publisher inside the transaction. A slow listener holds the instance lock and a
+     * connection, so the call is timed and logged above {@code handlers.slow-call-warning} with the event type,
+     * instance and duration only, never the payload. A listener exception rolls the transaction back and is reported
+     * as {@code EVENT_LISTENER_FAILED}.
+     */
+    private void publish(ProcessEventPublisher.Event event, String instanceId) {
+        long started = System.nanoTime();
+        try {
+            publisher.publish(event);
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING, "process.event.listener.failed type={0} instance={1} exception={2}",
+                    event.type(), instanceId, e.getClass().getName());
+            throw new EventListenerFailedException("A listener of " + event.type() + " failed; the change was rolled back");
+        } finally {
+            long elapsed = System.nanoTime() - started;
+            if (elapsed > settings.slowCallWarning().toNanos()) {
+                LOG.log(System.Logger.Level.WARNING, "process.event.listener.slow type={0} instance={1} elapsedMs={2}",
+                        event.type(), instanceId, elapsed / 1_000_000);
+            }
+        }
+    }
+
     /** Four-eyes participants: the starter and everyone who completed a task of the instance (PRE-007). */
     private java.util.Set<String> participants(String tenant, InstanceRow row) {
         java.util.Set<String> out = new java.util.LinkedHashSet<>();
@@ -413,9 +438,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             if (state.businessKey() != null) {
                                 payload.put("businessKey", state.businessKey());
                             }
-                            ProcessEventPublisher.Event published = new ProcessEventPublisher.Event(event.type(),
-                                    state.tenantId(), clock.instant(), payload);
-                            publisher.publish(published);
+                            publish(new ProcessEventPublisher.Event(event.eventId(), event.type(), state.tenantId(),
+                                    clock.instant(), payload), state.instanceId());
                         }
                         default -> throw new ExecutionException("EFFECT_NOT_SUPPORTED", null,
                                 effect.getClass().getSimpleName() + " is not supported in this release");

@@ -233,7 +233,9 @@ class ProcessServicesQaTest {
         // Events are handed over inside the transaction (DESIGN 6.4, #173): the exception reaches the caller, and the
         // host's transaction manager rolls the state change back with it.
         assertThatThrownBy(() -> services.start(StartRequest.of("pricing").withIdempotencyKey("k2")))
-                .isInstanceOf(IllegalStateException.class).hasMessage("listener down");
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.EventListenerFailedException.class)
+                .satisfies(e -> assertThat(((io.github.dhluong90.bpm.process.api.ProcessException) e).code())
+                        .isEqualTo("EVENT_LISTENER_FAILED"));
         assertThat(delivered.get()).isEqualTo(1);
     }
 
@@ -255,7 +257,7 @@ class ProcessServicesQaTest {
         return new ProcessServices(tenants, caller, clock, new Supplier0(), new MemoryStore(),
                 Map.of(SourceFormat.BPMN_XML, bytes -> process),
                 new LocalServiceInvoker(Map.of(), rules, Duration.ofSeconds(5)),
-                events, new EngineSettings(true, 500, 1_048_576, Duration.ofDays(1)), BehaviorCatalog.registry(),
+                events, new EngineSettings(true, 500, 1_048_576, Duration.ofDays(1), Duration.ofMillis(200)), BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(100));
     }
 
@@ -274,7 +276,7 @@ class ProcessServicesQaTest {
         return new ProcessServices(() -> "bank-a", caller, clock, new Supplier0(), new MemoryStore(),
                 Map.of(SourceFormat.BPMN_XML, bytes -> process),
                 new LocalServiceInvoker(Map.of(handler.name(), handler), Optional.empty(), Duration.ofSeconds(5)),
-                event -> { }, new EngineSettings(true, 500, 1_048_576, Duration.ofDays(1)), BehaviorCatalog.registry(),
+                event -> { }, new EngineSettings(true, 500, 1_048_576, Duration.ofDays(1), Duration.ofMillis(200)), BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(100));
     }
 

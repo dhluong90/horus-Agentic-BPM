@@ -51,6 +51,7 @@ class CardApplicationController {
             case "PERMISSION_DENIED" -> HttpStatus.FORBIDDEN;
             case "NO_EFFECTIVE_VERSION" -> HttpStatus.NOT_FOUND;
             case "INPUT_INVALID" -> HttpStatus.BAD_REQUEST;
+            case "EVENT_LISTENER_FAILED", "DEFINITION_INTEGRITY_FAILED" -> HttpStatus.INTERNAL_SERVER_ERROR;
             default -> HttpStatus.valueOf(422);
         };
         Map<String, Object> body = new java.util.LinkedHashMap<>();

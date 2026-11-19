@@ -264,7 +264,7 @@ final class WorkingContext implements ExecutionContext {
             if (scope.scopeTokenId() == null) {
                 status = InstanceStatus.COMPLETED;
                 history("INSTANCE_ENDED", null, Map.of("status", "COMPLETED"));
-                effect(new Effect.EmitEvent("processes.instance.completed.v1", Map.of("instanceId", initial.instanceId())));
+                effect(new Effect.EmitEvent(nextId(), "processes.instance.completed.v1", Map.of("instanceId", initial.instanceId())));
             }
         }
     }

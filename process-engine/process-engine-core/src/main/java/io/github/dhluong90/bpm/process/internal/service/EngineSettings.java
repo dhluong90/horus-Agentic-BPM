@@ -11,8 +11,10 @@ import java.util.Objects;
  * @param maxNodes {@code definitions.max-nodes}, at most {@link EngineDefaults#MAX_NODES}
  * @param maxBytes {@code definitions.max-bytes}, at most {@link EngineDefaults#MAX_BYTES}
  * @param idempotencyRetention {@code idempotency.retention}
+ * @param slowCallWarning {@code handlers.slow-call-warning}: local steps and event listeners slower than this are logged
  */
-public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention) {
+public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
+        Duration slowCallWarning) {
 
     public EngineSettings {
         if (maxNodes < 2 || maxNodes > EngineDefaults.MAX_NODES) {
@@ -25,11 +27,14 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
             throw new IllegalArgumentException("idempotency.retention must be positive");
         }
+        if (slowCallWarning == null) {
+            slowCallWarning = EngineDefaults.SLOW_CALL_WARNING;
+        }
     }
 
     /** @return the engine defaults, auto-approve off */
     public static EngineSettings defaults() {
         return new EngineSettings(false, EngineDefaults.MAX_NODES, EngineDefaults.MAX_BYTES,
-                EngineDefaults.IDEMPOTENCY_RETENTION);
+                EngineDefaults.IDEMPOTENCY_RETENTION, EngineDefaults.SLOW_CALL_WARNING);
     }
 }

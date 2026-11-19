@@ -146,6 +146,9 @@ class RuleAndProcessIT {
         assertThat(jdbc.sql("SELECT event_type FROM event_outbox WHERE tenant_id = 'bank-a' AND business_key = 'IT-1001' "
                 + "ORDER BY id").query(String.class).list())
                 .containsExactly("processes.instance.started.v1", "processes.instance.completed.v1");
+        assertThat(jdbc.sql("SELECT count(*) FROM event_outbox WHERE tenant_id = 'bank-a' AND business_key = 'IT-1001' "
+                + "AND event_id IS NOT NULL AND payload->>'instanceId' = ?").param(instance.get("id").stringValue())
+                .query(Long.class).single()).as("outbox rows carry the event id and a JSON payload").isEqualTo(2);
         assertThat(EventRecorder.EVENTS).filteredOn(e -> "IT-1001".equals(e.payload().get("businessKey")))
                 .extracting(io.github.dhluong90.bpm.process.spi.ProcessEventPublisher.Event::type)
                 .containsExactly("processes.instance.started.v1", "processes.instance.completed.v1");
@@ -252,6 +255,28 @@ class RuleAndProcessIT {
         assertThat(failure.reason()).isEqualTo("PERMISSION_DENIED");
         assertThat(jdbc.sql("SELECT count(*) FROM pre_instance WHERE business_key = 'IT-3001'").query(Long.class)
                 .single()).isZero();
+    }
+
+    @Test
+    void an_idempotent_replay_publishes_no_events() throws Exception {
+        String body = "{\"definitionKey\":\"card-fee-review\",\"variables\":{\"applicationId\":\"IT-8001\","
+                + "\"customerId\":\"C-002\"}}";
+        HttpResponse<String> first = sendWithKey("tuan", "/api/bpm/processes/v1/instances", body, "replay-8001");
+        HttpResponse<String> replay = sendWithKey("tuan", "/api/bpm/processes/v1/instances", body, "replay-8001");
+        assertThat(replay.body()).isEqualTo(first.body());
+        String instanceId = JSON.readTree(first.body()).get("id").stringValue();
+
+        assertThat(jdbc.sql("SELECT event_type FROM event_outbox WHERE tenant_id = 'bank-a' AND payload->>'instanceId' = ? "
+                + "ORDER BY id").param(instanceId).query(String.class).list())
+                .as("one started and one task-created event, not two of each")
+                .containsExactly("processes.instance.started.v1", "processes.task.created.v1");
+    }
+
+    private HttpResponse<String> sendWithKey(String user, String path, String body, String key) throws Exception {
+        return HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .header("Authorization", basic(user)).header("Content-Type", "application/json")
+                .header("Idempotency-Key", key).POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+                HttpResponse.BodyHandlers.ofString());
     }
 
     @Test

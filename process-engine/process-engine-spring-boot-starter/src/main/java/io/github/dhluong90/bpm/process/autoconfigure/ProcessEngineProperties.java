@@ -83,6 +83,6 @@ public record ProcessEngineProperties(
 
     EngineSettings toSettings() {
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
-                idempotencyRetention);
+                idempotencyRetention, handlers.slowCallWarning());
     }
 }
