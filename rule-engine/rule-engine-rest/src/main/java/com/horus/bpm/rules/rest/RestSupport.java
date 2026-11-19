@@ -1,10 +1,14 @@
 package com.horus.bpm.rules.rest;
 
+import com.horus.bpm.rules.api.PayloadTooLargeException;
 import com.horus.bpm.rules.api.PermissionDeniedException;
 import com.horus.bpm.rules.api.RuleSetVersion;
 import com.horus.bpm.rules.api.UnauthenticatedException;
 import com.horus.bpm.rules.internal.json.EngineValues;
+import com.horus.bpm.rules.internal.read.RuleSetReader;
 import com.horus.bpm.rules.spi.CallerResolver;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -61,5 +65,28 @@ final class RestSupport {
         } catch (NumberFormatException e) {
             throw new com.horus.bpm.rules.api.InputInvalidException("If-Match must be a quoted lock version, for example \"3\"");
         }
+    }
+
+    /**
+     * Reads an import body of at most {@link RuleSetReader#MAX_SOURCE_BYTES} bytes. A larger declared
+     * {@code Content-Length} is refused before anything is read; otherwise at most one byte more than the limit is
+     * read, so an oversized body never sits in memory whole.
+     *
+     * @param body the request body stream
+     * @param contentLength the declared length, or null
+     * @return the body bytes
+     * @throws PayloadTooLargeException when the body is larger than the limit
+     * @throws IOException when the stream fails
+     */
+    static byte[] boundedBody(InputStream body, Long contentLength) throws IOException {
+        int limit = RuleSetReader.MAX_SOURCE_BYTES;
+        if (contentLength != null && contentLength > limit) {
+            throw new PayloadTooLargeException(limit);
+        }
+        byte[] bytes = body.readNBytes(limit + 1);
+        if (bytes.length > limit) {
+            throw new PayloadTooLargeException(limit);
+        }
+        return bytes;
     }
 }

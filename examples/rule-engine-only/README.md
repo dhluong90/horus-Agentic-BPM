@@ -84,27 +84,26 @@ To see the `ruleEngine` component locally, start with `--management.endpoint.hea
 
 ## Demo: import, approve as a second person, evaluate
 
-The host has five demo users for this walkthrough, all with the password in `HORUS_DEMO_PASSWORD`:
+This walkthrough uses the demo users of the `dev` profile, in tenant `bank-a` (the profile's `dev-tenant`), with the password in `HORUS_DEMO_PASSWORD`. Their roles reach engine permissions through `horus.bpm.rules.security.role-permissions` in [`application.yml`](src/main/resources/application.yml), the same mapping `GET /api/bpm/me` lists. On the `dev` profile only they may also send HTTP Basic credentials, which keeps the curl steps short.
 
-| User | Tenant | Permissions |
+| User | Roles | Engine permissions |
 |---|---|---|
-| `alice` | `bank-a` | `rules:author`, `rules:approve`, `rules:read`, `rules:evaluate` |
-| `bob` | `bank-a` | `rules:approve`, `rules:read`, `rules:evaluate` |
-| `teller` | `bank-a` | `rules:evaluate` |
-| `carol`, `dave` | `tenant-b` | as `alice` and `bob` |
+| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve` |
+| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
+| `tuan` | `TELLER` | `rules:evaluate` |
 
-Start PostgreSQL as above, then start the host with demo users:
+Start PostgreSQL as above, then start the host on the `dev` profile:
 
 ```bash
-HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
   java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
 H=localhost:8080/api/bpm/rules/v1
 ```
 
-1. Alice imports the card fee table from [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml). It is stored as a draft with the file kept byte for byte:
+1. Hoa imports the card fee table from [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml). It is stored as a draft with the file kept byte for byte:
 
    ```bash
-   curl -s -u alice:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+   curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
      -H 'Idempotency-Key: demo-import-1' --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee.yaml
    # 201 {"ruleSet":"card-fee","version":1,"status":"DRAFT","sourceFormat":"YAML",
    #      "canonicalHash":"596414cd75b2ef85719562ae8014a3f26bad0527ee2d6ef191377aec572f9142",...}
@@ -112,32 +111,32 @@ H=localhost:8080/api/bpm/rules/v1
 
    Sending the same request again with the same `Idempotency-Key` returns the same `201` and creates nothing. The same key with a changed file returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
 
-2. Alice requests publication:
+2. Hoa requests publication:
 
    ```bash
-   curl -s -u alice:demo-only -X POST $H/rule-sets/card-fee/versions/1:request-publish
-   # 200 {"status":"PENDING_APPROVAL","requestedBy":"alice",...}
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:request-publish
+   # 200 {"status":"PENDING_APPROVAL","requestedBy":"hoa",...}
    ```
 
-3. Alice tries to approve her own request and is refused:
+3. Hoa tries to approve her own request and is refused:
 
    ```bash
-   curl -s -u alice:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
    # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
    ```
 
-4. Bob approves; the version is published and takes effect now:
+4. Minh approves; the version is published and takes effect now:
 
    ```bash
-   curl -s -u bob:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve \
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve \
      -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
-   # 200 {"status":"PUBLISHED","requestedBy":"alice","approvedBy":"bob",...}
+   # 200 {"status":"PUBLISHED","requestedBy":"hoa","approvedBy":"minh",...}
    ```
 
-5. A teller prices a Gold customer's card. Rule `R1` matches and the fee is 0 VND:
+5. Tuan, a teller, prices a Gold customer's card. Rule `R1` matches and the fee is 0 VND:
 
    ```bash
-   curl -s -u teller:demo-only -X POST $H/decisions/card-fee:evaluate \
+   curl -s -u tuan:demo-only -X POST $H/decisions/card-fee:evaluate \
      -H 'Content-Type: application/json' -d '{"inputs":{"tier":"GOLD","txCount":5}}'
    # 200 {"decisionId":"01M7RVDNER5T0V2T4QH6SE2C25","ruleSet":"card-fee","version":1,"outcome":"MATCHED",
    #      "matchedRuleIds":["R1"],"outputs":{"fee":{"currency":"VND","amount":0}},...}
@@ -148,21 +147,15 @@ H=localhost:8080/api/bpm/rules/v1
    ```bash
    docker exec horus-pg psql -U horus -d horus -c \
      'SELECT rule_set_name, version_num, outcome, matched_rule_ids, outputs, caller_id FROM rle_decision'
-   #  card-fee | 1 | OK | ["R1"] | {"fee": {"amount": 0, "currency": "VND"}} | teller
+   #  card-fee | 1 | OK | ["R1"] | {"fee": {"amount": 0, "currency": "VND"}} | tuan
    ```
 
-7. A user of another tenant cannot reach the rule set, even when the body names the tenant:
-
-   ```bash
-   curl -s -u carol:demo-only -X POST $H/decisions/card-fee:evaluate \
-     -H 'Content-Type: application/json' -d '{"tenantId":"bank-a","inputs":{"tier":"GOLD"}}'
-   # 404 {"code":"RULE_SET_NOT_FOUND",...}
-   ```
+7. A user of another tenant cannot reach the rule set, even when the body names the tenant. The `dev` profile has one tenant, so this step runs with bearer tokens for `bank-a` and `tenant-b` in `RuleLifecycleIT.RLE_011_*`: the answer is `404 RULE_SET_NOT_FOUND` and no decision row.
 
 8. The original file, comments included, is returned with `?include=source`:
 
    ```bash
-   curl -s -u alice:demo-only "$H/rule-sets/card-fee/versions/1?include=source"
+   curl -s -u hoa:demo-only "$H/rule-sets/card-fee/versions/1?include=source"
    # {..., "sourceDocument":"# Monthly card fee, the rule set of the Rule Engine walking skeleton (RLE-001).\n...", ...}
    ```
 

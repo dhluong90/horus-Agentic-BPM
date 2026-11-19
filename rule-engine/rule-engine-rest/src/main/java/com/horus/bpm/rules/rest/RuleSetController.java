@@ -8,6 +8,8 @@ import com.horus.bpm.rules.api.VersionService;
 import com.horus.bpm.rules.api.WriteOptions;
 import com.horus.bpm.rules.internal.json.EngineValues;
 import com.horus.bpm.rules.spi.CallerResolver;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Objects;
@@ -49,11 +51,13 @@ public class RuleSetController {
     /** {@code POST /rule-sets}: imports a document as version 1 of a new rule set. */
     @PostMapping
     public ResponseEntity<byte[]> importRuleSet(
-            @RequestBody byte[] body,
+            InputStream body,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
         RestSupport.require(callers, "rules:author");
-        ImportRequest request = new ImportRequest(format(contentType), body, idempotencyKey);
+        ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength),
+                idempotencyKey);
         return RestSupport.version(HttpStatus.CREATED, versions.importRuleSet(request));
     }
 
@@ -61,11 +65,13 @@ public class RuleSetController {
     @PostMapping("/{name}/versions")
     public ResponseEntity<byte[]> importVersion(
             @PathVariable("name") String name,
-            @RequestBody byte[] body,
+            InputStream body,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
         RestSupport.require(callers, "rules:author");
-        ImportRequest request = new ImportRequest(format(contentType), body, idempotencyKey);
+        ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength),
+                idempotencyKey);
         return RestSupport.version(HttpStatus.CREATED, versions.importVersion(name, request));
     }
 

@@ -3,6 +3,7 @@ package com.horus.bpm.rules.internal.service;
 import com.horus.bpm.rules.api.ImportRequest;
 import com.horus.bpm.rules.api.InputInvalidException;
 import com.horus.bpm.rules.api.InvalidStateException;
+import com.horus.bpm.rules.api.PayloadTooLargeException;
 import com.horus.bpm.rules.api.RuleSetExistsException;
 import com.horus.bpm.rules.api.RuleSetNotFoundException;
 import com.horus.bpm.rules.api.RuleSetVersion;
@@ -75,6 +76,9 @@ public final class DefaultVersionService implements VersionService {
 
     private RuleSetVersion importDocument(String targetRuleSet, ImportRequest request) {
         Objects.requireNonNull(request, "request must not be null");
+        if (request.size() > RuleSetReader.MAX_SOURCE_BYTES) {
+            throw new PayloadTooLargeException(RuleSetReader.MAX_SOURCE_BYTES);
+        }
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_AUTHOR);
         byte[] source = request.source();

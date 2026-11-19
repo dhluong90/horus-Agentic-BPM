@@ -98,6 +98,21 @@ class DmnImportIT {
                 .contains("Rule DecisionRule_1lh0wd3, input txCount", "function 'abs'", "(line 32)");
     }
 
+    @Test
+    void TR_STD_25_an_import_body_over_one_megabyte_is_refused_with_413() throws Exception {
+        byte[] huge = new byte[1_048_577];
+        java.util.Arrays.fill(huge, (byte) ' ');
+
+        Reply xml = send("alice", "POST", "/rule-sets", huge, "application/xml");
+        Reply yaml = send("alice", "POST", "/rule-sets/card-fee/versions", huge, "application/yaml");
+
+        for (Reply refused : java.util.List.of(xml, yaml)) {
+            assertThat(refused.status()).isEqualTo(413);
+            assertThat(refused.contentType()).startsWith("application/problem+json");
+            assertThat(refused.json().path("code").asString()).isEqualTo("PAYLOAD_TOO_LARGE");
+        }
+    }
+
     Reply send(String user, String method, String path, byte[] body, String contentType) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(uri(path))
                 .header("Authorization", TestTokens.bearer(user))

@@ -92,7 +92,7 @@ final class V1Forms {
         try {
             expr = Parser.parse(CompiledRuleSet.conditionSource(input, text), slots);
         } catch (ExpressionException e) {
-            throw new Feel.UnsupportedException("condition '" + text + "' does not parse: " + e.getMessage());
+            throw new Feel.UnsupportedException("condition " + Quote.of(text) + " does not parse: " + Quote.text(e.getMessage()));
         }
         if (expr instanceof Expr.Unary(Expr.UnaryOp op, Expr operand) && op == Expr.UnaryOp.NOT) {
             return new UnaryTests(false, true, positives(input, operand, text));
@@ -122,12 +122,12 @@ final class V1Forms {
         try {
             expr = Parser.parse(text, name -> -1);
         } catch (ExpressionException e) {
-            throw new Feel.UnsupportedException("output '" + text + "' is not a literal value: " + e.getMessage());
+            throw new Feel.UnsupportedException("output " + Quote.of(text) + " is not a literal value: " + Quote.text(e.getMessage()));
         }
         if (expr instanceof Expr.Literal literal) {
             return value(literal.value(), text);
         }
-        throw new Feel.UnsupportedException("output '" + text + "' is not a literal value");
+        throw new Feel.UnsupportedException("output " + Quote.of(text) + " is not a literal value");
     }
 
     /**
@@ -203,7 +203,7 @@ final class V1Forms {
                 // refused below
             }
         }
-        throw new Feel.UnsupportedException("condition '" + text + "' has no DMN unary-test form");
+        throw new Feel.UnsupportedException("condition " + Quote.of(text) + " has no DMN unary-test form");
     }
 
     private static Test.Compare boundOf(String input, Expr expr, String text) {
@@ -243,7 +243,7 @@ final class V1Forms {
         if (expr instanceof Expr.Literal literal) {
             return value(literal.value(), text);
         }
-        throw new Feel.UnsupportedException("condition '" + text + "' compares with an expression, not a literal value");
+        throw new Feel.UnsupportedException("condition " + Quote.of(text) + " compares with an expression, not a literal value");
     }
 
     private static Value value(Object literal, String text) {
@@ -255,7 +255,7 @@ final class V1Forms {
             case LocalDate d -> new Value.Date(d);
             case Instant i -> new Value.DateTime(i);
             case Money m -> new Value.Money(m.toMajor(), m.currency());
-            default -> throw new Feel.UnsupportedException("'" + text + "' holds a value with no FEEL form");
+            default -> throw new Feel.UnsupportedException(Quote.of(text) + " holds a value with no FEEL form");
         };
     }
 
