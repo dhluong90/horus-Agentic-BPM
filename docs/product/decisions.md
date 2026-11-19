@@ -2530,7 +2530,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] No BLOCKING finding from the architecture, security or QA reviews is open; each one closed with a test that fails without the fix. Every open SHOULD-FIX is listed in the release notes as a known limit.
 - [ ] Each merged pull request links a green CI run at its head commit (PD-081), and the last run on `main` at the release commit is green on every leg: Java 21 and 25, Spring Boot 4.x, 4.0.x and 3.5.x, PostgreSQL 14 and 18.
 - [ ] The spec-to-test gate, the licence gate and the vulnerability scan are green at the release commit; no high or critical finding.
-- [ ] The search for `com.horus` in the repository returns nothing (#21, PD-070).
+- [ ] The package rename (#21) is merged before the 0.1.0 tag, and the search for `com.horus` in the repository returns nothing (PD-070). The tag guard of the release workflow (#126) refuses the tag otherwise.
 - [ ] The release workflow builds from a clean checkout of the release commit; the cockpit bundle is built from source; the bill of materials lists the Java and npm packages; `shasum -c SHA256SUMS` verifies every artifact.
 - [ ] From a fresh clone on a clean machine with Docker only, `docker compose up` reaches a first logged decision by following the README; done by someone other than the author, with the time and every deviation recorded.
 - [ ] The security behaviour is shown by tests in CI: another tenant's rule set answers `404`; self-approval answers `403` through Java and REST; a reused idempotency key with another body answers `422`; no-store holds with the metadata endpoints switched off; the development tenant is refused beside a production profile; the container runs as a non-root user and holds no secret.
@@ -2539,6 +2539,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] The README, Getting Started and release notes claim only what ships: "first BPMN and DMN subset", no conformance claim (`TR-STD-05`), unsupported features named as later, the forward-only migrations listed (X-F-09), and no compatibility promise before 1.0.
 - [x] The version label is decided: `0.1.0` (PD-083, 2026-11-19).
 - [ ] A recorded walkthrough of the release journey exists for the review.
+- [ ] The GitHub Release upload (#153) is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the `v0.1.0` release.
 
 **Assumption to test.** [ASSUMPTION] Pull requests #87, #17 and #126 and issues #133, #131 and #21 can all be reviewed and merged by Fri 20 Nov without a new BLOCKING finding. Cheap test: a merge-order check on Thu 19 Nov evening (#133, then #87, then #21, then #17 and #126) with the count of open findings; if more than two BLOCKING findings are open on Fri 20 Nov 08:00 ICT, the product manager tells the product owner before the review, not at it.
 
