@@ -137,7 +137,6 @@ public class RuleSetController {
         SourceFormat sourceFormat = switch (format == null ? "" : format) {
             case "json" -> SourceFormat.JSON;
             case "dmn" -> SourceFormat.DMN_XML;
-            case "yaml", "" -> SourceFormat.YAML;
             default -> throw new InputInvalidException("format must be json or dmn");
         };
         String document = versions.export(name, version, sourceFormat);

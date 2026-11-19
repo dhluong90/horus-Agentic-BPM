@@ -60,6 +60,23 @@ class DmnRuleSetTest {
                 new DecisionResult.Matched(List.of("DecisionRule_09rn3ah"), Map.of("fee", new BigDecimal("50000"))));
     }
 
+    @Test
+    void TR_STD_25_extension_elements_on_every_level_and_foreign_attributes_do_not_change_the_table() {
+        // Given card-fee as a Camunda 7 style file: extensionElements, camunda:* and biodi:* attributes, DMNDI
+        ParsedRuleSet plain = RuleSetReader.read(SourceFormat.DMN_XML, resource("/rules/dmn/card-fee-modeller.dmn"));
+
+        // When
+        ParsedRuleSet extended = RuleSetReader.read(SourceFormat.DMN_XML, resource("/rules/dmn/card-fee-extensions.dmn"));
+        CompiledRuleSet table = CompiledRuleSet.compile(extended.model());
+
+        // Then: same table apart from the rule ids, nothing of the extensions in the canonical document
+        assertThat(extended.canonicalJson().replaceAll("DecisionRule_[0-9a-z]+", "R"))
+                .isEqualTo(plain.canonicalJson().replaceAll("DecisionRule_[0-9a-z]+", "R"));
+        assertThat(extended.canonicalJson()).doesNotContain("camunda", "biodi", "cards-team", "cellInput");
+        assertThat(evaluate(table, Map.of("tier", "SILVER", "txCount", 3))).isEqualTo(
+                new DecisionResult.Matched(List.of("DecisionRule_2"), Map.of("fee", new BigDecimal("10000"))));
+    }
+
     // ------------------------------------------------------------------ round trips
 
     @Test
