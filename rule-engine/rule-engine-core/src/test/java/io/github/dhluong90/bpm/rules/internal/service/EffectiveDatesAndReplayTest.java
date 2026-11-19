@@ -371,6 +371,36 @@ class EffectiveDatesAndReplayTest {
     }
 
     @Test
+    void RLE_008_a_pinned_decision_is_marked_on_its_row_in_the_result_and_on_replay() {
+        givenTheTwoCardFees();
+        clock.set(DEC_05);
+        caller.become("bank-a", "pricing", PRICING);
+
+        DecisionResult pinned = engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1));
+        DecisionResult selected = engine.evaluate(DecisionRequest.of("card-fee", STANDARD));
+
+        // Then the engine sets the mark, never the request: the row, the result and its JSON say pinned
+        assertThat(pinned.pinned()).isTrue();
+        assertThat(selected.pinned()).isFalse();
+        assertThat(stores.decisions.get(0).pinned()).isTrue();
+        assertThat(stores.decisions.get(1).pinned()).isFalse();
+        tools.jackson.databind.JsonNode json = io.github.dhluong90.bpm.rules.internal.json.EngineValues.decision(pinned);
+        assertThat(json.path("pinned").asBoolean()).isTrue();
+        assertThat(json.path("evalClock").asString()).isEqualTo(DEC_05.toString());
+        assertThat(json.path("clockChosen").asBoolean()).isFalse();
+        // and a replay reads the marks back from the row
+        caller.become("bank-a", "thu", AUDITOR);
+        assertThat(engine.replay(pinned.decisionId()).pinned()).isTrue();
+        assertThat(engine.replay(selected.decisionId()).pinned()).isFalse();
+        // and an idempotent replay of a pinned evaluation keeps the mark
+        caller.become("bank-a", "pricing", PRICING);
+        DecisionResult keyed = engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1)
+                .withIdempotencyKey("k-pin"));
+        assertThat(engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1).withIdempotencyKey("k-pin")))
+                .isEqualTo(keyed).extracting(DecisionResult::pinned).isEqualTo(true);
+    }
+
+    @Test
     void RLE_008_a_decision_at_a_chosen_clock_is_flagged_as_back_dated() {
         givenTheTwoCardFees();
         clock.set(DEC_05);

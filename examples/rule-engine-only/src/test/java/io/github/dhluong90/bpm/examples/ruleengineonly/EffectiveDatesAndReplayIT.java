@@ -151,12 +151,12 @@ class EffectiveDatesAndReplayIT {
         assertThat(november.status()).as(november.body()).isEqualTo(200);
         assertThat(november.json().path("version").asInt()).isEqualTo(1);
         assertThat(november.json().path("outputs").path("fee").toString()).isEqualTo("{\"currency\":\"VND\",\"amount\":50000}");
-        assertThat(november.json().path("clock").asString()).isEqualTo("2026-11-20T10:00:00Z");
+        assertThat(november.json().path("evalClock").asString()).isEqualTo("2026-11-20T10:00:00Z");
         assertThat(november.json().path("evaluatedAt").asString()).isEqualTo("2026-11-26T09:00:00Z");
         assertThat(november.json().path("clockChosen").asBoolean()).as("back-dated decision is flagged").isTrue();
         assertThat(december.json().path("version").asInt()).isEqualTo(2);
         assertThat(december.json().path("outputs").path("fee").toString()).isEqualTo("{\"currency\":\"VND\",\"amount\":30000}");
-        assertThat(december.json().path("clock").asString()).isEqualTo("2026-12-01T00:00:00Z");
+        assertThat(december.json().path("evalClock").asString()).isEqualTo("2026-12-01T00:00:00Z");
 
         // When the auditor replays the November decision on 5 Dec, and pricing evaluates pinned to (v1, 20 Nov)
         clock.set(Instant.parse("2026-12-05T08:00:00Z"));
@@ -168,15 +168,20 @@ class EffectiveDatesAndReplayIT {
 
         // Then version, fee and matchedRuleIds are identical to the logged decision; the replay wrote nothing
         assertThat(replayed.status()).as(replayed.body()).isEqualTo(200);
-        for (String field : List.of("decisionId", "version", "clock", "evaluatedAt", "clockChosen", "outcome",
+        for (String field : List.of("decisionId", "version", "evalClock", "evaluatedAt", "clockChosen", "pinned", "outcome",
                 "matchedRuleIds", "outputs")) {
             assertThat(replayed.json().path(field)).as(field).isEqualTo(november.json().path(field));
         }
         assertThat(pinned.status()).as(pinned.body()).isEqualTo(200);
-        for (String field : List.of("version", "clock", "outcome", "matchedRuleIds", "outputs")) {
+        for (String field : List.of("version", "evalClock", "outcome", "matchedRuleIds", "outputs")) {
             assertThat(pinned.json().path(field)).as(field).isEqualTo(november.json().path(field));
         }
         assertThat(decisions(t)).isEqualTo(rows + 1);
+        // and the pinned decision says so, in the response and on replay, while the selected one does not
+        assertThat(pinned.json().path("pinned").asBoolean()).isTrue();
+        assertThat(november.json().path("pinned").asBoolean()).isFalse();
+        assertThat(send(t, "thu", "/decisions/" + pinned.json().path("decisionId").asString() + ":replay", null, null)
+                .json().path("pinned").asBoolean()).isTrue();
         // and at the host clock alone, v2 is in force
         Reply hostClock = send(t, "teller", "/decisions/card-fee:evaluate", body(STANDARD + "}"), "application/json");
         assertThat(hostClock.json().path("version").asInt()).isEqualTo(2);

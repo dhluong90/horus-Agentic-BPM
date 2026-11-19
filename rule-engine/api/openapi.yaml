@@ -457,9 +457,10 @@ paths:
                 decisionId: 01KDG7Z0RQ6V2Y8M1C4N5P7T9W
                 ruleSet: card-fee
                 version: 1
-                clock: '2026-12-15T02:00:00Z'
+                evalClock: '2026-12-15T02:00:00Z'
                 evaluatedAt: '2026-12-15T02:00:00Z'
                 clockChosen: false
+                pinned: false
                 outcome: MATCHED
                 matchedRuleIds: [R1]
                 outputs:
@@ -518,9 +519,10 @@ paths:
                 decisionId: 01KCS3W1DQ0M8V6T2B9R5N7K4E
                 ruleSet: card-fee
                 version: 1
-                clock: '2026-11-20T10:00:00Z'
+                evalClock: '2026-11-20T10:00:00Z'
                 evaluatedAt: '2026-12-05T08:00:00Z'
                 clockChosen: true
+                pinned: true
                 outcome: MATCHED
                 matchedRuleIds: [R3]
                 outputs:
@@ -568,9 +570,10 @@ paths:
                 decisionId: 01KCS3W1DQ0M8V6T2B9R5N7K4E
                 ruleSet: card-fee
                 version: 1
-                clock: '2026-11-20T10:00:00Z'
+                evalClock: '2026-11-20T10:00:00Z'
                 evaluatedAt: '2026-11-20T10:00:00Z'
                 clockChosen: false
+                pinned: false
                 outcome: MATCHED
                 matchedRuleIds: [R3]
                 outputs:
@@ -892,15 +895,15 @@ components:
             Needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`); default the host clock.
     DecisionResult:
       type: object
-      required: [decisionId, ruleSet, version, clock, evaluatedAt, clockChosen, outcome, matchedRuleIds, outputs]
+      required: [decisionId, ruleSet, version, evalClock, evaluatedAt, clockChosen, pinned, outcome, matchedRuleIds, outputs]
       properties:
         decisionId: { type: string }
         ruleSet: { type: string }
         version: { type: integer }
-        clock:
+        evalClock:
           type: string
           format: date-time
-          description: The instant the decision reasoned about; logged, and used again by replay
+          description: The instant the decision reasoned about, the request's `clock` or the host clock; logged as `eval_clock` and used again by replay
         evaluatedAt:
           type: string
           format: date-time
@@ -910,6 +913,11 @@ components:
           description: |
             True when the caller chose the clock, so the decision is back-dated or forward-dated. The
             decision row records it the same way, as an `eval_clock` different from `created_at`.
+        pinned:
+          type: boolean
+          description: |
+            True when the caller named the version (`rules:pin`) instead of the clock selecting the
+            version in force. Set by the engine and stored on the decision row; never read from a request.
         outcome:
           type: string
           enum: [MATCHED, NO_MATCH]

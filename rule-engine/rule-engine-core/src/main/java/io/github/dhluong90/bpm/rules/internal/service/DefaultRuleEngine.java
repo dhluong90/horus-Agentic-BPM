@@ -136,7 +136,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                 ? new DecisionResult.Matched(matched.ruleIds(), typed)
                 : new DecisionResult.NoMatch(typed);
         return new DecisionResult(stored.decisionId(), stored.ruleSet(), stored.version(), stored.clock(),
-                stored.evaluatedAt(), outcome);
+                stored.evaluatedAt(), stored.pinned(), outcome);
     }
 
     private static Object typedValue(Object value, io.github.dhluong90.bpm.rules.internal.model.ValueType.Kind kind) {
@@ -175,8 +175,9 @@ public final class DefaultRuleEngine implements RuleEngine {
         long started = System.nanoTime();
         DecisionResult.Outcome outcome = rules.evaluate(request.input(), at);
         long micros = (System.nanoTime() - started) / 1_000;
+        boolean pinned = request.version() != null;
         DecisionResult result = new DecisionResult(Ulid.next(now), version.ruleSet(), version.version(), at, now,
-                outcome);
+                pinned, outcome);
         ArrayNode matched = EngineJson.NODES.arrayNode();
         result.matchedRuleIds().forEach(matched::add);
         String errorCode = outcome instanceof DecisionResult.Failed failed ? failed.code() : null;
@@ -185,7 +186,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                 version.hitPolicy(), errorCode == null ? "OK" : errorCode, errorCode,
                 EngineValues.write(EngineValues.loggedInputs(request.input(), rules.inputs())),
                 errorCode == null ? EngineValues.write(EngineValues.decision(result).get("outputs")) : null,
-                EngineValues.write(matched), caller, request.correlationId(), at, micros));
+                EngineValues.write(matched), caller, request.correlationId(), at, micros, pinned));
         return result;
     }
 
@@ -241,7 +242,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                 outcome = new DecisionResult.Failed("EVALUATION_ERROR", failure.getMessage());
             }
             return new DecisionResult(logged.id(), version.ruleSet(), version.version(), logged.evalClock(),
-                    logged.createdAt(), outcome);
+                    logged.createdAt(), logged.pinned(), outcome);
         });
     }
 
@@ -294,10 +295,10 @@ public final class DefaultRuleEngine implements RuleEngine {
         System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
                 "ALERT rule set integrity: tenant " + tenant + ", " + detail);
         DecisionResult result = new DecisionResult(Ulid.next(now), version.ruleSet(), version.version(), at, now,
-                new DecisionResult.Failed("EVALUATION_ERROR", detail));
+                request.version() != null, new DecisionResult.Failed("EVALUATION_ERROR", detail));
         log.append(new DecisionRecord(tenant, result.decisionId(), now, version.ruleSet(), version.version(),
                 version.hitPolicy(), "EVALUATION_ERROR", "EVALUATION_ERROR", "{}", null, "[]", caller,
-                request.correlationId(), at, 0));
+                request.correlationId(), at, 0, result.pinned()));
         return result;
     }
 

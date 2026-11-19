@@ -282,12 +282,12 @@ R=examples/rule-engine-only/src/main/resources/rules
    ```bash
    curl -s -u hoa:demo-only -X POST $H/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
      -d '{"inputs":{"tier":"STANDARD","txCount":1},"clock":"2026-11-20T10:00:00Z"}'
-   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9","ruleSet":"card-fee","version":1,"clock":"2026-11-20T10:00:00Z",
-   #      "evaluatedAt":"2026-11-19T15:25:08.804765Z","clockChosen":true,"outcome":"MATCHED","matchedRuleIds":["R3"],
+   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9","ruleSet":"card-fee","version":1,"evalClock":"2026-11-20T10:00:00Z",
+   #      "evaluatedAt":"2026-11-19T15:25:08.804765Z","clockChosen":true,"pinned":false,"outcome":"MATCHED","matchedRuleIds":["R3"],
    #      "outputs":{"fee":{"currency":"VND","amount":50000}}}
    curl -s -u hoa:demo-only -X POST $H/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
      -d '{"inputs":{"tier":"STANDARD","txCount":1},"clock":"2026-12-01T00:00:00Z"}'
-   # 200 {...,"version":2,"clock":"2026-12-01T00:00:00Z",...,"outputs":{"fee":{"currency":"VND","amount":30000}}}
+   # 200 {...,"version":2,"evalClock":"2026-12-01T00:00:00Z",...,"outputs":{"fee":{"currency":"VND","amount":30000}}}
    ```
 
    Without a `clock` the host clock is used. Tuan, who holds `rules:evaluate` only, gets `403 CLOCK_NOT_ALLOWED` when he sends one.
@@ -296,14 +296,14 @@ R=examples/rule-engine-only/src/main/resources/rules
 
    ```bash
    curl -s -u minh:demo-only -X POST $H/decisions/01M7T6JQT4SA6RT95E8KW201Y9:replay
-   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9","version":1,"clock":"2026-11-20T10:00:00Z",...,
+   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9","version":1,"evalClock":"2026-11-20T10:00:00Z",...,
    #      "matchedRuleIds":["R3"],"outputs":{"fee":{"currency":"VND","amount":50000}}}
    docker exec horus-pg psql -U horus -d horus -c \
      "SELECT version_num, eval_clock, created_at, matched_rule_ids FROM rle_decision WHERE id = '01M7T6JQT4SA6RT95E8KW201Y9'"
    #  1 | 2026-11-20 10:00:00+00 | 2026-11-19 15:25:08.804765+00 | ["R3"]
    ```
 
-   Pinning, `POST $H/decisions/card-fee/versions/1:evaluate` with the same body, gives the same answer as a new logged decision. It needs `rules:pin`, which this host grants to nobody, because a pin bypasses the version in force; the [rule-and-process example](../rule-and-process) grants it only to the Process Engine's service identity, and `EffectiveDatesAndReplayIT` runs the call as one. Hoa's pin is `403 PERMISSION_DENIED`. A retired version is refused unless `horus.bpm.rules.evaluation.pin-retired` is `true`. A pinned draft is `409 INVALID_STATE`. Tuan's replay is `403 PERMISSION_DENIED`, and an unknown id, or one of another tenant, is `404 DECISION_NOT_FOUND`.
+   Pinning, `POST $H/decisions/card-fee/versions/1:evaluate` with the same body, gives the same answer as a new logged decision. It needs `rules:pin`, which this host grants to nobody, because a pin bypasses the version in force; no example host grants it until a process step pins a version, and `EffectiveDatesAndReplayIT` runs the call as a service identity that holds it. Hoa's pin is `403 PERMISSION_DENIED`. A retired version is refused unless `horus.bpm.rules.evaluation.pin-retired` is `true`. A pinned draft is `409 INVALID_STATE`. Tuan's replay is `403 PERMISSION_DENIED`, and an unknown id, or one of another tenant, is `404 DECISION_NOT_FOUND`.
 
 4. [`rules/same-day-cutoff.yaml`](src/main/resources/rules/same-day-cutoff.yaml) declares `timeZone: Asia/Ho_Chi_Minh`. At `2027-01-15T18:30:00Z` it is 01:30 on 16 January in Ho Chi Minh City, so a transfer dated 16 January is same-day and one dated 15 January is not. In UTC it would be the other way round. Import, request and approve it as above, then:
 

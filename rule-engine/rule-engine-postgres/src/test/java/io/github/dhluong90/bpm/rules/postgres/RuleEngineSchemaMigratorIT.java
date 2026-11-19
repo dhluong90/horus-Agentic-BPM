@@ -35,8 +35,8 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.initialVersion()).isNull();
-        assertThat(result.currentVersion()).isEqualTo("5");
-        assertThat(result.migrationsExecuted()).isEqualTo(5);
+        assertThat(result.currentVersion()).isEqualTo("10");
+        assertThat(result.migrationsExecuted()).isEqualTo(6);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
                 "rle_rule_set",
@@ -121,10 +121,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
-        assertThat(result.currentVersion()).isEqualTo("5");
-        assertThat(result.migrationsExecuted()).isEqualTo(5);
+        assertThat(result.currentVersion()).isEqualTo("10");
+        assertThat(result.migrationsExecuted()).isEqualTo(6);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3", "4", "5");
+                .containsExactly("0", "1", "2", "3", "4", "5", "10");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -137,12 +137,32 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult second = migrator.migrate();
 
-        assertThat(second.initialVersion()).isEqualTo("5");
-        assertThat(second.currentVersion()).isEqualTo("5");
+        assertThat(second.initialVersion()).isEqualTo("10");
+        assertThat(second.currentVersion()).isEqualTo("10");
         assertThat(second.migrationsExecuted()).isZero();
-        assertThat(migrator.currentVersion()).contains("5");
+        assertThat(migrator.currentVersion()).contains("10");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
-                .isEqualTo(5L);
+                .isEqualTo(6L);
+    }
+
+    @Test
+    void RLE_008_V10_adds_the_pinned_mark_to_every_partition_and_its_rollback_step_runs() {
+        DataSource db = freshDatabase();
+        new RuleEngineSchemaMigrator(db).migrate();
+        JdbcClient jdbc = JdbcClient.create(db);
+        insertDecision(jdbc, "01KCS3W1DQ0M8V6T2B9R5N7K4E", "2026-11-20T10:00:00Z");
+
+        // Then the column exists on the parent and the default partition, false for rows that did not pin
+        assertThat(jdbc.sql("SELECT pinned FROM rle_decision").query(Boolean.class).single()).isFalse();
+        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE column_name = 'pinned'"
+                + " AND table_name IN ('rle_decision', 'rle_decision_default')").query(Long.class).single())
+                .isEqualTo(2L);
+
+        // When the documented rollback step runs, Then the column is gone and the row stays
+        jdbc.sql("ALTER TABLE rle_decision DROP COLUMN pinned").update();
+        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE column_name = 'pinned'"
+                + " AND table_name = 'rle_decision'").query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision").query(Long.class).single()).isEqualTo(1L);
     }
 
     @Test
@@ -150,12 +170,12 @@ class RuleEngineSchemaMigratorIT {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 5));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 6));
         assertThat(migrator.status().isCurrent()).isFalse();
 
         migrator.migrate();
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus("5", 0));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus("10", 0));
         assertThat(migrator.status().isCurrent()).isTrue();
     }
 

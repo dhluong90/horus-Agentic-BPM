@@ -47,10 +47,10 @@ Example: `card-fee` v1 charges 50,000 VND from 1 Nov 2026, and v2 charges 30,000
 
 | Step | Who | Call | Expected |
 |---|---|---|---|
-| 1. Evaluate at a chosen instant | pricing (`rules:evaluate` and `rules:simulate`) | `POST /api/bpm/rules/v1/decisions/card-fee:evaluate` with `{ "inputs": { "tier": "STANDARD", "txCount": 1 }, "clock": "2026-11-20T10:00:00Z" }` | `200`, `"version": 1`, `"fee": { "currency": "VND", "amount": 50000 }`, `"clock": "2026-11-20T10:00:00Z"`, and `evaluatedAt` the time it ran |
+| 1. Evaluate at a chosen instant | pricing (`rules:evaluate` and `rules:simulate`) | `POST /api/bpm/rules/v1/decisions/card-fee:evaluate` with `{ "inputs": { "tier": "STANDARD", "txCount": 1 }, "clock": "2026-11-20T10:00:00Z" }` | `200`, `"version": 1`, `"fee": { "currency": "VND", "amount": 50000 }`, `"evalClock": "2026-11-20T10:00:00Z"`, `"clockChosen": true`, and `evaluatedAt` the time it ran |
 | 2. The same at the change | pricing | the same with `"clock": "2026-12-01T00:00:00Z"` | `"version": 2`, fee 30,000 VND |
-| 3. Replay the November decision after 5 Dec | an (`rules:log:read`) | `POST /api/bpm/rules/v1/decisions/{decisionId}:replay`, no body | `200` with the logged `decisionId`, `"version": 1`, fee 50,000 VND, the same `matchedRuleIds` and `clock`; nothing is written |
-| 4. Or pin the version and the clock | a service identity with `rules:pin` | `POST /api/bpm/rules/v1/decisions/card-fee/versions/1:evaluate` with the inputs and `"clock": "2026-11-20T10:00:00Z"` | The same version, fee and `matchedRuleIds`, logged as a new decision |
+| 3. Replay the November decision after 5 Dec | an (`rules:log:read`) | `POST /api/bpm/rules/v1/decisions/{decisionId}:replay`, no body | `200` with the logged `decisionId`, `"version": 1`, fee 50,000 VND, the same `matchedRuleIds` and `evalClock`; nothing is written |
+| 4. Or pin the version and the clock | a service identity with `rules:pin` | `POST /api/bpm/rules/v1/decisions/card-fee/versions/1:evaluate` with the inputs and `"clock": "2026-11-20T10:00:00Z"` | The same version, fee and `matchedRuleIds`, logged as a new decision with `"pinned": true` |
 
 In Java: `engine.evaluate(DecisionRequest.of("card-fee", input).withClock(at))`, `.withVersion(1)` to pin, and `engine.replay(decisionId)`.
 

@@ -251,9 +251,10 @@ public final class EngineValues {
         node.put("decisionId", result.decisionId());
         node.put("ruleSet", result.ruleSet());
         node.put("version", result.version());
-        node.put("clock", result.clock().toString());
+        node.put("evalClock", result.clock().toString());
         node.put("evaluatedAt", result.evaluatedAt().toString());
         node.put("clockChosen", result.clockChosen());
+        node.put("pinned", result.pinned());
         switch (result.outcome()) {
             case DecisionResult.Matched matched -> {
                 node.put("outcome", "MATCHED");
@@ -309,9 +310,10 @@ public final class EngineValues {
         };
         Instant evaluatedAt = Instant.parse(node.get("evaluatedAt").stringValue());
         // Records stored before the clock was a field of its own carry only evaluatedAt, which was the clock then.
-        Instant clock = node.has("clock") ? Instant.parse(node.get("clock").stringValue()) : evaluatedAt;
+        Instant clock = node.has("evalClock") ? Instant.parse(node.get("evalClock").stringValue()) : evaluatedAt;
+        boolean pinned = node.has("pinned") && node.get("pinned").asBoolean();
         return new DecisionResult(node.get("decisionId").stringValue(), node.get("ruleSet").stringValue(),
-                node.get("version").asInt(), clock, evaluatedAt, outcome);
+                node.get("version").asInt(), clock, evaluatedAt, pinned, outcome);
     }
 
     /**

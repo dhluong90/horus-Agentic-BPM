@@ -16,10 +16,12 @@ import java.util.Objects;
  * @param clock the instant the decision reasoned about: it selected the version and fed {@code today()} and
  *     {@code now()}; logged, so a replay uses it again (TR-DET-05)
  * @param evaluatedAt when the evaluation ran; equals {@code clock} unless the caller chose a clock
+ * @param pinned true when the caller named the version ({@code rules:pin}) instead of letting the clock select the
+ *     version in force; set by the engine and stored on the decision row, never taken from the request body
  * @param outcome what happened; switch over it exhaustively
  */
 public record DecisionResult(String decisionId, String ruleSet, int version, Instant clock, Instant evaluatedAt,
-        Outcome outcome) {
+        boolean pinned, Outcome outcome) {
 
     public DecisionResult {
         Objects.requireNonNull(decisionId, "decisionId must not be null");
@@ -27,6 +29,21 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
         Objects.requireNonNull(clock, "clock must not be null");
         Objects.requireNonNull(evaluatedAt, "evaluatedAt must not be null");
         Objects.requireNonNull(outcome, "outcome must not be null");
+    }
+
+    /**
+     * Creates a result of the version in force, not pinned.
+     *
+     * @param decisionId the decision id
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param clock the instant the decision reasoned about
+     * @param evaluatedAt when it ran
+     * @param outcome the outcome
+     */
+    public DecisionResult(String decisionId, String ruleSet, int version, Instant clock, Instant evaluatedAt,
+            Outcome outcome) {
+        this(decisionId, ruleSet, version, clock, evaluatedAt, false, outcome);
     }
 
     /**
@@ -39,7 +56,7 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
      * @param outcome the outcome
      */
     public DecisionResult(String decisionId, String ruleSet, int version, Instant evaluatedAt, Outcome outcome) {
-        this(decisionId, ruleSet, version, evaluatedAt, evaluatedAt, outcome);
+        this(decisionId, ruleSet, version, evaluatedAt, evaluatedAt, false, outcome);
     }
 
     /**

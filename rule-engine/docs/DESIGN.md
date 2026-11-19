@@ -231,7 +231,7 @@ Permissions are checked in `VersionService` and `RuleEngine` through `CallerReso
 
 ### 4.2 REST endpoints (`/api/bpm/rules/v1`)
 
-Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read`, `rules:pin`. `rules:pin` (0.2.0, security review of #261) evaluates one named approved version. No role holds it by default; the examples grant it only to the Process Engine's service identity, so a user who may evaluate cannot choose an older version over the one approved for today. One permission per endpoint, checked with `@PreAuthorize`; the host maps the strings to its roles.
+Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read`, `rules:pin`. `rules:pin` (0.2.0, security review of #261) evaluates one named approved version. No role holds it by default, and no example grants it until a process step pins a version (security review of #261), so a user who may evaluate cannot choose an older version over the one approved for today. A pinned decision is marked on its row (`pinned`, migration `V10`), as a decision at a chosen clock is (`eval_clock` differs from `created_at`); the evaluation result and replay return both as `pinned` and `clockChosen`, beside `evalClock`. One permission per endpoint, checked with `@PreAuthorize`; the host maps the strings to its roles.
 
 | Endpoint | Permission | Idempotency and concurrency | Error codes |
 |---|---|---|---|

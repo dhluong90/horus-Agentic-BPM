@@ -35,10 +35,10 @@ public final class JdbcDecisionLog implements DecisionLog {
         jdbc.sql("""
                 INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy, outcome,
                   error_code, masked_inputs, outputs, matched_rule_ids, caller_id, correlation_id, eval_clock,
-                  duration_micros, log_mode)
+                  duration_micros, log_mode, pinned)
                 VALUES (:tenant, :createdAt, :id, :ruleSet, :version, :hitPolicy, :outcome, :errorCode,
                   CAST(:inputs AS jsonb), CAST(:outputs AS jsonb), CAST(:matched AS jsonb), :caller, :correlation,
-                  :clock, :micros, 'TRANSACTIONAL')
+                  :clock, :micros, 'TRANSACTIONAL', :pinned)
                 """)
                 .param("tenant", r.tenantId()).param("createdAt", Timestamp.from(r.createdAt())).param("id", r.id())
                 .param("ruleSet", r.ruleSet()).param("version", r.version()).param("hitPolicy", r.hitPolicy())
@@ -46,7 +46,7 @@ public final class JdbcDecisionLog implements DecisionLog {
                 .param("inputs", r.maskedInputsJson()).param("outputs", r.outputsJson())
                 .param("matched", r.matchedRuleIdsJson()).param("caller", r.callerId())
                 .param("correlation", r.correlationId()).param("clock", Timestamp.from(r.evalClock()))
-                .param("micros", r.durationMicros())
+                .param("micros", r.durationMicros()).param("pinned", r.pinned())
                 .update();
     }
 
@@ -76,7 +76,7 @@ public final class JdbcDecisionLog implements DecisionLog {
     private static final String SELECT = """
             SELECT tenant_id, id, created_at, rule_set_name, version_num, hit_policy, outcome, error_code,
               masked_inputs::text AS masked_inputs, outputs::text AS outputs, matched_rule_ids::text AS matched_rule_ids,
-              caller_id, correlation_id, eval_clock, duration_micros
+              caller_id, correlation_id, eval_clock, duration_micros, pinned
             FROM rle_decision
             """;
 
@@ -86,6 +86,6 @@ public final class JdbcDecisionLog implements DecisionLog {
                 rs.getString("hit_policy"), rs.getString("outcome"), rs.getString("error_code"),
                 rs.getString("masked_inputs"), rs.getString("outputs"), rs.getString("matched_rule_ids"),
                 rs.getString("caller_id"), rs.getString("correlation_id"), rs.getTimestamp("eval_clock").toInstant(),
-                rs.getLong("duration_micros"));
+                rs.getLong("duration_micros"), rs.getBoolean("pinned"));
     }
 }

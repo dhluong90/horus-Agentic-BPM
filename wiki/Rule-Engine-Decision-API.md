@@ -112,9 +112,10 @@ Response `200 OK`:
 ```json
 { "decisionId": "01JD2X5K9T1Q4N8V2M7B3C6D0E", "ruleSet": "card-fee", "version": 2, "hitPolicy": "first",
   "outputs": { "fee": { "currency": "VND", "amount": 0 }, "waived": true },
-  "matchedRuleIds": ["R2"], "clock": "2026-12-01T00:00:00Z", "evaluatedAt": "2026-11-18T09:12:44Z", "durationMicros": 180 }
+  "matchedRuleIds": ["R2"], "evalClock": "2026-12-01T00:00:00Z", "evaluatedAt": "2026-11-18T09:12:44Z",
+  "clockChosen": true, "pinned": false, "durationMicros": 180 }
 ```
-`clock` is the instant the decision reasoned about; `evaluatedAt` is when it ran. Both are logged so the decision replays (`TR-DET-05`).
+`evalClock` is the instant the decision reasoned about (the request's `clock`, or the host clock); `evaluatedAt` is when it ran. Both are logged so the decision replays (`TR-DET-05`). `clockChosen` is true when the caller chose the clock, and `pinned` when the caller named the version (`rules:pin`); the engine sets both and stores them on the decision row, so a back-dated or pinned decision is visible in the log.
 
 Batch request and response wrap items in `{ "items": [ { "inputs": {}, "correlationId": "" } ] }` and `{ "results": [ { "index": 0, "decision": {} } | { "index": 1, "problem": {} } ] }`.
 

@@ -153,6 +153,18 @@ class EffectiveDatesAndReplayPostgresIT {
         assertThat(replayed.matchedRuleIds()).containsExactly("R4");
         assertThat(pinned.outcome()).isEqualTo(november.outcome());
         assertThat(count("rle_decision")).isEqualTo(rows + 1);
+        // and the log reads back what kind of decision each row is: chosen clock, pinned, or neither
+        assertThat(jdbc.sql("SELECT pinned, eval_clock <> created_at AS clock_chosen FROM rle_decision WHERE id = :id")
+                .param("id", pinned.decisionId()).query((rs, n) -> rs.getBoolean(1) + " " + rs.getBoolean(2)).single())
+                .isEqualTo("true true");
+        assertThat(jdbc.sql("SELECT pinned, eval_clock <> created_at FROM rle_decision WHERE id = :id")
+                .param("id", november.decisionId()).query((rs, n) -> rs.getBoolean(1) + " " + rs.getBoolean(2)).single())
+                .isEqualTo("false true");
+        caller.as("bank-a", "thu", AUDITOR);
+        DecisionResult pinnedReplay = podB.ruleEngine().replay(pinned.decisionId());
+        assertThat(pinnedReplay.pinned()).isTrue();
+        assertThat(pinnedReplay.clockChosen()).isTrue();
+        assertThat(replayed.pinned()).isFalse();
         assertThat(count("rle_decision_outbox")).isEqualTo(count("rle_version") * 3); // lifecycle events only
     }
 
