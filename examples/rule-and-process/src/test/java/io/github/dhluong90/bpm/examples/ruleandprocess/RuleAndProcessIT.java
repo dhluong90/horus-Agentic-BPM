@@ -3,7 +3,7 @@ package io.github.dhluong90.bpm.examples.ruleandprocess;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.host.spi.TenantResolver;
+import io.github.dhluong90.bpm.host.spi.TenantResolver;
 import io.github.dhluong90.bpm.process.api.InstanceNotFoundException;
 import io.github.dhluong90.bpm.process.api.NoEffectiveVersionException;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;

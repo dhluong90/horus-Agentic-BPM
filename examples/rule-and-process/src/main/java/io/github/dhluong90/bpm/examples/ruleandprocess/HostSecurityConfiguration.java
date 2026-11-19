@@ -1,7 +1,7 @@
 package io.github.dhluong90.bpm.examples.ruleandprocess;
 
-import com.horus.bpm.host.autoconfigure.BpmProblemAccessDeniedHandler;
-import com.horus.bpm.host.autoconfigure.BpmProblemAuthenticationEntryPoint;
+import io.github.dhluong90.bpm.host.autoconfigure.BpmProblemAccessDeniedHandler;
+import io.github.dhluong90.bpm.host.autoconfigure.BpmProblemAuthenticationEntryPoint;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.ArrayList;
