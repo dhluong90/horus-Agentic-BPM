@@ -46,6 +46,7 @@
     <module>bpm-host-metadata</module>
     <module>rule-engine</module>
     <module>process-engine</module>
+    <module>cockpit</module>
     <module>examples</module>
   </modules>
 
@@ -82,6 +83,7 @@
     <!-- JUnit tags of tests that apply to one Spring Boot line only; the 3.5 profile swaps the value. -->
     <excludedGroups>spring-boot-3.5-only</excludedGroups>
     <archunit.version>1.5.1</archunit.version>
+    <jqwik.version>1.10.2</jqwik.version>
     <!-- Test scope only: validates REST responses against the published JSON Schemas (Apache 2.0). -->
     <json-schema-validator.version>2.0.1</json-schema-validator.version>
 
@@ -124,6 +126,11 @@
         <groupId>com.tngtech.archunit</groupId>
         <artifactId>archunit-junit5</artifactId>
         <version>${archunit.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>net.jqwik</groupId>
+        <artifactId>jqwik</artifactId>
+        <version>${jqwik.version}</version>
       </dependency>
       <dependency>
         <groupId>com.networknt</groupId>
@@ -513,6 +520,11 @@
           <dependency>
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
+            <version>${jackson-3.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>tools.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
             <version>${jackson-3.version}</version>
           </dependency>
         </dependencies>

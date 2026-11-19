@@ -4,7 +4,7 @@ Every host that embeds an engine answers two requests: `GET /api/bpm/meta` says 
 
 ## What a host adds
 
-Nothing beyond the engine starter and its own security. The starter brings the small host metadata module `bpm-host-metadata`, which serves both endpoints once per host, whatever engines run in it. The endpoints are active when the host is a servlet application with Spring MVC and Spring Security; `horus.bpm.host-metadata.enabled=false` turns them off.
+Nothing beyond the engine starter and its own security. The starter brings the small host metadata module `bpm-host-metadata`, which serves both endpoints once per host, whatever engines run in it. The endpoints are active when the host is a servlet application with Spring MVC and Spring Security; `horus.bpm.host-metadata.enabled=false` turns off these two endpoints and nothing else. The controls the engine endpoints rely on stay on whatever the switch says: the `no-store` header on engine responses, the tenant resolver, the [one access check](#one-access-check-for-me-and-the-engine-endpoints) and the problem responses.
 
 The host owns its security chain, so it adds one call that makes engine errors RFC 9457 problem details. Every other path keeps the host's own behaviour, for example a redirect to its sign-in page:
 
@@ -21,7 +21,7 @@ SecurityFilterChain hostSecurity(HttpSecurity http) {
 }
 ```
 
-Both classes are in `com.horus.bpm.host.autoconfigure`. Without them the host's own handlers answer, usually with an empty `401` body or a redirect. Even a chain that lets every request through never exposes data: the endpoints check the caller themselves and answer `401` as a problem.
+Both classes are in `com.horus.bpm.host.autoconfigure`, and the module also registers one bean of each, built from `horus.bpm.security.challenge`, so a chain can inject them and send the same challenge as the endpoints. Without them the host's own handlers answer, usually with an empty `401` body or a redirect. Even a chain that lets every request through never exposes data: the endpoints check the caller themselves and answer `401` as a problem.
 
 ## How a client uses the two endpoints
 
@@ -125,7 +125,37 @@ horus.bpm.rules.security.role-permissions:
 
 Only the permissions of the engines installed in the host are ever listed: `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read` for the Rule Engine. A misspelt authority (`rules:delete`), a process permission on a host without the Process Engine, or an OAuth2 scope never appears. A role mapping that grants an unknown permission, such as `rules:aprove`, stops the host at start-up with a message naming it.
 
-The mapping is read today for `/me`. The Rule Engine's own endpoints use the same mapping when they arrive with 0.1.
+`/me` and the engine endpoints apply the mapping in one place, described next.
+
+## One access check for `/me` and the engine endpoints
+
+`/me` never decides on its own. Every engine endpoint and `/me` ask the same bean, `EngineAccess` in `com.horus.bpm.host.spi`: who is calling, in which tenant, and whether they hold a permission. `/me` lists exactly the permissions for which that bean answers yes, so the cockpit never shows a button the engine refuses, or hides one it allows.
+
+```mermaid
+flowchart LR
+    S[Host security chain] -- authenticated caller --> A[EngineAccess]
+    R[TenantResolver] -- tenant --> A
+    D[Engine role mappings] -- permissions per role --> A
+    A -- caller, tenant, yes or no per permission --> M[GET /api/bpm/me]
+    A -- caller, tenant, yes or no --> E[Engine endpoints]
+    M -- permissions --> C[Cockpit buttons]
+```
+
+| Method | Answers |
+|---|---|
+| `currentCaller()` | The caller of the current request: user id, display name, tenant, authorities and groups. The tenant checks below run here; a refusal is `EngineAccessDeniedException` with `UNAUTHENTICATED` or `TENANT_NOT_ALLOWED` |
+| `hasPermission(caller, "rules:approve")` | Yes when the caller holds the permission as an authority or through the engine's role mapping. A permission no installed engine declares is a programming error and throws `IllegalArgumentException` |
+| `requirePermission("rules:approve")` | The caller, or `EngineAccessDeniedException` with `PERMISSION_DENIED` |
+
+When an engine endpoint lets the refusal through, the module answers with the same problem body `/me` sends. Within one request the caller is resolved once, so an operation that asks several times writes at most one `tenant.switch.refused` or `tenant.unresolved` entry. A refused permission writes one entry too:
+
+```text
+permission.denied permission=rules:approve user=lan tenant=bank-a correlationId=01M7S1RASFFAP0S0R1G9GDDZW3 clientCorrelationId=-
+```
+
+The engines resolve no tenant and read no role mapping themselves; an architecture test fails the build if engine code does.
+
+A host may replace the check with its own `EngineAccess` bean, for example to ask an entitlement service that is kept in memory. `/me` then reports from the host's bean too. The bean must be thread-safe and must not call the network on each request.
 
 ## Tenant
 
@@ -176,7 +206,7 @@ tenant.switch.refused reason=switching-off user=lan%40bank-a.vn tokenTenant=bank
 | `X-Correlation-Id` | A ULID issued by the host for every request, also in every problem body. A caller's own `X-Correlation-Id` is never adopted; it is logged as `clientCorrelationId` |
 | `WWW-Authenticate` | On every `401`. `Bearer` by default (`horus.bpm.security.challenge`); for a caller without a tenant a bearer challenge adds `error="invalid_token"` |
 
-Engine API responses under `/api/bpm/rules/**` and `/api/bpm/processes/**` get `Cache-Control: no-store` from the same module.
+Engine API responses under `/api/bpm/rules/**` and `/api/bpm/processes/**` get `Cache-Control: no-store` from the same module, also when the metadata endpoints are switched off.
 
 | Status | `code` | When |
 |---|---|---|
@@ -203,7 +233,7 @@ A client must not repeat the sign-in more than once on `UNAUTHENTICATED` with `e
 | Property | Default | Meaning |
 |---|---|---|
 | `horus.bpm.host-id` | unset | Id clients show for this host, 1 to 40 characters |
-| `horus.bpm.host-metadata.enabled` | `true` | `false` turns both endpoints off, for hosts that already serve them another way |
+| `horus.bpm.host-metadata.enabled` | `true` | `false` turns off `/api/bpm/meta` and `/api/bpm/me` only, for hosts that already serve them another way. The `no-store` header, the tenant resolver, `EngineAccess` and the problem responses stay on |
 | `horus.bpm.tenancy.claim` | `tenant_id` | Attribute of the authenticated principal, token claim or session attribute, that carries the tenant; always compared with the resolved tenant |
 | `horus.bpm.tenancy.dev-tenant` | unset | Fixed tenant for principals that carry none; `dev` profile only |
 | `horus.bpm.security.challenge` | `Bearer` | `WWW-Authenticate` value of a `401` the endpoints raise themselves |
