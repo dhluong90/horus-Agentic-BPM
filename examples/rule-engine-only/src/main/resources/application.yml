@@ -20,8 +20,12 @@ management:
       # Component names only for authorised callers; hosts copy examples, so the safe default is shown.
       show-components: when-authorized
 
-# The one configuration block a host adds for the Rule Engine.
+# The one configuration block a host adds for the Rule Engine, plus the cockpit's name for this service.
 horus:
   bpm:
+    host-id: loans
     rules:
       enabled: true
+    cockpit:
+      host-label: Loan origination
+      environment: demo

@@ -59,6 +59,19 @@ To see the `ruleEngine` component locally, start with `--management.endpoint.hea
 | `HORUS_DB_USERNAME` | `horus` | Database user |
 | `HORUS_DB_PASSWORD` | none | Database password. Never put it in a file in the repository |
 | `PORT` | `8080` | HTTP port |
+| `HORUS_DEMO_PASSWORD` | none | Password of the demo users `lan` and `minh`. Without it nobody can sign in |
+
+## Open the cockpit
+
+The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`). Build the cockpit bundle before packaging, then start with a demo password:
+
+```bash
+npm --prefix cockpit/web ci && npm --prefix cockpit/web run build      # from the repository root
+mvn -B -pl examples/rule-engine-only -am package -DskipTests
+HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+```
+
+Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination`, the tenant and the user once the host serves `/api/bpm/meta` and `/api/bpm/me`; until then the cockpit shows that the service has no cockpit endpoints.
 
 ## Rule Engine properties
 
@@ -71,7 +84,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 
 ## Run in CI
 
-`.github/workflows/ci.yml` runs `mvn -B verify` on every pull request on Java 21 and Spring Boot 4.x. In this module, Failsafe runs two Testcontainers suites on `postgres:16-alpine`. The host's clock is fixed at 26 January 2027.
+`.github/workflows/ci.yml` runs `mvn -B verify` on every pull request on Java 21 and Spring Boot 4.x. In this module, Failsafe runs three Testcontainers suites on `postgres:16-alpine`. The host's clock is fixed at 26 January 2027.
 
 | Test | Proves |
 |---|---|
@@ -79,6 +92,8 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `RuleEngineOnlyHostIT.TR_OPS_04_*` | Start-up creates `rle_decision_2027_01` and `rle_decision_2027_02` from the host's clock |
 | `RuleEngineOnlyHostIT.TR_EMB_06_*` | Engine migrations are recorded only in `rle_schema_history`; the host's history holds only its own migration |
 | `RuleEngineOnlyHostIT.TR_EMB_04_*` | The engine uses the host's only `DataSource` and the transaction manager that manages it, and the host's Flyway bean is still the Spring Boot one |
+| `CockpitEmbeddedIT.TR_SEC_09_*` | Without a session the cockpit path redirects to the host's sign-in and serves no file |
+| `CockpitEmbeddedIT.CKP_001_*` | After sign-in the cockpit page carries the strict CSP and `cockpit-hosts.json` names this one host |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.
