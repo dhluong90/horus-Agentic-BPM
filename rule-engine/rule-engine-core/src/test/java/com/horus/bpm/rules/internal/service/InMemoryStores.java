@@ -1,11 +1,14 @@
 package com.horus.bpm.rules.internal.service;
 
 import com.horus.bpm.rules.api.RuleSetExistsException;
+import com.horus.bpm.rules.api.RuleSetSummary;
+import com.horus.bpm.rules.api.VersionSummary;
 import com.horus.bpm.rules.api.VersionConflictException;
 import com.horus.bpm.rules.api.VersionStatus;
 import com.horus.bpm.rules.internal.store.DecisionLog;
 import com.horus.bpm.rules.internal.store.DecisionRecord;
 import com.horus.bpm.rules.internal.store.EventOutbox;
+import com.horus.bpm.rules.internal.store.HistoryRow;
 import com.horus.bpm.rules.internal.store.IdempotencyStore;
 import com.horus.bpm.rules.internal.store.RuleStore;
 import com.horus.bpm.rules.internal.store.StoredVersion;
@@ -37,6 +40,7 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     final List<StoredVersion> versions = new ArrayList<>();
     final List<DecisionRecord> decisions = new ArrayList<>();
     final List<OutboxRow> outbox = new ArrayList<>();
+    final List<HistoryRow> history = new ArrayList<>();
     final Map<String, IdempotencyRow> idempotency = new ConcurrentHashMap<>();
     /** Keys a concurrent transaction holds; a claim on them is in flight. */
     final Set<String> heldKeys = new HashSet<>();
@@ -127,5 +131,54 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     public void record(String tenantId, String operation, String key, String requestHash, int statusCode,
             String responseJson, Instant expiresAt) {
         idempotency.put(tenantId + "|" + operation + "|" + key, new IdempotencyRow(requestHash, statusCode, responseJson, expiresAt));
+    }
+
+    @Override
+    public List<RuleSetSummary> listRuleSets(String tenantId, String afterName, int limit, Instant now) {
+        return ruleSets.stream().filter(r -> r.tenantId().equals(tenantId))
+                .filter(r -> afterName == null || r.name().compareTo(afterName) > 0)
+                .sorted(Comparator.comparing(RuleSetRow::name)).limit(limit)
+                .map(r -> summary(r, now)).toList();
+    }
+
+    @Override
+    public Optional<RuleSetSummary> findRuleSetSummary(String tenantId, String name, Instant now) {
+        return ruleSets.stream().filter(r -> r.tenantId().equals(tenantId) && r.name().equals(name)).findFirst()
+                .map(r -> summary(r, now));
+    }
+
+    private RuleSetSummary summary(RuleSetRow row, Instant now) {
+        List<StoredVersion> own = versions.stream()
+                .filter(v -> v.tenantId().equals(row.tenantId()) && v.ruleSetId().equals(row.id())).toList();
+        StoredVersion latest = own.stream().max(Comparator.comparingInt(StoredVersion::version)).orElseThrow();
+        Integer published = findEffective(row.tenantId(), row.name(), now).map(StoredVersion::version).orElse(null);
+        Set<String> ids = new HashSet<>();
+        own.forEach(v -> ids.add(v.id()));
+        Instant changed = own.stream().flatMap(v -> java.util.stream.Stream.of(v.createdAt(), v.requestedAt(), v.approvedAt()))
+                .filter(java.util.Objects::nonNull).max(Comparator.naturalOrder()).orElseThrow();
+        for (HistoryRow h : history) {
+            if (h.tenantId().equals(row.tenantId()) && ids.contains(h.versionId()) && h.occurredAt().isAfter(changed)) {
+                changed = h.occurredAt();
+            }
+        }
+        return new RuleSetSummary(row.name(), latest.version(), latest.status(), published, changed);
+    }
+
+    @Override
+    public List<VersionSummary> listVersions(String tenantId, String ruleSetId, Integer beforeVersion, int limit) {
+        return versions.stream().filter(v -> v.tenantId().equals(tenantId) && v.ruleSetId().equals(ruleSetId))
+                .filter(v -> beforeVersion == null || v.version() < beforeVersion)
+                .sorted(Comparator.comparingInt(StoredVersion::version).reversed()).limit(limit)
+                .map(StoredVersion::toSummary).toList();
+    }
+
+    @Override
+    public void appendHistory(HistoryRow row) {
+        history.add(row);
+    }
+
+    @Override
+    public List<HistoryRow> history(String tenantId, String versionId) {
+        return history.stream().filter(h -> h.tenantId().equals(tenantId) && h.versionId().equals(versionId)).toList();
     }
 }

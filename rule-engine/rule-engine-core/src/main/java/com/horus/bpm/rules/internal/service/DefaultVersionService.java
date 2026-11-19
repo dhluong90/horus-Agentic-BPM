@@ -4,6 +4,13 @@ import com.horus.bpm.rules.api.ImportRequest;
 import com.horus.bpm.rules.api.InputInvalidException;
 import com.horus.bpm.rules.api.InvalidStateException;
 import com.horus.bpm.rules.api.PayloadTooLargeException;
+import com.horus.bpm.rules.api.LifecycleAction;
+import com.horus.bpm.rules.api.Page;
+import com.horus.bpm.rules.api.PageRequest;
+import com.horus.bpm.rules.api.QueryInvalidException;
+import com.horus.bpm.rules.api.RuleSetSummary;
+import com.horus.bpm.rules.api.VersionHistoryEntry;
+import com.horus.bpm.rules.api.VersionSummary;
 import com.horus.bpm.rules.api.RuleSetExistsException;
 import com.horus.bpm.rules.api.RuleSetNotFoundException;
 import com.horus.bpm.rules.api.RuleSetVersion;
@@ -23,13 +30,16 @@ import com.horus.bpm.rules.internal.json.Ulid;
 import com.horus.bpm.rules.internal.read.ParsedRuleSet;
 import com.horus.bpm.rules.internal.read.RuleSetReader;
 import com.horus.bpm.rules.internal.store.EventOutbox;
+import com.horus.bpm.rules.internal.store.HistoryRow;
 import com.horus.bpm.rules.internal.store.RuleStore;
 import com.horus.bpm.rules.internal.store.StoredVersion;
 import io.github.dhluong90.bpm.rules.internal.dmn.ruleset.DmnWriter;
+import tools.jackson.databind.node.ObjectNode;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -45,6 +55,10 @@ public final class DefaultVersionService implements VersionService {
     static final String EVENT_CREATED = "rules.version.created.v1";
     static final String EVENT_PUBLISH_REQUESTED = "rules.version.publish-requested.v1";
     static final String EVENT_PUBLISHED = "rules.version.published.v1";
+    static final String EVENT_REJECTED = "rules.version.rejected.v1";
+
+    private static final String CURSOR_RULE_SETS = "rule-sets";
+    private static final String CURSOR_VERSIONS = "versions";
 
     private final EngineContext context;
     private final RuleStore store;
@@ -118,6 +132,7 @@ public final class DefaultVersionService implements VersionService {
                 parsed.canonicalJson(), parsed.canonicalHash(), format, sourceText, Hashes.sha256(source), 0,
                 null, null, null, null, null, actor, now);
         store.insertVersion(version);
+        history(version, LifecycleAction.CREATED, null, actor, null, now);
         event(tenant, EVENT_CREATED, version, actor, now);
         return version.toView(false);
     }
@@ -138,6 +153,7 @@ public final class DefaultVersionService implements VersionService {
             Instant now = context.clock().instant();
             StoredVersion updated = current.requested(actor, now);
             store.updateVersion(updated, current.lockVersion());
+            history(updated, LifecycleAction.REQUESTED, current.status(), actor, null, now);
             event(tenant, EVENT_PUBLISH_REQUESTED, updated, actor, now);
             return updated.toView(false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
@@ -163,9 +179,121 @@ public final class DefaultVersionService implements VersionService {
             Instant now = context.clock().instant();
             StoredVersion updated = current.approved(actor, now, opts.comment());
             store.updateVersion(updated, current.lockVersion());
+            history(updated, LifecycleAction.APPROVED, current.status(), actor, opts.comment(), now);
             event(tenant, EVENT_PUBLISHED, updated, actor, now);
             return updated.toView(false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
+    }
+
+    @Override
+    public RuleSetVersion reject(String ruleSet, int version, WriteOptions options) {
+        WriteOptions opts = options == null ? WriteOptions.none() : options;
+        String tenant = context.tenant();
+        String actor = context.callerWith(PERMISSION_APPROVE);
+        String reason = requireReason(opts.comment());
+        String requestHash = Hashes.sha256Parts("reject", actor, ruleSet, Integer.toString(version),
+                String.valueOf(opts.expectedLockVersion()), reason);
+        return context.idempotent(tenant, "reject", opts.idempotencyKey(), requestHash, 200, () -> {
+            StoredVersion current = load(tenant, ruleSet, version);
+            if (current.status() != VersionStatus.PENDING_APPROVAL) {
+                throw new InvalidStateException(ruleSet, version, current.status(), "reject");
+            }
+            // No four-eyes check: a rejection publishes nothing, and the requester rejecting their own request
+            // withdraws it (DESIGN section 3.3).
+            checkLock(current, opts);
+            Instant now = context.clock().instant();
+            StoredVersion updated = current.rejected();
+            store.updateVersion(updated, current.lockVersion());
+            history(updated, LifecycleAction.REJECTED, current.status(), actor, reason, now);
+            event(tenant, EVENT_REJECTED, updated, actor, now, payload -> payload
+                    .put("rejectedBy", actor)
+                    .put("reason", reason));
+            return updated.toView(false);
+        }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
+    }
+
+    @Override
+    public Page<RuleSetSummary> listRuleSets(PageRequest page) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        PageRequest request = page == null ? PageRequest.first() : page;
+        int limit = limit(request);
+        String after = Cursors.decode(CURSOR_RULE_SETS, request.cursor());
+        return context.withoutDooming(() -> {
+            List<RuleSetSummary> rows = store.listRuleSets(tenant, after, limit + 1, context.clock().instant());
+            return page(rows, limit, last -> Cursors.encode(CURSOR_RULE_SETS, last.ruleSet()));
+        });
+    }
+
+    @Override
+    public Optional<RuleSetSummary> findRuleSet(String ruleSet) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        return context.withoutDooming(() -> store.findRuleSetSummary(tenant, ruleSet, context.clock().instant()));
+    }
+
+    @Override
+    public Page<VersionSummary> listVersions(String ruleSet, PageRequest page) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        PageRequest request = page == null ? PageRequest.first() : page;
+        int limit = limit(request);
+        String before = Cursors.decode(CURSOR_VERSIONS, request.cursor());
+        Integer beforeVersion = before == null ? null : Cursors.positiveInt(before);
+        return context.withoutDooming(() -> {
+            String ruleSetId = store.findRuleSetId(tenant, ruleSet).orElseThrow(() -> new RuleSetNotFoundException(ruleSet));
+            List<VersionSummary> rows = store.listVersions(tenant, ruleSetId, beforeVersion, limit + 1);
+            return page(rows, limit, last -> Cursors.encode(CURSOR_VERSIONS, Integer.toString(last.version())));
+        });
+    }
+
+    @Override
+    public List<VersionHistoryEntry> history(String ruleSet, int version) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        return context.withoutDooming(() -> {
+            StoredVersion stored = store.findVersion(tenant, ruleSet, version, false).orElseThrow(() ->
+                    store.findRuleSetId(tenant, ruleSet).isPresent()
+                            ? new VersionNotFoundException(ruleSet, version)
+                            : new RuleSetNotFoundException(ruleSet));
+            return store.history(tenant, stored.id()).stream().map(HistoryRow::toEntry).toList();
+        });
+    }
+
+    private int limit(PageRequest request) {
+        int max = context.settings().queryMaxPageSize();
+        if (request.limit() == null) {
+            return Math.min(EngineDefaults.QUERY_DEFAULT_PAGE_SIZE, max);
+        }
+        if (request.limit() < 1 || request.limit() > max) {
+            throw new QueryInvalidException("limit must be 1 to " + max + ", was " + request.limit());
+        }
+        return request.limit();
+    }
+
+    private static <T> Page<T> page(List<T> rows, int limit, java.util.function.Function<T, String> cursorOf) {
+        if (rows.size() <= limit) {
+            return new Page<>(rows, null);
+        }
+        List<T> items = rows.subList(0, limit);
+        return new Page<>(items, cursorOf.apply(items.getLast()));
+    }
+
+    private String requireReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            throw new InputInvalidException("reason is required and must not be blank");
+        }
+        int max = context.settings().reasonMaxLength();
+        if (reason.length() > max) {
+            throw new InputInvalidException("reason must be at most " + max + " characters, was " + reason.length());
+        }
+        return reason;
+    }
+
+    private void history(StoredVersion version, LifecycleAction action, VersionStatus from, String actor,
+            String reason, Instant at) {
+        store.appendHistory(new HistoryRow(version.tenantId(), Ulid.next(at), version.id(), action, from,
+                version.status(), actor, reason, version.lockVersion(), at));
     }
 
     @Override
@@ -207,14 +335,20 @@ public final class DefaultVersionService implements VersionService {
     }
 
     private void event(String tenant, String type, StoredVersion version, String actor, Instant at) {
-        String payload = EngineValues.write(EngineJson.NODES.objectNode()
+        event(tenant, type, version, actor, at, payload -> { });
+    }
+
+    private void event(String tenant, String type, StoredVersion version, String actor, Instant at,
+            java.util.function.Consumer<ObjectNode> extra) {
+        ObjectNode payload = EngineJson.NODES.objectNode()
                 .put("eventType", type)
                 .put("ruleSet", version.ruleSet())
                 .put("version", version.version())
                 .put("tenantId", tenant)
                 .put("actor", actor)
-                .put("occurredAt", at.toString()));
-        outbox.append(tenant, Ulid.next(at), payload, at);
+                .put("occurredAt", at.toString());
+        extra.accept(payload);
+        outbox.append(tenant, Ulid.next(at), EngineValues.write(payload), at);
     }
 
     private static String utf8(byte[] source) {

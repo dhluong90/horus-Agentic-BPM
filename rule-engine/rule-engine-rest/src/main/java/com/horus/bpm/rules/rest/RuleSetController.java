@@ -2,15 +2,24 @@ package com.horus.bpm.rules.rest;
 
 import com.horus.bpm.rules.api.ImportRequest;
 import com.horus.bpm.rules.api.InputInvalidException;
+import com.horus.bpm.rules.api.Page;
+import com.horus.bpm.rules.api.PageRequest;
+import com.horus.bpm.rules.api.RuleSetNotFoundException;
+import com.horus.bpm.rules.api.RuleSetSummary;
+import com.horus.bpm.rules.api.VersionHistoryEntry;
+import com.horus.bpm.rules.api.VersionSummary;
 import com.horus.bpm.rules.api.SourceFormat;
 import com.horus.bpm.rules.api.VersionNotFoundException;
 import com.horus.bpm.rules.api.VersionService;
 import com.horus.bpm.rules.api.WriteOptions;
+import com.horus.bpm.rules.internal.json.EngineJson;
+import com.horus.bpm.rules.internal.service.EngineDefaults;
 import com.horus.bpm.rules.internal.json.EngineValues;
 import com.horus.bpm.rules.spi.CallerResolver;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import org.springframework.http.HttpHeaders;
@@ -25,6 +34,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Import, read and the publication lifecycle of rule set versions. The tenant comes from the
@@ -48,6 +59,49 @@ public class RuleSetController {
         this.callers = Objects.requireNonNull(callers, "callers must not be null");
     }
 
+    /** {@code GET /rule-sets}: the caller's rule sets by name, keyset-paged. */
+    @GetMapping
+    public ResponseEntity<byte[]> listRuleSets(
+            @RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor) {
+        RestSupport.require(callers, "rules:read");
+        Page<RuleSetSummary> page = versions.listRuleSets(new PageRequest(RestSupport.limit(limit), cursor));
+        return RestSupport.json(HttpStatus.OK, RestSupport.page(page, RestSupport::ruleSetSummary));
+    }
+
+    /** {@code GET /rule-sets/{name}}: the summary of one rule set. */
+    @GetMapping("/{name}")
+    public ResponseEntity<byte[]> getRuleSet(@PathVariable("name") String name) {
+        RestSupport.require(callers, "rules:read");
+        return versions.findRuleSet(name)
+                .map(summary -> RestSupport.json(HttpStatus.OK, RestSupport.ruleSetSummary(summary)))
+                .orElseThrow(() -> new RuleSetNotFoundException(name));
+    }
+
+    /** {@code GET /rule-sets/{name}/versions}: versions newest first, keyset-paged. */
+    @GetMapping("/{name}/versions")
+    public ResponseEntity<byte[]> listVersions(
+            @PathVariable("name") String name,
+            @RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor) {
+        RestSupport.require(callers, "rules:read");
+        Page<VersionSummary> page = versions.listVersions(name, new PageRequest(RestSupport.limit(limit), cursor));
+        return RestSupport.json(HttpStatus.OK, RestSupport.page(page, v -> RestSupport.versionSummary(v, callers)));
+    }
+
+    /** {@code GET /rule-sets/{name}/versions/{v}/history}: lifecycle history, oldest first. */
+    @GetMapping("/{name}/versions/{version:\\d+}/history")
+    public ResponseEntity<byte[]> history(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version) {
+        RestSupport.require(callers, "rules:read");
+        List<VersionHistoryEntry> entries = versions.history(name, version);
+        ObjectNode body = EngineJson.NODES.objectNode();
+        ArrayNode data = body.putArray("data");
+        entries.forEach(entry -> data.add(RestSupport.historyEntry(entry)));
+        return RestSupport.json(HttpStatus.OK, body);
+    }
+
     /** {@code POST /rule-sets}: imports a document as version 1 of a new rule set. */
     @PostMapping
     public ResponseEntity<byte[]> importRuleSet(
@@ -58,7 +112,7 @@ public class RuleSetController {
         RestSupport.require(callers, "rules:author");
         ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength),
                 idempotencyKey);
-        return RestSupport.version(HttpStatus.CREATED, versions.importRuleSet(request));
+        return RestSupport.version(HttpStatus.CREATED, versions.importRuleSet(request), callers);
     }
 
     /** {@code POST /rule-sets/{name}/versions}: imports a document as the next draft version. */
@@ -72,7 +126,7 @@ public class RuleSetController {
         RestSupport.require(callers, "rules:author");
         ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength),
                 idempotencyKey);
-        return RestSupport.version(HttpStatus.CREATED, versions.importVersion(name, request));
+        return RestSupport.version(HttpStatus.CREATED, versions.importVersion(name, request), callers);
     }
 
     /** {@code GET /rule-sets/{name}/versions/{v}}; {@code ?include=source} adds the source document. */
@@ -84,7 +138,7 @@ public class RuleSetController {
         RestSupport.require(callers, "rules:read");
         boolean withSource = "source".equals(include);
         return versions.find(name, version, withSource)
-                .map(v -> RestSupport.version(HttpStatus.OK, v))
+                .map(v -> RestSupport.version(HttpStatus.OK, v, callers))
                 .orElseThrow(() -> new VersionNotFoundException(name, version));
     }
 
@@ -97,7 +151,7 @@ public class RuleSetController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         RestSupport.require(callers, "rules:author");
         WriteOptions options = new WriteOptions(idempotencyKey, RestSupport.ifMatch(ifMatch), null);
-        return RestSupport.version(HttpStatus.OK, versions.requestPublish(name, version, options));
+        return RestSupport.version(HttpStatus.OK, versions.requestPublish(name, version, options), callers);
     }
 
     /** {@code POST /rule-sets/{name}/versions/{v}:approve}, optional body {@code {"comment": "..."}}. */
@@ -105,12 +159,14 @@ public class RuleSetController {
     public ResponseEntity<byte[]> approve(
             @PathVariable("name") String name,
             @PathVariable("version") int version,
-            @RequestBody(required = false) byte[] body,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
         RestSupport.require(callers, "rules:approve");
+        byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         String comment = null;
-        if (body != null && body.length > 0) {
+        if (body.length > 0) {
             JsonNode node = EngineValues.readRequest(body);
             JsonNode value = node.get("comment");
             if (value != null && !value.isNull()) {
@@ -121,7 +177,32 @@ public class RuleSetController {
             }
         }
         WriteOptions options = new WriteOptions(idempotencyKey, RestSupport.ifMatch(ifMatch), comment);
-        return RestSupport.version(HttpStatus.OK, versions.approve(name, version, options));
+        return RestSupport.version(HttpStatus.OK, versions.approve(name, version, options), callers);
+    }
+
+    /** {@code POST /rule-sets/{name}/versions/{v}:reject}, body {@code {"reason": "..."}} required. */
+    @PostMapping("/{name}/versions/{version:\\d+}:reject")
+    public ResponseEntity<byte[]> reject(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
+            @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        RestSupport.require(callers, "rules:approve");
+        byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
+        String reason = null;
+        if (body.length > 0) {
+            JsonNode value = EngineValues.readRequest(body).get("reason");
+            if (value != null && !value.isNull()) {
+                if (!value.isString()) {
+                    throw new InputInvalidException("reason must be a string");
+                }
+                reason = value.stringValue();
+            }
+        }
+        WriteOptions options = new WriteOptions(idempotencyKey, RestSupport.ifMatch(ifMatch), reason);
+        return RestSupport.version(HttpStatus.OK, versions.reject(name, version, options), callers);
     }
 
     /**

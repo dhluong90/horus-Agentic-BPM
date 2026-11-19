@@ -2,6 +2,7 @@ package com.horus.bpm.rules.internal.read;
 
 import com.horus.bpm.rules.api.SourceFormat;
 import com.horus.bpm.rules.api.ValidationFailedException;
+import com.horus.bpm.rules.api.Violation;
 import com.horus.bpm.rules.internal.json.CanonicalJson;
 import com.horus.bpm.rules.internal.json.EngineJson;
 import com.horus.bpm.rules.internal.json.Hashes;
@@ -187,7 +188,7 @@ public final class RuleSetReader {
             if (!outputNames.add(outputName)) {
                 throw invalid("Duplicate output '" + outputName + "'");
             }
-            Cell defaultValue = output.has("default") ? cell(output.get("default"), outputName) : null;
+            Cell defaultValue = output.has("default") ? cell(output.get("default"), null, outputName) : null;
             outputs.add(new OutputClause(outputName, type(output, outputName), defaultValue));
         }
         List<Rule> rules = new ArrayList<>();
@@ -197,24 +198,28 @@ public final class RuleSetReader {
                 throw invalid("Every rule must be a mapping");
             }
             String id = text(rule, "id");
-            onlyKeys(rule, RULE_KEYS, "Rule " + id);
             if (!RULE_ID.matcher(id).matches() || id.length() > 64) {
                 throw invalid("Rule id '" + id + "' is not a valid id");
             }
+            for (String key : rule.propertyNames()) {
+                if (!RULE_KEYS.contains(key)) {
+                    throw invalidAt(id, null, "Unknown property '" + key + "'");
+                }
+            }
             if (!ruleIds.add(id)) {
-                throw invalid("Duplicate rule id '" + id + "'");
+                throw invalidAt(id, null, "duplicate rule id");
             }
             When when = when(required(rule, "when"), inputNames, id);
             JsonNode thenNode = required(rule, "then");
             if (!thenNode.isObject()) {
-                throw invalid("Rule " + id + ": then must be a mapping");
+                throw invalidAt(id, null, "then must be a mapping");
             }
             Map<String, Cell> then = new LinkedHashMap<>();
             for (Map.Entry<String, JsonNode> entry : thenNode.properties()) {
                 if (!outputNames.contains(entry.getKey())) {
-                    throw invalid("Rule " + id + ": unknown output '" + entry.getKey() + "'");
+                    throw invalidAt(id, entry.getKey(), "unknown output '" + entry.getKey() + "'");
                 }
-                then.put(entry.getKey(), cell(entry.getValue(), id));
+                then.put(entry.getKey(), cell(entry.getValue(), id, entry.getKey()));
             }
             rules.add(new Rule(id, when, then));
         }
@@ -280,7 +285,7 @@ public final class RuleSetReader {
 
     private static When when(JsonNode node, Set<String> inputNames, String ruleId) {
         if (!node.isObject()) {
-            throw invalid("Rule " + ruleId + ": when must be a mapping");
+            throw invalidAt(ruleId, null, "when must be a mapping");
         }
         Map<String, String> cells = new LinkedHashMap<>();
         List<When> any = new ArrayList<>();
@@ -290,17 +295,17 @@ public final class RuleSetReader {
             JsonNode value = entry.getValue();
             if (key.equals("any") || key.equals("all")) {
                 if (!value.isArray() || value.isEmpty()) {
-                    throw invalid("Rule " + ruleId + ": " + key + " must be a non-empty list");
+                    throw invalidAt(ruleId, null, key + " must be a non-empty list");
                 }
                 for (JsonNode nested : value) {
                     (key.equals("any") ? any : all).add(when(nested, inputNames, ruleId));
                 }
             } else {
                 if (!inputNames.contains(key)) {
-                    throw invalid("Rule " + ruleId + ": unknown input '" + key + "'");
+                    throw invalidAt(ruleId, key, "unknown input '" + key + "'");
                 }
                 if (!value.isString() || value.stringValue().isBlank()) {
-                    throw invalid("Rule " + ruleId + ": condition of '" + key + "' must be a non-empty string");
+                    throw invalidAt(ruleId, key, "the condition must be a non-empty string");
                 }
                 cells.put(key, value.stringValue());
             }
@@ -308,7 +313,7 @@ public final class RuleSetReader {
         return new When(cells, any, all);
     }
 
-    private static Cell cell(JsonNode value, String where) {
+    private static Cell cell(JsonNode value, String ruleId, String column) {
         if (value.isNull()) {
             return new Cell.Literal(null);
         }
@@ -321,7 +326,7 @@ public final class RuleSetReader {
         if (value.isString()) {
             return new Cell.Expression(value.stringValue());
         }
-        throw invalid(where + ": a cell must be a string, number, boolean or null");
+        throw invalidAt(ruleId, column, "a cell must be a string, number, boolean or null");
     }
 
     private static ValueType type(JsonNode clause, String name) {
@@ -384,5 +389,9 @@ public final class RuleSetReader {
 
     private static ValidationFailedException invalid(String detail) {
         return new ValidationFailedException(detail);
+    }
+
+    private static ValidationFailedException invalidAt(String ruleId, String column, String message) {
+        return new ValidationFailedException(List.of(new Violation(ruleId, column, message)));
     }
 }
