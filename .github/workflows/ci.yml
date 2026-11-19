@@ -296,10 +296,19 @@ jobs:
 
   cockpit:
     # The cockpit web application: licences of shipped packages, generated schemas, lint, types,
-    # Vitest, then Playwright on the bundled Chromium against the production build.
+    # Vitest, then Playwright on the Chromium of the Playwright image against the production build.
     name: Cockpit (lint, typecheck, Vitest, Playwright)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Chromium and the system libraries it needs come with Playwright's own image, pinned by digest, so
+    # no apt download is on this job's critical path (an Ubuntu mirror outage failed every run). The tag
+    # is the @playwright/test version in cockpit/web/package-lock.json; the first step below checks it.
+    # Update the tag, the digest and PLAYWRIGHT_IMAGE_VERSION together with the lockfile.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+      options: --ipc=host
+    env:
+      PLAYWRIGHT_IMAGE_VERSION: "1.65.1"
     defaults:
       run:
         working-directory: cockpit/web
@@ -311,6 +320,15 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: cockpit/web/package-lock.json
+
+      - name: The Playwright image matches the lockfile
+        run: |
+          locked="$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")"
+          if [ "$locked" != "$PLAYWRIGHT_IMAGE_VERSION" ]; then
+            echo "::error title=Playwright image out of date::package-lock.json has @playwright/test $locked, the job image is $PLAYWRIGHT_IMAGE_VERSION. Update the image tag and digest in ci.yml."
+            exit 1
+          fi
+          echo "@playwright/test $locked, image $PLAYWRIGHT_IMAGE_VERSION: browsers come from the image."
 
       - name: Install
         run: npm ci
@@ -329,9 +347,6 @@ jobs:
 
       - name: Vitest
         run: npm test
-
-      - name: Install the bundled Chromium
-        run: npx playwright install --with-deps chromium
 
       - name: Playwright (production build, 1440x900 and 1440x1200, light and dark, English and Vietnamese)
         run: npm run e2e
