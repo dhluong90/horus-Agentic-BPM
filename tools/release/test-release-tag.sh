@@ -11,6 +11,7 @@
 #            3. one module at another version          refused, naming the module and its version
 #            4. a commit off main                      refused
 #            5. a per-module tag on a commit off main  both problems named in one run
+#            6. a POM Maven cannot read                refused, and a per-module tag is still named
 #          The checkout itself is never changed.
 # Exit:    0 when every case behaves as expected, 1 otherwise.
 
@@ -19,7 +20,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RELEASE_GROUP_ID="io.github.dhluong90.bpm"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# Keep the exit status: bash 3.2 would otherwise exit with the status of the clean-up.
+trap 'status=$?; rm -rf "$WORK"; exit $status' EXIT
 repo="$WORK/repo"
 mkdir -p "$repo"
 
@@ -97,8 +99,16 @@ expect "a commit off main is refused" "v$release" 1 "which is not on main"
 expect "every problem is named in one run" "rule-engine/v$release" 1 \
   "is a per-module tag" "which is not on main"
 
+# A POM Maven cannot read: the guard retries, then still names the wrong tag form.
+git_ checkout -q main
+printf '<project>\n' > "$repo/bpm-bom/pom.xml"
+git_ commit -q -am "unreadable POM"
+git_ update-ref refs/remotes/origin/main HEAD
+expect "an unreadable POM is refused and the tag form is still checked" "rule-engine/v$release" 1 \
+  "so no module version or group id was checked" "is a per-module tag"
+
 if (( failures > 0 )); then
   echo "Release tag guard tests: $failures case(s) failed."
   exit 1
 fi
-echo "Release tag guard tests: all 5 cases behaved as expected."
+echo "Release tag guard tests: all 6 cases behaved as expected."

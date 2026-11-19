@@ -62,6 +62,10 @@ class ReleaseTagTest(unittest.TestCase):
         errors = self.errors("rule-engine/v0.1.0", projects)
         self.assertEqual(4, len(errors), errors)
 
+    def test_without_an_effective_pom_the_tag_form_is_still_checked(self):
+        self.assertEqual(1, release_sbom.release_tag("rule-engine/v0.1.0", None, GROUP))
+        self.assertEqual(0, release_sbom.release_tag("v0.1.0", None, GROUP))
+
     def test_reads_every_project_of_a_reactor_effective_pom(self):
         pom = """<?xml version="1.0"?>
 <projects>
