@@ -5,6 +5,7 @@ import com.horus.bpm.rules.api.DecisionResult;
 import com.horus.bpm.rules.api.InputInvalidException;
 import com.horus.bpm.rules.api.Money;
 import com.horus.bpm.rules.api.ValidationFailedException;
+import com.horus.bpm.rules.api.Violation;
 import com.horus.bpm.rules.internal.expr.EvaluationException;
 import com.horus.bpm.rules.internal.expr.Evaluator;
 import com.horus.bpm.rules.internal.expr.Expr;
@@ -59,11 +60,11 @@ public final class CompiledRuleSet {
     }
 
     /**
-     * Compiles a model.
+     * Compiles a model. Every cell is checked; all problems are reported together, each on its rule and column.
      *
      * @param model the decision model
      * @return the compiled rule set
-     * @throws ValidationFailedException when a cell does not parse, with the rule id
+     * @throws ValidationFailedException when a cell does not parse or has the wrong type, listing every such cell
      */
     public static CompiledRuleSet compile(Definitions model) {
         DecisionTable table = model.decision().table();
@@ -74,20 +75,25 @@ public final class CompiledRuleSet {
         for (int i = 0; i < table.inputs().size(); i++) {
             slots.put(table.inputs().get(i).name(), i);
         }
+        List<Violation> problems = new ArrayList<>();
         Map<String, Expr> defaults = new LinkedHashMap<>();
         for (OutputClause output : table.outputs()) {
             defaults.put(output.name(), output.defaultValue() == null
-                    ? new Expr.Literal(null) : cell(output.defaultValue(), slots, "output " + output.name()));
+                    ? new Expr.Literal(null) : output(output.defaultValue(), output, slots, table.inputs(), null, problems));
         }
         List<CompiledRule> rules = new ArrayList<>();
         for (Rule rule : table.rules()) {
-            Expr condition = when(rule.when(), slots, table.inputs(), rule.id());
+            Expr condition = when(rule.when(), slots, table.inputs(), rule.id(), problems);
             List<Expr> thens = new ArrayList<>();
             for (OutputClause output : table.outputs()) {
                 Cell cell = rule.then().get(output.name());
-                thens.add(cell == null ? defaults.get(output.name()) : cell(cell, slots, "rule " + rule.id()));
+                thens.add(cell == null ? defaults.get(output.name())
+                        : output(cell, output, slots, table.inputs(), rule.id(), problems));
             }
             rules.add(new CompiledRule(rule.id(), condition, thens));
+        }
+        if (!problems.isEmpty()) {
+            throw new ValidationFailedException(problems);
         }
         return new CompiledRuleSet(model, rules);
     }
@@ -261,21 +267,22 @@ public final class CompiledRuleSet {
         }
     }
 
-    private static Expr when(When when, Map<String, Integer> slots, List<InputClause> inputs, String ruleId) {
+    private static Expr when(When when, Map<String, Integer> slots, List<InputClause> inputs, String ruleId,
+            List<Violation> problems) {
         List<Expr> parts = new ArrayList<>();
         for (Map.Entry<String, String> cell : when.cells().entrySet()) {
-            parts.add(condition(cell.getKey(), cell.getValue(), slots, inputs, ruleId));
+            parts.add(condition(cell.getKey(), cell.getValue(), slots, inputs, ruleId, problems));
         }
         if (!when.any().isEmpty()) {
             Expr any = null;
             for (When nested : when.any()) {
-                Expr next = when(nested, slots, inputs, ruleId);
+                Expr next = when(nested, slots, inputs, ruleId, problems);
                 any = any == null ? next : new Expr.Binary(Expr.BinaryOp.OR, any, next);
             }
             parts.add(any);
         }
         for (When nested : when.all()) {
-            parts.add(when(nested, slots, inputs, ruleId));
+            parts.add(when(nested, slots, inputs, ruleId, problems));
         }
         Expr result = new Expr.Literal(Boolean.TRUE);
         for (Expr part : parts) {
@@ -284,8 +291,9 @@ public final class CompiledRuleSet {
         return result;
     }
 
+    /** Parses and type-checks one condition cell; a problem is recorded on its cell and a placeholder returned. */
     private static Expr condition(String input, String text, Map<String, Integer> slots, List<InputClause> inputs,
-            String ruleId) {
+            String ruleId, List<Violation> problems) {
         String trimmed = text.strip();
         boolean shorthand = SHORTHAND_PREFIXES.stream().anyMatch(trimmed::startsWith);
         String source = shorthand ? input + " " + trimmed : trimmed;
@@ -293,23 +301,35 @@ public final class CompiledRuleSet {
         try {
             expr = Parser.parse(source, name -> slots.getOrDefault(name, -1));
         } catch (ExpressionException e) {
-            throw new ValidationFailedException("Rule " + ruleId + ", input " + input + ": " + e.getMessage());
+            problems.add(new Violation(ruleId, input, e.getMessage()));
+            return new Expr.Literal(Boolean.FALSE);
         }
-        ConditionTypes.requireBoolean(expr, inputs, "Rule " + ruleId + ", input " + input);
+        String problem = ConditionTypes.conditionProblem(expr, inputs);
+        if (problem != null) {
+            problems.add(new Violation(ruleId, input, problem));
+        }
         return expr;
     }
 
-    private static Expr cell(Cell cell, Map<String, Integer> slots, String where) {
-        return switch (cell) {
+    /** Parses one output cell (or an output default, with no rule id) and checks it against the output's type. */
+    private static Expr output(Cell cell, OutputClause output, Map<String, Integer> slots, List<InputClause> inputs,
+            String ruleId, List<Violation> problems) {
+        Expr expr = switch (cell) {
             case Cell.Literal literal -> new Expr.Literal(literal.value());
             case Cell.Expression expression -> {
                 try {
                     yield Parser.parse(expression.source(), name -> slots.getOrDefault(name, -1));
                 } catch (ExpressionException e) {
-                    throw new ValidationFailedException(where + ": " + e.getMessage());
+                    problems.add(new Violation(ruleId, output.name(), e.getMessage()));
+                    yield new Expr.Literal(null);
                 }
             }
         };
+        String problem = ConditionTypes.outputProblem(expr, output, inputs);
+        if (problem != null) {
+            problems.add(new Violation(ruleId, output.name(), problem));
+        }
+        return expr;
     }
 
     private record CompiledRule(String id, Expr condition, List<Expr> thens) {

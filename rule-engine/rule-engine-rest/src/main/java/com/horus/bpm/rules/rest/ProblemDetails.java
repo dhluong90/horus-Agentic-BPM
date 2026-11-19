@@ -1,6 +1,8 @@
 package com.horus.bpm.rules.rest;
 
 import com.horus.bpm.rules.api.HorusBpmException;
+import com.horus.bpm.rules.api.ValidationFailedException;
+import com.horus.bpm.rules.api.Violation;
 import com.horus.bpm.rules.internal.json.CorrelationIds;
 import com.horus.bpm.rules.internal.json.EngineJson;
 import com.horus.bpm.rules.internal.json.EngineValues;
@@ -15,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
@@ -33,8 +36,9 @@ public class ProblemDetails {
     private static final MediaType PROBLEM = MediaType.parseMediaType("application/problem+json");
     private static final String TYPE_BASE = "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#";
 
-    private static final Map<String, HttpStatus> STATUS = Map.ofEntries(
+    static final Map<String, HttpStatus> STATUS = Map.ofEntries(
             Map.entry("INPUT_INVALID", HttpStatus.BAD_REQUEST),
+            Map.entry("QUERY_INVALID", HttpStatus.BAD_REQUEST),
             Map.entry("UNAUTHENTICATED", HttpStatus.UNAUTHORIZED),
             Map.entry("PERMISSION_DENIED", HttpStatus.FORBIDDEN),
             Map.entry("SELF_APPROVAL_FORBIDDEN", HttpStatus.FORBIDDEN),
@@ -48,7 +52,8 @@ public class ProblemDetails {
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
-            Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE));
+            Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE),
+            Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE));
 
     /**
      * Answers an engine exception.
@@ -60,8 +65,17 @@ public class ProblemDetails {
     @ExceptionHandler(HorusBpmException.class)
     public ResponseEntity<byte[]> handle(HorusBpmException e, WebRequest request) {
         HttpStatus status = STATUS.getOrDefault(e.code(), HttpStatus.INTERNAL_SERVER_ERROR);
-        ResponseEntity<byte[]> response = response(status, body(e.code(), status, e.getMessage(),
-                request.getHeader(CORRELATION_HEADER)));
+        ObjectNode body = body(e.code(), status, e.getMessage(), request.getHeader(CORRELATION_HEADER));
+        if (e instanceof ValidationFailedException failed) {
+            ArrayNode violations = body.putArray("violations");
+            for (Violation v : failed.violations()) {
+                ObjectNode item = violations.addObject();
+                item.set("ruleId", EngineValues.value(v.ruleId()));
+                item.set("column", EngineValues.value(v.column()));
+                item.put("message", v.message());
+            }
+        }
+        ResponseEntity<byte[]> response = response(status, body);
         if (status == HttpStatus.CONFLICT && "IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {
             return ResponseEntity.status(status).header("Retry-After", "1").contentType(PROBLEM).body(response.getBody());
         }

@@ -1,18 +1,23 @@
 package com.horus.bpm.rules.postgres;
 
+import com.horus.bpm.rules.api.LifecycleAction;
 import com.horus.bpm.rules.api.RuleSetExistsException;
+import com.horus.bpm.rules.api.RuleSetSummary;
+import com.horus.bpm.rules.api.VersionSummary;
 import com.horus.bpm.rules.api.SourceFormat;
 import com.horus.bpm.rules.api.VersionConflictException;
 import com.horus.bpm.rules.api.VersionStatus;
 import com.horus.bpm.rules.internal.json.CanonicalJson;
 import com.horus.bpm.rules.internal.json.EngineValues;
 import com.horus.bpm.rules.internal.json.Ulid;
+import com.horus.bpm.rules.internal.store.HistoryRow;
 import com.horus.bpm.rules.internal.store.RuleStore;
 import com.horus.bpm.rules.internal.store.StoredVersion;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import javax.sql.DataSource;
@@ -31,6 +36,29 @@ public final class JdbcRuleStore implements RuleStore {
             v.canonical_json::text AS canonical_json, v.canonical_hash, v.source_format, v.source_document,
             v.source_hash, v.lock_version, v.requested_by, v.requested_at, v.approved_by, v.approved_at,
             v.approval_comment, v.created_by, v.created_at
+            """;
+
+    /**
+     * Summary columns of a rule set {@code s}. {@code published_version} follows effective-version selection
+     * (DESIGN section 3.3.1, as {@link #findEffective}); {@code last_changed_at} is the latest version timestamp
+     * or history row, so a rejection (which clears {@code requested_at}) still counts as a change.
+     */
+    private static final String SUMMARY_SELECT = """
+            SELECT s.name, lv.version_num AS latest_version, lv.status AS latest_status,
+              (SELECT e.version_num FROM rle_version e
+                WHERE e.tenant_id = s.tenant_id AND e.rule_set_id = s.id
+                  AND e.status = 'PUBLISHED' AND e.effective_from <= :now
+                ORDER BY e.effective_from DESC, e.version_num DESC LIMIT 1) AS published_version,
+              GREATEST(
+                (SELECT max(GREATEST(v.created_at, v.requested_at, v.approved_at)) FROM rle_version v
+                  WHERE v.tenant_id = s.tenant_id AND v.rule_set_id = s.id),
+                (SELECT max(h.occurred_at) FROM rle_version_history h
+                  JOIN rle_version v ON v.tenant_id = h.tenant_id AND v.id = h.version_id
+                  WHERE v.tenant_id = s.tenant_id AND v.rule_set_id = s.id)) AS last_changed_at
+            FROM rle_rule_set s
+            JOIN LATERAL (SELECT v.version_num, v.status FROM rle_version v
+                           WHERE v.tenant_id = s.tenant_id AND v.rule_set_id = s.id
+                           ORDER BY v.version_num DESC LIMIT 1) lv ON TRUE
             """;
 
     private final JdbcClient jdbc;
@@ -152,15 +180,110 @@ public final class JdbcRuleStore implements RuleStore {
                 .query(JdbcRuleStore::version).optional();
     }
 
+    @Override
+    public List<RuleSetSummary> listRuleSets(String tenantId, String afterName, int limit, Instant now) {
+        // Byte order (COLLATE "C") so the keyset and the order agree for any locale of the host database.
+        return jdbc.sql(SUMMARY_SELECT + """
+                WHERE s.tenant_id = :tenant
+                  AND (CAST(:after AS TEXT) IS NULL OR s.name COLLATE "C" > CAST(:after AS TEXT) COLLATE "C")
+                ORDER BY s.name COLLATE "C"
+                LIMIT :limit
+                """)
+                .param("tenant", tenantId).param("after", afterName).param("limit", limit)
+                .param("now", Timestamp.from(now))
+                .query(JdbcRuleStore::summary).list();
+    }
+
+    @Override
+    public Optional<RuleSetSummary> findRuleSetSummary(String tenantId, String name, Instant now) {
+        return jdbc.sql(SUMMARY_SELECT + " WHERE s.tenant_id = :tenant AND s.name = :name")
+                .param("tenant", tenantId).param("name", name).param("now", Timestamp.from(now))
+                .query(JdbcRuleStore::summary).optional();
+    }
+
+    @Override
+    public List<VersionSummary> listVersions(String tenantId, String ruleSetId, Integer beforeVersion, int limit) {
+        return jdbc.sql("""
+                SELECT s.name, v.version_num, v.status, v.hit_policy, v.effective_from, v.lock_version,
+                  v.canonical_hash, v.created_by, v.created_at, v.requested_by, v.requested_at, v.approved_by,
+                  v.approved_at
+                FROM rle_version v
+                JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
+                WHERE v.tenant_id = :tenant AND v.rule_set_id = :ruleSetId
+                  AND (CAST(:before AS INT) IS NULL OR v.version_num < CAST(:before AS INT))
+                ORDER BY v.version_num DESC
+                LIMIT :limit
+                """)
+                .param("tenant", tenantId).param("ruleSetId", ruleSetId).param("before", beforeVersion)
+                .param("limit", limit)
+                .query((rs, row) -> new VersionSummary(rs.getString("name"), rs.getInt("version_num"),
+                        VersionStatus.valueOf(rs.getString("status")), rs.getString("hit_policy"),
+                        instant(rs, "effective_from"), rs.getLong("lock_version"), rs.getString("canonical_hash"),
+                        rs.getString("created_by"), instant(rs, "created_at"), rs.getString("requested_by"),
+                        instant(rs, "requested_at"), rs.getString("approved_by"), instant(rs, "approved_at")))
+                .list();
+    }
+
+    @Override
+    public void appendHistory(HistoryRow row) {
+        jdbc.sql("""
+                INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor,
+                  reason, lock_version, occurred_at)
+                VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :lock, :at)
+                """)
+                .param("tenant", row.tenantId()).param("id", row.id()).param("versionId", row.versionId())
+                .param("action", row.action().name())
+                .param("from", row.fromStatus() == null ? null : row.fromStatus().name())
+                .param("to", row.toStatus().name()).param("actor", row.actor()).param("reason", row.reason())
+                .param("lock", row.lockVersion()).param("at", Timestamp.from(row.occurredAt()))
+                .update();
+    }
+
+    @Override
+    public List<HistoryRow> history(String tenantId, String versionId) {
+        // Only the actions this release writes; the retirement actions arrive with their features.
+        return jdbc.sql("""
+                SELECT tenant_id, id, version_id, action, from_status, to_status, actor, reason, lock_version,
+                  occurred_at
+                FROM rle_version_history
+                WHERE tenant_id = :tenant AND version_id = :versionId
+                  AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED')
+                ORDER BY occurred_at, id
+                """)
+                .param("tenant", tenantId).param("versionId", versionId)
+                .query((rs, row) -> new HistoryRow(rs.getString("tenant_id"), rs.getString("id"),
+                        rs.getString("version_id"), LifecycleAction.valueOf(rs.getString("action")),
+                        rs.getString("from_status") == null ? null : VersionStatus.valueOf(rs.getString("from_status")),
+                        VersionStatus.valueOf(rs.getString("to_status")), rs.getString("actor"), rs.getString("reason"),
+                        rs.getLong("lock_version"), instant(rs, "occurred_at")))
+                .list();
+    }
+
+    private static RuleSetSummary summary(ResultSet rs, int row) throws SQLException {
+        int published = rs.getInt("published_version");
+        Integer publishedVersion = rs.wasNull() ? null : published;
+        return new RuleSetSummary(rs.getString("name"), rs.getInt("latest_version"),
+                VersionStatus.valueOf(rs.getString("latest_status")), publishedVersion, instant(rs, "last_changed_at"));
+    }
+
     private static StoredVersion version(ResultSet rs, int row) throws SQLException {
         return new StoredVersion(rs.getString("tenant_id"), rs.getString("id"), rs.getString("rule_set_id"),
                 rs.getString("name"), rs.getInt("version_num"), VersionStatus.valueOf(rs.getString("status")),
-                rs.getString("hit_policy"), instant(rs, "effective_from"), rs.getString("canonical_json"),
+                rs.getString("hit_policy"), instant(rs, "effective_from"), canonical(rs.getString("canonical_json")),
                 rs.getString("canonical_hash"), SourceFormat.valueOf(rs.getString("source_format")),
                 rs.getString("source_document"), rs.getString("source_hash"), rs.getLong("lock_version"),
                 rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("approved_by"),
                 instant(rs, "approved_at"), rs.getString("approval_comment"), rs.getString("created_by"),
                 instant(rs, "created_at"));
+    }
+
+    /**
+     * JSONB keeps the value but not the text: it reorders keys and drops whitespace. The RFC 8785 form is a function
+     * of the value, so writing it again gives back exactly the canonical document that was stored, and a version
+     * read from the database equals the one returned at import or by an idempotent replay.
+     */
+    private static String canonical(String jsonb) {
+        return CanonicalJson.write(EngineValues.read(jsonb));
     }
 
     static Instant instant(ResultSet rs, String column) throws SQLException {

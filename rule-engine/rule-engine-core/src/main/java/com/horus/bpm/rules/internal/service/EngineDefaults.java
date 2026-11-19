@@ -42,6 +42,35 @@ public final class EngineDefaults {
      */
     public static final boolean REJECT_UNDECLARED_INPUTS = true;
 
+    /**
+     * Default and ceiling of {@code horus.bpm.rules.query.max-page-size}: items per page of a list read (ADR-0015).
+     * A host may lower it, never raise it.
+     */
+    public static final int QUERY_MAX_PAGE_SIZE = 200;
+
+    /** Items per page of a list read when the request names no {@code limit}. */
+    public static final int QUERY_DEFAULT_PAGE_SIZE = 50;
+
+    /**
+     * Default and ceiling of {@code horus.bpm.rules.lifecycle.reason-max-length}: longest reason of a reject (and,
+     * later, a retire), in characters. A host may lower it, never raise it.
+     */
+    public static final int REASON_MAX_LENGTH = 2000;
+
+    /**
+     * Largest body of a lifecycle command ({@code :approve} comment, {@code :reject} reason), in bytes: room for a
+     * reason of {@link #REASON_MAX_LENGTH} characters even when every character is JSON-escaped. A safety bound of
+     * the REST layer, not a setting; a larger body is {@code 413 PAYLOAD_TOO_LARGE}, read no further than one byte
+     * past the bound.
+     */
+    public static final int COMMAND_BODY_MAX_BYTES = 16_384;
+
+    /**
+     * Largest {@code :evaluate} body, in bytes, the same bound as an imported document. A safety bound of the REST
+     * layer, not a setting; a larger body is {@code 413 PAYLOAD_TOO_LARGE}.
+     */
+    public static final int EVALUATE_BODY_MAX_BYTES = 1_048_576;
+
     /** Longest accepted {@code X-Correlation-Id}; a longer or malformed one is replaced by a generated id. */
     public static final int CORRELATION_ID_MAX_LENGTH = 128;
 
