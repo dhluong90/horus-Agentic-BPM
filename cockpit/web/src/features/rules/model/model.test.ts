@@ -51,8 +51,8 @@ describe('money without floating point', () => {
 describe('cell readings', () => {
   it('CKP_030_conditions_read_as_values_not_expressions', () => {
     expect(readCondition(undefined, 'en')).toEqual({ kind: 'any' });
-    expect(readCondition("== 'GOLD'", 'en')).toEqual({ kind: 'values', negated: false, values: [{ kind: 'text', text: 'GOLD' }] });
-    expect(readCondition("in ['GOLD', 'PLATINUM']", 'en')).toEqual({ kind: 'values', negated: false, values: [{ kind: 'text', text: 'GOLD' }, { kind: 'text', text: 'PLATINUM' }] });
+    expect(readCondition("== 'GOLD'", 'en')).toEqual({ kind: 'values', negated: false, values: [{ kind: 'text', text: 'Gold' }] });
+    expect(readCondition("in ['GOLD', 'PLATINUM']", 'en')).toEqual({ kind: 'values', negated: false, values: [{ kind: 'text', text: 'Gold' }, { kind: 'text', text: 'Platinum' }] });
     expect(readCondition('>= 50000000 VND', 'vi')).toEqual({ kind: 'compare', operator: '≥', value: { kind: 'text', text: '50.000.000 VND' } });
     expect(readCondition('== true', 'en')).toEqual({ kind: 'values', negated: false, values: [{ kind: 'yes' }] });
     expect(readCondition('balance > txCount * 2', 'en')).toEqual({ kind: 'raw', text: 'balance > txCount * 2' });
@@ -62,7 +62,7 @@ describe('cell readings', () => {
   it('CKP_030_outputs_and_results_read_with_formatted_amounts', () => {
     expect(readOutput('30000 VND', 'en')).toEqual({ kind: 'value', value: { kind: 'text', text: '30,000 VND' } });
     expect(readOutput(false, 'en')).toEqual({ kind: 'value', value: { kind: 'no' } });
-    expect(readOutput("'REVIEW'", 'en')).toEqual({ kind: 'value', value: { kind: 'text', text: 'REVIEW' } });
+    expect(readOutput("'REVIEW'", 'en')).toEqual({ kind: 'value', value: { kind: 'text', text: 'Review' } });
     expect(readResult({ currency: 'VND', amount: 10000 }, 'en')).toEqual({ kind: 'text', text: '10,000 VND' });
     expect(columnLabel('txCount', undefined)).toBe('Tx count');
     expect(columnLabel('fee', 'Annual fee')).toBe('Annual fee');

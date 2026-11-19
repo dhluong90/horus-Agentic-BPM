@@ -3,8 +3,8 @@ import { useI18n } from '../../../i18n/I18nProvider';
 import { diffRules, type RowDiff } from '../model/diff';
 import { cellText, nonAsciiCharacters } from '../model/nonAscii';
 import { readCondition, readOutput, type CellReading } from '../model/reading';
-import { CellValue } from './CellValue';
-import { DecisionTable, TableHead } from './DecisionTable';
+import { CellValue, ValueText } from './CellValue';
+import { TableHead } from './DecisionTable';
 
 const GLYPH: Record<RowDiff['change'], string> = { ADDED: '＋', CHANGED: '✎', MOVED: '⇅', REMOVED: '−', UNCHANGED: '' };
 
@@ -19,9 +19,41 @@ function NonAsciiMark({ raw }: { raw: string }) {
   );
 }
 
+/** A changed list of values reads as the values with the added ones marked: Gold (+ Platinum). */
+function ListDiff({ now, before }: { now: Extract<CellReading, { kind: 'values' }>; before: Extract<CellReading, { kind: 'values' }> }) {
+  const { t } = useI18n();
+  const text = (value: (typeof now.values)[number]) => (value.kind === 'text' ? value.text : value.kind);
+  const old = new Set(before.values.map(text));
+  const kept = new Set(now.values.map(text));
+  return (
+    <span className="cell-values">
+      {now.values.map((value, index) => (
+        <span key={index} className={old.has(text(value)) ? 'value-pill' : 'value-pill value-pill--added'}>
+          {old.has(text(value)) ? null : <span aria-hidden="true">+ </span>}
+          {!old.has(text(value)) ? <span className="sr-only">{t('change.ADDED')} </span> : null}
+          <ValueText value={value} />
+        </span>
+      ))}
+      {before.values.filter((value) => !kept.has(text(value))).map((value, index) => (
+        <span key={`r${String(index)}`} className="value-pill value-pill--removed">
+          <span className="sr-only">{t('change.REMOVED')} </span><ValueText value={value} />
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function DiffCell({ now, before, changed, raw }: { now: CellReading; before: CellReading; changed: boolean; raw: string }) {
   const { t } = useI18n();
   if (!changed) return <CellValue reading={now} />;
+  if (now.kind === 'values' && before.kind === 'values' && now.negated === before.negated) {
+    return (
+      <>
+        <ListDiff now={now} before={before} />
+        <NonAsciiMark raw={raw} />
+      </>
+    );
+  }
   return (
     <>
     <span className="diff-cell">
@@ -44,15 +76,15 @@ function rowClass(row: RowDiff): string {
 }
 
 /**
- * The checker's view. The row comparison is computed in this browser and is an aid only; the record the
- * approver signs off is the engine's canonical table of the pending version, shown below with its hash.
- * When the engine's diff endpoint (RLE-028) lands, it replaces the browser comparison.
+ * The checker's view: one summary line, then the rows of this version against the base version with the
+ * editor's labels and formats. The comparison is computed in this browser until the engine's diff endpoint
+ * (RLE-028, issue #165) lands; the stored version is the Table tab, and Details shows its content hash.
  */
-export function ChangesView({ definition, base, baseVersion, record }: {
+export function ChangesView({ definition, base, baseVersion, baseInEffect }: {
   definition: RuleSetDefinition;
   base: RuleSetDefinition | undefined;
   baseVersion: number | undefined;
-  record: { version: number; canonicalHash: string };
+  baseInEffect: boolean;
 }) {
   const { t, locale } = useI18n();
   const rows = diffRules(base?.rules ?? [], definition.rules);
@@ -60,12 +92,15 @@ export function ChangesView({ definition, base, baseVersion, record }: {
   const empty: Rule = { id: '', when: {}, then: {} };
   return (
     <div className="changes">
-      <p className="changes__aid">
-        <span aria-hidden="true">ⓘ</span> {t('changes.aid')}
-      </p>
       <p className="changes__summary">
-        <span>{base && baseVersion !== undefined ? t('changes.base', { base: String(baseVersion) }) : t('changes.first')}</span>
-        <span className="tnum">{t('changes.summary', { added: count('ADDED'), changed: count('CHANGED'), moved: count('MOVED'), removed: count('REMOVED') })}</span>
+        {base && baseVersion !== undefined ? (
+          <>
+            <strong className="tnum">{t('changes.summaryLine', { added: count('ADDED'), changed: count('CHANGED'), removed: count('REMOVED'), unchanged: count('UNCHANGED') })}</strong>
+            <span>{t(baseInEffect ? 'changes.comparedInEffect' : 'changes.comparedWith', { base: String(baseVersion) })}</span>
+          </>
+        ) : (
+          <strong>{t('changes.first')}</strong>
+        )}
       </p>
       <div className="dt-scroll" role="region" tabIndex={0} aria-label={t('changes.tableLabel')}>
         <table className="dt dt--diff">
@@ -106,13 +141,6 @@ export function ChangesView({ definition, base, baseVersion, record }: {
         </table>
       </div>
       {rows.every((row) => row.change === 'UNCHANGED') && base ? <p className="empty">{t('changes.none')}</p> : null}
-      <section className="changes__record" aria-labelledby="record-title">
-        <div className="changes__record-head">
-          <h2 id="record-title" className="card__title">{t('changes.record', { version: String(record.version) })}</h2>
-          <span className="changes__hash">{t('changes.hash')} <span className="mono" title={record.canonicalHash}>{record.canonicalHash.slice(0, 12)}</span></span>
-        </div>
-        <DecisionTable definition={definition} version={record.version} matched={new Set()} />
-      </section>
     </div>
   );
 }

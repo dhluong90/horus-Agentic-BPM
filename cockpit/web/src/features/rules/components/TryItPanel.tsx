@@ -4,6 +4,7 @@ import { useI18n, type Locale } from '../../../i18n/I18nProvider';
 import { useRulesSession } from '../api/rulesContext';
 import { useEvaluate } from '../api/useRules';
 import { groupWhileTyping, toMinorUnits } from '../model/money';
+import { valueLabel } from '../model/cells';
 import { columnLabel, readResult } from '../model/reading';
 import { CopyButton } from '../../../components/CopyButton';
 import { ValueText } from './CellValue';
@@ -65,10 +66,10 @@ function Field({ input, value, currency, invalid, onChange, onCurrency }: {
   const common = { id, className: 'field__input', 'aria-invalid': invalid };
   let control;
   if (input.allowed || input.type === 'boolean') {
-    const options = input.type === 'boolean' ? [['true', t('table.yes')], ['false', t('table.no')]] : (input.allowed ?? []).map((v) => [String(v), String(v)]);
+    const options = input.type === 'boolean' ? [['true', t('table.yes')], ['false', t('table.no')]] : (input.allowed ?? []).map((v) => [String(v), valueLabel(String(v))]);
     control = (
       <select {...common} value={value} onChange={(e) => { onChange(e.target.value); }}>
-        <option value="">{t('try.notSet')}</option>
+        <option value="">{t('try.anyPlaceholder')}</option>
         {options.map(([v, text]) => <option key={v} value={v}>{text}</option>)}
       </select>
     );
@@ -78,7 +79,7 @@ function Field({ input, value, currency, invalid, onChange, onCurrency }: {
   } else if (input.type === 'money') {
     control = (
       <span className="money-input">
-        <input {...common} inputMode="decimal" className="field__input tnum" value={value} onChange={(e) => { onChange(groupWhileTyping(e.target.value, locale)); }} />
+        <input {...common} inputMode="decimal" className="field__input tnum" placeholder={t('try.anyPlaceholder')} value={value} onChange={(e) => { onChange(groupWhileTyping(e.target.value, locale)); }} />
         {currency.kind === 'known' ? (
           <span className="money-input__code" aria-label={t('try.currency', { name: label })}>{currency.code}</span>
         ) : (
@@ -88,10 +89,10 @@ function Field({ input, value, currency, invalid, onChange, onCurrency }: {
       </span>
     );
   } else {
-    control = <input {...common} type={input.type === 'date' ? 'date' : 'text'} inputMode={input.type === 'integer' ? 'numeric' : undefined} value={value} onChange={(e) => { onChange(e.target.value); }} />;
+    control = <input {...common} type={input.type === 'date' ? 'date' : 'text'} inputMode={input.type === 'integer' ? 'numeric' : undefined} placeholder={t('try.anyPlaceholder')} value={value} onChange={(e) => { onChange(e.target.value); }} />;
   }
   return (
-    <div className={input.type === 'money' ? 'field field--wide' : 'field'}>
+    <div className="field">
       <label className="field__label" htmlFor={id}>{label}</label>
       {control}
       {invalid ? <span className="cell-error">{t('try.invalidAmount', { example: locale === 'vi' ? '60.000.000' : '60,000,000' })}</span> : null}
@@ -118,10 +119,9 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
 
   if (!can('rules:evaluate')) {
     return (
-      <section className="card" aria-labelledby="try-title">
-        <h2 id="try-title" className="card__title">{t('try.title')}</h2>
+      <div className="try">
         <p className="dock__note">{t('try.noPermission')}</p>
-      </section>
+      </div>
     );
   }
 
@@ -138,8 +138,7 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
   const result = evaluate.data;
 
   return (
-    <section className="card try" aria-labelledby="try-title">
-      <h2 id="try-title" className="card__title">{t('try.title')}</h2>
+    <div className="try">
       <p className="dock__hint">{version.status === 'PUBLISHED' ? t('try.hint') : t('try.draftNote')}</p>
       <form className="try__form" onSubmit={submit}>
         {definition.inputs.map((input) => (
@@ -147,22 +146,24 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
             onChange={(text) => { setValues((current) => ({ ...current, [input.name]: text })); }}
             onCurrency={(code) => { setTypedCurrency((current) => ({ ...current, [input.name]: code })); }} />
         ))}
-        <button type="submit" className="btn btn--primary" disabled={evaluate.isPending}>{evaluate.isPending ? t('try.running') : t('try.run')}</button>
+        <button type="submit" className="btn btn--primary try__run" disabled={evaluate.isPending} aria-busy={evaluate.isPending}>
+          <span aria-hidden="true">▷</span> {evaluate.isPending ? t('try.running') : t('try.run')}
+        </button>
       </form>
       {evaluate.isError ? <ProblemNotice error={evaluate.error} /> : null}
       <div role="status" aria-live="polite">
         {result ? (
           <div className="try__result">
             <div className="try__outcome">
-            <p className={result.outcome === 'MATCHED' ? 'badge badge--ok' : 'badge badge--muted'}>
-              <span aria-hidden="true">{result.outcome === 'MATCHED' ? '✓' : '✕'}</span>{' '}
-              {result.outcome === 'MATCHED' ? t('try.matched', { rows: result.matchedRuleIds.join(', ') }) : t('try.noMatch')}
-            </p>
-            <p className="badge badge--accent">{t('try.inEffect', { version: String(result.version) })}</p>
+              <p className={result.outcome === 'MATCHED' ? 'try__matched' : 'try__nomatch'}>
+                <span aria-hidden="true">{result.outcome === 'MATCHED' ? '✓' : '✕'}</span>{' '}
+                {result.outcome === 'MATCHED' ? t('try.matchedRow', { rows: result.matchedRuleIds.join(', ') }) : t('try.noMatch')}
+              </p>
+              <p className="badge badge--accent">{t('try.inEffect', { version: String(result.version) })}</p>
             </div>
-            <dl className="dock__facts">
+            <dl className="try__tiles">
               {definition.outputs.filter((o) => o.name in result.outputs).map((output) => (
-                <div key={output.name}>
+                <div key={output.name} className="try__tile">
                   <dt>{columnLabel(output.name, output.description)}</dt>
                   <dd className="tnum"><ValueText value={readResult(result.outputs[output.name], locale)} /></dd>
                 </div>
@@ -179,6 +180,6 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
           </div>
         ) : null}
       </div>
-    </section>
+    </div>
   );
 }

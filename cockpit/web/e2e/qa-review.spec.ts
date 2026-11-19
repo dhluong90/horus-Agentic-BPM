@@ -25,8 +25,9 @@ const SCREENS: { name: string; scenario: Scenario; hash: string; prepare?: (p: P
   { name: 'table', scenario: 'rules-author', hash: '#/rules/card-fee/1' },
   { name: 'editor-error', scenario: 'rules-author', hash: '#/rules/card-fee/1', prepare: async (p, l) => {
     await p.getByRole('button', { name: l === 'en' ? 'New draft' : 'Tạo bản nháp' }).click();
-    await p.getByRole('button', { name: l === 'en' ? 'Copy row R2' : 'Sao chép dòng R2' }).click();
-    await p.getByLabel(l === 'en' ? 'Row R6, Balance' : 'Dòng R6, Balance').fill('>= 50000000');
+    await p.getByRole('button', { name: l === 'en' ? 'Actions for row R2' : 'Thao tác cho dòng R2' }).click();
+    await p.getByRole('menuitem', { name: l === 'en' ? 'Duplicate row R2' : 'Nhân bản dòng R2' }).click();
+    await p.getByLabel(l === 'en' ? 'Row R6, Balance' : 'Dòng R6, Balance', { exact: true }).fill('');
     await p.getByRole('button', { name: l === 'en' ? 'Save draft' : 'Lưu bản nháp' }).click();
     await expect(p.locator('.cell-edit--bad').first()).toBeVisible();
   } },
@@ -53,6 +54,8 @@ for (const s of SCREENS) {
         for (const el of Array.from(document.querySelectorAll<HTMLElement>('main button, main a[href], main select, main input:not([type=file]):not([tabindex="-1"]), main summary, main textarea'))) {
           const r = el.getBoundingClientRect();
           if (r.width === 0 || r.height === 0) continue;
+          // Recorded exemption (rules.css): the editor's cell controls draw at 36 px in a dense grid.
+          if (el.closest('.cell-edit')) continue;
           const after = getComputedStyle(el, '::after');
           const aw = after.content !== 'none' ? parseFloat(after.width) || 0 : 0;
           const ah = after.content !== 'none' ? parseFloat(after.height) || 0 : 0;
@@ -62,7 +65,7 @@ for (const s of SCREENS) {
         return Array.from(new Set(out));
       });
       // Editor cell inputs are the recorded exemption (rules.css): 36 px in a dense grid.
-      expect(small.filter((entry) => !entry.startsWith('input.cell-input'))).toEqual([]);
+      expect(small).toEqual([]);
 
       const main = (await page.locator('main').innerText());
       // no raw JSON outside the deliberate Source view
@@ -101,13 +104,16 @@ test('QA_413_on_reject_shows_the_plain_message_and_code', async ({ page }) => {
 
 test('QA_413_on_save_draft_keeps_the_edits', async ({ page }) => {
   await open(page, 'rules-author', '#/rules/card-fee/1');
+  await page.route('**/api/bpm/rules/v1/rule-sets/card-fee/versions', async (route) => {
+    if (route.request().method() !== 'POST') { await route.fallback(); return; }
+    await route.fulfill({ status: 413, contentType: 'application/problem+json', body: JSON.stringify({ type: 'about:blank', title: 'Content Too Large', status: 413, code: 'PAYLOAD_TOO_LARGE', detail: 'The document is larger than 1048576 bytes', correlationId: '01JQA413' }) });
+  });
   await page.getByRole('button', { name: 'New draft' }).click();
-  // Over the import limit of 1 MiB.
-  await page.getByLabel('Row R2, Tier').fill("== '" + 'G'.repeat(1_100_000) + "'");
+  await page.getByLabel('Row R3, Fee').fill('35000');
   await page.getByRole('button', { name: 'Save draft' }).click();
-  const alert = page.getByRole('alert').first();
-  await expect(alert).toBeVisible();
+  await expect(page.getByRole('alert').first()).toContainText('The text is too long for the service.');
   await expect(page.getByTestId('problem-code')).toHaveText('PAYLOAD_TOO_LARGE');
+  await expect(page.getByLabel('Row R3, Fee')).toHaveValue('35,000');
   await expect(page.getByRole('button', { name: 'Save draft' })).toBeVisible();
 });
 
@@ -137,13 +143,14 @@ test('QA_double_click_request_publish_sends_one_request', async ({ page }) => {
   await open(page, 'rules-author', '#/rules/card-fee/1');
   // make a draft first
   await page.getByRole('button', { name: 'New draft' }).click();
-  await page.getByRole('button', { name: 'Copy row R2' }).click();
+  await page.getByRole('button', { name: 'Actions for row R2' }).click();
+  await page.getByRole('menuitem', { name: 'Duplicate row R2' }).click();
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.getByRole('button', { name: 'Request publish' })).toBeVisible();
   const posts: string[] = [];
   page.on('request', (r) => { if (r.method() === 'POST') posts.push(`${new URL(r.url()).pathname} ${r.headers()['idempotency-key'] ?? ''}`); });
   await page.getByRole('button', { name: 'Request publish' }).dblclick();
-  await expect(page.locator('.gate, .dock__note').first()).toBeVisible();
+  await expect(page.locator('.decision')).toBeVisible();
   expect(posts.filter((p) => p.includes(':request-publish'))).toHaveLength(1);
 });
 
@@ -174,8 +181,8 @@ test('QA_reject_reason_is_required_and_shows_in_history', async ({ page }) => {
   await expect(reject).toBeDisabled();
   await page.getByLabel(/Reason|Comment/).first().fill('Fee for R4 should stay 15,000 VND');
   await reject.click();
-  await expect(page.locator('.dock')).toContainText(/Draft/);
-  await page.locator('details.history summary').click();
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(/Draft/);
+  await page.getByRole('tab', { name: 'History' }).click();
   await expect(page.locator('.history__reason')).toContainText('Fee for R4 should stay 15,000 VND');
 });
 
@@ -184,11 +191,12 @@ test('QA_CKP_030_import_next_version_of_existing_rule_set_from_its_page', async 
   const posts: string[] = [];
   page.on('response', (r) => { if (r.request().method() === 'POST') posts.push(`${new URL(r.url()).pathname} -> ${String(r.status())}`); });
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'Import new version' }).click();
+  await page.getByRole('button', { name: 'More' }).click();
+  await page.getByRole('menuitem', { name: 'Import new version' }).click();
   const document = { schemaVersion: 1, ruleSet: 'card-fee', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }],
     rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] };
   await (await chooser).setFiles({ name: 'card-fee-v3.yaml', mimeType: 'application/yaml', buffer: Buffer.from(JSON.stringify(document)) });
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('card-fee Version 3');
+  await expect(page.locator('.rs-head__sub')).toHaveText(/^Version 3 · draft/);
   await expect(page.getByText('Draft version 3 created')).toBeVisible();
   expect(posts).toEqual(['/api/bpm/rules/v1/rule-sets/card-fee/versions -> 201']);
 });
@@ -200,7 +208,8 @@ test('QA_import_twice_in_one_session', async ({ page }) => {
     const chooser = page.waitForEvent('filechooser', { timeout: 5000 });
     await page.getByRole('button', { name: 'Import file' }).click();
     await (await chooser).setFiles({ name: `${n}.yaml`, mimeType: 'application/yaml', buffer: Buffer.from(doc(n)) });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText(`${n} Version 1`);
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(n);
+    await expect(page.locator('.rs-head__sub')).toHaveText(/^Version 1 · draft/);
     await page.getByRole('link', { name: 'All rule sets' }).click();
     await expect(page.getByRole('button', { name: 'Import file' })).toBeEnabled();
   }

@@ -18,12 +18,12 @@ function SummaryRow({ summary }: { summary: RuleSetSummary }) {
   return (
     <tr>
       <th scope="row">
-        <a className="rs-link mono hit" href={href({ name: 'rule-set', ruleSet: summary.ruleSet, version: undefined, lens: undefined })}>{summary.ruleSet}</a>
+        <a className="rs-link hit" href={href({ name: 'rule-set', ruleSet: summary.ruleSet, version: undefined, lens: undefined })}>{summary.ruleSet}</a>
       </th>
-      <td className="tnum">{t('ruleSets.versionShort', { version: String(summary.latestVersion) })}</td>
+      <td className="tnum">{t('list.version', { version: String(summary.latestVersion) })}</td>
       <td><StatusBadge status={summary.latestStatus} /></td>
       <td className="tnum">
-        {summary.publishedVersion !== null ? t('ruleSets.versionShort', { version: String(summary.publishedVersion) }) : <span className="cell-any" aria-hidden="true">—</span>}
+        {summary.publishedVersion !== null ? t('list.version', { version: String(summary.publishedVersion) }) : <span className="cell-any" aria-hidden="true">—</span>}
       </td>
       <td className="tnum">{formatDateTime(summary.lastChangedAt, locale)}</td>
     </tr>

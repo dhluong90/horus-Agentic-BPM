@@ -36,6 +36,7 @@ const SCREENS: readonly Screen[] = [
     hash: '#/rules/card-fee/1',
     primary: { en: 'New draft', vi: 'Tạo bản nháp' },
     prepare: async (page, locale) => {
+      await page.getByRole('tab', { name: locale === 'en' ? 'Try it' : 'Chạy thử' }).click();
       await page.locator('.try select').first().selectOption('GOLD');
       await page.locator('.money-input input').first().fill('60000000');
       await page.getByRole('button', { name: locale === 'en' ? 'Run' : 'Chạy' }).click();
@@ -49,8 +50,9 @@ const SCREENS: readonly Screen[] = [
     primary: { en: 'Save draft', vi: 'Lưu bản nháp' },
     prepare: async (page, locale) => {
       await page.getByRole('button', { name: locale === 'en' ? 'New draft' : 'Tạo bản nháp' }).click();
-      await page.getByRole('button', { name: locale === 'en' ? 'Copy row R2' : 'Sao chép dòng R2' }).click();
-      await page.getByLabel(locale === 'en' ? 'Row R6, Balance' : 'Dòng R6, Balance').fill('>= 50000000');
+      await page.getByRole('button', { name: locale === 'en' ? 'Actions for row R2' : 'Thao tác cho dòng R2' }).click();
+      await page.getByRole('menuitem', { name: locale === 'en' ? 'Duplicate row R2' : 'Nhân bản dòng R2' }).click();
+      await page.getByLabel(locale === 'en' ? 'Row R6, Balance' : 'Dòng R6, Balance', { exact: true }).fill('');
       await page.getByRole('button', { name: locale === 'en' ? 'Save draft' : 'Lưu bản nháp' }).click();
     },
     ready: async (page) => { await expect(page.locator('.cell-edit--bad')).toBeVisible(); },
@@ -74,7 +76,7 @@ const SCREENS: readonly Screen[] = [
     scenario: 'rules-author',
     hash: '#/rules/card-fee/1',
     primary: { en: 'New draft', vi: 'Tạo bản nháp' },
-    prepare: async (page, locale) => { await page.getByText(locale === 'en' ? 'History (3)' : 'Lịch sử (3)').click(); },
+    prepare: async (page, locale) => { await page.getByRole('tab', { name: locale === 'en' ? 'History' : 'Lịch sử' }).click(); },
     ready: async (page) => { await expect(page.locator('.history__entry').nth(2)).toBeVisible(); },
   },
   {

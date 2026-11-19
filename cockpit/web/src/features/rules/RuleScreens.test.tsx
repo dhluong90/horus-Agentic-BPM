@@ -36,6 +36,19 @@ const pendingV2 = {
     rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] },
 };
 
+/** The version line under the rule set name, for example "Version 3 · draft". */
+const versionLine = async (n: number, words = 'Version') => screen.findByText(new RegExp(`^${words} ${String(n)} ·`), { selector: '.rs-head__sub' });
+
+async function openMore(user: ReturnType<typeof userEvent.setup>, item: string) {
+  await user.click(await screen.findByRole('button', { name: 'More' }));
+  await user.click(screen.getByRole('menuitem', { name: item }));
+}
+
+async function rowAction(user: ReturnType<typeof userEvent.setup>, row: string, item: string) {
+  await user.click(screen.getByRole('button', { name: `Actions for row ${row}` }));
+  await user.click(screen.getByRole('menuitem', { name: item }));
+}
+
 const writes = () => calls.filter((c) => c.method === 'POST');
 
 describe('rule set list and version view', () => {
@@ -45,8 +58,8 @@ describe('rule set list and version view', () => {
     const rows = within(table).getAllByRole('row').slice(1);
     await waitFor(() => { expect(within(rows[0] as HTMLElement).getByText('Waiting for approval')).toBeInTheDocument(); });
     expect(rows[0]).toHaveTextContent('card-fee');
-    expect(rows[0]).toHaveTextContent('v2');
-    expect(rows[0]).toHaveTextContent('v1');
+    expect(rows[0]).toHaveTextContent('Version 2');
+    expect(rows[0]).toHaveTextContent('Version 1');
     expect(rows[1]).toHaveTextContent('kyc-risk');
     expect(screen.getByRole('button', { name: 'Import file' })).toBeInTheDocument();
   });
@@ -72,7 +85,8 @@ describe('rule set list and version view', () => {
     const document_ = { schemaVersion: 1, ruleSet: 'fx-margin', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }],
       rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] };
     await user.upload(input, new File([JSON.stringify(document_)], 'fx-margin.json', { type: 'application/json' }));
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('fx-margin Version 1');
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('fx-margin');
+    expect(await versionLine(1)).toBeInTheDocument();
     expect(contentTypes).toEqual(['application/yaml']);
   });
 
@@ -85,19 +99,21 @@ describe('rule set list and version view', () => {
   it('CKP_030_version_reads_as_a_table_and_the_source_only_on_purpose', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/1');
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee Version 1');
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee');
+    expect(await versionLine(1)).toHaveTextContent('Version 1 · in effect · first matching row wins');
     expect(screen.getByText('50,000,000 VND')).toBeInTheDocument();
+    expect(screen.getAllByText('Gold').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Any value').length).toBeGreaterThan(0);
     expect(screen.queryByText(/schemaVersion/)).not.toBeInTheDocument();
     expect(screen.queryByText("== 'GOLD'")).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Source' }));
+    await openMore(user, 'Source');
     expect(await screen.findByText(/"schemaVersion": 1/)).toBeInTheDocument();
     expect(calls.at(-1)?.path).toBe('/rule-sets/card-fee/versions/1');
   });
 
   it('TR_UI_04_vietnamese_screen_is_one_language_with_vietnamese_amounts', async () => {
     open('#/rules/card-fee/1', 'rules-author', 'vi');
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee Phiên bản 1');
+    expect(await versionLine(1, 'Phiên bản')).toBeInTheDocument();
     expect(screen.getByText('50.000.000 VND')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tạo bản nháp' })).toBeInTheDocument();
     expect(screen.queryByText('New draft')).not.toBeInTheDocument();
@@ -109,36 +125,34 @@ describe('minimal draft editing', () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/1');
     await user.click(await screen.findByRole('button', { name: 'New draft' }));
-    await user.clear(screen.getByLabelText('Row R1, Tier'));
-    await user.click(screen.getByLabelText('Row R1, Tier'));
-    await user.paste("in ['GOLD', 'PLATINUM']");
-    await user.click(screen.getByRole('button', { name: 'Copy row R2' }));
-    await user.click(screen.getByRole('button', { name: 'Move row R6 down' }));
-    await user.click(screen.getByRole('button', { name: 'Move row R6 up' }));
-    await user.clear(screen.getByLabelText('Row R6, Balance'));
-    await user.type(screen.getByLabelText('Row R6, Balance'), '>= 50000000');
-    await user.clear(screen.getByLabelText('Row R6, Fee'));
-    await user.type(screen.getByLabelText('Row R6, Fee'), '5000');
+    // Cells edit as values: a tier picker, a comparison and an amount with its currency, Yes or No.
+    await user.click(screen.getByRole('button', { name: 'Row R1, Tier: Platinum' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Gold' }));
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: 'Row R1, Tier: Gold, Platinum' })).toBeInTheDocument();
+    await rowAction(user, 'R2', 'Duplicate row R2');
+    await rowAction(user, 'R6', 'Move row R6 down');
+    await rowAction(user, 'R6', 'Move row R6 up');
+    expect(screen.getByText('Changes in this draft')).toBeInTheDocument();
+    // An operator with no amount is refused by the engine: one plain sentence on the cell.
+    await user.clear(screen.getByLabelText('Row R6, Balance', { exact: true }));
     await user.dblClick(screen.getByRole('button', { name: 'Save draft' }));
 
-    const cell = await screen.findByLabelText('Row R6, Balance');
+    const cell = await screen.findByLabelText('Row R6, Balance', { exact: true });
     await waitFor(() => { expect(cell).toHaveAttribute('aria-invalid', 'true'); });
-    expect(screen.getByText('compares a money with a number')).toBeInTheDocument();
-    // Every violation lands at once, output cells included.
-    expect(screen.getByLabelText('Row R6, Fee')).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByText(/output fee is money and needs a currency/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Row R1, Tier')).toHaveValue("in ['GOLD', 'PLATINUM']");
+    expect(cell).toHaveAccessibleDescription(/Enter a value\./);
+    expect(screen.getByText('1 to fix', { exact: false })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Row R1, Tier: Gold, Platinum' })).toBeInTheDocument();
     expect(new Set(writes().map((c) => c.key)).size).toBe(1);
 
-    await user.clear(cell);
-    await user.type(cell, '>= 50000000 VND');
-    await user.clear(screen.getByLabelText('Row R6, Fee'));
-    await user.type(screen.getByLabelText('Row R6, Fee'), '5000 VND');
+    await user.type(cell, '20000000');
+    expect(cell).toHaveValue('20,000,000');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee Version 3');
+    expect(await versionLine(3)).toBeInTheDocument();
     expect(screen.getByText('Saved as draft version 3')).toBeInTheDocument();
     const ids = screen.getAllByRole('rowheader').map((th) => th.textContent);
     expect(ids).toEqual(['R1', 'R2', 'R6', 'R3', 'R4', 'R5']);
+    expect(screen.getByText('20,000,000 VND')).toBeInTheDocument();
     expect(new Set(writes().map((c) => c.path))).toEqual(new Set(['/rule-sets/card-fee/versions']));
     expect(new Set(writes().map((c) => c.key)).size).toBe(2);
   });
@@ -148,7 +162,7 @@ describe('minimal draft editing', () => {
     open('#/rules/card-fee/1');
     await user.click(await screen.findByRole('button', { name: 'New draft' }));
     await user.clear(screen.getByLabelText('Row R3, Fee'));
-    await user.type(screen.getByLabelText('Row R3, Fee'), '35000 VND');
+    await user.type(screen.getByLabelText('Row R3, Fee'), '35000');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     await user.click(await screen.findByRole('button', { name: 'Request publish' }));
     expect(await screen.findByText('Version 3 is waiting for approval.')).toBeInTheDocument();
@@ -168,12 +182,13 @@ describe('four eyes', () => {
   it('CKP_032_approver_reads_the_changes_and_approves', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/2', 'rules-approver');
-    expect(await screen.findByText('Compared with version 1')).toBeInTheDocument();
-    expect(screen.getByText('1 added, 2 changed, 0 moved, 0 removed')).toBeInTheDocument();
-    expect(screen.getByText(/Aid: compared in this browser/)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Record: version 2 as stored by the engine' })).toBeInTheDocument();
+    expect(await screen.findByText('Compared with Version 1, in effect now')).toBeInTheDocument();
+    expect(screen.getByText('1 added, 2 changed, 0 removed, 3 unchanged')).toBeInTheDocument();
+    // One table: the stored version is the Table tab; Details carries its content hash.
+    expect(screen.getAllByRole('table')).toHaveLength(1);
+    expect(screen.getByText('Content hash')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled();
-    await user.type(screen.getByLabelText('Comment or reason'), 'Matches the tariff');
+    await user.type(screen.getByLabelText('Comment'), 'Matches the tariff');
     await user.click(screen.getByRole('button', { name: 'Approve and publish' }));
     expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
   });
@@ -184,11 +199,12 @@ describe('four eyes', () => {
     const reject = await screen.findByRole('button', { name: 'Reject' });
     expect(reject).toBeDisabled();
     expect(reject).toHaveAccessibleDescription('Reject needs a reason; it is kept in the history.');
-    await user.type(screen.getByLabelText('Comment or reason'), 'R2 waiver needs pricing committee minutes');
+    await user.type(screen.getByLabelText('Comment'), 'R2 waiver needs pricing committee minutes');
     await user.click(reject);
     expect(await screen.findByText('Version 2 is back with its author.')).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'Approval' })).getByText('Draft')).toBeInTheDocument();
-    await user.click(screen.getByText('History (3)'));
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Draft');
+    await user.click(screen.getByRole('tab', { name: 'History' }));
+    expect(await screen.findByText('History (3)')).toBeInTheDocument();
     expect(screen.getByText('Rejected by minh')).toBeInTheDocument();
     expect(screen.getByText('R2 waiver needs pricing committee minutes')).toBeInTheDocument();
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.path)).toEqual(['/rule-sets/card-fee/versions/2:reject']);
@@ -200,7 +216,7 @@ describe('four eyes', () => {
     expect(await screen.findByRole('button', { name: 'Approve and publish' })).toBeDisabled();
     expect(screen.getByText(/Approve is unavailable\. You requested this change/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Comment or reason')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Comment')).not.toBeInTheDocument();
   });
 
   it('RLE_043_a_disabled_approve_always_says_why', async () => {
@@ -230,7 +246,7 @@ describe('four eyes', () => {
     expect(await screen.findByText('You cannot approve a change you wrote or requested.')).toBeInTheDocument();
     expect(screen.getByTestId('problem-code')).toHaveTextContent('SELF_APPROVAL_FORBIDDEN');
     expect(screen.getByText('01JSTALE0000000000000000000')).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'Approval' })).getByText('Waiting for approval')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Waiting for approval');
   });
 
   it('TR_UI_02_a_version_conflict_offers_reload', async () => {
@@ -257,9 +273,9 @@ describe('import of the next version (CKP-030)', () => {
 
   it('CKP_030_import_a_file_as_the_next_version_from_the_rule_set_page', async () => {
     open('#/rules/card-fee/1');
-    await screen.findByRole('button', { name: 'Import new version' });
+    await screen.findByRole('button', { name: 'More' });
     await upload(v3.replace('>= 50000000', '>= 50000000 VND'), 'card-fee-v3.yaml');
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee Version 3');
+    expect(await versionLine(3)).toBeInTheDocument();
     expect(screen.getByText('Draft version 3 created')).toBeInTheDocument();
     const posts = calls.filter((c) => c.method === 'POST');
     expect(posts.map((c) => c.path)).toEqual(['/rule-sets/card-fee/versions']);
@@ -269,17 +285,17 @@ describe('import of the next version (CKP-030)', () => {
 
   it('CKP_030_a_bad_file_is_located_by_row_and_column_and_creates_nothing', async () => {
     open('#/rules/card-fee/1');
-    await screen.findByRole('button', { name: 'Import new version' });
+    await screen.findByRole('button', { name: 'More' });
     await upload(v3, 'card-fee-bad.yaml');
     expect(await screen.findByText('Row R4, column balance')).toBeInTheDocument();
     expect(screen.getByText(': compares a money with a number')).toBeInTheDocument();
     expect(screen.queryByText(/Draft version 3 created/)).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('card-fee Version 1');
+    expect(await versionLine(1)).toBeInTheDocument();
   });
 
   it('CKP_030_a_failed_import_clears_the_previous_success_notice', async () => {
     open('#/rules/card-fee/1');
-    await screen.findByRole('button', { name: 'Import new version' });
+    await screen.findByRole('button', { name: 'More' });
     await upload(v3.replace('>= 50000000', '>= 50000000 VND'), 'card-fee-v3.yaml');
     expect(await screen.findByText('Draft version 3 created')).toBeInTheDocument();
     await upload(v3, 'card-fee-bad.yaml');
@@ -288,8 +304,10 @@ describe('import of the next version (CKP-030)', () => {
   });
 
   it('PD_075_import_stays_available_when_cockpit_drafts_are_off', async () => {
+    const user = userEvent.setup();
     open('#/rules/card-fee/1', 'rules-author-drafts-off');
-    expect(await screen.findByRole('button', { name: 'Import new version' })).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'More' }));
+    expect(screen.getByRole('menuitem', { name: 'Import new version' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
   });
 });
@@ -302,7 +320,7 @@ describe('payload limits (413)', () => {
 
   it('RLE_044_an_import_over_the_limit_is_shown_in_plain_words', async () => {
     open('#/rules/card-fee/1');
-    await screen.findByRole('button', { name: 'Import new version' });
+    await screen.findByRole('button', { name: 'More' });
     const input = document.body.querySelector<HTMLInputElement>('.rs-head input[type=file]');
     if (!input) throw new Error('file input missing');
     await userEvent.setup().upload(input, new File(['#'.repeat(1_048_577)], 'huge.yaml', { type: 'application/yaml' }));
@@ -316,16 +334,16 @@ describe('payload limits (413)', () => {
     open('#/rules/card-fee/1');
     await user.click(await screen.findByRole('button', { name: 'New draft' }));
     await user.clear(screen.getByLabelText('Row R3, Fee'));
-    await user.type(screen.getByLabelText('Row R3, Fee'), '35000 VND');
+    await user.type(screen.getByLabelText('Row R3, Fee'), '35000');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await screen.findByText('The text is too long for the service.')).toBeInTheDocument();
-    expect(screen.getByLabelText('Row R3, Fee')).toHaveValue('35000 VND');
+    expect(screen.getByLabelText('Row R3, Fee')).toHaveValue('35,000');
   });
 
   it('RLE_044_a_reject_reason_over_the_limit_is_shown_in_plain_words', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/2', 'rules-approver');
-    await user.click(await screen.findByLabelText('Comment or reason'));
+    await user.click(await screen.findByLabelText('Comment'));
     await user.paste('x'.repeat(16_500));
     await user.click(screen.getByRole('button', { name: 'Reject' }));
     expect(await screen.findByText('The text is too long for the service.')).toBeInTheDocument();
@@ -337,22 +355,24 @@ describe('Try it', () => {
   it('CKP_030_try_it_shows_the_matched_row_and_formatted_outputs', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/1');
+    await user.click(await screen.findByRole('tab', { name: 'Try it' }));
     await user.selectOptions(await screen.findByLabelText('Tier'), 'GOLD');
     await user.type(screen.getByLabelText('Balance'), '60000000');
     expect(screen.getByLabelText('Balance')).toHaveValue('60,000,000');
     await user.click(screen.getByRole('button', { name: 'Run' }));
-    expect(await screen.findByText('Matched row R2')).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'Try it' })).getByText('0 VND')).toBeInTheDocument();
+    expect(await screen.findByText('Row R2 matched')).toBeInTheDocument();
+    expect(within(screen.getByRole('tabpanel', { name: 'Try it' })).getByText('0 VND')).toBeInTheDocument();
     await waitFor(() => { expect(screen.getByText('Matched', { selector: '.match-mark' })).toBeInTheDocument(); });
     expect(screen.getByText('Version in effect: 1')).toBeInTheDocument();
     // The raw decision id is not on screen until Details is opened.
-    expect(screen.getByText('Details').closest('details')).not.toHaveAttribute('open');
+    expect(document.body.querySelector('.try__details')).not.toHaveAttribute('open');
     const evaluate = calls.find((c) => c.path === '/decisions/card-fee:evaluate');
     expect(evaluate?.key).toBeTruthy();
   });
 
   it('CKP_030_try_it_needs_the_evaluate_permission', async () => {
     open('#/rules/card-fee/1', 'ready');
+    await userEvent.setup().click(await screen.findByRole('tab', { name: 'Try it' }));
     expect(await screen.findByText('You cannot run rules on this service.')).toBeInTheDocument();
   });
 });

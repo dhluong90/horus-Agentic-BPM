@@ -1,5 +1,6 @@
 import type { Locale } from '../../../i18n/I18nProvider';
 import type { Money, ThenValue } from '../../../api/rules/schemas';
+import { valueLabel } from './cells';
 import { formatDecimalText, formatMoney } from './money';
 
 /*
@@ -29,7 +30,7 @@ export function readLiteral(text: string, locale: Locale): Value | undefined {
   if (money) return { kind: 'text', text: `${formatDecimalText(money[1] ?? '', locale) ?? ''} ${money[2] ?? ''}` };
   if (NUMBER_LITERAL.test(trimmed)) return { kind: 'text', text: formatDecimalText(trimmed, locale) ?? trimmed };
   const quoted = QUOTED.exec(trimmed);
-  if (quoted) return { kind: 'text', text: (quoted[1] ?? '').replaceAll("\\'", "'") };
+  if (quoted) return { kind: 'text', text: valueLabel((quoted[1] ?? '').replaceAll("\\'", "'")) };
   if (trimmed === 'true') return { kind: 'yes' };
   if (trimmed === 'false') return { kind: 'no' };
   if (trimmed === 'null') return { kind: 'empty' };

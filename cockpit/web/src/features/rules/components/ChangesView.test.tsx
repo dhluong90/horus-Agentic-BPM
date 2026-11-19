@@ -13,16 +13,17 @@ const base: RuleSetDefinition = {
 const next: RuleSetDefinition = { ...base, rules: [{ id: 'R1', when: { tier: "== 'GОLD'" }, then: { fee: '0 VND' } }, base.rules[1] ?? { id: 'R2', when: {}, then: {} }] };
 
 describe('approver changes', () => {
-  it('ADR_0026_changed_literals_with_non_ascii_characters_are_marked_and_the_engine_record_is_shown', () => {
+  it('ADR_0026_changed_literals_with_non_ascii_characters_are_marked_under_one_summary_line', () => {
     render(
       <I18nProvider initialLocale="en">
-        <ChangesView definition={next} base={base} baseVersion={1} record={{ version: 2, canonicalHash: 'ab'.repeat(32) }} />
+        <ChangesView definition={next} base={base} baseVersion={1} baseInEffect />
       </I18nProvider>,
     );
     expect(screen.getByText('Non-ASCII: О U+041E')).toBeInTheDocument();
     expect(screen.getAllByText(/Non-ASCII/)).toHaveLength(1);
-    expect(screen.getByText(/Aid: compared in this browser/)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Record: version 2 as stored by the engine' })).toBeInTheDocument();
-    expect(screen.getByText('abababababab')).toHaveAttribute('title', 'ab'.repeat(32));
+    expect(screen.getByText('0 added, 1 changed, 0 removed, 1 unchanged')).toBeInTheDocument();
+    expect(screen.getByText('Compared with Version 1, in effect now')).toBeInTheDocument();
+    expect(screen.queryByText(/Aid:/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('table')).toHaveLength(1);
   });
 });

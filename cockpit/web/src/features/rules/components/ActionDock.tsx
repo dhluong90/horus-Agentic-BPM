@@ -1,11 +1,9 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useState } from 'react';
 import type { RuleSetVersion } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { useRulesSession } from '../api/rulesContext';
 import { formatDateTime } from '../model/dates';
-import { HistoryList } from './HistoryList';
 import { ProblemNotice } from './ProblemNotice';
-import { StatusBadge } from './StatusBadge';
 
 export interface Action<TArgs = void> {
   start: (args: TArgs) => void;
@@ -13,42 +11,44 @@ export interface Action<TArgs = void> {
   error: unknown;
 }
 
-export interface DockEditing {
-  dirty: boolean;
-  saving: boolean;
-  error: unknown;
-  onSave: () => void;
-  onCancel: () => void;
+/** Actions beside the version picker: New draft, Edit draft, Request publish. One primary per screen. */
+export function HeaderActions({ version, onEdit, requestPublish }: { version: RuleSetVersion; onEdit: () => void; requestPublish: Action }) {
+  const { t } = useI18n();
+  const { can, cockpitDrafts } = useRulesSession();
+  // Editing imports a new draft: it needs rules:author, and the host may keep changes in its release pipeline.
+  const canEdit = can('rules:author') && cockpitDrafts;
+  if (version.status === 'DRAFT') {
+    const canRequest = version.allowedActions.includes('request-publish');
+    return (
+      <>
+        {canEdit ? <button type="button" className="btn" onClick={onEdit}><span aria-hidden="true">✎</span> {t('editor.edit')}</button> : null}
+        {canRequest ? (
+          <button type="button" className="btn btn--primary" disabled={requestPublish.isPending} aria-busy={requestPublish.isPending} onClick={() => { requestPublish.start(); }}>
+            {requestPublish.isPending ? t('dock.requesting') : t('dock.requestPublish')}
+          </button>
+        ) : null}
+      </>
+    );
+  }
+  if (version.status === 'PUBLISHED' && canEdit) {
+    return <button type="button" className="btn btn--primary" onClick={onEdit}><span aria-hidden="true">＋</span> {t('editor.newDraft')}</button>;
+  }
+  return null;
 }
 
-interface DockProps {
-  version: RuleSetVersion;
-  latestVersion: number;
-  editing: DockEditing | undefined;
-  notice: string | undefined;
-  onEdit: () => void;
-  onOpen: (version: number) => void;
-  onReload: () => void;
-  requestPublish: Action;
-  approve: Action<string>;
-  reject: Action<string>;
-}
-
-function Fact({ label, value }: { label: string; value: string | null | undefined }) {
-  if (value === null || value === undefined) return null;
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </div>
-  );
+/** A line under the header when the host keeps rule changes in its release pipeline. */
+export function DraftsOffNote() {
+  const { t } = useI18n();
+  const { can, cockpitDrafts } = useRulesSession();
+  return can('rules:author') && !cockpitDrafts ? <p className="rs-head__note">{t('dock.draftsOff')}</p> : null;
 }
 
 /**
- * The four-eyes gate. What the user may do comes from the engine's allowedActions for this caller, and a
- * disabled Approve always carries its reason. A stale click still gets the engine's answer, shown with its code.
+ * The four-eyes decision for a version waiting for approval. What the user may do comes from the engine's
+ * allowedActions for this caller, and a disabled Approve always says why. A stale click still gets the
+ * engine's answer, shown with its code behind Details.
  */
-function FourEyesGate({ version, approve, reject }: Pick<DockProps, 'version' | 'approve' | 'reject'>) {
+export function DecisionCard({ version, approve, reject, onReload }: { version: RuleSetVersion; approve: Action<string>; reject: Action<string>; onReload: () => void }) {
   const { t } = useI18n();
   const { userId } = useRulesSession();
   const [text, setText] = useState('');
@@ -58,123 +58,105 @@ function FourEyesGate({ version, approve, reject }: Pick<DockProps, 'version' | 
   const allowed = new Set(version.allowedActions);
   const self = version.requestedBy === userId ? 'dock.selfRequested' : version.createdBy === userId ? 'dock.selfAuthored' : undefined;
   const canApprove = allowed.has('approve') && self === undefined;
-  // PD-089: a requester never rejects their own request; withdrawing gets its own action (:withdraw).
+  // PD-089: a requester never rejects their own request; withdrawing is its own action (:withdraw).
   const canReject = allowed.has('reject') && self === undefined;
-  if (!canApprove && !canReject && self === undefined) return <p className="dock__note">{t('dock.waiting')}</p>;
-  // A disabled Approve always says why: four eyes for the maker, otherwise the engine withheld it.
+  const error: unknown = approve.error ?? reject.error;
   const unavailable = canApprove ? undefined : self ?? 'dock.approveUnavailable';
   const busy = approve.isPending || reject.isPending;
   return (
-    <div className="gate">
-      {unavailable !== undefined ? (
-        <p id={reasonId} className="gate__reason">
-          <span aria-hidden="true">⊘</span> {t(unavailable)}
-        </p>
-      ) : null}
-      {canApprove || canReject ? (
-        <label className="field" htmlFor={textId}>
-          <span className="field__label">{t('dock.reason')}</span>
-          <textarea id={textId} className="field__input" rows={2} value={text} aria-describedby={canReject ? hintId : undefined} onChange={(e) => { setText(e.target.value); }} />
-        </label>
-      ) : null}
-      <div className="gate__buttons">
-        <button
-          type="button"
-          className="btn btn--primary btn--ok"
-          disabled={!canApprove || busy}
-          {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : {})}
-          onClick={() => { approve.start(text.trim()); }}
-        >
-          {approve.isPending ? t('dock.approving') : t('dock.approve')}
-        </button>
-        {canReject ? (
-          <button type="button" className="btn btn--danger-quiet" disabled={text.trim() === '' || busy} aria-describedby={hintId} onClick={() => { reject.start(text.trim()); }}>
-            {reject.isPending ? t('dock.rejecting') : t('dock.reject')}
-          </button>
-        ) : null}
-      </div>
-      {canReject ? <p id={hintId} className="dock__hint">{t('dock.reasonHint')}</p> : null}
+    <section className="card decision" aria-labelledby="decision-title">
+      <h2 id="decision-title" className="rules-card-title">{t('decision.title')}</h2>
+      {!canApprove && !canReject && self === undefined ? (
+        <p className="dock__note">{t('dock.waiting')}</p>
+      ) : (
+        <>
+          {unavailable !== undefined ? (
+            <p id={reasonId} className="gate__reason">
+              <span aria-hidden="true">⊘</span> {t(unavailable)}
+            </p>
+          ) : null}
+          {canApprove || canReject ? (
+            <label className="field" htmlFor={textId}>
+              <span className="field__label">{t('decision.comment')}</span>
+              <textarea id={textId} className="field__input" rows={2} value={text} placeholder={t('decision.commentHint')}
+                aria-describedby={canReject ? hintId : undefined} onChange={(e) => { setText(e.target.value); }} />
+            </label>
+          ) : null}
+          <div className="gate__buttons">
+            <button type="button" className="btn btn--primary btn--ok" disabled={!canApprove || busy} aria-busy={approve.isPending}
+              {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : {})} onClick={() => { approve.start(text.trim()); }}>
+              <span aria-hidden="true">✓</span> {approve.isPending ? t('dock.approving') : t('dock.approve')}
+            </button>
+            {canReject ? (
+              <button type="button" className="btn btn--danger-quiet" disabled={text.trim() === '' || busy} aria-describedby={hintId} onClick={() => { reject.start(text.trim()); }}>
+                {reject.isPending ? t('dock.rejecting') : t('dock.reject')}
+              </button>
+            ) : null}
+          </div>
+          {canReject ? <p id={hintId} className="dock__hint">{t('dock.reasonHint')}</p> : null}
+          {canApprove ? <p className="dock__hint">{t('decision.takesEffect')}</p> : null}
+        </>
+      )}
+      {error !== undefined && error !== null ? <ProblemNotice error={error} onReload={onReload} /> : null}
+    </section>
+  );
+}
+
+function Step({ title, when }: { title: string; when: string | undefined }) {
+  return (
+    <li className="timeline__step">
+      <span className="timeline__dot" aria-hidden="true">✓</span>
+      <span className="timeline__title">{title}</span>
+      {when !== undefined ? <span className="timeline__when tnum">{when}</span> : null}
+    </li>
+  );
+}
+
+/** Who drafted, requested and approved the version, since when it applies, and its content hash. */
+export function DetailsPanel({ version }: { version: RuleSetVersion }) {
+  const { t, locale } = useI18n();
+  const policy = version.hitPolicy.toUpperCase();
+  const policyKey = policy === 'UNIQUE' ? 'policy.UNIQUE' : policy === 'COLLECT' ? 'policy.COLLECT' : 'policy.FIRST';
+  return (
+    <div className="details">
+      <ol className="timeline">
+        {version.createdBy ? <Step title={t('details.drafted', { who: version.createdBy })} when={formatDateTime(version.createdAt, locale)} /> : null}
+        {version.requestedBy ? <Step title={t('details.requested', { who: version.requestedBy })} when={formatDateTime(version.requestedAt, locale)} /> : null}
+        {version.approvedBy ? <Step title={t('details.approved', { who: version.approvedBy })} when={formatDateTime(version.approvedAt, locale)} /> : null}
+        {version.effectiveFrom ? <Step title={t('details.inEffect')} when={t('details.from', { when: formatDateTime(version.effectiveFrom, locale) ?? '' })} /> : null}
+      </ol>
+      <dl className="dock__facts">
+        <div>
+          <dt>{t('details.hitPolicy')}</dt>
+          <dd>{t(policyKey)}</dd>
+        </div>
+        <div>
+          <dt>{t('details.rows')}</dt>
+          <dd className="tnum">{version.definition.rules.length}</dd>
+        </div>
+        <div>
+          <dt>{t('details.hash')}</dt>
+          <dd><span className="mono" title={version.canonicalHash}>{version.canonicalHash.slice(0, 12)}</span></dd>
+        </div>
+      </dl>
     </div>
   );
 }
 
-function Actions({ version, editing, onEdit, requestPublish, approve, reject }: Pick<DockProps, 'version' | 'editing' | 'onEdit' | 'requestPublish' | 'approve' | 'reject'>): ReactNode {
+/** The sticky save dock at the bottom of the editor: what is unsaved, what is left to fix, Discard and Save draft. */
+export function EditDock({ unsaved, toFix, saving, onSave, onDiscard }: { unsaved: number; toFix: number; saving: boolean; onSave: () => void; onDiscard: () => void }) {
   const { t } = useI18n();
-  const { can, cockpitDrafts } = useRulesSession();
-  // Editing imports a new draft: it needs rules:author, and the host may keep changes in its release pipeline.
-  const canEdit = can('rules:author') && cockpitDrafts;
-  const draftsOff = can('rules:author') && !cockpitDrafts ? <p className="dock__hint">{t('dock.draftsOff')}</p> : null;
-  if (editing) {
-    return (
-      <div className="dock__buttons">
-        <button type="button" className="btn btn--primary" disabled={!editing.dirty || editing.saving} onClick={editing.onSave}>
-          {editing.saving ? t('editor.saving') : t('editor.save')}
-        </button>
-        <button type="button" className="btn btn--quiet" disabled={editing.saving} onClick={editing.onCancel}>{t('editor.cancel')}</button>
-        <p className="dock__hint" role="status">{editing.dirty ? t('editor.unsaved') : t('editor.noChanges')}</p>
-        <p className="dock__hint">{t('editor.saveNote')}</p>
-      </div>
-    );
-  }
-  switch (version.status) {
-    case 'DRAFT': {
-      const canRequest = version.allowedActions.includes('request-publish');
-      if (!canRequest && !canEdit) return draftsOff ?? <p className="dock__note">{t('dock.readOnly')}</p>;
-      return (
-        <div className="dock__buttons">
-          {canRequest ? (
-            <button type="button" className="btn btn--primary" disabled={requestPublish.isPending} onClick={() => { requestPublish.start(); }}>
-              {requestPublish.isPending ? t('dock.requesting') : t('dock.requestPublish')}
-            </button>
-          ) : null}
-          {canEdit ? <button type="button" className="btn" onClick={onEdit}>{t('editor.edit')}</button> : null}
-          {draftsOff}
-        </div>
-      );
-    }
-    case 'PENDING_APPROVAL':
-      return <FourEyesGate version={version} approve={approve} reject={reject} />;
-    case 'PUBLISHED':
-      return (
-        <div className="dock__buttons">
-          {canEdit ? <button type="button" className="btn btn--primary" onClick={onEdit}>{t('editor.newDraft')}</button> : null}
-          {draftsOff ?? <p className="dock__hint">{t('dock.publishedNote')}</p>}
-        </div>
-      );
-    case 'RETIRED':
-      return <p className="dock__note">{t('dock.retiredNote')}</p>;
-  }
-}
-
-export function ActionDock(props: DockProps) {
-  const { t, locale } = useI18n();
-  const { version, latestVersion, notice, onOpen, onReload, editing, requestPublish, approve, reject } = props;
-  const error: unknown = editing ? undefined : requestPublish.error ?? approve.error ?? reject.error;
   return (
-    <section className="card dock" aria-labelledby="dock-title">
-      <div className="dock__head">
-        <h2 id="dock-title" className="card__title">{t('dock.title')}</h2>
-        <StatusBadge status={version.status} />
-      </div>
-      <dl className="dock__facts">
-        <Fact label={t('dock.author')} value={version.createdBy} />
-        <Fact label={t('dock.created')} value={formatDateTime(version.createdAt, locale)} />
-        <Fact label={t('dock.requester')} value={version.requestedBy} />
-        <Fact label={t('dock.approver')} value={version.approvedBy} />
-        <Fact label={t('dock.effective')} value={formatDateTime(version.effectiveFrom, locale)} />
-      </dl>
-      <Actions {...props} />
-      {error !== undefined && error !== null ? <ProblemNotice error={error} onReload={onReload} /> : null}
-      <p className="dock__live" role="status" aria-live="polite">{notice ?? ''}</p>
-      {!editing && version.version < latestVersion ? (
-        <p className="dock__hint">
-          {t('dock.newer')}{' '}
-          <button type="button" className="linkbtn hit" onClick={() => { onOpen(latestVersion); }}>
-            {t('dock.openVersion', { version: String(latestVersion) })}
-          </button>
-        </p>
-      ) : null}
-      {!editing ? <HistoryList ruleSet={version.ruleSet} version={version.version} /> : null}
-    </section>
+    <div className="edit-dock" role="region" aria-label={t('editor.save')}>
+      <p className="edit-dock__status" role="status">
+        {unsaved > 0 ? <span className="edit-dock__dot" aria-hidden="true" /> : null}
+        {unsaved === 1 ? t('editor.unsavedOne') : unsaved > 0 ? t('editor.unsavedCount', { count: String(unsaved) }) : t('editor.noChanges')}
+        {toFix > 0 ? ` · ${t('editor.toFix', { count: String(toFix) })}` : ''}
+      </p>
+      <button type="button" className="btn btn--ghost" disabled={saving} onClick={onDiscard}>{t('editor.cancel')}</button>
+      <button type="button" className="btn btn--primary" disabled={unsaved === 0 || saving} aria-busy={saving} onClick={onSave}>
+        {saving ? t('editor.saving') : t('editor.save')}
+      </button>
+    </div>
   );
 }

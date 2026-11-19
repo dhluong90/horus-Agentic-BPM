@@ -88,6 +88,10 @@ function validate(definition: Definition): Violation[] {
         found.push({ ruleId: rule.id, column: null, message: `unknown input '${input}'` });
         continue;
       }
+      if (/^(==|!=|>=|<=|>|<)\s*$/.test(condition.trim())) {
+        found.push({ ruleId: rule.id, column: input, message: `Unexpected end of expression at position ${String(condition.trim().length + 1)}` });
+        continue;
+      }
       const bare = /^(==|!=)\s*([A-Za-z_]\w*)$/.exec(condition);
       if (bare && bare[2] !== 'true' && bare[2] !== 'false' && bare[2] !== 'null') found.push({ ruleId: rule.id, column: input, message: `Unknown input '${bare[2] ?? ''}' at position ${String(condition.indexOf(bare[2] ?? '') + 1)}` });
       else if (types.get(input) === 'money' && /^(>=|<=|>|<|==|!=)\s*-?\d+(\.\d+)?$/.test(condition.trim())) found.push({ ruleId: rule.id, column: input, message: 'compares a money with a number' });

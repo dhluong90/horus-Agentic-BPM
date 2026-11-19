@@ -33,9 +33,8 @@ function messageKey(error: HostError): MessageKey {
 }
 
 /**
- * An engine refusal in place, next to the action that caused it: a message in the user's language, the
- * error code and the correlation id with Copy. The engine's own sentence is in English in this release, so it
- * shows directly in English and behind a disclosure in Vietnamese, keeping one language on screen.
+ * An engine refusal in place, next to the action that caused it: one plain sentence in the user's language.
+ * The error code, the correlation id with Copy and the engine's own (English) sentence stay behind Details.
  */
 function Located({ violations, english }: { violations: readonly Violation[]; english: boolean }) {
   const { t } = useI18n();
@@ -63,37 +62,37 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true, l
   const problem = hostError.kind === 'problem' ? hostError : undefined;
   const correlationId = hostError.kind === 'problem' || hostError.kind === 'unexpected-response' ? hostError.correlationId : undefined;
   const detail = showDetail ? problem?.detail : undefined;
+  const hasDetails = problem?.code !== undefined || correlationId !== undefined || detail !== undefined;
   return (
     <div className="notice notice--bad" role="alert">
       <p className="notice__title">
-        <span className="status-icon status-icon--bad" aria-hidden="true">!</span>
+        <span className="status-icon status-icon--bad" aria-hidden="true">✕</span>
         {t(messageKey(hostError))}
       </p>
       {located && problem?.violations ? <Located violations={problem.violations} english={locale === 'en'} /> : null}
-      {detail !== undefined && locale === 'en' && !(located && problem?.violations) ? <p className="notice__detail">{detail}</p> : null}
-      {detail !== undefined && locale !== 'en' ? (
+      {hasDetails ? (
         <details className="notice__more">
-          <summary>{t('problem.engineDetail')}</summary>
-          <p lang="en">{detail}</p>
+          <summary>{t('try.details')}</summary>
+          {detail !== undefined && !(located && problem?.violations) ? <p className="notice__detail" lang="en">{detail}</p> : null}
+          <dl className="notice__facts">
+            {problem?.code !== undefined ? (
+              <div>
+                <dt>{t('error.code')}</dt>
+                <dd className="mono" data-testid="problem-code">{problem.code}</dd>
+              </div>
+            ) : null}
+            {correlationId !== undefined ? (
+              <div>
+                <dt>{t('error.correlationId')}</dt>
+                <dd className="facts__with-action">
+                  <span className="mono">{correlationId}</span>
+                  <CopyButton value={correlationId} />
+                </dd>
+              </div>
+            ) : null}
+          </dl>
         </details>
       ) : null}
-      <dl className="notice__facts">
-        {problem?.code !== undefined ? (
-          <div>
-            <dt>{t('error.code')}</dt>
-            <dd className="mono" data-testid="problem-code">{problem.code}</dd>
-          </div>
-        ) : null}
-        {correlationId !== undefined ? (
-          <div>
-            <dt>{t('error.correlationId')}</dt>
-            <dd className="facts__with-action">
-              <span className="mono">{correlationId}</span>
-              <CopyButton value={correlationId} />
-            </dd>
-          </div>
-        ) : null}
-      </dl>
       {onReload && problem?.code === 'VERSION_CONFLICT' ? (
         <button type="button" className="btn btn--small hit" onClick={onReload}>
           {t('problem.reload')}

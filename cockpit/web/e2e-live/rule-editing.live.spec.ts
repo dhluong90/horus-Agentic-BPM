@@ -74,14 +74,18 @@ test('CKP_030_live_json_files_import_on_the_list_and_on_the_rule_set_page', asyn
   const doc = (fee: string) => JSON.stringify({ schemaVersion: 1, ruleSet: name, hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }],
     outputs: [{ name: 'fee', type: 'money' }], rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee } }] }, null, 2);
   const pick = async (button: string, fee: string) => {
+    // The list's Import file button; the rule set page imports from its More menu (below).
     const chooser = lan.waitForEvent('filechooser');
     await lan.getByRole('button', { name: button }).click();
     await (await chooser).setFiles({ name: `${name}.json`, mimeType: 'application/json', buffer: Buffer.from(doc(fee)) });
   };
   await pick('Import file', '0 VND');
-  await expect(lan.getByRole('heading', { level: 1 })).toContainText(`${name} Version 1`);
-  await pick('Import new version', '5000 VND');
-  await expect(lan.getByRole('heading', { level: 1 })).toContainText(`${name} Version 2`);
+  await expect(lan.locator('.rs-head__sub')).toHaveText(/^Version 1 · draft/);
+  await lan.getByRole('button', { name: 'More' }).click();
+  const chooser = lan.waitForEvent('filechooser');
+  await lan.getByRole('menuitem', { name: 'Import new version' }).click();
+  await (await chooser).setFiles({ name: `${name}.json`, mimeType: 'application/json', buffer: Buffer.from(doc('5000 VND')) });
+  await expect(lan.locator('.rs-head__sub')).toHaveText(/^Version 2 · draft/);
   await expect(lan.getByText('Draft version 2 created')).toBeVisible();
   await expect(lan.getByText('5,000 VND')).toBeVisible();
 });
@@ -95,8 +99,8 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
   const chooser = lan.waitForEvent('filechooser');
   await lan.getByRole('button', { name: 'Import file' }).click();
   await (await chooser).setFiles({ name: `${NAME}.yaml`, mimeType: 'application/yaml', buffer: Buffer.from(DOCUMENT) });
-  await expect(lan.getByRole('heading', { level: 1 })).toContainText(`${NAME} Version 1`);
-  await expect(lan.getByRole('cell', { name: '50,000,000 VND' })).toBeVisible();
+  await expect(lan.locator('.rs-head__sub')).toHaveText(/^Version 1 · draft/);
+  await expect(lan.getByText('50,000,000 VND')).toBeVisible();
   await lan.screenshot({ path: `${SHOTS}/01-version-table-draft-1440x900-light-en.png` });
 
   // Request publication; the requester sees Approve disabled with the reason.
@@ -111,39 +115,45 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
   const minh = await signIn(browser, 'minh');
   await openCockpit(minh, `#/rules/${NAME}/1`);
   await expect(minh.getByText('First version: every row is new.')).toBeVisible();
-  await minh.getByLabel('Comment or reason').fill('Fees match the tariff');
+  await minh.getByLabel('Comment').fill('Fees match the tariff');
   await aboveFold(minh, 'Approve and publish');
   await minh.getByRole('button', { name: 'Approve and publish' }).click();
   await expect(minh.getByText('Version 1 is published.')).toBeVisible();
 
   // The author starts a new draft from the published version and edits it.
   await lan.reload();
-  await expect(lan.locator('.dock .badge')).toHaveText(/Published/);
+  await expect(lan.getByRole('heading', { level: 1 })).toContainText('Published');
   await lan.getByRole('button', { name: 'New draft' }).click();
-  await lan.getByLabel('Row R2, Tier').fill("in ['GOLD', 'PLATINUM']");
+  // Cells edit as values: tier picker, comparison and amount, money with VND inside, Yes or No.
+  await lan.getByRole('button', { name: 'Row R2, Tier: Gold' }).click();
+  await lan.getByRole('checkbox', { name: 'Platinum' }).check();
+  await lan.keyboard.press('Escape');
   await lan.getByRole('button', { name: 'Add row' }).click();
-  for (let i = 0; i < 3; i += 1) await lan.getByRole('button', { name: 'Move row R6 up' }).click();
-  await lan.getByLabel('Row R6, Tier').fill("== 'GOLD'");
-  await lan.getByLabel('Row R6, Balance').fill('>= 20000000');
+  for (let i = 0; i < 3; i += 1) {
+    await lan.getByRole('button', { name: 'Actions for row R6' }).click();
+    await lan.getByRole('menuitem', { name: 'Move row R6 up' }).click();
+  }
+  await lan.getByRole('button', { name: 'Row R6, Tier', exact: true }).click();
+  await lan.getByRole('checkbox', { name: 'Gold' }).check();
+  await lan.keyboard.press('Escape');
+  // A comparison without an amount: the engine refuses it.
+  await lan.getByRole('button', { name: /^Row R6, Balance: any value/ }).click();
   await lan.getByLabel('Row R6, Fee').fill('10000');
-  await lan.getByLabel('Row R6, Waived').fill('false');
+  await lan.getByRole('group', { name: 'Row R6, Waived' }).getByRole('button', { name: 'No' }).click();
   await aboveFold(lan, 'Save draft');
   await lan.getByRole('button', { name: 'Save draft' }).click();
 
   // The engine's 422 lands on its cell; the other edits stay.
-  const balance = lan.getByLabel('Row R6, Balance');
+  const balance = lan.getByLabel('Row R6, Balance', { exact: true });
   await expect(balance).toHaveAttribute('aria-invalid', 'true');
-  await expect(lan.getByText('compares a money with a number')).toBeVisible();
-  // Every violation at once, output cells included.
-  await expect(lan.getByLabel('Row R6, Fee')).toHaveAttribute('aria-invalid', 'true');
-  await expect(lan.getByLabel('Row R2, Tier')).toHaveValue("in ['GOLD', 'PLATINUM']");
+  await expect(lan.getByText('Enter a value.')).toBeVisible();
+  await expect(lan.getByRole('button', { name: 'Row R2, Tier: Gold, Platinum' })).toBeVisible();
   await expect(lan.getByTestId('problem-code')).toHaveText('VALIDATION_FAILED');
   await lan.screenshot({ path: `${SHOTS}/03-editor-error-on-cell-1440x900-light-en.png` });
 
-  await balance.fill('>= 20000000 VND');
-  await lan.getByLabel('Row R6, Fee').fill('10000 VND');
+  await balance.fill('20000000');
   await lan.getByRole('button', { name: 'Save draft' }).click();
-  await expect(lan.getByRole('heading', { level: 1 })).toContainText(`${NAME} Version 2`);
+  await expect(lan.locator('.rs-head__sub')).toHaveText(/^Version 2 · draft/);
   await expect(lan.getByText('Saved as draft version 2')).toBeVisible();
   await expect(rowHeads(lan)).toHaveText(['R1', 'R2', 'R6', 'R3', 'R4', 'R5']);
   await lan.getByRole('button', { name: 'Request publish' }).click();
@@ -151,12 +161,12 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
 
   // The approver sends it back with a reason; the author sees it in the history and asks again.
   await openCockpit(minh, `#/rules/${NAME}/2`);
-  await minh.getByLabel('Comment or reason').fill('R6 needs the pricing committee minutes');
+  await minh.getByLabel('Comment').fill('R6 needs the pricing committee minutes');
   await minh.getByRole('button', { name: 'Reject' }).click();
   await expect(minh.getByText('Version 2 is back with its author.')).toBeVisible();
   await lan.reload();
-  await expect(lan.locator('.dock .badge')).toHaveText(/Draft/);
-  await lan.getByText(/^History \(\d+\)$/).click();
+  await expect(lan.getByRole('heading', { level: 1 })).toContainText('Draft');
+  await lan.getByRole('tab', { name: 'History' }).click();
   await expect(lan.getByText('Rejected by minh')).toBeVisible();
   await expect(lan.getByText('R6 needs the pricing committee minutes')).toBeVisible();
   await lan.screenshot({ path: `${SHOTS}/04a-author-sees-rejection-1440x900-light-en.png` });
@@ -165,8 +175,8 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
 
   // The approver reads the changes with the editor's labels and formats, then approves.
   await minh.reload();
-  await expect(minh.getByText('Compared with version 1')).toBeVisible();
-  await expect(minh.getByText('1 added, 1 changed, 0 moved, 0 removed')).toBeVisible();
+  await expect(minh.getByText('Compared with Version 1, in effect now')).toBeVisible();
+  await expect(minh.getByText('1 added, 1 changed, 0 removed, 4 unchanged')).toBeVisible();
   await minh.screenshot({ path: `${SHOTS}/04-approver-changes-1440x900-light-en.png` });
   await minh.setViewportSize({ width: 1440, height: 1200 });
   await minh.screenshot({ path: `${SHOTS}/04-approver-changes-1440x1200-light-en.png` });
@@ -177,6 +187,7 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
   // state; the test checks that state and records the skip instead of failing.
   await lan.reload();
   const me = (await (await lan.request.get('/api/bpm/me')).json()) as { permissions: string[] };
+  await lan.getByRole('tab', { name: 'Try it' }).click();
   if (!me.permissions.includes('rules:evaluate')) {
     await expect(lan.getByText('You cannot run rules on this service.')).toBeVisible();
     const note = 'Try it skipped: this host does not grant rules:evaluate to the demo author (lan).';
@@ -188,7 +199,7 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
   await lan.getByLabel('Balance', { exact: true }).fill('30000000');
   await expect(lan.getByLabel('Balance', { exact: true })).toHaveValue('30,000,000');
   await lan.getByRole('button', { name: 'Run' }).click();
-  await expect(lan.getByText('Matched row R6')).toBeVisible();
+  await expect(lan.getByText('Row R6 matched')).toBeVisible();
   await expect(lan.locator('.try__result').getByText('10,000 VND')).toBeVisible();
   await expect(lan.locator('tr.dt__row--matched .row-id')).toHaveText('R6');
   await lan.screenshot({ path: `${SHOTS}/05-try-it-matched-1440x900-light-en.png` });

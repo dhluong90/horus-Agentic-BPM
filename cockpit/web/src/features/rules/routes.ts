@@ -6,7 +6,7 @@ import { createContext, useContext } from 'react';
  * (hash routing in this app, or a path router at /rules) passes `navigate` and `href` for these paths.
  */
 
-export const LENSES = ['table', 'changes', 'source'] as const;
+export const LENSES = ['table', 'changes', 'history', 'source'] as const;
 export type Lens = (typeof LENSES)[number];
 
 export type RulesRoute =
