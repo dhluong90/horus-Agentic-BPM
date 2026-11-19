@@ -481,7 +481,7 @@ The test for "do now" is whether the change is expensive or impossible later. Ad
 
 ### 9.2 Larger decisions for the product owner
 
-P1 to P4 were decided on 2026-11-19; P5 to P9 are pending.
+P1 to P4 and P6 to P9 were decided on 2026-11-19; P5 (release dates) is with the product owner.
 
 | # | Change | Milestone | Effort (assumption) | Cost if not done now | Recommendation or decision |
 |---|---|---|---|---|---|
@@ -490,10 +490,10 @@ P1 to P4 were decided on 2026-11-19; P5 to P9 are pending.
 | P3 | Canonical semantic model in `*-core` (ADR-0018): the M1 rule set model shaped as DMN definitions, decision and decision table; the M2 process model as flow nodes and sequence flows with ids; the M3 BPMN subset reader built on it | M1, M2, M3 | About 3 days in M1 and 5 days in M2 | The M3 BPMN reader and every later stage map onto a model that cannot hold full BPMN; a rewrite of the definition layer in S1 | **Decided** 2026-11-19: accepted (PD-060 option 2, ADR-0018); supersedes the notation part of PD-034; `RLE-024`, `PRE-043`, `TR-STD-28` |
 | P4 | HORUS-built FEEL (ADR-0019) | S1 to S3 | About 22 engineer-weeks: S-FEEL core 6, full FEEL 12, TCK completion 4 | n/a (after 1.0) | **Decided** 2026-11-19: accepted (PD-061 option 1); a reference FEEL engine in test scope only |
 | P5 | Release targets and capacity for S1 (1.1), S2 (1.2), S3 (1.3) | After 1.0 | About 60 engineer-weeks in total for both engines and the cockpit symbols (section 11) | n/a | **Decision needed.** Dates by the product owner |
-| P6 | Principle 9 wording, the vision non-goal "never a full BPMN 2.0 implementation" and the PRD non-goals | Now | Documentation | Public documents contradict ADR-0017 | **Decision needed.** Wording proposed in ADR-0017 |
-| P7 | Test-data licence: the BPMN MIWG reference models are CC BY 3.0, outside Apache 2.0, MIT and BSD. Used as test data fetched at build time with attribution, never shipped | S1 | None | No MIWG evidence | **Decision needed** under PD-053. Allow as test data |
-| P8 | Choreography and conversation diagrams not targeted | Now | None | | **Decision needed.** Confirm |
-| P9 | FEEL `errorMode` default: `spec` for imported DMN models, `strict` for v1 rule sets | S2 | None | | **Decision needed.** Accept |
+| P6 | Principle 9 wording, the vision non-goal "never a full BPMN 2.0 implementation" and the PRD non-goals | Now | Documentation | Public documents contradict ADR-0017 | **Decided** 2026-11-19 (PD-063) |
+| P7 | Test-data licence: the BPMN MIWG reference models are CC BY 3.0, outside Apache 2.0, MIT and BSD. Used as test data fetched at build time with attribution, never shipped | S1 | None | No MIWG evidence | **Decided** 2026-11-19 (PD-064): allowed as test data fetched at build time with attribution, never shipped (`TR-LIC-01`) |
+| P8 | Choreography and conversation diagrams not targeted | Now | None | | **Decided** 2026-11-19 (PD-065): not targeted; kept in the source document with a warning; deviation register row in section 12 |
+| P9 | FEEL `errorMode` default: `spec` for imported DMN models, `strict` for v1 rule sets | S2 | None | | **Decided** 2026-11-19 (PD-066): error mode is a declared property of each decision model with these defaults, changed only by a new approved version (`TR-STD-23`) |
 
 ### 9.3 Deliberately not done now
 
@@ -544,13 +544,13 @@ Published per release (`TR-STD-05`). The claim is "BPMN 2.0.2 Process Execution 
 | DMN external functions (Java, PMML) | Refused; host functions through `RuleFunctionRegistry` | Principles 3 and 4 |
 | FEEL evaluation without bounds | Step budget and recursion depth | Principle 3 |
 | FEEL errors as `null` | Per-model `errorMode`; guardrails fail closed | Banking fail-closed rule |
-| Choreography and conversation | Kept in the source document, not displayed or executed | Pending P8 |
+| Choreography and conversation | Imported with that part kept untouched in the stored source document and a warning naming it; not displayed or executed | Not targeted (PD-065) |
 
 ## 13. Decisions needed and open questions
 
 | # | Question | Recommendation | Owner and gate |
 |---|---|---|---|
-| 13.1 | P5 to P9 of section 9.2 (P1 to P4 decided on 2026-11-19) | As stated there | Product owner |
+| 13.1 | P5 of section 9.2 (the others decided on 2026-11-19) | As stated there | Product owner |
 | 13.2 | `MESSAGE_KEY_AMBIGUOUS`: should a second instance waiting on the same message key be refused at its subscription instead of raising an incident? | Incident, because refusing would fail an unrelated business step | Architect, S2 design |
 | 13.3 | Message flows between two pools deployed in the same host: deliver directly in the same transaction, or always through the outbox? | Through the outbox by default, so behaviour does not change when a pool moves to another host | Architect, S2 design |
 | 13.4 | Error codes `BPMN_NOT_EXECUTABLE`, `BPMN_SCRIPT_FORMAT_UNSUPPORTED`, `BPMN_IMPLEMENTATION_UNSUPPORTED`, `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`, `CMMN_UNSUPPORTED`, `DMN_EXTERNAL_FUNCTION_UNSUPPORTED`, `EVALUATION_BUDGET_EXCEEDED`, `409 INSTANCE_BUSY` and incident codes `UNHANDLED_BUSINESS_ERROR`, `LATE_RESULT_AFTER_INTERRUPT`, `MESSAGE_KEY_AMBIGUOUS` | Add to the wiki error-code page when their stage is designed; `UNHANDLED_BUSINESS_ERROR` with M2 | Documentation, M2 |

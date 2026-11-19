@@ -122,7 +122,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 | UC-RE-35 | Approve from the bank's own ticket or workflow tool | Policy requires one approval tool (K8) | REST and events; integration is the host's | M1 | M1 | RE-F-20, RE-F-29 |
 | UC-RE-36 | Require two approvers from different functions (risk and compliance) | Credit policy needs two sign-offs | Not planned | later | later | RE-F-36 |
 | UC-RE-37 | Approve an urgent change alone | Fee charged in error, out of hours | The emergency path, only if the bank turned it on by configuration; logged and reviewed afterwards (PD-012, decided 2026-11-19); milestone set by the architect's ADR | never | later | RE-F-48 |
-| UC-RE-38 | Retire a rule set no longer used | Product withdrawn | Cockpit or REST `:retire` | M1 | M1 | RE-F-07 |
+| UC-RE-38 | Retire a rule set no longer used | Product withdrawn | Cockpit or REST `:retire`, one `rules:approve` holder with a reason by default; a host can require a second approver by setting from M3 (PD-080) | M1 | M1 | RE-F-07, RE-F-49 |
 
 ### Operations and customer support staff
 
@@ -169,7 +169,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 | UC-RE-62 | Set the masking key; start-up fails without it | Go-live | Host configuration and secret store | M1 | M1 | RE-F-13, RE-F-12 |
 | UC-RE-63 | Serve the cockpit embedded or standalone and register hosts | Go-live | Configuration | M1 | M1 | CK-F-01, CK-F-23, X-F-22 |
 | UC-RE-64 | Monitor evaluation latency, errors and cache freshness | Daily operations | Metrics and events in the bank's monitoring | M1 | M1 | RE-F-29, RE-F-09, RE-F-10 |
-| UC-RE-65 | Choose transactional or async decision logging | High-volume host | Configuration | M1 (cut candidate) | M1 (cut candidate) | RE-F-15 |
+| UC-RE-65 | Choose transactional or async decision logging | High-volume host | Configuration: synchronous by default (PD-075) | M1 (cut candidate) | M2 (cut candidate) | RE-F-15 |
 | UC-RE-66 | Set decision log retention | Records policy | Configuration | M3 | M3 | RE-F-31 |
 | UC-RE-67 | Turn on OpenTelemetry spans | Tracing standard | Configuration | M3 | M3 | X-F-11 |
 | UC-RE-68 | Upgrade the engine without downtime | New minor release | Rolling upgrade | M3 | M3 | X-F-10 |
@@ -181,6 +181,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 |---|---|---|---|---|---|---|
 | Before PD-043 | 37 | 5 | 10 | 13 | 4 | 69 |
 | Plan (PD-043 and PD-012 decided) | 43 | 6 | 11 | 6 | 3 | 69 |
+| Plan (delegated decisions of 2026-11-19: UC-RE-65 to M2, PD-075) | 42 | 7 | 11 | 6 | 3 | 69 |
 
 Per persona, under the plan:
 
@@ -193,7 +194,7 @@ Per persona, under the plan:
 | Operations and customer support staff | 3 | 1 | 1 | 0 | 0 | 5 |
 | Internal auditor | 3 | 1 | 1 | 0 | 0 | 5 |
 | Host-service developer | 9 | 2 | 0 | 0 | 0 | 11 |
-| Platform administrator | 5 | 0 | 3 | 2 | 0 | 10 |
+| Platform administrator | 4 | 1 | 3 | 2 | 0 | 10 |
 ## Journeys
 
 Six journeys cover the most frequent and the most consequential use cases. Each step names the screen or call. The examples use the `card-fee` rule set from [the authoring guide](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Rule-Engine-Authoring-Decision-Tables).

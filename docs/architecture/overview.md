@@ -108,7 +108,7 @@ Each engine is a functional core with an imperative shell. Domain code takes the
 | `ProcessEngine`, `TaskService`, `MigrationService` | Inbound | Process | Core implementation | No |
 | Storage ports, one per aggregate | Outbound | Both | `*-postgres` | Not in 0.x (storage SPI kept for later backends, ADR-0001) |
 | `CompiledCache` | Outbound | Both | Caffeine in the starter; small bounded LRU in `*-core` | Yes |
-| `TenantResolver`, `CallerResolver` | Outbound | Both | JWT claim or trusted header; principal name | Yes |
+| `TenantResolver`, `CallerResolver` | Outbound | Both | Attribute of the authenticated principal (session or token, PD-079); principal name | Yes |
 | Event publisher (`RuleEventPublisher` and the process equivalent) | Outbound | Both | Spring `ApplicationEventPublisher` | Yes, for an outbox |
 | `RuleFunctionRegistry` | Outbound | Rule | Built-in pure functions | Yes, pure functions only |
 | `ExpressionLanguage` | Inbound to the Rule Engine core, used by the Process Engine | Rule (API), Process (caller) | `horus-expr-v1` (M1); FEEL from S1 (ADR-0019) | No; the Process Engine evaluates gateway conditions and, later, mappings and script tasks only through it |
@@ -334,7 +334,7 @@ Hosts behind a transaction-mode pooler set `cache.listen-notify=false` and accep
 
 | Control | Where | Verified by |
 |---|---|---|
-| Tenant from the host security context (JWT claim by default, trusted gateway header, or a host `TenantResolver`); a `tenantId` in a request body is ignored | `TenantResolver` port, REST layer | `RLE-011` (`TR-SEC-03`) |
+| Tenant from the host security context: the principal's `tenancy.claim` attribute by default (session or token), or a host `TenantResolver`; never a header set upstream or a `tenantId` in a request body (PD-079) | `TenantResolver` port, REST layer | `RLE-011`, `RLE-037` (`TR-SEC-03`) |
 | Another tenant's resource answers `404`, never `403` | Every query filters `tenant_id` | Two-tenant integration tests (`TR-TEN-02`) |
 | One permission string per endpoint, named `<module>:<action>` or `<module>:<resource>:<action>` with modules `rules` and `processes` (`rules:approve`, `rules:log:read`, `processes:start`, `processes:task:work`, `processes:incident:manage`; full list in ADR-0010); the host maps strings to roles | `@PreAuthorize` in `*-rest` | REST tests |
 | Maker-checker on publication and four-eyes on tasks, in the service layer | `VersionService`, `TaskService` | `RLE-009`, `PRE-007` |

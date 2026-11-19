@@ -316,3 +316,61 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The list shows two rows with name, effective version, status and effective-from date, read from `GET /api/bpm/rules/v1/rule-sets`. The version view shows the rule table (row ids, conditions, outputs) and the hit policy; no YAML or JSON document is shown unless the user opens the source on purpose. Export calls `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=json` and downloads `card-fee-v1.json` whose bytes equal the response (`RLE-032`). The first import sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` with an `Idempotency-Key` and, only after the `201`, shows "Draft version 3 created" and opens v3; a double click sends one key and creates one version. The bad file shows the engine's `422 VALIDATION_FAILED` as "Row R4, column balance" with the message text, and no version is listed as created. For `dan` the Import action is not shown and Export is. At 1440x900 the list and the Import and Export actions are above the fold.
 - **Example:** `import card-fee-v3.yaml -> one POST with Idempotency-Key -> 201 -> "Draft version 3 created"; card-fee-bad.yaml -> "Row R4, column balance", no draft`.
 - **Test ID:** `CKP_030_rule_set_browser_lists_reads_imports_and_exports`
+
+---
+
+## Landing, Minimal Editing, Process Views and Diagram Accessibility (PD-013, PD-024, PD-048, PD-075, PD-078)
+
+### CKP-031 The cockpit opens on the work the user's role needs, unless the host fixes the landing area
+- **Traces to:** `TR-UI-08`, `TR-EXT-08`
+- **Milestone:** M1
+- **Given:** Host `loans` runs only the Rule Engine; `/api/bpm/meta` reports `cockpit.landing: by-role`. Users: `bob` holds `rules:approve`; `lan` holds `rules:author`; `dan` holds `rules:log:read` only; `eve` holds `rules:read` only. Second case: the host sets `cockpit.landing: decisions`. Third case: `bob` follows a link to `card-fee` v2.
+- **When:** Each user signs in and the cockpit opens.
+- **Then:** `bob` lands on Changes showing pending approvals; `lan` on Changes filtered to her own drafts and requests; `dan` on Decisions; `eve` on the rule set list; nobody lands on a process canvas, because no Process Engine host is registered. In the second case every user lands on Decisions. In the third case `bob` opens `card-fee` v2 directly, whatever the setting.
+- **Example:** `by-role: approver -> Changes, auditor -> Decisions; landing: decisions -> everyone on Decisions; deep link wins`.
+- **Test ID:** `CKP_031_landing_area_by_role_or_host_setting`
+
+### CKP-032 An author edits a draft in the cockpit with cell text and row actions, and errors show on their cells
+- **Traces to:** `TR-UI-02`, `TR-IDEM-01`
+- **Milestone:** M1
+- **Given:** Host `loans` with `card-fee` v1 `PUBLISHED` (rows `R1` to `R3`) and `authoring.cockpit-drafts` on; `lan` holds `rules:author`. Second case: the host turns `authoring.cockpit-drafts` off.
+- **When:** `lan` creates a draft from v1, types `GOLD, PLATINUM` in `R1`'s `tier` cell, copies `R2` as a new row `R4` and moves it above `R3`, types `>= 50000000` without a currency in `R4`'s `balance` cell, and saves; then fixes the cell to `>= 50000000 VND` and saves again.
+- **Then:** The first save sends the edited table through the existing draft endpoint (`PUT .../versions/2` with `If-Match`) and shows the engine's `422 VALIDATION_FAILED` on `R4`'s `balance` cell in plain words, with the other edits kept; the second save returns `200` and the draft shows rows `R1`, `R2`, `R4`, `R3` in that order. Inputs, outputs and the hit policy cannot be changed from this view. In the second case the edit actions are not shown and a direct `PUT` returns `403 DRAFT_AUTHORING_DISABLED`; import from a file still works.
+- **Example:** `R4 balance ">= 50000000" -> error on R4/balance; ">= 50000000 VND" -> saved, order R1, R2, R4, R3`.
+- **Test ID:** `CKP_032_minimal_draft_editing_shows_errors_on_cells`
+
+### CKP-033 Compensation runs appear in the instance timeline
+- **Traces to:** `TR-COMP-01`, `TR-OBS-01`
+- **Milestone:** M2
+- **Given:** Instance `I7` of `loan-booking` where `notify-partner` failed inside the `saga` `disburse` and the handlers `closeAccount` and `releaseFunds` ran, the second after one retry (`PRE-044`).
+- **When:** An operator with `processes:read` opens `I7`.
+- **Then:** The timeline lists, in time order and in text, the failure of `notify-partner`, then `closeAccount` and `releaseFunds` as compensation entries with their attempt ids, the retry of `releaseFunds`, and the scope `disburse` marked compensated; the diagram marks the compensated steps with an icon and a text label, not colour alone.
+- **Example:** `I7 timeline -> notify-partner FAILED, closeAccount COMPENSATED, releaseFunds retry 1 then COMPENSATED`.
+- **Test ID:** `CKP_033_compensation_runs_in_instance_timeline`
+
+### CKP-034 SLA breaches are a filter of the task queue, measured against each task's own deadline
+- **Traces to:** `TR-CAL-01`, `TR-PERF-07`
+- **Milestone:** M2
+- **Given:** Tasks `T1` (`sla: PT4H` on calendar `vn-banking-hours`, due 10:00), `T2` (`sla: P2D`, due tomorrow) and `T3` (no SLA) on host `loans`; the clock reads 11:00.
+- **When:** An operator turns on the "SLA breached" filter of the task queue.
+- **Then:** The cockpit sends the task query with `slaBreached=true` and shows only `T1`, with "overdue by 1 h" in text; `T3` never appears, because a task without a declared deadline cannot breach; no deadline is computed in the cockpit or from a product constant.
+- **Example:** `filter SLA breached at 11:00 -> T1 only, overdue by 1 h`.
+- **Test ID:** `CKP_034_sla_breach_filter_uses_task_deadlines`
+
+### CKP-035 Every diagram has a keyboard-usable list of its steps and states in text, not colour alone
+- **Traces to:** `TR-UI-03`
+- **Milestone:** M2
+- **Given:** The instance diagram of `I7` with tokens on two steps, one open incident and live counts per node.
+- **When:** A keyboard-only user tabs to the diagram and opens its step list; axe-core runs on the view in light and dark themes.
+- **Then:** The step list names every step in flow order with its type, token state, incident and count as text, and each entry moves focus to its node; token state, incidents and counts are also shown as text or icons with labels on the diagram (WCAG 1.4.1); axe-core reports no violation.
+- **Example:** `step list -> "score-applicant, agent task, waiting, 1 incident, 12 instances"`.
+- **Test ID:** `CKP_035_diagram_step_list_and_text_states`
+
+### CKP-036 The modeller canvas states its accessibility exemption and names the equal path
+- **Traces to:** `TR-UI-03`, `TR-DEF-04`
+- **Milestone:** M3
+- **Given:** The modeller canvas open on a draft definition.
+- **When:** A user opens it with a screen reader running, then follows the named path.
+- **Then:** The canvas announces and shows a notice that drawing is not keyboard accessible and that the definition can be edited as JSON or YAML and imported as a draft; the link opens the import path, which creates a draft that passes the same approval.
+- **Example:** `canvas notice -> "Edit as JSON or YAML and import as a draft" -> import creates a draft`.
+- **Test ID:** `CKP_036_canvas_exemption_names_import_path`

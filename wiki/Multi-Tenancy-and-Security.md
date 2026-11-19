@@ -8,13 +8,19 @@ Each numbered step is a control the request passes. Steps 1 to 3 run in your gat
 
 ## Tenant resolution
 
-| Source (`tenancy.resolver`) | How | Use when |
-|---|---|---|
-| `security-context` (default) | `TenantResolver` reads the `tenant_id` claim of the `JwtAuthenticationToken`, or the issuer realm when configured | OIDC hosts |
-| `header:X-Tenant-Id` | Trusted header set by a gateway after authentication | The gateway terminates authentication and the host network is private |
-| Bean name | Host `TenantResolver` implementation | Tenant from path, subdomain or session |
+The engines ask one extension point, `TenantResolver`, for the tenant of every call (ADR-0014).
 
-Rules that hold in every mode: every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant.
+| Source | How | Use when |
+|---|---|---|
+| Default resolver | Reads the `tenancy.claim` attribute (default `tenant_id`) of the authenticated principal in the host's Spring Security context. A server-side session login and a validated bearer token are handled alike | OIDC hosts, and host web applications that embed the cockpit behind their own session login |
+| Your own `TenantResolver` bean | Replaces the default; you do not exclude any auto-configuration | The tenant comes from your user directory, a realm, a path or a subdomain |
+| `tenancy.dev-tenant` | One fixed tenant for local work without an identity provider | The `dev` profile only. The starter refuses to start when it is set outside `dev` |
+
+No header-based resolver ships. A gateway header as the tenant source was rejected: one misconfigured gateway would let one tenant's operator see another tenant's data. A host that writes a resolver that trusts a request header owns that risk.
+
+A call whose tenant cannot be resolved, for example a principal without the `tenant_id` attribute, is refused with `401 UNAUTHENTICATED` and touches no data (`RLE-037`). The `X-Tenant-Id` header is honoured only as the cockpit's tenant switch, for a tenant in the caller's allowed list; any other tenant gets `403 TENANT_NOT_ALLOWED`.
+
+Rules that hold in every mode: tenant isolation is a guarantee that no setting relaxes; every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); the cockpit's tenant switch is accepted only for a tenant in the user's allowed list; a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant.
 
 ## Permissions
 
@@ -65,7 +71,7 @@ The cockpit holds no secrets and no state (ADR-0005). It never marks an approval
 
 | Category | Asset | Threat and exploit scenario | Control | Verification |
 |---|---|---|---|---|
-| Spoofing | Tenant boundary | Caller sends `tenantId: "tenant-b"` in the body, or forges `X-Tenant-Id` from outside the gateway | Body tenant ignored; header mode only behind a trusted gateway; JWT claim by default | `RLE-011`; REST test with forged body and header |
+| Spoofing | Tenant boundary | Caller sends `tenantId: "tenant-b"` in the body, or forges `X-Tenant-Id` from outside the gateway | Body tenant ignored; no header-based resolver ships; the tenant comes from the authenticated principal; `X-Tenant-Id` only switches to a tenant in the caller's allowed list | `RLE-011`, `RLE-037`; REST test with forged body and header |
 | Spoofing | Approvals | Compromised author token approves its own version | Service-layer identity check plus distinct permission | `RLE-009` at service and REST level |
 | Tampering | Rule definitions | Expression such as `T(java.lang.Runtime).getRuntime()` or a regex bomb in a draft | Closed grammar, no reflection; bounded regex; publish-time rejection | `RLE-004`, `RLE-007`; ArchUnit on `javax.script`, `java.lang.reflect.Method` |
 | Tampering | Task state | Two completions of one task, or a replayed approval | `lock_version` predicate; status guard in the same `UPDATE` | `PRE-003`; concurrency test with two threads |

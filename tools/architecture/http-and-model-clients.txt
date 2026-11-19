@@ -1,0 +1,25 @@
+# Packages of HTTP and model client libraries (ArchUnit syntax). Engine core and storage modules must
+# not depend on any of them (TR-EMB-05, TR-AGT-03). Read by CoreArchitectureTest and
+# PostgresArchitectureTest; the Maven artifacts of the same libraries are banned by the
+# enforce-no-network-client execution in the root pom.xml. One package per line.
+java.net.http..
+org.springframework.web.client..
+org.springframework.web.reactive.function.client..
+org.springframework.ai..
+org.apache.hc..
+org.apache.http..
+okhttp3..
+retrofit2..
+feign..
+io.netty..
+reactor.netty..
+org.asynchttpclient..
+org.eclipse.jetty.client..
+jakarta.ws.rs.client..
+dev.langchain4j..
+com.openai..
+com.anthropic..
+com.azure.ai..
+com.google.cloud.vertexai..
+com.google.genai..
+software.amazon.awssdk..

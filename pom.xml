@@ -54,7 +54,31 @@
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
     <!-- ADR-0011: build against the newest generally available Spring Boot 4.x minor. -->
-    <spring-boot.version>4.1.2</spring-boot.version>
+    <spring-boot-4.version>4.1.2</spring-boot-4.version>
+    <spring-boot.version>${spring-boot-4.version}</spring-boot.version>
+    <!--
+      TR-EMB-02: the other lines tested on the jars built with spring-boot-4.version. -Dspring-boot.line
+      switches the runtime classpath of the tests (profiles below, and the CI matrix):
+        absent or 4.x  newest 4.x minor (the build line)
+        4.0            Spring Boot 4.0.x, latest patch, while 4.0 is in open-source support (ADR-0011)
+        3.5            Spring Boot 3.5.x, minimum tested patch, until 1.0
+      Any other value fails the build (enforce-build-baseline).
+    -->
+    <spring-boot.line>4.x</spring-boot.line>
+    <spring-boot-4.0.version>4.0.9</spring-boot-4.0.version>
+    <spring-boot-3.5.version>3.5.16</spring-boot-3.5.version>
+    <!-- Test-only libraries kept on the line the tests are compiled with, on both Spring Boot lines. -->
+    <testcontainers-2.version>2.0.5</testcontainers-2.version>
+    <!--
+      Jackson 3 inside the engine cores (ADR-0021). Spring Boot 3.5 does not manage it, so the 3.5
+      profile pins this version. It must equal the Jackson 3 version that spring-boot-4.version
+      manages; tools/check-jackson-coexistence.py fails the 3.5 legs when they differ.
+    -->
+    <jackson-3.version>3.1.7</jackson-3.version>
+    <!-- PostgreSQL image of the Testcontainers tests; the CI matrix sets 14 and the newest release. -->
+    <bpm.test.postgres.image>postgres:16-alpine</bpm.test.postgres.image>
+    <!-- JUnit tags of tests that apply to one Spring Boot line only; the 3.5 profile swaps the value. -->
+    <excludedGroups>spring-boot-3.5-only</excludedGroups>
     <archunit.version>1.5.1</archunit.version>
 
     <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
@@ -119,6 +143,12 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
           <version>${maven-surefire-plugin.version}</version>
+          <configuration>
+            <systemPropertyVariables>
+              <bpm.test.postgres.image>${bpm.test.postgres.image}</bpm.test.postgres.image>
+              <bpm.root>${bpm.root}</bpm.root>
+            </systemPropertyVariables>
+          </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
@@ -127,6 +157,10 @@
           <configuration>
             <!-- Test against target/classes, not a repackaged Spring Boot jar. -->
             <classesDirectory>${project.build.outputDirectory}</classesDirectory>
+            <systemPropertyVariables>
+              <bpm.test.postgres.image>${bpm.test.postgres.image}</bpm.test.postgres.image>
+              <bpm.root>${bpm.root}</bpm.root>
+            </systemPropertyVariables>
           </configuration>
           <executions>
             <execution>
@@ -181,6 +215,55 @@
           <groupId>org.codehaus.mojo</groupId>
           <artifactId>license-maven-plugin</artifactId>
           <version>${license-maven-plugin.version}</version>
+        </plugin>
+        <!--
+          TR-EMB-05 and TR-AGT-03 by dependency analysis, one list for every *-core and *-postgres module.
+          The execution is unbound here; those modules bind it with
+            <execution><id>enforce-no-network-client</id><phase>validate</phase></execution>
+          ArchUnit's package list for the same rule is tools/architecture/http-and-model-clients.txt.
+          Test scope is checked too, on purpose: a test-only HTTP stub needs a decision first.
+        -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-enforcer-plugin</artifactId>
+          <version>${maven-enforcer-plugin.version}</version>
+          <executions>
+            <execution>
+              <id>enforce-no-network-client</id>
+              <phase>none</phase>
+              <goals>
+                <goal>enforce</goal>
+              </goals>
+              <configuration>
+                <rules>
+                  <bannedDependencies>
+                    <searchTransitive>true</searchTransitive>
+                    <excludes>
+                      <exclude>com.squareup.okhttp3:*</exclude>
+                      <exclude>com.squareup.retrofit2:*</exclude>
+                      <exclude>org.apache.httpcomponents*:*</exclude>
+                      <exclude>org.asynchttpclient:*</exclude>
+                      <exclude>io.github.openfeign:*</exclude>
+                      <exclude>io.netty:*</exclude>
+                      <exclude>io.projectreactor.netty:*</exclude>
+                      <exclude>org.eclipse.jetty:jetty-client</exclude>
+                      <exclude>org.springframework:spring-web</exclude>
+                      <exclude>org.springframework:spring-webflux</exclude>
+                      <exclude>org.springframework.ai:*</exclude>
+                      <exclude>dev.langchain4j:*</exclude>
+                      <exclude>com.openai:*</exclude>
+                      <exclude>com.anthropic:*</exclude>
+                      <exclude>com.azure:azure-ai-*</exclude>
+                      <exclude>com.google.cloud:google-cloud-vertexai</exclude>
+                      <exclude>com.google.genai:*</exclude>
+                      <exclude>software.amazon.awssdk:*</exclude>
+                    </excludes>
+                    <message>Engine core and storage modules never call the network: no HTTP or model client artifact (TR-EMB-05, TR-AGT-03).</message>
+                  </bannedDependencies>
+                </rules>
+              </configuration>
+            </execution>
+          </executions>
         </plugin>
         <plugin>
           <groupId>org.cyclonedx</groupId>
@@ -302,6 +385,11 @@
                 <requireMavenVersion>
                   <version>[3.9,)</version>
                 </requireMavenVersion>
+                <requireProperty>
+                  <property>spring-boot.line</property>
+                  <regex>^(4\.x|4\.0|3\.5)$</regex>
+                  <regexMessage>-Dspring-boot.line must be 4.x (default), 4.0 or 3.5 (TR-EMB-02, ADR-0011).</regexMessage>
+                </requireProperty>
                 <dependencyConvergence/>
                 <banDuplicatePomDependencyVersions/>
                 <!-- TR-LIC-01: a system-scope jar would bypass the licence gate and the SBOM. -->
@@ -327,4 +415,118 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!--
+      TR-EMB-02, Spring Boot 3.5.x leg. Activated by -Dspring-boot.line=3.5 on a test run of jars built
+      on the 4.x baseline, as an adopter receives them (see .github/workflows/ci.yml):
+        mvn -B install -DskipTests
+        mvn -B -Dspring-boot.line=3.5 surefire:test failsafe:integration-test failsafe:verify
+      The tests are not recompiled. Test-only libraries stay on the line they were compiled with.
+    -->
+    <profile>
+      <id>spring-boot-3.5</id>
+      <activation>
+        <property>
+          <name>spring-boot.line</name>
+          <value>3.5</value>
+        </property>
+      </activation>
+      <properties>
+        <spring-boot.version>${spring-boot-3.5.version}</spring-boot.version>
+        <!-- The ruleEngine health contributor exists on Spring Boot 4 only until #116 (ADR-0011). -->
+        <excludedGroups>spring-boot-4-only</excludedGroups>
+        <!-- This profile runs compiled tests only; main code is never recompiled against 3.5. -->
+        <maven.main.skip>true</maven.main.skip>
+      </properties>
+      <build>
+        <plugins>
+          <!-- The starter's optional Boot-4-only health module stays off a 3.5 host's classpath. -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <configuration>
+              <classpathDependencyExcludes>
+                <classpathDependencyExclude>org.springframework.boot:spring-boot-health</classpathDependencyExclude>
+              </classpathDependencyExcludes>
+            </configuration>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <classpathDependencyExcludes>
+                <classpathDependencyExclude>org.springframework.boot:spring-boot-health</classpathDependencyExclude>
+              </classpathDependencyExcludes>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+      <dependencyManagement>
+        <dependencies>
+          <!-- Resolved for the starter's optional dependency, then excluded from the test classpath above. -->
+          <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-health</artifactId>
+            <version>${spring-boot-4.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers-2.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <version>${testcontainers-2.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <version>${testcontainers-2.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-jdbc</artifactId>
+            <version>${testcontainers-2.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-database-commons</artifactId>
+            <version>${testcontainers-2.version}</version>
+          </dependency>
+          <!-- Spring Boot 3.5 does not manage Jackson 3; the engine core brings this line (ADR-0021). -->
+          <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson-3.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>${jackson-3.version}</version>
+          </dependency>
+        </dependencies>
+      </dependencyManagement>
+    </profile>
+
+    <!--
+      TR-EMB-02, Spring Boot 4.0.x leg (ADR-0011: every 4.x minor in open-source support). Same method
+      as the 3.5 leg; 4.0 has the same starter names as the build line, so only the version changes.
+      Drop this profile and its CI leg after 4.0 leaves open-source support on 2026-12-31.
+    -->
+    <profile>
+      <id>spring-boot-4.0</id>
+      <activation>
+        <property>
+          <name>spring-boot.line</name>
+          <value>4.0</value>
+        </property>
+      </activation>
+      <properties>
+        <spring-boot.version>${spring-boot-4.0.version}</spring-boot.version>
+        <maven.main.skip>true</maven.main.skip>
+      </properties>
+    </profile>
+  </profiles>
 </project>
