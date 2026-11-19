@@ -1,9 +1,9 @@
-package com.horus.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.rules.internal.expr;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.horus.bpm.testing.property.Gen;
-import com.horus.bpm.testing.property.Property;
+import io.github.dhluong90.bpm.testing.property.Gen;
+import io.github.dhluong90.bpm.testing.property.Property;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;

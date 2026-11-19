@@ -1,4 +1,4 @@
-package com.horus.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.rules.internal.expr;
 
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;

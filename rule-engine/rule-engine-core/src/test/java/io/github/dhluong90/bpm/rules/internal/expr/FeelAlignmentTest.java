@@ -1,4 +1,4 @@
-package com.horus.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.rules.internal.expr;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

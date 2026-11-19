@@ -1,14 +1,14 @@
-package com.horus.bpm.rules.internal.service;
+package io.github.dhluong90.bpm.rules.internal.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.DecisionInput;
-import com.horus.bpm.rules.api.DecisionResult;
-import com.horus.bpm.rules.api.ImportRequest;
-import com.horus.bpm.rules.api.Money;
-import com.horus.bpm.rules.api.ValidationFailedException;
-import com.horus.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.api.DecisionInput;
+import io.github.dhluong90.bpm.rules.api.DecisionResult;
+import io.github.dhluong90.bpm.rules.api.ImportRequest;
+import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
