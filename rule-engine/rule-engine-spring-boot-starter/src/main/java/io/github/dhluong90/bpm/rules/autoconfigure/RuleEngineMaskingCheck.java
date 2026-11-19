@@ -1,7 +1,7 @@
-package com.horus.bpm.rules.autoconfigure;
+package io.github.dhluong90.bpm.rules.autoconfigure;
 
-import com.horus.bpm.rules.internal.service.MaskingStartupCheck;
-import com.horus.bpm.rules.spi.MaskingPolicy;
+import io.github.dhluong90.bpm.rules.internal.service.MaskingStartupCheck;
+import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import java.util.List;
 import java.util.Objects;
 

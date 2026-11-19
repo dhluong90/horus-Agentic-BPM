@@ -1,4 +1,4 @@
-package com.horus.bpm.rules.api;
+package io.github.dhluong90.bpm.rules.api;
 
 /** No decision with this id in the caller's tenant ({@code 404 DECISION_NOT_FOUND}). */
 public final class DecisionNotFoundException extends HorusBpmException {

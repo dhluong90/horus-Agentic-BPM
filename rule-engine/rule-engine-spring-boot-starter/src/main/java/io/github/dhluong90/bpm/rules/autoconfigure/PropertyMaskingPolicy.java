@@ -1,8 +1,8 @@
-package com.horus.bpm.rules.autoconfigure;
+package io.github.dhluong90.bpm.rules.autoconfigure;
 
-import com.horus.bpm.rules.api.MaskingKey;
-import com.horus.bpm.rules.internal.service.EngineDefaults;
-import com.horus.bpm.rules.spi.MaskingPolicy;
+import io.github.dhluong90.bpm.rules.api.MaskingKey;
+import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
+import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;

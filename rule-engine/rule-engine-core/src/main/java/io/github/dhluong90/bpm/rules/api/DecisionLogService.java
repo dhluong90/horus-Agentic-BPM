@@ -1,4 +1,4 @@
-package com.horus.bpm.rules.api;
+package io.github.dhluong90.bpm.rules.api;
 
 /**
  * Reads the decision log of the caller's tenant. Every call needs {@code rules:log:read}; the tenant comes from the

@@ -1,6 +1,6 @@
-package com.horus.bpm.rules.spi;
+package io.github.dhluong90.bpm.rules.spi;
 
-import com.horus.bpm.rules.api.MaskingKey;
+import io.github.dhluong90.bpm.rules.api.MaskingKey;
 import java.util.Optional;
 
 /**

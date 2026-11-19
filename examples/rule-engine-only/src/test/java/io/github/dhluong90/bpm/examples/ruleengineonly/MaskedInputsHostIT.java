@@ -1,4 +1,4 @@
-package com.horus.bpm.examples.ruleengineonly;
+package io.github.dhluong90.bpm.examples.ruleengineonly;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

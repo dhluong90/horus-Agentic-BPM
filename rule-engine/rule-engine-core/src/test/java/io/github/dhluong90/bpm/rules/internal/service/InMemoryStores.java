@@ -122,7 +122,7 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
                 .filter(d -> d.tenantId().equals(tenantId) && d.ruleSet().equals(ruleSet)
                         && !d.createdAt().isBefore(from) && d.createdAt().isBefore(to))
                 .filter(d -> {
-                    var value = com.horus.bpm.rules.internal.json.EngineValues.read(d.maskedInputsJson()).get(input);
+                    var value = io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(d.maskedInputsJson()).get(input);
                     return value != null && value.isString() && value.stringValue().equals(text);
                 })
                 .sorted(Comparator.comparing(DecisionRecord::createdAt).thenComparing(DecisionRecord::id).reversed())
@@ -134,7 +134,7 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     public List<VersionInputs> liveVersionInputs() {
         return versions.stream().filter(v -> v.status() != VersionStatus.RETIRED)
                 .map(v -> new VersionInputs(v.tenantId(), v.ruleSet(), v.version(),
-                        com.horus.bpm.rules.internal.json.EngineValues.read(v.canonicalJson()).get("inputs").toString()))
+                        io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(v.canonicalJson()).get("inputs").toString()))
                 .toList();
     }
 

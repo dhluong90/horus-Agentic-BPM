@@ -1,4 +1,4 @@
-package com.horus.bpm.rules.api;
+package io.github.dhluong90.bpm.rules.api;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;

@@ -1,9 +1,9 @@
-package com.horus.bpm.rules.internal.service;
+package io.github.dhluong90.bpm.rules.internal.service;
 
-import com.horus.bpm.rules.internal.json.EngineValues;
-import com.horus.bpm.rules.internal.store.RuleStore;
-import com.horus.bpm.rules.internal.store.VersionInputs;
-import com.horus.bpm.rules.spi.MaskingPolicy;
+import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
+import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
+import io.github.dhluong90.bpm.rules.internal.store.VersionInputs;
+import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;

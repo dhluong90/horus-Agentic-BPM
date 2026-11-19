@@ -1,20 +1,20 @@
-package com.horus.bpm.rules.internal.service;
+package io.github.dhluong90.bpm.rules.internal.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.DecisionInput;
-import com.horus.bpm.rules.api.DecisionNotFoundException;
-import com.horus.bpm.rules.api.DecisionResult;
-import com.horus.bpm.rules.api.DecisionSearchResult;
-import com.horus.bpm.rules.api.ImportRequest;
-import com.horus.bpm.rules.api.LoggedDecision;
-import com.horus.bpm.rules.api.MaskedInputQuery;
-import com.horus.bpm.rules.api.MaskingKey;
-import com.horus.bpm.rules.api.PermissionDeniedException;
-import com.horus.bpm.rules.api.QueryInvalidException;
-import com.horus.bpm.rules.api.WriteOptions;
-import com.horus.bpm.rules.spi.MaskingPolicy;
+import io.github.dhluong90.bpm.rules.api.DecisionInput;
+import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
+import io.github.dhluong90.bpm.rules.api.DecisionResult;
+import io.github.dhluong90.bpm.rules.api.DecisionSearchResult;
+import io.github.dhluong90.bpm.rules.api.ImportRequest;
+import io.github.dhluong90.bpm.rules.api.LoggedDecision;
+import io.github.dhluong90.bpm.rules.api.MaskedInputQuery;
+import io.github.dhluong90.bpm.rules.api.MaskingKey;
+import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
+import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
+import io.github.dhluong90.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;

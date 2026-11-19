@@ -1,8 +1,8 @@
-package com.horus.bpm.rules.autoconfigure;
+package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.horus.bpm.rules.api.MaskingKey;
+import io.github.dhluong90.bpm.rules.api.MaskingKey;
 import java.util.Arrays;
 import java.util.Base64;
 import org.junit.jupiter.api.Test;

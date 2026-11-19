@@ -81,7 +81,7 @@ class RuleEngineAutoConfigurationTest {
                 return java.util.Set.of();
             }
         };
-        com.horus.bpm.rules.spi.MaskingPolicy masking = com.horus.bpm.rules.spi.MaskingPolicy.none();
+        io.github.dhluong90.bpm.rules.spi.MaskingPolicy masking = io.github.dhluong90.bpm.rules.spi.MaskingPolicy.none();
         runner.withUserConfiguration(HostWithEngineStandIns.class)
                 .withBean(io.github.dhluong90.bpm.rules.spi.TenantResolver.class, () -> tenants)
                 .withBean(io.github.dhluong90.bpm.rules.spi.CallerResolver.class, () -> callers)

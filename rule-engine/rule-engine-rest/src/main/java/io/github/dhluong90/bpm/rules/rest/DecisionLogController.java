@@ -1,15 +1,15 @@
-package com.horus.bpm.rules.rest;
+package io.github.dhluong90.bpm.rules.rest;
 
-import com.horus.bpm.rules.api.DecisionLogService;
-import com.horus.bpm.rules.api.DecisionSearchResult;
-import com.horus.bpm.rules.api.InputInvalidException;
-import com.horus.bpm.rules.api.LoggedDecision;
-import com.horus.bpm.rules.api.MaskedInputQuery;
-import com.horus.bpm.rules.api.QueryInvalidException;
-import com.horus.bpm.rules.internal.json.EngineJson;
-import com.horus.bpm.rules.internal.json.EngineValues;
-import com.horus.bpm.rules.internal.service.EngineDefaults;
-import com.horus.bpm.rules.spi.CallerResolver;
+import io.github.dhluong90.bpm.rules.api.DecisionLogService;
+import io.github.dhluong90.bpm.rules.api.DecisionSearchResult;
+import io.github.dhluong90.bpm.rules.api.InputInvalidException;
+import io.github.dhluong90.bpm.rules.api.LoggedDecision;
+import io.github.dhluong90.bpm.rules.api.MaskedInputQuery;
+import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
+import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
+import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
+import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;

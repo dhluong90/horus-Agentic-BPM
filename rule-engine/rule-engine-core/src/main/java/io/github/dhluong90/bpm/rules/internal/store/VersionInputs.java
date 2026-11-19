@@ -1,4 +1,4 @@
-package com.horus.bpm.rules.internal.store;
+package io.github.dhluong90.bpm.rules.internal.store;
 
 /**
  * The declared inputs of one version that can still be evaluated (any status but {@code RETIRED}), read at start-up
