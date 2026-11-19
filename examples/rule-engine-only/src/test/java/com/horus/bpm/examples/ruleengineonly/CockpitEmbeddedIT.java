@@ -78,6 +78,21 @@ class CockpitEmbeddedIT {
     }
 
     @Test
+    void CKP_001_after_sign_in_the_user_returns_to_the_cockpit_even_after_the_browser_asked_for_a_favicon() throws Exception {
+        HttpClient browser = HttpClient.newBuilder().cookieHandler(new CookieManager()).build();
+        // What a browser does: open the cockpit, follow it to the sign-in page, ask for the favicon there.
+        HttpResponse<String> cockpit = browser.send(HttpRequest.newBuilder(url("/bpm/cockpit/"))
+                .header("Accept", "text/html").GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(cockpit.statusCode()).isEqualTo(302);
+        get(browser, "/favicon.ico");
+
+        HttpResponse<String> result = signIn(browser, "lan");
+
+        // Spring Security marks a restored request with "?continue"; the path is what matters.
+        assertThat(result.headers().firstValue("Location").map(l -> URI.create(l).getPath())).hasValue("/bpm/cockpit/");
+    }
+
+    @Test
     void CKP_001_signed_in_user_gets_the_cockpit_page_and_its_one_host_registry() throws Exception {
         HttpClient browser = signedIn("lan", new CookieManager());
 
@@ -144,6 +159,11 @@ class CockpitEmbeddedIT {
 
     private HttpClient signedIn(String user, CookieManager cookies) throws Exception {
         HttpClient browser = HttpClient.newBuilder().cookieHandler(cookies).build();
+        signIn(browser, user);
+        return browser;
+    }
+
+    private HttpResponse<String> signIn(HttpClient browser, String user) throws Exception {
         HttpResponse<String> form = get(browser, "/login");
         Matcher csrf = Pattern.compile("name=\"_csrf\"[^>]*value=\"([^\"]+)\"").matcher(form.body());
         assertThat(csrf.find()).as("CSRF token on the sign-in form").isTrue();
@@ -154,7 +174,7 @@ class CockpitEmbeddedIT {
                 .build(), HttpResponse.BodyHandlers.ofString());
         assertThat(result.statusCode()).isEqualTo(302);
         assertThat(result.headers().firstValue("Location")).hasValueSatisfying(l -> assertThat(l).doesNotContain("error"));
-        return browser;
+        return result;
     }
 
     private HttpResponse<String> get(HttpClient browser, String path) throws Exception {

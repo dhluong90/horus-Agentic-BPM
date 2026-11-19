@@ -24,10 +24,12 @@
     "allowImportingTsExtensions": true
   },
   "include": [
-    "vite.config.ts",
-    "vitest.config.ts",
-    "playwright.config.ts",
+    "demo",
     "e2e",
-    "security-headers.ts"
+    "playwright.config.ts",
+    "playwright.demo.config.ts",
+    "security-headers.ts",
+    "vite.config.ts",
+    "vitest.config.ts"
   ]
 }
