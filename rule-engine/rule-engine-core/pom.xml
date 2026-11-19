@@ -46,6 +46,11 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
         <executions>
+          <!-- TR-EMB-05, TR-AGT-03: the shared list in the root POM's pluginManagement. -->
+          <execution>
+            <id>enforce-no-network-client</id>
+            <phase>validate</phase>
+          </execution>
           <execution>
             <id>enforce-framework-free-core</id>
             <goals>
@@ -67,25 +72,6 @@
                     <exclude>com.microsoft.sqlserver:*</exclude>
                     <exclude>com.h2database:*</exclude>
                     <exclude>org.hsqldb:*</exclude>
-                    <!-- TR-AGT-03, TR-EMB-05: no HTTP or model client library, even one no class references yet. -->
-                    <exclude>com.squareup.okhttp3:*</exclude>
-                    <exclude>com.squareup.retrofit2:*</exclude>
-                    <exclude>org.apache.httpcomponents*:*</exclude>
-                    <exclude>org.asynchttpclient:*</exclude>
-                    <exclude>io.github.openfeign:*</exclude>
-                    <exclude>io.netty:*</exclude>
-                    <exclude>io.projectreactor.netty:*</exclude>
-                    <exclude>org.eclipse.jetty:jetty-client</exclude>
-                    <exclude>org.springframework:spring-web</exclude>
-                    <exclude>org.springframework:spring-webflux</exclude>
-                    <exclude>org.springframework.ai:*</exclude>
-                    <exclude>dev.langchain4j:*</exclude>
-                    <exclude>com.openai:*</exclude>
-                    <exclude>com.anthropic:*</exclude>
-                    <exclude>com.azure:azure-ai-*</exclude>
-                    <exclude>com.google.cloud:google-cloud-vertexai</exclude>
-                    <exclude>com.google.genai:*</exclude>
-                    <exclude>software.amazon.awssdk:*</exclude>
                     <!-- TR-EMB-07, ADR-0021: one JSON major in the core, Jackson 3; never Jackson 2 or another JSON library. -->
                     <exclude>com.fasterxml.jackson.core:jackson-databind</exclude>
                     <exclude>com.fasterxml.jackson.core:jackson-core</exclude>
@@ -96,7 +82,7 @@
                     <exclude>javax.json*:*</exclude>
                     <exclude>com.alibaba*:fastjson*</exclude>
                   </excludes>
-                  <message>rule-engine-core depends on the JDK and Jackson 3 only: no framework, Jakarta, pool, JDBC driver, HTTP or model client, or second JSON library (TR-EMB-03, TR-EMB-05, TR-AGT-03, ADR-0021).</message>
+                  <message>rule-engine-core depends on the JDK and Jackson 3 only: no framework, Jakarta, pool, JDBC driver or second JSON library (TR-EMB-03, ADR-0021).</message>
                 </bannedDependencies>
               </rules>
             </configuration>

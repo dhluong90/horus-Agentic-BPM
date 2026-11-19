@@ -37,7 +37,8 @@ jobs:
 
   verify:
     # TR-EMB-02: the supported matrix (ADR-0011). Each Java version runs on both Spring Boot lines and
-    # each Spring Boot line on both PostgreSQL versions (14 and the newest release), pairwise.
+    # each Spring Boot line on both PostgreSQL versions (14 and the newest release), pairwise; Spring
+    # Boot 4.0.x has one leg while it is in open-source support.
     # The 3.5.x legs test the jars built on the 4.x baseline, as an adopter receives them: the same
     # compiled tests run on a Spring Boot 3.5 runtime classpath (-Dspring-boot.line=3.5, pom.xml).
     name: Java ${{ matrix.java }}, Spring Boot ${{ matrix.boot }}, PostgreSQL ${{ matrix.postgres }}
@@ -51,6 +52,9 @@ jobs:
           - { java: "21", boot: "3.5.x", postgres: "14" }
           - { java: "25", boot: "4.x", postgres: "14" }
           - { java: "25", boot: "3.5.x", postgres: "18" }
+          # ADR-0011 tests every 4.x minor in open-source support. Remove this leg, and the
+          # spring-boot-4.0 profile in pom.xml, after Spring Boot 4.0 leaves it on 2026-12-31.
+          - { java: "21", boot: "4.0.x", postgres: "16" }
     env:
       POSTGRES_IMAGE: postgres:${{ matrix.postgres }}-alpine
     steps:
@@ -69,14 +73,28 @@ jobs:
         run: mvn -B -ntp verify -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
 
       - name: Build the engine on the Spring Boot 4.x baseline, tests compiled but not run
-        if: matrix.boot == '3.5.x'
+        if: matrix.boot != '4.x'
         run: mvn -B -ntp install -DskipTests
 
-      - name: Run the same tests on Spring Boot 3.5.x
-        if: matrix.boot == '3.5.x'
+      # The dependency bans and convergence rules, evaluated against this line's dependency tree.
+      - name: Enforcer rules on the Spring Boot ${{ matrix.boot }} dependency tree
+        if: matrix.boot != '4.x'
+        run: |
+          mvn -B -ntp -Dspring-boot.line="$LINE" -pl "!bpm-bom" enforcer:enforce@enforce-build-baseline
+          mvn -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core,rule-engine/rule-engine-postgres \
+            enforcer:enforce@enforce-no-network-client
+          mvn -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core \
+            enforcer:enforce@enforce-framework-free-core
+        env:
+          LINE: ${{ matrix.boot == '3.5.x' && '3.5' || '4.0' }}
+
+      - name: Run the same tests on Spring Boot ${{ matrix.boot }}
+        if: matrix.boot != '4.x'
         run: >-
-          mvn -B -ntp -Dspring-boot.line=3.5 -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
+          mvn -B -ntp -Dspring-boot.line="$LINE" -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
           surefire:test failsafe:integration-test failsafe:verify
+        env:
+          LINE: ${{ matrix.boot == '3.5.x' && '3.5' || '4.0' }}
 
       - name: Jackson 3 resolves beside the host's own Jackson 2 (TR-EMB-07, PD-071)
         if: matrix.boot == '3.5.x'
@@ -84,7 +102,8 @@ jobs:
           mvn -B -ntp -q -Dspring-boot.line=3.5 -pl examples/rule-engine-only \
             org.apache.maven.plugins:maven-dependency-plugin:3.11.0:tree \
             -Dincludes=com.fasterxml.jackson.core,tools.jackson.core -DoutputFile=target/jackson-tree.txt
-          python3 tools/check-jackson-coexistence.py examples/rule-engine-only/target/jackson-tree.txt
+          python3 tools/check-jackson-coexistence.py examples/rule-engine-only/target/jackson-tree.txt \
+            "$(mvn -B -ntp -q help:evaluate -Dexpression=settings.localRepository -DforceStdout)"
 
       - name: Upload test reports
         if: always()

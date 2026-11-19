@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -100,8 +101,9 @@ class HostRestartIT {
         String db = freshDatabase();
         installEngineWithoutHostFlyway(db);
 
+        // Flyway's wording differs between versions; the exception type and one stable fragment do not.
         assertThatThrownBy(() -> start(db).close())
-                .hasStackTraceContaining("non-empty schema")
+                .hasRootCauseInstanceOf(FlywayException.class)
                 .hasStackTraceContaining("schema history table");
     }
 

@@ -50,7 +50,10 @@ import tools.jackson.databind.json.JsonMapper;
 @Testcontainers
 class RuleEngineOnlyHostIT {
 
-    /** Tests of what exists on one Spring Boot line only; the other leg skips them (TR-EMB-02). */
+    /**
+     * Tests of what exists on one Spring Boot line only; the other leg skips them (TR-EMB-02). The health
+     * component is Spring Boot 4 only until #116 adds it for 3.5 hosts and removes the tag.
+     */
     static final String SPRING_BOOT_4_ONLY = "spring-boot-4-only";
     static final String SPRING_BOOT_3_5_ONLY = "spring-boot-3.5-only";
 
@@ -118,7 +121,7 @@ class RuleEngineOnlyHostIT {
     @Test
     @Tag(SPRING_BOOT_4_ONLY)
     void TR_EMB_01_rule_engine_health_component_is_up() throws Exception {
-        // The ruleEngine health contributor exists on Spring Boot 4 only (ADR-0011).
+        // The ruleEngine health contributor exists on Spring Boot 4 only until #116 (ADR-0011).
         JsonNode health = JsonMapper.builder().build().readTree(get("/actuator/health").body());
 
         assertThat(health.path("components").path("ruleEngine").path("status").asString()).isEqualTo("UP");

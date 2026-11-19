@@ -4,6 +4,7 @@ import static com.tngtech.archunit.core.domain.JavaCall.Predicates.target;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableTo;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
@@ -16,6 +17,10 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.ObjectInputStream;
 import java.io.RandomAccessFile;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -26,30 +31,24 @@ import org.junit.jupiter.api.Test;
  */
 class CoreArchitectureTest {
 
-    /** HTTP and model client libraries: the engine never calls a model or a remote service itself. */
-    static final String[] HTTP_AND_MODEL_CLIENTS = {
-            "java.net.http..",
-            "org.springframework.web.client..",
-            "org.springframework.web.reactive.function.client..",
-            "org.springframework.ai..",
-            "org.apache.hc..",
-            "org.apache.http..",
-            "okhttp3..",
-            "retrofit2..",
-            "feign..",
-            "io.netty..",
-            "reactor.netty..",
-            "org.asynchttpclient..",
-            "org.eclipse.jetty.client..",
-            "jakarta.ws.rs.client..",
-            "dev.langchain4j..",
-            "com.openai..",
-            "com.anthropic..",
-            "com.azure.ai..",
-            "com.google.cloud.vertexai..",
-            "com.google.genai..",
-            "software.amazon.awssdk.."
-    };
+    /**
+     * HTTP and model client packages, one list for every engine module:
+     * tools/architecture/http-and-model-clients.txt at the repository root (bpm.root, passed by Surefire).
+     */
+    static final String[] HTTP_AND_MODEL_CLIENTS = httpAndModelClients();
+
+    private static String[] httpAndModelClients() {
+        Path list = Path.of(System.getProperty("bpm.root", "../.."),
+                "tools", "architecture", "http-and-model-clients.txt");
+        try {
+            return Files.readAllLines(list).stream()
+                    .map(String::strip)
+                    .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                    .toArray(String[]::new);
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot read " + list.toAbsolutePath(), e);
+        }
+    }
 
     private static JavaClasses core;
 
@@ -113,6 +112,16 @@ class CoreArchitectureTest {
                 .should().dependOnClassesThat()
                 .resideInAnyPackage("com.fasterxml.jackson.databind..", "com.fasterxml.jackson.core..")
                 .because("the cores parse with Jackson 3 only, one JSON major on every Spring Boot line (ADR-0021)")
+                .check(core);
+    }
+
+    @Test
+    void TR_EMB_03_core_depends_only_on_the_jdk_jackson_3_and_itself() {
+        // Allowlist: a new library (a model SDK, a second JSON library) is refused without updating any list.
+        classes()
+                .should().onlyDependOnClassesThat().resideInAnyPackage(
+                        "java..", "tools.jackson..", "com.fasterxml.jackson.annotation..", "com.horus.bpm.rules..")
+                .because("rule-engine-core depends on the JDK and Jackson 3 only (TR-EMB-03, ADR-0021)")
                 .check(core);
     }
 }

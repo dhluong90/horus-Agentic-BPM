@@ -75,48 +75,14 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
       </plugin>
-      <!--
-        TR-EMB-05 and TR-AGT-03 by dependency analysis: ArchUnit sees only referenced bytecode, so this
-        rule also refuses an HTTP or model client artifact that no class references yet.
-      -->
+      <!-- TR-EMB-05, TR-AGT-03 by dependency analysis: the shared list in the root POM's pluginManagement. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
         <executions>
           <execution>
             <id>enforce-no-network-client</id>
-            <goals>
-              <goal>enforce</goal>
-            </goals>
-            <configuration>
-              <rules>
-                <bannedDependencies>
-                  <searchTransitive>true</searchTransitive>
-                  <excludes>
-                    <!-- TR-AGT-03, TR-EMB-05: no HTTP or model client library, even one no class references yet. -->
-                    <exclude>com.squareup.okhttp3:*</exclude>
-                    <exclude>com.squareup.retrofit2:*</exclude>
-                    <exclude>org.apache.httpcomponents*:*</exclude>
-                    <exclude>org.asynchttpclient:*</exclude>
-                    <exclude>io.github.openfeign:*</exclude>
-                    <exclude>io.netty:*</exclude>
-                    <exclude>io.projectreactor.netty:*</exclude>
-                    <exclude>org.eclipse.jetty:jetty-client</exclude>
-                    <exclude>org.springframework:spring-web</exclude>
-                    <exclude>org.springframework:spring-webflux</exclude>
-                    <exclude>org.springframework.ai:*</exclude>
-                    <exclude>dev.langchain4j:*</exclude>
-                    <exclude>com.openai:*</exclude>
-                    <exclude>com.anthropic:*</exclude>
-                    <exclude>com.azure:azure-ai-*</exclude>
-                    <exclude>com.google.cloud:google-cloud-vertexai</exclude>
-                    <exclude>com.google.genai:*</exclude>
-                    <exclude>software.amazon.awssdk:*</exclude>
-                  </excludes>
-                  <message>rule-engine-postgres never calls the network: no HTTP or model client artifact (TR-EMB-05, TR-AGT-03).</message>
-                </bannedDependencies>
-              </rules>
-            </configuration>
+            <phase>validate</phase>
           </execution>
         </executions>
       </plugin>

@@ -47,7 +47,10 @@ import org.springframework.transaction.support.TransactionOperations;
 @ExtendWith(OutputCaptureExtension.class)
 class RuleEngineAutoConfigurationTest {
 
-    /** Tests of the health contributor, which exists on Spring Boot 4 only (ADR-0011); the 3.5 leg skips them. */
+    /**
+     * Tests of the health contributor, which exists on Spring Boot 4 only for now (ADR-0011); the 3.5 leg
+     * skips them. #116 adds the contributor for Spring Boot 3.5 hosts and removes this tag.
+     */
     static final String SPRING_BOOT_4_ONLY = "spring-boot-4-only";
 
     private static final Instant JAN_26_2027 = Instant.parse("2027-01-26T00:00:00Z");
