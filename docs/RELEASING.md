@@ -127,7 +127,7 @@ Each downloaded file prints `<name>: OK`. Step 6 runs the same command on the dr
 
 The text of steps 2 to 4 sits between `# BEGIN release-archive-check` and `# END release-archive-check` in the workflow. `tools/release/test-release-upload.sh` runs that exact text against fixture archives on every pull request that changes the release files. It checks that a good archive passes; that a changed file, an unlisted file, a trial build, another commit, a dirty tree and duplicate asset names are each refused; and that the adopters' check passes on good downloads and catches a changed one.
 
-To recover from a failed run, delete the draft (`gh release delete v0.1.0`), fix the cause, and re-run the workflow for the tag. Never delete and re-push a tag that has a published Release.
+To recover from a run that left only a draft, delete the draft (`gh release delete v0.1.0`), fix the cause, and re-run the workflow for the tag. Once a Release is published, never re-tag: fix it with the next patch release, `v0.1.1` (PD-091, see Tags).
 
 ## Local trial
 
