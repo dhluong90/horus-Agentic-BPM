@@ -312,14 +312,20 @@ class RetireVersionPostgresIT {
         clock.set(Instant.parse("2026-11-26T09:00:00Z"));
         statements.clear();
 
-        // When bob on pod A retires v2 and minh on pod B retires v1 with the confirmation, at the same moment
+        // When bob on pod A retires v2 without the confirmation while minh on
+        // pod B retires v1 with it, at the same moment
         CyclicBarrier together = new CyclicBarrier(2);
+        String v2Outcome;
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<?> a = pool.submit(() -> {
+            Future<String> a = pool.submit(() -> {
                 caller.asThread("bank-a", "bob", APPROVER);
                 together.await();
-                podA.versionService().retire("card-fee", 2, new WriteOptions(null, v2.lockVersion(), "Postponed"));
-                return null;
+                try {
+                    podA.versionService().retire("card-fee", 2, new WriteOptions(null, v2.lockVersion(), "Postponed"));
+                    return "200";
+                } catch (HorusBpmException refused) {
+                    return refused.code();
+                }
             });
             Future<?> b = pool.submit(() -> {
                 caller.asThread("bank-a", "minh", APPROVER);
@@ -327,14 +333,23 @@ class RetireVersionPostgresIT {
                 podB.versionService().retire("card-fee", 1, new WriteOptions(null, v1.lockVersion(), "Withdrawn"), true);
                 return null;
             });
-            a.get();
+            v2Outcome = a.get();
             b.get();
         }
 
-        // Then both are retired; only v1, the version in force, recorded that none remained; both locked the rule set
-        assertThat(jdbc.sql("SELECT v.version_num || ' ' || h.no_version_in_effect FROM rle_version_history h"
+        // Then the rule set lock ran them one after the other, and whichever order they took, no version left the
+        // rule set empty without a confirmed retirement saying so:
+        // - v2 first: v1 was still in force, so v2 retired with false, then v1 retired with true;
+        // - v1 first: v1 retired with true, then v2 was the last (scheduled only) and was refused, unconfirmed.
+        List<String> rows = jdbc.sql("SELECT v.version_num || ' ' || h.no_version_in_effect FROM rle_version_history h"
                 + " JOIN rle_version v ON v.tenant_id = h.tenant_id AND v.id = h.version_id WHERE h.action = 'RETIRED'"
-                + " ORDER BY v.version_num").query(String.class).list()).containsExactly("1 true", "2 false");
+                + " ORDER BY v.version_num").query(String.class).list();
+        if (v2Outcome.equals("200")) {
+            assertThat(rows).containsExactly("1 true", "2 false");
+        } else {
+            assertThat(v2Outcome).isEqualTo("LAST_VERSION_IN_EFFECT");
+            assertThat(rows).containsExactly("1 true");
+        }
         assertThat(statements).filteredOn(sql -> sql.contains("FROM rle_rule_set") && sql.contains("FOR UPDATE"))
                 .hasSizeGreaterThanOrEqualTo(2);
         assertThatThrownBy(() -> evaluate(podA, "card-fee")).isInstanceOf(NoEffectiveVersionException.class);
