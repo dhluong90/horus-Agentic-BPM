@@ -12,9 +12,11 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param hostId the id clients show for this host, at most 40 characters; omitted from
  *     {@code /api/bpm/meta} when unset
  * @param tenancy where the tenant of a request comes from
+ * @param security how engine endpoints answer unauthenticated callers
  */
 @ConfigurationProperties("horus.bpm")
-public record HostMetadataProperties(@Nullable String hostId, @DefaultValue Tenancy tenancy) {
+public record HostMetadataProperties(
+        @Nullable String hostId, @DefaultValue Tenancy tenancy, @DefaultValue Security security) {
 
     static final int HOST_ID_MAX_LENGTH = 40;
 
@@ -27,15 +29,19 @@ public record HostMetadataProperties(@Nullable String hostId, @DefaultValue Tena
     }
 
     /**
-     * Tenant resolution.
+     * Tenant resolution. Ignored when the host declares its own {@code TenantResolver} bean, except
+     * {@code claim}, which the engines always compare with the resolved tenant.
      *
      * @param resolver {@code security-context} (the tenant is a claim of the caller's token) or
      *     {@code header:<name>} (a trusted gateway sets the header after authentication)
-     * @param claim the token claim that carries the tenant in {@code security-context} mode
+     * @param claim the token claim that carries the tenant
+     * @param trustedGateway required outside the {@code dev} profile before {@code header:<name>} starts:
+     *     the operator confirms that a gateway authenticates every request and overwrites the header
      */
     public record Tenancy(
             @DefaultValue(SECURITY_CONTEXT) String resolver,
-            @DefaultValue("tenant_id") String claim) {
+            @DefaultValue("tenant_id") String claim,
+            @DefaultValue("false") boolean trustedGateway) {
 
         static final String SECURITY_CONTEXT = "security-context";
         static final String HEADER_PREFIX = "header:";
@@ -58,6 +64,22 @@ public record HostMetadataProperties(@Nullable String hostId, @DefaultValue Tena
         @Nullable
         String tenantHeader() {
             return resolver.startsWith(HEADER_PREFIX) ? resolver.substring(HEADER_PREFIX.length()) : null;
+        }
+    }
+
+    /**
+     * Security of the engine endpoints.
+     *
+     * @param challenge the {@code WWW-Authenticate} value of a {@code 401} the endpoints raise themselves;
+     *     for a caller without a tenant, a {@code Bearer} challenge gets {@code error="invalid_token"}
+     */
+    public record Security(@DefaultValue("Bearer") String challenge) {
+
+        /** Checks the challenge. */
+        public Security {
+            if (challenge.isBlank() || challenge.chars().anyMatch(c -> c < 0x20)) {
+                throw new IllegalArgumentException("horus.bpm.security.challenge must be a non-blank header value.");
+            }
         }
     }
 }

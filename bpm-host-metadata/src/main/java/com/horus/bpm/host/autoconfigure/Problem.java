@@ -23,9 +23,9 @@ record Problem(int status, String code, String title, String detail) {
                 "Sign in, or send a token issued for this host.");
     }
 
-    static Problem noTenant(String source) {
+    static Problem noTenant() {
         return new Problem(401, "UNAUTHENTICATED", "Authentication required",
-                "No tenant could be resolved for the caller: " + source + " is missing.");
+                "No tenant could be resolved for the caller. Signing in again with the same account does not help.");
     }
 
     static Problem permissionDenied() {
@@ -35,7 +35,7 @@ record Problem(int status, String code, String title, String detail) {
 
     static Problem tenantNotAllowed() {
         return new Problem(403, "TENANT_NOT_ALLOWED", "Tenant not allowed",
-                "X-Tenant-Id names a tenant other than the caller's token tenant, and tenant switching is off.");
+                "The request names a tenant the caller is not signed in for, and tenant switching is off.");
     }
 
     /** The JSON body for this request. */

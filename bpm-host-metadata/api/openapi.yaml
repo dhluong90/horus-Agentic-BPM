@@ -28,7 +28,7 @@ paths:
         '200':
           description: The host's engines.
           headers:
-            Cache-Control: { $ref: '#/components/headers/CacheControl' }
+            Cache-Control: { $ref: '#/components/headers/MetaCacheControl' }
             ETag: { $ref: '#/components/headers/ETag' }
             X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
           content:
@@ -60,10 +60,10 @@ paths:
         '200':
           description: The caller as this host sees it.
           headers:
-            Cache-Control: { $ref: '#/components/headers/CacheControl' }
+            Cache-Control: { $ref: '#/components/headers/MeCacheControl' }
             ETag: { $ref: '#/components/headers/ETag' }
             Vary:
-              description: '`Authorization, Cookie, X-Tenant-Id`: the body depends on the caller.'
+              description: '`Authorization, Cookie, X-Tenant-Id`, plus the configured tenant header in gateway mode: the body depends on the caller.'
               schema: { type: string }
             X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
           content:
@@ -97,31 +97,41 @@ components:
       name: X-Correlation-Id
       in: header
       required: false
-      description: Kept when it is 1 to 64 letters, digits, `.`, `_` or `-`; otherwise the host issues a ULID.
-      schema: { type: string, pattern: '^[0-9A-Za-z._-]{1,64}$' }
+      description: Your own id for the request. The host logs it as `clientCorrelationId` and always issues its own ULID, returned in the `X-Correlation-Id` response header and every problem body.
+      schema: { type: string }
     TenantId:
       name: X-Tenant-Id
       in: header
       required: false
       description: |
         Tenant switching is not available yet (`tenancy.switching: false`). A value other than the
-        caller's token tenant is refused with `403 TENANT_NOT_ALLOWED`.
+        tenant the request resolved to is refused with `403 TENANT_NOT_ALLOWED`.
       schema: { type: string }
   headers:
-    CacheControl:
-      description: Always `private, max-age=60`.
+    MetaCacheControl:
+      description: '`private, max-age=60`: the same for every caller of the host.'
       schema: { type: string, const: 'private, max-age=60' }
+    MeCacheControl:
+      description: '`private, no-cache`: the body carries the caller''s permissions, so the browser revalidates with `If-None-Match` every time.'
+      schema: { type: string, const: 'private, no-cache' }
     ETag:
       description: Weak validator of the body's content.
       schema: { type: string }
     CorrelationId:
-      description: The correlation id of this request, also in every problem body.
+      description: The ULID this host issued for the request, also in every problem body.
       schema: { type: string }
   responses:
     NotModified:
       description: The body has not changed since the `ETag` in `If-None-Match`.
     Unauthenticated:
-      description: '`UNAUTHENTICATED`: no principal, or no tenant could be resolved for it.'
+      description: |
+        `UNAUTHENTICATED`: no principal, or no tenant could be resolved for it. Always carries
+        `WWW-Authenticate`; for a missing tenant a bearer challenge adds `error="invalid_token"`, and a
+        client must not repeat the sign-in more than once, because the same account gets the same token.
+      headers:
+        WWW-Authenticate:
+          description: '`Bearer` by default (`horus.bpm.security.challenge`).'
+          schema: { type: string }
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -134,7 +144,7 @@ components:
             instance: /api/bpm/me
             correlationId: 01KAF3N8Q4V6W2Y9Z0A1B2C3D4
     TenantNotAllowed:
-      description: '`TENANT_NOT_ALLOWED`: `X-Tenant-Id` names a tenant other than the token tenant.'
+      description: '`TENANT_NOT_ALLOWED`: `X-Tenant-Id` or the gateway tenant header names a tenant other than the token tenant, or a tenant outside the allowed format.'
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }

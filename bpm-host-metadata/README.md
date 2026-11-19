@@ -15,10 +15,10 @@ flowchart LR
 
 | Package | Contents |
 |---|---|
-| `com.horus.bpm.host.spi` | `ModuleDescriptor`, implemented by engine starters only. Its constructor checks every value against the published schema, so a wrong entry stops the start-up |
-| `com.horus.bpm.host.autoconfigure` | Auto-configuration, `horus.bpm.*` properties, the controller, and `BpmProblemAuthenticationEntryPoint` and `BpmProblemAccessDeniedHandler` for the host's security chain |
+| `com.horus.bpm.host.spi` | `ModuleDescriptor`, contributed by engine starters; its constructor checks every value against the published schema, so a wrong entry stops the start-up. `TenantResolver` and `CallerContext`, which a host implements to resolve the tenant itself, for example from its signed-in session principal |
+| `com.horus.bpm.host.autoconfigure` | Auto-configuration, `horus.bpm.*` properties, the controller, the built-in token-claim and gateway-header resolvers, a filter that marks `/api/bpm/rules/**` and `/api/bpm/processes/**` responses `no-store`, and `BpmProblemAuthenticationEntryPoint` and `BpmProblemAccessDeniedHandler` for the host's security chain |
 
-The endpoints register only in a servlet host with Spring MVC and Spring Security, and only when at least one engine has contributed an entry, so `/meta` never lists zero modules. Spring MVC, Spring Security and Spring Security OAuth2 are optional dependencies. Main code uses no JSON library: responses go through the host's own message converters and problem bodies are written by a small writer, so the module works with either Jackson major.
+The endpoints register only in a servlet host with Spring MVC and Spring Security, only when at least one engine has contributed an entry (so `/meta` never lists zero modules), and unless `horus.bpm.host-metadata.enabled=false`. Whatever `TenantResolver` is active, a token tenant claim must match the resolved tenant and `X-Tenant-Id` must match it too; mismatches are `403 TENANT_NOT_ALLOWED` and logged on `com.horus.bpm.security`. Spring MVC, Spring Security and Spring Security OAuth2 are optional dependencies. Main code uses no JSON library: responses go through the host's own message converters and problem bodies are written by a small writer, so the module works with either Jackson major.
 
 ## Contract
 

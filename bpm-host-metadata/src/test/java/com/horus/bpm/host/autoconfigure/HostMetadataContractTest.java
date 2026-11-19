@@ -82,7 +82,9 @@ class HostMetadataContractTest {
             JsonSchemas.assertValid(entry.getValue(), new ObjectMapper().writeValueAsString(json.path("example")));
             assertThat(get.path("responses").fieldNames()).toIterable().contains("200", "304", "401", "403");
         }
-        assertThat(openapi.path("components").path("headers").path("CacheControl").path("schema").path("const").asText())
-                .isEqualTo(HostMetadataController.CACHE_CONTROL);
+        assertThat(openapi.path("components").path("headers").path("MetaCacheControl").path("schema").path("const").asText())
+                .isEqualTo(HostMetadataController.META_CACHE_CONTROL);
+        assertThat(openapi.path("components").path("headers").path("MeCacheControl").path("schema").path("const").asText())
+                .isEqualTo(HostMetadataController.ME_CACHE_CONTROL);
     }
 }

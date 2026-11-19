@@ -11,6 +11,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -24,26 +25,42 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>Both need an authenticated caller and no other permission. Responses follow
  * {@code cockpit/api/schema/bpm-meta.v1.schema.json} and {@code bpm-me.v1.schema.json} field for field,
- * carry {@code Cache-Control: private, max-age=60} and a weak {@code ETag}, and answer {@code 304} to a
- * matching {@code If-None-Match}. Bodies are built as ordered maps and written by the host's own JSON
- * converter, so absent optional fields are omitted rather than written as {@code null}.
+ * carry a weak {@code ETag} and answer {@code 304} to a matching {@code If-None-Match}. {@code /meta}, the
+ * same for every caller of the host, is {@code private, max-age=60}; {@code /me}, which carries the
+ * caller's permissions, is {@code private, no-cache}, so a revoked role or a sign-out on a shared machine
+ * is never served from the browser cache without asking the host. Bodies are built as ordered maps and
+ * written by the host's own JSON converter, so absent optional fields are omitted rather than written as
+ * {@code null}.
  */
 @RestController
 @RequestMapping("/api/bpm")
 final class HostMetadataController {
 
-    static final String CACHE_CONTROL = "private, max-age=60";
+    static final String META_CACHE_CONTROL = "private, max-age=60";
+    static final String ME_CACHE_CONTROL = "private, no-cache";
     /** ADR-0015: the largest page any engine list endpoint returns. */
     static final int MAX_PAGE_SIZE = 200;
 
     private final List<ModuleDescriptor> modules;
     private final HostMetadataProperties properties;
     private final CallerResolution callers;
+    private final String[] meVary;
 
     HostMetadataController(List<ModuleDescriptor> modules, HostMetadataProperties properties, CallerResolution callers) {
         this.modules = List.copyOf(modules);
         this.properties = properties;
         this.callers = callers;
+        this.meVary = vary(properties.tenancy().tenantHeader());
+    }
+
+    /** The headers {@code /me} depends on: the credentials, the switch header and the configured tenant header. */
+    static String[] vary(@Nullable String tenantHeader) {
+        List<String> vary = new ArrayList<>(List.of(
+                HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE, CallerResolution.TENANT_SWITCH_HEADER));
+        if (tenantHeader != null && !tenantHeader.equalsIgnoreCase(CallerResolution.TENANT_SWITCH_HEADER)) {
+            vary.add(tenantHeader);
+        }
+        return vary.toArray(String[]::new);
     }
 
     @GetMapping("/meta")
@@ -69,7 +86,7 @@ final class HostMetadataController {
         body.put("modules", entries);
         body.put("tenancy", Map.of("switching", false));
         body.put("limits", Map.of("maxPageSize", MAX_PAGE_SIZE));
-        return cacheable(request, body, false);
+        return cacheable(request, body, META_CACHE_CONTROL, new String[0]);
     }
 
     @GetMapping("/me")
@@ -88,19 +105,22 @@ final class HostMetadataController {
         body.put("user", user);
         body.put("tenant", tenant);
         body.put("permissions", permissions(caller));
-        body.put("roles", caller.roles());
+        body.put("roles", roles(caller));
         body.put("groups", caller.groups());
-        return cacheable(request, body, true);
+        return cacheable(request, body, ME_CACHE_CONTROL, meVary);
     }
 
     @ExceptionHandler(ProblemException.class)
     ResponseEntity<String> problem(ProblemException exception, HttpServletRequest request) {
         Problem problem = exception.problem();
-        return ResponseEntity.status(problem.status())
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(problem.status())
                 .contentType(MediaType.parseMediaType(Problem.MEDIA_TYPE))
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
-                .header(CorrelationIds.HEADER, CorrelationIds.of(request))
-                .body(problem.toJson(request));
+                .header(CorrelationIds.HEADER, CorrelationIds.of(request));
+        if (exception.challenge() != null) {
+            response.header(HttpHeaders.WWW_AUTHENTICATE, exception.challenge());
+        }
+        return response.body(problem.toJson(request));
     }
 
     /**
@@ -124,17 +144,28 @@ final class HostMetadataController {
     }
 
     /**
+     * The caller's host roles that some engine maps to permissions, sorted. Host roles unrelated to the
+     * engines stay out of the response, so the host's role model does not reach the browser.
+     */
+    private List<String> roles(Caller caller) {
+        return caller.authorities().stream()
+                .filter(authority -> modules.stream().anyMatch(module -> module.rolePermissions().containsKey(authority)))
+                .sorted()
+                .toList();
+    }
+
+    /**
      * Wraps a body with the caching headers. The weak ETag is a hash of the body's content, so it changes
      * exactly when the data changes; Spring MVC answers {@code 304} when {@code If-None-Match} matches.
      */
     private static ResponseEntity<Map<String, Object>> cacheable(
-            HttpServletRequest request, Map<String, Object> body, boolean perCaller) {
+            HttpServletRequest request, Map<String, Object> body, String cacheControl, String[] vary) {
         ResponseEntity.BodyBuilder response = ResponseEntity.ok()
-                .header(HttpHeaders.CACHE_CONTROL, CACHE_CONTROL)
+                .header(HttpHeaders.CACHE_CONTROL, cacheControl)
                 .eTag("W/\"" + contentHash(body) + "\"")
                 .header(CorrelationIds.HEADER, CorrelationIds.of(request));
-        if (perCaller) {
-            response.varyBy(HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE, CallerResolution.TENANT_SWITCH_HEADER);
+        if (vary.length > 0) {
+            response.varyBy(vary);
         }
         return response.body(body);
     }

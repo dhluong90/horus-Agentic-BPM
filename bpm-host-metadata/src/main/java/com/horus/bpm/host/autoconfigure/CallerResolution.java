@@ -1,13 +1,17 @@
 package com.horus.bpm.host.autoconfigure;
 
+import com.horus.bpm.host.spi.CallerContext;
+import com.horus.bpm.host.spi.TenantResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -21,64 +25,88 @@ import org.springframework.security.core.context.SecurityContextHolder;
  * Resolves the caller and tenant of a request from the authenticated principal, never from a request body
  * or query parameter (TR-SEC-03).
  *
- * <p>In {@code security-context} mode the tenant is a claim of the caller's token. Tenant switching is not
- * available yet, so an {@code X-Tenant-Id} header that names another tenant is refused with
- * {@code 403 TENANT_NOT_ALLOWED} and a {@code tenant.switch.refused} security log entry (ADR-0014). In
- * {@code header:<name>} mode a trusted gateway sets the tenant header after authentication.
+ * <p>The {@link TenantResolver} finds the tenant. Two checks then apply to every resolver, the host's own
+ * included: when the token carries the tenant claim, the resolved tenant must equal it, so a gateway
+ * header cannot move a caller into another tenant; and while tenant switching is off, an
+ * {@code X-Tenant-Id} header must equal the resolved tenant. A mismatch, or a tenant outside the allowed
+ * format, is {@code 403 TENANT_NOT_ALLOWED} with a {@code tenant.switch.refused} security log entry
+ * (ADR-0014).
  */
 final class CallerResolution {
 
     static final String TENANT_SWITCH_HEADER = "X-Tenant-Id";
+    /** 1 to 64 characters, starting with a letter or digit. */
+    static final Pattern TENANT = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
     private static final Log SECURITY_LOG = LogFactory.getLog("com.horus.bpm.security");
 
-    private final HostMetadataProperties.Tenancy tenancy;
+    private final TenantResolver resolver;
+    private final String tenantClaim;
     private final Function<Authentication, Map<String, Object>> claims;
+    private final String challenge;
 
-    CallerResolution(HostMetadataProperties.Tenancy tenancy, Function<Authentication, Map<String, Object>> claims) {
-        this.tenancy = tenancy;
+    CallerResolution(TenantResolver resolver, String tenantClaim, Function<Authentication, Map<String, Object>> claims,
+            String challenge) {
+        this.resolver = resolver;
+        this.tenantClaim = tenantClaim;
         this.claims = claims;
+        this.challenge = challenge;
     }
 
     /**
      * The caller of the current request.
      *
      * @throws ProblemException {@code 401 UNAUTHENTICATED} without a principal or without a tenant,
-     *     {@code 403 TENANT_NOT_ALLOWED} for a tenant header that differs from the token tenant
+     *     {@code 403 TENANT_NOT_ALLOWED} for a tenant the caller is not signed in for
      */
     Caller resolve(HttpServletRequest request) {
         Authentication authentication = SecurityContextHolder.getContextHolderStrategy().getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()
                 || authentication instanceof AnonymousAuthenticationToken) {
-            throw new ProblemException(Problem.unauthenticated());
+            throw new ProblemException(Problem.unauthenticated(), challenge);
         }
         Map<String, Object> tokenClaims = claims.apply(authentication);
-        String tenant = tenant(request, authentication, tokenClaims);
         Set<String> authorities = authorities(authentication.getAuthorities());
-        List<String> roles = authorities.stream().filter(a -> a.startsWith("ROLE_")).sorted().toList();
-        return new Caller(authentication.getName(), displayName(tokenClaims), tenant, authorities, roles,
-                stringList(tokenClaims.get("groups")));
-    }
+        Context context = new Context(authentication.getName(), authentication.getPrincipal(), authorities, tokenClaims,
+                request);
+        String tokenTenant = context.stringClaim(tenantClaim).orElse(null);
 
-    private String tenant(HttpServletRequest request, Authentication authentication, Map<String, Object> tokenClaims) {
-        String header = tenancy.tenantHeader();
-        if (header != null) {
-            String tenant = request.getHeader(header);
-            if (tenant == null || tenant.isBlank()) {
-                throw new ProblemException(Problem.noTenant("the " + header + " header"));
-            }
-            return tenant;
+        Optional<String> resolved = resolver.resolve(context);
+        if (resolved.isEmpty()) {
+            SECURITY_LOG.warn("tenant.unresolved user=" + CorrelationIds.loggable(authentication.getName())
+                    + " source=" + CorrelationIds.loggable(resolver.toString())
+                    + " correlationId=" + CorrelationIds.of(request)
+                    + " clientCorrelationId=" + CorrelationIds.clientValue(request));
+            throw new ProblemException(Problem.noTenant(), invalidTokenChallenge());
         }
-        if (!(tokenClaims.get(tenancy.claim()) instanceof String tenant) || tenant.isBlank()) {
-            throw new ProblemException(Problem.noTenant("the " + tenancy.claim() + " claim"));
+        String tenant = resolved.get();
+        if (!TENANT.matcher(tenant).matches()) {
+            throw refused(request, authentication, tokenTenant, tenant, "invalid-tenant");
+        }
+        if (tokenTenant != null && !tokenTenant.equals(tenant)) {
+            throw refused(request, authentication, tokenTenant, tenant, "differs-from-token-tenant");
         }
         String requested = request.getHeader(TENANT_SWITCH_HEADER);
         if (requested != null && !requested.equals(tenant)) {
-            SECURITY_LOG.warn("tenant.switch.refused user=" + CorrelationIds.loggable(authentication.getName())
-                    + " requestedTenant=" + CorrelationIds.loggable(requested)
-                    + " correlationId=" + CorrelationIds.of(request));
-            throw new ProblemException(Problem.tenantNotAllowed());
+            throw refused(request, authentication, tokenTenant, requested, "switching-off");
         }
-        return tenant;
+        return new Caller(authentication.getName(), displayName(context), tenant, authorities,
+                stringList(tokenClaims.get("groups")));
+    }
+
+    private static ProblemException refused(HttpServletRequest request, Authentication authentication,
+            @Nullable String tokenTenant, String requested, String reason) {
+        SECURITY_LOG.warn("tenant.switch.refused reason=" + reason
+                + " user=" + CorrelationIds.loggable(authentication.getName())
+                + " tokenTenant=" + CorrelationIds.loggable(tokenTenant)
+                + " requestedTenant=" + CorrelationIds.loggable(requested)
+                + " correlationId=" + CorrelationIds.of(request)
+                + " clientCorrelationId=" + CorrelationIds.clientValue(request));
+        return new ProblemException(Problem.tenantNotAllowed());
+    }
+
+    /** A bearer challenge says the token is the problem, so a client knows a fresh sign-in will not help. */
+    private String invalidTokenChallenge() {
+        return challenge.regionMatches(true, 0, "Bearer", 0, 6) ? challenge + " error=\"invalid_token\"" : challenge;
     }
 
     private static Set<String> authorities(Collection<? extends GrantedAuthority> granted) {
@@ -88,13 +116,8 @@ final class CallerResolution {
                 .collect(Collectors.toCollection(TreeSet::new));
     }
 
-    private static @Nullable String displayName(Map<String, Object> tokenClaims) {
-        for (String claim : List.of("name", "preferred_username")) {
-            if (tokenClaims.get(claim) instanceof String value && !value.isBlank()) {
-                return value;
-            }
-        }
-        return null;
+    private static @Nullable String displayName(CallerContext context) {
+        return context.stringClaim("name").or(() -> context.stringClaim("preferred_username")).orElse(null);
     }
 
     private static List<String> stringList(@Nullable Object claim) {
@@ -108,5 +131,14 @@ final class CallerResolution {
             }
         }
         return strings;
+    }
+
+    private record Context(String principalName, Object principal, Set<String> authorities,
+            Map<String, Object> claims, HttpServletRequest request) implements CallerContext {
+
+        @Override
+        public Optional<String> header(String name) {
+            return Optional.ofNullable(request.getHeader(name));
+        }
     }
 }

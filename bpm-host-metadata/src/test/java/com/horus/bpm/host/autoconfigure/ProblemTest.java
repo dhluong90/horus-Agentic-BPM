@@ -63,9 +63,12 @@ class ProblemTest {
     }
 
     @Test
-    void unsafe_values_are_never_echoed_into_logs() {
+    void log_values_are_escaped_recoverably_and_capped() {
         assertThat(CorrelationIds.loggable("bank-b")).isEqualTo("bank-b");
-        assertThat(CorrelationIds.loggable("bank-b\nFAKE ENTRY")).isEqualTo("<unprintable>");
-        assertThat(CorrelationIds.loggable(null)).isEqualTo("<unprintable>");
+        assertThat(CorrelationIds.loggable("lan@bank-a.vn")).isEqualTo("lan%40bank-a.vn");
+        assertThat(CorrelationIds.loggable("bank-b\nFAKE ENTRY")).isEqualTo("bank-b%0AFAKE%20ENTRY");
+        assertThat(CorrelationIds.loggable("Lê")).isEqualTo("L%C3%AA");
+        assertThat(CorrelationIds.loggable(null)).isEqualTo("-");
+        assertThat(CorrelationIds.loggable("a".repeat(500))).hasSize(131).endsWith("...");
     }
 }

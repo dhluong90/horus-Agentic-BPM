@@ -32,7 +32,11 @@ final class TestHosts {
     }
 
     static WebApplicationContextRunner runner() {
-        return new WebApplicationContextRunner().withUserConfiguration(HostSecurity.class);
+        return runner(HostSecurity.class);
+    }
+
+    static WebApplicationContextRunner runner(Class<?> security) {
+        return new WebApplicationContextRunner().withUserConfiguration(security);
     }
 
     static MockMvc mockMvc(ApplicationContext context) {
@@ -56,6 +60,22 @@ final class TestHosts {
                     .exceptionHandling(exceptions -> exceptions
                             .defaultAuthenticationEntryPointFor(new BpmProblemAuthenticationEntryPoint(), bpm)
                             .defaultAccessDeniedHandlerFor(new BpmProblemAccessDeniedHandler(), bpm));
+            return http.build();
+        }
+    }
+
+    /**
+     * A host whose chain lets every request through to the endpoints and wires no engine handler: the
+     * controller's own check is then the only control.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @EnableAutoConfiguration
+    @EnableWebSecurity
+    static class PermitAllSecurity {
+
+        @Bean
+        SecurityFilterChain hostSecurity(HttpSecurity http) {
+            http.authorizeHttpRequests(requests -> requests.anyRequest().permitAll());
             return http.build();
         }
     }
