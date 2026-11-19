@@ -54,12 +54,18 @@ for record in "${HISTORY_RECORDS[@]}"; do HISTORY_EXCLUDES+=(":(exclude)$record"
 # apply
 # ---------------------------------------------------------------------------------------------------
 
+map_path() {
+  OLD_PATH="$OLD_PATH" NEW_PATH="$NEW_PATH" perl -e '
+    ($p, $o, $n) = ($ARGV[0], @ENV{qw(OLD_PATH NEW_PATH)});
+    $p =~ s{/\Q$o\E/processes/}{/$n/process/}; $p =~ s{/\Q$o\E/}{/$n/}; print $p;
+  ' "$1"
+}
+
 move_paths() {
   local moved=0 src dst
-  # Every tracked file under a .../com/horus/bpm/... directory, in source and resource trees alike.
+  # Every tracked file under the old root directory, in source and resource trees alike.
   while IFS= read -r src; do
-    dst="${src//\/${OLD_PATH}\/processes\//\/${NEW_PATH}\/process\/}"
-    dst="${dst//\/${OLD_PATH}\//\/${NEW_PATH}\/}"
+    dst=$(map_path "$src")
     [ "$dst" != "$src" ] || fail "cannot map path $src"
     if [ -e "$dst" ]; then
       fail "collision: $src would overwrite $dst; rename one of them by hand first"
@@ -73,18 +79,21 @@ move_paths() {
 }
 
 rewrite_references() {
-  local files count
+  local list count
   # Text files that mention the old root, except the history records. Migration scripts are never
   # rewritten: Flyway checksums their content, so a changed byte would fail validation on every
   # database that has already applied them. verify fails if one still names the old root.
-  files=$(git grep -I -l -E "$LEFTOVER_PATTERN" -- . "${HISTORY_EXCLUDES[@]}" ':(exclude)*.sql' || true)
-  if [ -z "$files" ]; then
+  # NUL-separated through a file: command substitution would drop the NUL bytes.
+  list=$(mktemp)
+  git grep -I -l -z -E "$LEFTOVER_PATTERN" -- . "${HISTORY_EXCLUDES[@]}" ':(exclude)*.sql' > "$list" || true
+  count=$(tr -cd "\\000" < "$list" | wc -c | tr -d " ")
+  if [ "$count" = 0 ]; then
+    rm -f "$list"
     info "rewrote 0 files"
     return
   fi
-  count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
-  printf '%s\n' "$files" | OLD_DOT="$OLD_DOT" NEW_DOT="$NEW_DOT" OLD_PATH="$OLD_PATH" NEW_PATH="$NEW_PATH" \
-    xargs perl -pi -e '
+  OLD_DOT="$OLD_DOT" NEW_DOT="$NEW_DOT" OLD_PATH="$OLD_PATH" NEW_PATH="$NEW_PATH" \
+    xargs -0 perl -pi -e '
       BEGIN {
         ($o, $n, $op, $np) = @ENV{qw(OLD_DOT NEW_DOT OLD_PATH NEW_PATH)};
         ($oe = $o) =~ s/\./\\./g; ($ne = $n) =~ s/\./\\./g;
@@ -97,7 +106,8 @@ rewrite_references() {
       s/\Q$oe\E/$ne/g;
       s/(?<![\w.])\Q$o\E(?!\w)/$n/g;
       s/\Q$op\E/$np/g;
-    '
+    ' < "$list"
+  rm -f "$list"
   info "rewrote $count files"
 }
 
@@ -156,6 +166,11 @@ check_autoconfiguration_imports() {
     while IFS= read -r entry; do
       printf '%s\n' "$sources" | grep -q -F "/java/${entry//.//}.java" || info "note: $entry is named but not in this tree"
     done
+  # ADR-0022: the process engine root is "process". A "processes" package names a class that never
+  # exists, and Spring Boot silently ignores an ordering hint that names a missing class.
+  local wrong
+  wrong=$(git grep -n -F "${NEW_DOT}.processes." -- '*.java' '*.imports' || true)
+  [ -z "$wrong" ] || { printf '%s\n' "$wrong" >&2; fail "references to a ${NEW_DOT}.processes package (ADR-0022 says process)"; }
   info "ok: every auto-configuration registration resolves to a class"
 }
 
