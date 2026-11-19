@@ -37,7 +37,11 @@
       <groupId>org.springframework</groupId>
       <artifactId>spring-jdbc</artifactId>
     </dependency>
-    <!-- Optional: the ruleEngine health contributor is added only when the host has Spring Boot 4 health. -->
+    <!--
+      Optional: the ruleEngine health contributor is added only when the host has Spring Boot 4 health
+      (ADR-0011); Spring Boot 3.5 hosts get theirs with #116. The 3.5 test leg excludes this module from
+      the test classpath (root POM, profile spring-boot-3.5).
+    -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-health</artifactId>

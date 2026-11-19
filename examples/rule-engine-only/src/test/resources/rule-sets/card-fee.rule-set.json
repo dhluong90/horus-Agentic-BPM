@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "ruleSet": "card-fee",
+  "description": "Monthly card fee by tier and balance",
+  "hitPolicy": "first",
+  "moneyRounding": "HALF_EVEN",
+  "inputs": [
+    { "name": "tier", "type": "string", "allowed": ["CLASSIC", "GOLD", "PLATINUM"] },
+    { "name": "balance", "type": "money" },
+    { "name": "utilisation", "type": "decimal" }
+  ],
+  "outputs": [
+    { "name": "fee", "type": "money" },
+    { "name": "discountRate", "type": "decimal", "default": 0 }
+  ],
+  "rules": [
+    { "id": "R1", "when": { "tier": "== 'GOLD'" }, "then": { "fee": "0 VND" } },
+    { "id": "R2", "when": { "balance": ">= 50000000 VND" }, "then": { "fee": "0 VND", "discountRate": 0.015 } },
+    { "id": "R3", "when": {}, "then": { "fee": "50000 VND", "discountRate": 0.1000000000000000055511151231257827 } }
+  ]
+}
