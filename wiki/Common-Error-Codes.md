@@ -52,6 +52,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [LAYOUT_INVALID](#layout_invalid) | processes | M3 |
 | 422 | [BPMN_UNSUPPORTED_ELEMENT](#bpmn_unsupported_element) | processes | M3 |
 | 422 | [BPMN_UNSAFE_XML](#bpmn_unsafe_xml) | processes | M3 |
+| 428 | [PRECONDITION_REQUIRED](#precondition_required) | both | M1 |
 | 429 | [RATE_LIMITED](#rate_limited) | both | M1 |
 | 500 | [INTERNAL_ERROR](#internal_error) | both | M1 |
 | 503 | [SCHEMA_NOT_READY](#schema_not_ready) | rules | M1 |
@@ -74,10 +75,10 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `403`. `X-Tenant-Id` names a tenant outside the token's allowed-tenants claim, or differs from the resolved tenant while tenant switching is off; a host resolver returns a tenant other than the principal's tenant attribute; or the tenant is outside the allowed format. No data is returned and the host writes the security log entry `tenant.switch.refused` (ADR-0014). Ask your identity provider administrator to add the tenant to your token.
 
 ### IDEMPOTENCY_IN_FLIGHT
-`409` with `Retry-After: 1`. A request with the same `Idempotency-Key` is still running. Retry after one second with the same key (ADR-0006).
+`409` with `Retry-After: 1`. A request with the same `Idempotency-Key` is still running, for example after a double click or a client retry that came too soon. Nothing was done for this request. Wait the `Retry-After` seconds and send the same request with the same key: once the first request has finished, the retry returns its original status and body, and nothing is created twice (ADR-0006).
 
 ### IDEMPOTENCY_KEY_REUSE_MISMATCH
-`422`. The `Idempotency-Key` was used before with a different request body. Use a new key for a new request.
+`422`. The `Idempotency-Key` was used before with a different request body. This is a client defect, so retrying the same request never helps. Use a new key for a new request.
 
 ### VERSION_CONFLICT
 `409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again.
@@ -89,7 +90,10 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `429` with `Retry-After`. Returned only when the host configures a rate limiter. Wait and retry.
 
 ### INTERNAL_ERROR
-`500`. Unexpected failure. The body carries only `code` and `correlationId`; give the `correlationId` to the host's operators to find the server log.
+`500`. Unexpected failure. The body carries only the fixed `detail` text and the `correlationId`, never a stack trace, class name, SQL or table name. Give the `correlationId` to the host's operators: the server log has the same id with the cause. Send `X-Correlation-Id` with your request to choose the id yourself.
+
+### PRECONDITION_REQUIRED
+`428`. A command that must be conditional was sent without the header it needs: `If-Match` on a Rule Engine command such as `:withdraw`, `If-Match` and `Idempotency-Key` on a Process Engine task completion, or a business key or `Idempotency-Key` on a Process Engine instance start. Read the resource, then send its `ETag` as `If-Match: "<lockVersion>"` (and a new `Idempotency-Key` where asked), so the command cannot overwrite a change you have not seen or run twice.
 
 ## Versions and approvals
 

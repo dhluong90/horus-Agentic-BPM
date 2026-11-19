@@ -55,6 +55,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
     post:
       tags: [rule-sets]
@@ -116,6 +117,7 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}:
     get:
       tags: [rule-sets]
@@ -134,6 +136,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions:
     get:
       tags: [rule-sets]
@@ -177,6 +180,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
     post:
       tags: [rule-sets]
@@ -202,10 +206,13 @@ paths:
         '201':
           $ref: '#/components/responses/VersionCreated'
         '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:
     get:
       tags: [rule-sets]
@@ -234,6 +241,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/export:
     get:
       tags: [rule-sets]
@@ -270,6 +278,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/history:
     get:
       tags: [rule-sets]
@@ -317,6 +326,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:request-publish:
     post:
       tags: [rule-sets]
@@ -331,11 +341,13 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:approve:
     post:
       tags: [rule-sets]
@@ -367,12 +379,14 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:reject:
     post:
       tags: [rule-sets]
@@ -410,6 +424,7 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}:evaluate:
     post:
       tags: [decisions]
@@ -466,6 +481,7 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     hostAuth:
@@ -492,9 +508,13 @@ components:
       in: header
       required: false
       description: |
-        A replay with the same request returns the original result and changes nothing. The same
-        key with a different request is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; while the first
-        request runs it is `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`. Remembered 24 hours.
+        Accepted by every endpoint that writes. A replay with the same request returns the original
+        status and body and changes nothing. The same key with a different request is
+        `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` (a client defect: do not retry). A second request with the
+        key while the first is still running is `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`: wait
+        that many seconds and send the same request again, which then replays the first result.
+        Keys are scoped to the tenant and the operation and remembered 24 hours
+        (`idempotency.retention`).
       schema:
         type: string
         minLength: 1
@@ -563,7 +583,11 @@ components:
         `PERMISSION_DENIED` when the caller lacks the endpoint's permission, `SELF_APPROVAL_FORBIDDEN` for a
         maker approving their own version, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
         another tenant than the caller's while tenant switching is off, or the principal's tenant attribute
-        contradicts the resolved tenant (RLE-018, RLE-037).
+        contradicts the resolved tenant (RLE-018, RLE-037). `428 PRECONDITION_REQUIRED` is a command
+        that must be conditional sent without `If-Match`. `500 INTERNAL_ERROR` carries only a
+        `correlationId`, never a stack trace, class name, SQL or table name; the same id is in the
+        server log. `type` is
+        `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#<code in lower case>`.
       headers:
         WWW-Authenticate:
           description: Sent with every `401`
@@ -795,7 +819,8 @@ components:
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION,
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
-            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SCHEMA_NOT_READY]
+            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
+            PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY]
         detail: { type: string }
         correlationId: { type: string }
         violations:
