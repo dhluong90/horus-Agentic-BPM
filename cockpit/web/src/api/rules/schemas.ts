@@ -130,6 +130,23 @@ export type WarningCode = (typeof WARNING_CODES)[number];
 const anyWarning = z.object({ code: z.string(), input: z.string(), matchedName: z.string().nullable().optional(), message: z.string() }).loose();
 export interface VersionWarning { code: WarningCode; input: string; matchedName: string | null; message: string }
 
+/** One warning the approver accepts, as the exact pair shown on screen (PD-104, RLE-053). */
+export interface AcknowledgedWarning { code: WarningCode; input: string }
+
+const pendingWarning = z.object({ code: z.string(), input: z.string() }).loose();
+
+/**
+ * The `warnings` of a 409 WARNINGS_NOT_ACKNOWLEDGED: the full set the engine now needs accepted, read entry by
+ * entry; an entry with a code this cockpit cannot show is dropped. Undefined when the member is missing.
+ */
+export function readPendingWarnings(value: unknown): AcknowledgedWarning[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap((item): AcknowledgedWarning[] => {
+    const parsed = pendingWarning.safeParse(item);
+    return parsed.success && (WARNING_CODES as readonly string[]).includes(parsed.data.code) ? [{ code: parsed.data.code as WarningCode, input: parsed.data.input }] : [];
+  });
+}
+
 /**
  * What the author and the approver should see before publication (RLE-049). Engines before 0.2.0 send no
  * `warnings`: none. A warning this cockpit cannot read is dropped, never fatal.

@@ -39,6 +39,12 @@ export function acknowledgeWarningsOf(meta: BpmMetaV1): readonly string[] {
   return value.split(',').map((code) => code.trim()).filter((code) => code !== '');
 }
 
+/** The tenant's decision-log.mask-default from the rules module of /meta (RLE-052); off when absent. */
+export function maskDefaultOf(meta: BpmMetaV1): boolean {
+  const value = meta.modules.find((module) => module.module === 'rules')?.settings?.['decision-log.mask-default'];
+  return value === true || value === 'true';
+}
+
 export interface FrameProps {
   host: RegistryHost;
   meta: BpmMetaV1;
@@ -52,7 +58,7 @@ export function AppFrame({ host, meta, me, fetchImpl }: FrameProps) {
   const codes = acknowledgeWarningsOf(meta).join(',');
   const acknowledgeWarnings = useMemo(() => (codes === '' ? [] : codes.split(',')), [codes]);
   return (
-    <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} acknowledgeWarnings={acknowledgeWarnings} fetchImpl={fetchImpl}>
+    <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} acknowledgeWarnings={acknowledgeWarnings} maskDefault={maskDefaultOf(meta)} fetchImpl={fetchImpl}>
       <PeopleProvider me={me.user}>
         <Frame meta={meta} me={me} />
       </PeopleProvider>

@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import type { RuleSetDefinition, VersionWarning } from '../../../api/rules/schemas';
+import type { RuleSetDefinition } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { columnLabel } from '../model/reading';
 
@@ -11,6 +11,8 @@ export interface Acceptance {
   needed: boolean;
   /** The id Approve points to for its description while the box is not ticked. */
   id: string;
+  /** The inputs the box accepts: exactly the pairs Approve will send. */
+  inputs: readonly string[];
 }
 
 /**
@@ -18,7 +20,7 @@ export interface Acceptance {
  * then what follows from it. With `acceptance`, the approver ticks one box naming the inputs before Approve works
  * (PD-104). Nothing renders when there is no warning.
  */
-export function PersonalDataWarnings({ warnings, definition, acceptance }: { warnings: readonly VersionWarning[]; definition: RuleSetDefinition; acceptance?: Acceptance | undefined }) {
+export function PersonalDataWarnings({ warnings, definition, acceptance }: { warnings: readonly { input: string }[]; definition: RuleSetDefinition; acceptance?: Acceptance | undefined }) {
   const { t } = useI18n();
   const titleId = useId();
   if (warnings.length === 0) return null;
@@ -39,7 +41,7 @@ export function PersonalDataWarnings({ warnings, definition, acceptance }: { war
           {acceptance.needed ? <p className="pii-warning__why pii-warning__needed" role="alert">{t('pii.needed')}</p> : null}
           <label className="pii-warning__accept">
             <input type="checkbox" checked={acceptance.checked} onChange={(e) => { acceptance.onChange(e.target.checked); }} />
-            <span id={acceptance.id}>{t(many ? 'pii.acceptMany' : 'pii.acceptOne', { inputs: inputs.join(', ') })}</span>
+            <span id={acceptance.id}>{t(acceptance.inputs.length > 1 ? 'pii.acceptMany' : 'pii.acceptOne', { inputs: acceptance.inputs.map(label).join(', ') })}</span>
           </label>
         </>
       ) : null}

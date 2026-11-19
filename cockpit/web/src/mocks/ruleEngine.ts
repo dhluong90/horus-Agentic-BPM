@@ -391,10 +391,16 @@ export function createFakeEngine(seed: StoredVersion[]) {
       return view(v, request);
     }
     if (v.requestedBy === request.user || v.createdBy === request.user) return problem(403, 'SELF_APPROVAL_FORBIDDEN', `The requester or author of ${v.ruleSet} v${String(v.version)} cannot approve it`);
-    // PD-104: every warning of a listed code must be acknowledged by its code on the approve request.
-    const acknowledged = new Set((body as { acknowledgedWarnings?: string[] }).acknowledgedWarnings ?? []);
-    const open = warningsOf(v.definition).filter((warning) => ACKNOWLEDGE_WARNINGS.includes(warning.code) && !acknowledged.has(warning.code));
-    if (open.length > 0) return problem(409, 'WARNINGS_NOT_ACKNOWLEDGED', `Approval needs an acknowledgement of ${open.map((w) => `${w.code} on ${w.input}`).join(', ')}`);
+    // PD-104, RLE-053: the sent { code, input } pairs must equal, as a set, the pairs that need an acknowledgement.
+    const needed = warningsOf(v.definition).filter((warning) => ACKNOWLEDGE_WARNINGS.includes(warning.code));
+    const pairKey = (pair: { code?: unknown; input?: unknown }) => `${String(pair.code)}\u0000${String(pair.input)}`;
+    const sent = new Set(((body as { acknowledgedWarnings?: { code?: unknown; input?: unknown }[] }).acknowledgedWarnings ?? []).map(pairKey));
+    const wanted = new Set(needed.map(pairKey));
+    if (sent.size !== wanted.size || [...wanted].some((key) => !sent.has(key))) {
+      const refusal = problem(409, 'WARNINGS_NOT_ACKNOWLEDGED', `Approval needs an acknowledgement of ${needed.map((w) => `${w.code} on ${w.input}`).join(', ') || 'nothing'}`);
+      const extra = { warnings: needed.map(({ code, input, matchedName }) => ({ code, input, matchedName })), setting: ACKNOWLEDGE_WARNINGS };
+      return { ...refusal, body: JSON.stringify({ ...(JSON.parse(refusal.body) as object), ...extra }) };
+    }
     for (const other of versionsOf(v.ruleSet)) if (other.status === 'PUBLISHED') other.status = 'RETIRED';
     Object.assign(v, { status: 'PUBLISHED', approvedBy: request.user, approvedAt: now(), effectiveFrom: now(), lockVersion: v.lockVersion + 1 });
     record(v, 'APPROVED', from, request.user, body.comment ?? null);

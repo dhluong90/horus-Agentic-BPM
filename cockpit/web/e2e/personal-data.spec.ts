@@ -85,7 +85,10 @@ test('CKP_037_approving_sends_the_accepted_code_and_publishes', async ({ page })
   const sent = page.waitForRequest((request) => request.method() === 'POST' && request.url().includes(':approve'));
   await page.getByRole('checkbox', { name: TEXT.en.accept }).check();
   await page.getByRole('button', { name: TEXT.en.approve }).click();
-  expect((await sent).postDataJSON()).toEqual({ acknowledgedWarnings: ['UNMASKED_PERSONAL_DATA'] });
+  expect((await sent).postDataJSON()).toEqual({ acknowledgedWarnings: [
+    { code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId' },
+    { code: 'UNMASKED_PERSONAL_DATA', input: 'email' },
+  ] });
   await expect(page.getByText('Version 2 is published.')).toBeVisible();
 });
 

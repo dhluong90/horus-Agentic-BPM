@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
-import { toHostError } from '../../../api/hostError';
 import { allVersions } from '../../../api/rules/catalogue';
 import type { RuleDocument } from '../../../api/rules/rulesClient';
-import type { DecisionResult, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
+import type { AcknowledgedWarning, DecisionResult, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
 
 /*
@@ -158,16 +157,9 @@ export function useApprove(onDone: (version: RuleSetVersion) => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
-    async ({ version, comment, acknowledgedWarnings = [] }: { version: VersionSummary; comment: string; acknowledgedWarnings?: readonly string[] }, key) => {
-      try {
-        return await client.approve(version.ruleSet, version.version, version.lockVersion, comment, key, acknowledgedWarnings);
-      } catch (error) {
-        // PD-104: refused for an unaccepted warning; read the version again so the warnings on screen are the engine's.
-        const hostError = toHostError(error);
-        if (hostError.kind === 'problem' && hostError.code === 'WARNINGS_NOT_ACKNOWLEDGED') await refresh();
-        throw error;
-      }
-    },
+    // Never retried on a refusal: a 409 WARNINGS_NOT_ACKNOWLEDGED goes back to the approver (PD-104).
+    ({ version, comment, acknowledgedWarnings = [] }: { version: VersionSummary; comment: string; acknowledgedWarnings?: readonly AcknowledgedWarning[] }, key) =>
+      client.approve(version.ruleSet, version.version, version.lockVersion, comment, key, acknowledgedWarnings),
     async (version) => {
       await refresh();
       onDone(version);

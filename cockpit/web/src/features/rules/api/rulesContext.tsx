@@ -13,6 +13,8 @@ export interface RulesSession {
   cockpitDrafts: boolean;
   /** Warning codes an approver must accept before Approve (/meta setting lifecycle.acknowledge-warnings, PD-104). */
   acknowledgeWarnings: readonly string[];
+  /** The tenant's decision-log.mask-default in /meta: an undeclared input is masked, so its warning needs no acceptance. */
+  maskDefault: boolean;
 }
 
 /** PD-104: the engine's default for lifecycle.acknowledge-warnings. */
@@ -26,6 +28,7 @@ export function RulesProvider({
   me,
   cockpitDrafts,
   acknowledgeWarnings = DEFAULT_ACKNOWLEDGE_WARNINGS,
+  maskDefault = false,
   fetchImpl,
   children,
 }: {
@@ -34,6 +37,7 @@ export function RulesProvider({
   me: BpmMeV1;
   cockpitDrafts: boolean;
   acknowledgeWarnings?: readonly string[] | undefined;
+  maskDefault?: boolean | undefined;
   fetchImpl?: typeof fetch | undefined;
   children: ReactNode;
 }) {
@@ -50,8 +54,9 @@ export function RulesProvider({
       can: (permission) => granted.has(permission),
       cockpitDrafts,
       acknowledgeWarnings,
+      maskDefault,
     };
-  }, [baseUrl, hostId, permissions, tenant, userId, cockpitDrafts, acknowledgeWarnings, fetchImpl]);
+  }, [baseUrl, hostId, permissions, tenant, userId, cockpitDrafts, acknowledgeWarnings, maskDefault, fetchImpl]);
   return <RulesContext.Provider value={value}>{children}</RulesContext.Provider>;
 }
 

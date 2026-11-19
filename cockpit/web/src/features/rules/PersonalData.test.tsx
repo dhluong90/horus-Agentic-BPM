@@ -53,24 +53,48 @@ describe('personal data on the approval screen (PD-099, PD-104)', () => {
     await waitFor(() => { expect(approve).toBeEnabled(); });
     await user.click(approve);
     expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
-    expect(bodies.map((body) => JSON.parse(body) as unknown)).toEqual([{ acknowledgedWarnings: ['UNMASKED_PERSONAL_DATA'] }]);
+    expect(bodies.map((body) => JSON.parse(body) as unknown)).toEqual([{ acknowledgedWarnings: [
+      { code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId' },
+      { code: 'UNMASKED_PERSONAL_DATA', input: 'email' },
+    ] }]);
   });
 
-  it('CKP_037_a_refusal_for_a_missing_acceptance_clears_the_box_and_shows_the_warning_again', async () => {
+  it('CKP_037_a_refusal_shows_the_returned_set_with_the_box_cleared_and_is_never_retried', async () => {
     const user = userEvent.setup();
+    const bodies = approveBodies();
+    // Configuration changed between screen and click: the engine now also needs the phone number accepted.
+    const returned = ['nationalId', 'email', 'phoneNumber'].map((input) => ({ code: 'UNMASKED_PERSONAL_DATA', input, matchedName: input }));
     mockHost.use(http.post('*/api/bpm/rules/v1/rule-sets/customer-screening/versions/2:approve', () => HttpResponse.json(
-      { status: 409, code: 'WARNINGS_NOT_ACKNOWLEDGED', title: 'Conflict', detail: 'Approval needs an acknowledgement of UNMASKED_PERSONAL_DATA on nationalId' },
+      { status: 409, code: 'WARNINGS_NOT_ACKNOWLEDGED', title: 'Conflict', detail: 'needs an acknowledgement', warnings: returned, setting: ['UNMASKED_PERSONAL_DATA'] },
       { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
     )));
     open('#/rules/customer-screening/2');
     const card = await dock();
-    const box = within(card).getByRole('checkbox', { name: ACCEPT });
-    await user.click(box);
+    await user.click(within(card).getByRole('checkbox', { name: ACCEPT }));
     await user.click(within(card).getByRole('button', { name: 'Approve and publish' }));
     expect(await within(card).findByRole('alert')).toHaveTextContent('Approval needs this acceptance. Tick the box and approve again.');
-    expect(box).not.toBeChecked();
+    const warning = within(card).getByRole('group', { name: 'Personal data without a masking rule' });
+    expect(within(warning).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['National ID: no masking rule', 'Email: no masking rule', 'Phone number: no masking rule']);
+    const again = within(card).getByRole('checkbox', { name: 'I accept that these inputs are logged without masking: National ID, Email, Phone number' });
+    expect(again).not.toBeChecked();
     expect(within(card).getByRole('button', { name: 'Approve and publish' })).toBeDisabled();
+    await waitFor(() => { expect(bodies).toHaveLength(1); });
+    // The approver ticks again; only then is the request sent, with the returned set.
+    await user.click(again);
+    await user.click(within(card).getByRole('button', { name: 'Approve and publish' }));
+    await waitFor(() => { expect(bodies).toHaveLength(2); });
+    expect((JSON.parse(bodies[1] ?? '{}') as { acknowledgedWarnings: unknown }).acknowledgedWarnings).toEqual(returned.map(({ code, input }) => ({ code, input })));
+  });
+
+  it('CKP_037_a_tenant_that_masks_undeclared_inputs_by_default_needs_no_acceptance', async () => {
+    mockHost.use(http.get('*/api/bpm/meta', () => HttpResponse.json({
+      ...metaRulesOnly, modules: [{ ...metaRulesOnly.modules[0], settings: { 'decision-log.mask-default': true } }],
+    })));
+    open('#/rules/customer-screening/2');
+    const card = await dock();
     expect(within(card).getByRole('group', { name: 'Personal data without a masking rule' })).toBeInTheDocument();
+    expect(within(card).queryByRole('checkbox')).not.toBeInTheDocument();
+    await waitFor(() => { expect(within(card).getByRole('button', { name: 'Approve and publish' })).toBeEnabled(); });
   });
 
   it('CKP_037_masking_changes_read_as_sentences_above_the_table_with_a_marker_on_the_header', async () => {
@@ -165,7 +189,7 @@ describe('the warning text follows the number of inputs', () => {
     ['en', 'Its values will be kept unmasked in the decision log, which cannot be changed later.', 'I accept that this input is logged without masking: National ID'],
     ['vi', 'Giá trị của trường này sẽ được lưu không che trong nhật ký quyết định và không thể sửa về sau.', 'Tôi chấp nhận trường sau được lưu không che trong nhật ký quyết định: National ID'],
   ] as const)('TR_UI_04_one_input_reads_in_the_singular_%s', (locale, why, accept) => {
-    render(<I18nProvider initialLocale={locale}><PersonalDataWarnings warnings={one} definition={definition} acceptance={{ checked: false, onChange: () => undefined, needed: false, id: 'a' }} /></I18nProvider>);
+    render(<I18nProvider initialLocale={locale}><PersonalDataWarnings warnings={one} definition={definition} acceptance={{ checked: false, onChange: () => undefined, needed: false, id: 'a', inputs: ['nationalId'] }} /></I18nProvider>);
     expect(screen.getByText(why)).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: accept })).toBeInTheDocument();
   });

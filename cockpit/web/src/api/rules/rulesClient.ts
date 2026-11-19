@@ -10,6 +10,7 @@ import {
   type DecisionResult,
   type HistoryEntry,
   type Page,
+  type AcknowledgedWarning,
   type RuleSetSummary,
   type RuleSetVersion,
   type VersionSummary,
@@ -59,8 +60,8 @@ export interface RulesClient {
   importVersion(name: string, document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** requestPublish */
   requestPublish(name: string, version: number, lockVersion: number, idempotencyKey: string): Promise<RuleSetVersion>;
-  /** approve; `acknowledgedWarnings` names the warning codes the approver accepts (PD-104) */
-  approve(name: string, version: number, lockVersion: number, comment: string | undefined, idempotencyKey: string, acknowledgedWarnings?: readonly string[]): Promise<RuleSetVersion>;
+  /** approve; `acknowledgedWarnings` are the exact { code, input } pairs the approver accepted (PD-104, RLE-053) */
+  approve(name: string, version: number, lockVersion: number, comment: string | undefined, idempotencyKey: string, acknowledgedWarnings?: readonly AcknowledgedWarning[]): Promise<RuleSetVersion>;
   /** evaluate: runs the version in effect at the host clock and logs one decision */
   evaluate(ruleSet: string, inputs: Readonly<Record<string, unknown>>, idempotencyKey: string): Promise<DecisionResult>;
 }
