@@ -2520,6 +2520,11 @@ Committed: the release does not ship without these.
 
 **Added to the committed scope, 2026-11-19 (product manager, delegated, on the product owner's feedback).** The product owner found the cockpit empty, with no menu, and the sign-in page unattractive. The release review is visual, so the cockpit navigation shell, a non-empty Home and a branded sign-in page for the example host are committed for the Fri 20 Nov review (#180). The shell follows the approved prototype (PD-056): Home, Rules, Approvals, and Decisions and Processes labelled Preview. Home shows only pending approvals and recent rule sets (PD-078). Decisions has no read API in 0.1.0, and logged decisions may hold personal data until masking arrives, so the Decisions area shows a one-line "comes in 0.2.0" empty state and no decision data. Sign-in stays the host's page; the cockpit library has no login of its own.
 
+**Scope notes, 2026-11-19 (product manager, delegated).**
+- The rule set and version lists, reject and field errors (#147, pull request #152, merged) are in 0.1.0. The cockpit's Home and Rules pages need them.
+- Withdraw (#162) is not in 0.1.0 and ships in 0.2.0. The cockpit hides the action, and a requester asks an approver to reject instead.
+- Display names on the version API (`createdByName`, `requestedByName`, `approvedByName`) are not in 0.1.0. Rows show the identity recorded in the audit trail. Display names come in 0.2.0 from a host extension point that resolves names when they are read, rather than from names copied into engine tables.
+
 Pulled in by PD-084: in the release only if each meets the same readiness bar at the Fri 20 Nov review; otherwise cut in the order below.
 
 | Issue | What ships | Feature map |
@@ -2544,6 +2549,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] Each merged pull request links a green CI run at its head commit (PD-081), and the last run on `main` at the release commit is green on every leg: Java 21 and 25, Spring Boot 4.x, 4.0.x and 3.5.x, PostgreSQL 14 and 18.
 - [ ] The spec-to-test gate, the licence gate and the vulnerability scan are green at the release commit; no high or critical finding.
 - [ ] The package rename (#21) is merged before the `v0.1.0` tag, and the search for `com.horus` in the repository returns nothing (PD-070). The tag guard of the release workflow (#126) refuses the tag otherwise.
+- [ ] The DMN extension namespace uses `v1` (#186) before the `v0.1.0` tag. Exported DMN files carry that namespace for good, so it cannot change after the first release.
 - [ ] The release workflow builds from a clean checkout of the release commit; the cockpit bundle is built from source; the bill of materials lists the Java and npm packages; `shasum -c SHA256SUMS` verifies every artifact.
 - [ ] From a fresh clone on a clean machine with Docker only, `docker compose up` reaches a first logged decision by following the README; done by someone other than the author, with the time and every deviation recorded.
 - [ ] The security behaviour is shown by tests in CI: another tenant's rule set answers `404`; self-approval answers `403` through Java and REST; a reused idempotency key with another body answers `422`; no-store holds with the metadata endpoints switched off; the development tenant is refused beside a production profile; the container runs as a non-root user and holds no secret.
@@ -2552,7 +2558,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] The README, Getting Started and release notes claim only what ships: "first BPMN and DMN subset", no conformance claim (`TR-STD-05`), unsupported features named as later, the forward-only migrations listed (X-F-09), and no compatibility promise before 1.0.
 - [x] The version label is decided: `0.1.0` (PD-083, 2026-11-19).
 - [ ] A recorded walkthrough of the release journey exists for the review.
-- [ ] The GitHub Release upload (#153) is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the release of the `v0.1.0` tag, the one project tag for 0.1.0 (PD-087, #163).
+- [x] The GitHub Release upload workflow (#153) is merged; it runs when the tag is pushed. The upload itself is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the release of the `v0.1.0` tag, the one project tag for 0.1.0 (PD-087, #163).
 - [ ] The release notes call the Process Engine a preview (ADR-0027, process DESIGN 5.8): outside `dev`, imports stay drafts, activation is by the development auto-approve setting only, and there is no claim step.
 
 **Assumption to test.** [ASSUMPTION] Pull requests #87, #17 and #126 and issues #133, #131 and #21 can all be reviewed and merged by Fri 20 Nov without a new BLOCKING finding. Cheap test: a merge-order check on Thu 19 Nov evening (#133, then #87, then #21, then #17 and #126) with the count of open findings; if more than two BLOCKING findings are open on Fri 20 Nov 08:00 ICT, the product manager tells the product owner before the review, not at it.
