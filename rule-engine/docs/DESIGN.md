@@ -399,7 +399,7 @@ CREATE TABLE rle_version (
   approved_by       TEXT,
   approved_at       TIMESTAMPTZ,
   approval_comment  TEXT,                        -- latest approval only; full history in rle_version_history
-  retired_at        TIMESTAMPTZ,                 -- added by V7 (#28, additive); selection reads it (section 3.3.1);
+  retired_at        TIMESTAMPTZ,                 -- added by V11 (#28, additive); selection reads it (section 3.3.1);
                                                  -- CHECK ((status = 'RETIRED') = (retired_at IS NOT NULL))
   retire_requested_by TEXT,                      -- four-eyes retirement request (M3, PD-080); selection never reads it
   retire_requested_at TIMESTAMPTZ,

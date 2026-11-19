@@ -9,8 +9,8 @@
 -- Additive and forward-only: one nullable column, one partial index and one check constraint. No release before this
 -- one writes status RETIRED, so no existing row needs a value and the constraint validates at once. An old replica
 -- during a rolling upgrade ignores the column and selects by status: it also stops serving a retired version, but
--- does not select it for a clock before its retirement. Numbered 7: version 6 is taken by the draft replace change
--- (#165). Rollback, a new forward migration, tested in RuleEngineSchemaMigratorIT:
+-- does not select it for a clock before its retirement. Numbered 11, the number reserved for this change;
+-- versions 6 to 10 belong to other 0.2.0 changes, and Flyway accepts the gap. Rollback, a new forward migration, tested in RuleEngineSchemaMigratorIT:
 --   ALTER TABLE rle_version DROP CONSTRAINT rle_version_retired_at_check;
 --   DROP INDEX idx_rle_version_published;
 --   ALTER TABLE rle_version DROP COLUMN retired_at;

@@ -35,7 +35,7 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.initialVersion()).isNull();
-        assertThat(result.currentVersion()).isEqualTo("7");
+        assertThat(result.currentVersion()).isEqualTo("11");
         assertThat(result.migrationsExecuted()).isEqualTo(6);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
@@ -121,10 +121,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
-        assertThat(result.currentVersion()).isEqualTo("7");
+        assertThat(result.currentVersion()).isEqualTo("11");
         assertThat(result.migrationsExecuted()).isEqualTo(6);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3", "4", "5", "7");
+                .containsExactly("0", "1", "2", "3", "4", "5", "11");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -137,16 +137,16 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult second = migrator.migrate();
 
-        assertThat(second.initialVersion()).isEqualTo("7");
-        assertThat(second.currentVersion()).isEqualTo("7");
+        assertThat(second.initialVersion()).isEqualTo("11");
+        assertThat(second.currentVersion()).isEqualTo("11");
         assertThat(second.migrationsExecuted()).isZero();
-        assertThat(migrator.currentVersion()).contains("7");
+        assertThat(migrator.currentVersion()).contains("11");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
                 .isEqualTo(6L);
     }
 
     @Test
-    void RLE_026_V7_adds_retired_at_its_check_and_its_index_and_its_rollback_step_runs() {
+    void RLE_026_V11_adds_retired_at_its_check_and_its_index_and_its_rollback_step_runs() {
         // Given a migrated database with one published and one retired version
         DataSource db = freshDatabase();
         new RuleEngineSchemaMigrator(db).migrate();
@@ -171,7 +171,7 @@ class RuleEngineSchemaMigratorIT {
         assertThat(jdbc.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_rle_version_published'")
                 .query(String.class).single()).contains("WHERE (status = 'PUBLISHED'::text)");
 
-        // When the documented rollback step of V7 runs
+        // When the documented rollback step of V11 runs
         jdbc.sql("ALTER TABLE rle_version DROP CONSTRAINT rle_version_retired_at_check").update();
         jdbc.sql("DROP INDEX idx_rle_version_published").update();
         jdbc.sql("ALTER TABLE rle_version DROP COLUMN retired_at").update();
@@ -192,7 +192,7 @@ class RuleEngineSchemaMigratorIT {
 
         migrator.migrate();
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus("7", 0));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus("11", 0));
         assertThat(migrator.status().isCurrent()).isTrue();
     }
 

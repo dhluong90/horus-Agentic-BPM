@@ -264,6 +264,33 @@ class RetireVersionPostgresIT {
     }
 
     @Test
+    void RLE_026_retiring_a_scheduled_version_leaves_the_version_in_force_serving() {
+        // Given card-fee v1 in force since 1 Nov and v2 approved on 25 Nov for 1 Dec (ADR-0025, as clarified in #276)
+        publish("bank-a", "card-fee", fee("card-fee", "2026-11-01T00:00:00Z", "50000 VND"),
+                Instant.parse("2026-10-20T00:00:00Z"));
+        RuleSetVersion v2 = publish("bank-a", "card-fee", fee("card-fee", "2026-12-01T00:00:00Z", "30000 VND"),
+                Instant.parse("2026-11-25T10:00:00Z"));
+
+        // When bob cancels the December change on 26 Nov by retiring v2 on pod A
+        clock.set(Instant.parse("2026-11-26T09:00:00Z"));
+        caller.as("bank-a", "bob", APPROVER);
+        podA.versionService().retire("card-fee", 2, new WriteOptions("k-cancel", v2.lockVersion(),
+                "December tariff postponed"));
+
+        // Then only v2 is retired; v1 stays PUBLISHED and serves on both replicas, also after 1 Dec, and the sweep
+        // finds nothing to retire
+        assertThat(jdbc.sql("SELECT version_num || ' ' || status FROM rle_version ORDER BY version_num")
+                .query(String.class).list()).containsExactly("1 PUBLISHED", "2 RETIRED");
+        assertThat(retiredEvents()).isEqualTo(1);
+        assertThat(evaluate(podB, "card-fee")).isEqualTo(1);
+        clock.set(Instant.parse("2026-12-05T00:00:00Z"));
+        assertThat(evaluate(podA, "card-fee")).isEqualTo(1);
+        assertThat(evaluate(podB, "card-fee")).isEqualTo(1);
+        assertThat(podB.lifecycleSweep().run()).isZero();
+        assertThat(retiredEvents()).isEqualTo(1);
+    }
+
+    @Test
     void RLE_026_a_retire_from_another_tenant_finds_nothing_and_writes_nothing() {
         RuleSetVersion v1 = publish("bank-a", "tet-fee-waiver", fee("tet-fee-waiver", "2027-01-20T00:00:00Z", "0 VND"),
                 Instant.parse("2027-01-15T00:00:00Z"));
