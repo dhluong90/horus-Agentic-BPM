@@ -1,6 +1,6 @@
 package io.github.dhluong90.bpm.rules.internal.dmn.ruleset;
 
-/** Rule set style-check of RLE-039: the same table in author style (A) and in normal form (B). */
+/** Rule set style-check of RLE-045: the same table in author style (A) and in normal form (B). */
 public final class StyleCheck {
 
     private StyleCheck() {

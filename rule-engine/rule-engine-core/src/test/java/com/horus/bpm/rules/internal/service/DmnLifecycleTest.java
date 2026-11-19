@@ -124,7 +124,7 @@ class DmnLifecycleTest {
     }
 
     @Test
-    void RLE_039_the_same_table_in_two_styles_has_one_canonical_hash_and_keeps_its_own_source() {
+    void RLE_045_the_same_table_in_two_styles_has_one_canonical_hash_and_keeps_its_own_source() {
         // Given style A in bank-a and style B (normal form) in bank-b
         byte[] a = io.github.dhluong90.bpm.rules.internal.dmn.ruleset.StyleCheck.A.getBytes(StandardCharsets.UTF_8);
         byte[] b = io.github.dhluong90.bpm.rules.internal.dmn.ruleset.StyleCheck.B.getBytes(StandardCharsets.UTF_8);
@@ -144,7 +144,7 @@ class DmnLifecycleTest {
     }
 
     @Test
-    void RLE_039_a_version_whose_stored_canonical_document_was_altered_is_not_served() {
+    void RLE_045_a_version_whose_stored_canonical_document_was_altered_is_not_served() {
         // Given card-fee published, then its canonical_json altered in the store (fee of R1 from 0 VND to 1 VND)
         engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
@@ -173,7 +173,7 @@ class DmnLifecycleTest {
     }
 
     @Test
-    void RLE_039_a_source_that_is_not_clean_utf_8_is_refused_and_nothing_is_stored() {
+    void RLE_045_a_source_that_is_not_clean_utf_8_is_refused_and_nothing_is_stored() {
         byte[] yaml = CardFee.yaml();
         byte[] latin1 = new String(yaml, StandardCharsets.UTF_8).replace("Monthly", "Mont\u00e9ly").getBytes(StandardCharsets.ISO_8859_1);
         byte[] nul = new byte[yaml.length + 1];

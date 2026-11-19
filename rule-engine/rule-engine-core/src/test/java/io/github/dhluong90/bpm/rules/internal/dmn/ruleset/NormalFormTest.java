@@ -19,7 +19,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
-/** RLE-039 and ADR-0026: one behaviour hash per meaning, whatever the authoring style or the format. */
+/** RLE-045 and ADR-0026: one behaviour hash per meaning, whatever the authoring style or the format. */
 class NormalFormTest {
 
     // ------------------------------------------------------------------ the frozen printer
@@ -47,7 +47,7 @@ class NormalFormTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("golden")
-    void RLE_039_the_v1_printer_is_frozen_by_the_golden_file(Golden row) {
+    void RLE_045_the_v1_printer_is_frozen_by_the_golden_file(Golden row) {
         // When
         if (row.normal().equals("<omitted>")) {
             // an explicit null output, without a default, is the omitted cell
@@ -72,14 +72,14 @@ class NormalFormTest {
         CompiledRuleSet.compile(parsed.model());
     }
 
-    // ------------------------------------------------------------------ RLE-039
+    // ------------------------------------------------------------------ RLE-045
 
     static final String STYLE_A = StyleCheck.A;
 
     static final String STYLE_B = StyleCheck.B;
 
     @Test
-    void RLE_039_authoring_style_and_dmn_round_trip_keep_one_behaviour_hash() {
+    void RLE_045_authoring_style_and_dmn_round_trip_keep_one_behaviour_hash() {
         // Given the same table in author style (A) and in normal form (B)
         byte[] a = STYLE_A.getBytes(StandardCharsets.UTF_8);
         byte[] b = STYLE_B.getBytes(StandardCharsets.UTF_8);
@@ -102,7 +102,7 @@ class NormalFormTest {
     }
 
     @Test
-    void RLE_039_money_cells_print_at_the_currency_scale_and_keep_their_hash_through_dmn() {
+    void RLE_045_money_cells_print_at_the_currency_scale_and_keep_their_hash_through_dmn() {
         String rules = "<rule id=\"M1\"><inputEntry><text>-</text></inputEntry><outputEntry><text>money(12.5, \"USD\")</text></outputEntry></rule>"
                 + "<rule id=\"M2\"><inputEntry><text>-</text></inputEntry><outputEntry><text>money(10000.00, \"VND\")</text></outputEntry></rule>"
                 + "<rule id=\"M3\"><inputEntry><text>-</text></inputEntry><outputEntry><text>money(-5, \"USD\")</text></outputEntry></rule>";
@@ -119,7 +119,7 @@ class NormalFormTest {
     }
 
     @Test
-    void RLE_039_a_money_amount_finer_than_its_currency_is_refused_with_its_line() {
+    void RLE_045_a_money_amount_finer_than_its_currency_is_refused_with_its_line() {
         String xml = DmnRuleSetTest.table("<input><inputExpression typeRef=\"number\"><text>age</text></inputExpression></input>",
                 "\n<rule id=\"M1\"><inputEntry><text>-</text></inputEntry><outputEntry><text>money(12.505, \"USD\")</text></outputEntry></rule>");
 
@@ -130,7 +130,7 @@ class NormalFormTest {
                 .hasMessageContaining("(line 2)");
     }
 
-    // ------------------------------------------------------------------ RLE-039: different behaviour never shares a hash
+    // ------------------------------------------------------------------ RLE-045: different behaviour never shares a hash
 
     static String hashOf(String yaml) {
         return RuleSetReader.read(SourceFormat.YAML, yaml.getBytes(StandardCharsets.UTF_8)).canonicalHash();
@@ -145,7 +145,7 @@ class NormalFormTest {
     }
 
     @Test
-    void RLE_039_one_hash_per_behaviour_in_any_style_and_never_for_different_behaviour() {
+    void RLE_045_one_hash_per_behaviour_in_any_style_and_never_for_different_behaviour() {
         String base = hashOf(StyleCheck.B);
 
         // n1: a JSON number that does not survive an exact round trip is refused with its line; as a string it is accepted
@@ -178,7 +178,7 @@ class NormalFormTest {
     }
 
     @Test
-    void RLE_039_invisible_characters_are_escaped_in_cells_kept_as_written() {
+    void RLE_045_invisible_characters_are_escaped_in_cells_kept_as_written() {
         // n6, kept-as-written cells: a cross-column test, a compound cell and a calculated output
         String cross = withCell("x", "y != 'V\u200BN'").replace("- { name: y, type: integer }", "- { name: y, type: string }");
         String compound = StyleCheck.B.replace("\"!= 'VN'\"", "\"country != 'V\u200BN' and country != 'a'\"");
@@ -197,7 +197,7 @@ class NormalFormTest {
     }
 
     @Test
-    void RLE_039_bidirectional_controls_are_refused_in_descriptions() {
+    void RLE_045_bidirectional_controls_are_refused_in_descriptions() {
         String doc = StyleCheck.B.replace("ruleSet: style-check", "ruleSet: style-check\ndescription: \"ok \u202E evil\"");
 
         assertThatThrownBy(() -> hashOf(doc)).isInstanceOf(ValidationFailedException.class)
@@ -205,7 +205,7 @@ class NormalFormTest {
     }
 
     @Test
-    void RLE_039_a_bidirectional_control_in_a_dmn_cell_is_refused_with_its_line() {
+    void RLE_045_a_bidirectional_control_in_a_dmn_cell_is_refused_with_its_line() {
         String xml = DmnRuleSetTest.table("<input><inputExpression typeRef=\"string\"><text>c</text></inputExpression></input>",
                 "\n<rule id=\"R1\"><inputEntry><text>\"V\u202EN\"</text></inputEntry><outputEntry><text>true</text></outputEntry></rule>");
 
@@ -214,7 +214,7 @@ class NormalFormTest {
     }
 
     @Test
-    void RLE_039_the_golden_file_is_pinned_to_schema_version_1() throws Exception {
+    void RLE_045_the_golden_file_is_pinned_to_schema_version_1() throws Exception {
         // Any edit of the golden file is a new schema version (ADR-0026 decision 3); this pin fails on any change.
         byte[] golden = DmnRuleSetTest.resource("/rules/normal-form.v1.txt");
         String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(golden));

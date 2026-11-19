@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 class CanonicalIntegrityTest {
 
     @Test
-    void RLE_039_a_printer_that_does_not_reproduce_the_model_is_refused_at_import() throws IOException {
+    void RLE_045_a_printer_that_does_not_reproduce_the_model_is_refused_at_import() throws IOException {
         byte[] cardFee;
         try (InputStream in = getClass().getResourceAsStream("/rules/card-fee.yaml")) {
             cardFee = in.readAllBytes();
