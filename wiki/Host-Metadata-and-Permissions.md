@@ -79,7 +79,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
 | `modules[]` | One entry per engine in the host. The Rule Engine contributes `rules`; no `processes` entry until the Process Engine 0.1 |
 | `engineVersion` | The version of the engine starter the host was built with |
 | `features` | Empty: a flag such as `rules.simulation` is added with the feature it announces, so a client never offers a screen whose endpoints are missing |
-| `settings` | Omitted when the engine has none |
+| `settings` | Omitted when the engine has none. The Rule Engine always sends `authoring.cockpit-drafts`, and `decision-log.mask-default` and `decision-log.require-explicit-mask` as in force for the caller's tenant |
 | `tenancy.switching` | `false`: tenant switching arrives in M2 |
 | `limits.maxPageSize` | `200`, the largest page of any engine list |
 

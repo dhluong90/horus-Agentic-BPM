@@ -1,0 +1,40 @@
+sequenceDiagram
+  autonumber
+  box rgb(232,245,233) Host service
+    participant A as Author or approver (REST or Java API)
+    participant P as MaskingPolicy (host settings or host bean)
+  end
+  box rgb(224,242,241) Rule Engine, in process
+    participant V as VersionService
+    participant C as Masking start-up check
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as rle_version, rle_setting_seen
+  end
+  rect rgb(255,248,225)
+    Note over P,DB: Start-up, after the migrations and the masking key check, outside any request
+    C->>DB: SELECT the recorded decision-log.mask-default per tenant and for the host default
+    C->>P: maskByDefault(tenant) for the host default and every known tenant
+    alt the value differs from the one recorded (a new tenant is compared with the host default)
+      C->>C: write one host log line naming the tenant, the old and the new value (WARN when masking is turned off)
+    end
+    C->>DB: upsert the values in force
+  end
+  rect rgb(224,242,241)
+    Note over A,DB: Import, draft replacement or publication request
+    A->>V: import kyc-routing (nationalId declares no mask)
+    V->>P: requireExplicitMask(tenant)
+    alt strict mode on and an input declares no mask
+      V-->>A: 422 VALIDATION_FAILED, one violation per input, column nationalId, nothing stored
+    else every input declared, or strict mode off
+      V->>DB: insert or update the version
+      V->>P: personalDataNames(tenant), maskByDefault(tenant)
+      V-->>A: the version with warnings: UNMASKED_PERSONAL_DATA nationalId, matched "national id"
+    end
+  end
+  rect rgb(232,245,233)
+    Note over A,DB: The approver reviews
+    A->>V: GET the pending version, GET the diff against the version in effect
+    V->>DB: SELECT both canonical documents
+    V-->>A: the same warnings, and masking per input: nationalId MASKED to NOT_MASKED, changed
+  end

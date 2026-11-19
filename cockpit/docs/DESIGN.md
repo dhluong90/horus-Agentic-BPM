@@ -176,7 +176,7 @@ Both endpoints are served once per host by a small shared module that both engin
 
 | Endpoint | Schema | Content |
 |---|---|---|
-| `GET /api/bpm/meta` | [`api/schema/bpm-meta.v1.schema.json`](../api/schema/bpm-meta.v1.schema.json) | `modules[]` with `module`, `engineVersion`, `apiVersion`, `features[]`, `settings`; `tenancy.switching`; `limits.maxPageSize` |
+| `GET /api/bpm/meta` | [`api/schema/bpm-meta.v1.schema.json`](../api/schema/bpm-meta.v1.schema.json) | `modules[]` with `module`, `engineVersion`, `apiVersion`, `features[]`, `settings`; `tenancy.switching`; `limits.maxPageSize`. A module's `settings` may hold values for the caller's tenant (host metadata `TenantModuleSettings`), such as the Rule Engine's `decision-log.mask-default` and `decision-log.require-explicit-mask` |
 | `GET /api/bpm/me` | [`api/schema/bpm-me.v1.schema.json`](../api/schema/bpm-me.v1.schema.json) | `user`, `tenant.current`, `tenant.allowed`, `permissions[]`, `roles[]`, `groups[]` for the tenant the request resolved to |
 
 ```json
