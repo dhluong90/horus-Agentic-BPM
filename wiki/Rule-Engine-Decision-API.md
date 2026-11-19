@@ -98,9 +98,9 @@ Batch request and response wrap items in `{ "items": [ { "inputs": {}, "correlat
 
 | Call | Request | Response |
 |---|---|---|
-| `GET /rule-sets/{name}/versions/{v}/export` | `Accept: application/yaml` (default) or `application/json` | `200` with the canonical definition document, `ETag: "<version>"`, `Content-Disposition: attachment; filename="card-fee-v2.yaml"` |
-| `POST /rule-sets/{name}/versions:import` | `Content-Type: application/yaml` or `application/json`; body is a definition document; `Idempotency-Key` | `201` with the new draft `{ "ruleSet": "card-fee", "version": 3, "status": "DRAFT", "lockVersion": 0, "validation": { "errors": [], "warnings": [] } }`; `422 VALIDATION_FAILED` when the document does not parse; the rule set is created when `{name}` does not exist and the caller has `rules:author` |
-| `GET /rule-sets/{name}/versions/{a}/diff/{b}` | none | `200` `{ "from": 1, "to": 2, "hitPolicyChanged": false, "columns": { "added": [], "removed": [], "changed": [] }, "rows": { "added": ["R5"], "removed": [], "changed": [ { "ruleId": "R2", "cells": [ { "column": "fee", "from": {"currency":"VND","amount":10000}, "to": {"currency":"VND","amount":0} } ] } ] } }` |
+| `GET /rule-sets/{name}/versions/{v}/export?format=yaml` (default) or `?format=json` | none; another `format` is `400 INPUT_INVALID` | `200` with the canonical definition document, without `effectiveFrom`, tenant, status or approvals; `ETag: "<lockVersion>"`, `Content-Disposition: attachment; filename="card-fee-v2.yaml"` |
+| `POST /rule-sets/{name}/versions` (next version) or `POST /rule-sets` (new rule set, version 1) | `Content-Type: application/yaml` or `application/json`; body is a definition document; `Idempotency-Key`. `POST /rule-sets/{name}/versions?copyOf=2` with no body copies version 2 | `201` with the new draft `{ "ruleSet": "card-fee", "version": 3, "status": "DRAFT", "lockVersion": 0, "validation": { "errors": [], "warnings": [] } }`. `400 INPUT_INVALID` when the document's `ruleSet` differs from `{name}`; `409 RULE_SET_EXISTS` on `POST /rule-sets` for an existing name; `422 VALIDATION_FAILED` naming row and column. A refused document stores nothing. An `effectiveFrom` in the document becomes the draft's proposed date and is not part of the hash |
+| `GET /rule-sets/{name}/versions/{v}/diff?base={w}` | none | `200` `{ "ruleSet": "card-fee", "version": 2, "base": 1, "canonicalHash": "...", "baseCanonicalHash": "...", "header": [], "inputs": { "added": [], "removed": [], "changed": [] }, "outputs": { "added": [], "removed": [], "changed": [] }, "rows": [ { "ruleId": "R2", "change": "CHANGED", "position": 2, "basePosition": 2, "fields": [ { "path": "/then/fee", "from": {"currency":"VND","amount":10000}, "to": {"currency":"VND","amount":0} } ] }, { "ruleId": "R5", "change": "ADDED", "position": 3 } ], "unchangedCount": 2 }`. Rows are matched by rule id; `change` is `ADDED`, `REMOVED`, `CHANGED` or `MOVED` (order changed relative to the other rows; under `first` order is behaviour) |
 
 Definition documents carry `schemaVersion`; old schema versions import forever. Simulation of a draft (`:simulate`) uses the same evaluator as `:evaluate` and writes no decision rows:
 
@@ -175,8 +175,8 @@ Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ER
 |---|---|---|
 | `rules.version.publish-requested.v1` | `:request-publish` | `ruleSet`, `version`, `requestedBy` |
 | `rules.version.published.v1` | `:approve` | `ruleSet`, `version`, `effectiveFrom`, `approvedBy`, `requestedBy` |
-| `rules.version.rejected.v1` | `:reject` | `ruleSet`, `version`, `reason` |
-| `rules.version.retired.v1` | `:retire` or superseded | `ruleSet`, `version` |
+| `rules.version.rejected.v1` | `:reject` | `ruleSet`, `version`, `rejectedBy`, `reason` |
+| `rules.version.retired.v1` | `:retire` or superseded | `ruleSet`, `version`, `retiredBy` (`system` when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `retiredAt` |
 | `rules.decision.evaluated.v1` | every decision, off by default (`events.decision-evaluated`) | `decisionId`, `ruleSet`, `version`, `outcome` |
 
 Envelope: `eventId` (ULID), `eventType`, `occurredAt`, `tenantId`, `correlationId`, `causationId`, `producer`, `schemaVersion`, `payload`. Changes are additive within a `.v1` type. Events go through the host's `RuleEventPublisher` inside the same transaction as the state change.

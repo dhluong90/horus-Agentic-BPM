@@ -38,12 +38,17 @@ Filters: `ruleSet`, `from`, `to`, `outcome`, matched rule id, and any output val
 
 `GET /api/bpm/rules/v1/decisions/01JD2X8K3N4P5Q6R7S8T9V0W1X/explain` returns a plain-language rendering: the inputs, the row that matched with its conditions, and the outputs. Example:
 
-```
-Card fee for December 2026: 0 VND (waived).
-Rule R2 applied: tier is GOLD and balance 60,000,000 VND is at least 50,000,000 VND.
+```json
+{ "ruleSet": "card-fee", "version": 2, "outcome": "OK",
+  "matched": [ { "ruleId": "R2", "conditions": [
+      { "input": "tier", "test": "== 'GOLD'", "value": "GOLD", "masked": false, "missing": false, "result": true },
+      { "input": "balance", "test": ">= 50000000 VND", "value": { "currency": "VND", "amount": 60000000 }, "masked": false, "missing": false, "result": true } ] } ],
+  "outputs": { "fee": { "currency": "VND", "amount": 0 } },
+  "reasons": [ { "code": "RULE_MATCHED", "params": { "ruleId": "R2", "version": 2 } } ],
+  "text": "Rule R2 of card-fee version 2 matched because tier is GOLD and balance is 60000000 VND, which is at least 50000000 VND. Result: fee 0 VND." }
 ```
 
-Templates per rule set can override the wording (a 1.0 target, see [[Roadmap]]).
+`matched`, `outputs` and `reasons` are the contract; `text` is one English rendering with locale-neutral numbers (no grouping, money in major units with its currency code). The cockpit renders the reasons in English or Vietnamese with local number formatting. The explanation is built from the log entry and the stored version only: nothing is evaluated again, rows that did not match are not explained, masked inputs show as `hmac:<hex>` and missing inputs as "has no value". Generated explanations in 0.1 depend on a pending product decision (PD-027); templates per rule set can override the wording later (see [[Roadmap]]).
 
 ## Mask personal data
 

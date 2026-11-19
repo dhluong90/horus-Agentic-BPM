@@ -303,3 +303,16 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `unknown boundaryEvent:timer -> generic node with its type name, diagram rendered`.
 - **Test ID:** `CKP_029_diagram_nodes_by_bpmn_type_unknown_rendered_generic`
 
+
+---
+
+## Rule Set Browser, Import and Export (Cockpit 0.1)
+
+### CKP-030 An author lists rule sets, reads a version as a table, and imports or exports it
+- **Traces to:** `TR-UI-02`, `TR-IDEM-01`
+- **Milestone:** M1
+- **Given:** Host `loans` with rule sets `card-fee` (v1 `PUBLISHED`, effective from `2026-11-01`; v2 `DRAFT`) and `kyc-risk` (v1 `PUBLISHED`). User `lan` holds `rules:read` and `rules:author`; user `dan` holds `rules:read` only. Files `card-fee-v3.yaml` (valid) and `card-fee-bad.yaml` (row `R4`, column `balance`, `50000000` without a currency). Viewports 1440x900 and 1440x1200.
+- **When:** `lan` opens Rule sets, opens `card-fee` v1, exports it as JSON, then imports `card-fee-v3.yaml` and then `card-fee-bad.yaml` from the `card-fee` page. `dan` opens the same pages.
+- **Then:** The list shows two rows with name, effective version, status and effective-from date, read from `GET /api/bpm/rules/v1/rule-sets`. The version view shows the rule table (row ids, conditions, outputs) and the hit policy; no YAML or JSON document is shown unless the user opens the source on purpose. Export calls `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=json` and downloads `card-fee-v1.json` whose bytes equal the response (`RLE-032`). The first import sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` with an `Idempotency-Key` and, only after the `201`, shows "Draft version 3 created" and opens v3; a double click sends one key and creates one version. The bad file shows the engine's `422 VALIDATION_FAILED` as "Row R4, column balance" with the message text, and no version is listed as created. For `dan` the Import action is not shown and Export is. At 1440x900 the list and the Import and Export actions are above the fold.
+- **Example:** `import card-fee-v3.yaml -> one POST with Idempotency-Key -> 201 -> "Draft version 3 created"; card-fee-bad.yaml -> "Row R4, column balance", no draft`.
+- **Test ID:** `CKP_030_rule_set_browser_lists_reads_imports_and_exports`
