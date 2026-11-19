@@ -69,6 +69,15 @@ class RuleEngineSettingsTest {
                 .containsExactly(EngineDefaults.QUERY_MAX_PAGE_SIZE, EngineDefaults.REASON_MAX_LENGTH));
     }
 
+    @Test
+    void RLE_047_cockpit_drafts_setting_reaches_the_engine_and_is_off_by_default() {
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class).draftAuthoring()).isFalse());
+        runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=true")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).draftAuthoring()).isTrue());
+        runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=false")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).draftAuthoring()).isFalse());
+    }
+
     @org.junit.jupiter.api.Test
     void TR_EXT_01_undeclared_inputs_can_be_ignored_instead_of_refused() {
         runner.withPropertyValues("horus.bpm.rules.evaluation.reject-undeclared-inputs=false")

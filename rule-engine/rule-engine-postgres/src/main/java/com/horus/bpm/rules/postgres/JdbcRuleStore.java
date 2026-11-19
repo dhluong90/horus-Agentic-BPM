@@ -122,6 +122,11 @@ public final class JdbcRuleStore implements RuleStore {
                 .param("comment", v.approvalComment()).param("createdBy", v.createdBy())
                 .param("createdAt", Timestamp.from(v.createdAt()))
                 .update();
+        insertRules(v, v.createdAt());
+    }
+
+    /** One {@code rle_rule} row per rule of the version's canonical document, in document order. */
+    private void insertRules(StoredVersion v, java.time.Instant idTime) {
         JsonNode rules = EngineValues.read(v.canonicalJson()).get("rules");
         int order = 0;
         for (JsonNode rule : rules) {
@@ -129,12 +134,38 @@ public final class JdbcRuleStore implements RuleStore {
                     INSERT INTO rle_rule (tenant_id, id, version_id, row_order, rule_id, when_expr_json, then_expr_json)
                     VALUES (:tenant, :id, :versionId, :order, :ruleId, CAST(:when AS jsonb), CAST(:then AS jsonb))
                     """)
-                    .param("tenant", v.tenantId()).param("id", Ulid.next(v.createdAt())).param("versionId", v.id())
+                    .param("tenant", v.tenantId()).param("id", Ulid.next(idTime)).param("versionId", v.id())
                     .param("order", order++).param("ruleId", rule.get("id").stringValue())
                     .param("when", CanonicalJson.write(rule.get("when")))
                     .param("then", CanonicalJson.write(rule.get("then")))
                     .update();
         }
+    }
+
+    @Override
+    public void replaceDraft(StoredVersion v, long expectedLockVersion) {
+        // Guarded by the lock version and the status, so a concurrent replace, request or second writer on another
+        // replica loses with VERSION_CONFLICT instead of overwriting (RLE-047).
+        int updated = jdbc.sql("""
+                UPDATE rle_version SET hit_policy = :hitPolicy, effective_from = :effectiveFrom,
+                  canonical_json = CAST(:canonicalJson AS jsonb), canonical_hash = :canonicalHash,
+                  source_format = :sourceFormat, source_document = :sourceDocument, source_hash = :sourceHash,
+                  lock_version = :lock
+                WHERE tenant_id = :tenant AND id = :id AND lock_version = :expected AND status = 'DRAFT'
+                """)
+                .param("hitPolicy", v.hitPolicy()).param("effectiveFrom", timestamp(v.effectiveFrom()))
+                .param("canonicalJson", v.canonicalJson()).param("canonicalHash", v.canonicalHash())
+                .param("sourceFormat", v.sourceFormat().name()).param("sourceDocument", v.sourceDocument())
+                .param("sourceHash", v.sourceHash()).param("lock", v.lockVersion())
+                .param("tenant", v.tenantId()).param("id", v.id()).param("expected", expectedLockVersion)
+                .update();
+        if (updated != 1) {
+            throw new VersionConflictException(v.ruleSet() + " v" + v.version()
+                    + " changed meanwhile; read it again and retry with its current ETag");
+        }
+        jdbc.sql("DELETE FROM rle_rule WHERE tenant_id = :tenant AND version_id = :versionId")
+                .param("tenant", v.tenantId()).param("versionId", v.id()).update();
+        insertRules(v, v.createdAt());
     }
 
     @Override

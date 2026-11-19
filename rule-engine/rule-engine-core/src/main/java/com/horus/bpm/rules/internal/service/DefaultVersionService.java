@@ -1,6 +1,9 @@
 package com.horus.bpm.rules.internal.service;
 
+import com.horus.bpm.rules.api.DraftAuthoringDisabledException;
 import com.horus.bpm.rules.api.ImportRequest;
+import com.horus.bpm.rules.api.PermissionDeniedException;
+import com.horus.bpm.rules.api.VersionDiff;
 import com.horus.bpm.rules.api.InputInvalidException;
 import com.horus.bpm.rules.api.InvalidStateException;
 import com.horus.bpm.rules.api.PayloadTooLargeException;
@@ -109,11 +112,14 @@ public final class DefaultVersionService implements VersionService {
                 EngineValues::versionFromJson);
     }
 
-    private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source) {
+    /**
+     * Reads, checks and compiles a source document exactly as import does; used by import and by draft replacement,
+     * so both give the same violations (RLE-033, RLE-041, RLE-047).
+     */
+    private ParsedRuleSet checkedDocument(SourceFormat format, byte[] source) {
         if (format != SourceFormat.YAML && format != SourceFormat.DMN_XML) {
             throw new InputInvalidException("Only YAML and DMN XML import are available in this release");
         }
-        String sourceText = utf8(source);
         ParsedRuleSet parsed = RuleSetReader.read(format, source);
         // The import model equals the parsed canonical form (checked by the reader, ADR-0026 decision 4); it is compiled
         // here so violations follow the order cells are written in (RLE-041). Evaluation compiles only from the stored form.
@@ -123,6 +129,15 @@ public final class DefaultVersionService implements VersionService {
                     + context.settings().maxRows());
         }
         CompiledRuleSet.compile(parsed.model(), context.settings().maxOutputBytes(), context.settings().maxStringLength());
+        return parsed;
+    }
+
+    private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source) {
+        if (format != SourceFormat.YAML && format != SourceFormat.DMN_XML) {
+            throw new InputInvalidException("Only YAML and DMN XML import are available in this release");
+        }
+        String sourceText = utf8(source);
+        ParsedRuleSet parsed = checkedDocument(format, source);
         String name = parsed.model().name();
         Instant now = context.clock().instant();
         String ruleSetId;
@@ -147,6 +162,69 @@ public final class DefaultVersionService implements VersionService {
         history(version, LifecycleAction.CREATED, null, actor, null, now);
         event(tenant, EVENT_CREATED, version, actor, now);
         return version.toView(false);
+    }
+
+    @Override
+    public RuleSetVersion replaceDraft(String ruleSet, int version, ImportRequest request, WriteOptions options) {
+        Objects.requireNonNull(request, "request must not be null");
+        WriteOptions opts = options == null ? WriteOptions.none() : options;
+        if (request.size() > RuleSetReader.MAX_SOURCE_BYTES) {
+            throw new PayloadTooLargeException(RuleSetReader.MAX_SOURCE_BYTES);
+        }
+        String tenant = context.tenant();
+        String actor = context.callerWith(PERMISSION_AUTHOR);
+        if (!context.settings().draftAuthoring()) {
+            throw new DraftAuthoringDisabledException(ruleSet, version);
+        }
+        byte[] source = request.source();
+        String key = opts.idempotencyKey() != null ? opts.idempotencyKey() : request.idempotencyKey();
+        String requestHash = Hashes.sha256Parts("replace-draft", actor, ruleSet, Integer.toString(version),
+                String.valueOf(opts.expectedLockVersion()), request.format().name(), Hashes.sha256(source));
+        return context.idempotent(tenant, "replace-draft", key, requestHash, 200, () -> {
+            StoredVersion current = load(tenant, ruleSet, version);
+            if (current.status() != VersionStatus.DRAFT) {
+                throw new InvalidStateException(ruleSet, version, current.status(), "replace");
+            }
+            // Four eyes compares the approver with the author (created_by), so only the author replaces the content;
+            // another author imports a new version, which records them as its author.
+            if (!actor.equals(current.createdBy())) {
+                throw PermissionDeniedException.notAuthor(ruleSet, version);
+            }
+            checkLock(current, opts);
+            String sourceText = utf8(source);
+            ParsedRuleSet parsed = checkedDocument(request.format(), source);
+            if (!ruleSet.equals(parsed.model().name())) {
+                throw new InputInvalidException("Document names rule set '" + parsed.model().name() + "', not '"
+                        + ruleSet + "'");
+            }
+            StoredVersion updated = current.replaced(parsed.model().decision().table().hitPolicy().name(),
+                    parsed.model().effectiveFrom(), parsed.canonicalJson(), parsed.canonicalHash(), request.format(),
+                    sourceText, Hashes.sha256(source));
+            store.replaceDraft(updated, current.lockVersion());
+            return updated.toView(false);
+        }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
+    }
+
+    @Override
+    public VersionDiff diff(String ruleSet, int version, int base) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        requireRuleSetName(ruleSet);
+        if (base == version) {
+            throw new InputInvalidException("base must name another version than " + version);
+        }
+        return context.withoutDooming(() -> {
+            StoredVersion compared = existing(tenant, ruleSet, version);
+            StoredVersion against = existing(tenant, ruleSet, base);
+            return VersionDiffs.diff(compared, against);
+        });
+    }
+
+    private StoredVersion existing(String tenant, String ruleSet, int version) {
+        return store.findVersion(tenant, ruleSet, version, false).orElseThrow(() ->
+                store.findRuleSetId(tenant, ruleSet).isPresent()
+                        ? new VersionNotFoundException(ruleSet, version)
+                        : new RuleSetNotFoundException(ruleSet));
     }
 
     @Override

@@ -52,6 +52,8 @@ public class ProblemDetails {
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
+            Map.entry("PRECONDITION_REQUIRED", HttpStatus.PRECONDITION_REQUIRED),
+            Map.entry("DRAFT_AUTHORING_DISABLED", HttpStatus.FORBIDDEN),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
