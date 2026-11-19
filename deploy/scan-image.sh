@@ -4,8 +4,8 @@
 # Usage:   deploy/scan-image.sh IMAGE
 #
 #   1. No secrets in the layers: no .env, private key or keystore file in any layer, no secret-like
-#      variable in the image config, and none of the values of HORUS_DB_PASSWORD and
-#      HORUS_DEMO_PASSWORD (from the environment or ./.env) anywhere in the saved image.
+#      variable in the image config, and none of the values of HORUS_DB_ADMIN_PASSWORD,
+#      HORUS_DB_PASSWORD and HORUS_DEMO_PASSWORD (from the environment or ./.env) anywhere in the saved image.
 #   2. Vulnerabilities: Grype scans the image (operating system packages and the Java libraries) with
 #      the repository's .grype.yaml and fails on a high or critical finding.
 #
@@ -56,7 +56,7 @@ if docker image inspect "$IMAGE" --format '{{json .Config.Env}}' | grep -i -E '(
   echo "FAIL  secret-like variable in the image config" >&2
   failed=1
 fi
-for name in HORUS_DB_PASSWORD HORUS_DEMO_PASSWORD; do
+for name in HORUS_DB_ADMIN_PASSWORD HORUS_DB_PASSWORD HORUS_DEMO_PASSWORD; do
   value="$(env_value "$name")"
   [[ -z "$value" ]] && continue
   if grep -a -q -F -- "$value" "$contents"; then

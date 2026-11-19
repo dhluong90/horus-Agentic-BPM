@@ -1,10 +1,13 @@
+# LOCAL EVALUATION ONLY, NOT A PRODUCTION DEPLOYMENT: demo users, plain HTTP, one instance, no backups.
 # One-command local deployment: PostgreSQL 16 and one example host. Guide: docs/DEPLOYING.md.
 #
-#   cp .env.example .env      # then set the two passwords
+#   cp .env.example .env      # then set the three passwords
 #   docker compose up --build --wait
 #
 # Every secret comes from .env, which git ignores; compose stops with a message when one is missing.
 # PostgreSQL publishes no port: only the example host reaches it, on the compose network.
+# The host connects as "horus", a role without superuser rights that owns the database horus and runs
+# the migrations; the superuser "postgres" is used only by the init script (deploy/postgres/initdb).
 
 name: horus-bpm
 
@@ -14,16 +17,28 @@ services:
     image: postgres:16-alpine@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857
     environment:
       POSTGRES_DB: horus
-      POSTGRES_USER: horus
-      POSTGRES_PASSWORD: ${HORUS_DB_PASSWORD:?set HORUS_DB_PASSWORD in .env (see .env.example)}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${HORUS_DB_ADMIN_PASSWORD:?set HORUS_DB_ADMIN_PASSWORD in .env (see .env.example)}
+      # Read by deploy/postgres/initdb/10-application-role.sh on the first start only.
+      HORUS_DB_PASSWORD: ${HORUS_DB_PASSWORD:?set HORUS_DB_PASSWORD in .env (see .env.example)}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U horus -d horus"]
       interval: 5s
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    # The entrypoint switches to the postgres user and fixes ownership of the data directory; nothing more.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
     deploy:
@@ -31,6 +46,7 @@ services:
         limits:
           cpus: "1.0"
           memory: 512M
+          pids: 256
 
   host:
     build:
@@ -60,7 +76,7 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:
@@ -70,6 +86,7 @@ services:
         limits:
           cpus: "2.0"
           memory: 1G
+          pids: 512
 
 volumes:
   pgdata:

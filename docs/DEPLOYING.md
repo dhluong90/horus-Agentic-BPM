@@ -1,5 +1,15 @@
 # Deploying with Docker Compose
 
+> **Local evaluation, not production.** This compose file runs the example host on your own machine so you can try the engines. It is not a production deployment. Compared with one:
+>
+> - demo users share one password and may sign in with HTTP Basic, and `hoa` may both author and approve;
+> - traffic is plain HTTP on 127.0.0.1, with no TLS;
+> - the host connects as the database owner, which also runs the migrations (a role without superuser rights);
+> - passwords reach the containers as environment variables;
+> - there is one instance of each service, and no backups.
+>
+> For anything shared, start from [Run without demo users](#run-without-demo-users). The host logs a `WARN` at start-up while demo users are on.
+
 From a fresh clone, one command builds the example host image and starts it beside PostgreSQL 16. The host is a Spring Boot service that embeds the Rule Engine and the cockpit ([`examples/rule-engine-only`](../examples/rule-engine-only/README.md)). This guide takes you from `git clone` to a priced transaction, with the exact commands and the output to expect.
 
 ```mermaid
@@ -35,7 +45,7 @@ The image is `linux/amd64`. Its JRE, Temurin 21.0.13.1, carries the fix for a hi
 git clone https://github.com/dhluong90/horus-Agentic-BPM.git
 cd horus-Agentic-BPM
 cp .env.example .env
-sed -i.bak "s/^HORUS_DB_PASSWORD=.*/HORUS_DB_PASSWORD=$(openssl rand -hex 16)/; s/^HORUS_DEMO_PASSWORD=.*/HORUS_DEMO_PASSWORD=$(openssl rand -hex 12)/" .env && rm .env.bak
+sed -i.bak "s/^HORUS_DB_ADMIN_PASSWORD=.*/HORUS_DB_ADMIN_PASSWORD=$(openssl rand -hex 16)/; s/^HORUS_DB_PASSWORD=.*/HORUS_DB_PASSWORD=$(openssl rand -hex 16)/; s/^HORUS_DEMO_PASSWORD=.*/HORUS_DEMO_PASSWORD=$(openssl rand -hex 12)/" .env && rm .env.bak
 docker compose up --build --wait
 ```
 
@@ -49,10 +59,20 @@ The first build downloads dependencies and takes 2 to 5 minutes; later builds re
  Container horus-bpm-host-1 Healthy
 ```
 
-Every secret comes from `.env`, which git ignores. Without `HORUS_DB_PASSWORD` compose stops before starting anything:
+Every secret comes from `.env`, which git ignores. Without a database password compose stops before starting anything:
 
 ```
-error while interpolating services.postgres.environment.POSTGRES_PASSWORD: required variable HORUS_DB_PASSWORD is missing a value: set HORUS_DB_PASSWORD in .env (see .env.example)
+error while interpolating services.postgres.environment.POSTGRES_PASSWORD: required variable HORUS_DB_ADMIN_PASSWORD is missing a value: set HORUS_DB_ADMIN_PASSWORD in .env (see .env.example)
+```
+
+The host log names the demo users and warns that they are for local evaluation only:
+
+```bash
+docker compose logs host | grep 'Demo users'
+```
+
+```
+host-1  | 2026-11-19T05:44:29.253Z  WARN 1 --- [rule-engine-only] [           main] c.h.b.e.r.HostSecurityConfiguration      : Demo users are on (dev profile): [lan, minh, hoa, tuan] share one password and may sign in with HTTP Basic. Local evaluation only, never a shared or production environment.
 ```
 
 ## 2. Check health
@@ -78,14 +98,16 @@ curl -s 127.0.0.1:8080/actuator/health
 | `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve` |
 | `tuan` | `TELLER` | `rules:evaluate` |
 
-Load the passwords into this shell, then sign in as `lan` with the host's form. The session cookie is kept in `./cookies`:
+Load the passwords into this shell and write one curl config file per demo user, so no password appears on a command line (where `ps` would show it). `printf` is a shell builtin, so it does not show either. Then sign in as `lan` with the host's form. The session cookie is kept in `./cookies`:
 
 ```bash
 set -a; . ./.env; set +a
+C=$(mktemp -d); chmod 700 "$C"
+for u in lan minh hoa tuan; do printf 'user = "%s:%s"\n' "$u" "$HORUS_DEMO_PASSWORD" > "$C/$u"; done
+printf 'data-urlencode = "password=%s"\n' "$HORUS_DEMO_PASSWORD" > "$C/form"
 CSRF=$(curl -s -c cookies -b cookies 127.0.0.1:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
-curl -s -c cookies -b cookies -o /dev/null -w '%{http_code}\n' \
-  --data-urlencode "username=lan" --data-urlencode "password=$HORUS_DEMO_PASSWORD" --data-urlencode "_csrf=$CSRF" \
-  127.0.0.1:8080/login
+curl -s -c cookies -b cookies -o /dev/null -w '%{http_code}\n' -K "$C/form" \
+  --data-urlencode "username=lan" --data-urlencode "_csrf=$CSRF" 127.0.0.1:8080/login
 curl -s -b cookies 127.0.0.1:8080/api/bpm/me
 curl -s -b cookies 127.0.0.1:8080/api/bpm/meta
 ```
@@ -108,17 +130,16 @@ curl -s 127.0.0.1:8080/api/bpm/meta
 
 ## 4. Import, approve and evaluate a rule set
 
-On the `dev` profile each call can carry Basic credentials instead of the session cookie, so the next steps use `-u`.
+On the `dev` profile each call can carry Basic credentials instead of the session cookie. The next steps read them from the config files of step 3 with `-K "$C/<user>"`.
 
 ```bash
 H=127.0.0.1:8080/api/bpm/rules/v1
-P=$HORUS_DEMO_PASSWORD
 ```
 
 1. Hoa imports the card fee table, [`card-fee.yaml`](../examples/rule-engine-only/src/main/resources/rules/card-fee.yaml). It is stored as a draft:
 
    ```bash
-   curl -s -u hoa:$P -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+   curl -s -K "$C/hoa" -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
      -H 'Idempotency-Key: deploy-guide-1' \
      --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee.yaml
    ```
@@ -130,7 +151,7 @@ P=$HORUS_DEMO_PASSWORD
 2. Hoa requests publication:
 
    ```bash
-   curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:request-publish
+   curl -s -K "$C/hoa" -X POST $H/rule-sets/card-fee/versions/1:request-publish
    ```
 
    ```
@@ -140,7 +161,7 @@ P=$HORUS_DEMO_PASSWORD
 3. Hoa tries to approve her own request and is refused (maker-checker):
 
    ```bash
-   curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve
+   curl -s -K "$C/hoa" -X POST $H/rule-sets/card-fee/versions/1:approve
    ```
 
    ```
@@ -150,7 +171,7 @@ P=$HORUS_DEMO_PASSWORD
 4. Minh approves. The version is published:
 
    ```bash
-   curl -s -u minh:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
+   curl -s -K "$C/minh" -X POST $H/rule-sets/card-fee/versions/1:approve \
      -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
    ```
 
@@ -161,7 +182,7 @@ P=$HORUS_DEMO_PASSWORD
 5. Tuan prices a Gold customer's card. Rule `R1` matches and the fee is 0 VND:
 
    ```bash
-   curl -s -u tuan:$P -X POST $H/decisions/card-fee:evaluate \
+   curl -s -K "$C/tuan" -X POST $H/decisions/card-fee:evaluate \
      -H 'Content-Type: application/json' -d '{"inputs":{"tier":"GOLD","txCount":5}}'
    ```
 
@@ -218,7 +239,7 @@ Smoke test passed.
 
 Run again on the same database, the test finds `card-fee` already published and only evaluates.
 
-## 7. Check the image before you ship it
+## 7. Check the image
 
 [`deploy/scan-image.sh`](../deploy/scan-image.sh) applies the release gates to the built image: no secret in any layer or in the image configuration, and no high or critical vulnerability (Grype, with the repository's [`.grype.yaml`](../.grype.yaml)).
 
@@ -239,14 +260,34 @@ PASS  no high or critical vulnerability in horus-bpm/rule-engine-only:local (rep
 | Property | Value |
 |---|---|
 | Stages | Cockpit bundle (Node 22, skipped when the checkout has no `cockpit/web`), Maven build (JDK 21), runtime file system, runtime image |
-| Runtime | Alpine 3.24 reduced to musl and busybox (no package manager, no OpenSSL), Temurin JRE 21.0.13.1 checked against its published SHA-256 |
-| User | `horus`, uid and gid 10001; the container runs with a read-only root file system, `/tmp` in memory, all capabilities dropped |
+| Runtime | Alpine 3.24 reduced to musl and busybox (no package manager, no OpenSSL), Temurin JRE 21.0.13.1 checked against the Adoptium GPG signature and a pinned SHA-256 |
+| User | `horus`, uid and gid 10001; the container runs with a read-only root file system, `/tmp` in memory (64 MB, `noexec`, `nosuid`, `nodev`), all capabilities dropped, at most 512 processes |
 | Health check | `wget` on `http://127.0.0.1:$PORT/actuator/health` every 10 seconds, after a 60-second start period |
 | Layers | one base layer, then the Spring Boot layers: dependencies, loader, snapshot dependencies, application |
 | Secrets | none; `.dockerignore` keeps `.env`, keys and build output out of the build context |
 | Size | about 82 MB |
 
-Base images are pinned by digest. To update one, resolve the new digest, replace tag, digest and version comment together in [`deploy/docker/Dockerfile`](../deploy/docker/Dockerfile) or [`docker-compose.yml`](../docker-compose.yml), then rebuild and run steps 6 and 7. The JRE release, its file version and its SHA-256 (from the `.sha256.txt` file beside the archive on the Adoptium release page) change together.
+Base images are pinned by digest. To update one, resolve the new digest, replace tag, digest and version comment together in [`deploy/docker/Dockerfile`](../deploy/docker/Dockerfile) or [`docker-compose.yml`](../docker-compose.yml), then rebuild and run steps 6 and 7.
+
+### Updating the JRE
+
+The build checks the JRE archive twice in a throwaway stage, so `gnupg` never reaches the runtime image:
+
+1. **Provenance.** It verifies the archive's detached GPG signature (`.tar.gz.sig`, published beside the archive) against the Adoptium public key committed as [`deploy/docker/adoptium.asc`](../deploy/docker/adoptium.asc). The key's primary fingerprint must be `3B04D753C9050D9A5D343F39843C48A565F8F04B`, and the signature must be made by that key; the build stops otherwise.
+2. **Integrity.** It checks the SHA-256 pinned in the Dockerfile.
+
+To move to a new JRE release:
+
+1. Set `JRE_RELEASE`, `JRE_FILE_VERSION` and the SHA-256 from the `.sha256.txt` beside the new archive on the [Adoptium release page](https://github.com/adoptium/temurin21-binaries/releases).
+2. Build. The log must show both checks:
+
+   ```
+   GPG signature OK: signed by 3B04D753C9050D9A5D343F39843C48A565F8F04B
+   /tmp/jre.tar.gz: OK
+   ```
+
+3. If Adoptium rotates its key, replace `adoptium.asc` and `ADOPTIUM_KEY_FINGERPRINT` only after checking the new fingerprint against the signing key that Adoptium publishes on adoptium.net, in the same pull request as the version bump.
+4. Run steps 6 and 7.
 
 ## Configuration
 
@@ -254,13 +295,20 @@ All values live in `.env` ([`.env.example`](../.env.example) documents each one)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `HORUS_DB_PASSWORD` | none, required | Password of the PostgreSQL user `horus`. PostgreSQL keeps the value from its first start; to change it, reset (below) |
+| `HORUS_DB_ADMIN_PASSWORD` | none, required | Password of the PostgreSQL superuser `postgres`, used only to create the database on the first start. The host never receives it |
+| `HORUS_DB_PASSWORD` | none, required | Password of `horus`, the role the host connects with. PostgreSQL keeps both passwords from its first start; to change one, reset (below) |
 | `SPRING_PROFILES_ACTIVE` | `dev` in `.env.example` | `dev` turns on the demo users. Empty: no demo users |
 | `HORUS_DEMO_PASSWORD` | none | Password of the demo users on the `dev` profile. Empty: nobody can sign in |
 | `HORUS_EXAMPLE` | `rule-engine-only` | Example host to build, a folder under `examples/` |
 | `HORUS_HTTP_PORT` | `8080` | Port on 127.0.0.1 that serves the host |
 
-The same image runs everywhere: configuration reaches it only through environment variables. The variables the host itself reads are listed in the [example host README](../examples/rule-engine-only/README.md#environment-variables).
+The same image runs everywhere: configuration reaches it only through environment variables.
+
+### Database roles
+
+On its first start PostgreSQL runs [`deploy/postgres/initdb/10-application-role.sh`](../deploy/postgres/initdb/10-application-role.sh). It creates `horus`, which owns the database `horus` and its `public` schema, and is not a superuser: it cannot create roles or databases, read server files or run programs. The host connects as `horus`, and the host's and the engines' Flyway migrations run as that owner at start-up.
+
+Beyond a local walkthrough, run the migrations as the schema owner in a separate step, and run the application with a second role that has only data rights (`SELECT`, `INSERT`, `UPDATE`, `DELETE` on the tables, `USAGE` on the sequences). Set `horus.bpm.rules.migrate-on-start=false` in the application ([configuration](../examples/rule-engine-only/README.md#rule-engine-properties)). The schema belongs to the host. The variables the host itself reads are listed in the [example host README](../examples/rule-engine-only/README.md#environment-variables).
 
 ### Run without demo users
 
@@ -293,7 +341,7 @@ The host refuses to start with an issuer and no audience, and refuses the `dev` 
 |---|---|---|
 | `required variable HORUS_DB_PASSWORD is missing a value` | No `.env`, or the value is empty | Step 1 |
 | `Bind for 127.0.0.1:8080 failed: port is already allocated` | Another process uses 8080 | Set `HORUS_HTTP_PORT=18080` in `.env` and use that port in the commands |
-| Host restarts; log shows `password authentication failed for user "horus"` | `HORUS_DB_PASSWORD` changed after the database was created | `docker compose down -v`, then start again |
+| Host restarts; log shows `password authentication failed for user "horus"` | A database password changed after the database was created, or the volume is from a version of this guide before the `horus` role existed | `docker compose down -v`, then start again |
 | Sign-in redirects to `/login?error` | Wrong demo password, or the host is not on the `dev` profile | `grep -E 'SPRING_PROFILES_ACTIVE|HORUS_DEMO_PASSWORD' .env` |
 | `No patched Temurin JRE for arm64 yet` during the build | The build was asked for `linux/arm64` | Build through compose, or add `--platform linux/amd64` to `docker build` |
 | `docker compose up --wait` reports `host` unhealthy | The host did not start | `docker compose logs host` shows the reason, usually the database or a configuration check |
