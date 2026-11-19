@@ -21,7 +21,7 @@ public sealed interface Cell {
     /**
      * An expression text, such as {@code "0 VND"} or {@code "'GOLD'"}.
      *
-     * @param source the text
+     * @param source the text; null when the document held an array or object, which the compiler reports
      */
     record Expression(String source) implements Cell {
     }

@@ -23,6 +23,11 @@ import org.springframework.beans.factory.SmartInitializingSingleton;
  * migration is switched off and the schema is not current, partitions are skipped with a warning and
  * the {@code ruleEngine} health contributor reports down. The {@code rle_*} tables are ready when the
  * application context is refreshed.
+ *
+ * <p>Last step: load the cursor key ({@code rle_engine_key}, RLE-039) in one short transaction outside any
+ * request, then re-read it every {@code EngineDefaults.CURSOR_KEY_REFRESH} on a daemon thread of its own, in a
+ * read-only transaction. A request never reads or writes the key. A database user without SELECT and INSERT on
+ * {@code rle_engine_key} fails start-up with a message naming the table.
  */
 public final class RuleEngineSchemaInitializer implements SmartInitializingSingleton {
 
@@ -32,13 +37,20 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
     private final DecisionLogPartitions partitions;
     private final boolean migrate;
     private final Clock clock;
+    private final RuleEngineCursorKeyInitializer cursorKeys;
 
     RuleEngineSchemaInitializer(
             RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate, Clock clock) {
+        this(migrator, partitions, migrate, clock, null);
+    }
+
+    RuleEngineSchemaInitializer(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate,
+            Clock clock, RuleEngineCursorKeyInitializer cursorKeys) {
         this.migrator = Objects.requireNonNull(migrator, "migrator must not be null");
         this.partitions = Objects.requireNonNull(partitions, "partitions must not be null");
         this.migrate = migrate;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.cursorKeys = cursorKeys;
     }
 
     @Override
@@ -53,12 +65,19 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
                 LOG.warn("Rule Engine schema is not current (version " + status.currentVersion() + ", "
                         + status.pendingMigrations() + " pending) and horus.bpm.rules.migrate-on-start=false; "
                         + "decision log partitions were not created");
+                if (cursorKeys != null) {
+                    cursorKeys.notReady("schema at version " + status.currentVersion() + ", "
+                            + status.pendingMigrations() + " migration(s) pending, migrate-on-start=false");
+                }
                 return;
             }
         }
         List<String> created = partitions.ensureCurrentAndNextMonth(clock.instant());
         if (!created.isEmpty()) {
             LOG.info("Rule Engine created decision log partitions " + created);
+        }
+        if (cursorKeys != null) {
+            cursorKeys.start();
         }
     }
 }
