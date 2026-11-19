@@ -11,6 +11,7 @@
 - [[Concepts]]
 - [[Principles]]
 - [[Architecture]]
+- [[Configuration and extension points|Configuration-and-Extension-Points]]
 
 **Rule Engine**
 - [[Rule Engine: author a decision table|Rule-Engine-Authoring-Decision-Tables]]

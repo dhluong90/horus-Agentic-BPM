@@ -25,7 +25,7 @@ The usual answers each cost something the team cannot pay:
 
 | For | Not for |
 |---|---|
-| Java 21 or 25 teams on Spring Boot 4.x (3.5.x supported until 1.0, PD-007) and PostgreSQL 14+ | Other languages, frameworks or databases before 1.0 |
+| Java 21 or 25 teams on Spring Boot 4.x (3.5.x supported until 1.0, PD-007) and PostgreSQL 15+ (14 tested until 1.0, [PD-055](decisions.md#pd-055-postgresql-version-range)) | Other languages, frameworks or databases before 1.0 |
 | Services whose rules and process definitions change under four-eyes approval with effective dates | Teams that need CMMN; teams that need full BPMN 2.0 and DMN execution before 1.1, since it arrives in stages after 1.0 ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)); a general-purpose diagram tool ([PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)) |
 | Approval flows, task queues with SLAs and compensating service steps inside one service | One central orchestration platform shared by many teams |
 | AI agent steps that must pass rules a compliance team can read | Durable execution of arbitrary code across many services, or rule inference and chaining |
@@ -48,6 +48,28 @@ The first sentence alone is true of other embeddable engines. The line depends o
 
 Source: [diagrams/vision-differentiators.mmd](diagrams/vision-differentiators.mmd).
 
+## Product principles
+
+The design principles are numbered on the wiki [Principles](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Principles) page and cited by number across these documents. In short:
+
+| # | Principle |
+|---|---|
+| 1 | A library, never a server |
+| 2 | The host owns the data |
+| 3 | Deterministic by construction |
+| 4 | No arbitrary code in definitions |
+| 5 | Everything versioned, nothing rewritten |
+| 6 | Governance built in, for rule sets and process definitions |
+| 7 | Agents are participants with obligations |
+| 8 | Small surface, stable contracts |
+| 9 | BPMN 2.0 and DMN are the models; our JSON is their canonical serialisation and always has a diagram; what each release executes is exactly what the standards compliance page lists ([PD-063](decisions.md#pd-063-principle-9-wording-and-the-standards-non-goals)) |
+| 10 | Operable from day one |
+| 11 | Permissive dependencies, explicit licence |
+| 12 | Documentation precedes code |
+| 13 | **Generic by design** ([PD-074](decisions.md#pd-074-product-principle-generic-by-design)). Every business behaviour is optional and configurable per host or tenant, with a safe default. Business logic enters through extension points (SPI interfaces, Spring beans, hooks), not as built-in behaviour. Nothing bank-specific is hard-coded. The core stays small, like Camunda's embeddable engine |
+
+Principle 13 is what lets one library serve a bank, a fintech, an insurer or a public agency: a customer need becomes a setting or an extension, never a fork. Its limit is principles 2 to 7: tenant isolation, append-only audit, determinism, no code in definitions, fail-closed guardrails and the four-eyes rule are guarantees, not settings. A setting that relaxes a control, such as the emergency approval path (PD-012), is off by default, logged when used and visible in the host's settings.
+
 ## What the engine will never be
 
 | Never | Why |
@@ -59,6 +81,7 @@ Source: [diagrams/vision-differentiators.mmd](diagrams/vision-differentiators.mm
 | A CMMN implementation | [PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn), [ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md): case management would be a second execution model with little use in the target banks. A CMMN file is refused by name (`TR-STD-26`) |
 | A distributed transaction coordinator | [ADR-0007](../adr/0007-compensation-instead-of-distributed-transactions.md). Compensation, not two-phase commit |
 | A cockpit with its own backend, database or login | [ADR-0005](../adr/0005-cockpit-as-static-assets.md) |
+| A product with one customer's business rules built in | Principle 13, [PD-074](decisions.md#pd-074-product-principle-generic-by-design). Currencies, tiers, fee and reason codes, roles, languages, calendars and SLA periods come from definitions, configuration or host extensions |
 
 ## Standards: BPMN 2.0 and DMN
 
@@ -69,7 +92,7 @@ BPMN 2.0 and DMN are fully supported on the roadmap, and CMMN never is ([PD-057]
 | M1 to M3 (before 1.0) | Rule sets and process definitions in JSON or YAML; a documented BPMN subset imported and exported in M3; DMN single decision tables imported in M3; anything else refused by name with the release that adds it. Foundations are built in now so that later stages need no rewrite and no data migration |
 | 1.1, 1.2, 1.3 (after 1.0) | Every BPMN element imported, displayed and exported; execution added in three stages; DMN Level 2, then full FEEL and Level 3. Dates are pending ([PD-062](decisions.md#pd-062-release-targets-for-the-standards-track)); content and exit criteria are in the [roadmap](roadmap.md#standards-track-after-10-s1-to-s3) |
 
-The standards are implemented inside the principles, not beside them: the engines stay libraries in the host JVM with no listener or broker client, state stays in the host database, evaluation stays deterministic, definitions contain no code, and every network call is an Async Wait-State. Where the standard and a principle collide, the deviation is published. What is supported is exactly what is published. The BPMN and DMN semantic models are the engines' canonical model, with our JSON as their canonical serialisation ([PD-060](decisions.md#pd-060-canonical-model-bpmn-and-dmn-semantic-models), decided 2026-11-19). The new wording of principle 9 is pending as [PD-063](decisions.md#pd-063-principle-9-wording-and-the-standards-non-goals); with PD-060 decided, the recommended wording is its option 1.
+The standards are implemented inside the principles, not beside them: the engines stay libraries in the host JVM with no listener or broker client, state stays in the host database, evaluation stays deterministic, definitions contain no code, and every network call is an Async Wait-State. Where the standard and a principle collide, the deviation is published. What is supported is exactly what is published. The BPMN and DMN semantic models are the engines' canonical model, with our JSON as their canonical serialisation ([PD-060](decisions.md#pd-060-canonical-model-bpmn-and-dmn-semantic-models), decided 2026-11-19). Principle 9 now reads: "BPMN 2.0 and DMN are the models. Our JSON is their canonical serialisation and always has a diagram. What each release executes is exactly what the standards compliance page lists" ([PD-063](decisions.md#pd-063-principle-9-wording-and-the-standards-non-goals), decided 2026-11-19).
 
 Conformance is not a differentiator: established BPM and decision engines already claim it. It removes a reason to lose an evaluation and lets a team take its models away. The three differentiators above are why a team chooses these engines.
 
@@ -98,6 +121,6 @@ Who uses the Rule Engine, through which surface, and the use cases per milestone
 | External adoption | Two adopters outside the maintainers in production or pilot, at least one using `agentTask` | Roadmap M3 exit |
 | Release gates | Every "must" requirement green in CI | Roadmap M3 exit, [requirements.md](requirements.md) |
 | Time to first decision | A newcomer completes Getting Started in under 30 minutes | Roadmap M1 exit, kept through 1.0 |
-| Contract stability | API frozen at 1.0; deprecations overlap one minor release | Roadmap M3, principle 8 |
+| Contract stability | API frozen at 1.0; a deprecated API stays at least one minor release and six months and is removed only in a major release ([PD-054](decisions.md#pd-054-deprecation-length)) | Roadmap M3, principle 8 |
 
 North Star: governed decisions and process steps executed per week in adopters' services, reported by adopters from M3, since the engine sends no telemetry. Before M3 three early signals stand in for it: time to a first logged decision for a newcomer, external teams running an example host, and `agentTask` escalations completed by a person in pilot hosts ([PD-019](decisions.md#pd-019-north-star-metric), decided 2026-11-19).

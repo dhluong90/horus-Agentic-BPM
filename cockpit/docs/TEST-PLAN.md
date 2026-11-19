@@ -43,6 +43,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-027 | `CKP_027_migration_plan_side_by_side_diagrams` | Playwright | M3 | `TR-MIG-03` | Planned |
 | CKP-028 | `CKP_028_bundle_budget_and_lazy_diagram_chunk` | CI bundle check, Playwright throttled | M2 | `TR-UI-06` | Planned |
 | CKP-029 | `CKP_029_diagram_nodes_by_bpmn_type_unknown_rendered_generic` | Component | M2 | `TR-UI-07`, `TR-UI-08` | Planned |
+| CKP-030 | `CKP_030_rule_set_browser_lists_reads_imports_and_exports` | Playwright at 1440x900 and 1440x1200, network capture | M1 | `TR-UI-02`, `TR-IDEM-01` | Planned |
 
 ## Known gaps
 | Gap | Plan |
