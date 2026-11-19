@@ -57,7 +57,7 @@ Nothing has been released or logged in production yet. 0.1.0 is the first releas
 - **Updated in this change:**
   - `standards-compliance.md` section 3.4;
   - `TR-DEF-04` and `TR-STD-03`;
-  - `RLE-020` and `RLE-024`, and the new `RLE-039` with its negative cases;
+  - `RLE-020` and `RLE-024`, and the new `RLE-045` with its negative cases;
   - rule engine DESIGN: hash identity, effective date, compilation from `canonical_json` and `source_document`;
   - process engine DESIGN section 5.2;
   - the wiki sentence on comparing a version with Git.
@@ -67,7 +67,7 @@ Nothing has been released or logged in production yet. 0.1.0 is the first releas
   - the import checks of decisions 2, 4 and 5;
   - the load-time hash check;
   - the golden files, the coverage gate, the property tests and the corpus;
-  - tests named by `RLE-020`, `RLE-024` and `RLE-039`, including the QA cases of review 5969673183 and the security cases of review 5969746899;
+  - tests named by `RLE-020`, `RLE-024` and `RLE-045`, including the QA cases of review 5969673183 and the security cases of review 5969746899;
   - the RFC 8785 vector of `RLE-020`, recomputed over the printed form.
 - **Follow-up issue:** a no-write validate operation, an API call and a command-line tool on the same printer, that returns `canonical_hash` and `source_hash` for a file. Until it exists, a pipeline reads `canonical_hash` from the draft after import.
 - **Development databases.** Versions stored before this change keep their old hashes and fail the load-time check of decision 4. Delete them, or import them again, before 0.1.0. Nothing is released yet.
