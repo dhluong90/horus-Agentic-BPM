@@ -74,6 +74,20 @@ describe('personal data on the approval screen (PD-099)', () => {
     expect(screen.queryByText('Mask removed')).not.toBeInTheDocument();
   });
 
+  it('CKP_037_a_newer_masking_status_on_one_column_leaves_the_other_marks_in_place', async () => {
+    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/customer-screening/versions/2/diff', () => HttpResponse.json({
+      ruleSet: 'customer-screening', version: 2, base: 1, masking: [
+        { input: 'nationalId', from: 'MASKED', to: 'NOT_MASKED_BY_DEFAULT', changed: true, personalDataName: 'national id' },
+        { input: 'email', from: null, to: 'TOKENISED', changed: true, personalDataName: null },
+      ],
+    })));
+    open('#/rules/customer-screening/2');
+    const table = await screen.findByRole('table');
+    expect(await within(table).findByText('Mask removed')).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: /^Email/ }).textContent).toBe('Email');
+    expect(screen.queryByText('Masking changes are not available from this service.')).not.toBeInTheDocument();
+  });
+
   it('TR_UI_04_the_warning_and_the_masking_change_read_in_vietnamese', async () => {
     open('#/rules/customer-screening/2', 'rules-approver', 'vi');
     const note = await screen.findByRole('note');

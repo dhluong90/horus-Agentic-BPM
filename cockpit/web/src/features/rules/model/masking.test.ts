@@ -44,6 +44,16 @@ describe('reading warnings and the diff tolerantly', () => {
     expect(parsed.warnings).toEqual([{ code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId', matchedName: 'national id', message: 'm' }]);
   });
 
+  it('CKP_037_a_masking_entry_with_an_unknown_status_is_dropped_and_the_others_kept', () => {
+    const parsed = versionDiff.parse({ ruleSet: 'customer-screening', version: 2, base: 1, masking: [
+      { input: 'nationalId', from: 'MASKED', to: 'NOT_MASKED_BY_DEFAULT', changed: true, personalDataName: 'national id' },
+      { input: 'email', from: 'MASKED', to: 'TOKENISED', changed: true, personalDataName: null },
+      { input: 'segment', from: 'NOT_MASKED', to: 'NOT_MASKED' },
+      { input: 'phoneNumber', from: 'MASKED', to: 'MASKED', changed: false, personalDataName: null },
+    ] });
+    expect(parsed.masking.map((item) => item.input)).toEqual(['nationalId', 'phoneNumber']);
+  });
+
   it('CKP_037_a_diff_without_masking_gives_an_empty_column', () => {
     expect(versionDiff.parse({ ruleSet: 'card-fee', version: 2, base: 1, rows: [] }).masking).toEqual([]);
   });

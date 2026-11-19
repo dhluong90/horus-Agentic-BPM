@@ -171,11 +171,23 @@ export const inputMasking = z
 export type InputMasking = z.infer<typeof inputMasking>;
 
 /**
+ * The masking column, read entry by entry: an entry this cockpit cannot read (a status from a newer engine, a
+ * missing member) is dropped, and the other inputs keep their marks.
+ */
+const maskingColumn = z
+  .array(z.unknown())
+  .default([])
+  .transform((items) => items.flatMap((item): InputMasking[] => {
+    const parsed = inputMasking.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  }));
+
+/**
  * GET .../diff?base= (RLE-028). The cockpit reads `masking` from it; the row diff is still computed in the
  * browser, so the other members are kept as they come. An engine without `masking` gives an empty list.
  */
 export const versionDiff = z
-  .object({ ruleSet: z.string(), version: z.number().int(), base: z.number().int(), masking: z.array(inputMasking).default([]) })
+  .object({ ruleSet: z.string(), version: z.number().int(), base: z.number().int(), masking: maskingColumn })
   .loose();
 export type VersionDiff = z.infer<typeof versionDiff>;
 
