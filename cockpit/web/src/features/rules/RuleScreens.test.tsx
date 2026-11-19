@@ -219,7 +219,7 @@ describe('four eyes', () => {
     open('#/rules/card-fee/2', 'rules-approver');
     await screen.findByRole('table', { name: 'Version 1 and version 2 of card-fee, side by side' });
     const approve = screen.getByRole('button', { name: 'Approve and publish' });
-    await waitFor(() => { expect(approve).toHaveAccessibleDescription(/Changed since you opened it\. Review again\./); });
+    await waitFor(() => { expect(approve).toHaveAccessibleDescription('Version 2 changed while you had it open. Check the table again.'); });
     expect(approve).toBeDisabled();
     expect(writes()).toEqual([]);
   });

@@ -327,6 +327,7 @@ export const en = {
   'toast.close': 'Close',
   'editor.unsavedOne': '1 unsaved change',
   'changes.nonAsciiCount': '{count} changed cells contain look-alike characters',
+  'changes.nonAsciiCountOne': '1 changed cell contains a look-alike character',
   'crumb.newDraft': 'New draft',
   'crumb.versionDraft': 'Version {version} draft',
   'editor.viewChanges': 'View changes',
@@ -356,8 +357,8 @@ export const en = {
   'changes.note.columnsReordered.then': 'Result columns are in a new order',
   'changes.notesLabel': 'Changes outside the rows',
   'decision.takesEffectOn': 'Takes effect {when} once approved.',
-  'decision.changed': 'Changed since you opened it. Review again.',
-  'decision.reviewAgain': 'Show the new version',
+  'decision.changed': 'Version {version} changed while you had it open. Check the table again.',
+  'decision.reviewAgain': 'I\'ve checked it',
 } as const;
 
 export type MessageKey = keyof typeof en;

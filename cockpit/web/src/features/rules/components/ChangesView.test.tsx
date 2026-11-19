@@ -124,7 +124,7 @@ describe('side-by-side version diff', () => {
     show({ ...diff, rows: [{ ruleId: 'R1', change: 'CHANGED', position: 1, basePosition: 1, moved: false, fields: [{ path: '/when/tier', from: "== 'GOLD'", to: "== 'GОLD'", nonAscii: true }] }, ...diff.rows] }, lookalike);
     expect(within(row('R1')).getByText('Look-alike character: О U+041E')).toBeInTheDocument();
     expect(screen.getAllByText(/Look-alike character:/)).toHaveLength(1);
-    expect(screen.getByText('1 changed cells contain look-alike characters')).toBeInTheDocument();
+    expect(screen.getByText('1 changed cell contains a look-alike character')).toBeInTheDocument();
   });
 
   it('ADR_0026_vietnamese_names_look_alike_and_hidden_characters_in_plain_words', () => {

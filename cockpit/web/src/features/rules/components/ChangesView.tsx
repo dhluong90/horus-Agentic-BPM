@@ -146,7 +146,7 @@ export function ChangesView({ diff, base, next }: { diff: VersionDiff; base: Rul
       <p className="changes__summary">
         <strong className="tnum">{t(counts.moved > 0 ? 'changes.summaryMoved' : 'changes.summaryLine', values)}</strong>
         {counts.nonAscii > 0 ? (
-          <span className="nonascii-mark"><span aria-hidden="true">▲</span> {t('changes.nonAsciiCount', { count: String(counts.nonAscii) })}</span>
+          <span className="nonascii-mark"><span aria-hidden="true">▲</span> {counts.nonAscii === 1 ? t('changes.nonAsciiCountOne') : t('changes.nonAsciiCount', { count: String(counts.nonAscii) })}</span>
         ) : null}
       </p>
       {notes.length > 0 ? (

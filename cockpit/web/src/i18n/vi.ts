@@ -329,6 +329,7 @@ export const vi: Record<MessageKey, string> = {
   'toast.close': 'Đóng',
   'editor.unsavedOne': '1 thay đổi chưa lưu',
   'changes.nonAsciiCount': '{count} ô đã sửa có ký tự dễ nhầm',
+  'changes.nonAsciiCountOne': '1 ô đã sửa có ký tự dễ nhầm',
   'crumb.newDraft': 'Bản nháp mới',
   'crumb.versionDraft': 'Bản nháp phiên bản {version}',
   'editor.viewChanges': 'Xem thay đổi',
@@ -358,6 +359,6 @@ export const vi: Record<MessageKey, string> = {
   'changes.note.columnsReordered.then': 'Các cột kết quả đổi thứ tự',
   'changes.notesLabel': 'Thay đổi ngoài các dòng',
   'decision.takesEffectOn': 'Có hiệu lực {when} sau khi được phê duyệt.',
-  'decision.changed': 'Đã thay đổi sau khi bạn mở. Hãy xem lại.',
-  'decision.reviewAgain': 'Xem phiên bản mới',
+  'decision.changed': 'Phiên bản {version} đã thay đổi khi bạn đang mở. Hãy xem lại bảng.',
+  'decision.reviewAgain': 'Tôi đã xem lại',
 };

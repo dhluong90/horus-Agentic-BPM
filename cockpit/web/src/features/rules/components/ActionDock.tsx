@@ -93,8 +93,8 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
         <>
           <div className="decision__body">
             {unavailable !== undefined ? (
-              <p id={reasonId} className="gate__reason">
-                <span aria-hidden="true">⊘</span> {t(unavailable)}
+              <p className="gate__reason">
+                <span aria-hidden="true">⊘</span> <span id={reasonId}>{t(unavailable, { version: String(version.version) })}</span>
                 {unavailable === 'decision.changed' && onReviewAgain ? (
                   <> <button type="button" className="linkbtn hit" onClick={onReviewAgain}>{t('decision.reviewAgain')}</button></>
                 ) : null}

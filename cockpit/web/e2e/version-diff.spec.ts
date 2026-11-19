@@ -92,19 +92,27 @@ test('CKP_002_the_decision_stays_docked_in_view_when_the_diff_is_taller_than_the
   expect(scrollable).toBe(true);
 });
 
-test('CKP_002_approve_waits_when_the_version_changes_under_the_reader', async ({ page }) => {
+const CHANGED = {
+  en: { notice: 'Version 2 changed while you had it open. Check the table again.', checked: "I've checked it", versions: 'Versions', changes: 'Changes', fee: '40,000 VND', fee0: '35,000 VND', published: 'Version 2 is published.' },
+  vi: { notice: 'Phiên bản 2 đã thay đổi khi bạn đang mở. Hãy xem lại bảng.', checked: 'Tôi đã xem lại', versions: 'Phiên bản', changes: 'Thay đổi', fee: '40.000 VND', fee0: '35.000 VND', published: 'Phiên bản 2 đã được xuất bản.' },
+} as const;
+
+for (const { theme, locale } of [{ theme: 'light', locale: 'en' }, { theme: 'dark', locale: 'vi' }] as const) {
+test(`CKP_002_approve_waits_when_the_version_changes_under_the_reader_${theme}_${locale}`, async ({ page }) => {
+  const c = CHANGED[locale];
   await page.setViewportSize(VIEWPORTS[0]);
+  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
   await page.clock.install();
   const approvals: { ifMatch: string | undefined }[] = [];
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().endsWith(':approve')) approvals.push({ ifMatch: request.headers()['if-match'] });
   });
-  await rememberLocale(page, 'en');
+  await rememberLocale(page, locale);
   await mockHost(page, 'rules-approver');
   const engine = await mockRuleEngine(page, 'rules-approver');
   await page.goto('./#/rules/card-fee/2');
-  await expect(rowOf(page, 'R3').locator('.diff-td--mod')).toContainText('35,000 VND');
-  const approve = page.getByRole('button', { name: TEXT.en.approve, exact: true });
+  await expect(rowOf(page, 'R3').locator('.diff-td--mod')).toContainText(c.fee0);
+  const approve = page.getByRole('button', { name: TEXT[locale].approve, exact: true });
   await expect(approve).toBeEnabled();
 
   // Meanwhile the requester withdraws, replaces R3's fee and requests again: same version, new content and lock.
@@ -114,28 +122,30 @@ test('CKP_002_approve_waits_when_the_version_changes_under_the_reader', async ({
   stored.lockVersion += 1;
   // The approver glances at version 1 and comes back after the data went stale; the cockpit reads v2 again.
   await page.clock.fastForward(11_000);
-  await page.getByLabel('Versions').selectOption('1');
+  await page.getByLabel(c.versions, { exact: true }).selectOption('1');
   await expect(page).toHaveURL(/#\/rules\/card-fee\/1/);
-  await page.getByLabel('Versions').selectOption('2');
-  await page.getByRole('tab', { name: 'Changes' }).click();
+  await page.getByLabel(c.versions, { exact: true }).selectOption('2');
+  await page.getByRole('tab', { name: c.changes }).click();
 
-  await expect(page.getByText('Changed since you opened it. Review again.')).toBeVisible();
+  await expect(page.getByText(c.notice)).toBeVisible();
   await expect(approve).toBeDisabled();
-  await expect(approve).toHaveAccessibleDescription(/Changed since you opened it\. Review again\./);
+  await expect(approve).toHaveAccessibleDescription(c.notice);
   expect(approvals).toEqual([]);
   await settle(page);
-  await page.screenshot({ path: 'e2e/screenshots/version-diff-changed-1440x900-light-en.png', fullPage: false });
+  await page.screenshot({ path: `e2e/screenshots/version-diff-changed-1440x900-${theme}-${locale}.png`, fullPage: false });
   await check(page);
 
-  await page.getByRole('button', { name: 'Show the new version' }).click();
-  await expect(rowOf(page, 'R3').locator('.diff-td--mod')).toContainText('40,000 VND');
-  await expect(page.getByText('Changed since you opened it. Review again.')).toHaveCount(0);
+  // The table already shows the new content; the approver confirms they checked it, and only then may approve.
+  await expect(rowOf(page, 'R3').locator('.diff-td--mod')).toContainText(c.fee);
+  await page.getByRole('button', { name: c.checked }).click();
+  await expect(page.getByText(c.notice)).toHaveCount(0);
   await expect(approve).toBeEnabled();
   await approve.click();
-  await expect(page.getByText('Version 2 is published.')).toBeVisible();
+  await expect(page.getByText(c.published)).toBeVisible();
   // The lock version sent is the one of the content now on screen.
   expect(approvals).toEqual([{ ifMatch: '"2"' }]);
 });
+}
 
 test('CKP_002_a_removed_row_strikes_nothing', async ({ page }) => {
   await page.setViewportSize(VIEWPORTS[0]);
@@ -158,7 +168,7 @@ async function check(page: Page) {
 // The two review screens of the design sign-off: light English and dark Vietnamese at 1440x900.
 const REVIEW_SHOTS = [{ theme: 'light', locale: 'en' }, { theme: 'dark', locale: 'vi' }] as const;
 const REVIEW_TEXT = {
-  en: { long: 'Version 1 and version 2 of domestic-transfer-fee, side by side', structure: 'Version 1 and version 2 of card-cashback, side by side', policy: 'Hit policy: first matching row wins → exactly one row matches', column: 'Result column added: Cap', lookalike: 'Look-alike character: О U+041E', count: '1 changed cells contain look-alike characters', scheduled: 'Takes effect 01 Jan 2027 00:00 once approved.' },
+  en: { long: 'Version 1 and version 2 of domestic-transfer-fee, side by side', structure: 'Version 1 and version 2 of card-cashback, side by side', policy: 'Hit policy: first matching row wins → exactly one row matches', column: 'Result column added: Cap', lookalike: 'Look-alike character: О U+041E', count: '1 changed cell contains a look-alike character', scheduled: 'Takes effect 01 Jan 2027 00:00 once approved.' },
   vi: { long: 'Phiên bản 1 và phiên bản 2 của domestic-transfer-fee, đặt cạnh nhau', structure: 'Phiên bản 1 và phiên bản 2 của card-cashback, đặt cạnh nhau', policy: 'Cách chọn dòng: dòng khớp đầu tiên được áp dụng → chỉ đúng một dòng khớp', column: 'Thêm cột kết quả: Cap', lookalike: 'Ký tự dễ nhầm: О U+041E', count: '1 ô đã sửa có ký tự dễ nhầm', scheduled: 'Có hiệu lực 01/01/2027 00:00 sau khi được phê duyệt.' },
 } as const;
 
