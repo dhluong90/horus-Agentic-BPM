@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.horus.bpm.rules.postgres.RuleEngineSchemaMigrator;
 import com.horus.bpm.rules.postgres.RuleEngineTransactions;
 import com.zaxxer.hikari.HikariDataSource;
+import java.io.InputStream;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -16,21 +18,24 @@ import java.util.Arrays;
 import java.util.List;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -45,6 +50,13 @@ import tools.jackson.databind.json.JsonMapper;
 @Testcontainers
 class RuleEngineOnlyHostIT {
 
+    /**
+     * Tests of what exists on one Spring Boot line only; the other leg skips them (TR-EMB-02). The health
+     * component is Spring Boot 4 only until #116 adds it for 3.5 hosts and removes the tag.
+     */
+    static final String SPRING_BOOT_4_ONLY = "spring-boot-4-only";
+    static final String SPRING_BOOT_3_5_ONLY = "spring-boot-3.5-only";
+
     private static final Instant HOST_NOW = Instant.parse("2027-01-26T00:00:00Z");
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -56,8 +68,16 @@ class RuleEngineOnlyHostIT {
     }
 
     @Container
-    @ServiceConnection
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES =
+            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+
+    // Plain properties, not @ServiceConnection: the same test runs on both Spring Boot lines (TR-EMB-02).
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.username", POSTGRES::getUsername);
+        registry.add("spring.datasource.password", POSTGRES::getPassword);
+    }
 
     @Autowired
     private ConfigurableApplicationContext context;
@@ -70,15 +90,11 @@ class RuleEngineOnlyHostIT {
 
     @Test
     void TR_EMB_01_host_boots_healthy_on_clean_database_and_rle_tables_are_usable() throws Exception {
-        HttpResponse<String> response = HttpClient.newHttpClient().send(
-                HttpRequest.newBuilder(URI.create("http://localhost:" + environment.getProperty("local.server.port")
-                        + "/actuator/health")).GET().build(),
-                HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = get("/actuator/health");
         JsonNode health = JsonMapper.builder().build().readTree(response.body());
 
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(health.path("status").asString()).isEqualTo("UP");
-        assertThat(health.path("components").path("ruleEngine").path("status").asString()).isEqualTo("UP");
         assertThat(health.path("components").path("db").path("status").asString()).isEqualTo("UP");
 
         // Usable: a rule set and a decision of a Gold-tier card fee are written and read back.
@@ -100,6 +116,58 @@ class RuleEngineOnlyHostIT {
         assertThat(jdbc.sql("SELECT matched_rule_ids::text FROM rle_decision WHERE tenant_id = 'bank-a' AND id = ?")
                 .param("01JD00000000000000000000DC").query(String.class).single())
                 .isEqualTo("[\"R1\"]");
+    }
+
+    @Test
+    @Tag(SPRING_BOOT_4_ONLY)
+    void TR_EMB_01_rule_engine_health_component_is_up() throws Exception {
+        // The ruleEngine health contributor exists on Spring Boot 4 only until #116 (ADR-0011).
+        JsonNode health = JsonMapper.builder().build().readTree(get("/actuator/health").body());
+
+        assertThat(health.path("components").path("ruleEngine").path("status").asString()).isEqualTo("UP");
+    }
+
+    @Test
+    void TR_EMB_07_jackson_3_parses_a_rule_set_definition_with_exact_decimals() throws Exception {
+        // The engine's own mapper (ADR-0021): Jackson 3, every number as BigDecimal, never through double.
+        JsonMapper engineMapper = JsonMapper.builder()
+                .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .build();
+        JsonNode ruleSet;
+        try (InputStream definition = getClass().getResourceAsStream("/rule-sets/card-fee.rule-set.json")) {
+            ruleSet = engineMapper.readTree(definition);
+        }
+
+        assertThat(tools.jackson.databind.cfg.PackageVersion.VERSION.getMajorVersion()).isEqualTo(3);
+        assertThat(ruleSet.path("ruleSet").asString()).isEqualTo("card-fee");
+        assertThat(ruleSet.path("hitPolicy").asString()).isEqualTo("first");
+        assertThat(ruleSet.path("rules")).hasSize(3);
+        assertThat(ruleSet.path("rules").path(1).path("then").path("discountRate").decimalValue())
+                .isEqualTo(new BigDecimal("0.015"));
+        assertThat(ruleSet.path("rules").path(2).path("then").path("discountRate").decimalValue())
+                .isEqualTo(new BigDecimal("0.1000000000000000055511151231257827"));
+    }
+
+    @Test
+    @Tag(SPRING_BOOT_3_5_ONLY)
+    void TR_EMB_07_spring_boot_3_5_host_keeps_its_own_jackson_2_beside_the_engine_jackson_3() throws Exception {
+        // Read by name: the Spring Boot 4 build that compiles this test has no Jackson 2 databind.
+        String databind = jacksonVersion("com.fasterxml.jackson.databind.cfg.PackageVersion");
+        String core = jacksonVersion("com.fasterxml.jackson.core.json.PackageVersion");
+        Object hostMapper = context.getBean(Class.forName("com.fasterxml.jackson.databind.ObjectMapper"));
+
+        // Both majors on one classpath; the host's set is consistent and its mapper is still Jackson 2.
+        assertThat(databind).startsWith("2.");
+        assertThat(core).isEqualTo(databind);
+        assertThat(jacksonVersion("tools.jackson.databind.cfg.PackageVersion")).startsWith("3.");
+        assertThat(hostMapper.getClass().getName()).startsWith("com.fasterxml.jackson.databind.");
+
+        // The host's own endpoint still answers.
+        assertThat(get("/actuator/health").statusCode()).isEqualTo(200);
+    }
+
+    private static String jacksonVersion(String packageVersionClass) throws ReflectiveOperationException {
+        return String.valueOf(Class.forName(packageVersionClass).getField("VERSION").get(null));
     }
 
     @Test
@@ -148,5 +216,12 @@ class RuleEngineOnlyHostIT {
         // The host's own Flyway auto-configuration still applies: the engine registered no Flyway bean.
         assertThat(context.getBeanNamesForType(Flyway.class)).containsExactly("flyway");
         assertThat(context.getBeanNamesForType(RuleEngineSchemaMigrator.class)).containsExactly("ruleEngineSchemaMigrator");
+    }
+
+    private HttpResponse<String> get(String path) throws Exception {
+        return HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create("http://localhost:" + environment.getProperty("local.server.port")
+                        + path)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
     }
 }

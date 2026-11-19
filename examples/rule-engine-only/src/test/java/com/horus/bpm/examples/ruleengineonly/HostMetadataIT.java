@@ -28,7 +28,6 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.core.env.Environment;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -55,11 +54,15 @@ class HostMetadataIT {
     private static final KeyPair KEYS = rsaKeys();
 
     @Container
-    @ServiceConnection
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES =
+            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
 
     @DynamicPropertySource
-    static void tokenValidation(DynamicPropertyRegistry registry) throws Exception {
+    static void databaseAndTokenValidation(DynamicPropertyRegistry registry) throws Exception {
+        // Plain properties, not @ServiceConnection: the same test runs on both Spring Boot lines (TR-EMB-02).
+        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.username", POSTGRES::getUsername);
+        registry.add("spring.datasource.password", POSTGRES::getPassword);
         Path publicKey = Files.createTempFile("host-metadata-it", ".pub");
         Files.writeString(publicKey, "-----BEGIN PUBLIC KEY-----\n"
                 + Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII)).encodeToString(KEYS.getPublic().getEncoded())

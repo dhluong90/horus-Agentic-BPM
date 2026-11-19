@@ -63,7 +63,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `400`. A list query breaks a read limit (ADR-0015): `limit` above 200, a time range longer than 31 days, or `GET /decisions` without `ruleSet`, `from` and `to`. Narrow the query and page with the cursor.
 
 ### UNAUTHENTICATED
-`401`. No principal, a token whose audience is another host, or no tenant for the caller. Always with `WWW-Authenticate`. Sign in again or request a token for this host, but only once: when the challenge says `error="invalid_token"`, the account has no tenant on this host and signing in again with it gives the same answer. The host returns this body from its security chain when the chain uses `BpmProblemAuthenticationEntryPoint` ([[Host Metadata and Permissions]]).
+`401`. No principal, a token whose audience is another host, or a principal with no tenant the `TenantResolver` can read (for example no `tenant_id` attribute). Sign in again, request a token for this host, or give the user a tenant in your identity provider. Every `401` carries `WWW-Authenticate`; when the challenge says `error="invalid_token"`, the account has no tenant on this host, so sign in again at most once. The host returns this body from its security chain when the chain uses `BpmProblemAuthenticationEntryPoint` ([[Host Metadata and Permissions]]).
 
 ### PERMISSION_DENIED
 `403`. The principal lacks the permission the endpoint checks. Map the permission to the caller's role; see [[Multi-Tenancy and Security]].

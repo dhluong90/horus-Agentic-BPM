@@ -987,7 +987,7 @@ What "Camunda-like" includes and excludes in all eleven entries:
 
 **Consequences.** New features PE-F-45 (lifecycle, M2), PE-F-46 (graph diff, M2), CK-F-31 (approval screens, M3). PE-F-01 and PE-F-28 change contract: deploy creates a draft. Principle 6 is extended (PD-040). ADR-0012 and an ADR-0010 amendment are needed before M2 code. `TR-SEC-04` applies to process definitions as well as rule sets.
 
-**Follow-ups.** Architect: ADR-0012, ADR-0010 amendment, process OpenAPI changes, `PRE-*` statements for the lifecycle and the self-approval check. Product manager: update the process PRD and requirements after the decision. Security reviewer: confirm the `dev`-only relaxation rule.
+**Follow-ups.** Architect: ADR-0012, ADR-0010 amendment, process OpenAPI changes, `PRE-*` statements for the lifecycle and the self-approval check. Product manager: update the process PRD and requirements after the decision. Maintainers: confirm the `dev`-only relaxation rule.
 
 ### PD-034 Process notation: own JSON canonical, BPMN subset for import and export
 
@@ -1053,7 +1053,7 @@ What "Camunda-like" includes and excludes in all eleven entries:
 
 **Consequences.** New features CK-F-23 (M1), X-F-22 (M1), CK-F-28 and CK-F-29 (M2). ADR-0014 amends ADR-0005 and `TR-UI-01` (host registry, sign-in across hosts with OIDC PKCE as a public client, version skew: the cockpit supports the current and previous engine minor version and turns off screens a host cannot serve). `oidc-client-ts` (Apache 2.0) needs a dependency justification. CK-F-01's open design question is closed by this decision.
 
-**Follow-ups.** Architect: ADR-0014 and the `/meta` and `/me` contracts before M1 code; size the M1 part. Security reviewer: token audience per host, token lifetime, CORS off by default, ASVS L2 review of the federated mode. Documentation: reference gateway configuration for option D.
+**Follow-ups.** Architect: ADR-0014 and the `/meta` and `/me` contracts before M1 code; size the M1 part. Maintainers: token audience per host, token lifetime, CORS off by default, ASVS L2 review of the federated mode. Documentation: reference gateway configuration for option D.
 
 ### PD-036 Source of truth for process definitions
 
@@ -1112,7 +1112,7 @@ What "Camunda-like" includes and excludes in all eleven entries:
 
 **Consequences.** New feature X-F-23 (M2): host check plus the cockpit tenant switcher. The allowed-tenants claim name is documented for host IdP configuration.
 
-**Follow-ups.** Architect: claim name and resolver rule in ADR-0014. Security reviewer: tests that a header outside the allowed list is rejected and logged.
+**Follow-ups.** Architect: claim name and resolver rule in ADR-0014. Maintainers: tests that a header outside the allowed list is rejected and logged.
 
 ### PD-038 Analytics scope
 
@@ -1512,7 +1512,7 @@ The architect reviewed the technical, non-functional and developer requirements 
 
 **Consequences if accepted.** `TR-UI-03`, `TR-SEC-07`, `TR-QA-03` and `TR-OPS-02` become Must at 1.0. The roadmap M3 exit lists them.
 
-**Follow-ups.** QA: coverage scope in CI. Security reviewer: ASVS checklist ownership.
+**Follow-ups.** QA: coverage scope in CI. Maintainers: ASVS checklist ownership.
 
 **Applied, 2026-11-19 (delegated decision, PD-073).** Option 2. From 1.0, `TR-UI-03` (WCAG 2.1 AA), `TR-SEC-07` (OWASP ASVS level 2 per minor release), `TR-QA-03` (coverage of the engine core and the rule evaluator only) and `TR-OPS-02` (zero-downtime upgrade between adjacent minor releases) block the release. Configurable: no. Date watch: this adds test and review work to M3 without moving 21 May 2027. If the maintainers' M3 sizing shows it cannot fit, the product manager does not move the date; the date question goes to the product owner with cut options (PD-073). Not applied here: the four retags in [requirements.md](requirements.md) (architect); coverage scope in CI (QA); the ASVS checklist owner (maintainers).
 

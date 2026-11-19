@@ -15,11 +15,7 @@
   <description>A minimal Spring Boot service that embeds the Rule Engine on its own PostgreSQL database.</description>
 
   <dependencies>
-    <!-- The host's own stack. -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-webmvc</artifactId>
-    </dependency>
+    <!-- The host's own stack. Starters whose name differs between Spring Boot lines are in the profiles below. -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
@@ -35,10 +31,6 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-jdbc</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-flyway</artifactId>
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
@@ -60,11 +52,6 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-testcontainers</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -103,4 +90,58 @@
       </plugin>
     </plugins>
   </build>
+
+  <!--
+    TR-EMB-02: the same host on both Spring Boot lines. Only starter names differ; the host code does not.
+    Spring Boot 4.x is the default; -Dspring-boot.line=3.5 selects 3.5.x (parent POM).
+  -->
+  <profiles>
+    <profile>
+      <id>host-spring-boot-4</id>
+      <activation>
+        <property>
+          <name>spring-boot.line</name>
+          <value>!3.5</value>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>host-spring-boot-3.5</id>
+      <activation>
+        <property>
+          <name>spring-boot.line</name>
+          <value>3.5</value>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+          <groupId>org.flywaydb</groupId>
+          <artifactId>flyway-core</artifactId>
+        </dependency>
+        <!--
+          ADR-0021 and TR-EMB-07: the engine core will bring Jackson 3 as a compile dependency. Until the
+          first parsing feature adds it to rule-engine-core, the 3.5 host declares it here the same way,
+          so the coexistence test runs against the real resolution: Jackson 3 beside the host's Jackson 2.
+        -->
+        <dependency>
+          <groupId>tools.jackson.core</groupId>
+          <artifactId>jackson-databind</artifactId>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
 </project>

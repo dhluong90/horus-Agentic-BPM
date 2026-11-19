@@ -57,11 +57,12 @@ The decision, its inputs and the matched row are written to the decision log in 
 
 | A good fit if you | Not a good fit if you |
 |---|---|
-| Build Java 21 or 25 services on Spring Boot 4.x (3.5.x supported until 1.0) with PostgreSQL 14 or later | Run on another language, framework or database before 1.0 |
-| Need business rules that product, risk or compliance staff change under four-eyes approval with effective dates | Need full BPMN 2.0, DMN FEEL or CMMN, or a general-purpose diagram tool |
+| Build Java 21 or 25 services on Spring Boot 4.x (3.5.x supported until 1.0) with PostgreSQL 14 or later (15 or later from 1.0) | Run on another language, framework or database before 1.0 |
+| Need business rules that product, risk or compliance staff change under four-eyes approval with effective dates | Need full BPMN 2.0 execution or DMN with FEEL before the staged releases after 1.0, CMMN, or a general-purpose diagram tool |
 | Need approval flows, human task queues with SLAs, and compensating service steps inside one service | Want one central orchestration platform shared by many teams and run by a platform team |
 | Want AI agents to take process steps, but only within rules your compliance team can read | Need cross-process message correlation (planned after 1.0) or durable execution of arbitrary code across many services |
 | Must keep the decision log and process history in your own database, in your own transactions | Need something you can run in production now: nothing is released yet |
+| Serve several businesses or tenants whose rules, roles and calendars differ, and want settings rather than a fork | Need an engine that ships one industry's business rules built in |
 
 Not sure? Read [[Compare and choose|Compare-and-Choose]]. It sets this project against Camunda 8, the Camunda 7 forks, Flowable, Drools and Kogito, Temporal and hand-coded rules, including where each of them is the better choice.
 

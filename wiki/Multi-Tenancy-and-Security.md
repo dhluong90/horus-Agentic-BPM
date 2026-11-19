@@ -8,15 +8,19 @@ Each numbered step is a control the request passes. Steps 1 to 3 run in your gat
 
 ## Tenant resolution
 
+The engines ask one extension point, `TenantResolver`, for the tenant of every call (ADR-0014).
+
 | Source | How | Use when |
 |---|---|---|
-| Default `TenantResolver` | Reads the `tenancy.claim` attribute (default `tenant_id`) of the authenticated principal: the claim of a validated token, or the attribute of a server-side session principal from an OIDC or OAuth2 login. Both are handled alike | OIDC hosts, with bearer tokens or with the cockpit embedded in the host's own web application |
-| Host `TenantResolver` bean (`com.horus.bpm.host.spi`) | Replaces the default; reads the host's own principal type or user directory | The principal carries no tenant attribute, for example after a form, SAML or LDAP sign-in |
-| `tenancy.dev-tenant` | A fixed tenant for principals that carry none | Local work without an identity provider; `dev` profile only, start-up refused elsewhere |
+| Default resolver | Reads the `tenancy.claim` attribute (default `tenant_id`) of the authenticated principal in the host's Spring Security context. A server-side session login and a validated bearer token are handled alike | OIDC hosts, and host web applications that embed the cockpit behind their own session login |
+| Your own `TenantResolver` bean | Replaces the default; you do not exclude any auto-configuration | The tenant comes from your user directory, a realm, a path or a subdomain |
+| `tenancy.dev-tenant` | One fixed tenant for local work without an identity provider | The `dev` profile only. The starter refuses to start when it is set outside `dev` |
 
-No resolver that trusts a header is shipped (PD-079, ADR-0014 decision 6): in a browser any header can be set by script, and a header set by a misconfigured gateway would expose one tenant's data to another tenant's operator. A host that writes such a resolver owns that risk. A principal whose tenant cannot be resolved gets `401 UNAUTHENTICATED` and reads nothing.
+No header-based resolver ships. A gateway header as the tenant source was rejected: one misconfigured gateway would let one tenant's operator see another tenant's data. A host that writes a resolver that trusts a request header owns that risk.
 
-Rules that hold in every mode: every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant. Whatever the resolver, a principal that carries the tenant attribute must match the resolved tenant, so a host resolver cannot move a caller into another tenant. Until tenant switching arrives (M2), an `X-Tenant-Id` header, the switch request, that differs from the resolved tenant is refused with `403 TENANT_NOT_ALLOWED` and the security log entry `tenant.switch.refused`. Both are built for `/api/bpm/meta` and `/api/bpm/me` ([[Host Metadata and Permissions]]).
+A call whose tenant cannot be resolved, for example a principal without the `tenant_id` attribute, is refused with `401 UNAUTHENTICATED` and touches no data (`RLE-037`). The `X-Tenant-Id` header is honoured only as the cockpit's tenant switch, for a tenant in the caller's allowed list; any other tenant gets `403 TENANT_NOT_ALLOWED`. Whatever the resolver, a principal that carries the tenant attribute must match the tenant the resolver returns, so a host resolver cannot move a caller into another tenant. Both rules are built for `/api/bpm/meta` and `/api/bpm/me` ([[Host Metadata and Permissions]]).
+
+Rules that hold in every mode: tenant isolation is a guarantee that no setting relaxes; every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); the cockpit's tenant switch is accepted only for a tenant in the user's allowed list; a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant.
 
 ## Permissions
 
@@ -67,7 +71,7 @@ The cockpit holds no secrets and no state (ADR-0005). It never marks an approval
 
 | Category | Asset | Threat and exploit scenario | Control | Verification |
 |---|---|---|---|---|
-| Spoofing | Tenant boundary | Caller sends `tenantId: "tenant-b"` in the body, or forges `X-Tenant-Id` from outside the gateway | Body tenant ignored; header mode only behind a trusted gateway; JWT claim by default | `RLE-011`; REST test with forged body and header |
+| Spoofing | Tenant boundary | Caller sends `tenantId: "tenant-b"` in the body, or forges `X-Tenant-Id` from outside the gateway | Body tenant ignored; no header-based resolver ships; the tenant comes from the authenticated principal; `X-Tenant-Id` only switches to a tenant in the caller's allowed list | `RLE-011`, `RLE-037`; REST test with forged body and header |
 | Spoofing | Approvals | Compromised author token approves its own version | Service-layer identity check plus distinct permission | `RLE-009` at service and REST level |
 | Tampering | Rule definitions | Expression such as `T(java.lang.Runtime).getRuntime()` or a regex bomb in a draft | Closed grammar, no reflection; bounded regex; publish-time rejection | `RLE-004`, `RLE-007`; ArchUnit on `javax.script`, `java.lang.reflect.Method` |
 | Tampering | Task state | Two completions of one task, or a replayed approval | `lock_version` predicate; status guard in the same `UPDATE` | `PRE-003`; concurrency test with two threads |
