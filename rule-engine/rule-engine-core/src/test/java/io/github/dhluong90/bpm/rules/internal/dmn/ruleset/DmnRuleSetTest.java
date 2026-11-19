@@ -113,6 +113,35 @@ class DmnRuleSetTest {
         }
     }
 
+    @Test
+    void TR_STD_25_a_collect_table_round_trips_with_its_list_output() {
+        // Given risk-flags of RLE-003 as v1: collect, output flags list<string>
+        String yaml = """
+                schemaVersion: 1
+                ruleSet: risk-flags
+                hitPolicy: collect
+                inputs:
+                  - { name: txCount, type: integer }
+                outputs:
+                  - { name: flags, type: "list<string>" }
+                rules:
+                  - { id: R1, when: { txCount: ">= 10" }, then: { flags: "'HIGH_VELOCITY'" } }
+                  - { id: R3, when: {}, then: { flags: "'NEW_DEVICE'" } }
+                """;
+        ParsedRuleSet v1 = RuleSetReader.read(SourceFormat.YAML, yaml.getBytes(StandardCharsets.UTF_8));
+
+        // When
+        String dmn = DmnWriter.write(v1.canonicalJson());
+        ParsedRuleSet back = RuleSetReader.read(SourceFormat.DMN_XML, dmn.getBytes(StandardCharsets.UTF_8));
+
+        // Then: DMN declares the item type; the v1 output is the list
+        assertThat(dmn).contains("hitPolicy=\"COLLECT\"", "name=\"flags\" label=\"flags\" typeRef=\"string\"/>");
+        assertThat(back.canonicalHash()).isEqualTo(v1.canonicalHash());
+        assertThat(evaluate(CompiledRuleSet.compile(back.model()), Map.of("txCount", 12)))
+                .isInstanceOfSatisfying(DecisionResult.Matched.class, m -> assertThat(m.outputs().get("flags"))
+                        .isEqualTo(List.of("HIGH_VELOCITY", "NEW_DEVICE")));
+    }
+
     // ------------------------------------------------------------------ the FEEL subset and null semantics
 
     @ParameterizedTest(name = "{0} -> {1}")

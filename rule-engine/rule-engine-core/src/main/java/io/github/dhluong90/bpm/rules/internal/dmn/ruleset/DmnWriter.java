@@ -71,7 +71,7 @@ public final class DmnWriter {
             writeInput(out, input);
         }
         for (JsonNode output : outputs) {
-            writeOutput(out, output);
+            writeOutput(out, output, hitPolicy.equals("COLLECT"));
         }
         for (JsonNode rule : list(doc.get("rules"))) {
             writeRule(out, rule, inputs, outputs, slots);
@@ -119,9 +119,12 @@ public final class DmnWriter {
         out.line(3, "</input>");
     }
 
-    private static void writeOutput(Xml out, JsonNode output) {
+    private static void writeOutput(Xml out, JsonNode output, boolean collect) {
         String name = output.get("name").stringValue();
         String type = output.get("type").stringValue();
+        if (collect && type.startsWith("list<") && type.endsWith(">")) {
+            type = type.substring(5, type.length() - 1); // DMN declares the type of one rule's output
+        }
         if (output.has("default")) {
             throw unsupported("Output " + name + " has a default; DMN has no per-rule output default."
                     + " Write the value in every rule, then export");

@@ -117,7 +117,12 @@ public final class DefaultVersionService implements VersionService {
         ParsedRuleSet parsed = RuleSetReader.read(format, source);
         // The import model equals the parsed canonical form (checked by the reader, ADR-0026 decision 4); it is compiled
         // here so violations follow the order cells are written in (RLE-041). Evaluation compiles only from the stored form.
-        CompiledRuleSet.compile(parsed.model());
+        int rows = parsed.model().decision().table().rules().size();
+        if (rows > context.settings().maxRows()) {
+            throw new ValidationFailedException("The rule set has " + rows + " rules; evaluation.max-rows allows "
+                    + context.settings().maxRows());
+        }
+        CompiledRuleSet.compile(parsed.model(), context.settings().maxOutputBytes(), context.settings().maxStringLength());
         String name = parsed.model().name();
         Instant now = context.clock().instant();
         String ruleSetId;

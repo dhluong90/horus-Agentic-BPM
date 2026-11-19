@@ -183,6 +183,15 @@ public final class DmnReader {
         if (rules.isEmpty()) {
             throw invalid("The decision table has no <rule>", table);
         }
+        // A DMN COLLECT table declares the type of one rule's output; the v1 output is the list of them.
+        if ("collect".equals(doc.get("hitPolicy").stringValue())) {
+            for (tools.jackson.databind.JsonNode output : outputs) {
+                String type = output.get("type").stringValue();
+                if (!type.startsWith("list<")) {
+                    ((ObjectNode) output).put("type", "list<" + type + ">");
+                }
+            }
+        }
     }
 
     private static String readInput(XmlTree input, String feel, ArrayNode inputs) {

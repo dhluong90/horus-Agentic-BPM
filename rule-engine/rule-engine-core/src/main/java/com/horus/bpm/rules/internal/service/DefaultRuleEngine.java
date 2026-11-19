@@ -66,7 +66,8 @@ public final class DefaultRuleEngine implements RuleEngine {
             throw new InputInvalidException("correlationId must be 1 to " + EngineDefaults.CORRELATION_ID_MAX_LENGTH
                     + " characters of A-Z, a-z, 0-9, '.', '_', ':' or '-'");
         }
-        InputLimits.check(request.input(), EngineDefaults.DECIMAL_PRECISION, context.settings().maxInputScale());
+        InputLimits.check(request.input(), EngineDefaults.DECIMAL_PRECISION, context.settings().maxInputScale(),
+                context.settings().maxStringLength());
         String requestHash = Hashes.sha256Parts("evaluate", caller, request.ruleSet(), ExactForm.of(request.input()));
         return context.idempotent(tenant, "evaluate", request.idempotencyKey(), requestHash, 200,
                 () -> doEvaluate(tenant, caller, request),
@@ -123,7 +124,8 @@ public final class DefaultRuleEngine implements RuleEngine {
             throw new IntegrityFailure("Integrity check failed: the stored canonical document of " + version.ruleSet()
                     + " v" + version.version() + " does not match its canonical_hash; the version is not served");
         }
-        CompiledRuleSet fresh = CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()));
+        CompiledRuleSet fresh = CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()),
+                context.settings().maxOutputBytes(), context.settings().maxStringLength());
         compiled.put(key, fresh);
         return fresh;
     }

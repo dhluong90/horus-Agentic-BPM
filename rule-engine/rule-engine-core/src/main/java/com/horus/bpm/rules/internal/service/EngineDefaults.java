@@ -43,6 +43,22 @@ public final class EngineDefaults {
     public static final boolean REJECT_UNDECLARED_INPUTS = true;
 
     /**
+     * Default and ceiling of {@code horus.bpm.rules.evaluation.max-output-bytes}: the estimated JSON size of one
+     * decision's outputs, checked while collected values accumulate. Lower only: outputs are held in the heap
+     * that every tenant of the host shares.
+     */
+    public static final int OUTPUT_MAX_BYTES = 1_048_576;
+
+    /**
+     * Default and ceiling of {@code horus.bpm.rules.evaluation.max-string-length}: the longest string an input may
+     * carry or string {@code +} may build, in UTF-16 code units. Lower only.
+     */
+    public static final int STRING_MAX_LENGTH = 65_536;
+
+    /** Default and ceiling of {@code horus.bpm.rules.evaluation.max-rows}: the most rules a version may contain. Lower only. */
+    public static final int RULES_MAX = 5_000;
+
+    /**
      * Default and ceiling of {@code horus.bpm.rules.query.max-page-size}: items per page of a list read (ADR-0015).
      * A host may lower it, never raise it.
      */
