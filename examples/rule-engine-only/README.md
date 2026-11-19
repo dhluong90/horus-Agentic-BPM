@@ -201,6 +201,18 @@ H=localhost:8080/api/bpm/rules/v1
     #          {"action":"REJECTED","actor":"minh","reason":"R2 waiver needs pricing committee minutes",...}]}
     ```
 
+    Hoa, the author, fixes the draft in place instead of importing a v3 (the `dev` profile turns `authoring.cockpit-drafts` on; with it off the answer is `403 DRAFT_AUTHORING_DISABLED`). Both headers are required, and only the draft's author may replace it. Minh then compares v2 with the version in effect; the engine computes the diff, so the approver sees exactly what is hashed:
+
+    ```bash
+    sed 's/"10000 VND"/"5000 VND"/' examples/rule-engine-only/src/main/resources/rules/card-fee.yaml |
+      curl -s -u hoa:demo-only -X PUT $H/rule-sets/card-fee/versions/2 -H 'Content-Type: application/yaml' \
+        -H 'Idempotency-Key: demo-replace-1' -H 'If-Match: "2"' --data-binary @-
+    # 200 {"version":2,"status":"DRAFT","lockVersion":3,"canonicalHash":"...",...}   ETag: "3"
+    curl -s -u minh:demo-only "$H/rule-sets/card-fee/versions/2/diff?base=1"
+    # {"ruleSet":"card-fee","version":2,"base":1,...,"rows":[{"ruleId":"R2","change":"CHANGED","position":2,
+    #   "basePosition":2,"moved":false,"fields":[{"path":"/then/fee","from":{...},"to":{...},"nonAscii":false}]}],...}
+    ```
+
 11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them:
 
     ```bash

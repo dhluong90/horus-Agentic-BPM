@@ -245,7 +245,7 @@ paths:
         `horus.bpm.rules.authoring.cockpit-drafts` to `false` the answer is
         `403 DRAFT_AUTHORING_DISABLED` (DESIGN section 4.4).
 
-        The body is read and validated exactly as for `importVersion`: YAML, JSON or DMN 1.2 to 1.5,
+        The body is read and validated exactly as for `importVersion`: YAML or DMN 1.2 to 1.5,
         at most 1,048,576 bytes (`413 PAYLOAD_TOO_LARGE`), the document's `ruleSet` must equal
         `{name}` (`400 INPUT_INVALID`), and a refused document is `422 VALIDATION_FAILED` with every
         cell problem in `violations`. A refused document stores nothing.
@@ -282,9 +282,6 @@ paths:
                 - id: R1
                   when: { tier: "== 'GOLD'" }
                   then: { fee: "0 VND" }
-          application/json:
-            schema:
-              type: object
           application/xml:
             schema:
               type: string
