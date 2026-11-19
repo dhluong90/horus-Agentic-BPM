@@ -13,7 +13,7 @@ describe('host registry validation', () => {
     expect(result.registry.auth.tokenMode).toBe('per-host');
   });
 
-  it('TR_UI_01_http_base_url_outside_localhost_is_rejected_at_its_json_pointer', () => {
+  it('CKP_012_http_base_url_outside_localhost_is_rejected_at_its_json_pointer', () => {
     const result = parseRegistry({
       ...base,
       hosts: [
@@ -24,7 +24,7 @@ describe('host registry validation', () => {
     expect(result).toMatchObject({ ok: false, problem: { reason: 'invalid', pointer: '/hosts/1/baseUrl' } });
   });
 
-  it('TR_UI_01_duplicate_host_id_is_an_error', () => {
+  it('CKP_012_duplicate_host_id_is_an_error', () => {
     const result = parseRegistry({
       ...base,
       hosts: [

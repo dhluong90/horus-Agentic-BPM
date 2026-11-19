@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { cockpitHostsV1, type CockpitHostsV1 } from '../../api/generated/cockpit-hosts.v1';
+import { cockpitHostsV1, cockpitHostsV1Refinements, type CockpitHostsV1 } from '../../api/generated/cockpit-hosts.v1';
 
 export type HostRegistry = CockpitHostsV1;
 export type RegistryHost = HostRegistry['hosts'][number];
@@ -31,20 +31,39 @@ function firstIssue(error: z.ZodError): { pointer: string; message: string } {
   return { pointer: toPointer(path), message: issue.message };
 }
 
-/** Rules of the schema the generator cannot express, plus the duplicate rules of DESIGN section 4. */
-function checkCrossFieldRules(registry: HostRegistry): RegistryProblem | undefined {
-  if (registry.auth.mode === 'oidc') {
+export type SchemaRefinement = (typeof cockpitHostsV1Refinements)[number];
+
+/**
+ * The schema rules the generator cannot express (scripts/generate-schemas.mjs, KNOWN_GAPS), restored by
+ * hand. The record type makes a new gap without an implementation a compile error; each one is proved
+ * against the JSON Schema in src/api/contract.test.ts.
+ */
+export const SCHEMA_REFINEMENTS: Record<SchemaRefinement, (registry: HostRegistry) => RegistryProblem | undefined> = {
+  'oidc-requires-issuer-and-client-id': (registry) => {
+    if (registry.auth.mode !== 'oidc') return undefined;
     if (registry.auth.issuer === undefined) return { reason: 'invalid', pointer: '/auth/issuer', message: 'Required with mode oidc' };
     if (registry.auth.clientId === undefined) return { reason: 'invalid', pointer: '/auth/clientId', message: 'Required with mode oidc' };
-  }
-  const ids = new Set<string>();
-  const baseUrls = new Set<string>();
-  for (const [index, host] of registry.hosts.entries()) {
-    if (typeof host.label !== 'string') {
-      if (host.label['en'] === undefined) return { reason: 'invalid', pointer: `/hosts/${index}/label`, message: 'A label map needs an en entry' };
+    return undefined;
+  },
+  'label-map-requires-en': (registry) => {
+    const index = registry.hosts.findIndex((host) => typeof host.label !== 'string' && host.label['en'] === undefined);
+    return index < 0 ? undefined : { reason: 'invalid', pointer: `/hosts/${index}/label`, message: 'A label map needs an en entry' };
+  },
+  'label-map-locale-names': (registry) => {
+    for (const [index, host] of registry.hosts.entries()) {
+      if (typeof host.label === 'string') continue;
       const badLocale = Object.keys(host.label).find((locale) => !/^[a-z]{2}(-[A-Z]{2})?$/.test(locale));
       if (badLocale !== undefined) return { reason: 'invalid', pointer: `/hosts/${index}/label/${badLocale}`, message: 'Not a locale' };
     }
+    return undefined;
+  },
+};
+
+/** Rules beyond the schema: the duplicate rules of DESIGN section 4 and at least one enabled host. */
+function checkDesignRules(registry: HostRegistry): RegistryProblem | undefined {
+  const ids = new Set<string>();
+  const baseUrls = new Set<string>();
+  for (const [index, host] of registry.hosts.entries()) {
     if (ids.has(host.id)) return { reason: 'duplicate-id', pointer: `/hosts/${index}/id`, value: host.id };
     ids.add(host.id);
     if (baseUrls.has(host.baseUrl)) return { reason: 'duplicate-base-url', pointer: `/hosts/${index}/baseUrl`, value: host.baseUrl };
@@ -54,11 +73,22 @@ function checkCrossFieldRules(registry: HostRegistry): RegistryProblem | undefin
   return undefined;
 }
 
-export function parseRegistry(body: unknown): RegistryResult {
+/** Schema validation only: generated zod plus the refinements. Exported for the contract test. */
+export function validateRegistrySchema(body: unknown): RegistryResult {
   const parsed = cockpitHostsV1.safeParse(body);
   if (!parsed.success) return { ok: false, problem: { reason: 'invalid', ...firstIssue(parsed.error) } };
-  const problem = checkCrossFieldRules(parsed.data);
-  return problem ? { ok: false, problem } : { ok: true, registry: parsed.data };
+  for (const name of cockpitHostsV1Refinements) {
+    const problem = SCHEMA_REFINEMENTS[name](parsed.data);
+    if (problem) return { ok: false, problem };
+  }
+  return { ok: true, registry: parsed.data };
+}
+
+export function parseRegistry(body: unknown): RegistryResult {
+  const result = validateRegistrySchema(body);
+  if (!result.ok) return result;
+  const problem = checkDesignRules(result.registry);
+  return problem ? { ok: false, problem } : result;
 }
 
 /** Loads the registry served next to index.html. Never throws. */

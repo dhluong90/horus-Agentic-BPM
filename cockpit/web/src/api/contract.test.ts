@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { meLan, meMinh, metaRulesOnly, registryEmbedded } from '../mocks/fixtures';
 import { bpmMeV1 } from './generated/bpm-me.v1';
 import { bpmMetaV1 } from './generated/bpm-meta.v1';
-import { cockpitHostsV1 } from './generated/cockpit-hosts.v1';
+import { validateRegistrySchema, type SchemaRefinement } from '../app/config/registry';
 
 // Vitest runs from cockpit/web; the schemas live in cockpit/api/schema.
 const schemaDir = join(process.cwd(), '..', 'api', 'schema');
@@ -55,7 +55,35 @@ describe('generated zod schemas agree with the published JSON Schemas', () => {
   });
 
   it.each(hostCases)('CKP_001_contract_cockpit_hosts_%s', (_name, body) => {
-    expect(cockpitHostsV1.safeParse(body).success).toBe(hostsSchema(body));
+    expect(validateRegistrySchema(body).ok).toBe(hostsSchema(body));
+  });
+
+  // One case per hand-written refinement; the Record type forces a case for every new one.
+  const refinementCases: Record<SchemaRefinement, unknown> = {
+    'oidc-requires-issuer-and-client-id': {
+      schemaVersion: 1, auth: { mode: 'oidc', clientId: 'horus-cockpit' },
+      hosts: [{ id: 'kyc', label: 'KYC', baseUrl: 'https://kyc.bank.example', scope: 'kyc-bpm' }],
+    },
+    'label-map-requires-en': {
+      schemaVersion: 1, auth: { mode: 'host-session' }, hosts: [{ id: 'kyc', label: { vi: 'Định danh' }, baseUrl: '' }],
+    },
+    'label-map-locale-names': {
+      schemaVersion: 1, auth: { mode: 'host-session' }, hosts: [{ id: 'kyc', label: { en: 'KYC', Vietnamese: 'Định danh' }, baseUrl: '' }],
+    },
+  };
+
+  it.each(Object.entries(refinementCases))('CKP_001_contract_refinement_%s_rejects_what_the_json_schema_rejects', (_name, body) => {
+    expect(hostsSchema(body)).toBe(false);
+    expect(validateRegistrySchema(body).ok).toBe(false);
+  });
+
+  it('CKP_001_contract_refinements_accept_what_the_json_schema_accepts', () => {
+    const body = {
+      schemaVersion: 1, auth: { mode: 'oidc', issuer: 'https://idp.bank.example', clientId: 'horus-cockpit' },
+      hosts: [{ id: 'kyc', label: { en: 'KYC', vi: 'Định danh', 'en-GB': 'KYC' }, baseUrl: 'https://kyc.bank.example', scope: 'kyc-bpm' }],
+    };
+    expect(hostsSchema(body)).toBe(true);
+    expect(validateRegistrySchema(body).ok).toBe(true);
   });
 
   it('CKP_001_contract_mock_host_fixtures_are_valid', () => {
