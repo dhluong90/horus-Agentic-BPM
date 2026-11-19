@@ -1,0 +1,51 @@
+# The normal form of rule-set.v1 cells (ADR-0026). Frozen: a changed line is a new schema version, never a patch.
+# Format: kind | type of x | cell as authored | normal form. Kind "when" is a condition of input x; "then" an output cell.
+when | integer  | >= 3                                        | >= 3
+when | integer  | x >= 3                                      | >= 3
+when | integer  |   >=   3                                    | >= 3
+when | integer  | == 7                                        | == 7
+when | integer  | x == null                                   | is null
+when | integer  | between 1 and 5                             | between 1 and 5
+when | integer  | x between 1 and 5                           | between 1 and 5
+when | integer  | x > 1 and x <= 5                            | x > 1 and x <= 5
+when | integer  | is not null                                 | is not null
+when | integer  | x is not null                               | is not null
+when | integer  | x < 18 or x > 65                            | x < 18 or x > 65
+when | integer  | not (x < 18)                                | not (x < 18)
+when | integer  | -5 < x                                      | -5 < x
+when | integer  | x > y                                       | x > y
+when | integer  | x + 1 > 3                                   | x + 1 > 3
+when | string   | == 'GOLD'                                   | == 'GOLD'
+when | string   | x != 'VN'                                   | != 'VN'
+when | string   | in ['VN','SG']                              | in ['VN', 'SG']
+when | string   | x in [ 'VN' , 'SG' ]                        | in ['VN', 'SG']
+when | string   | not in ['VN', 'SG']                         | not in ['VN', 'SG']
+when | string   | not in ['VN']                               | != 'VN'
+when | string   | == 'it\'s'                                  | == 'it\'s'
+when | boolean  | == true                                     | == true
+when | date     | == date('2026-12-01')                       | == date('2026-12-01')
+when | datetime | == datetime('2026-12-01T00:00:00+07:00')    | == datetime('2026-11-30T17:00:00Z')
+when | datetime | >= datetime('2026-12-01T00:00:00Z')         | >= datetime('2026-12-01T00:00:00Z')
+when | money    | == 12.5 USD                                 | == 12.50 USD
+when | money    | >= 50000000 VND                             | >= 50000000 VND
+when | money    | x < 0.1 USD                                 | < 0.10 USD
+then | string   | 'GOLD'                                      | 'GOLD'
+then | money    | 12.5 USD                                    | 12.50 USD
+then | money    | 10000 VND                                   | 10000 VND
+then | money    | -5 USD                                      | -5.00 USD
+then | integer  | 30000                                       | #30000
+then | boolean  | true                                        | #true
+then | date     | date('2026-12-01')                          | date('2026-12-01')
+then | datetime | datetime('2026-12-01T07:00:00+07:00')       | datetime('2026-12-01T00:00:00Z')
+then | integer  | x * 2                                       | x * 2
+when | integer  | y >= 3                                      | y >= 3
+when | string   | == 'V​N'                                 | == 'V\u200BN'
+when | string   | == 'V\u200BN'                              | == 'V\u200BN'
+when | string   | == 'a\u0009b'                              | == 'a\u0009b'
+when | string   | == 'Вб'                                     | == 'Вб'
+then | decimal  | 0.10                                        | 0.10
+then | decimal  | 0.1                                         | 0.1
+then | decimal  | 0.1000000000000000055511151231257827        | 0.1000000000000000055511151231257827
+then | integer  | 9007199254740993                            | 9007199254740993
+then | integer  | -5                                          | #-5
+then | nulloutput | null                                        | <omitted>

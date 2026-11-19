@@ -253,6 +253,43 @@ public Money cardFee(String tier, int txCount) {
 }
 ```
 
+## Demo: import a DMN decision table
+
+A `.dmn` file goes through the same import endpoint as YAML, with `Content-Type: application/xml` (or `text/xml`, `application/dmn+xml`). It becomes a `DRAFT` that a second person approves before it evaluates. The sample is a hand-written table in the style a common DMN modeller writes: [`card-fee-modeller.dmn`](src/test/resources/rules/dmn/card-fee-modeller.dmn).
+
+Start the host on the `dev` profile as in [Host metadata with two demo users](#host-metadata-with-two-demo-users), then sign in `lan` (author), `minh` (approver) and `tuan` (teller), each with their own cookie jar, and send the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on every `POST`:
+
+```bash
+DMN=examples/rule-engine-only/src/test/resources/rules/dmn/card-fee-modeller.dmn
+xsrf() { awk '$6=="XSRF-TOKEN"{print $7}' "$1"; }
+
+curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -H 'Content-Type: application/xml' \
+  -H 'Idempotency-Key: demo-dmn-1' --data-binary @$DMN localhost:8080/api/bpm/rules/v1/rule-sets
+# {"ruleSet":"card-fee","version":1,"status":"DRAFT",...,"sourceFormat":"DMN_XML",...,
+#  "definition":{...,"rules":[{"description":"Gold customers pay nothing","id":"DecisionRule_0fk2x7a",
+#  "then":{"fee":0},"when":{"tier":"== 'GOLD'"}},...]}}
+
+curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -X POST \
+  localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:request-publish
+curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -X POST \
+  localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve
+# {"ruleSet":"card-fee","version":1,"status":"PUBLISHED",...,"requestedBy":"lan",...,"approvedBy":"minh",...}
+
+curl -s -b tuan -c tuan -H "X-XSRF-TOKEN: $(xsrf tuan)" -H 'Content-Type: application/json' \
+  -d '{"inputs":{"tier":"GOLD","txCount":5}}' localhost:8080/api/bpm/rules/v1/decisions/card-fee:evaluate
+# {"decisionId":"...","ruleSet":"card-fee","version":1,...,"outcome":"MATCHED","matchedRuleIds":["DecisionRule_0fk2x7a"],"outputs":{"fee":0}}
+
+curl -s -b lan -OJ 'localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=dmn'
+# writes card-fee-v1.dmn (DMN 1.5); importing it as the next version gives the same canonicalHash
+```
+
+Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..500000000]`), lists (`"VN", "SG"`), `not(...)`, `-`, `null`, strings, numbers, booleans, `date("2026-01-01")` and `date and time("...")`; `money(12.50, "USD")` is an extension other DMN tools do not read. Anything else is refused as a whole, naming the cell:
+
+```
+422 VALIDATION_FAILED  Rule DecisionRule_1lh0wd3, input txCount: '? >= 3': '?' (a unary test expression)
+                       is not supported before full FEEL (line 32)
+```
+
 ## Environment variables
 
 | Variable | Default | Meaning |

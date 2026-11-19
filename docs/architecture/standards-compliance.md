@@ -563,6 +563,7 @@ Published per release (`TR-STD-05`). The claim is "BPMN 2.0.2 Process Execution 
 | FEEL evaluation without bounds | Step budget and recursion depth | Principle 3 |
 | FEEL errors as `null` | Per-model `errorMode`; guardrails fail closed | Banking fail-closed rule |
 | Choreography and conversation | Imported with that part kept untouched in the stored source document and a warning naming it; not displayed or executed | Not targeted (PD-065) |
+| DMN vendor `extensionElements`, foreign attributes and DMNDI on export | Accepted on import and kept only in the stored source document; not read, never executed, and not written back by DMN export, so an exported file has no diagram and no vendor extensions | DMNDI round trip arrives in stage S3 (section 6.2); until then the source document (`?include=source`) keeps them byte for byte |
 
 ## 13. Decisions needed and open questions
 

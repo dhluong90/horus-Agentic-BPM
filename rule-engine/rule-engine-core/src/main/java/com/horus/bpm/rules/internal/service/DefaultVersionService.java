@@ -3,6 +3,7 @@ package com.horus.bpm.rules.internal.service;
 import com.horus.bpm.rules.api.ImportRequest;
 import com.horus.bpm.rules.api.InputInvalidException;
 import com.horus.bpm.rules.api.InvalidStateException;
+import com.horus.bpm.rules.api.PayloadTooLargeException;
 import com.horus.bpm.rules.api.LifecycleAction;
 import com.horus.bpm.rules.api.Page;
 import com.horus.bpm.rules.api.PageRequest;
@@ -32,6 +33,7 @@ import com.horus.bpm.rules.internal.store.EventOutbox;
 import com.horus.bpm.rules.internal.store.HistoryRow;
 import com.horus.bpm.rules.internal.store.RuleStore;
 import com.horus.bpm.rules.internal.store.StoredVersion;
+import io.github.dhluong90.bpm.rules.internal.dmn.ruleset.DmnWriter;
 import tools.jackson.databind.node.ObjectNode;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -93,6 +95,9 @@ public final class DefaultVersionService implements VersionService {
 
     private RuleSetVersion importDocument(String targetRuleSet, ImportRequest request) {
         Objects.requireNonNull(request, "request must not be null");
+        if (request.size() > RuleSetReader.MAX_SOURCE_BYTES) {
+            throw new PayloadTooLargeException(RuleSetReader.MAX_SOURCE_BYTES);
+        }
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_AUTHOR);
         byte[] source = request.source();
@@ -105,11 +110,13 @@ public final class DefaultVersionService implements VersionService {
     }
 
     private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source) {
-        if (format != SourceFormat.YAML) {
-            throw new InputInvalidException("Only YAML import is available in this release");
+        if (format != SourceFormat.YAML && format != SourceFormat.DMN_XML) {
+            throw new InputInvalidException("Only YAML and DMN XML import are available in this release");
         }
         String sourceText = utf8(source);
         ParsedRuleSet parsed = RuleSetReader.read(format, source);
+        // The import model equals the parsed canonical form (checked by the reader, ADR-0026 decision 4); it is compiled
+        // here so violations follow the order cells are written in (RLE-041). Evaluation compiles only from the stored form.
         int rows = parsed.model().decision().table().rules().size();
         if (rows > context.settings().maxRows()) {
             throw new ValidationFailedException("The rule set has " + rows + " rules; evaluation.max-rows allows "
@@ -329,6 +336,23 @@ public final class DefaultVersionService implements VersionService {
         }
         return context.withoutDooming(() ->
                 store.findVersion(tenant, ruleSet, version, false).map(v -> v.toView(includeSource)));
+    }
+
+    @Override
+    public String export(String ruleSet, int version, SourceFormat format) {
+        Objects.requireNonNull(format, "format must not be null");
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        requireRuleSetName(ruleSet);
+        StoredVersion stored = context.withoutDooming(() -> store.findVersion(tenant, ruleSet, version, false)
+                .orElseThrow(() -> store.findRuleSetId(tenant, ruleSet).isPresent()
+                        ? new VersionNotFoundException(ruleSet, version)
+                        : new RuleSetNotFoundException(ruleSet)));
+        return switch (format) {
+            case JSON -> stored.canonicalJson();
+            case DMN_XML -> DmnWriter.write(stored.canonicalJson());
+            case YAML -> throw new InputInvalidException("YAML export is not available in this release; use json or dmn");
+        };
     }
 
     /**

@@ -486,9 +486,7 @@ public final class CompiledRuleSet {
             problems.add(new Violation(ruleId, input, "the condition must be a non-empty string"));
             return new Expr.Literal(Boolean.FALSE);
         }
-        String trimmed = text.strip();
-        boolean shorthand = SHORTHAND_PREFIXES.stream().anyMatch(trimmed::startsWith);
-        String source = shorthand ? input + " " + trimmed : trimmed;
+        String source = conditionSource(input, text);
         Expr expr;
         try {
             expr = Parser.parse(source, name -> slots.getOrDefault(name, -1));
@@ -501,6 +499,20 @@ public final class CompiledRuleSet {
             problems.add(new Violation(ruleId, input, problem));
         }
         return expr;
+    }
+
+    /**
+     * Returns the full expression of a condition cell: a shorthand such as {@code "< 18"} is prefixed with its
+     * input name, a full expression is returned as written.
+     *
+     * @param input the input the cell is keyed by
+     * @param text the cell text
+     * @return the expression source
+     */
+    public static String conditionSource(String input, String text) {
+        String trimmed = text.strip();
+        boolean shorthand = SHORTHAND_PREFIXES.stream().anyMatch(trimmed::startsWith);
+        return shorthand ? input + " " + trimmed : trimmed;
     }
 
     /** Parses one output cell (or an output default, with no rule id) and checks it against the output's type. */

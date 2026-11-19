@@ -145,10 +145,15 @@ class RuleEngineOnlyHostIT {
         assertThat(ruleSet.path("ruleSet").asString()).isEqualTo("card-fee");
         assertThat(ruleSet.path("hitPolicy").asString()).isEqualTo("first");
         assertThat(ruleSet.path("rules")).hasSize(3);
-        assertThat(ruleSet.path("rules").path(1).path("then").path("discountRate").decimalValue())
+        // Decimals are strings with their scale (ADR-0026): a JSON number would be hashed through double
+        assertThat(new BigDecimal(ruleSet.path("rules").path(1).path("then").path("discountRate").asString()))
                 .isEqualTo(new BigDecimal("0.015"));
-        assertThat(ruleSet.path("rules").path(2).path("then").path("discountRate").decimalValue())
+        assertThat(new BigDecimal(ruleSet.path("rules").path(2).path("then").path("discountRate").asString()))
                 .isEqualTo(new BigDecimal("0.1000000000000000055511151231257827"));
+        // and the engine stores that value exactly, with its own hash
+        com.horus.bpm.rules.internal.read.ParsedRuleSet parsed = com.horus.bpm.rules.internal.read.RuleSetReader.read(
+                com.horus.bpm.rules.api.SourceFormat.JSON, getClass().getResourceAsStream("/rule-sets/card-fee.rule-set.json").readAllBytes());
+        assertThat(parsed.canonicalJson()).contains("\"discountRate\":\"0.1000000000000000055511151231257827\"");
     }
 
     @Test

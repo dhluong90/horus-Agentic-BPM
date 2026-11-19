@@ -57,7 +57,8 @@ class CoreArchitectureTest {
     static void importCore() {
         core = new ClassFileImporter()
                 .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
-                .importPackages("com.horus.bpm.rules");
+                // Both package roots while the ADR-0022 rename is pending: new code is under io.github.dhluong90.bpm.
+                .importPackages("com.horus.bpm.rules", "io.github.dhluong90.bpm.rules");
     }
 
     @Test
@@ -102,7 +103,8 @@ class CoreArchitectureTest {
     @Test
     void TR_API_06_jackson_3_only_inside_internal_and_never_jackson_2_databind() {
         noClasses()
-                .that().resideInAnyPackage("com.horus.bpm.rules.api..", "com.horus.bpm.rules.spi..")
+                .that().resideInAnyPackage("com.horus.bpm.rules.api..", "com.horus.bpm.rules.spi..",
+                        "io.github.dhluong90.bpm.rules.api..", "io.github.dhluong90.bpm.rules.spi..")
                 .should().dependOnClassesThat().resideInAnyPackage("tools.jackson..", "com.fasterxml.jackson..")
                 .because("no JSON library type appears in the public API (ADR-0016, ADR-0021)")
                 .check(core);
@@ -115,8 +117,10 @@ class CoreArchitectureTest {
     @Test
     void TR_EMB_03_public_api_does_not_depend_on_internal() {
         noClasses()
-                .that().resideInAnyPackage("com.horus.bpm.rules.api..", "com.horus.bpm.rules.spi..")
-                .should().dependOnClassesThat().resideInAnyPackage("com.horus.bpm.rules.internal..")
+                .that().resideInAnyPackage("com.horus.bpm.rules.api..", "com.horus.bpm.rules.spi..",
+                        "io.github.dhluong90.bpm.rules.api..", "io.github.dhluong90.bpm.rules.spi..")
+                .should().dependOnClassesThat().resideInAnyPackage("com.horus.bpm.rules.internal..",
+                        "io.github.dhluong90.bpm.rules.internal..")
                 .because("internal has no compatibility promise (ADR-0016)")
                 .check(core);
     }
@@ -144,12 +148,25 @@ class CoreArchitectureTest {
         classes()
                 .should().onlyDependOnClassesThat().resideInAnyPackage(
                         "java..", "tools.jackson..", "com.fasterxml.jackson.annotation..", "com.horus.bpm.rules..",
+                        "io.github.dhluong90.bpm.rules..",
                         // The YAML parser of jackson-dataformat-yaml, read directly only to refuse anchors, aliases
                         // and tags that Jackson does not report (security review of #1, finding 7).
                         "org.snakeyaml.engine..",
+                        // The JDK streaming XML parser for DMN XML, hardened in one place (no DTD, no external entity).
+                        "javax.xml", "javax.xml.stream..", "javax.xml.namespace..",
                         // JDK cryptography (HMAC-SHA256), used to sign list cursors (RLE-039, QA review of #147).
                         "javax.crypto..")
                 .because("rule-engine-core depends on the JDK and Jackson 3 only (TR-EMB-03, ADR-0021)")
+                .check(core);
+    }
+
+    @Test
+    void TR_SEC_01_feel_and_dmn_packages_use_no_reflection_scripting_or_network() {
+        noClasses()
+                .that().resideInAnyPackage("io.github.dhluong90.bpm.rules.internal.feel..",
+                        "io.github.dhluong90.bpm.rules.internal.dmn..")
+                .should().dependOnClassesThat().resideInAnyPackage("java.lang.reflect..", "javax.script..", "java.net..")
+                .because("FEEL and DMN evaluate untrusted models: no reflection, scripting or network (TR-SEC-01, ADR-0019)")
                 .check(core);
     }
 }

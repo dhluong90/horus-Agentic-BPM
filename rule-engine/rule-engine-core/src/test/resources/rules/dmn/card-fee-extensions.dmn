@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- card-fee as a Camunda 7 style modeller writes it: extensionElements on every level, foreign attributes, DMNDI. -->
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:camunda="http://camunda.org/schema/1.0/dmn" xmlns:biodi="http://bpmn.io/schema/dmn/biodi/2.0" id="Definitions_1abc" name="DRD" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="4.12.0">
+  <extensionElements>
+    <camunda:properties><camunda:property name="owner" value="cards-team" /></camunda:properties>
+  </extensionElements>
+  <decision id="card-fee" name="Monthly card fee" camunda:historyTimeToLive="180" camunda:versionTag="2026-11">
+    <extensionElements><camunda:properties><camunda:property name="channel" value="branch" /></camunda:properties></extensionElements>
+    <decisionTable id="DecisionTable_0x1" hitPolicy="FIRST" camunda:inputVariable="cellInput">
+      <extensionElements><camunda:properties><camunda:property name="table" value="t" /></camunda:properties></extensionElements>
+      <input id="Input_1" label="Card tier" biodi:width="192" camunda:inputVariable="tierValue">
+        <extensionElements><camunda:properties><camunda:property name="column" value="tier" /></camunda:properties></extensionElements>
+        <inputExpression id="InputExpression_1" typeRef="string">
+          <extensionElements><camunda:properties><camunda:property name="expr" value="tier" /></camunda:properties></extensionElements>
+          <text>tier</text>
+        </inputExpression>
+      </input>
+      <input id="Input_2" label="Transactions this month" biodi:width="150">
+        <inputExpression id="InputExpression_2" typeRef="integer"><text>txCount</text></inputExpression>
+      </input>
+      <output id="Output_1" label="Fee (VND)" name="fee" typeRef="number" biodi:width="120">
+        <extensionElements><camunda:properties><camunda:property name="unit" value="VND" /></camunda:properties></extensionElements>
+      </output>
+      <rule id="DecisionRule_1">
+        <extensionElements><camunda:properties><camunda:property name="row" value="1" /></camunda:properties></extensionElements>
+        <description>Gold customers pay nothing</description>
+        <inputEntry id="UnaryTests_1">
+          <extensionElements><camunda:properties><camunda:property name="cell" value="a" /></camunda:properties></extensionElements>
+          <text>"GOLD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_2"><text></text></inputEntry>
+        <outputEntry id="LiteralExpression_1">
+          <extensionElements><camunda:properties><camunda:property name="cell" value="b" /></camunda:properties></extensionElements>
+          <text>0</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_2">
+        <inputEntry id="UnaryTests_3"><text>-</text></inputEntry>
+        <inputEntry id="UnaryTests_4"><text>&gt;= 3</text></inputEntry>
+        <outputEntry id="LiteralExpression_2"><text>10000</text></outputEntry>
+      </rule>
+      <rule id="DecisionRule_3">
+        <inputEntry id="UnaryTests_5"><text>-</text></inputEntry>
+        <inputEntry id="UnaryTests_6"><text>-</text></inputEntry>
+        <outputEntry id="LiteralExpression_3"><text>50000</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram id="DMNDiagram_1">
+      <dmndi:DMNShape id="DMNShape_1" dmnElementRef="card-fee"><dc:Bounds height="80" width="180" x="160" y="100" /></dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>

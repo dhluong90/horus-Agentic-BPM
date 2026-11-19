@@ -4,8 +4,8 @@ info:
   version: 0.1.0
   description: |
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
-    This file covers the endpoints implemented so far: import, lists and reads, request
-    publication, approve, reject, history and evaluate. The remaining endpoints of
+    This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
+    export, request publication, approve, reject, history and evaluate. The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
     The tenant is never part of a request: it comes from the host's authenticated context
@@ -59,12 +59,21 @@ paths:
     post:
       tags: [rule-sets]
       operationId: importRuleSet
-      summary: Import a YAML document as version 1 of a new rule set
+      summary: Import a YAML document or a DMN decision table as version 1 of a new rule set
       description: |
         Stores the version as `DRAFT`, with the source document byte for byte, its SHA-256
         (`sourceHash`) and the SHA-256 of its RFC 8785 canonical form (`canonicalHash`). Nothing
-        in the document is evaluated. Permission `rules:author`, checked before the body is read. A
-        body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
+        in the document is evaluated. Permission `rules:author`, checked before the body is read.
+
+        A DMN 1.2 to 1.5 file (`application/xml`, `text/xml` or a DMN media type such as
+        `application/dmn+xml`) holding one decision with a decision table is read into the lowest
+        schema version that expresses it, so it gets the same checks, hash and four-eyes approval
+        as YAML. The rule set name is the decision id (kebab-case). Cells use a FEEL subset:
+        comparisons, ranges such as `[18..65]`, lists, `not(...)`, `-`, `null`, strings, numbers,
+        booleans, `date("...")` and `date and time("...")`; `money(12.50, "USD")` is a non-portable
+        extension. Anything else is `422 VALIDATION_FAILED` naming the rule, the column and the line.
+        DTDs and entities are refused, and the file must be UTF-8. A body over 1 MB (1,048,576 bytes)
+        is `413 PAYLOAD_TOO_LARGE`, for every content type.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -85,6 +94,19 @@ paths:
                 - id: R1
                   when: { tier: "== 'GOLD'" }
                   then: { fee: "0 VND" }
+          application/xml:
+            schema:
+              type: string
+            example: |
+              <definitions xmlns="https://www.omg.org/spec/DMN/20230324/MODEL/" name="card-fee" namespace="urn:example">
+                <decision id="card-fee" name="card-fee">
+                  <decisionTable hitPolicy="FIRST">
+                    <input><inputExpression typeRef="string"><text>tier</text></inputExpression></input>
+                    <output name="fee" typeRef="number"/>
+                    <rule id="R1"><inputEntry><text>"GOLD"</text></inputEntry><outputEntry><text>0</text></outputEntry></rule>
+                  </decisionTable>
+                </decision>
+              </definitions>
       responses:
         '201':
           $ref: '#/components/responses/VersionCreated'
@@ -159,10 +181,11 @@ paths:
     post:
       tags: [rule-sets]
       operationId: importVersion
-      summary: Import a YAML document as the next draft version of an existing rule set
+      summary: Import a YAML document or a DMN decision table as the next draft version of an existing rule set
       description: |
-        The document's `ruleSet` must equal `{name}`. Permission `rules:author`, checked before the
-        body is read. A body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
+        The document's `ruleSet` (for DMN, the decision id) must equal `{name}`. DMN files are read
+        as for `importRuleSet`. Permission `rules:author`, checked before the body is read. A body
+        over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -170,6 +193,9 @@ paths:
         required: true
         content:
           application/yaml:
+            schema:
+              type: string
+          application/xml:
             schema:
               type: string
       responses:
@@ -208,6 +234,42 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}/export:
+    get:
+      tags: [rule-sets]
+      operationId: exportVersion
+      summary: Export a version as a file that imports back with the same canonical hash
+      description: |
+        `format=json` is the RFC 8785 canonical document; `format=dmn` is a DMN 1.5 document with
+        one decision table. The file carries no tenant, status, lock version, requester, approver or
+        decision data. A version that uses `any` or `all` groups, output defaults, collect
+        aggregates or calculated cells has no decision table form and is `422 VALIDATION_FAILED`
+        naming the rule and the cell. YAML export is not available yet. Writes nothing. Permission
+        `rules:read`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [json, dmn]
+      responses:
+        '200':
+          description: The file, with `Content-Disposition` `attachment; filename="<name>-v<version>.<json|dmn>"`
+          content:
+            application/json:
+              schema:
+                type: object
+            application/xml:
+              schema:
+                type: string
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/history:
     get:
       tags: [rule-sets]
