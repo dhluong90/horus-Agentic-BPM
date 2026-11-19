@@ -43,12 +43,23 @@ export function DraftsOffNote() {
   return can('rules:author') && !cockpitDrafts ? <p className="rs-head__note">{t('dock.draftsOff')}</p> : null;
 }
 
+/** When the version takes effect once approved: its proposed date if it has one in the future, else at once. */
+function TakesEffect({ effectiveFrom }: { effectiveFrom: string | null | undefined }) {
+  const { t, locale } = useI18n();
+  // Read once when the card opens: the hint must not flip while the approver is reading it.
+  const [now] = useState(() => Date.now());
+  const future = effectiveFrom !== null && effectiveFrom !== undefined && Date.parse(effectiveFrom) > now;
+  const when = future ? formatDateTime(effectiveFrom, locale) : undefined;
+  return <p className="dock__hint">{when === undefined ? t('decision.takesEffect') : t('decision.takesEffectOn', { when })}</p>;
+}
+
 /**
  * The four-eyes decision for a version waiting for approval. What the user may do comes from the engine's
  * allowedActions for this caller, and a disabled Approve always says why. A stale click still gets the
- * engine's answer, shown with its code behind Details.
+ * engine's answer, shown with its code behind Details. Docked, it sits at the bottom of the screen under the
+ * side-by-side diff, so Approve stays in view while the approver reads what changed.
  */
-export function DecisionCard({ version, approve, reject, onReload }: { version: RuleSetVersion; approve: Action<string>; reject: Action<string>; onReload: () => void }) {
+export function DecisionCard({ version, approve, reject, onReload, docked = false }: { version: RuleSetVersion; approve: Action<string>; reject: Action<string>; onReload: () => void; docked?: boolean }) {
   const { t } = useI18n();
   const { userId } = useRulesSession();
   const [text, setText] = useState('');
@@ -64,37 +75,41 @@ export function DecisionCard({ version, approve, reject, onReload }: { version: 
   const unavailable = canApprove ? undefined : self ?? 'dock.approveUnavailable';
   const busy = approve.isPending || reject.isPending;
   return (
-    <section className="card decision" aria-labelledby="decision-title">
+    <section className={docked ? 'card decision decision--dock' : 'card decision'} aria-labelledby="decision-title">
       <h2 id="decision-title" className="rules-card-title">{t('decision.title')}</h2>
       {!canApprove && !canReject && self === undefined ? (
         <p className="dock__note">{t('dock.waiting')}</p>
       ) : (
         <>
-          {unavailable !== undefined ? (
-            <p id={reasonId} className="gate__reason">
-              <span aria-hidden="true">⊘</span> {t(unavailable)}
-            </p>
-          ) : null}
-          {canApprove || canReject ? (
-            <label className="field" htmlFor={textId}>
-              <span className="field__label">{t('decision.comment')}</span>
-              <textarea id={textId} className="field__input" rows={2} value={text} placeholder={t('decision.commentHint')}
-                aria-describedby={canReject ? hintId : undefined} onChange={(e) => { setText(e.target.value); }} />
-            </label>
-          ) : null}
-          <div className="gate__buttons">
-            <button type="button" className="btn btn--primary btn--ok" disabled={!canApprove || busy} aria-busy={approve.isPending}
-              {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : {})} onClick={() => { approve.start(text.trim()); }}>
-              <span aria-hidden="true">✓</span> {approve.isPending ? t('dock.approving') : t('dock.approve')}
-            </button>
-            {canReject ? (
-              <button type="button" className="btn btn--danger-quiet" disabled={text.trim() === '' || busy} aria-describedby={hintId} onClick={() => { reject.start(text.trim()); }}>
-                {reject.isPending ? t('dock.rejecting') : t('dock.reject')}
-              </button>
+          <div className="decision__body">
+            {unavailable !== undefined ? (
+              <p id={reasonId} className="gate__reason">
+                <span aria-hidden="true">⊘</span> {t(unavailable)}
+              </p>
+            ) : null}
+            {canApprove || canReject ? (
+              <label className="field" htmlFor={textId}>
+                <span className="field__label">{t('decision.comment')}</span>
+                <textarea id={textId} className="field__input" rows={docked ? 1 : 2} value={text} placeholder={t('decision.commentHint')}
+                  aria-describedby={canReject ? hintId : undefined} onChange={(e) => { setText(e.target.value); }} />
+              </label>
             ) : null}
           </div>
-          {canReject ? <p id={hintId} className="dock__hint">{t('dock.reasonHint')}</p> : null}
-          {canApprove ? <p className="dock__hint">{t('decision.takesEffect')}</p> : null}
+          <div className="decision__actions">
+            <div className="gate__buttons">
+              <button type="button" className="btn btn--primary btn--ok" disabled={!canApprove || busy} aria-busy={approve.isPending}
+                {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : {})} onClick={() => { approve.start(text.trim()); }}>
+                <span aria-hidden="true">✓</span> {approve.isPending ? t('dock.approving') : t('dock.approve')}
+              </button>
+              {canReject ? (
+                <button type="button" className="btn btn--danger-quiet" disabled={text.trim() === '' || busy} aria-describedby={hintId} onClick={() => { reject.start(text.trim()); }}>
+                  {reject.isPending ? t('dock.rejecting') : t('dock.reject')}
+                </button>
+              ) : null}
+            </div>
+            {canReject ? <p id={hintId} className="dock__hint">{t('dock.reasonHint')}</p> : null}
+            {canApprove ? <TakesEffect effectiveFrom={version.effectiveFrom} /> : null}
+          </div>
         </>
       )}
       {error !== undefined && error !== null ? <ProblemNotice error={error} onReload={onReload} /> : null}

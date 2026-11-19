@@ -4,7 +4,7 @@ import { toHostError } from '../../api/hostError';
 import type { Rule, RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useRulesSession } from './api/rulesContext';
-import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersions } from './api/useRules';
+import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
 import { DecisionCard, DetailsPanel, DraftsOffNote, EditDock, HeaderActions, type Action } from './components/ActionDock';
 import { ChangesView } from './components/ChangesView';
 import { DecisionTable } from './components/DecisionTable';
@@ -67,13 +67,26 @@ function Inspector({ version, onMatched }: { version: RuleSetVersion; onMatched:
   );
 }
 
-/** The diff reads the base version in full only when the Changes view is open. */
+/**
+ * The approver's comparison. The engine computes the diff (RLE-028); both versions are read in full so every
+ * row shows beside its counterpart. Nothing is fetched until the Changes view is open.
+ */
 function ChangesLens({ version, base }: { version: RuleSetVersion; base: VersionSummary | undefined }) {
   const { t } = useI18n();
   const baseVersion = useVersion(version.ruleSet, base?.version);
-  if (base && baseVersion.isPending) return <p className="empty" role="status">{t('ruleSets.loading')}</p>;
+  const diff = useVersionDiff(version.ruleSet, version.version, base?.version);
+  if (!base) {
+    return (
+      <div className="changes">
+        <p className="changes__summary"><strong>{t('changes.first')}</strong></p>
+        <DecisionTable definition={version.definition} version={version.version} matched={new Set()} />
+      </div>
+    );
+  }
   if (baseVersion.isError) return <ProblemNotice error={baseVersion.error} />;
-  return <ChangesView definition={version.definition} base={baseVersion.data?.definition} baseVersion={base?.version} baseInEffect={base?.status === 'PUBLISHED'} />;
+  if (diff.isError) return <ProblemNotice error={diff.error} />;
+  if (baseVersion.isPending || diff.isPending) return <p className="empty" role="status">{t('ruleSets.loading')}</p>;
+  return <ChangesView diff={diff.data} base={baseVersion.data} next={version} />;
 }
 
 function LensContent({ lens, version, base, matched }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string> }) {
@@ -131,6 +144,13 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
     save.start({ contentType: 'application/yaml', text: JSON.stringify(document, null, 2) });
   };
   const tabLens: 'table' | 'changes' | 'history' = lens === 'source' ? 'table' : lens;
+  // Two versions side by side need the full width: one view at a time, and the decision docks below the diff.
+  const comparing = !editing && lens === 'changes';
+  const decision = (docked: boolean) => (
+    <DecisionCard version={version} docked={docked} onReload={() => { window.location.reload(); }}
+      approve={{ start: (comment) => { approve.start({ version, comment }); }, isPending: approve.isPending, error: approve.error }}
+      reject={{ start: (reason) => { reject.start({ version, reason }); }, isPending: reject.isPending, error: reject.error }} />
+  );
   // The breadcrumb names what is on screen: "New draft" while editing, "Version N draft" for a draft.
   const crumb = editing ? t('crumb.newDraft') : version.status === 'DRAFT' ? t('crumb.versionDraft', { version: String(version.version) }) : undefined;
   useEffect(() => {
@@ -192,15 +212,11 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
           </div>
         ) : null}
       </div>
-      <div className={editing ? 'workbench workbench--editing' : 'workbench'}>
+      <div className={editing ? 'workbench workbench--editing' : comparing ? 'workbench workbench--wide' : 'workbench'}>
         {main}
-        <aside className="workbench__side">
+        {comparing ? null : <aside className="workbench__side">
           {editing ? <DraftChanges definition={version.definition} base={version.definition.rules} next={draftRules} /> : null}
-          {!editing && version.status === 'PENDING_APPROVAL' ? (
-            <DecisionCard version={version} onReload={() => { window.location.reload(); }}
-              approve={{ start: (comment) => { approve.start({ version, comment }); }, isPending: approve.isPending, error: approve.error }}
-              reject={{ start: (reason) => { reject.start({ version, reason }); }, isPending: reject.isPending, error: reject.error }} />
-          ) : null}
+          {!editing && version.status === 'PENDING_APPROVAL' ? decision(false) : null}
           {!editing ? (
             <Inspector version={version} onMatched={(ids) => {
               setMatched(new Set(ids));
@@ -208,8 +224,9 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
               if (lens !== 'table' && ids.length > 0) go({ lens: 'table' });
             }} />
           ) : null}
-        </aside>
+        </aside>}
       </div>
+      {comparing && version.status === 'PENDING_APPROVAL' ? decision(true) : null}
       {editing ? <EditDock unsaved={unsaved} toFix={errors.length} saving={save.isPending} onSave={saveDraft} onDiscard={() => { reset(false); }}
         onViewChanges={() => {
           const card = window.document.getElementById('draft-changes');

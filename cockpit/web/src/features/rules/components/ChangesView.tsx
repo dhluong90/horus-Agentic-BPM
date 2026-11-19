@@ -1,155 +1,186 @@
-import type { Rule, RuleSetDefinition } from '../../../api/rules/schemas';
+import type { Rule, RuleSetDefinition, RuleSetVersion, VersionDiff } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
-import { diffRules, type RowDiff } from '../model/diff';
+import { formatDateTime } from '../model/dates';
 import { cellText, nonAsciiCharacters } from '../model/nonAscii';
-import { readCondition, readOutput, type CellReading } from '../model/reading';
-import { CellValue, ValueText } from './CellValue';
-import { TableHead } from './DecisionTable';
+import { columnLabel, readCondition, readOutput } from '../model/reading';
+import { countChanges, pairRows, structureNotes, type PairChange, type RowPair, type StructureNote } from '../model/versionDiff';
+import { CellValue } from './CellValue';
 
-const GLYPH: Record<RowDiff['change'], string> = { ADDED: '＋', CHANGED: '✎', MOVED: '⇅', REMOVED: '−', UNCHANGED: '' };
+const GLYPH: Record<PairChange, string> = { ADDED: '＋', CHANGED: '✎', MOVED: '⇅', REMOVED: '−', UNCHANGED: '' };
 
+type Side = 'base' | 'next';
+
+/** The characters the engine flagged, named by code point; an escape or a hidden character has no visible glyph. */
 function NonAsciiMark({ raw }: { raw: string }) {
   const { t } = useI18n();
   const characters = nonAsciiCharacters(raw);
-  if (characters.length === 0) return null;
   return (
     <span className="nonascii-mark">
-      <span aria-hidden="true">▲</span> {t('changes.nonAscii', { chars: characters.join(', ') })}
+      <span aria-hidden="true">▲</span> {characters.length > 0 ? t('changes.nonAscii', { chars: characters.join(', ') }) : t('changes.hiddenCharacter')}
     </span>
   );
 }
 
-/** A changed list of values reads as the values with the added ones marked: Gold (+ Platinum). */
-function ListDiff({ now, before }: { now: Extract<CellReading, { kind: 'values' }>; before: Extract<CellReading, { kind: 'values' }> }) {
-  const { t } = useI18n();
-  const text = (value: (typeof now.values)[number]) => (value.kind === 'text' ? value.text : value.kind);
-  const old = new Set(before.values.map(text));
-  const kept = new Set(now.values.map(text));
+/** Version number, effective date and content hash: the metadata of one side, never content changes (RLE-028). */
+function SideHead({ version, effectiveFrom, hash, span, side }: { version: RuleSetVersion; effectiveFrom: string | null; hash: string; span: number; side: Side }) {
+  const { t, locale } = useI18n();
+  const when = formatDateTime(effectiveFrom, locale);
+  let meta: string;
+  if (version.status === 'PENDING_APPROVAL' || version.status === 'DRAFT') meta = when === undefined ? t('changes.sideProposed') : t('changes.sideProposedOn', { when });
+  else if (when === undefined) meta = t('changes.sideNoDate');
+  else meta = version.status === 'PUBLISHED' ? t('changes.sideInEffect', { when }) : t('changes.sideEffectiveFrom', { when });
   return (
-    <span className="cell-values">
-      {now.values.map((value, index) => (
-        <span key={index} className={old.has(text(value)) ? 'value-pill' : 'value-pill value-pill--added'}>
-          {old.has(text(value)) ? null : <span aria-hidden="true">+ </span>}
-          {!old.has(text(value)) ? <span className="sr-only">{t('change.ADDED')} </span> : null}
-          <ValueText value={value} />
-        </span>
-      ))}
-      {before.values.filter((value) => !kept.has(text(value))).map((value, index) => (
-        <span key={`r${String(index)}`} className="value-pill value-pill--removed">
-          <span className="sr-only">{t('change.REMOVED')} </span><ValueText value={value} />
-        </span>
-      ))}
-    </span>
+    <th scope="colgroup" colSpan={span} className={`sbs__side sbs__side--${side} sbs__start--${side}`}>
+      <span className="sbs__title">{t('changes.sideTitle', { version: String(version.version) })}</span>
+      <span className="sbs__meta">{meta}</span>
+      <span className="sbs__hash">{t('details.hash')} <span className="mono" title={hash}>{hash.slice(0, 12)}</span></span>
+    </th>
   );
 }
 
-function DiffCell({ now, before, changed, raw }: { now: CellReading; before: CellReading; changed: boolean; raw: string }) {
+function ColumnGroups({ definition, side }: { definition: RuleSetDefinition; side: Side }) {
   const { t } = useI18n();
-  if (!changed) return <CellValue reading={now} />;
-  if (now.kind === 'values' && before.kind === 'values' && now.negated === before.negated) {
-    return (
-      <>
-        <ListDiff now={now} before={before} />
-        <NonAsciiMark raw={raw} />
-      </>
-    );
-  }
   return (
     <>
-    <span className="diff-cell">
-      <span className="diff-cell__old">
-        <span className="sr-only">{t('changes.was')} </span>
-        <CellValue reading={before} />
-      </span>
-      <span aria-hidden="true" className="diff-cell__arrow">→</span>
-      <span className="diff-cell__new">
-        <CellValue reading={now} />
-      </span>
-    </span>
-    <NonAsciiMark raw={raw} />
+      {definition.inputs.length > 0 ? <th scope="colgroup" colSpan={definition.inputs.length} className={`dt__group sbs__start--${side}`}>{t('table.when')}</th> : null}
+      {definition.outputs.length > 0 ? <th scope="colgroup" colSpan={definition.outputs.length} className="dt__group dt__group--then">{t('table.then')}</th> : null}
     </>
   );
 }
 
-function rowClass(row: RowDiff): string {
-  return `diff-row diff-row--${row.change.toLowerCase()}`;
+function ColumnNames({ definition, side }: { definition: RuleSetDefinition; side: Side }) {
+  return (
+    <>
+      {definition.inputs.map((input, index) => (
+        <th key={`${side}-in-${input.name}`} scope="col" className={index === 0 ? `sbs__start--${side}` : undefined}>{columnLabel(input.name, input.description)}</th>
+      ))}
+      {definition.outputs.map((output, index) => (
+        <th key={`${side}-out-${output.name}`} scope="col" className={index === 0 ? 'dt__first-then' : undefined}>{columnLabel(output.name, output.description)}</th>
+      ))}
+    </>
+  );
+}
+
+/** One side of a row: its cells, or one quiet cell saying the row is not on this side. */
+function SideCells({ definition, rule, pair, side, absent }: { definition: RuleSetDefinition; rule: Rule | undefined; pair: RowPair; side: Side; absent: string }) {
+  const { t, locale } = useI18n();
+  const span = definition.inputs.length + definition.outputs.length;
+  if (rule === undefined) return <td colSpan={span} className={`sbs__absent sbs__start--${side}`}>{absent}</td>;
+  const cell = (part: 'when' | 'then', name: string, first: string | undefined) => {
+    const key = `${part}.${name}`;
+    const changed = pair.changed.has(key);
+    const value = part === 'when' ? rule.when[name] : rule.then[name];
+    const classes = [first, changed ? (side === 'next' ? 'diff-td--mod' : 'diff-td--old') : undefined].filter(Boolean).join(' ');
+    return (
+      <td key={`${side}-${key}`} className={classes === '' ? undefined : classes}>
+        {changed ? <span className="sr-only">{side === 'next' ? t('change.CHANGED') : t('changes.was')} </span> : null}
+        <CellValue reading={part === 'when' ? readCondition(rule.when[name], locale) : readOutput(rule.then[name], locale)} />
+        {side === 'next' && pair.nonAscii.has(key) ? <NonAsciiMark raw={cellText(value)} /> : null}
+      </td>
+    );
+  };
+  return (
+    <>
+      {definition.inputs.map((input, index) => cell('when', input.name, index === 0 ? `sbs__start--${side}` : undefined))}
+      {definition.outputs.map((output, index) => cell('then', output.name, index === 0 ? 'dt__first-then' : undefined))}
+    </>
+  );
+}
+
+function RowMarks({ pair }: { pair: RowPair }) {
+  const { t } = useI18n();
+  const marks: PairChange[] = pair.change === 'UNCHANGED' ? [] : pair.change === 'CHANGED' && pair.moved ? ['CHANGED', 'MOVED'] : [pair.change];
+  return (
+    <>
+      {marks.map((mark) => (
+        <span key={mark} className={`change-mark change-mark--${mark.toLowerCase()}`}>
+          <span aria-hidden="true">{GLYPH[mark]}</span> {t(`change.${mark}`)}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function NoteText({ note }: { note: StructureNote }) {
+  const { t } = useI18n();
+  const policy = (value: string) => {
+    const upper = value.toUpperCase();
+    return t(upper === 'UNIQUE' ? 'policy.UNIQUE' : upper === 'COLLECT' ? 'policy.COLLECT' : 'policy.FIRST');
+  };
+  switch (note.kind) {
+    case 'hitPolicy':
+      return <>{t('changes.note.hitPolicy', { from: policy(note.from), to: policy(note.to) })}</>;
+    case 'member':
+      return <>{note.member === 'description' ? t('changes.note.description') : t('changes.note.member', { member: note.member })}</>;
+    case 'columnAdded':
+    case 'columnRemoved':
+    case 'columnChanged':
+      return <>{t(`changes.note.${note.kind}.${note.group}`, { name: note.name })}</>;
+    case 'columnsReordered':
+      return <>{t(`changes.note.columnsReordered.${note.group}`)}</>;
+  }
 }
 
 /**
- * The checker's view: one summary line, then the rows of this version against the base version with the
- * editor's labels and formats. The comparison is computed in this browser until the engine's diff endpoint
- * (RLE-028, issue #165) lands; the stored version is the Table tab, and Details shows its content hash.
+ * The approver's comparison: the base version (usually the one in effect) and the proposed version side by
+ * side in one table, so each rule id sits on one line. What changed comes from the engine's diff (RLE-028);
+ * the cells use the editor's labels and formats. Effective dates and hashes are version metadata in the header.
  */
-export function ChangesView({ definition, base, baseVersion, baseInEffect }: {
-  definition: RuleSetDefinition;
-  base: RuleSetDefinition | undefined;
-  baseVersion: number | undefined;
-  baseInEffect: boolean;
-}) {
-  const { t, locale } = useI18n();
-  const rows = diffRules(base?.rules ?? [], definition.rules);
-  // Changed cells whose new literal holds characters outside ASCII, so the summary can flag them too.
-  const nonAscii = rows.reduce((total, row) => total + [...row.changedCells].filter((cell) => {
-    const [part, name] = cell.split('.') as ['when' | 'then', string];
-    return nonAsciiCharacters(cellText(row.rule?.[part][name])).length > 0;
-  }).length, 0);
-  const count = (change: RowDiff['change']) => String(rows.filter((row) => row.change === change || (change === 'MOVED' && row.moved && row.change === 'CHANGED')).length);
-  const empty: Rule = { id: '', when: {}, then: {} };
+export function ChangesView({ diff, base, next }: { diff: VersionDiff; base: RuleSetVersion; next: RuleSetVersion }) {
+  const { t } = useI18n();
+  const pairs = pairRows(diff, base.definition.rules, next.definition.rules);
+  const counts = countChanges(diff);
+  const notes = structureNotes(diff);
+  const values = { added: String(counts.added), changed: String(counts.changed), moved: String(counts.moved), removed: String(counts.removed), unchanged: String(counts.unchanged) };
+  const baseSpan = base.definition.inputs.length + base.definition.outputs.length;
+  const nextSpan = next.definition.inputs.length + next.definition.outputs.length;
+  const caption = t('changes.caption', { base: String(base.version), version: String(next.version), name: next.ruleSet });
   return (
     <div className="changes">
-      {base ? <p className="changes__note">{t('changes.browserNote')}</p> : null}
       <p className="changes__summary">
-        {base && baseVersion !== undefined ? (
-          <>
-            <strong className="tnum">{t('changes.summaryLine', { added: count('ADDED'), changed: count('CHANGED'), removed: count('REMOVED'), unchanged: count('UNCHANGED') })}</strong>
-            <span>{t(baseInEffect ? 'changes.comparedInEffect' : 'changes.comparedWith', { base: String(baseVersion) })}</span>
-          </>
-        ) : (
-          <strong>{t('changes.first')}</strong>
-        )}
-        {nonAscii > 0 ? (
-          <span className="nonascii-mark"><span aria-hidden="true">▲</span> {t('changes.nonAsciiCount', { count: String(nonAscii) })}</span>
+        <strong className="tnum">{t(counts.moved > 0 ? 'changes.summaryMoved' : 'changes.summaryLine', values)}</strong>
+        {counts.nonAscii > 0 ? (
+          <span className="nonascii-mark"><span aria-hidden="true">▲</span> {t('changes.nonAsciiCount', { count: String(counts.nonAscii) })}</span>
         ) : null}
       </p>
-      <div className="dt-scroll" role="region" tabIndex={0} aria-label={t('changes.tableLabel')}>
-        <table className="dt dt--diff">
-          <TableHead definition={definition} />
+      {notes.length > 0 ? (
+        <ul className="changes__notes" aria-label={t('changes.notesLabel')}>
+          {notes.map((note, index) => <li key={index}><NoteText note={note} /></li>)}
+        </ul>
+      ) : null}
+      <div className="dt-scroll" role="region" tabIndex={0} aria-label={caption}>
+        <table className="dt dt--diff dt--sbs">
+          <caption className="sr-only">{caption}</caption>
+          <thead>
+            <tr className="sbs__versions">
+              <th scope="col" rowSpan={3} className="dt__rowhead">{t('table.row')}</th>
+              <SideHead version={base} effectiveFrom={diff.effectiveFrom.from} hash={diff.baseCanonicalHash} span={baseSpan} side="base" />
+              <SideHead version={next} effectiveFrom={diff.effectiveFrom.to} hash={diff.canonicalHash} span={nextSpan} side="next" />
+            </tr>
+            <tr className="dt__groups">
+              <ColumnGroups definition={base.definition} side="base" />
+              <ColumnGroups definition={next.definition} side="next" />
+            </tr>
+            <tr>
+              <ColumnNames definition={base.definition} side="base" />
+              <ColumnNames definition={next.definition} side="next" />
+            </tr>
+          </thead>
           <tbody>
-            {rows.map((row) => {
-              const now = row.rule ?? row.base ?? empty;
-              const before = row.base ?? empty;
-              return (
-                <tr key={`${row.change}-${row.ruleId}`} className={rowClass(row)}>
-                  <th scope="row" className="dt__rowhead">
-                    <span className="row-id mono">{row.ruleId}</span>
-                    {row.change !== 'UNCHANGED' ? (
-                      <span className={`change-mark change-mark--${row.change.toLowerCase()}`}>
-                        <span aria-hidden="true">{GLYPH[row.change]}</span> {t(`change.${row.change}`)}
-                      </span>
-                    ) : null}
-                    {row.change === 'CHANGED' && row.moved ? (
-                      <span className="change-mark change-mark--moved">
-                        <span aria-hidden="true">{GLYPH.MOVED}</span> {t('change.MOVED')}
-                      </span>
-                    ) : null}
-                  </th>
-                  {definition.inputs.map((input) => (
-                    <td key={input.name} className={row.changedCells.has(`when.${input.name}`) ? 'diff-td--mod' : undefined}>
-                      <DiffCell now={readCondition(now.when[input.name], locale)} before={readCondition(before.when[input.name], locale)} changed={row.changedCells.has(`when.${input.name}`)} raw={cellText(now.when[input.name])} />
-                    </td>
-                  ))}
-                  {definition.outputs.map((output, index) => (
-                    <td key={output.name} className={[index === 0 ? 'dt__first-then' : '', row.changedCells.has(`then.${output.name}`) ? 'diff-td--mod' : ''].join(' ').trim() || undefined}>
-                      <DiffCell now={readOutput(now.then[output.name], locale)} before={readOutput(before.then[output.name], locale)} changed={row.changedCells.has(`then.${output.name}`)} raw={cellText(now.then[output.name])} />
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
+            {pairs.map((pair) => (
+              <tr key={`${pair.change}-${pair.ruleId}`} className={`diff-row diff-row--${pair.change.toLowerCase()}`}>
+                <th scope="row" className="dt__rowhead">
+                  <span className="row-id mono">{pair.ruleId}</span>{' '}
+                  <RowMarks pair={pair} />
+                </th>
+                <SideCells definition={base.definition} rule={pair.base} pair={pair} side="base" absent={t('changes.notInBase', { version: String(base.version) })} />
+                <SideCells definition={next.definition} rule={pair.next} pair={pair} side="next" absent={t('changes.removedIn', { version: String(next.version) })} />
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
-      {rows.every((row) => row.change === 'UNCHANGED') && base ? <p className="empty">{t('changes.none')}</p> : null}
+      {diff.rows.length === 0 && notes.length === 0 ? <p className="empty">{t('changes.none')}</p> : null}
     </div>
   );
 }

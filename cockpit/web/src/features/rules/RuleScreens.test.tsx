@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../../App';
 import type { Scenario } from '../../mocks/fixtures';
 import { mockHost, setScenario } from '../../mocks/node';
+import { formatDateTime } from './model/dates';
 
 /** Engine calls the screens made, in order: method and path. */
 let calls: { method: string; path: string; key: string | null }[] = [];
@@ -184,16 +185,56 @@ describe('four eyes', () => {
     expect(approve).toHaveAccessibleDescription(/Approve is unavailable\. You requested this change\. Another approver must decide\./);
   });
 
+  it('CKP_002_approver_sees_both_versions_side_by_side_before_the_approval_action', async () => {
+    open('#/rules/card-fee/2', 'rules-approver');
+    const table = await screen.findByRole('table', { name: 'Version 1 and version 2 of card-fee, side by side' });
+    expect(screen.getByText('1 added, 1 changed, 1 removed, 3 unchanged')).toBeInTheDocument();
+    // The engine compares: one diff request against the version in effect, and no other version is changed.
+    expect(calls.filter((c) => c.path.includes('/diff'))).toEqual([{ method: 'GET', path: '/rule-sets/card-fee/versions/2/diff', key: null }]);
+    const marks = within(table).getAllByRole('rowheader').map((th) => th.textContent.replace(/[＋✎⇅−]/g, '').replace(/\s+/g, ' ').trim());
+    expect(marks).toEqual(['R1', 'R2', 'R6 Added', 'R3 Changed', 'R4 Removed', 'R5']);
+    expect(within(table).getByText('35,000 VND').closest('td')).toHaveClass('diff-td--mod');
+    // The diff comes before the decision in reading order, and the decision is the only other panel.
+    const approve = screen.getByRole('button', { name: 'Approve and publish' });
+    expect(table.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Inspector' })).not.toBeInTheDocument();
+    expect(writes()).toEqual([]);
+  });
+
+  it('CKP_002_a_proposed_effective_date_is_named_beside_approve', async () => {
+    const effectiveFrom = '2027-01-01T00:00:00Z';
+    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/card-fee/versions/2', () => HttpResponse.json({ ...pendingV2, effectiveFrom, allowedActions: ['approve', 'reject'] })));
+    open('#/rules/card-fee/2/table', 'rules-approver');
+    expect(await screen.findByText(`Takes effect ${formatDateTime(effectiveFrom, 'en') ?? ''} once approved.`)).toBeInTheDocument();
+  });
+
+  it('CKP_002_a_refused_diff_is_shown_with_its_code_and_no_table', async () => {
+    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/card-fee/versions/2/diff', () => HttpResponse.json(
+      { type: 'x', title: 'Not Found', status: 404, code: 'VERSION_NOT_FOUND', detail: 'Version 1 of rule set card-fee not found', correlationId: '01JDIFF00000000000000000000' },
+      { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
+    )));
+    open('#/rules/card-fee/2', 'rules-approver');
+    expect(await screen.findByTestId('problem-code')).toHaveTextContent('VERSION_NOT_FOUND');
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('CKP_002_the_first_version_has_nothing_to_compare_and_calls_no_diff', async () => {
+    open('#/rules/kyc-risk/1/changes', 'rules-approver');
+    expect(await screen.findByText('First version: every row is new.')).toBeInTheDocument();
+    expect(calls.some((c) => c.path.includes('/diff'))).toBe(false);
+  });
+
   it('CKP_032_approver_reads_the_changes_and_approves', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/2', 'rules-approver');
-    expect(await screen.findByText('Compared with Version 1, in effect now')).toBeInTheDocument();
-    expect(screen.getByText('1 added, 2 changed, 0 removed, 3 unchanged')).toBeInTheDocument();
-    expect(screen.getByText('Compared in this browser. The stored version is in the Table tab.')).toBeInTheDocument();
+    expect(await screen.findByText('1 added, 1 changed, 1 removed, 3 unchanged')).toBeInTheDocument();
     expect(screen.queryByText(/Characters outside ASCII/)).not.toBeInTheDocument();
-    // One table: the stored version is the Table tab; Details carries its content hash.
+    // One table: both versions side by side; each side's header carries its content hash.
     expect(screen.getAllByRole('table')).toHaveLength(1);
-    expect(screen.getByText('Content hash')).toBeInTheDocument();
+    const hashes = [...document.querySelectorAll('.sbs__hash')].map((el) => el.textContent);
+    expect(hashes).toHaveLength(2);
+    hashes.forEach((text) => { expect(text).toMatch(/^Content hash [0-9a-f]{12}$/); });
+    expect(new Set(hashes).size).toBe(2);
     expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled();
     await user.type(screen.getByLabelText('Comment'), 'Matches the tariff');
     await user.click(screen.getByRole('button', { name: 'Approve and publish' }));
