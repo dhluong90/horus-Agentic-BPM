@@ -55,15 +55,14 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `50000000 VND` vs `3000.00 USD -> EVALUATION_ERROR (currency mismatch)`.
 - **Test ID:** `RLE_005_money_currency_mismatch_is_rejected`
 
-### RLE-006 Null comparisons evaluate to false; explicit `is null` required
-- **Traces to:** `TR-DET-01`
+### RLE-006 Null follows FEEL three-valued logic; a condition matches only when it is `true`
+- **Traces to:** `TR-DET-01`, `TR-STD-02`
 - **Milestone:** M1
-- **Given:** Rule `R1` (`income < 5000000 VND`) and `R2` (`income is null`).
-- **When:** Evaluate with `income = null`.
-- **Then:** `R1` evaluates to `false` (does not match); `R2` matches (`matchedRuleIds = ["R2"]`).
-- **Example:** `income = null -> R1 false, R2 true`.
-- **Test ID:** `RLE_006_null_comparisons_are_false_unless_is_null`
-- **Pending decision P1 (ADR-0019, proposed):** if FEEL three-valued null logic is accepted for M1, this statement keeps its Given, When and Then, and adds two cases: `tier != 'GOLD'` with `tier = null` matches (FEEL: `null != "GOLD"` is `true`), and `not (income < 5000000 VND)` with `income = null` does not match (FEEL: `not(null)` is `null`). See [`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 4.3.
+- **Given:** Rule set `null-check` v1 with `hitPolicy: collect`, inputs `income` (money, VND) and `tier` (string), and rules `R1` (`income < 5000000 VND`), `R2` (`income is null`), `R3` (`tier != 'GOLD'`), `R4` (`not(income < 5000000 VND)`), `R5` (`tier not in ['GOLD', 'PLATINUM']`), `R6` (`tier == 'GOLD'`), `R7` (`income < 5000000 VND or tier is null`), `R8` (`income < 5000000 VND and tier is null`).
+- **When:** Evaluate with `income = null` and `tier = null`.
+- **Then:** `R1` is `null` (no match); `R2` is `true` (match); `R3` is `true` (match, `null != "GOLD"` is `true` in FEEL); `R4` is `null` (no match, `not(null)` is `null`); `R5` is `true` (match, `not(null in [...])` is `not(false)`); `R6` is `false` (no match); `R7` is `true` (`null or true`); `R8` is `null` (`null and true`, no match). `matchedRuleIds = ["R2", "R3", "R5", "R7"]`; the decision is logged with outcome `OK`, and replaying it with its logged version and clock gives the same list.
+- **Example:** `income = null, tier = null -> matched R2, R3, R5, R7; R1, R4, R6, R8 not matched`.
+- **Test ID:** `RLE_006_null_follows_feel_three_valued_logic`
 
 ### RLE-007 Regex execution is bounded by length and timeout
 - **Traces to:** `TR-SEC-02`
@@ -209,7 +208,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ### RLE-021 Every expression has a FEEL translation that gives the same result
 - **Traces to:** `TR-STD-02`, `TR-DET-01`
-- **Milestone:** M1 (proposed with ADR-0019; the null cases depend on decision P1)
+- **Milestone:** M1 (ADR-0019; null cases as `RLE-006`, PD-058)
 - **Given:** jqwik generators for well-typed `horus-expr-v1` expressions over `string`, `integer`, `decimal`, `boolean`, `date`, `datetime` and lists, with inputs including `null`, and the translation table of `standards-compliance.md` section 4.4. The reference FEEL implementation runs in test scope only.
 - **When:** Each expression is evaluated by the engine and its FEEL translation by the reference implementation with the same inputs and clock; 1,000 tries per property in CI, 100,000 nightly. Fixed cases: `7 / 2`, `round(2.5, 0)`, `matches('ab12', '[0-9]+')`, `daysBetween(date('2027-01-01'), date('2027-03-01'))`.
 - **Then:** Results are equal for every try (money expressions excluded, since money is a HORUS extension); the fixed cases give `3.5`, `2`, `true` and `59`.
@@ -224,3 +223,21 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** v1 matches `R1` (`today()` is 2027-01-16 in the rule set's zone); v2 does not match (`today()` is 2027-01-15 in UTC); replaying either decision with its logged version and clock gives the same result.
 - **Example:** `clock 2027-01-15T18:30Z, zone Asia/Ho_Chi_Minh -> today() = 2027-01-16`.
 - **Test ID:** `RLE_022_today_uses_rule_set_time_zone`
+
+### RLE-023 Engine JSON is the engine's own: host Jackson settings change no engine payload
+- **Traces to:** `TR-EMB-07`, `TR-API-06`
+- **Milestone:** M1
+- **Given:** The example host with the Rule Engine starter and REST module, rule set `card-fee` v1 published, and host properties `spring.jackson.property-naming-strategy=SNAKE_CASE` and `spring.jackson.serialization.write-dates-as-timestamps=true`; the test runs in the Spring Boot 4.x leg and in the Spring Boot 3.5 leg, where the host's Jackson 2 stays at the version its dependency management pins.
+- **When:** `card-fee.yaml` is imported with `POST /api/bpm/rules/v1/rule-sets`, then `POST /api/bpm/rules/v1/decisions/card-fee:evaluate` is sent with body `{ "inputs": { "tier": "GOLD", "txCount": 5 } }`.
+- **Then:** Both requests succeed; the evaluate response keys are camelCase (`matchedRuleIds`, `decisionId`, `evaluatedAt`), `evaluatedAt` is an ISO 8601 string, and `fee` is `{ "currency": "VND", "amount": 0 }`; the host's own controllers still answer in snake case; in the 3.5 leg the resolved dependency tree has `tools.jackson` artifacts from the engine and the host's `com.fasterxml.jackson` artifacts at the host's pinned version, with no override in the host build.
+- **Example:** `host SNAKE_CASE -> engine response {"matchedRuleIds":["R1"],"outputs":{"fee":{"currency":"VND","amount":0}}}`.
+- **Test ID:** `RLE_023_engine_json_ignores_host_jackson_settings`
+
+### RLE-024 A v1 rule set reads into the DMN model and writes back to the same canonical JSON
+- **Traces to:** `TR-STD-28`, `TR-STD-03`
+- **Milestone:** M1
+- **Given:** `card-fee.yaml` (v1, `hitPolicy: first`, inputs `tier` and `txCount`, output `fee`, rules `R1` to `R3`) and the RFC 8785 hash the pipeline computed from it.
+- **When:** The v1 reader builds the in-memory model and the canonical writer prints it back.
+- **Then:** The model is one `Definitions` named `card-fee` holding one `Decision` `card-fee` whose `DecisionTable` has hit policy `FIRST`, input clauses `tier` and `txCount`, output clause `fee` and rules with ids `R1`, `R2`, `R3` in document order; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document and its SHA-256 equals the pipeline hash and the stored `canonical_hash`.
+- **Example:** `card-fee.yaml -> Definitions(card-fee) / Decision(card-fee) / DecisionTable(FIRST, 2 inputs, 1 output, 3 rules) -> same hash`.
+- **Test ID:** `RLE_024_v1_rule_set_round_trips_through_dmn_model`

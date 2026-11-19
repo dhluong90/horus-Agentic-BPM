@@ -12,7 +12,7 @@ Reference for the libraries and tools the project uses, what each one is for, an
 | Data access | Spring JDBC `JdbcClient` | Apache 2.0 | JPA/Hibernate: hidden queries and entity lifecycle inside a library; jOOQ: code generation and dual licence |
 | Database | PostgreSQL 14+ behind a storage port | | Multi-database in 0.x: doubles the matrix before the design is proven |
 | Migrations | Flyway community edition, one history table per engine | Apache 2.0 | Liquibase: heavier |
-| JSON | Jackson | Apache 2.0 | Already in every Spring host |
+| JSON | Jackson 3, inside the engine only (ADR-0021); never in the public Java API | Apache 2.0 | Jackson 2: the deprecated line on Spring Boot 4; a port with one adapter per Jackson major: two adapters to keep equal, kept as the fallback |
 | JSON Schema (agentTask output) | `networknt/json-schema-validator` behind an `OutputSchemaValidator` port in the Process Engine starter; `*-core` sees only the port | Apache 2.0 | Writing a validator: Draft 2020-12 is large; `everit`: older drafts, less active |
 | Expression language | Hand-written recursive-descent parser, sealed typed tree, zero dependencies (ADR-0003) | | ANTLR: fine licence, more machinery than the grammar needs; SpEL, MVEL, JEXL: allow method calls and reflection |
 | Identifiers | ULID, generated in `*-core` (Crockford base32, monotonic within a millisecond) | | UUIDv4: index churn; sequences: not replica-safe; a ULID library: 60 lines are not worth a dependency |
@@ -42,9 +42,8 @@ New runtime dependencies need a one-paragraph justification in the pull request 
 |---|---|
 | CI | GitHub Actions: Java 21/25 x PostgreSQL 14/16/17, one job through PgBouncer in transaction mode, ArchUnit, benchmark trend, SBOM, licence check, wiki publish |
 | Versioning | Semver per module; tags `<module>/vX.Y.Z`; `bpm-bom` with every release |
-| Distribution | Maven Central via the Sonatype Central Portal |
+| Distribution | Maven Central via the Sonatype Central Portal, `groupId` `io.github.dhluong90.bpm` (ADR-0022) |
 
 ## Open decisions
-- **Maven groupId.** `com.horus.bpm` needs verified ownership of `horus.com`; otherwise a domain the project controls, or `io.github.<owner>.bpm`. Decided before the first published artifact.
 - **Java 25 as baseline** once host adoption allows.
 - **JSON Schema validator.** `networknt/json-schema-validator` is the proposed default; the port keeps the choice reversible. Decided before M2 starts.

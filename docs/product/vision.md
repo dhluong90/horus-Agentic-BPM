@@ -4,7 +4,7 @@
 |---|---|
 | Type | Explanation |
 | Owner area | Product |
-| Last reviewed | 2026-11-18 |
+| Last reviewed | 2026-11-19 |
 
 Design preview: nothing is released. Milestone dates are owned by the [product roadmap](roadmap.md) and feature scope by the [feature map](feature-map.md); this page links to them and never restates dates as commitments. Product decisions are in the [decision log](decisions.md).
 
@@ -41,7 +41,7 @@ The first sentence alone is true of other embeddable engines. The line depends o
 | # | Differentiator | Rests on |
 |---|---|---|
 | 1 | Runs inside the host service and its PostgreSQL transaction: no engine cluster, no broker, no separate identity | Principles 1 and 2, [ADR-0002](../adr/0002-state-in-host-database.md), [ADR-0004](../adr/0004-no-standalone-server.md) |
-| 2 | Rule and process changes by business users with maker-checker, effective dates and simulation (validation and graph diff for processes) enforced in the service layer, not only in a UI | Principles 5 and 6, `TR-SEC-04`, [PD-033](decisions.md#pd-033-maker-checker-for-process-definitions), [PD-040](decisions.md#pd-040-principle-6-extended-to-process-definitions) |
+| 2 | Rule and process changes by business users with maker-checker, effective dates and simulation (validation and graph diff for processes) enforced in the service layer, not only in a UI. Four-eyes holds by default; a bank can turn on a logged emergency single-approver path by configuration, reviewed after every use, and only then is the claim weakened for that bank ([PD-012](decisions.md#pd-012-emergency-single-approver-path)) | Principles 5 and 6, `TR-SEC-04`, [PD-033](decisions.md#pd-033-maker-checker-for-process-definitions), [PD-040](decisions.md#pd-040-principle-6-extended-to-process-definitions) |
 | 3 | Agent output validated by a JSON Schema and a guardrail rule set before the process continues; on violation, a human approves or the step fails | Principle 7, `TR-AGT-01`, [ADR-0008](../adr/0008-async-wait-state-for-external-steps.md) |
 
 ![The three differentiators: in-transaction evaluation, governed change, checked agent output](images/vision-differentiators.svg)
@@ -69,7 +69,7 @@ BPMN 2.0 and DMN are fully supported on the roadmap, and CMMN never is ([PD-057]
 | M1 to M3 (before 1.0) | Rule sets and process definitions in JSON or YAML; a documented BPMN subset imported and exported in M3; DMN single decision tables imported in M3; anything else refused by name with the release that adds it. Foundations are built in now so that later stages need no rewrite and no data migration |
 | 1.1, 1.2, 1.3 (after 1.0) | Every BPMN element imported, displayed and exported; execution added in three stages; DMN Level 2, then full FEEL and Level 3. Dates are pending ([PD-062](decisions.md#pd-062-release-targets-for-the-standards-track)); content and exit criteria are in the [roadmap](roadmap.md#standards-track-after-10-s1-to-s3) |
 
-The standards are implemented inside the principles, not beside them: the engines stay libraries in the host JVM with no listener or broker client, state stays in the host database, evaluation stays deterministic, definitions contain no code, and every network call is an Async Wait-State. Where the standard and a principle collide, the deviation is published. What is supported is exactly what is published. The new wording of principle 9 is pending as [PD-063](decisions.md#pd-063-principle-9-wording-and-the-standards-non-goals).
+The standards are implemented inside the principles, not beside them: the engines stay libraries in the host JVM with no listener or broker client, state stays in the host database, evaluation stays deterministic, definitions contain no code, and every network call is an Async Wait-State. Where the standard and a principle collide, the deviation is published. What is supported is exactly what is published. The BPMN and DMN semantic models are the engines' canonical model, with our JSON as their canonical serialisation ([PD-060](decisions.md#pd-060-canonical-model-bpmn-and-dmn-semantic-models), decided 2026-11-19). The new wording of principle 9 is pending as [PD-063](decisions.md#pd-063-principle-9-wording-and-the-standards-non-goals); with PD-060 decided, the recommended wording is its option 1.
 
 Conformance is not a differentiator: established BPM and decision engines already claim it. It removes a reason to lose an evaluation and lets a team take its models away. The three differentiators above are why a team chooses these engines.
 
@@ -100,4 +100,4 @@ Who uses the Rule Engine, through which surface, and the use cases per milestone
 | Time to first decision | A newcomer completes Getting Started in under 30 minutes | Roadmap M1 exit, kept through 1.0 |
 | Contract stability | API frozen at 1.0; deprecations overlap one minor release | Roadmap M3, principle 8 |
 
-Proposed, not yet adopted: a North Star of governed decisions and process steps executed per week by adopters' services. It needs adopter-reported numbers, since the engine sends no telemetry. Pending as [PD-019](decisions.md#pd-019-north-star-metric).
+North Star: governed decisions and process steps executed per week in adopters' services, reported by adopters from M3, since the engine sends no telemetry. Before M3 three early signals stand in for it: time to a first logged decision for a newcomer, external teams running an example host, and `agentTask` escalations completed by a person in pilot hosts ([PD-019](decisions.md#pd-019-north-star-metric), decided 2026-11-19).

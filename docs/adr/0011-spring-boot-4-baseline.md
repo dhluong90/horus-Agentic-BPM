@@ -29,7 +29,7 @@ Spring Boot 4.x is the primary baseline: the starters build against the newest g
 4. Keep "3.4 and later 3.x": 3.4 left open-source support on 2025-12-31.
 
 ## Consequences
-- Spring Boot 4 brings Spring Framework 7, Jakarta EE 11 and Jackson 3 as its default JSON library; 3.5 uses Jackson 2. `*-core` depends on Jackson, so the Jackson major used by `*-core`, and how the starters bridge the other one, must be fixed in `rule-engine/docs/DESIGN.md` and `process-engine/docs/DESIGN.md` before M1 code starts. Jackson types must not appear in the public Java API.
+- Spring Boot 4 brings Spring Framework 7, Jakarta EE 11 and Jackson 3 as its default JSON library; 3.5 uses Jackson 2. `*-core` depends on Jackson, so the Jackson major used by `*-core`, and how the starters bridge the other one, must be fixed in `rule-engine/docs/DESIGN.md` and `process-engine/docs/DESIGN.md` before M1 code starts. Jackson types must not appear in the public Java API. Fixed on 2026-11-19 by ADR-0021: Jackson 3 inside the cores only.
 - Spring Boot 4 splits auto-configuration into smaller modules (Flyway and JDBC support among them). The starters declare those modules explicitly.
 - The CI matrix becomes Java 21/25 x Spring Boot 4.x minors in support plus 3.5.x x PostgreSQL 14/16/17, with one job through PgBouncer in transaction mode.
 - Dropping 3.5 at 1.0 is announced in the release notes of every 0.x release.

@@ -1,8 +1,8 @@
 # ADR-0020: Execution tree with scope tokens, event subscriptions and cancellation
 
-- Status: proposed (Decision needed by the product owner for the M2 part, about 4 days)
-- Date: 2026-11-18
-- Deciders: maintainers; product owner for the M2 effort
+- Status: accepted, 2026-11-19
+- Date: 2026-11-18 (proposed), 2026-11-19 (accepted)
+- Deciders: maintainers; accepted by the product owner, including the M2 effort (PD-059 option 1)
 - Module: process-engine
 
 ## Context
@@ -23,7 +23,11 @@ Details and DDL: [`standards-compliance.md`](../architecture/standards-complianc
 3. One generic subscription table for timers too, replacing `pre_timer` for waits. Uniform, but splits the job queue that already gives one poller and one partial index for timers, SLA escalations and async leases; no gain for the cost.
 
 ## Consequences
-- `pre_token.scope_id TEXT` becomes `scope_token_id VARCHAR(26)` with a self-reference, if accepted before the first M2 migration.
+- `pre_token.scope_id TEXT` is replaced by `token_kind` and `scope_token_id VARCHAR(26)` with a self-reference in the first M2 migration, and `pre_compensation_stack.scope_id` by `scope_token_id` (process engine DESIGN section 7). Requirement `TR-STD-29`; statement `PRE-044`.
 - Each instance gets one extra token row: 1 million instances a month add about 150 MB a month.
 - TX2 of the Async Wait-State checks `status = 'CLAIMED'` in addition to the lease.
 - New S2 tables `pre_event_subscription` and `pre_signal`, new job kinds `BOUNDARY_TIMER`, `START_TIMER`, `SIGNAL_DELIVERY`, new APIs `MessageService` and `SignalService`, all additive.
+
+## History
+- 2026-11-18: proposed by the maintainers, with a decision needed by the product owner for the M2 part (about 4 days).
+- 2026-11-19: accepted by the product owner as PD-059 option 1, before any M2 migration exists.

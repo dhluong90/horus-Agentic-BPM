@@ -1,13 +1,13 @@
 # Standards compliance: full BPMN 2.0 and DMN
 
-Status: target architecture, 2026-11-18. The product owner decided on 2026-11-18 that BPMN 2.0 and DMN are fully supported on the roadmap, that CMMN is out of scope, and that full support is not required for M1 or M2 but the architecture must reach it without a rewrite ([ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md)). This document is the target, the staging and the list of changes the M1 and M2 designs need now. It is owned by architecture; requirement ids `TR-STD-*` are in [`docs/product/requirements.md`](../product/requirements.md).
+Status: target architecture, 2026-11-18, updated 2026-11-19. The product owner decided on 2026-11-18 that BPMN 2.0 and DMN are fully supported on the roadmap, that CMMN is out of scope, and that full support is not required for M1 or M2 but the architecture must reach it without a rewrite ([ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md)). On 2026-11-19 the product owner decided P1 to P4 of section 9.2: FEEL null semantics from M1 (PD-058), scope tokens in M2 (PD-059, ADR-0020), the BPMN and DMN semantic models as the canonical model (PD-060, ADR-0018) and a HORUS-built FEEL (PD-061, ADR-0019). This document is the target, the staging and the list of changes the M1 and M2 designs need now. It is owned by architecture; requirement ids `TR-STD-*` are in [`docs/product/requirements.md`](../product/requirements.md).
 
 | If you need | Read |
 |---|---|
 | The decision and what it supersedes | [ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md) |
-| Why the BPMN and DMN semantic models are canonical | [ADR-0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md) (proposed) |
-| Why FEEL is built here and how the current expression language maps to it | [ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md) (proposed) |
-| The execution tree, scope tokens and event subscriptions | [ADR-0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md) (proposed) |
+| Why the BPMN and DMN semantic models are canonical | [ADR-0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md) (accepted) |
+| Why FEEL is built here and how the current expression language maps to it | [ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md) (accepted) |
+| The execution tree, scope tokens and event subscriptions | [ADR-0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md) (accepted) |
 | The system-level design this extends | [`overview.md`](overview.md) |
 
 Contents: 1 Scope. 2 Context. 3 Canonical internal model. 4 Expression strategy: FEEL. 5 Execution model changes. 6 Coverage by stage. 7 Principle conflicts. 8 Scale and bottleneck math. 9 Do now: changes to the M1 and M2 designs. 10 Conformance proof. 11 Staging after 1.0. 12 Deviation register. 13 Decisions needed and open questions.
@@ -55,9 +55,9 @@ Source: [`diagrams/standards-context.mmd`](diagrams/standards-context.mmd).
 
 ## 3. Canonical internal model
 
-### 3.1 Recommendation
+### 3.1 Decision
 
-The canonical model becomes the BPMN 2.0 and DMN semantic models (the OMG metamodels), held in `*-core` as sealed Java records. Our JSON becomes the canonical serialisation of that model: the form that is stored, hashed, diffed and approved. BPMN XML and DMN XML are first-class serialisations of the same model, read and written losslessly. The current `process-definition.v1` and `rule-set.v1` documents stay valid forever as a compact profile that a reader maps onto the model. Recorded as [ADR-0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md) (proposed, because it replaces the notation part of PD-034).
+The canonical model is the BPMN 2.0 and DMN semantic models (the OMG metamodels), held in `*-core` as sealed Java records. Our JSON is the canonical serialisation of that model: the form that is stored, hashed, diffed and approved. BPMN XML and DMN XML are first-class serialisations of the same model, read and written losslessly. The current `process-definition.v1` and `rule-set.v1` documents stay valid forever as a compact profile that a reader maps onto the model. Recorded as [ADR-0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md), accepted on 2026-11-19 (PD-060 option 2); it replaces the notation part of PD-034. Verified by `TR-STD-28` (`RLE-024`, `PRE-043`).
 
 ![Canonical model, readers and writers](images/standards-components.svg)
 
@@ -65,14 +65,14 @@ Source: [`diagrams/standards-components.mmd`](diagrams/standards-components.mmd)
 
 ### 3.2 Why not keep our own model canonical with a lossless round trip
 
-| Criterion | A. Our model canonical, lossless BPMN round trip | B. BPMN and DMN semantic models canonical, our JSON as serialisation (recommended) | C. BPMN or DMN XML text canonical, executed from the XML |
+| Criterion | A. Our model canonical, lossless BPMN round trip | B. BPMN and DMN semantic models canonical, our JSON as serialisation (chosen) | C. BPMN or DMN XML text canonical, executed from the XML |
 |---|---|---|---|
 | Size of the model | Grows toward the BPMN metamodel anyway: about 60 element and event-definition kinds, plus our own names for each | One model, the standard's names; HORUS concepts are extension records | One model, but XML-shaped: namespaces, `xsi:type`, references by string |
 | Mapping code | Two models and a two-way mapping per element; the mapping becomes the product and every BPMN feature is designed twice | One mapping per serialisation, mechanical: XML to model, model to XML, JSON to model, model to JSON | None for XML; JSON authoring needs a full mapping to XML |
 | MIWG round trip | Every element must survive two translations; edge cases (multiple flows between the same nodes, event definitions shared by reference) need special fields | Model mirrors the XML; round trip is serialise and compare | Trivial for import and export |
 | Hash, diff and approval | Unchanged from today | Hash and diff over the canonical JSON, which mirrors the model | Hash over XML is unstable (namespace prefixes, attribute order) unless we canonicalise XML |
 | Our step types (`agentTask`, guardrails, async mode, forms, SLA) | Native | Extension records in a `horus` namespace, as in ADR-0013 today | Extension elements only |
-| Cost before 1.0 | Lowest now, highest later | About 3 days in M1 and 5 days in M2 (pending decision P3, section 9.2) | Rewrite of the M2 definition handling |
+| Cost before 1.0 | Lowest now, highest later | About 3 days in M1 and 5 days in M2 (decided as P3, section 9.2) | Rewrite of the M2 definition handling |
 
 Option B wins because full BPMN means the model must be able to hold every element anyway; doing it once, in the standard's shape, removes a permanent translation layer. Option A remains possible but pays the design cost of every BPMN feature twice for as long as the product lives.
 
@@ -119,9 +119,9 @@ A rule set is a DMN `definitions` named after the rule set, holding one `decisio
 
 ## 4. Expression strategy: FEEL
 
-### 4.1 Recommendation
+### 4.1 Decision
 
-FEEL is the DMN expression language and becomes the engines' standard language. The engines get a HORUS-built, deterministic, sandboxed FEEL implementation in `rule-engine-core`, on the same typed tree, type checker and compiled evaluator as today's language. The current language (`horus-expr-v1`) stays as an authoring dialect, defined from M1 as a semantic subset of FEEL with a documented syntactic translation, so every v1 expression has a FEEL equivalent with the same result. Recorded as [ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md) (proposed).
+FEEL is the DMN expression language and becomes the engines' standard language. The engines get a HORUS-built, deterministic, sandboxed FEEL implementation in `rule-engine-core`, on the same typed tree, type checker and compiled evaluator as today's language. The current language (`horus-expr-v1`) stays as an authoring dialect, defined from M1 as a semantic subset of FEEL with a documented syntactic translation, so every v1 expression has a FEEL equivalent with the same result. Recorded as [ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md), accepted on 2026-11-19 (PD-061 option 1).
 
 ### 4.2 Options and licence check
 
@@ -138,7 +138,7 @@ Licences checked on 2026-11-18 from each project's repository licence file; they
 
 | Topic | Rule in both dialects | Status |
 |---|---|---|
-| Null | Three-valued logic as in FEEL: `<`, `<=`, `>`, `>=`, arithmetic and functions on `null` give `null`; `=` and `!=` with `null` are two-valued (`null = null` is true, `5 != null` is true); `and`, `or`, `not` follow FEEL truth tables. A condition matches only when it evaluates to `true` | Pending P1: changes `RLE-006` for `not` and `!=` (section 9.2) |
+| Null | Three-valued logic as in FEEL: `<`, `<=`, `>`, `>=`, arithmetic and functions on `null` give `null`; `=` and `!=` with `null` are two-valued (`null = null` is true, `5 != null` is true); `and`, `or`, `not` follow FEEL truth tables. A condition matches only when it evaluates to `true` | Decided (PD-058), from M1: `RLE-006` changes for `!=`, `not` and `not in` (rule engine DESIGN 3.2) |
 | Numbers | One number type in evaluation: `BigDecimal` with `MathContext.DECIMAL128` (34 significant digits, `HALF_EVEN`), as FEEL specifies. `integer` and `decimal` are declared constraints on it. `7 / 2` is `3.5` | Applied (rule engine DESIGN 3.2) |
 | `round(x, scale)` | Half-even, the FEEL `round half even` | Applied |
 | `matches(s, p)` | Unanchored search with the XPath `fn:matches` flag set, no back-references or look-around, bounded as `TR-SEC-02` | Applied |
@@ -194,7 +194,7 @@ Both dialects parse into the same `Expr` tree. Export to DMN writes FEEL text fr
 
 ## 5. Execution model changes
 
-The M2 runtime already has the right foundations: token rows, one `pre_instance` row lock per transition, a `SKIP LOCKED` job queue with leases, and the Async Wait-State. Full BPMN adds scope tokens, event subscriptions and cancellation. Recorded as [ADR-0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md) (proposed).
+The M2 runtime already has the right foundations: token rows, one `pre_instance` row lock per transition, a `SKIP LOCKED` job queue with leases, and the Async Wait-State. Full BPMN adds scope tokens, event subscriptions and cancellation. Recorded as [ADR-0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md), accepted on 2026-11-19 with scope tokens in M2 (PD-059 option 1). The M2 DDL of `pre_token` and `pre_compensation_stack` with `token_kind` and `scope_token_id` is in the process engine DESIGN section 7.
 
 ### 5.1 Execution tree and token states
 
@@ -206,7 +206,7 @@ Source: [`diagrams/execution-tree-states.mmd`](diagrams/execution-tree-states.mm
 
 | From | Trigger | Guard | To | Stage |
 |---|---|---|---|---|
-| none | Scope entered (process start, subprocess, transaction, event subprocess, multi-instance body or instance) | Instance row locked | Scope token `WAITING_SCOPE`; start token `ACTIVE` | Root and `saga` scopes M2 if P2 is accepted; others S1 |
+| none | Scope entered (process start, subprocess, transaction, event subprocess, multi-instance body or instance) | Instance row locked | Scope token `WAITING_SCOPE`; start token `ACTIVE` | Root and `saga` scopes M2 (PD-059, `PRE-044`); others S1 |
 | `ACTIVE` | Reaches a user task, async step or timer | As today | `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER`; boundary timers and subscriptions of the activity are created in the same transaction | Boundary parts S1 |
 | `ACTIVE` | Reaches a message, signal or conditional catch, a receive task or an event-based gateway | Subscription written in the same transaction | `WAITING_EVENT` | S2 |
 | any waiting status | Interrupting boundary event fires, terminate end event, instance cancel, migration off the node | Instance row locked | `CANCELLED`; open task `CANCELLED`; open job `CANCELLED` | `CANCELLED` and job cancellation M2 (applied, `PRE-041`); boundaries S1 |
@@ -479,14 +479,16 @@ The test for "do now" is whether the change is expensive or impossible later. Ad
 | DN-10 | Cancellation of in-flight async jobs: job status `CANCELLED`, TX2 requires `status = 'CLAIMED'`, token status `CANCELLED`; instance cancel and migration off a step use it; late results discarded and recorded. Needed in M2 for cancel; the same rule serves interrupting boundaries | M2 | Process engine DESIGN 3.4, 4, 7 | `PRE-041` |
 | DN-11 | Cockpit node types keyed by BPMN element type plus HORUS subtype; an unknown type renders as a labelled generic node; `/api/bpm/meta` may carry a `standards` object per module so a federated cockpit knows what each host executes | M2 | Cockpit DESIGN 10, `bpm-meta.v1` | `CKP-029` |
 
-### 9.2 Pending decisions for the product owner (larger)
+### 9.2 Larger decisions for the product owner
 
-| # | Change | Milestone | Effort (assumption) | Cost if not done now | Recommendation |
+P1 to P4 were decided on 2026-11-19; P5 to P9 are pending.
+
+| # | Change | Milestone | Effort (assumption) | Cost if not done now | Recommendation or decision |
 |---|---|---|---|---|---|
-| P1 | FEEL null semantics for `horus-expr-v1`: `x != 'GOLD'` with `x` null becomes true and `not(x < 5)` with `x` null becomes null (not matched). Changes `RLE-006` in those two cases; the wiki expression page changes too | M1 | 1 day, plus 3 days for the differential test harness with a reference FEEL implementation in test scope | After M1 ships, logged decisions depend on today's semantics; aligning later breaks replay (`TR-DET-05`) or leaves v1 forever different from FEEL | **Decision needed.** Accept |
-| P2 | Execution tree with scope tokens: a root scope token per instance and one per `saga`; `scope_token_id` replaces the text `scope_id`; joins and compensation keyed by scope token | M2 | About 4 days in M2 | Joins and compensation written for flat scopes are rewritten for subprocesses, event subprocesses and multi-instance in S1, and every in-flight instance needs a data migration | **Decision needed.** Accept |
-| P3 | Canonical semantic model in `*-core` (ADR-0018): the M1 rule set model shaped as DMN definitions, decision and decision table; the M2 process model as flow nodes and sequence flows with ids; the M3 BPMN subset reader built on it | M1, M2, M3 | About 3 days in M1 and 5 days in M2 | The M3 BPMN reader and every later stage map onto a model that cannot hold full BPMN; a rewrite of the definition layer in S1 | **Decision needed.** Accept; changes the notation part of PD-034 |
-| P4 | HORUS-built FEEL (ADR-0019) | S1 to S3 | About 22 engineer-weeks: S-FEEL core 6, full FEEL 12, TCK completion 4 | n/a (after 1.0) | **Decision needed.** Accept |
+| P1 | FEEL null semantics for `horus-expr-v1`: `x != 'GOLD'` with `x` null becomes true and `not(x < 5)` with `x` null becomes null (not matched). Changes `RLE-006` in those two cases and for `x not in [...]`, which translates to `not(x in [...])` and so matches a null `x` like `!=`; the wiki expression page changes too | M1 | 1 day, plus 3 days for the differential test harness with a reference FEEL implementation in test scope | After M1 ships, logged decisions depend on today's semantics; aligning later breaks replay (`TR-DET-05`) or leaves v1 forever different from FEEL | **Decided** 2026-11-19: accepted (PD-058 option 1); `RLE-006`, `RLE-021`, `TR-STD-02` |
+| P2 | Execution tree with scope tokens: a root scope token per instance and one per `saga`; `scope_token_id` replaces the text `scope_id`; joins and compensation keyed by scope token | M2 | About 4 days in M2 | Joins and compensation written for flat scopes are rewritten for subprocesses, event subprocesses and multi-instance in S1, and every in-flight instance needs a data migration | **Decided** 2026-11-19: accepted (PD-059 option 1, ADR-0020); `PRE-044`, `TR-STD-29` |
+| P3 | Canonical semantic model in `*-core` (ADR-0018): the M1 rule set model shaped as DMN definitions, decision and decision table; the M2 process model as flow nodes and sequence flows with ids; the M3 BPMN subset reader built on it | M1, M2, M3 | About 3 days in M1 and 5 days in M2 | The M3 BPMN reader and every later stage map onto a model that cannot hold full BPMN; a rewrite of the definition layer in S1 | **Decided** 2026-11-19: accepted (PD-060 option 2, ADR-0018); supersedes the notation part of PD-034; `RLE-024`, `PRE-043`, `TR-STD-28` |
+| P4 | HORUS-built FEEL (ADR-0019) | S1 to S3 | About 22 engineer-weeks: S-FEEL core 6, full FEEL 12, TCK completion 4 | n/a (after 1.0) | **Decided** 2026-11-19: accepted (PD-061 option 1); a reference FEEL engine in test scope only |
 | P5 | Release targets and capacity for S1 (1.1), S2 (1.2), S3 (1.3) | After 1.0 | About 60 engineer-weeks in total for both engines and the cockpit symbols (section 11) | n/a | **Decision needed.** Dates by the product owner |
 | P6 | Principle 9 wording, the vision non-goal "never a full BPMN 2.0 implementation" and the PRD non-goals | Now | Documentation | Public documents contradict ADR-0017 | **Decision needed.** Wording proposed in ADR-0017 |
 | P7 | Test-data licence: the BPMN MIWG reference models are CC BY 3.0, outside Apache 2.0, MIT and BSD. Used as test data fetched at build time with attribution, never shipped | S1 | None | No MIWG evidence | **Decision needed** under PD-053. Allow as test data |
@@ -510,7 +512,7 @@ The test for "do now" is whether the change is expensive or impossible later. Ad
 | 10.1 DMN TCK | DMN Level 2 and 3 behaviour | Module `rule-engine-tck` (test only, never published) runs the TCK at a pinned commit; the TCK repository is Apache 2.0. Results are written in the TCK results format so they can be submitted to the public TCK results site. Policy exclusions (external Java and PMML functions) are listed by test id | `TR-STD-20`, `TR-STD-21` |
 | 10.2 BPMN MIWG round trip | Process Modeling Conformance: import and export of every element and its diagram | The 22 reference models (A, B and C series) at a pinned commit, fetched at build time (CC BY 3.0, pending P7). Import, export, then compare with the MIWG comparison approach (the MIWG tools are MIT): semantic equality of elements, attributes, references and BPMNDI, ignoring prefixes, order and whitespace; the export validates against the BPMN 2.0.2 XSD | `TR-STD-10` |
 | 10.3 HORUS executable conformance suite | Process Execution Conformance | One BPMN file per behaviour and a scripted scenario (start, correlate, broadcast, complete, advance the `TestClock`), asserting token positions, history and variables; about 200 scenarios by S3, grouped by element and lifecycle; concurrency-sensitive scenarios also run on two replicas; published with the project | `TR-STD-11` |
-| 10.4 Differential FEEL testing | v1 and HORUS FEEL agree with a reference FEEL | jqwik generates expressions and inputs; results compared with `camunda/feel-scala` (Apache 2.0) in test scope only. From M1 it checks that every v1 expression's FEEL translation gives the same result (pending P1); from S1 it checks the HORUS FEEL engine | `TR-STD-02`, `TR-STD-27` |
+| 10.4 Differential FEEL testing | v1 and HORUS FEEL agree with a reference FEEL | jqwik generates expressions and inputs; results compared with `camunda/feel-scala` (Apache 2.0) in test scope only. From M1 it checks that every v1 expression's FEEL translation gives the same result, null cases included (PD-058); from S1 it checks the HORUS FEEL engine | `TR-STD-02`, `TR-STD-27` |
 | 10.5 Graph invariants | No lost tokens, joins fire exactly once, every token ends or waits | Property tests over generated BPMN graphs with all S1 to S3 elements | `TR-STD-11` |
 
 ## 11. Staging after 1.0
@@ -521,7 +523,7 @@ Source: [`diagrams/standards-staging.mmd`](diagrams/standards-staging.mmd).
 
 | Stage | Release | Content | Gap after the stage | Effort (assumption) |
 |---|---|---|---|---|
-| S0 | M1 to M3 (before 1.0) | Section 9.1 and, if accepted, 9.2 P1 to P3; ADR-0013 subset import and export; DMN single-table import (RE-F-30) | Everything in section 6 marked S1 to S3 is refused by name (`TR-STD-04`) | Inside M1 to M3 plus P1 to P3 |
+| S0 | M1 to M3 (before 1.0) | Section 9.1 and 9.2 P1 to P3 (decided 2026-11-19); ADR-0013 subset import and export; DMN single-table import (RE-F-30) | Everything in section 6 marked S1 to S3 is refused by name (`TR-STD-04`) | Inside M1 to M3 plus P1 to P3 |
 | S1 | 1.1 | Scopes and errors: subprocess, boundary timer, error and escalation, event subprocess (timer, error, escalation), inclusive gateway, multi-instance, loops, data objects, terminate, link, script task with `horus-expr-v1`; full BPMN import and display with MIWG round trip; DMN Level 2, every hit policy, DRDs, item definitions, S-FEEL in the HORUS FEEL engine; cockpit BPMN and DMN symbol sets | No messages, signals or conditional events, no event-based gateway, compensation only through handlers, no transaction cancel; no full FEEL, BKMs or boxed expressions other than literal | BPMN about 12, DMN about 8, cockpit about 4 engineer-weeks |
 | S2 | 1.2 | Events across instances: message events and tasks with correlation, signals with broadcast, conditional events, event-based gateway, full compensation, transaction cancel and hazards, message flows between pools through hosts, script tasks with FEEL; full FEEL, every boxed expression, BKMs, decision services | Complex gateway, ad-hoc subprocess, multiple events, instantiating event-based gateways, message buffer; DMN imports, remaining TCK cases | BPMN about 14, DMN about 12, cockpit about 2 engineer-weeks |
 | S3 | 1.3 | Completeness: complex gateway, ad-hoc subprocess, multiple and parallel multiple events, instantiating event-based gateways, optional message buffer; conformance suite 100 percent; DMN TCK Level 3 100 percent except policy exclusions; DMN `import`; DMNDI | The deviations of section 12 only | BPMN about 6, DMN about 2 engineer-weeks |
@@ -548,7 +550,7 @@ Published per release (`TR-STD-05`). The claim is "BPMN 2.0.2 Process Execution 
 
 | # | Question | Recommendation | Owner and gate |
 |---|---|---|---|
-| 13.1 | P1 to P9 of section 9.2 | As stated there | Product owner; P1 and P3 before M1 code, P2 before M2 code |
+| 13.1 | P5 to P9 of section 9.2 (P1 to P4 decided on 2026-11-19) | As stated there | Product owner |
 | 13.2 | `MESSAGE_KEY_AMBIGUOUS`: should a second instance waiting on the same message key be refused at its subscription instead of raising an incident? | Incident, because refusing would fail an unrelated business step | Architect, S2 design |
 | 13.3 | Message flows between two pools deployed in the same host: deliver directly in the same transaction, or always through the outbox? | Through the outbox by default, so behaviour does not change when a pool moves to another host | Architect, S2 design |
 | 13.4 | Error codes `BPMN_NOT_EXECUTABLE`, `BPMN_SCRIPT_FORMAT_UNSUPPORTED`, `BPMN_IMPLEMENTATION_UNSUPPORTED`, `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`, `CMMN_UNSUPPORTED`, `DMN_EXTERNAL_FUNCTION_UNSUPPORTED`, `EVALUATION_BUDGET_EXCEEDED`, `409 INSTANCE_BUSY` and incident codes `UNHANDLED_BUSINESS_ERROR`, `LATE_RESULT_AFTER_INTERRUPT`, `MESSAGE_KEY_AMBIGUOUS` | Add to the wiki error-code page when their stage is designed; `UNHANDLED_BUSINESS_ERROR` with M2 | Documentation, M2 |

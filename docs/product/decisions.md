@@ -33,15 +33,15 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-009](#pd-009-licensing-stays-minimal) | Licensing stays minimal | Decided |
 | [PD-010](#pd-010-the-engines-and-their-wiki-are-the-first-priority) | The engines and their wiki are the first priority | Decided |
 | [PD-011](#pd-011-design-documents-live-in-docs-separate-from-the-user-wiki) | Design documents live in `docs/`, separate from the user wiki | Decided |
-| [PD-012](#pd-012-emergency-single-approver-path) | Emergency single-approver path | Pending product owner |
-| [PD-013](#pd-013-from-which-milestone-tr-ui-02-gates) | From which milestone `TR-UI-02` gates | Pending product owner |
+| [PD-012](#pd-012-emergency-single-approver-path) | Emergency single-approver path | Decided |
+| [PD-013](#pd-013-from-which-milestone-tr-ui-02-gates) | From which milestone `TR-UI-02` gates | Decided |
 | [PD-014](#pd-014-model-and-prompt-version-in-agentresult) | Model and prompt version in `AgentResult` | Pending product owner |
 | [PD-015](#pd-015-autonomy-rung-0-shadow-mode-and-rung-4) | Autonomy rung 0 (shadow mode) and rung 4 | Pending product owner |
 | [PD-016](#pd-016-cockpit-pulse-strip) | Cockpit pulse strip | Pending product owner |
 | [PD-017](#pd-017-migration-execution-as-the-first-cut-if-m2-slips) | Migration execution as the first cut if M2 slips | Pending product owner |
-| [PD-018](#pd-018-replay-simulation-in-m1) | Replay simulation in M1 | Pending product owner |
-| [PD-019](#pd-019-north-star-metric) | North Star metric | Pending product owner |
-| [PD-020](#pd-020-conflict-partitioning-milestone-on-the-roadmap) | Conflict: partitioning milestone on the roadmap | Pending product owner |
+| [PD-018](#pd-018-replay-simulation-in-m1) | Replay simulation in M1 | Pending product owner (held for discussion) |
+| [PD-019](#pd-019-north-star-metric) | North Star metric | Decided |
+| [PD-020](#pd-020-conflict-partitioning-milestone-on-the-roadmap) | Conflict: partitioning milestone on the roadmap | Decided |
 | [PD-021](#pd-021-conflict-exit-criteria-omit-musts-tagged-for-the-milestone) | Conflict: exit criteria omit Musts tagged for the milestone | Pending product owner |
 | [PD-022](#pd-022-conflict-simulation-report-in-cockpit-01-approvals) | Conflict: simulation report in Cockpit 0.1 approvals | Pending product owner |
 | [PD-023](#pd-023-conflict-milestone-of-the-instance-migration-screen) | Conflict: milestone of the instance migration screen | Pending product owner |
@@ -49,13 +49,13 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-025](#pd-025-conflict-process-engine-version-label) | Conflict: Process Engine version label | Pending product owner |
 | [PD-026](#pd-026-conflict-should-requirements-used-as-release-gates) | Conflict: Should requirements used as release gates | Pending product owner |
 | [PD-027](#pd-027-conflict-decision-explanation-in-m1) | Conflict: decision explanation in M1 | Pending product owner |
-| [PD-028](#pd-028-conflict-agent-chosen-steps-in-m3-or-after-10) | Conflict: agent-chosen steps in M3 or after 1.0 | Pending product owner |
-| [PD-029](#pd-029-accept-adr-0008-async-wait-state-for-external-steps) | Accept ADR-0008 (async wait-state for external steps) | Pending product owner |
-| [PD-030](#pd-030-accept-adr-0009-cache-coherence) | Accept ADR-0009 (cache coherence) | Pending product owner |
-| [PD-031](#pd-031-milestone-dates-and-pre-approved-cuts) | Milestone dates and pre-approved cuts | Pending product owner |
+| [PD-028](#pd-028-conflict-agent-chosen-steps-in-m3-or-after-10) | Conflict: agent-chosen steps in M3 or after 1.0 | Decided |
+| [PD-029](#pd-029-accept-adr-0008-async-wait-state-for-external-steps) | Accept ADR-0008 (async wait-state for external steps) | Decided |
+| [PD-030](#pd-030-accept-adr-0009-cache-coherence) | Accept ADR-0009 (cache coherence) | Decided |
+| [PD-031](#pd-031-milestone-dates-and-pre-approved-cuts) | Milestone dates and pre-approved cuts | Decided |
 | [PD-032](#pd-032-diagrams-and-a-visual-modeller-in-scope) | Diagrams and a visual modeller in scope | Decided |
 | [PD-033](#pd-033-maker-checker-for-process-definitions) | Maker-checker for process definitions | Decided |
-| [PD-034](#pd-034-process-notation-own-json-canonical-bpmn-subset-for-import-and-export) | Process notation: own JSON canonical, BPMN subset for import and export | Decided (superseded in part by PD-057) |
+| [PD-034](#pd-034-process-notation-own-json-canonical-bpmn-subset-for-import-and-export) | Process notation: own JSON canonical, BPMN subset for import and export | Decided (superseded in part by PD-057 and PD-060) |
 | [PD-035](#pd-035-multi-host-cockpit-model) | Multi-host cockpit model | Decided |
 | [PD-036](#pd-036-source-of-truth-for-process-definitions) | Source of truth for process definitions | Decided |
 | [PD-037](#pd-037-tenant-switching-for-multi-tenant-operators) | Tenant switching for multi-tenant operators | Decided |
@@ -64,14 +64,14 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-040](#pd-040-principle-6-extended-to-process-definitions) | Principle 6 extended to process definitions | Decided |
 | [PD-041](#pd-041-conflict-vision-non-goal-diagram-modeller) | Conflict: vision non-goal "diagram modeller" | Decided (superseded in part by PD-057) |
 | [PD-042](#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted) | Milestone dates if the cockpit direction is accepted | Decided |
-| [PD-043](#pd-043-rule-authoring-for-business-users-without-yaml) | Rule authoring for business users without YAML | Pending product owner |
+| [PD-043](#pd-043-rule-authoring-for-business-users-without-yaml) | Rule authoring for business users without YAML | Decided |
 | [PD-044](#pd-044-rpo-and-rto-responsibility-wording) | RPO and RTO responsibility wording | Pending product owner |
 | [PD-045](#pd-045-capacity-limits-we-publish) | Capacity limits we publish | Pending product owner |
 | [PD-046](#pd-046-federation-limits-we-support) | Federation limits we support | Pending product owner |
 | [PD-047](#pd-047-usability-targets) | Usability targets | Pending product owner |
 | [PD-048](#pd-048-diagram-accessibility) | Diagram accessibility | Pending product owner |
 | [PD-049](#pd-049-wcag-asvs-and-coverage-as-must-at-10) | WCAG, ASVS and coverage as Must at 1.0 | Pending product owner |
-| [PD-050](#pd-050-retention-default-for-the-decision-log-and-history) | Retention default for the decision log and history | Pending product owner |
+| [PD-050](#pd-050-retention-default-for-the-decision-log-and-history) | Retention default for the decision log and history | Decided |
 | [PD-051](#pd-051-tenant-exit-export-and-purge) | Tenant exit: export and purge | Pending product owner |
 | [PD-052](#pd-052-tamper-evidence-beyond-append-only) | Tamper evidence beyond append-only | Pending product owner |
 | [PD-053](#pd-053-licence-rule-for-test-and-build-tools) | Licence rule for test and build tools | Pending product owner |
@@ -79,10 +79,10 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-055](#pd-055-postgresql-version-range) | PostgreSQL version range | Pending product owner |
 | [PD-056](#pd-056-rule-management-ux-direction) | Rule management UX direction | Pending product owner |
 | [PD-057](#pd-057-full-bpmn-20-and-dmn-support-no-cmmn) | Full BPMN 2.0 and DMN support, no CMMN | Decided |
-| [PD-058](#pd-058-feel-null-semantics-in-the-expression-language-from-m1) | FEEL null semantics in the expression language from M1 | Pending product owner |
-| [PD-059](#pd-059-execution-tree-with-scope-tokens-in-m2) | Execution tree with scope tokens in M2 | Pending product owner |
-| [PD-060](#pd-060-canonical-model-bpmn-and-dmn-semantic-models) | Canonical model: BPMN and DMN semantic models | Pending product owner |
-| [PD-061](#pd-061-horus-built-feel) | HORUS-built FEEL | Pending product owner |
+| [PD-058](#pd-058-feel-null-semantics-in-the-expression-language-from-m1) | FEEL null semantics in the expression language from M1 | Decided |
+| [PD-059](#pd-059-execution-tree-with-scope-tokens-in-m2) | Execution tree with scope tokens in M2 | Decided |
+| [PD-060](#pd-060-canonical-model-bpmn-and-dmn-semantic-models) | Canonical model: BPMN and DMN semantic models | Decided |
+| [PD-061](#pd-061-horus-built-feel) | HORUS-built FEEL | Decided |
 | [PD-062](#pd-062-release-targets-for-the-standards-track) | Release targets for the standards track | Pending product owner |
 | [PD-063](#pd-063-principle-9-wording-and-the-standards-non-goals) | Principle 9 wording and the standards non-goals | Pending product owner |
 | [PD-064](#pd-064-bpmn-miwg-test-data-licence) | BPMN MIWG test data licence | Pending product owner |
@@ -91,9 +91,9 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-067](#pd-067-product-roadmap-approved-sprint-planning-starts) | Product roadmap approved; sprint planning starts | Decided |
 | [PD-068](#pd-068-human-readable-issues-and-planning-artefacts) | Human-readable issues and planning artefacts | Decided |
 | [PD-069](#pd-069-development-starts-on-a-10-sprint-plan-with-reviewed-sprints) | Development starts on a 10-sprint plan with reviewed sprints | Decided |
-| [PD-070](#pd-070-maven-groupid-and-java-package-root) | Maven groupId and Java package root | Pending product owner |
-| [PD-071](#pd-071-jackson-major-used-inside-the-engine-cores) | Jackson major used inside the engine cores | Pending product owner |
-| [PD-072](#pd-072-fixed-or-configurable-rule-engine-table-prefix) | Fixed or configurable Rule Engine table prefix | Pending product owner |
+| [PD-070](#pd-070-maven-groupid-and-java-package-root) | Maven groupId and Java package root | Decided |
+| [PD-071](#pd-071-jackson-major-used-inside-the-engine-cores) | Jackson major used inside the engine cores | Decided |
+| [PD-072](#pd-072-fixed-or-configurable-rule-engine-table-prefix) | Fixed or configurable Rule Engine table prefix | Decided |
 
 ---
 
@@ -343,13 +343,15 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 |---|---|
 | Date | 2026-11-18 |
 | Question | Is a logged single-approver path for urgent rule changes ever allowed? |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-19, option 4 (added on 2026-11-19 because no recorded option matched the decision) |
+| History | Recorded on 2026-11-18 with the status: Pending product owner; the product manager recommended option 1 |
 
 **Options considered**
 
 1. No emergency path before 1.0; four-eyes is mandatory outside `dev`; document as a non-goal. Urgent changes use the normal flow with an on-call second approver and `effectiveFrom` now. Consequence: differentiator 2 stays absolute; some teams may need a second approver on call.
 2. A logged emergency path: one approver, a mandatory reason, an event, and an automatic follow-up approval task for a second identity within N hours. Consequence: covers real urgent cases; adds a new state, permission and tests in M1 or M2, and weakens the claim that the engine enforces four-eyes.
 3. A host-configurable switch to disable maker-checker per rule set. Consequence: cheapest to build; makes the control optional, which defeats it.
+4. Added 2026-11-19 (chosen). An emergency single-approver path that exists only when the bank turns it on by configuration; it is off by default; every use is logged; every use is reviewed afterwards. Maker-checker itself is never switched off, unlike option 3. Consequence: banks that need an out-of-hours path have one without a fork; the claim that the engine enforces four-eyes holds by default and is weakened only for a bank that turns the path on, and that bank's own configuration and logs show it.
 
 **Recommendation.** Option 1 for 1.0, revisited with evidence. Run the PRD red-team test (three compliance contacts on how an urgent fee change is approved today). If two of three require a single-person path, open an ADR for option 2 targeted after 1.0.
 
@@ -359,19 +361,23 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 
 **Follow-ups.** Product manager: three compliance conversations during M1 (kill assumption K6).
 
+**Applied, 2026-11-19.** The product owner chose option 4. The architect writes an ADR that sets the milestone and the controls of the path: who may enable it and in which environments, the permission, the mandatory reason, the event and log content, and the form and deadline of the review afterwards. Feature RE-F-48 is added to the [feature map](feature-map.md) as "later", status design preview, until that ADR sets its milestone. Positioning: the [vision](vision.md) differentiator and [`prd-rule-engine.md`](prd-rule-engine.md) now say four-eyes is enforced by default and can be relaxed only by the bank's explicit configuration, with every use logged and reviewed. Kill assumption K6 in the [roadmap](roadmap.md) now tests how many banks would turn the path on. Use case UC-RE-37 in [Rule Engine users and journeys](rule-engine-users-and-journeys.md) points to this decision. Not applied here: the ADR and the `RLE-*` statements (architect).
+
 ### PD-013 From which milestone `TR-UI-02` gates
 
 | Field | Value |
 |---|---|
 | Date | 2026-11-18 |
 | Question | `TR-UI-02` (author, validate, simulate, request publication and approve without leaving the cockpit) is a Must with no milestone, while Cockpit 0.1 has no editing. Does it gate M1? |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-19, option 4 ("Both", added on 2026-11-19): import from the cockpit and authoring in the cockpit both gate M1 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner; the product manager recommended option 1 |
 
 **Options considered**
 
 1. `TR-UI-02` becomes "Must (M2)"; M1 gates on the narrower path: import a draft from the cockpit, validate, simulate, request publication and approve (CKP-002 to CKP-004 plus CK-F-02). Consequence: M1 keeps its scope; full in-cockpit authoring is a gate once the grid editor ships.
 2. YAML import from the cockpit counts as authoring, so `TR-UI-02` gates from M1 unchanged. Consequence: no requirement change, but "authoring" means uploading a file, which overstates the M1 user outcome.
 3. Bring a minimal editor into Cockpit 0.1. Consequence: reverses the M1 scope choice and risks the 15 Jan date.
+4. Added 2026-11-19 (chosen): "Both". Options 2 and 3 together: import from the cockpit counts, and an author can also change a rule in the cockpit itself, so `TR-UI-02` gates M1 for changes to existing rule sets. Consequence: the M1 outcome "business staff change rules" is true inside the cockpit, not only through a file; Cockpit 0.1 gains editing work in a milestone that already absorbed the spreadsheet round-trip (PD-043).
 
 **Recommendation.** Option 1.
 
@@ -380,6 +386,22 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 **Consequences.** Feature CK-F-02 (rule sets list, version view, import and export) becomes an M1 must and needs a `CKP-*` statement. CK-F-10 (grid editor) carries `TR-UI-02` in M2.
 
 **Follow-ups.** Architect: tag `TR-UI-02` "Must (M2)" and add an M1 requirement or `CKP-*` statement for import from the cockpit.
+
+**Applied, 2026-11-19.** The product owner chose option 4 ("Both"). It collides with PD-043, which puts the spreadsheet round-trip in M1 and the grid editor in M2. The product manager's proposal for the smallest M1 editing that satisfies "Both" without a full grid editor follows; it needs the product owner's confirmation before it is counted.
+
+*Proposed minimal M1 editing (CK-F-43).* On a draft of an existing rule set, in the cockpit:
+
+- Edit one cell at a time as plain text. The cell accepts the same shorthand and gives the same plain errors as the spreadsheet round-trip (`GOLD, PLATINUM`, `>= 50000000 VND`, `18 to 65`), because it reuses the CK-F-35 conversion and message catalogue.
+- Add a row (blank or as a copy of the selected row), delete a row, and move a row up or down, since row order decides the result for `first` tables.
+- Save the draft. The engine validates on save (RE-F-02) and each error is shown on its cell. Then simulate and request approval with the existing M1 screens (CK-F-05, CK-F-04). A draft starts from the effective version or from an earlier one (RE-F-33).
+- Not included, all left in M2: typed cell widgets and drop-downs (CK-F-37), templates and new rule sets (CK-F-36), changes to inputs, outputs or hit policy, multi-cell paste, and undo beyond discarding the draft.
+- No new engine contract: the cockpit sends the edited table through the existing draft import and validate endpoints. Whether the shorthand conversion runs in the cockpit or the engine is already an architect question under PD-043.
+
+*Effect on 15 Jan 2027* [ASSUMPTION, to be sized by the maintainers]. About 5 to 7 days of cockpit work: the editable table, row actions, dirty state, save, and mapping errors to cells. Add 1 day of QA for keyboard use and the 1440x900 and 1440x1200 checks. This comes on top of about one week already added by PD-043, in a milestone with about five working weeks, so taken alone it is about one week of slip risk, to around 22 Jan 2027. To hold 15 Jan, the product manager recommends moving async decision log writing (RE-F-15, the first item on the M1 cut list, about 3 to 4 days) to M2 now, ahead of the checkpoint, and keeping the decision log filters as the 8 Jan checkpoint cut. If the maintainers size CK-F-43 above 7 days, the decision deep link (CK-F-34) also moves to M2.
+
+*Feature map impact.* A new feature CK-F-43, M1, spec gap, depending on CK-F-35 and RE-F-02, needing a new `CKP-*` statement. It is listed as "M1 if the PD-013 scope is confirmed" and is not counted yet. If it is confirmed together with moving RE-F-15: M1 stays at 56 features (one in, one out), M2 goes from 65 to 66, the M1 cut list keeps only the decision log filters, and the M2 cut list gains RE-F-15 at its head. CK-F-10 (grid editor, M2) then builds on CK-F-43 instead of starting from nothing, which takes about the same number of days out of M2 [ASSUMPTION].
+
+Applied now: the [roadmap](roadmap.md) M1 exit criteria name `TR-UI-02` as gating M1 for changes to existing rule sets; the [feature map](feature-map.md) lists CK-F-43 as not counted; [`prd-cockpit.md`](prd-cockpit.md) section 7.5 records the decision. Not applied here: the `TR-UI-02` milestone tag in [requirements.md](requirements.md) and a `CKP-*` statement (architect).
 
 ### PD-014 Model and prompt version in `AgentResult`
 
@@ -475,7 +497,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 |---|---|
 | Date | 2026-11-18 |
 | Question | Should replay of logged decisions through a draft (RE-F-22, CK-F-11) move from M2 into M1? |
-| Decision | Pending product owner |
+| Decision | Pending product owner. Held for discussion with the product owner (2026-11-19) |
 
 **Options considered**
 
@@ -497,7 +519,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 |---|---|
 | Date | 2026-11-18 |
 | Question | Which single measure tells the maintainers the engines deliver value? |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner |
 
 **Options considered**
 
@@ -513,6 +536,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 
 **Follow-ups.** Product manager: ask pilot adopters for a monthly count from their own metrics (`TR-OBS-02`); update [`vision.md`](vision.md) when decided.
 
+**Applied, 2026-11-19.** The product owner accepted option 1: the North Star is governed decisions and process steps executed per week in adopters' services, adopter-reported from M3, with three input measures before that (time to a first logged decision for a newcomer, external teams running an example host, `agentTask` escalations completed by a person in pilot hosts). The [vision](vision.md) and the [roadmap](roadmap.md) measures of M1, M2 and M3 state it. No telemetry is added.
+
 ---
 
 ## Pending: conflicts between roadmap, SPEC and wiki
@@ -525,7 +550,8 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 |---|---|
 | Date | 2026-11-18 |
 | Question | The previous roadmap ships "monthly partitioning by configuration" in M3 and `TR-OPS-04` is a Should, while PD-004 (decided) partitions `rle_decision` from the first migration and `rule-engine/docs/DESIGN.md` already shows the partitioned DDL. Which milestone carries partitioning and retention? |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-19, option 2 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner |
 
 **Options considered**
 
@@ -539,6 +565,8 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 **Consequences.** RE-F-16 (partitioned table, scheduled partition creation) in M1; RE-F-31 (retention) in M3. The previous M3 roadmap line is replaced.
 
 **Follow-ups.** Architect: `RLE-*` statements for partition creation (M1) and retention (M3); `TR-OPS-04` wording.
+
+**Applied, 2026-11-19.** The product owner accepted option 2: the monthly partitioned table in M1 (January 2027), the retention setting and purge in M3 (May 2027). Read with [PD-050](#pd-050-retention-default-for-the-decision-log-and-history) (retention required, 12-month minimum): the required setting and the start-up refusal outside `dev` arrive with RE-F-31 in M3. Before M3 nothing is ever deleted, which matches the intent of PD-050 that only the bank's explicit choice deletes audit data. The [feature map](feature-map.md) RE-F-31 row, the [roadmap](roadmap.md) and [`prd-rule-engine.md`](prd-rule-engine.md) state it.
 
 ### PD-021 Conflict: exit criteria omit Musts tagged for the milestone
 
@@ -695,7 +723,8 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 |---|---|
 | Date | 2026-11-18 |
 | Question | The previous roadmap ships "ad-hoc step selection inside a bounded block" in M3 and lists "multi-agent planning with ad-hoc step selection" after 1.0. Is agent-chosen step selection in 1.0? |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner |
 
 **Options considered**
 
@@ -711,9 +740,13 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 
 **Follow-ups.** Product manager: update the PRD after the decision.
 
+**Applied, 2026-11-19.** Decided together with PD-031 in the product owner's decision session. PE-F-39 moves from M3 to later (status design preview) in the [feature map](feature-map.md); the [roadmap](roadmap.md) M3 agentic depth row no longer lists it and its deferred list states the decision; [`prd-process-engine.md`](prd-process-engine.md) sections 7.4 and 8 place agent-chosen steps after 1.0.
+
 ---
 
-## Pending: acceptance of architecture decisions
+## Decided: acceptance of architecture decisions
+
+Both entries were pending until the product owner's decision session of 2026-11-19, which accepted them.
 
 ### PD-029 Accept ADR-0008 (async wait-state for external steps)
 
@@ -721,7 +754,8 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 |---|---|
 | Date | 2026-11-18 |
 | Question | Accept [ADR-0008](../adr/0008-async-wait-state-for-external-steps.md), currently "proposed"? |
-| Decision | Pending product owner (an architecture decision; the product owner accepts it) |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner (an architecture decision; the product owner accepts it) |
 
 **Options considered**
 
@@ -736,13 +770,16 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 
 **Follow-ups.** Architect: set the status to accepted with the date.
 
+**Applied, 2026-11-19.** The product owner accepted ADR-0008 in the decision session; the architect updates the ADR file. The [roadmap](roadmap.md) M0 exit row and M2 dependency row record the acceptance. No feature changes milestone.
+
 ### PD-030 Accept ADR-0009 (cache coherence)
 
 | Field | Value |
 |---|---|
 | Date | 2026-11-18 |
 | Question | Accept [ADR-0009](../adr/0009-cache-coherence-listen-notify-and-epoch.md), currently "proposed"? |
-| Decision | Pending product owner (an architecture decision; the product owner accepts it) |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner (an architecture decision; the product owner accepts it) |
 
 **Options considered**
 
@@ -757,9 +794,13 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 
 **Follow-ups.** Architect: set the status to accepted with the date.
 
+**Applied, 2026-11-19.** The product owner accepted ADR-0009 in the decision session; the architect updates the ADR file. The [roadmap](roadmap.md) M0 exit row and M1 dependency row record the acceptance. No feature changes milestone.
+
 ---
 
-## Pending: dates
+## Decided: dates
+
+Pending until the product owner's decision session of 2026-11-19, which accepted option 1 together with PD-028 option 1.
 
 ### PD-031 Milestone dates and pre-approved cuts
 
@@ -767,7 +808,8 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 |---|---|
 | Date | 2026-11-18 |
 | Question | Can M0 (4 Dec 2026), M1 (15 Jan 2027), M2 (12 Mar 2027) and M3 (7 May 2027) hold with the scope in the [feature map](feature-map.md)? |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner |
 
 **Update, 2026-11-18.** [PD-042](#pd-042-milestone-dates-if-the-cockpit-direction-is-accepted) (Decided) moves M2 to 26 Mar 2027 and M3 to 21 May 2027 and replaces the M2 and M3 rows of the cut list below; [PD-034](#pd-034-process-notation-own-json-canonical-bpmn-subset-for-import-and-export) (Decided) removes PE-F-41 from the M3 row. What stays open in this entry is the M1 row (date 15 Jan 2027 and its cut list) and the never-cut list. The analysis below is kept as written on 2026-11-18.
 
@@ -801,6 +843,8 @@ Never cut, in any milestone: tenant isolation, idempotency, maker-checker, appen
 **Consequences.** The roadmap shows the dates unchanged and the cut list as conditional deferrals. A cut, when triggered, is recorded as a new entry.
 
 **Follow-ups.** Maintainers: report checkpoint status on the dates above. Product manager: record any triggered cut.
+
+**Applied, 2026-11-19.** Decided together with PD-028 option 1. What this entry still decided after PD-042: M1 keeps 15 Jan 2027; the M1 cut list above (RE-F-15, then RE-F-26, then decision log filters beyond rule set and period) is pre-approved at the 8 Jan 2027 checkpoint; the never-cut list holds in every milestone. The M2 and M3 rows stay as replaced by PD-042, and PE-F-41 stays off the M3 list (PD-034). The [roadmap](roadmap.md), the [feature map](feature-map.md) cut list and [README.md](README.md) show the M1 cuts as decided.
 
 ---
 
@@ -902,7 +946,7 @@ What "Camunda-like" includes and excludes in all eleven entries:
 | Date | 2026-11-18 |
 | Question | What is the source notation for process definitions once diagrams exist, and what is BPMN's role? |
 | Raised by | Architect's review, decision 3 |
-| Decision | Decided by the product owner, 2026-11-18: option 1. Own JSON canonical; BPMN subset import (PE-F-41) off the cut list; export (PE-F-53) in M3 as a cut candidate. Superseded in part by [PD-057](#pd-057-full-bpmn-20-and-dmn-support-no-cmmn) (2026-11-18): the subset is the M3 scope, not the end state; the canonical notation is pending as PD-060 |
+| Decision | Decided by the product owner, 2026-11-18: option 1. Own JSON canonical; BPMN subset import (PE-F-41) off the cut list; export (PE-F-53) in M3 as a cut candidate. Superseded in part by [PD-057](#pd-057-full-bpmn-20-and-dmn-support-no-cmmn) (2026-11-18): the subset is the M3 scope, not the end state. Superseded in its notation part by [PD-060](#pd-060-canonical-model-bpmn-and-dmn-semantic-models) (2026-11-19, option 2): the BPMN and DMN semantic models are canonical and our JSON is their canonical serialisation |
 
 **Architect's recommendation.** Our own definition JSON stays canonical, with an optional `diagram` part (node positions, edge waypoints, lanes). A BPMN subset is for import and export only, converted in Java with the JDK's StAX parser (no new dependency) and tested in CI against the schema; anything outside the subset is rejected and named in the error. Take PE-F-41 (BPMN subset import) off the cut list.
 
@@ -1152,7 +1196,7 @@ What "Camunda-like" includes and excludes in all eleven entries:
 
 ---
 
-## Pending: business-user authoring
+## Decided: business-user authoring
 
 ### PD-043 Rule authoring for business users without YAML
 
@@ -1161,7 +1205,8 @@ What "Camunda-like" includes and excludes in all eleven entries:
 | Date | 2026-11-18 |
 | Question | Today a business user can only import YAML or JSON in Cockpit 0.1 (M1) and gets the grid editor in Cockpit 0.2 (M2). Which authoring path do pricing managers and credit risk analysts get in M1, and what must "user-friendly" mean in testable terms? |
 | Raised by | Product owner review of the Rule Engine product design ("who is the user, how do they interact, do we provide a user-friendly UI so the business user can create rules and rule sets?"); product manager, from the [Rule Engine users and journeys](rule-engine-users-and-journeys.md) catalogue |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-19, option 3 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner |
 
 **What the users need.** From the [personas](rule-engine-users-and-journeys.md#users):
 
@@ -1242,6 +1287,8 @@ The position this supports: meet business users in the spreadsheet they already 
 **Consequences if accepted.** Feature map: CK-F-35, RE-F-33 and CK-F-34 in M1; RE-F-26 to M2; RE-F-34, CK-F-36 and CK-F-37 in M2; CK-F-38 in M3. Roadmap counts M1 50, M2 59, M3 31. Kill assumption K3 is rewritten; A1 and A3 join the roadmap. `TR-UI-02` (authoring in the cockpit) can gate M1 for changes to existing rule sets, which narrows PD-013. The wiki authoring page gains a "change a table in Excel" how-to. Option 1 needs no change; option 2 would also move M1, M2 and M3 by 2 to 3 weeks.
 
 **Follow-ups.** Maintainers: size CK-F-35, CK-F-36 and CK-F-37 before 2 Dec 2026. Architect: where the shorthand conversion runs, and the CSV header and quoting rules. QA: the Excel round-trip test (A3). Product manager: run the A1 and A2 conversations; rewrite K3. Documentation: the Excel how-to page after the decision.
+
+**Applied, 2026-11-19.** The product owner chose option 3: in M1 (January 2027) business users export a rule table to Excel, edit it with the plain shorthand and import it back as a draft with plain errors; the grid editor with templates follows in M2 (March 2027), and batch evaluate (RE-F-26) moves to M2. The [feature map](feature-map.md) counts CK-F-35, RE-F-33 and CK-F-34 in M1, RE-F-26, RE-F-34, CK-F-36 and CK-F-37 in M2, and CK-F-38 in M3: M1 holds 56, M2 65 and M3 31 (the counts in this entry, 50, 59 and 31, predate the cockpit direction and the standards foundations). RE-F-26 leaves the M1 cut list; RE-F-26 and RE-F-34 join the M2 cut list after PE-F-12, and CK-F-38 the M3 list after X-F-17. The [roadmap](roadmap.md) rewrites K3 and adds A1 and A3 as K22 and K23; the PRDs, the [Rule Engine users and journeys](rule-engine-users-and-journeys.md) page and [README.md](README.md) show the decided plan. PD-013, decided the same day with option 4 ("Both"), adds editing in the cockpit to the M1 gate; the minimal editing scope is proposed in that entry. Not applied here: where the shorthand conversion runs and the CSV rules (architect), the Excel how-to page (documentation).
 
 ---
 
@@ -1406,7 +1453,8 @@ The architect reviewed the technical, non-functional and developer requirements 
 | Date | 2026-11-18 |
 | Question | The decision log and process history are partitioned monthly (PD-004), and retention drops whole partitions when configured (RE-F-31). With no configuration, what happens? Banks keep audit data for 5 to 10 years, often longer for credit decisions. |
 | Raised by | Architect's requirements review (18 Nov 2026), section 4 |
-| Decision | Pending product owner |
+| Decision | Decided by the product owner, 2026-11-19, option 3, with a minimum period of 12 months |
+| History | Recorded on 2026-11-18 with the status: Pending product owner; the product manager recommended option 1 |
 
 **Architect's proposal.** Choose between keeping everything by default and shipping a default period. Amend `TR-OPS-04`.
 
@@ -1423,6 +1471,8 @@ The architect reviewed the technical, non-functional and developer requirements 
 **Consequences if accepted.** `TR-OPS-04` rewritten to match PD-004 and this default. RE-F-31 and the process history retention follow it.
 
 **Follow-ups.** Architect: the warning and the 12-month floor in DESIGN. Documentation: retention guidance in the decision log page.
+
+**Applied, 2026-11-19.** The product owner chose option 3, the stricter option: retention is required. Outside the `dev` profile the engine refuses to start until a retention period is set; the minimum is 12 months, in whole months. The `dev` profile needs no setting, so the 30-minute Getting Started path is unaffected; this answers the objection in the rationale above, which assumed demos run outside `dev`. No audit data is deleted by a product default, because the bank always chooses the period. Feature RE-F-31 in the [feature map](feature-map.md) is reworded. Timing, settled by [PD-020](#pd-020-conflict-partitioning-milestone-on-the-roadmap) (option 2, decided the same day): the setting, the start-up refusal and the purge arrive together with RE-F-31 in M3; before M3 nothing is deleted. Not applied here: `TR-OPS-04` in [requirements.md](requirements.md) (architecture and QA), DESIGN (architect, which now needs the refusal rather than a warning), the decision log wiki page (documentation).
 
 ### PD-051 Tenant exit: export and purge
 
@@ -1637,6 +1687,8 @@ The architect reviewed the technical, non-functional and developer requirements 
 
 The architect's [standards compliance](../architecture/standards-compliance.md) page section 9.2 lists nine larger choices (P1 to P9) that follow from PD-057. Each is one entry below. Gates: PD-058 and PD-060 must be decided before M1 code (7 Dec 2026); PD-059 before M2 code (18 Jan 2027).
 
+**Update, 2026-11-19.** The product owner decided PD-058 (option 1), PD-059 (option 1), PD-060 (option 2) and PD-061 (option 1) and accepted ADR-0018, ADR-0019 and ADR-0020; the code gates above are met. PD-062 to PD-066 stay pending. The section keeps its title so that existing links resolve.
+
 ### PD-058 FEEL null semantics in the expression language from M1
 
 | Field | Value |
@@ -1644,7 +1696,8 @@ The architect's [standards compliance](../architecture/standards-compliance.md) 
 | Date | 2026-11-18 |
 | Question | Should `horus-expr-v1` follow FEEL null logic from M1, so that every v1 expression has a FEEL equivalent with the same result? It changes two cases of `RLE-006`: `x != 'GOLD'` with `x` null becomes true, and `not(x < 5)` with `x` null becomes null (the condition does not match) |
 | Raised by | Architect, standards compliance P1 ([ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md), proposed) |
-| Decision | Pending product owner. Gate: before M1 code |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner. Gate: before M1 code |
 
 **Options considered**
 
@@ -1657,6 +1710,8 @@ The architect's [standards compliance](../architecture/standards-compliance.md) 
 
 **Follow-ups.** Architect: `RLE-006` and the harness. Documentation: wiki expression page.
 
+**Applied, 2026-11-19.** The product owner accepted option 1 together with [ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md). RE-F-41 joins M1 and is counted in the [feature map](feature-map.md); RE-F-03 is reworded; the `RLE-006` correction is listed under "SPEC corrections already decided" in the feature map until the architect changes the SPEC. The [roadmap](roadmap.md) M1 feature table, exit criteria (`TR-STD-02`) and standards effort totals include it. [`prd-rule-engine.md`](prd-rule-engine.md) section 8 lists it as decided. Not applied here: `RLE-006` (architect), `TR-STD-02` wording in [requirements.md](requirements.md) (architecture and QA), the wiki expression page (documentation).
+
 ### PD-059 Execution tree with scope tokens in M2
 
 | Field | Value |
@@ -1664,7 +1719,8 @@ The architect's [standards compliance](../architecture/standards-compliance.md) 
 | Date | 2026-11-18 |
 | Question | Should the M2 Process Engine store a root scope token per instance and one per `saga`, with joins and compensation keyed by scope token, instead of a flat text `scope_id`? |
 | Raised by | Architect, standards compliance P2 ([ADR-0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md), proposed for the M2 part) |
-| Decision | Pending product owner. Gate: before M2 code |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner. Gate: before M2 code |
 
 **Options considered**
 
@@ -1677,6 +1733,8 @@ The architect's [standards compliance](../architecture/standards-compliance.md) 
 
 **Follow-ups.** Architect: DESIGN and DDL.
 
+**Applied, 2026-11-19.** The product owner accepted option 1 together with [ADR-0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md). PE-F-58 joins M2 and is counted in the [feature map](feature-map.md); the [roadmap](roadmap.md) M2 feature table and standards effort totals include it, and it is not on the M2 cut list. [`prd-process-engine.md`](prd-process-engine.md) section 8 lists it as decided. Not applied here: process engine DESIGN and token DDL (architect).
+
 ### PD-060 Canonical model: BPMN and DMN semantic models
 
 | Field | Value |
@@ -1684,7 +1742,8 @@ The architect's [standards compliance](../architecture/standards-compliance.md) 
 | Date | 2026-11-18 |
 | Question | Should the canonical internal model be the BPMN 2.0 and DMN semantic models, with our JSON as their canonical serialisation and BPMN and DMN XML as lossless serialisations of the same model? This replaces the notation part of PD-034 |
 | Raised by | Architect, standards compliance P3 ([ADR-0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md), proposed) |
-| Decision | Pending product owner. Gate: before M1 code (the M1 rule set model), and before M2 code (the process model) |
+| Decision | Decided by the product owner, 2026-11-19, option 2 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner. Gate: before M1 code (the M1 rule set model), and before M2 code (the process model) |
 
 **Options considered**
 
@@ -1698,6 +1757,8 @@ The architect's [standards compliance](../architecture/standards-compliance.md) 
 
 **Follow-ups.** Architect: ADR-0018 to accepted; module DESIGN documents.
 
+**Applied, 2026-11-19.** The product owner accepted option 2 together with [ADR-0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md). [PD-034](#pd-034-process-notation-own-json-canonical-bpmn-subset-for-import-and-export) is superseded in its notation part (our JSON is now the canonical serialisation of the BPMN and DMN semantic models, not the canonical model itself); its subset import and export scope for M3 stands as amended by PD-057. X-F-28 joins M1 (rule set model) and M2 (process model) and is counted once, in M1, in the [feature map](feature-map.md). The [roadmap](roadmap.md) M1 and M2 feature tables and standards effort totals include it. Both PRDs list it as decided. With this decision, the PD-063 recommendation resolves to its option 1 (the ADR-0017 wording); PD-063 itself stays pending. Not applied here: `TR-DEF-01` drops its "if ADR-0018 is accepted" wording in [requirements.md](requirements.md) (architecture and QA); module DESIGN documents (architect).
+
 ### PD-061 HORUS-built FEEL
 
 | Field | Value |
@@ -1705,7 +1766,8 @@ The architect's [standards compliance](../architecture/standards-compliance.md) 
 | Date | 2026-11-18 |
 | Question | Is FEEL built here, deterministic and sandboxed, on the same typed tree and evaluator as today's language, rather than embedding an existing FEEL engine? |
 | Raised by | Architect, standards compliance P4 ([ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md), proposed) |
-| Decision | Pending product owner. Needed before S1 planning |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner. Needed before S1 planning |
 
 **Options considered**
 
@@ -1718,6 +1780,8 @@ The architect's [standards compliance](../architecture/standards-compliance.md) 
 **Consequences if accepted.** RE-F-45 to RE-F-47 are built on it; ADR-0019 accepted.
 
 **Follow-ups.** Architect: ADR-0019 to accepted; S1 plan for the S-FEEL core.
+
+**Applied, 2026-11-19.** The product owner accepted option 1 together with [ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md). No feature changes milestone: RE-F-45 to RE-F-47 stay on the standards track, built on the HORUS FEEL engine. The [roadmap](roadmap.md) standards gate now waits only on PD-062 (dates) for S1 planning.
 
 ### PD-062 Release targets for the standards track
 
@@ -1757,6 +1821,8 @@ Effort (assumption): S1 about 24 engineer-weeks (BPMN 12, DMN 8, cockpit 4), S2 
 2. Wording that holds whatever PD-060 decides: "Standard models in and out. BPMN 2.0 and DMN are imported, displayed and exported in full; what each release executes is exactly what the standards compliance page lists, with its deviations. No CMMN." Therefore unchanged in spirit: "Supported is what is published."
 
 **Recommendation (product manager).** Option 1 if PD-060 is accepted, option 2 otherwise. Both keep the useful half of the old principle: what is supported is exactly what is published.
+
+**Update, 2026-11-19.** PD-060 was decided with option 2 (BPMN and DMN semantic models canonical), so the recommendation is now option 1. This entry stays pending until the product owner decides it; the public documents keep the PD-039 wording of principle 9 until then.
 
 **Consequences if accepted.** Wiki Principles row 9, Concepts and FAQ; the vision table row that cites principle 9.
 
@@ -1921,9 +1987,11 @@ Effort (assumption): S1 about 24 engineer-weeks (BPMN 12, DMN 8, cockpit 4), S2 
 
 **Follow-ups.** Product manager: review every sprint and publish the review with each review video. Maintainers (engineering): end every sprint with a recorded demo and per-feature evidence. Documentation: the wiki Roadmap page states that development has started.
 
-## Pending: first publish and core dependencies
+## Decided: first publish and core dependencies
 
 The architecture review of the first engine pull request (the Maven skeleton and example host, [#12](https://github.com/dhluong90/horus-Agentic-BPM/pull/12#pullrequestreview-5967480926)) raised three choices that are cheap now and expensive once an artifact is published or Sprint 1 code builds on them. All three are due at the M0 exit (Fri 4 Dec 2026). PD-071 gates the first core pull request that parses definitions (Sprint 1, from 7 Dec 2026); PD-070 and PD-072 gate the first published artifact (M1 release, 15 Jan 2027).
+
+**Update, 2026-11-19.** The product owner decided all three in the decision session of 2026-11-19, ahead of the M0 exit: PD-070 option 1, PD-071 option 1 with its condition, PD-072 option 1.
 
 ### PD-070 Maven groupId and Java package root
 
@@ -1932,7 +2000,8 @@ The architecture review of the first engine pull request (the Maven skeleton and
 | Date | 2026-11-19 |
 | Question | Under which Maven `groupId` do the engines publish to Maven Central, and does the Java package root follow it? The code uses `com.horus.bpm` as a literal in 14 places across 7 POMs, and as the package root of every Java class |
 | Raised by | Architect, review of pull request #12 (should-fix 9); [rule engine DESIGN](../../rule-engine/docs/DESIGN.md) section 7.2 |
-| Decision | Pending product owner. Due 4 Dec 2026 (M0 exit). Gate: Maven Central namespace registered before the first publish (M1 release, 15 Jan 2027); package root fixed before Sprint 1 code (7 Dec 2026) |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-19 with the status: Pending product owner. Due 4 Dec 2026 (M0 exit). Gate: Maven Central namespace registered before the first publish (M1 release, 15 Jan 2027); package root fixed before Sprint 1 code (7 Dec 2026) |
 
 **Facts.** Maven Central only accepts a `groupId` whose namespace the publisher has verified: a reversed domain proven by a DNS record, or `io.github.<account>` proven through that GitHub account. A WHOIS lookup on 2026-11-19 shows `horus.com` registered since 1995 to an unrelated company, so `com.horus` cannot be verified by this project. `io.github.dhluong90` can be verified today. A `groupId` and the Java package root may differ, but Java convention expects the package root to be a namespace the project controls.
 
@@ -1951,6 +2020,8 @@ The architecture review of the first engine pull request (the Maven skeleton and
 
 **Follow-ups.** Maintainers (engineering): rename and register the namespace. Architect: close DESIGN 7.2 and correct the "one edit" comment in the parent POM. Documentation: wiki Technical Stack and Getting Started coordinates.
 
+**Applied, 2026-11-19.** The product owner accepted option 1: `io.github.dhluong90.bpm`, applied to the Maven `groupId` and the Java package root together, in one pull request before Sprint 1 code (7 Dec 2026). The [roadmap](roadmap.md) M0 exit row records the `groupId` as answered. The pilot-conversation test of the assumption above stays open. Not applied here: POMs, BOM, example host and Java packages (maintainers), DESIGN 7.2 (architect), `TR-API-07` package names in [requirements.md](requirements.md) (architecture and QA), wiki Technical Stack and Getting Started (documentation).
+
 ### PD-071 Jackson major used inside the engine cores
 
 | Field | Value |
@@ -1958,7 +2029,8 @@ The architecture review of the first engine pull request (the Maven skeleton and
 | Date | 2026-11-19 |
 | Question | Which Jackson major do `rule-engine-core` and `process-engine-core` use to parse definitions, given that Spring Boot 4 defaults to Jackson 3 and Spring Boot 3.5, tested until 1.0, uses Jackson 2? |
 | Raised by | Architect, [ADR-0011](../adr/0011-spring-boot-4-baseline.md) consequences; [rule engine DESIGN](../../rule-engine/docs/DESIGN.md) section 7.1; review of pull request #12 |
-| Decision | Pending product owner. Due 4 Dec 2026 (M0 exit). Gate: before the first core pull request that parses definitions (Sprint 1, from 7 Dec 2026) |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-19 with the status: Pending product owner. Due 4 Dec 2026 (M0 exit). Gate: before the first core pull request that parses definitions (Sprint 1, from 7 Dec 2026) |
 
 **Facts.** Jackson 2 and Jackson 3 use different Java packages and can sit on one classpath. ADR-0016 keeps Jackson types out of the public `api` and `spi`, so the choice is internal to the engine and can change in a later minor release. What must not change is the serialised form of definitions and decision log rows, because replay depends on it.
 
@@ -1976,6 +2048,8 @@ The architecture review of the first engine pull request (the Maven skeleton and
 
 **Follow-ups.** Architect: DESIGN 7.1 in the rule engine and process engine, and the core dependency rules. Maintainers (engineering): the 3.5 coexistence test. Documentation: wiki Getting Started.
 
+**Applied, 2026-11-19.** The product owner accepted option 1 with its condition: Jackson 3 inside the cores only, provided the Spring Boot 3.5 test leg proves in Sprint 1, in the first parsing pull request, that a 3.5 host resolves Jackson 3 next to its own Jackson 2 and parses a definition. If that test fails or needs the host to override its own Jackson versions, the architect returns with option 3 before the parsing pull request merges, and that change is recorded as a new entry. The [roadmap](roadmap.md) M0 exit row and M1 dependency row record the decision and its condition; feature X-F-02 names it. Not applied here: DESIGN 7.1 and the core boundary rules (architect), the coexistence test (maintainers), wiki Getting Started (documentation).
+
 ### PD-072 Fixed or configurable Rule Engine table prefix
 
 | Field | Value |
@@ -1983,7 +2057,8 @@ The architecture review of the first engine pull request (the Maven skeleton and
 | Date | 2026-11-19 |
 | Question | Does the Rule Engine keep the documented property `horus.bpm.rules.schema-prefix`, or are its table names fixed at `rle_`? The first migration hard-codes `rle_` in every table name |
 | Raised by | Architect, review of pull request #12 (should-fix 4); [rule engine DESIGN](../../rule-engine/docs/DESIGN.md) section 1, line 17 |
-| Decision | Pending product owner. Due 4 Dec 2026 (M0 exit). Gate: before the first published artifact (M1 release, 15 Jan 2027) |
+| Decision | Decided by the product owner, 2026-11-19, option 1 |
+| History | Recorded on 2026-11-19 with the status: Pending product owner. Due 4 Dec 2026 (M0 exit). Gate: before the first published artifact (M1 release, 15 Jan 2027) |
 
 **Facts.** Flyway checks every applied migration against a checksum of its file. If the first migration ships with literal `rle_` names and is later changed to use a placeholder, its checksum changes and every existing install fails validation at start-up. The Flyway history table is already fixed as `rle_schema_history` (`TR-EMB-06`).
 
@@ -2000,3 +2075,5 @@ The architecture review of the first engine pull request (the Maven skeleton and
 **Consequences if accepted.** DESIGN section 1 drops the property; `TR-EMB-06` wording is checked; the wiki Rule Engine Configuration page drops the `schema-prefix` row.
 
 **Follow-ups.** Architect: DESIGN section 1 and `TR-EMB-06`. Maintainers (engineering): close should-fix 4 of the pull request #12 review. Documentation: wiki Rule Engine Configuration page.
+
+**Applied, 2026-11-19.** The product owner accepted option 1: the `schema-prefix` property is dropped and Rule Engine table names are fixed at `rle_`; option 3 (a dedicated PostgreSQL schema, additive) is the stated path if an adopter needs isolation. No product document names the property; feature X-F-01 already reads `rle_*` tables. The two assumption tests above stay open for the M1 pilot conversations. Not applied here: DESIGN section 1 and `TR-EMB-06` (architect), the wiki Rule Engine Configuration page, which still shows "Pending PD-072" (documentation).

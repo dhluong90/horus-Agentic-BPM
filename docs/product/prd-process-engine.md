@@ -4,7 +4,7 @@
 |---|---|
 | Type | Product requirements |
 | Owner area | Product |
-| Last reviewed | 2026-11-18 |
+| Last reviewed | 2026-11-19 |
 
 Design preview. Behaviour is specified in [`process-engine/docs/SPEC.md`](../../process-engine/docs/SPEC.md) (`PRE-*`); release requirements in [requirements.md](requirements.md) (`TR-*`); milestone dates in the [product roadmap](roadmap.md); feature scope and status in the [feature map](feature-map.md); decisions in the [decision log](decisions.md).
 
@@ -111,7 +111,8 @@ Recommended eval bar, measured by the adopter on 30 to 50 labelled cases includi
 | `saga` block scope and `throwCompensation` | M2 | TR-COMP-01 |
 | Incident resolve; history of every transition; process tenant isolation | M2 | TR-OPS-03, TR-OBS-01, TR-TEN-01 |
 | Throughput of 1 000 transitions per second per replica | M2 | TR-PERF-04 |
-| MCP adapter, bounded agent memory, agent-chosen steps in a bounded block, offline runner | M3 | TR-AGT-04 |
+| MCP adapter, bounded agent memory, offline runner | M3 | TR-AGT-04 |
+| Agent-chosen steps in a bounded block ([PD-028](decisions.md#pd-028-conflict-agent-chosen-steps-in-m3-or-after-10), decided 2026-11-19) | After 1.0 | |
 | Renamed-step mapping and cancellation | M3 | TR-MIG-03 |
 | Definition lifecycle, graph diff, activity history, live node counts, task query, task forms (decided 2026-11-18, PD-032 to PD-038; sections 5 to 7 to be revised with journeys for the diagram views) | M2 | TR-SEC-04, TR-OBS-01 |
 | Layout storage, step catalogue, hourly rollup, BPMN subset export | M3 | TR-DET-01 |
@@ -127,13 +128,13 @@ Recommended eval bar, measured by the adopter on 30 to 50 labelled cases includi
 | Milestone | In scope |
 |---|---|
 | M2 (Process Engine 0.1) | Everything in 7.2; `agentTask` with in-process and HTTP adapters; same-id migration; definition lifecycle with maker-checker, import as draft and content hash (PE-F-45), graph diff (PE-F-46), activity history and live node counts (PE-F-47, PE-F-48), task query and task forms (PE-F-50, PE-F-51) |
-| M3 (1.0) | MCP adapter and reference LLM adapters in `examples/`; bounded agent memory; agent-chosen steps under the same guardrails (after 1.0 if PD-028 is decided as recommended); offline runner; renamed-step migration; BPMN subset import (protected) and export (cut candidate); layout storage and step catalogue for the modeller (PE-F-44, PE-F-52); hourly node rollup (PE-F-49); zero-downtime upgrade tests; API freeze |
+| M3 (1.0) | MCP adapter and reference LLM adapters in `examples/`; bounded agent memory; offline runner; renamed-step migration; BPMN subset import (protected) and export (cut candidate); layout storage and step catalogue for the modeller (PE-F-44, PE-F-52); hourly node rollup (PE-F-49); zero-downtime upgrade tests; API freeze |
 | 1.1 (S1, dates pending PD-062) | Subprocesses, boundary timer, error and escalation events, event subprocesses, inclusive gateway, multi-instance and loops, data objects, script tasks with our expression language, handler-bound service tasks; every BPMN 2.0.2 element imported, displayed and exported, with the MIWG round trip (PE-F-59 to PE-F-63) |
 | 1.2 (S2) | Message correlation and message flows between pools through each host, signals, conditional events, event-based gateway, full compensation, transaction cancel, script tasks with FEEL (PE-F-40, PE-F-64, PE-F-65) |
 | 1.3 (S3) | Complex gateway, ad-hoc subprocess, multiple events, instantiating event-based gateways, optional message buffer; the executable conformance suite at 100 percent (PE-F-66) |
-| After 1.0 (candidates) | Multi-agent planning; other databases |
+| After 1.0 (candidates) | Agent-chosen steps under the same guardrails (PE-F-39, [PD-028](decisions.md#pd-028-conflict-agent-chosen-steps-in-m3-or-after-10)); multi-agent planning; other databases |
 
-Standards foundations in M2 ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)): the deployed file is kept as received with its hash, and each definition names its expression language (PE-F-54); BPMN-style step ids (PE-F-55); handler business errors open an incident until error events exist (PE-F-56); cancelling an instance during an adapter call discards the late result (PE-F-57). Pending: scope tokens in the execution tree ([PD-059](decisions.md#pd-059-execution-tree-with-scope-tokens-in-m2), PE-F-58, gates M2 code) and the canonical model ([PD-060](decisions.md#pd-060-canonical-model-bpmn-and-dmn-semantic-models)). In M3, a CMMN document and every element the release cannot run are refused by name (X-F-25).
+Standards foundations in M2 ([PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)): the deployed file is kept as received with its hash, and each definition names its expression language (PE-F-54); BPMN-style step ids (PE-F-55); handler business errors open an incident until error events exist (PE-F-56); cancelling an instance during an adapter call discards the late result (PE-F-57). Decided on 2026-11-19: every instance and `saga` has a scope token, with joins and compensation keyed by it, so subprocesses and multi-instance arrive in 1.1 without migrating in-flight instances ([PD-059](decisions.md#pd-059-execution-tree-with-scope-tokens-in-m2), PE-F-58); and the process model is the BPMN semantic model, with our JSON as its canonical serialisation, so authors see no change and the M3 BPMN reader builds on a model that can hold full BPMN ([PD-060](decisions.md#pd-060-canonical-model-bpmn-and-dmn-semantic-models), X-F-28). In M3, a CMMN document and every element the release cannot run are refused by name (X-F-25).
 
 Non-goals: CMMN; BPMN execution beyond the documented subset before 1.1 (full BPMN 2.0 arrives in stages after 1.0, [PD-057](decisions.md#pd-057-full-bpmn-20-and-dmn-support-no-cmmn)); choreography and conversation diagrams (pending [PD-065](decisions.md#pd-065-choreography-and-conversation-diagrams-not-targeted)); script tasks in any language other than FEEL or our expression language; a full BPMN 2.0 modeller or any canvas element the engine cannot run ([PD-041](decisions.md#pd-041-conflict-vision-non-goal-diagram-modeller)); two-phase commit ([ADR-0007](../adr/0007-compensation-instead-of-distributed-transactions.md)); a distributed job executor or broker; any model call inside a transaction ([ADR-0008](../adr/0008-async-wait-state-for-external-steps.md)); an embedded model or prompt store (`TR-AGT-03`).
 

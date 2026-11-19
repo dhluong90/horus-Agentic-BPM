@@ -4,7 +4,7 @@ flowchart TB
     RT["rule-engine-test"] --> RC
     RR["rule-engine-rest"] --> RS["rule-engine-spring-boot-starter"]
     RS --> RP["rule-engine-postgres"]
-    RS --> RC["rule-engine-core<br/>Java 21 + Jackson only"]
+    RS --> RC["rule-engine-core<br/>Java 21 + Jackson 3 only"]
     RP --> RC
   end
   subgraph ProcessEngine["Process Engine"]
@@ -12,7 +12,7 @@ flowchart TB
     PT["process-engine-test"] --> PC
     PR["process-engine-rest"] --> PS["process-engine-spring-boot-starter"]
     PS --> PP["process-engine-postgres"]
-    PS --> PC["process-engine-core<br/>Java 21 + Jackson only"]
+    PS --> PC["process-engine-core<br/>Java 21 + Jackson 3 only"]
     PP --> PC
   end
   PC -.->|"RuleEngine API interface only"| RC

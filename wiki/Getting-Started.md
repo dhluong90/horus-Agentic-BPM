@@ -34,12 +34,12 @@ In `pom.xml`:
 ```xml
 <dependencies>
   <dependency>
-    <groupId>com.horus.bpm</groupId>
+    <groupId>io.github.dhluong90.bpm</groupId>
     <artifactId>rule-engine-spring-boot-starter</artifactId>
     <version>0.1.0</version>
   </dependency>
   <dependency>
-    <groupId>com.horus.bpm</groupId>
+    <groupId>io.github.dhluong90.bpm</groupId>
     <artifactId>rule-engine-test</artifactId>
     <version>0.1.0</version>
     <scope>test</scope>
@@ -47,7 +47,9 @@ In `pom.xml`:
 </dependencies>
 ```
 
-The starter runs its own Flyway migrations in your database under the `rle_` prefix. There is nothing else to install.
+The starter runs its own Flyway migrations in your database; its tables are always named `rle_*`. There is nothing else to install.
+
+The engine reads definitions and REST bodies with its own JSON library (Jackson 3, private to the engine). On a Spring Boot 3.5 host it sits next to your Jackson 2 without changing it. Your `spring.jackson.*` settings apply to your own endpoints only; engine endpoints always use camelCase names, ISO 8601 dates and the money object of [[Rule Engine Decision API]].
 
 ## 3. Configure
 
@@ -110,9 +112,9 @@ This step needs no database. `src/test/java/com/example/loans/LoanEligibilityTes
 ```java
 package com.example.loans;
 
-import com.horus.bpm.rules.test.RuleSetTest;
-import com.horus.bpm.rules.test.RuleSetUnderTest;
-import com.horus.bpm.rules.Money;
+import io.github.dhluong90.bpm.rules.test.RuleSetTest;
+import io.github.dhluong90.bpm.rules.test.RuleSetUnderTest;
+import io.github.dhluong90.bpm.rules.api.Money;
 import org.junit.jupiter.api.Test;
 import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -122,14 +124,14 @@ class LoanEligibilityTest {
 
   @Test
   void adult_in_vietnam_with_income_is_eligible(RuleSetUnderTest rules) {
-    var r = rules.evaluate(Map.of("age", 25, "income", Money.of("VND", 8_000_000), "country", "VN"));
+    var r = rules.evaluate(Map.of("age", 25, "income", Money.ofMinor("VND", 8_000_000), "country", "VN"));
     assertThat(r.matchedRuleIds()).containsExactly("R4");
     assertThat(r.output("eligible", Boolean.class)).isTrue();
   }
 
   @Test
   void minor_is_rejected_before_income_is_checked(RuleSetUnderTest rules) {
-    var r = rules.evaluate(Map.of("age", 17, "income", Money.of("VND", 8_000_000), "country", "VN"));
+    var r = rules.evaluate(Map.of("age", 17, "income", Money.ofMinor("VND", 8_000_000), "country", "VN"));
     assertThat(r.matchedRuleIds()).containsExactly("R1");
     assertThat(r.output("reason", String.class)).isEqualTo("UNDER_AGE");
   }
@@ -192,7 +194,7 @@ class LoanService {
   boolean isEligible(Applicant a) {
     DecisionResult r = rules.evaluate("loan-eligibility", DecisionInput.of(
         "age", a.age(),
-        "income", Money.of("VND", a.monthlyIncomeMinorUnits()),
+        "income", Money.ofMinor("VND", a.monthlyIncomeMinorUnits()),
         "country", a.country()));
     return r.output("eligible", Boolean.class);
   }

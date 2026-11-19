@@ -1,8 +1,8 @@
 flowchart LR
   subgraph S0 ["S0: before 1.0 (M1 to M3)"]
     direction TB
-    F1["M1 rules: source document, time zone,<br/>FEEL-aligned semantics, DMN-shaped rule set<br/>RE-F-38 to RE-F-40, RE-F-42"]
-    F2["M2 processes: source document, BPMN ids,<br/>business errors, job cancel, BPMN-typed nodes<br/>PE-F-54 to PE-F-57, CK-F-40"]
+    F1["M1 rules: source document, time zone,<br/>FEEL-aligned semantics and nulls, DMN-shaped rule set,<br/>semantic model canonical<br/>RE-F-38 to RE-F-42, X-F-28"]
+    F2["M2 processes: source document, BPMN ids,<br/>business errors, job cancel, scope tokens,<br/>BPMN-typed nodes, semantic model canonical<br/>PE-F-54 to PE-F-58, CK-F-40, X-F-28"]
     F3["M3: ADR-0013 subset import and export;<br/>DMN single table; refused by name; no CMMN<br/>PE-F-41, PE-F-53, RE-F-30, X-F-25"]
     F1 --> F2 --> F3
   end
@@ -23,13 +23,11 @@ flowchart LR
     B4["Complex gateway, ad-hoc subprocess,<br/>multiple events; conformance suite 100 percent<br/>PE-F-66"]
     D3["DMN import, DMNDI; TCK Level 3 100 percent<br/>RE-F-47"]
   end
-  P["Pending, not counted:<br/>RE-F-41 (PD-058), PE-F-58 (PD-059), X-F-28 (PD-060)"]
   F3 -- "1. 1.0 API frozen" --> B1
   B1 -- "2. scope tokens reused" --> B3
   D1 -- "3. HORUS FEEL core (PD-061)" --> D2
   B3 --> B4
   D2 --> D3
-  P -.-> F1
 
   classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
   classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F
@@ -40,7 +38,6 @@ flowchart LR
   class F1,F2,F3,B1,B3,B4,D1,D2,D3 engine;
   class B2 client;
   class R1 host;
-  class P obs;
   style S0 fill:none,stroke:#1565C0,stroke-dasharray:5 5
   style T1 fill:none,stroke:#6A1B9A,stroke-dasharray:5 5
   style T2 fill:none,stroke:#6A1B9A,stroke-dasharray:5 5

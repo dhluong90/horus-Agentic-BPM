@@ -13,7 +13,7 @@ The engines are held to numbered, testable requirements with ids such as `TR-EMB
 
 | Group | Ids | Covers |
 |---|---|---|
-| Embedding and compatibility | `TR-EMB-*` | One starter, your `DataSource` and transactions, no network I/O; supported Java, Spring Boot and PostgreSQL versions (`TR-EMB-02`) |
+| Embedding and compatibility | `TR-EMB-*` | One starter, your `DataSource` and transactions, no network I/O; supported Java, Spring Boot and PostgreSQL versions (`TR-EMB-02`); fixed table names (`TR-EMB-06`); the engine's own JSON library, unaffected by your JSON settings (`TR-EMB-07`) |
 | Determinism and correctness | `TR-DET-*` | Same version, inputs and clock give the same result; expressions checked at publish time |
 | Security | `TR-SEC-*` | No code execution, bounded regex, tenant from the resolver only, maker-checker, masking, error bodies, cockpit headers |
 | Reliability under retries | `TR-IDEM-*` | Idempotency keys, business keys, optimistic locking |
@@ -27,5 +27,9 @@ The engines are held to numbered, testable requirements with ids such as `TR-EMB
 | Performance and scalability | `TR-PERF-*` | Evaluation latency, compile time, replicas sharing jobs, bounded cache |
 | Operability | `TR-OPS-*` | Forward-only migrations, upgrades, incidents, connection poolers |
 | Cockpit | `TR-UI-*` | Authoring and approval in the cockpit, accessibility, languages |
+| Definitions and diagrams | `TR-DEF-*` | Definition lifecycle, content hash, layout, size limits, BPMN subset interchange |
+| Standards conformance | `TR-STD-*` | Source documents kept, stable hashes, FEEL-aligned expressions (`TR-STD-02`), BPMN and DMN models as the canonical model (`TR-STD-28`), scope tokens (`TR-STD-29`), staged BPMN and DMN conformance |
+| Java API | `TR-API-*` | One interface per job, immutable records, nullness checked in the build, unchecked exceptions with codes, compatibility from 1.0 (ADR-0016) |
+| Documentation | `TR-DOC-*` | Javadoc contract per public method, compiled examples, one owner per fact |
 | Quality and documentation | `TR-QA-*` | Tests named by specification id, documentation in the same pull request, coverage |
 | Licensing | `TR-LIC-*` | Permissive dependencies only, licence notice on every artifact |
