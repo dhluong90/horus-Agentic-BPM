@@ -60,6 +60,10 @@ public final class RuleSetReader {
             "expressionLanguage", "timeZone", "hitPolicy", "effectiveFrom", "moneyRounding", "inputs", "outputs",
             "rules");
 
+    private static final Set<String> INPUT_KEYS = Set.of("name", "type", "description", "allowed", "mask");
+    private static final Set<String> OUTPUT_KEYS = Set.of("name", "type", "description", "default", "collect");
+    private static final Set<String> RULE_KEYS = Set.of("id", "description", "when", "then");
+
     private RuleSetReader() {
     }
 
@@ -159,6 +163,7 @@ public final class RuleSetReader {
         Set<String> inputNames = new HashSet<>();
         for (JsonNode input : array(root, "inputs", 0)) {
             String inputName = identifier(input, "inputs");
+            onlyKeys(input, INPUT_KEYS, "Input '" + inputName + "'");
             if (!inputNames.add(inputName)) {
                 throw invalid("Duplicate input '" + inputName + "'");
             }
@@ -172,6 +177,7 @@ public final class RuleSetReader {
         Set<String> outputNames = new HashSet<>();
         for (JsonNode output : array(root, "outputs", 1)) {
             String outputName = identifier(output, "outputs");
+            onlyKeys(output, OUTPUT_KEYS, "Output '" + outputName + "'");
             if (!outputNames.add(outputName)) {
                 throw invalid("Duplicate output '" + outputName + "'");
             }
@@ -185,6 +191,7 @@ public final class RuleSetReader {
                 throw invalid("Every rule must be a mapping");
             }
             String id = text(rule, "id");
+            onlyKeys(rule, RULE_KEYS, "Rule " + id);
             if (!RULE_ID.matcher(id).matches() || id.length() > 64) {
                 throw invalid("Rule id '" + id + "' is not a valid id");
             }
@@ -338,6 +345,15 @@ public final class RuleSetReader {
         List<JsonNode> items = new ArrayList<>();
         node.forEach(items::add);
         return items;
+    }
+
+    /** additionalProperties: false of the schema, so a misspelt key such as {@code maks} is never ignored. */
+    private static void onlyKeys(JsonNode node, Set<String> allowed, String where) {
+        for (String key : node.propertyNames()) {
+            if (!allowed.contains(key)) {
+                throw invalid(where + ": Unknown property '" + key + "'");
+            }
+        }
     }
 
     private static JsonNode required(JsonNode node, String key) {

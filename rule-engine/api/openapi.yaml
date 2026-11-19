@@ -334,6 +334,9 @@ components:
         requestedAt: { type: [string, 'null'], format: date-time }
         approvedBy: { type: [string, 'null'] }
         approvedAt: { type: [string, 'null'], format: date-time }
+        createdBy:
+          type: [string, 'null']
+          description: Who imported the version; neither the author nor the requester may approve it
         createdAt: { type: string, format: date-time }
         definition:
           type: object

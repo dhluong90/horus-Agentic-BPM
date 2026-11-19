@@ -149,6 +149,21 @@ public final class CompiledRuleSet {
     }
 
     /**
+     * Refuses input names the table does not declare, so a misspelt name cannot silently fall to a default row.
+     *
+     * @param input the inputs
+     * @throws InputInvalidException listing the undeclared names
+     */
+    public void requireOnlyDeclared(DecisionInput input) {
+        java.util.Set<String> declared = new java.util.HashSet<>();
+        inputs.forEach(clause -> declared.add(clause.name()));
+        List<String> unknown = input.values().keySet().stream().filter(name -> !declared.contains(name)).sorted().toList();
+        if (!unknown.isEmpty()) {
+            throw new InputInvalidException("Rule set " + name + " does not declare the input(s) " + unknown);
+        }
+    }
+
+    /**
      * Binds inputs to slots, converting them to evaluation types.
      *
      * @param input the inputs
@@ -172,7 +187,7 @@ public final class CompiledRuleSet {
             case INTEGER -> value instanceof BigDecimal number && isIntegral(number);
             case DECIMAL -> value instanceof BigDecimal;
             case BOOLEAN -> value instanceof Boolean;
-            case MONEY -> value instanceof Money;
+            case MONEY -> value instanceof Money money && Math.abs(money.minorUnits()) <= Money.MAX_JSON_SAFE;
             case DATE -> value instanceof LocalDate;
             case DATETIME -> value instanceof Instant;
         };

@@ -47,8 +47,10 @@ public record RuleEngineProperties(
      *
      * @param maxInputScale the largest absolute scale of a number input, 0 to 34; default 34. May be lowered,
      *     never raised
+     * @param rejectUndeclaredInputs refuse input names the rule set does not declare; default true. When false,
+     *     undeclared inputs are ignored and never logged
      */
-    public record Evaluation(Integer maxInputScale) {
+    public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs) {
     }
 
     /**
@@ -60,6 +62,8 @@ public record RuleEngineProperties(
         return new EngineSettings(
                 cache.maxEntries() == null ? EngineDefaults.CACHE_MAX_ENTRIES : cache.maxEntries(),
                 idempotency.retention() == null ? EngineDefaults.IDEMPOTENCY_RETENTION : idempotency.retention(),
-                evaluation.maxInputScale() == null ? EngineDefaults.INPUT_MAX_SCALE : evaluation.maxInputScale());
+                evaluation.maxInputScale() == null ? EngineDefaults.INPUT_MAX_SCALE : evaluation.maxInputScale(),
+                evaluation.rejectUndeclaredInputs() == null
+                        ? EngineDefaults.REJECT_UNDECLARED_INPUTS : evaluation.rejectUndeclaredInputs());
     }
 }

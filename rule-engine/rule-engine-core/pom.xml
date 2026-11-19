@@ -43,6 +43,7 @@
       <artifactId>archunit-junit5</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- jqwik is EPL-2.0: allowed in test scope only, never shipped (PD-053 option 2). -->
     <dependency>
       <groupId>net.jqwik</groupId>
       <artifactId>jqwik</artifactId>

@@ -3,6 +3,7 @@ package com.horus.bpm.rules.internal.service;
 import com.horus.bpm.rules.api.ImportRequest;
 import com.horus.bpm.rules.api.InputInvalidException;
 import com.horus.bpm.rules.api.InvalidStateException;
+import com.horus.bpm.rules.api.RuleSetExistsException;
 import com.horus.bpm.rules.api.RuleSetNotFoundException;
 import com.horus.bpm.rules.api.RuleSetVersion;
 import com.horus.bpm.rules.api.SelfApprovalForbiddenException;
@@ -95,6 +96,9 @@ public final class DefaultVersionService implements VersionService {
         Instant now = context.clock().instant();
         String ruleSetId;
         if (targetRuleSet == null) {
+            if (store.findRuleSetId(tenant, name).isPresent()) {
+                throw new RuleSetExistsException(name);
+            }
             ruleSetId = Ulid.next(now);
             store.createRuleSet(tenant, ruleSetId, name, now);
         } else {
@@ -163,7 +167,7 @@ public final class DefaultVersionService implements VersionService {
     public Optional<RuleSetVersion> find(String ruleSet, int version, boolean includeSource) {
         String tenant = context.tenant();
         context.callerWith(PERMISSION_READ);
-        return context.transactions().inTransaction(() ->
+        return context.withoutDooming(() ->
                 store.findVersion(tenant, ruleSet, version, false).map(v -> v.toView(includeSource)));
     }
 

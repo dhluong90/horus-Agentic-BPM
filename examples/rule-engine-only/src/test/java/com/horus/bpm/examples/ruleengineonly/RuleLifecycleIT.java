@@ -62,6 +62,12 @@ class RuleLifecycleIT {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+    @Autowired
+    com.horus.bpm.rules.api.VersionService versions;
+
     @Test
     void RLE_020_import_keeps_source_document_and_canonical_hash() throws Exception {
         // Given
@@ -180,6 +186,85 @@ class RuleLifecycleIT {
     }
 
     @Test
+    void RLE_014_a_request_whose_key_is_still_in_flight_gets_409_with_retry_after() throws Exception {
+        // Given alice's import with key k-in-flight is running in another transaction
+        publish("card-fee-flight");
+        java.util.concurrent.CountDownLatch holding = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        Thread running = Thread.ofVirtual().start(() -> {
+            org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                    org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated("alice", null,
+                            org.springframework.security.core.authority.AuthorityUtils.createAuthorityList(
+                                    "rules:author", "tenant:bank-a")));
+            new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                versions.importVersion("card-fee-flight", com.horus.bpm.rules.api.ImportRequest.yaml(renamed("card-fee-flight"))
+                        .withIdempotencyKey("k-in-flight"));
+                holding.countDown();
+                try {
+                    release.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+        });
+        assertThat(holding.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+        // When alice sends the same request over REST
+        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets/card-fee-flight/versions"))
+                .header("Authorization", "Basic " + Base64.getEncoder().encodeToString(
+                        "alice:it-only-password".getBytes(StandardCharsets.UTF_8)))
+                .header("Content-Type", "application/yaml").header("Idempotency-Key", "k-in-flight")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(renamed("card-fee-flight"))).build(),
+                HttpResponse.BodyHandlers.ofString());
+        release.countDown();
+        running.join(10_000);
+
+        // Then
+        assertThat(response.statusCode()).isEqualTo(409);
+        assertThat(response.headers().firstValue("Retry-After")).contains("1");
+        assertThat(JSON.readTree(response.body()).path("code").asString()).isEqualTo("IDEMPOTENCY_IN_FLIGHT");
+    }
+
+    @Test
+    void TR_SEC_08_oversized_numbers_and_undeclared_inputs_are_400_not_500() throws Exception {
+        publish("card-fee-limits");
+        for (String inputs : new String[] {"{\"tier\":\"GOLD\",\"txCount\":1e-30000000}",
+                "{\"tier\":\"GOLD\",\"txCount\":1e999999999}", "{\"tier\":\"SILVER\",\"txcount\":5}"}) {
+            long started = System.nanoTime();
+            Reply reply = send("teller", "POST", "/decisions/card-fee-limits:evaluate",
+                    ("{\"inputs\":" + inputs + "}").getBytes(StandardCharsets.UTF_8), "application/json", null);
+            assertThat(reply.status()).as(inputs).isEqualTo(400);
+            assertThat(reply.json().path("code").asString()).isEqualTo("INPUT_INVALID");
+            assertThat(System.nanoTime() - started).isLessThan(2_000_000_000L);
+        }
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision WHERE rule_set_name = 'card-fee-limits'")
+                .query(Long.class).single()).isZero();
+    }
+
+    @Test
+    void RLE_009_a_caller_without_rules_approve_gets_403_permission_denied() throws Exception {
+        send("alice", "POST", "/rule-sets", renamed("card-fee-perm2"), "application/yaml", null);
+        send("alice", "POST", "/rule-sets/card-fee-perm2/versions/1:request-publish", null, null, null);
+
+        Reply reply = send("teller", "POST", "/rule-sets/card-fee-perm2/versions/1:approve", null, null, null);
+
+        assertThat(reply.status()).isEqualTo(403);
+        assertThat(reply.json().path("code").asString()).isEqualTo("PERMISSION_DENIED");
+    }
+
+    @Test
+    void a_malformed_correlation_id_is_replaced_not_echoed() throws Exception {
+        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(uri("/decisions/no-such-rule-set:evaluate"))
+                .header("Authorization", "Basic " + Base64.getEncoder().encodeToString(
+                        "teller:it-only-password".getBytes(StandardCharsets.UTF_8)))
+                .header("Content-Type", "application/json").header("X-Correlation-Id", "x".repeat(300))
+                .POST(HttpRequest.BodyPublishers.ofString("{\"inputs\":{}}")).build(), HttpResponse.BodyHandlers.ofString());
+
+        String correlationId = JSON.readTree(response.body()).path("correlationId").asString();
+        assertThat(correlationId).hasSize(26).doesNotContain("xxx");
+    }
+
+    @Test
     void permissions_and_authentication_are_checked() throws Exception {
         assertThat(send("teller", "POST", "/rule-sets", renamed("card-fee-perm"), "application/yaml", null).json()
                 .path("code").asString()).isEqualTo("PERMISSION_DENIED");
@@ -187,7 +272,10 @@ class RuleLifecycleIT {
                 HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(401);
     }
 
-    /** The canonical JSON of card-fee.yaml as the authoring pipeline computes it (RFC 8785). */
+    /**
+     * The canonical JSON of card-fee.yaml, written out by hand from RFC 8785 as a test vector. It stands in for the
+     * authoring pipeline's hash; it is not output of an independent RFC 8785 implementation.
+     */
     static final String PIPELINE_CANONICAL = "{\"description\":\"Monthly card fee by tier and transaction count\","
             + "\"hitPolicy\":\"first\",\"inputs\":[{\"name\":\"tier\",\"type\":\"string\"},"
             + "{\"description\":\"card transactions in the month\",\"name\":\"txCount\",\"type\":\"integer\"}],"

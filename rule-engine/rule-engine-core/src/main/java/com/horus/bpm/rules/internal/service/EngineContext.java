@@ -1,5 +1,6 @@
 package com.horus.bpm.rules.internal.service;
 
+import com.horus.bpm.rules.api.HorusBpmException;
 import com.horus.bpm.rules.api.IdempotencyInFlightException;
 import com.horus.bpm.rules.api.IdempotencyKeyReuseException;
 import com.horus.bpm.rules.api.InputInvalidException;
@@ -76,7 +77,7 @@ public record EngineContext(
         if (key != null && (key.isBlank() || key.length() > MAX_KEY_LENGTH)) {
             throw new InputInvalidException("Idempotency-Key must be 1 to " + MAX_KEY_LENGTH + " characters");
         }
-        return transactions.inTransaction(() -> {
+        return withoutDooming(() -> {
             if (key == null) {
                 return action.get();
             }
@@ -93,5 +94,28 @@ public record EngineContext(
                 }
             };
         });
+    }
+
+    /**
+     * Runs work in the caller's transaction, but returns an engine refusal ({@link HorusBpmException}) as a value
+     * out of the transaction callback and throws it afterwards, so a refusal the host catches never marks the
+     * host's transaction rollback-only (TR-EMB-04). Every refusal happens before the engine writes anything that
+     * matters; unexpected exceptions still roll back.
+     */
+    <T> T withoutDooming(Supplier<T> work) {
+        Result<T> result = transactions.inTransaction(() -> {
+            try {
+                return new Result<>(work.get(), null);
+            } catch (HorusBpmException refusal) {
+                return new Result<>(null, refusal);
+            }
+        });
+        if (result.refusal() != null) {
+            throw result.refusal();
+        }
+        return result.value();
+    }
+
+    private record Result<T>(T value, HorusBpmException refusal) {
     }
 }

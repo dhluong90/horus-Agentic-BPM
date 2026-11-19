@@ -44,7 +44,13 @@ class RuleEngineSettingsTest {
                         "horus.bpm.rules.idempotency.retention=" + retention,
                         "horus.bpm.rules.evaluation.max-input-scale=" + maxScale)
                 .run(context -> assertThat(context.getBean(EngineSettings.class))
-                        .isEqualTo(new EngineSettings(maxEntries, Duration.parse(retention), maxScale)));
+                        .isEqualTo(new EngineSettings(maxEntries, Duration.parse(retention), maxScale, true)));
+    }
+
+    @org.junit.jupiter.api.Test
+    void TR_EXT_01_undeclared_inputs_can_be_ignored_instead_of_refused() {
+        runner.withPropertyValues("horus.bpm.rules.evaluation.reject-undeclared-inputs=false")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).rejectUndeclaredInputs()).isFalse());
     }
 
     @ParameterizedTest

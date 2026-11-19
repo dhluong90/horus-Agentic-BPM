@@ -221,7 +221,13 @@ class RuleEnginePostgresIT {
         publishCardFee();
         caller.as("bank-a", "teller-01");
 
-        engines.ruleEngine().evaluate("card-fee",
+        RuleEngines lenient = PostgresRuleEngines.create(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)),
+                caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), new EngineSettings(1000, java.time.Duration.ofHours(24), 34, false));
+        assertThatThrownBy(() -> engines.ruleEngine().evaluate("card-fee",
+                DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5, "nationalId", "079090001234"))))
+                .isInstanceOf(com.horus.bpm.rules.api.InputInvalidException.class);
+
+        lenient.ruleEngine().evaluate("card-fee",
                 DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5, "nationalId", "079090001234")));
 
         assertThat(JdbcClient.create(db).sql("SELECT masked_inputs::text FROM rle_decision WHERE tenant_id = 'bank-a'")

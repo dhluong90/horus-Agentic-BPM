@@ -42,7 +42,7 @@ class RuleLifecycleAcceptanceTest {
     final TestCaller caller = new TestCaller("bank-a", "alice");
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, Duration.ofHours(24)),
+                    stores, stores, EngineSettings.defaults()),
             stores, stores, stores);
 
     void publish(byte[] yaml, String name) {
@@ -173,21 +173,25 @@ class RuleLifecycleAcceptanceTest {
     }
 
     @Test
-    void RLE_009_the_checker_is_whoever_did_not_request_even_the_importer() {
+    void RLE_009_the_checker_is_neither_the_requester_nor_the_importer() {
         // Given bob imports, alice requests publication
         caller.become("bank-a", "bob");
         engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         caller.become("bank-a", "alice");
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
 
-        // When bob approves
+        // When bob, the author, approves (changed by the security review of #1, finding 4: the author is a maker too)
         caller.become("bank-a", "bob");
-        RuleSetVersion published = engines.versionService().approve("card-fee", 1, WriteOptions.none());
 
-        // Then
+        // Then he is refused, and a third person publishes
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, WriteOptions.none()))
+                .isInstanceOf(com.horus.bpm.rules.api.SelfApprovalForbiddenException.class);
+        caller.become("bank-a", "carol");
+        RuleSetVersion published = engines.versionService().approve("card-fee", 1, WriteOptions.none());
         assertThat(published.status()).isEqualTo(VersionStatus.PUBLISHED);
         assertThat(published.requestedBy()).isEqualTo("alice");
-        assertThat(published.approvedBy()).isEqualTo("bob");
+        assertThat(published.createdBy()).isEqualTo("bob");
+        assertThat(published.approvedBy()).isEqualTo("carol");
     }
 
     @Test

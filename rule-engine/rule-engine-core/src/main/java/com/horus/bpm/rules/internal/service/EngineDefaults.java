@@ -36,6 +36,12 @@ public final class EngineDefaults {
      */
     public static final int INPUT_MAX_SCALE = 34;
 
+    /**
+     * Default of {@code horus.bpm.rules.evaluation.reject-undeclared-inputs}: a misspelt input name ({@code txcount}
+     * for {@code txCount}) is refused instead of silently matching a default row.
+     */
+    public static final boolean REJECT_UNDECLARED_INPUTS = true;
+
     /** Longest accepted {@code X-Correlation-Id}; a longer or malformed one is replaced by a generated id. */
     public static final int CORRELATION_ID_MAX_LENGTH = 128;
 

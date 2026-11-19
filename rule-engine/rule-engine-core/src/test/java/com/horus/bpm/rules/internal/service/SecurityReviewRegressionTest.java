@@ -134,21 +134,53 @@ class SecurityReviewRegressionTest {
     // Finding 3 (blocking): only declared inputs are logged; masked ones are replaced.
 
     @Test
-    void TR_SEC_05_undeclared_inputs_never_reach_the_decision_log() {
+    void TR_SEC_05_undeclared_inputs_are_refused_by_default_and_nothing_is_logged() {
         publish(PRICING, "pricing");
         caller.become("bank-a", "teller", EVALUATE_ONLY);
+
+        assertThatThrownBy(() -> engines.ruleEngine().evaluate("pricing", DecisionInput.of(customer())))
+                .isInstanceOf(InputInvalidException.class)
+                .hasMessageContaining("[accountNumber, phone]")
+                .hasMessageNotContaining("0903123456");
+        assertThat(stores.decisions).isEmpty();
+    }
+
+    @Test
+    void TR_SEC_05_undeclared_inputs_never_reach_the_decision_log_when_they_are_allowed() {
+        RuleEngines lenient = RuleEngines.create(new EngineContext(caller, caller,
+                Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC), stores, stores,
+                new EngineSettings(EngineDefaults.CACHE_MAX_ENTRIES, EngineDefaults.IDEMPOTENCY_RETENTION,
+                        EngineDefaults.INPUT_MAX_SCALE, false)), stores, stores, stores);
+        publish(PRICING, "pricing");
+        caller.become("bank-a", "teller", EVALUATE_ONLY);
+
+        lenient.ruleEngine().evaluate("pricing", DecisionInput.of(customer()));
+
+        String logged = stores.decisions.getFirst().maskedInputsJson();
+        assertThat(logged).isEqualTo("{\"fee\":{\"currency\":\"VND\",\"amount\":1000},\"rate\":1,\"nationalId\":\"masked\"}");
+        assertThat(logged).doesNotContain("079090001234", "0903123456", "1903 4567 8901", "phone", "accountNumber");
+    }
+
+    static Map<String, Object> customer() {
         Map<String, Object> customer = new LinkedHashMap<>();
         customer.put("fee", Money.ofMinor("VND", 1000));
         customer.put("rate", BigDecimal.ONE);
         customer.put("nationalId", "079090001234");
         customer.put("phone", "0903123456");
         customer.put("accountNumber", "1903 4567 8901");
+        return customer;
+    }
 
-        engines.ruleEngine().evaluate("pricing", DecisionInput.of(customer));
+    @Test
+    void money_outputs_beyond_what_json_clients_read_exactly_fail_the_decision() {
+        publish(PRICING, "pricing");
+        caller.become("bank-a", "teller", EVALUATE_ONLY);
 
-        String logged = stores.decisions.getFirst().maskedInputsJson();
-        assertThat(logged).isEqualTo("{\"fee\":{\"currency\":\"VND\",\"amount\":1000},\"rate\":1,\"nationalId\":\"masked\"}");
-        assertThat(logged).doesNotContain("079090001234", "0903123456", "1903 4567 8901", "phone", "accountNumber");
+        DecisionResult result = engines.ruleEngine().evaluate("pricing", DecisionInput.of(Map.of(
+                "fee", Money.ofMinor("VND", 9_000_000_000_000_000L), "rate", BigDecimal.TEN)));
+
+        assertThat(((DecisionResult.Failed) result.outcome()).code()).isEqualTo("EVALUATION_ERROR");
+        assertThat(result.outputs()).isEmpty();
     }
 
     // Finding 4: the author of a version cannot approve it either.

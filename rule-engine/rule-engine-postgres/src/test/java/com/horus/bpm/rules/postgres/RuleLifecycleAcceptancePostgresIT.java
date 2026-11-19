@@ -58,7 +58,8 @@ class RuleLifecycleAcceptancePostgresIT {
         new DecisionLogPartitions(db, transactions).ensureCurrentAndNextMonth(NOW);
         host = new TransactionTemplate(transactionManager);
         jdbc = JdbcClient.create(db);
-        engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC));
+        engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
+                com.horus.bpm.rules.internal.service.EngineSettings.defaults());
     }
 
     @Test

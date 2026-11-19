@@ -9,8 +9,11 @@ import java.time.Duration;
  * @param cacheMaxEntries {@code horus.bpm.rules.cache.max-entries}, 1 to {@value EngineDefaults#CACHE_MAX_ENTRIES_LIMIT}
  * @param idempotencyRetention {@code horus.bpm.rules.idempotency.retention}, 1 minute to 30 days
  * @param maxInputScale {@code horus.bpm.rules.evaluation.max-input-scale}, 0 to {@value EngineDefaults#INPUT_MAX_SCALE}
+ * @param rejectUndeclaredInputs {@code horus.bpm.rules.evaluation.reject-undeclared-inputs}: refuse an input name the
+ *     rule set does not declare ({@code INPUT_INVALID}); when false, such inputs are ignored and never logged
  */
-public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale) {
+public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+        boolean rejectUndeclaredInputs) {
 
     public EngineSettings {
         if (cacheMaxEntries < 1 || cacheMaxEntries > EngineDefaults.CACHE_MAX_ENTRIES_LIMIT) {
@@ -36,6 +39,6 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public static EngineSettings defaults() {
         return new EngineSettings(EngineDefaults.CACHE_MAX_ENTRIES, EngineDefaults.IDEMPOTENCY_RETENTION,
-                EngineDefaults.INPUT_MAX_SCALE);
+                EngineDefaults.INPUT_MAX_SCALE, EngineDefaults.REJECT_UNDECLARED_INPUTS);
     }
 }

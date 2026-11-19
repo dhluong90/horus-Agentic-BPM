@@ -126,6 +126,19 @@ public final class EngineValues {
         return DecisionInput.of(values);
     }
 
+    /** Output values as the evaluator returns them: every number is a {@code BigDecimal} (DESIGN section 3.5). */
+    private static Object outputFromJson(JsonNode node, String name) {
+        if (node.isNumber()) {
+            return node.decimalValue();
+        }
+        if (node.isArray()) {
+            List<Object> list = new ArrayList<>();
+            node.forEach(element -> list.add(outputFromJson(element, name)));
+            return List.copyOf(list);
+        }
+        return fromJson(node, name);
+    }
+
     private static Object fromJson(JsonNode node, String name) {
         if (node.isNull()) {
             return null;
@@ -274,7 +287,7 @@ public final class EngineValues {
                 List<String> ids = new ArrayList<>();
                 node.get("matchedRuleIds").forEach(id -> ids.add(id.stringValue()));
                 Map<String, Object> outputs = new LinkedHashMap<>();
-                node.get("outputs").properties().forEach(e -> outputs.put(e.getKey(), fromJson(e.getValue(), e.getKey())));
+                node.get("outputs").properties().forEach(e -> outputs.put(e.getKey(), outputFromJson(e.getValue(), e.getKey())));
                 yield new DecisionResult.Matched(ids, outputs);
             }
             case "NO_MATCH" -> new DecisionResult.NoMatch();

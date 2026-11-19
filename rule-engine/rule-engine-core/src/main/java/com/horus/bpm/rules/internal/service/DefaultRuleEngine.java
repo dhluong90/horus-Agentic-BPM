@@ -80,6 +80,9 @@ public final class DefaultRuleEngine implements RuleEngine {
                         ? new NoEffectiveVersionException(request.ruleSet())
                         : new RuleSetNotFoundException(request.ruleSet()));
         CompiledRuleSet rules = compiled(version);
+        if (context.settings().rejectUndeclaredInputs()) {
+            rules.requireOnlyDeclared(request.input());
+        }
         long started = System.nanoTime();
         DecisionResult.Outcome outcome = rules.evaluate(request.input());
         long micros = (System.nanoTime() - started) / 1_000;

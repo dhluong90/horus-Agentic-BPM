@@ -16,7 +16,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import javax.sql.DataSource;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
@@ -53,11 +52,15 @@ public final class JdbcRuleStore implements RuleStore {
 
     @Override
     public void createRuleSet(String tenantId, String id, String name, Instant createdAt) {
-        try {
-            jdbc.sql("INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES (:tenant, :id, :name, :at)")
-                    .param("tenant", tenantId).param("id", id).param("name", name)
-                    .param("at", Timestamp.from(createdAt)).update();
-        } catch (DuplicateKeyException e) {
+        // ON CONFLICT instead of a failing INSERT: a unique violation would abort the caller's PostgreSQL
+        // transaction, and the refusal must leave the host's transaction usable (TR-EMB-04).
+        int inserted = jdbc.sql("""
+                INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES (:tenant, :id, :name, :at)
+                ON CONFLICT (tenant_id, name) DO NOTHING
+                """)
+                .param("tenant", tenantId).param("id", id).param("name", name)
+                .param("at", Timestamp.from(createdAt)).update();
+        if (inserted == 0) {
             throw new RuleSetExistsException(name);
         }
     }
