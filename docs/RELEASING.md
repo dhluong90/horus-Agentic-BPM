@@ -1,6 +1,6 @@
 # Releasing
 
-This page describes the release build. Publishing to Maven Central starts once the namespace is registered (ADR-0022). Until then the build is a dry run, and its output is uploaded to the workflow run.
+This page describes the release build. Publishing to Maven Central starts once the namespace is registered (ADR-0022). Until then a tag run publishes a GitHub Release from the checked build output (see GitHub Release).
 
 ## One command
 
@@ -104,13 +104,38 @@ ERROR: tag rule-engine/v0.1.0 is a per-module tag; a release is one project tag 
 
 The workflow's job "Release tag guard tests" proves each refusal on every pull request that changes the release files. It runs `tools/release/test_release_sbom.py` (unit tests of the check) and `tools/release/test-release-tag.sh`. The second builds a scratch copy of the tree at the release version and group id, commits it as `main`, and runs the guard for seven cases: `v0.1.0` on `main` passes; a per-module tag, a module at another version and a commit off `main` are refused; a per-module tag on a commit off `main` names both problems; a POM that Maven cannot read is refused, with a per-module tag still named; and a tag named `origin/main` on a commit off `main` does not fake the main check.
 
+## GitHub Release
+
+On a tag run that passed the release build, the job `github-release` publishes the GitHub Release for the tag. It uses the archive `release-dry-run-success` of the same run and rebuilds nothing. It is the only job with a write token (`contents: write`). It has no checkout, no Maven and no npm, and uses one action, `actions/download-artifact`, pinned by commit SHA. Pull request and dispatch runs skip it.
+
+| Step | What happens | Fails when, and what is left |
+|---|---|---|
+| 1 | Download `release-dry-run-success` of this run | The release build failed: the job does not start |
+| 2 | `shasum -a 256 -c SHA256SUMS` over the archive, and every file in it must be listed | A file differs from `SHA256SUMS`, or is not listed: no draft |
+| 3 | `BUILD-INFO.json` must say `"trial": false`, `"workingTree": "clean"`, and the tag and commit of this run | Any field differs: no draft |
+| 4 | Assets: every jar and POM under `maven-repo` (no `maven-metadata`, no checksum side files), `bom-release.json`, `SHA256SUMS`, `BUILD-INFO.json` | Two assets share a file name, or there is no jar: no draft |
+| 5 | `gh release create "$TAG" --verify-tag --draft` with every asset and the release notes | An upload fails: a draft only, never a published Release |
+| 6 | The draft's assets are downloaded and checked against the `SHA256SUMS` of the archive checked in step 2 (the draft's own copy must be identical to it); then `gh release edit --draft=false` | An asset is missing, extra or different: the draft stays unpublished |
+
+The release notes link this page and give the check adopters run in the folder of their downloads:
+
+```
+while read -r hash path; do name="${path##*/}"; [ -f "$name" ] && printf '%s  %s\n' "$hash" "$name"; done < SHA256SUMS | shasum -a 256 -c -
+```
+
+Each downloaded file prints `<name>: OK`. Step 6 runs the same command on the draft's downloads, reading the archive's `SHA256SUMS`.
+
+The text of steps 2 to 4 sits between `# BEGIN release-archive-check` and `# END release-archive-check` in the workflow. `tools/release/test-release-upload.sh` runs that exact text against fixture archives on every pull request that changes the release files. It checks that a good archive passes; that a changed file, an unlisted file, a trial build, another commit, a dirty tree and duplicate asset names are each refused; and that the adopters' check passes on good downloads and catches a changed one.
+
+To recover from a run that left only a draft, delete the draft (`gh release delete v0.1.0`), fix the cause, and re-run the workflow for the tag. Once a Release is published, never re-tag: fix it with the next patch release, `v0.1.1` (PD-091, see Tags).
+
 ## Local trial
 
 `BPM_RELEASE_TRIAL=true tools/release/release-build.sh` accepts another Node version and a dirty working tree. `BUILD-INFO.json` and the SBOM then record `"trial": true`, and the log ends with "TRIAL build, not a release". The script refuses trial mode when `CI` or `GITHUB_ACTIONS` is `true`.
 
 ## Not yet
 
-- Signing, sources and Javadoc jars, and the upload to Maven Central arrive with the publishing slice.
+- Signing, sources and Javadoc jars, and the upload to Maven Central arrive with the publishing slice. GitHub Releases are published (see GitHub Release).
 - Provenance and SBOM attestations on tag runs before publishing: `actions/attest-build-provenance` for the staged jars and POMs, and `actions/attest-sbom` for `bom-release.json`, with `id-token: write` and `attestations: write` granted to that job only.
 - Real publishing lives in its own workflow with no `pull_request` trigger, behind a protected environment that holds the Central credentials. Pull requests from branches of this repository receive secrets, so publishing never shares a workflow with that trigger.
 - The standalone cockpit archive comes with standalone mode (#11).
