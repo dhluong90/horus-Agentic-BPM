@@ -192,7 +192,7 @@ The avatar opens a menu (level 4): full name, roles in words (`Author`, `Approve
   - a user with no rule permission sees Home only.
 - "Preview" is said once in the menu: as the group heading. The items under it carry no tag of their own. In the collapsed menu the group keeps a divider, and the tooltip reads "Decisions (Preview)".
 - Footer: Collapse menu. The collapsed menu is 72 px wide with icons and a tooltip label; the count badge becomes a dot.
-- Item height 40 px, padding 0 12 px, gap 12 px between icon and label, 4 px between items.
+- Item height 44 px (`--target-min`), padding 0 12 px, gap 12 px between icon and label, 4 px between items.
 
 ## 9. Component states
 
@@ -200,7 +200,7 @@ Every state below is designed. A state that is not listed does not ship.
 
 ### Buttons
 
-Height 40 px (hit area 44 px), padding 0 16 px, `--radius-m`, `--type-body` at 600. Icon 16 px, 8 px from the label.
+Height 44 px (`--target-min`), padding 0 16 px, `--radius-m`, `--type-body` at 600. Icon 16 px, 8 px from the label. Dense table controls, such as the row `⋯` menu, may draw at 32 px but extend their hit area to 44 px ([UX design section 8](../ux-design.md#8-accessibility-and-viewport-checks)).
 
 | Variant | Default | Hover | Pressed | Focus | Loading | Disabled |
 |---|---|---|---|---|---|---|
@@ -213,7 +213,7 @@ One primary button per screen region. Reject is never filled red: it is the seco
 
 ### Inputs, selects and the money field
 
-Height 40 px, padding 0 12 px, `--radius-m`, `--type-body`.
+Height 44 px (`--target-min`), padding 0 12 px, `--radius-m`, `--type-body`. Cells in the table editor follow the dense-control rule above.
 
 | State | Treatment |
 |---|---|
