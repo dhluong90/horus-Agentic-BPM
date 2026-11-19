@@ -48,7 +48,6 @@ RUN --mount=type=cache,id=horus-bpm-m2,target=/root/.m2/repository \
       rm -rf cockpit/web/dist && mkdir -p cockpit/web/dist && cp -R /tmp/cockpit-dist/. cockpit/web/dist/; \
       skip_cockpit=false; \
     fi; \
-    export REAL_MVN="$(command -v mvn)"; mkdir -p /tmp/fault; cp deploy/docker/fault-first-mvn.sh /tmp/fault/mvn; chmod +x /tmp/fault/mvn; export PATH="/tmp/fault:$PATH"; \
     bash tools/mvn-retry.sh -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests -Dcockpit.bundle.skip="${skip_cockpit}"; \
     jar="$(find "examples/${EXAMPLE}/target" -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' | head -n 1)"; \
     test -n "$jar"; \
