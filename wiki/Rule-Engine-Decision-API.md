@@ -75,7 +75,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | Method and path | Purpose | Permission | Headers |
 |---|---|---|---|
 | `POST /decisions/{ruleSet}:evaluate` | Evaluate the effective version at `clock` (default now) | `rules:evaluate`; `rules:simulate` when `clock` is set | `Idempotency-Key` optional |
-| `POST /decisions/{ruleSet}/versions/{v}:evaluate` | Evaluate one published version at the host clock or `clock`, instead of the version in force; a `RETIRED` version only with `evaluation.pin-retired: true`; a draft is `409 INVALID_STATE` and is simulated with `:simulate` instead | `rules:pin` (held by no role by default); `rules:simulate` when `clock` is set | `Idempotency-Key` optional |
+| `POST /decisions/{ruleSet}/versions/{v}:evaluate` | Evaluate one approved version. A draft is `409 INVALID_STATE` (use `:simulate`); a retired version is `409 INVALID_STATE` unless `evaluation.pin-retired` is `true` | `rules:pin`, plus `rules:simulate` for a custom `clock` | `Idempotency-Key` optional |
 | `POST /decisions/{decisionId}:replay` | Evaluate a logged decision again with its version, inputs and clock; writes nothing. `404 DECISION_NOT_FOUND` for another tenant's id; `422 REPLAY_NOT_POSSIBLE` when a masked input had a value | `rules:log:read` | none |
 | `POST /decisions/{ruleSet}:evaluate-batch` | Up to 1 000 input sets; one decision row each; partial failures reported per item | `rules:evaluate` | `Idempotency-Key` optional |
 | `GET /rule-sets` | List rule sets with effective version and pending approvals | `rules:read` | cursor pagination |
@@ -90,7 +90,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | Freeze the draft, record the requester | `rules:author` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:approve` | Publish; approver must differ from requester | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:reject` | Back to draft with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
-| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason. In `four-eyes` mode (M3) it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason. For the last version in effect, add `"confirmNoVersionInEffect": true` or get `409 LAST_VERSION_IN_EFFECT` (PD-101). In `four-eyes` mode (M3) it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:confirm-retire` | M3, `four-eyes` mode: retire the version a retirement request names; the requester gets `403 SELF_APPROVAL_FORBIDDEN` | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:cancel-retire` | M3: withdraw a pending retirement request, with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `GET /rule-sets/{name}/versions/{v}/export` | YAML, JSON or DMN 1.5 export | `rules:read` | |
