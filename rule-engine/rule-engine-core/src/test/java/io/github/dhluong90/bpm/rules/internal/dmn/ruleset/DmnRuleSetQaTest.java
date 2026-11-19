@@ -13,6 +13,7 @@ import com.horus.bpm.rules.internal.read.RuleSetReader;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -175,6 +176,7 @@ class DmnRuleSetQaTest {
 
     // ---------------------------------------------------------------- PD-088: unique and collect from DMN
 
+    @Disabled("Runs once unique and collect (#132) are on main; #145 merges after #132 (architecture decision on #145)")
     @Test
     void RLE_002_a_dmn_table_with_the_default_hit_policy_imports_as_unique_and_zero_matches_is_no_match() {
         // Given a DMN table with no hitPolicy attribute (DMN default UNIQUE), as a modeller writes it
@@ -189,6 +191,7 @@ class DmnRuleSetQaTest {
         assertThat(compiled.evaluate(DecisionInput.of(Map.of("age", 70)))).isEqualTo(new DecisionResult.NoMatch());
     }
 
+    @Disabled("Runs once unique and collect (#132) are on main; #145 merges after #132 (architecture decision on #145)")
     @Test
     void RLE_002_a_dmn_collect_table_keeps_null_outputs_of_matched_rules() {
         // Given a COLLECT table where one matched rule outputs null
@@ -205,6 +208,7 @@ class DmnRuleSetQaTest {
         assertThat(((DecisionResult.Matched) outcome).ruleIds()).containsExactly("R1", "R2");
     }
 
+    @Disabled("Runs once unique and collect (#132) are on main; #145 merges after #132 (architecture decision on #145)")
     @Test
     void TR_STD_04_a_hit_policy_the_engine_cannot_run_yet_is_refused_at_import_with_its_line() {
         // Given a DMN table with no hitPolicy attribute (DMN default UNIQUE)
