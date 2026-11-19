@@ -1,6 +1,9 @@
 package com.horus.bpm.rules.internal.store;
 
+import com.horus.bpm.rules.api.RuleSetSummary;
+import com.horus.bpm.rules.api.VersionSummary;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -74,4 +77,52 @@ public interface RuleStore {
      * @return the version, or empty
      */
     Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at);
+
+    /**
+     * Lists rule set summaries by name, ascending.
+     *
+     * @param tenantId the tenant
+     * @param afterName only names after this one, or null from the start
+     * @param limit at most this many
+     * @param now the instant {@code publishedVersion} is resolved at
+     * @return the summaries
+     */
+    List<RuleSetSummary> listRuleSets(String tenantId, String afterName, int limit, Instant now);
+
+    /**
+     * Reads one rule set summary.
+     *
+     * @param tenantId the tenant
+     * @param name the rule set name
+     * @param now the instant {@code publishedVersion} is resolved at
+     * @return the summary, or empty
+     */
+    Optional<RuleSetSummary> findRuleSetSummary(String tenantId, String name, Instant now);
+
+    /**
+     * Lists version summaries of a rule set by version number, descending.
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     * @param beforeVersion only versions below this number, or null from the newest
+     * @param limit at most this many
+     * @return the summaries
+     */
+    List<VersionSummary> listVersions(String tenantId, String ruleSetId, Integer beforeVersion, int limit);
+
+    /**
+     * Appends one lifecycle history row.
+     *
+     * @param row the row
+     */
+    void appendHistory(HistoryRow row);
+
+    /**
+     * Reads the history of a version, oldest first.
+     *
+     * @param tenantId the tenant
+     * @param versionId the version id
+     * @return the rows
+     */
+    List<HistoryRow> history(String tenantId, String versionId);
 }

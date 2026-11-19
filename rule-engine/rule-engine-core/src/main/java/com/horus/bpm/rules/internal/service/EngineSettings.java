@@ -11,9 +11,13 @@ import java.time.Duration;
  * @param maxInputScale {@code horus.bpm.rules.evaluation.max-input-scale}, 0 to {@value EngineDefaults#INPUT_MAX_SCALE}
  * @param rejectUndeclaredInputs {@code horus.bpm.rules.evaluation.reject-undeclared-inputs}: refuse an input name the
  *     rule set does not declare ({@code INPUT_INVALID}); when false, such inputs are ignored and never logged
+ * @param queryMaxPageSize {@code horus.bpm.rules.query.max-page-size}, 1 to {@value EngineDefaults#QUERY_MAX_PAGE_SIZE}:
+ *     the largest {@code limit} a list read accepts
+ * @param reasonMaxLength {@code horus.bpm.rules.lifecycle.reason-max-length}, 1 to
+ *     {@value EngineDefaults#REASON_MAX_LENGTH}: the longest reject reason, in characters
  */
 public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
-        boolean rejectUndeclaredInputs) {
+        boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength) {
 
     public EngineSettings {
         if (cacheMaxEntries < 1 || cacheMaxEntries > EngineDefaults.CACHE_MAX_ENTRIES_LIMIT) {
@@ -30,6 +34,28 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
             throw new IllegalArgumentException("horus.bpm.rules.evaluation.max-input-scale must be 0 to "
                     + EngineDefaults.INPUT_MAX_SCALE + " (it may be lowered, never raised), was " + maxInputScale);
         }
+        if (queryMaxPageSize < 1 || queryMaxPageSize > EngineDefaults.QUERY_MAX_PAGE_SIZE) {
+            throw new IllegalArgumentException("horus.bpm.rules.query.max-page-size must be 1 to "
+                    + EngineDefaults.QUERY_MAX_PAGE_SIZE + " (it may be lowered, never raised), was " + queryMaxPageSize);
+        }
+        if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.REASON_MAX_LENGTH) {
+            throw new IllegalArgumentException("horus.bpm.rules.lifecycle.reason-max-length must be 1 to "
+                    + EngineDefaults.REASON_MAX_LENGTH + " (it may be lowered, never raised), was " + reasonMaxLength);
+        }
+    }
+
+    /**
+     * Creates settings with the default page size and reason length.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                EngineDefaults.QUERY_MAX_PAGE_SIZE, EngineDefaults.REASON_MAX_LENGTH);
     }
 
     /**
@@ -39,6 +65,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public static EngineSettings defaults() {
         return new EngineSettings(EngineDefaults.CACHE_MAX_ENTRIES, EngineDefaults.IDEMPOTENCY_RETENTION,
-                EngineDefaults.INPUT_MAX_SCALE, EngineDefaults.REJECT_UNDECLARED_INPUTS);
+                EngineDefaults.INPUT_MAX_SCALE, EngineDefaults.REJECT_UNDECLARED_INPUTS,
+                EngineDefaults.QUERY_MAX_PAGE_SIZE, EngineDefaults.REASON_MAX_LENGTH);
     }
 }

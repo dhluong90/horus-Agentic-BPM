@@ -1,16 +1,30 @@
 package com.horus.bpm.rules.rest;
 
+import com.horus.bpm.rules.api.Page;
+import com.horus.bpm.rules.api.PayloadTooLargeException;
 import com.horus.bpm.rules.api.PermissionDeniedException;
+import com.horus.bpm.rules.api.QueryInvalidException;
+import com.horus.bpm.rules.api.RuleSetSummary;
 import com.horus.bpm.rules.api.RuleSetVersion;
 import com.horus.bpm.rules.api.UnauthenticatedException;
+import com.horus.bpm.rules.api.VersionActions;
+import com.horus.bpm.rules.api.VersionHistoryEntry;
+import com.horus.bpm.rules.api.VersionStatus;
+import com.horus.bpm.rules.api.VersionSummary;
+import com.horus.bpm.rules.internal.json.EngineJson;
 import com.horus.bpm.rules.internal.json.EngineValues;
+import com.horus.bpm.rules.internal.read.RuleSetReader;
 import com.horus.bpm.rules.spi.CallerResolver;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /** Shared helpers of the engine controllers. */
 final class RestSupport {
@@ -36,14 +50,89 @@ final class RestSupport {
                 .body(EngineValues.write(body).getBytes(StandardCharsets.UTF_8));
     }
 
-    static ResponseEntity<byte[]> version(HttpStatus status, RuleSetVersion version) {
+    /**
+     * Answers a version with its {@code ETag} and the caller's {@code allowedActions}, computed now: an idempotent
+     * replay stores the version, never the actions, so they always reflect the caller's current permissions.
+     */
+    static ResponseEntity<byte[]> version(HttpStatus status, RuleSetVersion version, CallerResolver callers) {
         ResponseEntity.BodyBuilder builder = ResponseEntity.status(status)
                 .header(HttpHeaders.ETAG, "\"" + version.lockVersion() + "\"");
         if (status == HttpStatus.CREATED) {
             builder.header(HttpHeaders.LOCATION, BASE + "/rule-sets/" + version.ruleSet() + "/versions/" + version.version());
         }
+        ObjectNode body = EngineValues.version(version);
+        body.set("allowedActions", actions(version.status(), version.createdBy(), version.requestedBy(), callers));
         return builder.contentType(MediaType.APPLICATION_JSON)
-                .body(EngineValues.write(EngineValues.version(version)).getBytes(StandardCharsets.UTF_8));
+                .body(EngineValues.write(body).getBytes(StandardCharsets.UTF_8));
+    }
+
+    static ArrayNode actions(VersionStatus status, String createdBy, String requestedBy, CallerResolver callers) {
+        ArrayNode actions = EngineJson.NODES.arrayNode();
+        VersionActions.allowed(status, createdBy, requestedBy, callers.currentCallerId(), callers.currentPermissions())
+                .forEach(actions::add);
+        return actions;
+    }
+
+    static ObjectNode ruleSetSummary(RuleSetSummary summary) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", summary.ruleSet());
+        node.put("latestVersion", summary.latestVersion());
+        node.put("latestStatus", summary.latestStatus().name());
+        node.set("publishedVersion", EngineValues.value(summary.publishedVersion()));
+        node.put("lastChangedAt", summary.lastChangedAt().toString());
+        return node;
+    }
+
+    static ObjectNode versionSummary(VersionSummary v, CallerResolver callers) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", v.ruleSet());
+        node.put("version", v.version());
+        node.put("status", v.status().name());
+        node.put("hitPolicy", v.hitPolicy());
+        node.set("effectiveFrom", EngineValues.value(v.effectiveFrom()));
+        node.put("lockVersion", v.lockVersion());
+        node.put("canonicalHash", v.canonicalHash());
+        node.set("createdBy", EngineValues.value(v.createdBy()));
+        node.put("createdAt", v.createdAt().toString());
+        node.set("requestedBy", EngineValues.value(v.requestedBy()));
+        node.set("requestedAt", EngineValues.value(v.requestedAt()));
+        node.set("approvedBy", EngineValues.value(v.approvedBy()));
+        node.set("approvedAt", EngineValues.value(v.approvedAt()));
+        node.set("allowedActions", actions(v.status(), v.createdBy(), v.requestedBy(), callers));
+        return node;
+    }
+
+    static ObjectNode historyEntry(VersionHistoryEntry entry) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("action", entry.action().name());
+        node.set("fromStatus", EngineValues.value(entry.fromStatus() == null ? null : entry.fromStatus().name()));
+        node.put("toStatus", entry.toStatus().name());
+        node.put("actor", entry.actor());
+        node.set("reason", EngineValues.value(entry.reason()));
+        node.put("lockVersion", entry.lockVersion());
+        node.put("occurredAt", entry.occurredAt().toString());
+        return node;
+    }
+
+    static <T> ObjectNode page(Page<T> page, java.util.function.Function<T, ObjectNode> item) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        ArrayNode data = node.putArray("data");
+        page.items().forEach(i -> data.add(item.apply(i)));
+        node.set("nextCursor", EngineValues.value(page.nextCursor()));
+        node.put("hasNext", page.nextCursor() != null);
+        return node;
+    }
+
+    /** Parses {@code ?limit=}; a value that is not a number is {@code QUERY_INVALID}, like one out of range. */
+    static Integer limit(String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(value.strip());
+        } catch (NumberFormatException e) {
+            throw new QueryInvalidException("limit must be a whole number");
+        }
     }
 
     /** Parses {@code If-Match: "3"} into 3; null when absent. */
@@ -61,5 +150,41 @@ final class RestSupport {
         } catch (NumberFormatException e) {
             throw new com.horus.bpm.rules.api.InputInvalidException("If-Match must be a quoted lock version, for example \"3\"");
         }
+    }
+
+    /**
+     * Reads an import body of at most {@link RuleSetReader#MAX_SOURCE_BYTES} bytes. A larger declared
+     * {@code Content-Length} is refused before anything is read; otherwise at most one byte more than the limit is
+     * read, so an oversized body never sits in memory whole.
+     *
+     * @param body the request body stream
+     * @param contentLength the declared length, or null
+     * @return the body bytes
+     * @throws PayloadTooLargeException when the body is larger than the limit
+     * @throws IOException when the stream fails
+     */
+    static byte[] boundedBody(InputStream body, Long contentLength) throws IOException {
+        return boundedBody(body, contentLength, RuleSetReader.MAX_SOURCE_BYTES);
+    }
+
+    /**
+     * Reads a body of at most {@code limit} bytes, as {@link #boundedBody(InputStream, Long)} does for imports.
+     *
+     * @param body the request body stream
+     * @param contentLength the declared length, or null
+     * @param limit the largest accepted size, in bytes
+     * @return the body bytes
+     * @throws PayloadTooLargeException when the body is larger than the limit
+     * @throws IOException when the stream fails
+     */
+    static byte[] boundedBody(InputStream body, Long contentLength, int limit) throws IOException {
+        if (contentLength != null && contentLength > limit) {
+            throw new PayloadTooLargeException(limit);
+        }
+        byte[] bytes = body.readNBytes(limit + 1);
+        if (bytes.length > limit) {
+            throw new PayloadTooLargeException(limit);
+        }
+        return bytes;
     }
 }
