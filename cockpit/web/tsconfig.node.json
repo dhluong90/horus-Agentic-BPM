@@ -27,6 +27,8 @@
     "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts",
+    "playwright.live.config.ts",
+    "e2e-live",
     "e2e",
     "security-headers.ts"
   ]
