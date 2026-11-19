@@ -8,7 +8,7 @@ Thank you for your interest. Until the first release the maintainers drive the r
 
 ## While you work
 - One pull request per issue, from a `feat/<module>/<issue>-<slug>` branch, with Conventional Commits (`feat(rule-engine): add collect hit policy (#12)`).
-- Tests are required and named by the specification id they prove (`<module>/docs/SPEC.md`).
+- Tests are required and named by the specification id they prove (`<module>/docs/SPEC.md`), for example `RLE_003_collect_hit_policy_aggregates_matched_rules`. `python3 tools/spec-coverage.py` checks this; statements not delivered yet are listed in `<module>/docs/spec-pending.txt`.
 - No reflection, scripting engines or I/O in rule expressions or definitions. Such pull requests are declined.
 - Third-party dependencies must be Apache 2.0, MIT or BSD licensed.
 
