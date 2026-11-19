@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Outputs of the kernel, applied by the shell. The kernel never performs them itself.
@@ -147,11 +148,13 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
     /**
      * Hand an engine event to the host publisher in the transaction.
      *
+     * @param eventId stable id derived like other kernel ids (instance id and sequence); consumers deduplicate on it
      * @param type for example processes.instance.started.v1
-     * @param payload payload
+     * @param payload payload; never instance variables
      */
-    record EmitEvent(String type, Map<String, Object> payload) implements Effect {
+    record EmitEvent(String eventId, String type, Map<String, Object> payload) implements Effect {
         public EmitEvent {
+            Objects.requireNonNull(eventId, "eventId must not be null");
             payload = payload == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(payload));
         }
     }
