@@ -88,4 +88,4 @@ Events are delivered through the `RuleEventPublisher` SPI, which the host implem
 | A decision you saw in the response is missing from the log | The business transaction rolled back after the evaluation (transactional mode) | Expected behaviour; the business effect did not happen either |
 | Plain values appear where you expected a hash | `mask: true` was added after the decisions were logged | Masking applies from the version where it is declared; older entries are immutable |
 | `GET /decisions?...` returns `403` | Caller lacks `rules:log:read` | Grant the permission |
-| Query is slow over a long range | No partitioning, or a range spanning many months | Enable monthly partitioning; narrow `from` and `to` |
+| Query is slow | A range close to the 31-day limit with no other filter | Narrow `from` and `to` to one monthly partition, or add `outcome` or `matchedRuleId` |

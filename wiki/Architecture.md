@@ -83,22 +83,22 @@ Positions in a process are rows in `pre_token`, not a column on the instance, be
 
 | From (instance / token) | Event | Guard | To | Emitted event |
 |---|---|---|---|---|
-| none | `start(definition, businessKey, idempotencyKey)` | Unique `(tenant_id, definition_key, business_key)`; idempotency key new, or same payload hash | `RUNNING`; token `ACTIVE` at `start` | `process.instance.started.v1` |
-| token `ACTIVE` | sync step done (`decision`, `exclusiveGateway`, local `serviceTask`) | Runs inside the current transaction | token `ACTIVE` at the next node | `process.step.completed.v1` |
-| token `ACTIVE` | reaches `userTask` | Assignee resolved; SLA `due_at` computed through `BusinessCalendar` | token `WAITING_USER`; `pre_task OPEN` | `process.task.created.v1` |
-| token `WAITING_USER` | `complete(taskId, version)` | `lock_version` matches; four-eyes: actor not in `forbidden_users` | token `ACTIVE` | `process.task.completed.v1` |
+| none | `start(definition, businessKey, idempotencyKey)` | Unique `(tenant_id, definition_key, business_key)`; idempotency key new, or same payload hash | `RUNNING`; token `ACTIVE` at `start` | `processes.instance.started.v1` |
+| token `ACTIVE` | sync step done (`decision`, `exclusiveGateway`, local `serviceTask`) | Runs inside the current transaction | token `ACTIVE` at the next node | `processes.step.completed.v1` |
+| token `ACTIVE` | reaches `userTask` | Assignee resolved; SLA `due_at` computed through `BusinessCalendar` | token `WAITING_USER`; `pre_task OPEN` | `processes.task.created.v1` |
+| token `WAITING_USER` | `complete(taskId, version)` | `lock_version` matches; four-eyes: actor not in `forbidden_users` | token `ACTIVE` | `processes.task.completed.v1` |
 | token `ACTIVE` | reaches `agentTask` or remote `serviceTask` | Job row created with lease; TX1 commits before the adapter call | token `WAITING_ASYNC` | none |
-| token `WAITING_ASYNC` | adapter result, TX2 | Lease still held; output validates; guardrail `allow` | token `ACTIVE` | `process.step.completed.v1` |
-| token `WAITING_ASYNC` | guardrail violation, `route-to-human` | | token `WAITING_USER`; approval task created | `process.task.created.v1` |
+| token `WAITING_ASYNC` | adapter result, TX2 | Lease still held; output validates; guardrail `allow` | token `ACTIVE` | `processes.step.completed.v1` |
+| token `WAITING_ASYNC` | guardrail violation, `route-to-human` | | token `WAITING_USER`; approval task created | `processes.task.created.v1` |
 | token `WAITING_ASYNC` | failure, attempts remaining | `attempt < retry.max` | token `WAITING_ASYNC`; job `DUE` at `now + backoff` | none |
-| token `WAITING_ASYNC` or `ACTIVE` | failure, attempts exhausted, `onFailure: incident` | | token paused; `pre_incident OPEN`; instance stays `RUNNING` | `process.incident.raised.v1` |
-| any paused token | `incident:retry` or `:resolve` | `lock_version` matches | token `ACTIVE` (retry) or as resolved | `process.incident.resolved.v1` |
+| token `WAITING_ASYNC` or `ACTIVE` | failure, attempts exhausted, `onFailure: incident` | | token paused; `pre_incident OPEN`; instance stays `RUNNING` | `processes.incident.raised.v1` |
+| any paused token | `incident:retry` or `:resolve` | `lock_version` matches | token `ACTIVE` (retry) or as resolved | `processes.incident.resolved.v1` |
 | token `ACTIVE` | reaches a `parallelGateway` join | `pre_instance` row locked `FOR UPDATE`; all sibling tokens in the scope `JOINED` | one new `ACTIVE` token; siblings `COMPLETED` | none |
 | token `ACTIVE` | reaches `timer` | Timer row `DUE` | token `WAITING_TIMER` | none |
-| `RUNNING` | failure with `onFailure: compensate`, or `throwCompensation` | | `COMPENSATING`; compensation stack walked LIFO | `process.compensation.started.v1` |
-| `COMPENSATING` | all handlers done, or the manual-compensation incident resolved | | `FAILED` (terminal, compensated) | `process.instance.failed.v1` |
-| `RUNNING` | last token reaches `end` | No other active or waiting token | `COMPLETED` | `process.instance.completed.v1` |
-| `RUNNING` | `cancel` | | `CANCELLED` | `process.instance.cancelled.v1` |
+| `RUNNING` | failure with `onFailure: compensate`, or `throwCompensation` | | `COMPENSATING`; compensation stack walked LIFO | `processes.compensation.started.v1` |
+| `COMPENSATING` | all handlers done, or the manual-compensation incident resolved | | `FAILED` (terminal, compensated) | `processes.instance.failed.v1` |
+| `RUNNING` | last token reaches `end` | No other active or waiting token | `COMPLETED` | `processes.instance.completed.v1` |
+| `RUNNING` | `cancel` | | `CANCELLED` | `processes.instance.cancelled.v1` |
 
 ## 4. Transaction model: sync steps and the Async Wait-State protocol
 
@@ -118,7 +118,7 @@ TX2 re-reads the job `WHERE locked_by = me AND locked_until > now()`. If another
 | Engine | Tables | Notes |
 |---|---|---|
 | Rule Engine | `rle_rule_set`, `rle_version`, `rle_rule`, `rle_decision`, `rle_decision_outbox`, `rle_idempotency` | `rle_decision` partitioned monthly by `created_at`; `rle_rule_set.cache_epoch` drives invalidation |
-| Process Engine | `pre_definition`, `pre_instance`, `pre_token`, `pre_task`, `pre_timer`, `pre_incident`, `pre_history`, `pre_compensation_stack`, `pre_idempotency`, `pre_calendar`, `pre_holiday`, `pre_migration` | `pre_history` partitioned monthly; `pre_timer` holds timers, SLA escalations and async job leases |
+| Process Engine | `pre_definition`, `pre_definition_layout`, `pre_instance`, `pre_token`, `pre_task`, `pre_timer`, `pre_incident`, `pre_history`, `pre_node_stats_hourly`, `pre_engine_watermark`, `pre_compensation_stack`, `pre_idempotency`, `pre_calendar`, `pre_holiday` | `pre_history` partitioned monthly; `pre_timer` holds timers, SLA escalations and async job leases; `pre_definition_layout` keeps append-only diagram layout revisions apart from the hashed definition; `pre_token.definition_id` follows the instance through migration so live counts per node read one index; `pre_node_stats_hourly` is the hourly per-node rollup behind the heatmap, with `pre_engine_watermark` recording how far the rollup has read. Migration plan storage gets its table before M2 execution work |
 
 Rules for every table: `tenant_id TEXT NOT NULL`, first in every unique constraint and index (`TR-TEN-01`); ULID `VARCHAR(26)` keys; `TIMESTAMPTZ` only; money as `BIGINT` minor units plus `CHAR(3)` currency; definitions stored as canonical JSONB whose SHA-256 is part of the version identity. Migrations are forward-only Flyway scripts in a history table per engine, applied expand-then-contract across one minor release (`TR-OPS-01`, `TR-OPS-02`); indexes on populated tables are created `CONCURRENTLY`. Full DDL: the module `DESIGN.md` files.
 
@@ -186,7 +186,7 @@ Latency budget per hot path (p50 / p99 targets after warm-up):
 | Step fails after earlier external effects | One instance | retries exhausted with `onFailure: compensate` | Compensation stack walked LIFO with per-handler retry; `compensate: manual` opens an incident instead of skipping (ADR-0007) |
 | Regex on adversarial input | One evaluation | Bounded matcher hits `regex-timeout-ms` | `422 EVALUATION_ERROR` with reason `REGEX_TIMEOUT`; the thread is not stuck (`TR-SEC-02`) |
 | Flyway migration fails mid-way | Host start-up | Engine history table shows the failed version | Fix forward with a new migration; the engine never edits applied scripts (`TR-OPS-01`) |
-| Decision log partition for next month missing | All decisions in that database | Insert fails for lack of a partition | Partition creation runs from the scheduler thread 7 days ahead; a default partition catches stragglers |
+| Decision log partition for next month missing | Query and drop performance for that month | Rows land in `rle_decision_default`; the `ruleEngine` health contributor reports the missing partition | Start-up creates the current and next month's partitions; the scheduler creates them 7 days ahead and moves stragglers out of the default partition when it attaches a month |
 | Host rolls back a business transaction after `evaluate` | That transaction | none needed | The decision row rolls back with it in `transactional` mode (`TR-EMB-04`) |
 
 ## 10. Deployment shapes

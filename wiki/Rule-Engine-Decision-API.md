@@ -15,20 +15,20 @@ public interface RuleEngine {
 }
 ```
 ```java
-DecisionResult r = rules.evaluate("card-fee", DecisionInput.of("tier", "GOLD", "balance", Money.of("VND", 60_000_000), "txCount", 3));
+DecisionResult r = rules.evaluate("card-fee", DecisionInput.of("tier", "GOLD", "balance", Money.ofMinor("VND", 60_000_000), "txCount", 3));
 r.ruleSet();            // "card-fee"
 r.version();            // 2
 r.matchedRuleIds();     // ["R2"]
 r.output("fee", Money.class);
 r.decisionId();         // ULID of the decision log row
-r.isError();            // false
+r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 ```
 
 | Rule | Detail |
 |---|---|
 | Tenant and caller | From the host's `TenantResolver` and `CallerResolver` (defaults read Spring Security). `DecisionRequest.tenantId` is for batch jobs that run without a security context and requires the host to grant it explicitly |
 | Clock | `DecisionRequest.clock` selects the effective version and feeds `today()` and `now()`; default is the engine `Clock` bean |
-| Errors | `DecisionResult.isError()` with `errorCode()`; the Java API throws only for programming errors (unknown rule set, invalid input shape) |
+| Errors | `UNIQUE_HIT_VIOLATION` and `EVALUATION_ERROR` come back as a `Failed` outcome with `code()`, because they are logged decisions; `evaluateAs` throws `DecisionFailedException` with the same code. Other failures throw an unchecked `HorusBpmException` subtype whose `code()` equals the REST error code (ADR-0016) |
 | Idempotency | `DecisionRequest.idempotencyKey` returns the stored decision instead of logging a second one (ADR-0006) |
 
 ## REST conventions
@@ -39,13 +39,13 @@ r.isError();            // false
 | Actions | Non-CRUD transitions use a `:verb` suffix: `:evaluate`, `:request-publish`, `:approve` |
 | Identifiers | ULID strings, for example `01JD2X5K9T1Q4N8V2M7B3C6D0E` |
 | Timestamps | ISO 8601 UTC, `2026-12-01T00:00:00Z` |
-| Money | `{ "currency": "VND", "amount": 60000000 }`: ISO 4217 code and an integer in minor units. Never a JSON float |
-| Tenant | Resolved from the security context or a trusted gateway header. A `tenantId` field in any request body is ignored (`TR-SEC-03`, `RLE-011`) |
+| Money | `{ "currency": "VND", "amount": 60000000 }`: ISO 4217 code and an integer in minor units. Never a JSON float. In Java, `Money.ofMinor("VND", 60_000_000)` or `Money.ofMajor("USD", "12.50")` |
+| Tenant | Resolved from the security context or a trusted gateway header. A `tenantId` field in any request body is ignored (`TR-SEC-03`, `RLE-011`). With tenant switching on, `X-Tenant-Id` may name another tenant from the token's allowed list; any other value is `403 TENANT_NOT_ALLOWED` |
 | Authentication | Every endpoint requires an authenticated principal from the host's Spring Security; see [[Multi Tenancy and Security]] |
-| Errors | RFC 9457 `application/problem+json` with a stable `code`; see the error matrix |
+| Errors | RFC 9457 `application/problem+json` with a stable `code`; see the error matrix and [[Common Error Codes]]. Clients branch on `code`, never on `type` |
 | Idempotency | `Idempotency-Key` header on every `POST` and `PUT`; semantics below |
 | Optimistic locking | Drafts carry `version` (entity lock version). `PUT` requires `If-Match: "<version>"` or the `version` field; responses carry `ETag` |
-| Pagination | Cursor-based: `?cursor=<opaque>&limit=50` (max 200), response `{ "data": [], "nextCursor": "...", "hasNext": true }` |
+| Pagination | Cursor-based: `?cursor=<opaque>&limit=50` (max 200), response `{ "data": [], "nextCursor": "...", "hasNext": true }`. `limit` above 200 is `400 QUERY_INVALID` |
 | OpenAPI | `GET /api/bpm/rules/v1/openapi.yaml` (OpenAPI 3.1) |
 | Expressions in definitions | Plain function form only: `startsWith(name, 'Mr')`, `len(s)`, `matches(s, '^[A-Z]')`. There is no method-call syntax (`name.startsWith('Mr')`), which keeps the grammar closed (ADR-0003) |
 
@@ -73,7 +73,7 @@ r.isError();            // false
 | `POST /rule-sets/{name}/versions:import` | Create a draft from YAML or JSON | `rules:author` | `Idempotency-Key` |
 | `GET /decisions/{id}` | One decision; masked inputs stay hashed | `rules:log:read` | |
 | `GET /decisions/{id}/explain` | Plain-language explanation | `rules:log:read` | |
-| `GET /decisions?ruleSet=&from=&to=&outcome=&matchedRuleId=&cursor=&limit=` | Decision log, newest first | `rules:log:read` | cursor pagination |
+| `GET /decisions?ruleSet=&from=&to=&outcome=&matchedRuleId=&cursor=&limit=` | Decision log, newest first. `ruleSet`, `from` and `to` are required; the range is at most 31 days | `rules:log:read` | cursor pagination |
 
 Permission strings match [[Rule Engine Configuration]].
 
@@ -128,9 +128,9 @@ Every draft response carries `version` in the body and `ETag: "<version>"`. `PUT
 
 ```json
 {
-  "type": "https://github.com/horus-bpm/errors/unique-hit-violation",
+  "type": "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#unique_hit_violation",
   "title": "Unique hit policy violated",
-  "status": 409,
+  "status": 422,
   "code": "UNIQUE_HIT_VIOLATION",
   "detail": "Rule set 'card-fee' v2 matched 2 rules (R2, R4); expected exactly 1.",
   "instance": "/api/bpm/rules/v1/decisions/card-fee:evaluate",
@@ -138,34 +138,36 @@ Every draft response carries `version` in the body and `ETag: "<version>"`. `PUT
   "violations": []
 }
 ```
-`violations` lists `{ "field", "ruleId", "message" }` entries for validation errors. Responses never contain stack traces. `500` responses carry only `code: INTERNAL_ERROR` and the `correlationId` to find the server log.
+`type` points at the code's heading on [[Common Error Codes]] (ADR-0010). `violations` lists `{ "field", "ruleId", "message" }` entries for validation errors. Responses never contain stack traces. `500` responses carry only `code: INTERNAL_ERROR` and the `correlationId` to find the server log.
 
 ## Error code matrix
 
 | HTTP | `code` | When | Endpoints |
 |---|---|---|---|
-| 400 | `INPUT_INVALID` | Missing or mistyped input, malformed JSON, `limit` above 200 | all |
+| 400 | `INPUT_INVALID` | Missing or mistyped input, malformed JSON | all |
+| 400 | `QUERY_INVALID` | `limit` above 200, a decision log query without `ruleSet`, `from` and `to`, or a range longer than 31 days (ADR-0015) | `GET /decisions`, every list |
 | 401 | `UNAUTHENTICATED` | No principal | all |
 | 403 | `PERMISSION_DENIED` | Principal lacks the permission | all |
 | 403 | `SELF_APPROVAL_FORBIDDEN` | Approver equals requester (`TR-SEC-04`) | `:approve` |
 | 403 | `CLOCK_NOT_ALLOWED` | `clock` set without `rules:simulate` | `:evaluate` |
+| 403 | `TENANT_NOT_ALLOWED` | `X-Tenant-Id` names a tenant outside the token's allowed list, or differs from the token tenant while switching is off; no data returned, security log entry written (ADR-0014, `RLE-018`) | all |
 | 404 | `RULE_SET_NOT_FOUND` | Unknown rule set in this tenant (also for other tenants' rule sets) | all with `{ruleSet}` or `{name}` |
 | 404 | `VERSION_NOT_FOUND` | Unknown version number | versions |
 | 404 | `NO_EFFECTIVE_VERSION` | Nothing published and effective at `clock` | `:evaluate`, `:evaluate-batch` |
 | 404 | `DECISION_NOT_FOUND` | Unknown or other-tenant decision id | `/decisions/{id}` |
-| 409 | `UNIQUE_HIT_VIOLATION` | `unique` table matched zero or several rows (`TR-DET-04`) | `:evaluate` |
 | 409 | `VERSION_CONFLICT` | `If-Match` or `version` is stale | `PUT`, lifecycle actions |
 | 409 | `INVALID_STATE` | Action not allowed in the current state, for example `:approve` on a `DRAFT` | lifecycle actions |
 | 409 | `IDEMPOTENCY_IN_FLIGHT` | Same key, first request still running; `Retry-After: 1` | all with `Idempotency-Key` |
 | 409 | `RULE_SET_EXISTS` | Name already used in this tenant | `POST /rule-sets` |
 | 422 | `VALIDATION_FAILED` | Parse or type errors; `violations` lists rows (`TR-DET-02`) | `PUT`, `:validate`, `:request-publish`, `:import` |
+| 422 | `UNIQUE_HIT_VIOLATION` | `unique` table matched zero or several rows (`TR-DET-04`). An authoring defect, so retrying does not help (ADR-0010) | `:evaluate`, item error in `:evaluate-batch` |
 | 422 | `EVALUATION_ERROR` | Currency mismatch, division by zero, regex timeout; `detail` names the reason (`CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT`, `FUNCTION_ERROR`) | `:evaluate` |
 | 422 | `IDEMPOTENCY_KEY_REUSE_MISMATCH` | Same key, different payload | all with `Idempotency-Key` |
 | 422 | `BATCH_TOO_LARGE` | More than 1 000 items | `:evaluate-batch` |
 | 429 | `RATE_LIMITED` | Host rate limiter, if configured; `Retry-After` | all |
 | 500 | `INTERNAL_ERROR` | Unexpected failure; no details beyond `correlationId` | all |
 
-Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ERROR`, so errors are auditable too.
+Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ERROR`, so errors are auditable too. Process Engine codes are listed on [[Common Error Codes]].
 
 ## Events
 

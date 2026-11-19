@@ -32,6 +32,7 @@
 - [[Multi-tenancy and security|Multi-Tenancy-and-Security]]
 
 **Reference**
+- [[Common error codes|Common-Error-Codes]]
 - [[Technical requirements|Technical-Requirements]]
 
 **Project status**

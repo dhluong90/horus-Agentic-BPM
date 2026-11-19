@@ -132,6 +132,6 @@ Endpoint details, headers and error codes are in [[Rule Engine Decision API]].
 |---|---|---|
 | `422 VALIDATION_FAILED` at row `R2`, "unknown identifier" | A condition refers to an input that is not declared | Add the input in `inputs` or fix the spelling |
 | `422 VALIDATION_FAILED`, "money + integer" | Arithmetic mixes money and a plain number | Multiply money by a number (`balance * 0.01`) or add money to money of the same currency |
-| `409 UNIQUE_HIT_VIOLATION` at run time | A `unique` table had zero or several matches for real inputs | Add the missing row, or switch to `first` with a default row if order is intended |
+| `422 UNIQUE_HIT_VIOLATION` at run time | A `unique` table had zero or several matches for real inputs | Add the missing row, or switch to `first` with a default row if order is intended |
 | Default row never matches | It is not the last row under `first` | Move `when: {}` to the end |
 | Validation warns about an unreachable row | An earlier row under `first` already covers it | Delete the row or reorder |
