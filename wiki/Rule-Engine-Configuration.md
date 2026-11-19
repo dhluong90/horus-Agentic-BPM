@@ -65,7 +65,7 @@ These are under `horus.bpm.` and apply to every engine in the host. They are rea
 | Property | Default | Status | Meaning |
 |---|---|---|---|
 | `host-id` | unset | Built | Id clients show for this host, 1 to 40 characters; returned as `hostId` by `/api/bpm/meta` |
-| `host-metadata.enabled` | `true` | Built | `false` turns `/api/bpm/meta` and `/api/bpm/me` off |
+| `host-metadata.enabled` | `true` | Built | `false` turns off `/api/bpm/meta` and `/api/bpm/me` only. The `no-store` header on engine responses, the tenant resolver and `EngineAccess` stay on: controls are not options (ADR-0024) |
 | `tenancy.claim` | `tenant_id` | Built | Attribute of the authenticated principal that the default `TenantResolver` reads: the claim of a validated token, or the attribute of a session principal from an OIDC or OAuth2 login (PD-079). Whatever the resolver, a principal with this attribute must match the resolved tenant |
 | `tenancy.dev-tenant` | unset | Built | Fixed tenant for principals that carry none, for local work without an identity provider. Accepted on the `dev` profile only; start-up is refused when it is set elsewhere |
 
