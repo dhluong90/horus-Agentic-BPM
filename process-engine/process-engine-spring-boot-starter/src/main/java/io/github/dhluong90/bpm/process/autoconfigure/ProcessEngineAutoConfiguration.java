@@ -1,6 +1,8 @@
 package io.github.dhluong90.bpm.process.autoconfigure;
 
 import io.github.dhluong90.bpm.host.autoconfigure.ApproverMustDifferFrom;
+import io.github.dhluong90.bpm.host.autoconfigure.RetireApproval;
+import io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
@@ -170,7 +172,8 @@ public class ProcessEngineAutoConfiguration {
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
                 new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
                         properties.handlers().slowCallWarning()), publisher,
-                properties.toSettings(EngineSettings.ApproverRule.valueOf(ApproverMustDifferFrom.from(environment).name())),
+                properties.toSettings(EngineSettings.ApproverRule.valueOf(ApproverMustDifferFrom.from(environment).name()),
+                        EngineSettings.RetireLastVersionRule.valueOf(RetireLastVersion.from(environment).name())),
                 BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings);
     }
@@ -190,6 +193,16 @@ public class ProcessEngineAutoConfiguration {
         }
         if (properties.definitions().autoApprove()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");
+        }
+        // PD-102 and PD-101: the four-eyes retirement modes are not built for process definitions in this release.
+        if (RetireApproval.from(environment) == RetireApproval.FOUR_EYES) {
+            throw new IllegalStateException(RetireApproval.PROPERTY + "=four-eyes is not available for process "
+                    + "definitions in this release; use single (the default), which needs processes:approve and a "
+                    + "reason (PD-102)");
+        }
+        if (RetireLastVersion.from(environment) == RetireLastVersion.FOUR_EYES) {
+            throw new IllegalStateException(RetireLastVersion.PROPERTY + "=four-eyes is not available for process "
+                    + "definitions in this release; use confirm (the default) or refuse (PD-101)");
         }
         if (ApproverMustDifferFrom.from(environment) == ApproverMustDifferFrom.REQUESTER) {
             LOG.warn(ApproverMustDifferFrom.PROPERTY + "=requester relaxes four eyes for process definitions: the "
@@ -248,7 +261,9 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnMissingBean(name = "processEngineModuleDescriptor")
     ModuleDescriptor processEngineModuleDescriptor(ProcessEngineProperties properties, Environment environment) {
         return new ModuleDescriptor("processes", ProcessEngineModule.engineVersion(), "v1", List.of(),
-                Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value()),
+                Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value(),
+                        RetireApproval.META_SETTING, RetireApproval.from(environment).value(),
+                        RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value()),
                 PERMISSIONS, properties.security().rolePermissions());
     }
 

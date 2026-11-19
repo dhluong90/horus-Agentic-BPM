@@ -12,6 +12,7 @@ import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
 import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
 import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
+import io.github.dhluong90.bpm.process.api.LastVersionInEffectException;
 import io.github.dhluong90.bpm.process.api.VersionSupersededException;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.IdempotencyKeyReuseException;
@@ -393,29 +394,55 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     @Override
-    public DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, String idempotencyKey) {
+    public DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, String reason,
+            boolean confirmNoVersionInEffect, String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWithAny(PERMISSION_APPROVE, PERMISSION_AUTHOR);
+        String why = boundedComment(reason, false);
         String requestHash = Hashes.sha256Parts("retire", caller, ref.key(), Integer.toString(ref.version()),
-                Long.toString(expectedLockVersion));
+                Long.toString(expectedLockVersion), why, Boolean.toString(confirmNoVersionInEffect));
         return transactions.inTransaction(() -> idempotent(tenant, "retire", idempotencyKey, requestHash, () -> {
-            StoredDefinition current = lockVersion(tenant, ref).version();
-            String needed = switch (current.status()) {
-                case "ACTIVE" -> PERMISSION_APPROVE;
-                case "DRAFT" -> PERMISSION_AUTHOR;
+            Locked locked = lockVersion(tenant, ref);
+            StoredDefinition current = locked.version();
+            boolean active = switch (current.status()) {
+                case "ACTIVE" -> true;
+                case "DRAFT" -> false;
                 default -> throw new InvalidStateException(ref.key() + " v" + ref.version() + " is " + current.status()
                         + "; only an active version or a draft can be retired");
             };
-            callerWith(needed);
+            callerWith(active ? PERMISSION_APPROVE : PERMISSION_AUTHOR);
+            if (active && why == null) {
+                throw new InputInvalidException("reason is required to retire an active version");
+            }
             requireLock(current, expectedLockVersion);
             Instant now = clock.instant();
+            // PD-101: a key left with no version in effect makes every new start fail until a new version is approved.
+            boolean inEffect = active && current.effectiveFrom() != null && !current.effectiveFrom().isAfter(now);
+            boolean othersInEffect = locked.all().stream().anyMatch(d -> !d.id().equals(current.id())
+                    && "ACTIVE".equals(d.status()) && d.effectiveFrom() != null && !d.effectiveFrom().isAfter(now));
+            boolean last = inEffect && !othersInEffect;
+            if (last && settings.retireLastVersion() == EngineSettings.RetireLastVersionRule.REFUSE) {
+                throw new LastVersionInEffectException(ref.key() + " v" + ref.version() + " is the last version in "
+                        + "effect and horus.bpm.lifecycle.retire-last-version is refuse; approve a replacement first");
+            }
+            if (last && !confirmNoVersionInEffect) {
+                throw new LastVersionInEffectException("No version of " + ref.key() + " will be in effect: new starts "
+                        + "will fail with NO_EFFECTIVE_VERSION until a new version is approved. Running instances "
+                        + "continue. Send confirmNoVersionInEffect: true to retire it.");
+            }
             StoredDefinition updated = current.retired(caller, now, null);
             write(updated);
-            lifecycleHistory(updated, "RETIRED", current.status(), caller, null, Map.of(), now);
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("approvalMode", EngineSettings.RETIRE_APPROVAL_MODE);
+            details.put("noVersionInEffect", last);
+            lifecycleHistory(updated, "RETIRED", current.status(), caller, why, details, now);
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("definitionKey", updated.key());
             payload.put("version", updated.version());
             payload.put("retiredBy", caller);
+            payload.put("reason", why);
+            payload.put("approvalMode", EngineSettings.RETIRE_APPROVAL_MODE);
+            payload.put("noVersionInEffect", last);
             publishDefinition(updated, "processes.definition.retired.v1", payload, now);
             return view(updated);
         }, Views::definitionToJson, Views::definitionFromJson));

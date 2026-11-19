@@ -227,14 +227,28 @@ paths:
       operationId: retireDefinition
       summary: Retire an active version or withdraw a draft
       description: |
-        `ACTIVE` (permission `processes:approve`) or `DRAFT` (permission `processes:author`) to `RETIRED`. A pending
-        or retired version is `409 INVALID_STATE`. Running instances keep their version; new starts get the next
-        effective version, or `404 NO_EFFECTIVE_VERSION`. Publishes `processes.definition.retired.v1`.
+        `ACTIVE` (permission `processes:approve`, `reason` required) or `DRAFT` (permission `processes:author`) to
+        `RETIRED`. A pending or retired version is `409 INVALID_STATE`. Retiring stops new starts only; running
+        instances keep their version. The mode is `horus.bpm.lifecycle.retire-approval: single` and is recorded on the
+        history row and the event. Retiring the last version in effect of the key needs `confirmNoVersionInEffect:
+        true` under `horus.bpm.lifecycle.retire-last-version: confirm` (the default), and is always refused under
+        `refuse`: `409 LAST_VERSION_IN_EFFECT`, naming what stops working. Publishes
+        `processes.definition.retired.v1` with `reason`, `approvalMode` and `noVersionInEffect`.
       parameters:
         - $ref: '#/components/parameters/DefinitionKey'
         - $ref: '#/components/parameters/DefinitionVersionNumber'
         - $ref: '#/components/parameters/IfMatchDefinition'
         - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: [string, 'null'], maxLength: 1000 }
+                confirmNoVersionInEffect: { type: boolean, default: false }
+            example: { reason: fraud check bypass found, confirmNoVersionInEffect: true }
       responses:
         '200': { $ref: '#/components/responses/Definition' }
         '400': { $ref: '#/components/responses/Problem' }
@@ -414,7 +428,7 @@ components:
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
-        `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
+        `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
         `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH` or `STEP_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
@@ -556,7 +570,7 @@ components:
           type: string
           enum: [INPUT_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED, SELF_APPROVAL_FORBIDDEN,
             TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, INSTANCE_NOT_FOUND, TASK_NOT_FOUND, DEFINITION_NOT_FOUND,
-            INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
+            INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT, IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
             BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, PRECONDITION_REQUIRED,
             DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]
         detail: { type: string }

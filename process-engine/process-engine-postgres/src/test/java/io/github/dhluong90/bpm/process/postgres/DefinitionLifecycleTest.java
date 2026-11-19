@@ -432,4 +432,102 @@ class DefinitionLifecycleTest {
         dev.identity.as("bank-a", "auditor", "processes:read");
         assertThat(dev.services.find(v1.ref()).orElseThrow().status()).isEqualTo("RETIRED");
     }
+
+    // ---- retirement (PD-102, PD-101); the PRE statement is owed by the architect -----------------------------
+
+    @Test
+    void retiring_the_last_version_in_effect_needs_a_reason_and_an_explicit_confirmation() {
+        // Given kyc-onboarding v1, the only version in effect, with a running instance
+        DefinitionVersion v1 = activate(1);
+        ProcessInstance running = start("KYC-2027-0300");
+        int history = count("SELECT count(*) FROM pre_definition_history");
+        engine.events.clear();
+
+        // When bob retires it without a reason, then with a reason but without the confirmation
+        engine.identity.as("bank-a", "bob", APPROVER);
+        assertThatThrownBy(() -> engine.services.retire(v1.ref(), v1.lockVersion(), null, true, null))
+                .isInstanceOf(InputInvalidException.class);
+        assertThatThrownBy(() -> engine.services.retire(v1.ref(), v1.lockVersion(), "fraud check bypass found", false,
+                null))
+                // Then both are refused, the second naming what stops working, and nothing is written
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.LastVersionInEffectException.class)
+                .hasMessageContaining("No version of kyc-onboarding will be in effect")
+                .extracting(e -> ((ProcessException) e).code()).isEqualTo("LAST_VERSION_IN_EFFECT");
+        assertThat(stored(1).status()).isEqualTo("ACTIVE");
+        assertThat(count("SELECT count(*) FROM pre_definition_history")).isEqualTo(history);
+        assertThat(engine.events).isEmpty();
+
+        // When bob confirms
+        DefinitionVersion retired = engine.services.retire(v1.ref(), v1.lockVersion(), "fraud check bypass found",
+                true, null);
+
+        // Then v1 is retired in single mode, recorded on the history row and the event; new starts stop
+        assertThat(retired.status()).isEqualTo("RETIRED");
+        assertThat(retired.retiredBy()).isEqualTo("bob");
+        assertThat(TestEngine.jdbc().sql("SELECT comment || ' ' || (details->>'approvalMode') || ' ' "
+                + "|| (details->>'noVersionInEffect') FROM pre_definition_history WHERE action = 'RETIRED'")
+                .query(String.class).single()).isEqualTo("fraud check bypass found single true");
+        assertThat(engine.events).singleElement().satisfies(e -> assertThat(e.payload())
+                .containsEntry("approvalMode", "single").containsEntry("noVersionInEffect", true)
+                .containsEntry("reason", "fraud check bypass found").containsEntry("retiredBy", "bob"));
+        assertThatThrownBy(() -> start("KYC-2027-0301"))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.NoEffectiveVersionException.class);
+
+        // And the running instance continues on v1
+        engine.identity.as("bank-a", "officer", "processes:task:work", "processes:read").roles = java.util.Set.of(
+                "KYC_OFFICER");
+        ProcessInstance.Task review = running.tasks().get(0);
+        ProcessInstance completed = engine.services.complete(review.id(), Map.of("approved", true), review.lockVersion(),
+                "complete-kyc-0300");
+        assertThat(completed.definitionVersion()).isEqualTo(1);
+        assertThat(completed.status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void retiring_a_version_that_is_not_the_last_in_effect_needs_no_confirmation() {
+        // Given v1 in effect and v2 approved for a later date
+        activate(1);
+        DefinitionVersion v2 = approveByBob(request(importAs(2), Instant.parse("2027-04-01T00:00:00Z")));
+
+        // When bob retires v2 before its date
+        engine.identity.as("bank-a", "bob", APPROVER);
+        DefinitionVersion retired = engine.services.retire(v2.ref(), v2.lockVersion(), "start date moved", false, null);
+
+        // Then v2 is retired, v1 stays in effect, and v2's effective-date job later changes nothing
+        assertThat(retired.status()).isEqualTo("RETIRED");
+        assertThat(TestEngine.jdbc().sql("SELECT details->>'noVersionInEffect' FROM pre_definition_history "
+                + "WHERE action = 'RETIRED'").query(String.class).single()).isEqualTo("false");
+        clock.set(Instant.parse("2027-04-01T00:01:00Z"));
+        assertThat(engine.jobs.pollOnce()).isEqualTo(1);
+        assertThat(stored(1).status()).isEqualTo("ACTIVE");
+        assertThat(start("KYC-2027-0400").definitionVersion()).isEqualTo(1);
+    }
+
+    @Test
+    void with_retire_last_version_refuse_the_last_version_cannot_be_retired_even_when_confirmed() {
+        TestEngine strict = TestEngine.replica("pod-1", clock).autoApprove(false)
+                .retireLastVersion(io.github.dhluong90.bpm.process.internal.service.EngineSettings.RetireLastVersionRule
+                        .REFUSE).build();
+        strict.identity.as("bank-a", "pipeline", PIPELINE);
+        DefinitionVersion v1 = strict.services.importDefinition(new ImportRequest(SourceFormat.BPMN_XML, kyc(1), null));
+        strict.identity.as("bank-a", "alice", AUTHOR);
+        DefinitionVersion pending = strict.services.requestApproval(v1.ref(), v1.lockVersion(), null, null);
+        strict.identity.as("bank-a", "bob", APPROVER);
+        DefinitionVersion active = strict.services.approve(pending.ref(), pending.lockVersion(), null, null);
+
+        assertThatThrownBy(() -> strict.services.retire(active.ref(), active.lockVersion(), "stop it", true, null))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.LastVersionInEffectException.class)
+                .hasMessageContaining("refuse");
+        assertThat(strict.services.find(v1.ref()).orElseThrow().status()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void retiring_an_active_version_needs_processes_approve() {
+        DefinitionVersion v1 = activate(1);
+
+        engine.identity.as("bank-a", "carol", "processes:author", "processes:read");
+        assertThatThrownBy(() -> engine.services.retire(v1.ref(), v1.lockVersion(), "stop it", true, null))
+                .isInstanceOf(PermissionDeniedException.class);
+        assertThat(stored(1).status()).isEqualTo("ACTIVE");
+    }
 }

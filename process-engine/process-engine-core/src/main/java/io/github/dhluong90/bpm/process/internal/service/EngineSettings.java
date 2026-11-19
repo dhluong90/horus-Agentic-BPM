@@ -19,7 +19,40 @@ import java.util.Objects;
  *     relaxation {@code REQUESTER}
  */
 public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
-        Duration slowCallWarning, boolean makerChecker, int reasonMaxLength, ApproverRule approverRule) {
+        Duration slowCallWarning, boolean makerChecker, int reasonMaxLength, ApproverRule approverRule,
+        RetireLastVersionRule retireLastVersion) {
+
+    /**
+     * What retiring the last version in effect of a key needs (PD-101, {@code horus.bpm.lifecycle.retire-last-version}).
+     * The {@code four-eyes} value is refused at start-up until the four-eyes retirement mode exists.
+     */
+    public enum RetireLastVersionRule {
+        /** An explicit {@code confirmNoVersionInEffect}. The default. */
+        CONFIRM,
+        /** Never. */
+        REFUSE
+    }
+
+    /** Approval mode of a retirement in this release ({@code horus.bpm.lifecycle.retire-approval: single}, PD-102). */
+    public static final String RETIRE_APPROVAL_MODE = "single";
+
+    /**
+     * Settings with the default retirement rule.
+     *
+     * @param definitionsAutoApprove dev auto-approval
+     * @param maxNodes most nodes
+     * @param maxBytes largest document
+     * @param idempotencyRetention idempotency retention
+     * @param slowCallWarning slow call threshold
+     * @param makerChecker maker-checker on
+     * @param reasonMaxLength longest reason
+     * @param approverRule approver rule
+     */
+    public EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
+            Duration slowCallWarning, boolean makerChecker, int reasonMaxLength, ApproverRule approverRule) {
+        this(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning, makerChecker,
+                reasonMaxLength, approverRule, RetireLastVersionRule.CONFIRM);
+    }
 
     /** Whom the approver of a definition version must differ from (PD-096). */
     public enum ApproverRule {
@@ -48,7 +81,7 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
     public EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
             Duration slowCallWarning, boolean makerChecker, int reasonMaxLength) {
         this(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning, makerChecker,
-                reasonMaxLength, ApproverRule.MAKERS);
+                reasonMaxLength, ApproverRule.MAKERS, RetireLastVersionRule.CONFIRM);
     }
 
     /** Default longest rejection reason or approval comment. */
@@ -85,6 +118,9 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
         }
         if (approverRule == null) {
             approverRule = ApproverRule.MAKERS;
+        }
+        if (retireLastVersion == null) {
+            retireLastVersion = RetireLastVersionRule.CONFIRM;
         }
         if (reasonMaxLength < 1 || reasonMaxLength > 10_000) {
             throw new IllegalArgumentException("lifecycle.reason-max-length must be 1 to 10000");

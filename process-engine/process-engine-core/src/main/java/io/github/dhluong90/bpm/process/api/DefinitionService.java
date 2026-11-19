@@ -87,16 +87,26 @@ public interface DefinitionService {
     DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason, String idempotencyKey);
 
     /**
-     * Retires an active version ({@code processes:approve}) or withdraws a draft ({@code processes:author}). Running
-     * instances keep their version.
+     * Retires an active version ({@code processes:approve}, PD-102) or withdraws a draft ({@code processes:author}).
+     * Retiring stops new starts only: running instances keep their version. A retirement of an active version needs a
+     * reason and runs in the {@code single} approval mode ({@code horus.bpm.lifecycle.retire-approval}); the history
+     * row and {@code retired.v1} record the mode. Retiring the last version in effect of the key follows
+     * {@code horus.bpm.lifecycle.retire-last-version} (PD-101): under {@code confirm}, the default, it needs
+     * {@code confirmNoVersionInEffect}; under {@code refuse} it is refused.
      *
      * @param ref the version
      * @param expectedLockVersion its lock version
+     * @param reason why; required for an active version, optional for a draft
+     * @param confirmNoVersionInEffect the caller accepts that new starts of the key will fail until a new version is
+     *     approved
      * @param idempotencyKey idempotency key, or null
      * @return the version, now retired
      * @throws InvalidStateException when the version is pending approval or already retired
+     * @throws InputInvalidException when an active version is retired without a reason
+     * @throws LastVersionInEffectException when it is the last version in effect and that is not confirmed or allowed
      */
-    DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, String idempotencyKey);
+    DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, String reason, boolean confirmNoVersionInEffect,
+            String idempotencyKey);
 
     /**
      * @param ref the version

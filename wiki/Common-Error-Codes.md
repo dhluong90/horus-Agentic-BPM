@@ -40,6 +40,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 409 | [IDEMPOTENCY_IN_FLIGHT](#idempotency_in_flight) | both | M1 |
 | 409 | [RULE_SET_EXISTS](#rule_set_exists) | rules | M1 |
 | 409 | [VERSION_SUPERSEDED](#version_superseded) | processes | M2 |
+| 409 | [LAST_VERSION_IN_EFFECT](#last_version_in_effect) | processes | M2 |
 | 413 | [PAYLOAD_TOO_LARGE](#payload_too_large) | rules | M1 |
 | 422 | [VALIDATION_FAILED](#validation_failed) | both | M1 |
 | 422 | [IDEMPOTENCY_KEY_REUSE_MISMATCH](#idempotency_key_reuse_mismatch) | both | M1 |
@@ -112,6 +113,9 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 
 ### VERSION_SUPERSEDED
 `409`. Processes only. An older pending version cannot be approved because a version with a higher number is already `ACTIVE` (ADR-0012). Create a new draft from the effective version and request approval again.
+
+### LAST_VERSION_IN_EFFECT
+`409`. Retiring this version would leave its key (or rule set) with no version in effect, so new starts (or evaluations) would fail until a new version is approved (PD-101). Under `horus.bpm.lifecycle.retire-last-version: confirm` resend with `confirmNoVersionInEffect: true` if that is intended; under `refuse`, approve a replacement first.
 
 ### DRAFT_AUTHORING_DISABLED
 `403`. Processes only. The host sets `horus.bpm.processes.authoring.cockpit-drafts: false`, so creating or editing drafts through the `processes:author` endpoints is refused. Imports with `processes:deploy`, approvals and layout saves still work. Change the definition in Git and let the release pipeline import it.

@@ -141,13 +141,22 @@ public class ProcessController {
                 idempotencyKey));
     }
 
-    /** Retires an active version ({@code processes:approve}) or withdraws a draft ({@code processes:author}). */
+    /**
+     * Retires an active version ({@code processes:approve}) or withdraws a draft ({@code processes:author}). Body:
+     * {@code reason} (required for an active version) and {@code confirmNoVersionInEffect} (PD-101).
+     */
     @PostMapping("/definitions/{key}/versions/{version}:retire")
     public ResponseEntity<byte[]> retire(@PathVariable("key") String key, @PathVariable("version") int version,
-            @RequestHeader(value = "If-Match", required = false) String ifMatch,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
         long lock = requiredLockVersion(ifMatch);
-        return version(definitions.retire(DefinitionRef.of(key, version), lock, idempotencyKey));
+        JsonNode body = optionalBody(http);
+        JsonNode confirm = body.get("confirmNoVersionInEffect");
+        if (confirm != null && !confirm.isNull() && !confirm.isBoolean()) {
+            throw new InputInvalidException("confirmNoVersionInEffect must be true or false");
+        }
+        return version(definitions.retire(DefinitionRef.of(key, version), lock, text(body, "reason"),
+                confirm != null && confirm.isBoolean() && confirm.booleanValue(), idempotencyKey));
     }
 
     private ResponseEntity<byte[]> version(DefinitionVersion v) {

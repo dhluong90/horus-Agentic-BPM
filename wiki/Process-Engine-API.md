@@ -15,7 +15,7 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `POST /definitions/{key}/versions/{v}:request-approval` | `requestApproval(ref, lockVersion, effectiveFrom, idempotencyKey)` | `processes:author` or `processes:deploy` | `DRAFT` to `PENDING_APPROVAL`; optional `effectiveFrom`, never in the past. `If-Match` required. 0.2.0 |
 | `POST /definitions/{key}/versions/{v}:approve` | `approve(ref, lockVersion, comment, idempotencyKey)` | `processes:approve` | To `ACTIVE`, effective from `effectiveFrom` or now. The requester gets `403 SELF_APPROVAL_FORBIDDEN`; an older version than the active one gets `409 VERSION_SUPERSEDED`. 0.2.0 |
 | `POST /definitions/{key}/versions/{v}:reject` | `reject(ref, lockVersion, reason, idempotencyKey)` | `processes:approve` | Back to `DRAFT`; `reason` required (`400` without). 0.2.0 |
-| `POST /definitions/{key}/versions/{v}:retire` | `retire(ref, lockVersion, idempotencyKey)` | `processes:approve` (active), `processes:author` (draft) | To `RETIRED`; running instances keep their version. 0.2.0 |
+| `POST /definitions/{key}/versions/{v}:retire` | `retire(ref, lockVersion, reason, confirmNoVersionInEffect, idempotencyKey)` | `processes:approve` (active), `processes:author` (draft) | To `RETIRED`; an active version needs a `reason`; the last version in effect needs `confirmNoVersionInEffect: true` (`409 LAST_VERSION_IN_EFFECT` otherwise). Only new starts stop; running instances keep their version. 0.2.0 |
 | `GET /definitions/{key}/versions/{v}/history` | `history(ref)` | `processes:read` | Every transition with actor and comment, oldest first. 0.2.0 |
 | `POST /instances` | `ProcessEngine.start(StartRequest)` | `processes:start` | Needs a `businessKey` or an `Idempotency-Key` (`428` without either). `201` for a new instance, `200` when one exists for the business key |
 | `GET /instances/{id}` | `ProcessEngine.instance(id)` | `processes:read` | Execution tree (root scope token and flow tokens) and tasks; variables unmasked in 0.1.0 |
@@ -29,7 +29,7 @@ The tenant always comes from the authenticated caller, never from a body. Every 
 | 401 | `UNAUTHENTICATED` |
 | 403 | `PERMISSION_DENIED`, `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN`, `TENANT_NOT_ALLOWED` |
 | 404 | `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND`, `DEFINITION_NOT_FOUND` |
-| 409 | `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `INVALID_STATE`, `IDEMPOTENCY_IN_FLIGHT` (with `Retry-After: 1`) |
+| 409 | `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `IDEMPOTENCY_IN_FLIGHT` (with `Retry-After: 1`) |
 | 413 | `PAYLOAD_TOO_LARGE` |
 | 422 | `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`, `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED` |
 | 428 | `PRECONDITION_REQUIRED` |
@@ -51,6 +51,8 @@ stateDiagram-v2
   ACTIVE --> RETIRED: newer version effective, or retire
   DRAFT --> RETIRED: withdraw
 ```
+
+Retiring an active version needs `processes:approve` and a reason, in the `single` mode of the shared host setting `horus.bpm.lifecycle.retire-approval`; the history row and `retired.v1` record the mode. It stops new starts only; running instances keep their version. Retiring the last version in effect of a key follows `horus.bpm.lifecycle.retire-last-version`: `confirm` (default) needs `confirmNoVersionInEffect: true`, `refuse` never allows it. The `four-eyes` value of either setting is refused at start-up in this release.
 
 Outside the `dev` profile the starter refuses `definitions.auto-approve: true` and `maker-checker.enabled: false`, and on every profile it refuses the removed key `definitions-auto-approve`.
 

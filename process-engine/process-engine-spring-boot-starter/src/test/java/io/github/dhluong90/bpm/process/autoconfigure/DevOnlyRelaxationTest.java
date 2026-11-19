@@ -94,6 +94,23 @@ class DevOnlyRelaxationTest {
                 .hasMessageContaining("horus.bpm.lifecycle.approver-must-differ-from");
     }
 
+    @Test
+    void retirement_four_eyes_modes_are_refused_at_start_up_and_the_modes_are_published_in_meta() {
+        assertThatThrownBy(() -> startUp(new String[] {"prod"}, "horus.bpm.lifecycle.retire-approval", "four-eyes"))
+                .hasMessageContaining("horus.bpm.lifecycle.retire-approval=four-eyes").hasMessageContaining("single");
+        assertThatThrownBy(() -> startUp(new String[] {"prod"}, "horus.bpm.lifecycle.retire-last-version", "four-eyes"))
+                .hasMessageContaining("horus.bpm.lifecycle.retire-last-version=four-eyes");
+        assertThatCode(() -> startUp(new String[] {"prod"}, "horus.bpm.lifecycle.retire-last-version", "refuse"))
+                .doesNotThrowAnyException();
+
+        MockEnvironment defaults = new MockEnvironment();
+        ProcessEngineProperties properties = org.springframework.boot.context.properties.bind.Binder.get(defaults)
+                .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class);
+        assertThat(new ProcessEngineAutoConfiguration().processEngineModuleDescriptor(properties, defaults).settings())
+                .containsEntry("lifecycle.retire-approval", "single")
+                .containsEntry("lifecycle.retire-last-version", "confirm");
+    }
+
     private static void startUp(String[] profiles, String property, String value) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(profiles);

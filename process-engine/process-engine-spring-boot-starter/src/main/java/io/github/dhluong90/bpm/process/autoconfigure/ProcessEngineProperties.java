@@ -163,9 +163,10 @@ public record ProcessEngineProperties(
     public record Security(@DefaultValue Map<String, List<String>> rolePermissions) {
     }
 
-    EngineSettings toSettings(EngineSettings.ApproverRule approverRule) {
+    EngineSettings toSettings(EngineSettings.ApproverRule approverRule,
+            EngineSettings.RetireLastVersionRule retireLastVersion) {
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
                 idempotencyRetention, handlers.slowCallWarning(), makerChecker.enabled(), lifecycle.reasonMaxLength(),
-                approverRule);
+                approverRule, retireLastVersion);
     }
 }
