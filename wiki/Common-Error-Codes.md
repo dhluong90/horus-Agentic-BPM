@@ -69,7 +69,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `401`. No principal, a token whose audience is another host, or a principal with no tenant the `TenantResolver` can read (for example no `tenant_id` attribute). Sign in again, request a token for this host, or give the user a tenant in your identity provider. Every `401` carries `WWW-Authenticate`; when the challenge says `error="invalid_token"`, the account has no tenant on this host, so sign in again at most once. The host returns this body from its security chain when the chain uses `BpmProblemAuthenticationEntryPoint` ([[Host Metadata and Permissions]]).
 
 ### PERMISSION_DENIED
-`403`. The principal lacks the permission the endpoint checks. Map the permission to the caller's role; see [[Multi-Tenancy and Security]].
+`403`. The principal lacks the permission the endpoint checks. Map the permission to the caller's role; see [[Multi-Tenancy and Security]]. The host also answers this code, on `/api/bpm/me` and every engine endpoint, to a caller whose id starts with `system:`, the prefix the engines reserve for their own actions, and writes the security log entry `caller.reserved.refused`; give that user another id in your identity provider ([[Host Metadata and Permissions]]).
 
 ### TENANT_NOT_ALLOWED
 `403`. `X-Tenant-Id` names a tenant outside the token's allowed-tenants claim, or differs from the resolved tenant while tenant switching is off; a host resolver returns a tenant other than the principal's tenant attribute; or the tenant is outside the allowed format. No data is returned and the host writes the security log entry `tenant.switch.refused` (ADR-0014). Ask your identity provider administrator to add the tenant to your token.
