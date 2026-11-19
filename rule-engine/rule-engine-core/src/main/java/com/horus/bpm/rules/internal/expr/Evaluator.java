@@ -6,13 +6,17 @@ import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 
 /**
  * Evaluates an {@link Expr} over input slots with FEEL semantics (rule-engine/docs/DESIGN.md section
  * 3.2, PD-058): numbers are {@code BigDecimal} in {@link MathContext#DECIMAL128}; comparisons,
  * arithmetic and {@code between} with a null operand give null; {@code ==} and {@code !=} are
- * two-valued; {@code in} is false for a null target; {@code and}, {@code or} and {@code not} follow
- * the FEEL truth tables. Mixed currencies and division by zero raise {@link EvaluationException}.
+ * two-valued; {@code in} is true when an element equals the target, so a null target is in a list only
+ * when the list holds null; {@code and}, {@code or} and {@code not} follow the FEEL truth tables; a
+ * function with a null argument gives null; {@code round} is half-even; {@code matches} is an unanchored
+ * search. Mixed currencies, division by zero and a regex search past its step budget raise
+ * {@link EvaluationException}.
  * Stateless and thread-safe.
  */
 public final class Evaluator {
@@ -68,6 +72,9 @@ public final class Evaluator {
                 yield and(compare(Expr.BinaryOp.GE, value, low), compare(Expr.BinaryOp.LE, value, high));
             }
             case Expr.IsNull isNull -> (evaluate(isNull.target(), slots) == null) != isNull.negated();
+            case Expr.Call call -> call(call, slots);
+            case Expr.Matches matches -> evaluate(matches.target(), slots) instanceof String text
+                    ? matches.pattern().find(text) : null;
         };
     }
 
@@ -83,15 +90,23 @@ public final class Evaluator {
     }
 
     private boolean in(Object target, Expr.InList inList, Object[] slots) {
-        if (target == null) {
-            return false;
-        }
         for (Expr element : inList.elements()) {
             if (Boolean.TRUE.equals(equal(target, evaluate(element, slots)))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private Object call(Expr.Call call, Object[] slots) {
+        Object first = evaluate(call.args().get(0), slots);
+        Object second = evaluate(call.args().get(1), slots);
+        return switch (call.function()) {
+            case ROUND -> first instanceof BigDecimal number && second instanceof BigDecimal scale && Parser.isScale(scale)
+                    ? number.setScale(scale.intValueExact(), RoundingMode.HALF_EVEN) : null;
+            case DAYS_BETWEEN -> first instanceof LocalDate from && second instanceof LocalDate to
+                    ? BigDecimal.valueOf(ChronoUnit.DAYS.between(from, to)) : null;
+        };
     }
 
     private Object binary(Expr.Binary binary, Object[] slots) {

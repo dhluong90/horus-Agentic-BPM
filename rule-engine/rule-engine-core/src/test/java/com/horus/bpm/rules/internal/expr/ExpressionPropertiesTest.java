@@ -137,11 +137,12 @@ class ExpressionPropertiesTest {
     }
 
     @TestFactory
-    Stream<DynamicTest> RLE_006_in_is_false_and_not_in_is_true_for_a_null_target() {
+    Stream<DynamicTest> RLE_006_a_null_target_is_in_a_list_only_when_the_list_holds_null() {
+        // FEEL list contains(list, null) is true only when the list holds null; v1 in is true when an element equals x
         return Property.tries(1_000).forAll(COMPARABLE, element -> {
-            assertThat(eval("a in [b]", null, element)).isEqualTo(false);
-            assertThat(eval("a not in [b]", null, element)).isEqualTo(true);
-            assertThat(eval("a in [b, c]", null, element, null, null, null, null)).isEqualTo(false);
+            assertThat(eval("a in [b]", null, element)).isEqualTo(element == null);
+            assertThat(eval("a not in [b]", null, element)).isEqualTo(element != null);
+            assertThat(eval("a in [b, c]", null, element, null, null, null, null)).isEqualTo(true);
         });
     }
 

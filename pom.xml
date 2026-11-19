@@ -85,6 +85,11 @@
     <archunit.version>1.5.1</archunit.version>
     <!-- Test scope only: validates REST responses against the published JSON Schemas (Apache 2.0). -->
     <json-schema-validator.version>2.0.1</json-schema-validator.version>
+    <!--
+      Test scope only: the reference FEEL implementation of the RLE-021 differential test (Apache 2.0).
+      Never a dependency of a shipped module (ArchUnit and the enforce-framework-free-core ban).
+    -->
+    <feel-engine.version>1.22.1</feel-engine.version>
 
     <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
     <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
@@ -125,6 +130,11 @@
         <groupId>com.tngtech.archunit</groupId>
         <artifactId>archunit-junit5</artifactId>
         <version>${archunit.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.camunda.feel</groupId>
+        <artifactId>feel-engine</artifactId>
+        <version>${feel-engine.version}</version>
       </dependency>
       <dependency>
         <groupId>com.networknt</groupId>
