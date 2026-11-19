@@ -358,4 +358,6 @@ export const vi: Record<MessageKey, string> = {
   'changes.note.columnsReordered.then': 'Các cột kết quả đổi thứ tự',
   'changes.notesLabel': 'Thay đổi ngoài các dòng',
   'decision.takesEffectOn': 'Có hiệu lực {when} sau khi được phê duyệt.',
+  'decision.changed': 'Đã thay đổi sau khi bạn mở. Hãy xem lại.',
+  'decision.reviewAgain': 'Xem phiên bản mới',
 };

@@ -24,7 +24,8 @@ function useKeys() {
     version: (name: string, version: number) => [...rules, name, 'version', version] as const,
     history: (name: string, version: number) => [...rules, name, 'history', version] as const,
     source: (name: string, version: number) => [...rules, name, 'source', version] as const,
-    diff: (name: string, version: number, base: number) => [...rules, name, 'diff', version, base] as const,
+    // The content hash and lock version of the version read are part of the key: a diff is never reused for other content.
+    diff: (name: string, version: number, hash: string, lockVersion: number, base: number) => [...rules, name, 'diff', version, hash, lockVersion, base] as const,
   };
 }
 
@@ -47,13 +48,16 @@ export function useVersion(name: string, version: number | undefined) {
   });
 }
 
-/** The engine's row-level diff of a version against a base version (RLE-028); off while there is no base. */
-export function useVersionDiff(name: string, version: number, base: number | undefined) {
+/**
+ * The engine's row-level diff of a version against a base version (RLE-028); off while there is no base. Keyed by
+ * the content hash and lock version of the version on screen, so a version that changes gets a new diff.
+ */
+export function useVersionDiff(version: Pick<RuleSetVersion, 'ruleSet' | 'version' | 'canonicalHash' | 'lockVersion'>, base: number | undefined) {
   const { client } = useRulesSession();
   const keys = useKeys();
   return useQuery({
-    queryKey: keys.diff(name, version, base ?? 0),
-    queryFn: ({ signal }) => client.diffVersions(name, version, base ?? 0, signal),
+    queryKey: keys.diff(version.ruleSet, version.version, version.canonicalHash, version.lockVersion, base ?? 0),
+    queryFn: ({ signal }) => client.diffVersions(version.ruleSet, version.version, base ?? 0, signal),
     enabled: base !== undefined,
     staleTime: 10_000,
   });

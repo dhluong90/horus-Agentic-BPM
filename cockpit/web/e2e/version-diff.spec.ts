@@ -92,6 +92,51 @@ test('CKP_002_the_decision_stays_docked_in_view_when_the_diff_is_taller_than_the
   expect(scrollable).toBe(true);
 });
 
+test('CKP_002_approve_waits_when_the_version_changes_under_the_reader', async ({ page }) => {
+  await page.setViewportSize(VIEWPORTS[0]);
+  await page.clock.install();
+  const approvals: { ifMatch: string | undefined }[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith(':approve')) approvals.push({ ifMatch: request.headers()['if-match'] });
+  });
+  await rememberLocale(page, 'en');
+  await mockHost(page, 'rules-approver');
+  const engine = await mockRuleEngine(page, 'rules-approver');
+  await page.goto('./#/rules/card-fee/2');
+  await expect(rowOf(page, 'R3').locator('.diff-td--mod')).toContainText('35,000 VND');
+  const approve = page.getByRole('button', { name: TEXT.en.approve, exact: true });
+  await expect(approve).toBeEnabled();
+
+  // Meanwhile the requester withdraws, replaces R3's fee and requests again: same version, new content and lock.
+  const stored = engine.store.find((v) => v.ruleSet === 'card-fee' && v.version === 2);
+  if (!stored) throw new Error('card-fee v2 missing');
+  stored.definition = { ...stored.definition, rules: stored.definition.rules.map((r) => (r.id === 'R3' ? { ...r, then: { ...r.then, fee: '40000 VND' } } : r)) };
+  stored.lockVersion += 1;
+  // The approver glances at version 1 and comes back after the data went stale; the cockpit reads v2 again.
+  await page.clock.fastForward(11_000);
+  await page.getByLabel('Versions').selectOption('1');
+  await expect(page).toHaveURL(/#\/rules\/card-fee\/1/);
+  await page.getByLabel('Versions').selectOption('2');
+  await page.getByRole('tab', { name: 'Changes' }).click();
+
+  await expect(page.getByText('Changed since you opened it. Review again.')).toBeVisible();
+  await expect(approve).toBeDisabled();
+  await expect(approve).toHaveAccessibleDescription(/Changed since you opened it\. Review again\./);
+  expect(approvals).toEqual([]);
+  await settle(page);
+  await page.screenshot({ path: 'e2e/screenshots/version-diff-changed-1440x900-light-en.png', fullPage: false });
+  await check(page);
+
+  await page.getByRole('button', { name: 'Show the new version' }).click();
+  await expect(rowOf(page, 'R3').locator('.diff-td--mod')).toContainText('40,000 VND');
+  await expect(page.getByText('Changed since you opened it. Review again.')).toHaveCount(0);
+  await expect(approve).toBeEnabled();
+  await approve.click();
+  await expect(page.getByText('Version 2 is published.')).toBeVisible();
+  // The lock version sent is the one of the content now on screen.
+  expect(approvals).toEqual([{ ifMatch: '"2"' }]);
+});
+
 test('CKP_002_a_removed_row_strikes_nothing', async ({ page }) => {
   await page.setViewportSize(VIEWPORTS[0]);
   await openDiff(page, 'en');

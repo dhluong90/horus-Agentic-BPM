@@ -356,6 +356,8 @@ export const en = {
   'changes.note.columnsReordered.then': 'Result columns are in a new order',
   'changes.notesLabel': 'Changes outside the rows',
   'decision.takesEffectOn': 'Takes effect {when} once approved.',
+  'decision.changed': 'Changed since you opened it. Review again.',
+  'decision.reviewAgain': 'Show the new version',
 } as const;
 
 export type MessageKey = keyof typeof en;

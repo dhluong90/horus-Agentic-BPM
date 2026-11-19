@@ -41,11 +41,12 @@ export async function rememberLocale(page: Page, locale: 'en' | 'vi'): Promise<v
 }
 
 /** Answers the Rule Engine endpoints from the in-memory engine with the demo data (or `seed`), as the scenario's user. */
-export async function mockRuleEngine(page: Page, scenario: Scenario, seed: StoredVersion[] = demoSeed()): Promise<void> {
+export async function mockRuleEngine(page: Page, scenario: Scenario, seed: StoredVersion[] = demoSeed()): Promise<ReturnType<typeof createFakeEngine>> {
   const engine = createFakeEngine(seed);
   await page.route('**/api/bpm/rules/v1/**', async (route) => {
     const request = route.request();
     const answer = engine.handle({ method: request.method(), path: request.url(), headers: request.headers(), body: request.postData() ?? '', user: scenarioUser(scenario), permissions: scenarioPermissions(scenario) });
     await route.fulfill({ status: answer.status, headers: answer.headers, body: answer.body });
   });
+  return engine;
 }

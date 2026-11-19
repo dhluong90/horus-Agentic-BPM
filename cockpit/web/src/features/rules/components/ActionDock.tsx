@@ -43,6 +43,12 @@ export function DraftsOffNote() {
   return can('rules:author') && !cockpitDrafts ? <p className="rs-head__note">{t('dock.draftsOff')}</p> : null;
 }
 
+/**
+ * Whether what is on screen is what Approve would publish: `ok`; `checking` while the diff of the current content
+ * loads; `changed` when the version moved on since the user opened it, or the diff on screen is of other content.
+ */
+export type Review = 'ok' | 'checking' | 'changed';
+
 /** A scheduled date, when the version has one in the future; otherwise nothing (the header already says when). */
 function TakesEffect({ effectiveFrom }: { effectiveFrom: string | null | undefined }) {
   const { t, locale } = useI18n();
@@ -59,7 +65,9 @@ function TakesEffect({ effectiveFrom }: { effectiveFrom: string | null | undefin
  * engine's answer, shown with its code behind Details. Docked, it sits at the bottom of the screen under the
  * side-by-side diff, so Approve stays in view while the approver reads what changed.
  */
-export function DecisionCard({ version, approve, reject, onReload, docked = false }: { version: RuleSetVersion; approve: Action<string>; reject: Action<string>; onReload: () => void; docked?: boolean }) {
+export function DecisionCard({ version, approve, reject, onReload, docked = false, review = 'ok', onReviewAgain }: {
+  version: RuleSetVersion; approve: Action<string>; reject: Action<string>; onReload: () => void; docked?: boolean; review?: Review; onReviewAgain?: () => void;
+}) {
   const { t } = useI18n();
   const { userId } = useRulesSession();
   const [text, setText] = useState('');
@@ -68,16 +76,18 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
   const hintId = useId();
   const allowed = new Set(version.allowedActions);
   const self = version.requestedBy === userId ? 'dock.selfRequested' : version.createdBy === userId ? 'dock.selfAuthored' : undefined;
-  const canApprove = allowed.has('approve') && self === undefined;
+  const mayApprove = allowed.has('approve') && self === undefined;
+  const canApprove = mayApprove && review === 'ok';
   // PD-089: a requester never rejects their own request; withdrawing is its own action (:withdraw).
   const canReject = allowed.has('reject') && self === undefined;
   const error: unknown = approve.error ?? reject.error;
-  const unavailable = canApprove ? undefined : self ?? 'dock.approveUnavailable';
+  // A disabled Approve says why; while the current diff loads it is only busy for a moment.
+  const unavailable = canApprove || (mayApprove && review === 'checking') ? undefined : self ?? (mayApprove ? 'decision.changed' : 'dock.approveUnavailable');
   const busy = approve.isPending || reject.isPending;
   return (
     <section className={docked ? 'card decision decision--dock' : 'card decision'} aria-labelledby="decision-title">
       <h2 id="decision-title" className="rules-card-title">{t('decision.title')}</h2>
-      {!canApprove && !canReject && self === undefined ? (
+      {!mayApprove && !canReject && self === undefined ? (
         <p className="dock__note">{t('dock.waiting')}</p>
       ) : (
         <>
@@ -85,9 +95,12 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
             {unavailable !== undefined ? (
               <p id={reasonId} className="gate__reason">
                 <span aria-hidden="true">⊘</span> {t(unavailable)}
+                {unavailable === 'decision.changed' && onReviewAgain ? (
+                  <> <button type="button" className="linkbtn hit" onClick={onReviewAgain}>{t('decision.reviewAgain')}</button></>
+                ) : null}
               </p>
             ) : null}
-            {canApprove || canReject ? (
+            {mayApprove || canReject ? (
               <label className="field" htmlFor={textId}>
                 <span className="field__label">{t('decision.comment')}</span>
                 <textarea id={textId} className="field__input" rows={docked ? 1 : 2} value={text} placeholder={t('decision.commentHint')}
@@ -97,7 +110,7 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
           </div>
           <div className="decision__actions">
             <div className="gate__buttons">
-              <button type="button" className="btn btn--primary btn--ok" disabled={!canApprove || busy} aria-busy={approve.isPending}
+              <button type="button" className="btn btn--primary btn--ok" disabled={!canApprove || busy} aria-busy={approve.isPending || review === 'checking'}
                 {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : {})} onClick={() => { approve.start(text.trim()); }}>
                 <span aria-hidden="true">✓</span> {approve.isPending ? t('dock.approving') : t('dock.approve')}
               </button>
@@ -109,7 +122,7 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
             </div>
             {/* The placeholder already says Reject needs a reason; the hint stays as Reject's spoken description. */}
             {canReject ? <p id={hintId} className="sr-only">{t('dock.reasonHint')}</p> : null}
-            {canApprove ? <TakesEffect effectiveFrom={version.effectiveFrom} /> : null}
+            {mayApprove ? <TakesEffect effectiveFrom={version.effectiveFrom} /> : null}
           </div>
         </>
       )}

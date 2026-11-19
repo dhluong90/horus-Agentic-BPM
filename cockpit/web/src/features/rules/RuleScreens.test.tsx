@@ -6,6 +6,7 @@ import { App } from '../../App';
 import type { Scenario } from '../../mocks/fixtures';
 import { mockHost, setScenario } from '../../mocks/node';
 import { formatDateTime } from './model/dates';
+import { createFakeEngine, demoSeed } from '../../mocks/ruleEngine';
 
 /** Engine calls the screens made, in order: method and path. */
 let calls: { method: string; path: string; key: string | null }[] = [];
@@ -206,6 +207,21 @@ describe('four eyes', () => {
     mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/card-fee/versions/2', () => HttpResponse.json({ ...pendingV2, effectiveFrom, allowedActions: ['approve', 'reject'] })));
     open('#/rules/card-fee/2/table', 'rules-approver');
     expect(await screen.findByText(`Takes effect ${formatDateTime(effectiveFrom, 'en') ?? ''} once approved.`)).toBeInTheDocument();
+  });
+
+  it('CKP_002_approve_is_off_when_the_diff_on_screen_is_of_other_content', async () => {
+    // The engine's diff of card-fee v2, but computed over content other than the version the cockpit holds.
+    const other = createFakeEngine(demoSeed());
+    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/card-fee/versions/2/diff', ({ request }) => {
+      const answer = other.handle({ method: 'GET', path: request.url, headers: {}, body: '', user: 'minh', permissions: ['rules:read'] });
+      return HttpResponse.json({ ...(JSON.parse(answer.body) as Record<string, unknown>), canonicalHash: 'f'.repeat(64) });
+    }));
+    open('#/rules/card-fee/2', 'rules-approver');
+    await screen.findByRole('table', { name: 'Version 1 and version 2 of card-fee, side by side' });
+    const approve = screen.getByRole('button', { name: 'Approve and publish' });
+    await waitFor(() => { expect(approve).toHaveAccessibleDescription(/Changed since you opened it\. Review again\./); });
+    expect(approve).toBeDisabled();
+    expect(writes()).toEqual([]);
   });
 
   it('CKP_002_a_refused_diff_is_shown_with_its_code_and_no_table', async () => {
