@@ -90,6 +90,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-066](#pd-066-feel-error-mode-default) | FEEL error mode default | Pending product owner |
 | [PD-067](#pd-067-product-roadmap-approved-sprint-planning-starts) | Product roadmap approved; sprint planning starts | Decided |
 | [PD-068](#pd-068-human-readable-issues-and-planning-artefacts) | Human-readable issues and planning artefacts | Decided |
+| [PD-069](#pd-069-development-starts-on-a-10-sprint-plan-with-reviewed-sprints) | Development starts on a 10-sprint plan with reviewed sprints | Decided |
 
 ---
 
@@ -1891,3 +1892,28 @@ Effort (assumption): S1 about 24 engineer-weeks (BPMN 12, DMN 8, cockpit 4), S2 
 - The issue templates and contribution guide state the title and summary rules.
 
 **Follow-ups.** Product manager: apply the rules to the sprint plan slice titles, the feature names in the PRDs and the roadmap; draft the decision issues for PD-058 and PD-060. Maintainers (engineering): create the M0 prerequisite issue, retitle and rewrite issues #1 to #5, add the missing labels and the public status names. QA: add the two viewports to every UI demo check. Documentation: issue templates and contribution guide.
+
+### PD-069 Development starts on a 10-sprint plan with reviewed sprints
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Does development start now, on what plan, and how is each sprint's work accepted? |
+| Raised by | Product manager |
+| Decision | Decided by the product owner, 2026-11-19: option 1. Development starts on a 10-sprint plan; each sprint is reviewed by the product manager and accepted by the product owner from a recorded review video |
+
+**Options considered**
+
+1. Start development on a 10-sprint plan; the product manager reviews each sprint feature by feature against its acceptance criteria, and the product owner accepts or rejects each feature from a recorded review video (chosen). Consequence: the product owner reviews one short video per sprint instead of every artefact; features that fail review return to a later sprint before they reach the product owner.
+2. Start development on a 5-sprint plan, with the product owner reviewing each sprint demo directly. Consequence: no review step before the product owner, but more of the product owner's time per sprint and a second plan approval after five sprints.
+
+**Recommendation (product manager).** Option 1. Ten sprints cover the path through the next milestones without a pause for a new plan, and a review against acceptance criteria before the product owner sees the work keeps acceptance quick and consistent.
+
+**Consequences.**
+
+- Only the product owner accepts a feature. The product manager's review is a recommendation per feature: accepted, accepted with notes, or rejected with reasons.
+- A feature that changes scope from its issue goes to the product owner for a decision, recorded in this log, rather than being accepted or rejected in review.
+- Rejected features and review notes are carried into the plan for the following sprint.
+- UI features are reviewed at 1440x900, with the primary action and its result visible without scrolling, and at 1440x1200 (PD-068, rule 7).
+
+**Follow-ups.** Product manager: review every sprint and publish the review with each review video. Maintainers (engineering): end every sprint with a recorded demo and per-feature evidence. Documentation: the wiki Roadmap page states that development has started.
