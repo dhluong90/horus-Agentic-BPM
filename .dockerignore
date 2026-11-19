@@ -1,0 +1,19 @@
+# Build context of deploy/docker/Dockerfile. Keep secrets and build output out of every image layer.
+.git
+.github
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.jks
+**/target/
+**/node_modules/
+**/dist/
+**/test-results/
+.m2repo/
+.idea/
+.vscode/
+**/.DS_Store
+wiki/
