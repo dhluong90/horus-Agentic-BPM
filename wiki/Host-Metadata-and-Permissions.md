@@ -21,7 +21,7 @@ SecurityFilterChain hostSecurity(HttpSecurity http) {
 }
 ```
 
-Both classes are in `com.horus.bpm.host.autoconfigure`, and the module also registers one bean of each, built from `horus.bpm.security.challenge`, so a chain can inject them and send the same challenge as the endpoints. Without them the host's own handlers answer, usually with an empty `401` body or a redirect. Even a chain that lets every request through never exposes data: the endpoints check the caller themselves and answer `401` as a problem.
+Both classes are in `io.github.dhluong90.bpm.host.autoconfigure`, and the module also registers one bean of each, built from `horus.bpm.security.challenge`, so a chain can inject them and send the same challenge as the endpoints. Without them the host's own handlers answer, usually with an empty `401` body or a redirect. Even a chain that lets every request through never exposes data: the endpoints check the caller themselves and answer `401` as a problem.
 
 ## How a client uses the two endpoints
 
@@ -129,7 +129,7 @@ Only the permissions of the engines installed in the host are ever listed: `rule
 
 ## One access check for `/me` and the engine endpoints
 
-`/me` never decides on its own. Every engine endpoint and `/me` ask the same bean, `EngineAccess` in `com.horus.bpm.host.spi`: who is calling, in which tenant, and whether they hold a permission. `/me` lists exactly the permissions for which that bean answers yes, so the cockpit never shows a button the engine refuses, or hides one it allows.
+`/me` never decides on its own. Every engine endpoint and `/me` ask the same bean, `EngineAccess` in `io.github.dhluong90.bpm.host.spi`: who is calling, in which tenant, and whether they hold a permission. `/me` lists exactly the permissions for which that bean answers yes, so the cockpit never shows a button the engine refuses, or hides one it allows.
 
 ```mermaid
 flowchart LR
@@ -188,7 +188,7 @@ Whatever the resolver, these rules hold:
 | The tenant is not 1 to 64 letters, digits, `.`, `_` or `-`, starting with a letter or digit | `403 TENANT_NOT_ALLOWED` |
 | A tenant in a query parameter, a body or any other header | Ignored |
 
-Every refusal writes one entry on the logger `com.horus.bpm.security`:
+Every refusal writes one entry on the logger `io.github.dhluong90.bpm.security`:
 
 ```text
 tenant.switch.refused reason=switching-off user=lan%40bank-a.vn tokenTenant=bank-a requestedTenant=bank-b correlationId=01M7RT1NNKHDP8JWFNE563SNP6 clientCorrelationId=-
