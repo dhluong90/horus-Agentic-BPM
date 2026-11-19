@@ -41,9 +41,9 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `evaluation.regex-max-input-length` | `4096` | 0.1 (M1) | Longer inputs fail `matches()` deterministically |
 | `evaluation.max-input-scale` | `34` | Built | Largest absolute scale of a number input (`1e-35` and `1e35` are refused with `400 INPUT_INVALID`; at most 34 significant digits always). `0` to `34`; may be lowered, never raised. An invalid value stops start-up |
 | `evaluation.reject-undeclared-inputs` | `true` | Built | Refuse an input name the rule set does not declare with `400 INPUT_INVALID`, so a misspelt name such as `txcount` never falls to a default row. With `false`, undeclared inputs are ignored; they are never written to the decision log either way |
-| `cache.max-entries` | `1000` | Built | Compiled versions kept per replica, `1` to `100000`; the cache is cleared when full (LRU eviction from 0.1). An invalid value stops start-up |
-| `cache.listen-notify` | `true` | 0.1 (M1) | Open one session-mode connection for `LISTEN horus_rle_cache`; set `false` behind a transaction-mode pooler |
-| `cache.epoch-check-interval` | `PT5S` | 0.1 (M1) | Interval of the `cache_epoch` sweep; this is the staleness bound when NOTIFY is unavailable |
+| `cache.max-entries` | `1000` | Built (LRU from 0.2) | Compiled versions kept per replica, `1` to `100000`, one per rule set and tenant. When full, the least recently used entry leaves, counted by `horus.rle.cache.evictions{cause=size}`, so memory stays flat however many versions exist. An invalid value stops start-up |
+| `cache.listen-notify` | `true` | Built (0.2) | Hold one connection from the host's pool for `LISTEN horus_rle_cache`, so every replica drops an approved rule set within about a second. Set `false` behind a transaction-mode pooler. See [Replicas and connection poolers](#replicas-and-connection-poolers) |
+| `cache.epoch-check-interval` | `PT5S` | Built (0.2) | How often each replica compares its cached rule sets with their `cache_epoch`, `PT0.1S` to `PT5M`: one indexed read per cached tenant. The longest a replica serves a version after another replica's approval when no notification arrives |
 | `idempotency.retention` | `PT24H` | Built | Lifetime of `rle_idempotency` rows, `PT1M` to `P30D`. An invalid value stops start-up |
 | `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | 0.1 (M1) | Bounds of `GET /decisions` and list reads; range and page size may be lowered, never raised |
 | `lifecycle.sweep-interval` | `PT1M` | 0.1 (M1) | How often superseded versions are marked retired; evaluation already switches at `effectiveFrom` |
@@ -141,6 +141,27 @@ Several replicas can start at once: a transaction-scoped advisory lock lets one 
 With `migrate-on-start: false`, the engine creates partitions only if its schema is current. If migrations are pending, it skips the partitions, logs a warning, and the `ruleEngine` health contributor reports `DOWN`. Run the migrations, then restart.
 
 The `ruleEngine` health contributor also reports whether next month's partition exists. A missing partition is a detail, not a failure: decisions of a month without a partition go to `rle_decision_default` until that partition is created.
+
+## Replicas and connection poolers
+
+Each replica keeps the compiled version of every rule set it evaluates in memory, so a cached evaluation reads nothing from the database and writes its one decision row. An approval increments the rule set's `cache_epoch` and sends `pg_notify('horus_rle_cache', ...)` in its own transaction; PostgreSQL delivers the notification after commit, and the approving replica drops its own entry at the same moment.
+
+| Path | When it applies | Bound |
+|---|---|---|
+| Notification | `cache.listen-notify: true` on a direct connection. One connection of the host's pool stays open for `LISTEN` for the replica's lifetime; size the pool with one connection to spare | About 1 s |
+| Epoch check | Always, every `cache.epoch-check-interval` | The interval, 5 s by default |
+| Hand-over | A published version with a later `effectiveFrom` takes over at that instant on every replica, with no notification | Exact |
+
+Behind PgBouncer or another pooler in transaction mode, `LISTEN` does not work: the pooler hands each transaction to any server connection and drops notifications. Set `cache.listen-notify: false` there. No session connection is opened, and the epoch check alone brings every replica to a new version within the interval. Sending the notification is transactional, so approvals work through the pooler either way. With the JDBC driver behind a transaction-mode pooler, also set `prepareThreshold=0` on the URL unless the pooler supports prepared statements.
+
+If the listener loses its connection (a failover, a restart of PostgreSQL), it logs one warning, retries every second, and logs one line when it listens again; it runs one epoch check on reconnect, because PostgreSQL does not replay notifications sent while it was away.
+
+| Meter | Prometheus | Meaning |
+|---|---|---|
+| `horus.rle.cache.size` | `horus_rle_cache_size` | Compiled entries held; at most `cache.max-entries` |
+| `horus.rle.cache.evictions` | `horus_rle_cache_evictions_total` | Entries that left the cache, tag `cause`: `size`, `epoch` or `notify` |
+
+The meters are registered only when the host has Micrometer on its classpath, for example through Spring Boot Actuator. No meter carries a tenant or a rule set.
 
 ## Host beans the starter picks up
 
