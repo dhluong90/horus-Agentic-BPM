@@ -32,6 +32,9 @@ Test names start with the specification id they prove, for example `CKP_001_...`
 | Folder | Holds |
 |---|---|
 | `src/app/config` | Loading and validating `cockpit-hosts.json` |
+| `src/app/route.ts`, `src/app/navigation.ts` | Hash routes (`#/home`, `#/rules/...`, `#/approvals`, `#/decisions`, `#/processes`), the menu areas each user may use, and the landing area |
+| `src/shell` | The header, the left menu (`NavRail`) and the frame that routes to an area (`AppFrame`) |
+| `src/features` | One folder per area: `home`, `rules`, `approvals`, `decisions`, `processes`, and `overview` for the lists that Home and Approvals share |
 | `src/app/session` | The session state: registry, `/meta` and `/me` as one state |
 | `src/api` | The host client, problem-details parsing and the generated schemas |
 | `src/components` | Design tokens, the header and the state panels |

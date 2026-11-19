@@ -45,6 +45,8 @@ export interface RulesClient {
   getHistory(name: string, version: number, signal?: AbortSignal): Promise<HistoryEntry[]>;
   /** reject: back to DRAFT with a required reason */
   reject(name: string, version: number, lockVersion: number, reason: string, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** withdraw: the requester takes their own request back to DRAFT, with an optional reason (RLE-046, PD-089) */
+  withdraw(name: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<RuleSetVersion>;
   /** getVersion */
   getVersion(name: string, version: number, options?: { source?: boolean; signal?: AbortSignal }): Promise<RuleSetVersion>;
   /** importRuleSet: version 1 of a new rule set */
@@ -97,6 +99,18 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
           path: `${versionPath(name, version)}:reject`,
           headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
           body: { contentType: 'application/json', text: JSON.stringify({ reason }) },
+        },
+        ruleSetVersion,
+      );
+      return answer.data;
+    },
+    async withdraw(name, version, lockVersion, reason, idempotencyKey) {
+      const answer = await call(
+        {
+          method: 'POST',
+          path: `${versionPath(name, version)}:withdraw`,
+          headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
+          body: { contentType: 'application/json', text: JSON.stringify(reason === undefined ? {} : { reason }) },
         },
         ruleSetVersion,
       );

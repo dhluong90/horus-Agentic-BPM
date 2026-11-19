@@ -133,10 +133,10 @@ test.describe('keyboard', () => {
     await page.keyboard.press('Tab');
     await expect(page.getByRole('link', { name: 'Skip to main content' })).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(page.getByRole('button', { name: 'EN' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'EN', exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Tổng quan dịch vụ');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Trang chủ');
     await page.keyboard.press('Tab');
     await page.keyboard.press('Enter');
     await expect(page.locator('html')).toHaveAttribute('data-theme', /light|dark/);
