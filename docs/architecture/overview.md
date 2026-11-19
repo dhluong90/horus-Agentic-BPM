@@ -438,7 +438,7 @@ The engines keep no state outside the database. Replicas coordinate only through
 | Gate | Proves | Tooling |
 |---|---|---|
 | Module boundaries | `*-core` free of Spring, SQL, network, scripting and reflection; `*-postgres` free of HTTP | ArchUnit in every build (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`) |
-| Determinism | Same version, inputs and clock give the same result | jqwik property tests (`TR-DET-01`), replay tests (`TR-DET-05`) |
+| Determinism | Same version, inputs and clock give the same result | Property tests with the project's seeded generator (`TR-DET-01`, PD-090), replay tests (`TR-DET-05`) |
 | Async Wait-State | No connection held during adapter calls; lease is timeout plus margin; takeover exactly once | Testcontainers with a 2-connection pool and a 2 s stub adapter (`PRE-009`, `PRE-017`, `TR-ASY-01`, `TR-ASY-02`) |
 | Guardrails | Contract checked at deploy; violation routes to a human; errors fail closed | `PRE-010`, `PRE-016` |
 | Concurrency | Join without lost wakeup; stale completion rejected; duplicate-key semantics | Two-replica Testcontainers tests (`PRE-005`, `TR-ASY-03`, `TR-IDEM-03`, `TR-IDEM-05`) |

@@ -6,6 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
@@ -13,6 +16,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 
 /** The example host's start-up guards for the demo users and for bearer tokens. */
+@ExtendWith(OutputCaptureExtension.class)
 class HostSecurityConfigurationTest {
 
     private static final String JWT = "spring.security.oauth2.resourceserver.jwt.";
@@ -27,6 +31,25 @@ class HostSecurityConfigurationTest {
         assertThatThrownBy(() -> HostSecurityConfiguration.requireLocalDevelopment(devAndProd))
                 .hasMessageContaining("profile 'prod' is active too");
         assertThatCode(() -> HostSecurityConfiguration.requireLocalDevelopment(devAndTest)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void demo_users_log_a_warning_that_they_are_for_local_evaluation_only(CapturedOutput output) {
+        MockEnvironment dev = new MockEnvironment();
+        dev.setActiveProfiles("dev");
+
+        new HostSecurityConfiguration().hostUsers(dev, "demo-only");
+
+        assertThat(output).contains("Demo users are on (dev profile): [lan, minh, hoa, tuan] share one password")
+                .contains("Local evaluation only")
+                .doesNotContain("demo-only");
+    }
+
+    @Test
+    void no_demo_users_and_no_warning_outside_dev(CapturedOutput output) {
+        new HostSecurityConfiguration().hostUsers(new MockEnvironment(), "demo-only");
+
+        assertThat(output).doesNotContain("Demo users are on");
     }
 
     @Test

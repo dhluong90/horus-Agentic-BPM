@@ -23,6 +23,7 @@ Users never need this folder. Contributors and evaluators start here.
 | [`architecture/overview.md`](architecture/overview.md) | System design across modules: boundaries, state, dependencies, deployment; its diagrams live under `architecture/` |
 | [`adr/`](adr/) | Project-wide architecture decision records `ADR-nnnn`, from [`0000-template.md`](adr/0000-template.md) |
 | [`proposals/`](proposals/README.md) | Design proposals for new features, before they reach a PRD and a SPEC |
+| [`DEPLOYING.md`](DEPLOYING.md) | Run an example host with PostgreSQL in docker compose, from a fresh clone, with the image gates |
 | [`roadmap.md`](roadmap.md) | Pointer to the wiki Roadmap |
 
 Each module keeps its own design beside its code:
