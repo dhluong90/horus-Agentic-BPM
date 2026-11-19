@@ -218,7 +218,7 @@ class EditorApiTest {
         versions.importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob", APPROVER);
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
         caller.become("bank-a", "alice", AUTHOR);
         versions.importVersion("card-fee", ImportRequest.yaml(cardFee("0 VND", "card-fee")));
         return versions.requestPublish("card-fee", 2, WriteOptions.none());
@@ -279,6 +279,48 @@ class EditorApiTest {
         assertThat(versions.history("card-fee", 2)).extracting(VersionHistoryEntry::action)
                 .containsExactly(LifecycleAction.CREATED, LifecycleAction.REQUESTED, LifecycleAction.WITHDRAWN,
                         LifecycleAction.REQUESTED, LifecycleAction.APPROVED);
+    }
+
+    /**
+     * Security review of #234, which withdraw inherits (#275): request, withdraw, replace in place, request again, then
+     * an approval with the lock version the approver reviewed is refused. Withdraw is what lets the requester start
+     * this sequence without an approver, so it is tested here with the exact steps.
+     */
+    @Test
+    void RLE_046_an_approval_of_content_withdrawn_and_replaced_since_is_refused() {
+        // Given v2 pending, requested by alice; bob, the approver, reviews it at its current lock version
+        RuleSetVersion pending = alicesPendingCardFeeV2();
+        caller.become("bank-a", "bob", APPROVER);
+        RuleSetVersion reviewed = versions.find("card-fee", 2, false).orElseThrow();
+        assertThat(reviewed.lockVersion()).isEqualTo(pending.lockVersion());
+
+        // When alice withdraws it, replaces R2 in place and requests publication again (draft editing on)
+        VersionService editing = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
+                EngineSettings.defaults().withDraftAuthoring(true)), stores, stores, stores).versionService();
+        caller.become("bank-a", "alice", AUTHOR);
+        RuleSetVersion withdrawn = editing.withdraw("card-fee", 2, new WriteOptions("k-w", reviewed.lockVersion(), null));
+        RuleSetVersion replaced = editing.replaceDraft("card-fee", 2, ImportRequest.yaml(cardFee("50000 VND", "card-fee")),
+                new WriteOptions("k-p", withdrawn.lockVersion(), null));
+        RuleSetVersion again = editing.requestPublish("card-fee", 2, new WriteOptions(null, replaced.lockVersion(), null));
+        assertThat(again.canonicalHash()).isNotEqualTo(reviewed.canonicalHash());
+        int events = stores.outbox.size();
+        int history = stores.history.size();
+
+        // Then bob's approval with the lock version he reviewed is refused, and one without a lock version too
+        caller.become("bank-a", "bob", APPROVER);
+        assertThatThrownBy(() -> versions.approve("card-fee", 2, new WriteOptions(null, reviewed.lockVersion(), null)))
+                .isInstanceOf(VersionConflictException.class);
+        assertThatThrownBy(() -> versions.approve("card-fee", 2, WriteOptions.none()))
+                .isInstanceOfSatisfying(io.github.dhluong90.bpm.rules.api.PreconditionRequiredException.class,
+                        e -> assertThat(e.code()).isEqualTo("PRECONDITION_REQUIRED"));
+        // and nothing was published or recorded; v1 is still in effect
+        assertThat(versions.find("card-fee", 2, false).orElseThrow().status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
+        assertThat(stores.outbox).hasSize(events);
+        assertThat(stores.history).hasSize(history);
+
+        // When bob reviews the new content and approves with its lock version, it publishes
+        assertThat(versions.approve("card-fee", 2, new WriteOptions(null, again.lockVersion(), null)).status())
+                .isEqualTo(VersionStatus.PUBLISHED);
     }
 
     @Test

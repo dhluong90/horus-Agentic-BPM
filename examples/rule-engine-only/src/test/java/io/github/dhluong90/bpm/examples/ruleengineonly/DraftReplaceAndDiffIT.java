@@ -181,6 +181,32 @@ class DraftReplaceAndDiffIT {
         assertThat(approved.json().path("status").asString()).isEqualTo("PUBLISHED");
     }
 
+    /** The same attack with withdraw (#162): request, withdraw, replace, request again, approve with the old ETag. */
+    @Test
+    void RLE_046_an_approval_of_content_withdrawn_and_replaced_since_is_refused() throws Exception {
+        String t = "bank-withdraw-approve";
+        publish(t);
+        Reply draft = send(t, "lan", "POST", "/rule-sets/card-fee/versions", cardFee("10000 VND"), "application/yaml", null, null);
+        send(t, "lan", "POST", "/rule-sets/card-fee/versions/2:request-publish", null, null, "k-r1", draft.etag());
+        String reviewed = send(t, "minh", "GET", "/rule-sets/card-fee/versions/2", null, null, null, null).etag();
+
+        // lan takes it back, changes R2 and sends it again
+        Reply withdrawn = send(t, "lan", "POST", "/rule-sets/card-fee/versions/2:withdraw", null, null, "k-w1", reviewed);
+        assertThat(withdrawn.status()).as(withdrawn.body()).isEqualTo(200);
+        Reply replaced = send(t, "lan", "PUT", "/rule-sets/card-fee/versions/2", cardFee("0 VND"), "application/yaml", "k-p1",
+                withdrawn.etag());
+        Reply again = send(t, "lan", "POST", "/rule-sets/card-fee/versions/2:request-publish", null, null, "k-r2", replaced.etag());
+        long before = rows(t);
+
+        // minh's approval with the ETag he reviewed is refused and nothing changes
+        assertProblem(send(t, "minh", "POST", "/rule-sets/card-fee/versions/2:approve", null, null, "k-a1", reviewed),
+                409, "VERSION_CONFLICT");
+        assertThat(rows(t)).isEqualTo(before);
+        // with the current ETag, after reviewing the new content, it publishes
+        Reply approved = send(t, "minh", "POST", "/rule-sets/card-fee/versions/2:approve", null, null, "k-a2", again.etag());
+        assertThat(approved.json().path("status").asString()).isEqualTo("PUBLISHED");
+    }
+
     @Test
     void RLE_028_version_diff_lists_added_changed_removed_and_moved_rows() throws Exception {
         // Given card-fee v1 published (R2 30000 VND), v2 with R2 at 0 VND and R6 inserted before R3
