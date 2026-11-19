@@ -1,6 +1,8 @@
 package com.horus.bpm.rules.postgres;
 
+import com.horus.bpm.rules.internal.store.TransactionRunner;
 import java.util.Objects;
+import java.util.function.Supplier;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionCallback;
@@ -17,10 +19,11 @@ import org.springframework.transaction.support.TransactionTemplate;
  * <p>Deliberately not a {@code TransactionOperations} bean, so it never replaces or competes with the
  * host's own {@code TransactionTemplate}.
  */
-public final class RuleEngineTransactions {
+public final class RuleEngineTransactions implements TransactionRunner {
 
     private final PlatformTransactionManager transactionManager;
     private final TransactionTemplate newTransaction;
+    private final TransactionTemplate callerTransaction;
 
     /**
      * Creates the engine's transaction access on the host's transaction manager.
@@ -31,6 +34,22 @@ public final class RuleEngineTransactions {
         this.transactionManager = Objects.requireNonNull(transactionManager, "transactionManager must not be null");
         this.newTransaction = new TransactionTemplate(transactionManager);
         this.newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.callerTransaction = new TransactionTemplate(transactionManager);
+        this.callerTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+    }
+
+    /**
+     * Runs engine work on behalf of a caller: in the caller's transaction when there is one, so the
+     * engine's rows commit or roll back with the caller's work (RLE-013), otherwise in a new one.
+     *
+     * @param work the work to run
+     * @param <T> the result type
+     * @return the work's result
+     */
+    @Override
+    public <T> T inTransaction(Supplier<T> work) {
+        Objects.requireNonNull(work, "work must not be null");
+        return callerTransaction.execute(status -> work.get());
     }
 
     /**
