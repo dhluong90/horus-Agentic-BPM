@@ -55,6 +55,7 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  5       | V5__rle_engine_key.sql
 #  6       | V6__rle_version_history_draft_updated.sql
 #  14      | V14__rle_setting_seen.sql
+#  15      | V15__rle_version_history_acknowledged_warnings.sql
 ```
 
 ### The cursor key

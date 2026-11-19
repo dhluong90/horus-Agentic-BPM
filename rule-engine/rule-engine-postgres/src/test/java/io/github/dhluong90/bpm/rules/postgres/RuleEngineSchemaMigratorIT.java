@@ -35,8 +35,8 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.initialVersion()).isNull();
-        assertThat(result.currentVersion()).isEqualTo("14");
-        assertThat(result.migrationsExecuted()).isEqualTo(7);
+        assertThat(result.currentVersion()).isEqualTo("15");
+        assertThat(result.migrationsExecuted()).isEqualTo(8);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
                 "rle_rule_set",
@@ -122,10 +122,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
-        assertThat(result.currentVersion()).isEqualTo("14");
-        assertThat(result.migrationsExecuted()).isEqualTo(7);
+        assertThat(result.currentVersion()).isEqualTo("15");
+        assertThat(result.migrationsExecuted()).isEqualTo(8);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3", "4", "5", "6", "14");
+                .containsExactly("0", "1", "2", "3", "4", "5", "6", "14", "15");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -138,12 +138,12 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult second = migrator.migrate();
 
-        assertThat(second.initialVersion()).isEqualTo("14");
-        assertThat(second.currentVersion()).isEqualTo("14");
+        assertThat(second.initialVersion()).isEqualTo("15");
+        assertThat(second.currentVersion()).isEqualTo("15");
         assertThat(second.migrationsExecuted()).isZero();
-        assertThat(migrator.currentVersion()).contains("14");
+        assertThat(migrator.currentVersion()).contains("15");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
-                .isEqualTo(7L);
+                .isEqualTo(8L);
     }
 
     @Test
@@ -151,12 +151,12 @@ class RuleEngineSchemaMigratorIT {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 7));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 8));
         assertThat(migrator.status().isCurrent()).isFalse();
 
         migrator.migrate();
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus("14", 0));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus("15", 0));
         assertThat(migrator.status().isCurrent()).isTrue();
     }
 

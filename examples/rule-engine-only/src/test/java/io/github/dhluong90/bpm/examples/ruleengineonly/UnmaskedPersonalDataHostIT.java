@@ -26,8 +26,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * The guards against unmasked personal data over HTTP on the example host (PD-099): the warning the approver sees
- * (RLE-049), strict mode for one tenant (RLE-050), masking in the diff (RLE-051), and the masking default logged at
- * start-up and shown in {@code /api/bpm/meta} (RLE-052). bank-a runs without strict mode, bank-b with it.
+ * (RLE-049), the acknowledgement the approval needs (RLE-053), strict mode for one tenant (RLE-050), masking in the
+ * diff (RLE-051), and the masking default logged at start-up and shown in {@code /api/bpm/meta} (RLE-052). bank-a runs without strict mode, bank-b with it.
  */
 @Testcontainers
 @ExtendWith(OutputCaptureExtension.class)
@@ -62,7 +62,7 @@ class UnmaskedPersonalDataHostIT {
             """;
 
     @Test
-    void RLE_049_RLE_050_RLE_051_RLE_052_guards_over_http_and_the_masking_default_across_a_restart(
+    void RLE_049_RLE_050_RLE_051_RLE_052_RLE_053_guards_over_http_and_the_masking_default_across_a_restart(
             CapturedOutput output) throws Exception {
         String db = freshDatabase();
         String alice = TestTokens.bearerFor("alice", "bank-a", AUTHOR);
@@ -87,6 +87,35 @@ class UnmaskedPersonalDataHostIT {
             Reply pending = send(port, bob, "GET", "/api/bpm/rules/v1/rule-sets/kyc-routing/versions/1", null);
             assertThat(pending.json().path("status").asString()).isEqualTo("PENDING_APPROVAL");
             assertThat(pending.json().path("warnings").get(0).path("input").asString()).isEqualTo("nationalId");
+
+            // RLE-053: bob's approval without the acknowledgement is 409 naming the warning, the input and the setting
+            String approve = "/api/bpm/rules/v1/rule-sets/kyc-routing/versions/1:approve";
+            Reply unacknowledged = sendJson(port, bob, approve, "{\"comment\": \"ok\"}", "ack-1");
+            assertThat(unacknowledged.status()).isEqualTo(409);
+            assertThat(unacknowledged.json().path("code").asString()).isEqualTo("WARNINGS_NOT_ACKNOWLEDGED");
+            JsonNode missing = unacknowledged.json().path("warnings").get(0);
+            assertThat(missing.path("code").asString()).isEqualTo("UNMASKED_PERSONAL_DATA");
+            assertThat(missing.path("input").asString()).isEqualTo("nationalId");
+            assertThat(missing.path("matchedName").asString()).isEqualTo("national id");
+            assertThat(unacknowledged.json().path("setting").get(0).asString()).isEqualTo("UNMASKED_PERSONAL_DATA");
+            assertThat(send(port, bob, "GET", "/api/bpm/rules/v1/rule-sets/kyc-routing/versions/1", null).json()
+                    .path("status").asString()).isEqualTo("PENDING_APPROVAL");
+            // With the code it is published, and the history shows the acknowledgement with the approval
+            Reply approved = sendJson(port, bob, approve,
+                    "{\"comment\": \"ok\", \"acknowledgedWarnings\": [\"UNMASKED_PERSONAL_DATA\"]}", "ack-2");
+            assertThat(approved.status()).isEqualTo(200);
+            assertThat(approved.json().path("status").asString()).isEqualTo("PUBLISHED");
+            JsonNode history = send(port, bob, "GET", "/api/bpm/rules/v1/rule-sets/kyc-routing/versions/1/history",
+                    null).json();
+            JsonNode approval = null;
+            for (JsonNode entry : history.isArray() ? history : history.path("data")) {
+                if (entry.path("action").asString().equals("APPROVED")) {
+                    approval = entry;
+                }
+            }
+            assertThat(approval).isNotNull();
+            assertThat(approval.path("acknowledgedWarnings").get(0).path("input").asString()).isEqualTo("nationalId");
+            assertThat(approval.path("maskedByDefaultInputs")).isEmpty();
 
             // RLE-050: bank-b runs in strict mode, so the same import is 422 naming nationalId, and nothing is stored
             Reply refused = send(port, binh, "POST", "/api/bpm/rules/v1/rule-sets", KYC_ROUTING);
@@ -120,6 +149,7 @@ class UnmaskedPersonalDataHostIT {
             assertThat(metaA.path("decision-log.mask-default").asBoolean(true)).isFalse();
             assertThat(metaA.path("decision-log.require-explicit-mask").asBoolean(true)).isFalse();
             assertThat(metaB.path("decision-log.require-explicit-mask").asBoolean(false)).isTrue();
+            assertThat(metaA.path("lifecycle.acknowledge-warnings").asString()).isEqualTo("UNMASKED_PERSONAL_DATA");
         }
         int before = output.getAll().length();
 
@@ -174,6 +204,15 @@ class UnmaskedPersonalDataHostIT {
             request.header("Content-Type", "application/yaml");
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        return new Reply(response.statusCode(), response.body());
+    }
+
+    private static Reply sendJson(int port, String bearer, String path, String json, String key) throws Exception {
+        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .header("Authorization", bearer).header("Content-Type", "application/json")
+                .header("If-Match", "\"1\"").header("Idempotency-Key", key)
+                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8)).build(),
+                HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.body());
     }
 

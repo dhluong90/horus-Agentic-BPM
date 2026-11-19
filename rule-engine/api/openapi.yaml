@@ -516,6 +516,18 @@ paths:
         turned on) is `422 VALIDATION_FAILED` naming the input, and stays `PENDING_APPROVAL`
         (`RLE-050`).
 
+        Acknowledged warnings (PD-104, `RLE-053`, DESIGN 3.3.5): after the permission, four-eyes,
+        strict-mode and lock checks, the engine computes the version's warnings again with the tenant's
+        settings in force. Every warning whose code is in `lifecycle.acknowledge-warnings` (default
+        `[UNMASKED_PERSONAL_DATA]`) must be named in `acknowledgedWarnings`, else
+        `409 WARNINGS_NOT_ACKNOWLEDGED` with `warnings` (`{ code, input, matchedName }`) and `setting`
+        in the problem body; nothing is written. A warning on an input that the tenant's
+        `decision-log.mask-default` masks needs no acknowledgement. A code given that no warning carries
+        is ignored and not recorded. The `APPROVED` history entry and `rules.version.published.v1`
+        carry `acknowledgedWarnings` (`{ code, input }`, empty when nothing needed it); the history
+        entry also lists `maskedByDefaultInputs`. A client shows the warnings again and lets the
+        approver resend with the codes; it never retries on its own.
+
         `If-Match` is required and must be the `lockVersion` of the version the approver reviewed:
         without it the answer is `428 PRECONDITION_REQUIRED`, and a stale value is
         `409 VERSION_CONFLICT`, with nothing published. A version can be sent back, replaced in place
@@ -539,8 +551,16 @@ paths:
                   type: string
                   maxLength: 2000
                   description: Optional; stored in the history. Longer than `lifecycle.reason-max-length` (default 2,000 characters) is `400 INPUT_INVALID`
+                acknowledgedWarnings:
+                  type: array
+                  maxItems: 20
+                  description: Warning codes the approver accepts on the record (`RLE-053`). Each 1 to 64 upper-case letters, digits or `_`, else `400 INPUT_INVALID`. Part of the idempotency request hash
+                  items:
+                    type: string
+                    pattern: '^[A-Z][A-Z0-9_]{0,63}$'
             example:
               comment: Fees checked against the tariff
+              acknowledgedWarnings: [UNMASKED_PERSONAL_DATA]
       responses:
         '200':
           $ref: '#/components/responses/Version'
@@ -1060,6 +1080,21 @@ components:
           type: string
           pattern: '^[0-9a-f]{64}$'
           description: On `DRAFT_UPDATED` only; the canonical hash before the replacement
+        acknowledgedWarnings:
+          type: array
+          description: On `APPROVED` only, always present there; the warnings the approver accepted, empty when nothing needed an acknowledgement (`RLE-053`); approvals recorded before this release show it empty
+          items:
+            $ref: '#/components/schemas/AcknowledgedWarning'
+        maskedByDefaultInputs:
+          type: array
+          description: On `APPROVED` only, always present there; the inputs masked by the tenant's `decision-log.mask-default` rather than by their declaration at approval (PD-104)
+          items: { type: string }
+    AcknowledgedWarning:
+      type: object
+      required: [code, input]
+      properties:
+        code: { type: string, example: UNMASKED_PERSONAL_DATA }
+        input: { type: string, example: nationalId }
     VersionHistory:
       type: object
       required: [data]
@@ -1324,7 +1359,7 @@ components:
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, DECISION_NOT_FOUND,
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
           IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, RATE_LIMITED, INTERNAL_ERROR, SCHEMA_NOT_READY,
-          PRECONDITION_REQUIRED, DRAFT_AUTHORING_DISABLED]
+          PRECONDITION_REQUIRED, DRAFT_AUTHORING_DISABLED, WARNINGS_NOT_ACKNOWLEDGED]
         detail: { type: string }
         correlationId: { type: string }
         violations:

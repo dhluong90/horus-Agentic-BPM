@@ -61,6 +61,27 @@
     "approvedBy": {
       "description": "Who approved it; always equal to actor, and never the requester or the author (four eyes).",
       "type": "string"
+    },
+    "acknowledgedWarnings": {
+      "description": "The warnings the approver accepted on the record (PD-104, RLE-053): every warning listed in lifecycle.acknowledge-warnings that applied at approval, empty when none needed an acknowledgement. Additive within v1; absent on events written before it.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "code",
+          "input"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "input": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "examples": [
@@ -74,7 +95,13 @@
       "canonicalHash": "3f1c9a5e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d",
       "effectiveFrom": "2027-01-01T00:00:00Z",
       "requestedBy": "lan",
-      "approvedBy": "minh"
+      "approvedBy": "minh",
+      "acknowledgedWarnings": [
+        {
+          "code": "UNMASKED_PERSONAL_DATA",
+          "input": "nationalId"
+        }
+      ]
     }
   ]
 }

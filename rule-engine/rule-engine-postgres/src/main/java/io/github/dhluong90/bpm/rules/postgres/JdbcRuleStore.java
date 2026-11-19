@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.postgres;
 
+import io.github.dhluong90.bpm.rules.api.AcknowledgedWarning;
 import io.github.dhluong90.bpm.rules.api.LifecycleAction;
 import io.github.dhluong90.bpm.rules.api.RuleSetExistsException;
 import io.github.dhluong90.bpm.rules.api.RuleSetSummary;
@@ -8,6 +9,7 @@ import io.github.dhluong90.bpm.rules.api.SourceFormat;
 import io.github.dhluong90.bpm.rules.api.VersionConflictException;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
 import io.github.dhluong90.bpm.rules.internal.json.CanonicalJson;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
 import io.github.dhluong90.bpm.rules.internal.json.Ulid;
 import io.github.dhluong90.bpm.rules.internal.store.HistoryRow;
@@ -259,10 +261,13 @@ public final class JdbcRuleStore implements RuleStore {
 
     @Override
     public void appendHistory(HistoryRow row) {
+        boolean approved = row.action() == LifecycleAction.APPROVED;
         jdbc.sql("""
                 INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor,
-                  reason, lock_version, occurred_at, canonical_hash, previous_canonical_hash)
-                VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :lock, :at, :hash, :previousHash)
+                  reason, lock_version, occurred_at, canonical_hash, previous_canonical_hash, acknowledged_warnings,
+                  masked_by_default_inputs)
+                VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :lock, :at, :hash, :previousHash,
+                  CAST(:acknowledged AS jsonb), CAST(:maskedByDefault AS jsonb))
                 """)
                 .param("tenant", row.tenantId()).param("id", row.id()).param("versionId", row.versionId())
                 .param("action", row.action().name())
@@ -270,7 +275,40 @@ public final class JdbcRuleStore implements RuleStore {
                 .param("to", row.toStatus().name()).param("actor", row.actor()).param("reason", row.reason())
                 .param("lock", row.lockVersion()).param("at", Timestamp.from(row.occurredAt()))
                 .param("hash", row.canonicalHash()).param("previousHash", row.previousCanonicalHash())
+                .param("acknowledged", approved ? acknowledgedJson(row.acknowledgedWarnings()) : null)
+                .param("maskedByDefault", approved ? stringsJson(row.maskedByDefaultInputs()) : null)
                 .update();
+    }
+
+    /** An acknowledgement as stored in {@code acknowledged_warnings} (V15): a JSON array of {@code { code, input }}. */
+    private static String acknowledgedJson(List<AcknowledgedWarning> warnings) {
+        tools.jackson.databind.node.ArrayNode array = EngineJson.NODES.arrayNode();
+        warnings.forEach(w -> array.addObject().put("code", w.code()).put("input", w.input()));
+        return EngineValues.write(array);
+    }
+
+    private static String stringsJson(List<String> values) {
+        tools.jackson.databind.node.ArrayNode array = EngineJson.NODES.arrayNode();
+        values.forEach(array::add);
+        return EngineValues.write(array);
+    }
+
+    private static List<AcknowledgedWarning> acknowledged(String json) {
+        List<AcknowledgedWarning> warnings = new java.util.ArrayList<>();
+        if (json != null) {
+            for (tools.jackson.databind.JsonNode w : EngineValues.read(json)) {
+                warnings.add(new AcknowledgedWarning(w.get("code").stringValue(), w.get("input").stringValue()));
+            }
+        }
+        return warnings;
+    }
+
+    private static List<String> strings(String json) {
+        List<String> values = new java.util.ArrayList<>();
+        if (json != null) {
+            EngineValues.read(json).forEach(v -> values.add(v.stringValue()));
+        }
+        return values;
     }
 
     @Override
@@ -278,7 +316,8 @@ public final class JdbcRuleStore implements RuleStore {
         // Only the actions this release writes; the retirement actions arrive with their features.
         return jdbc.sql("""
                 SELECT tenant_id, id, version_id, action, from_status, to_status, actor, reason, lock_version,
-                  occurred_at, canonical_hash, previous_canonical_hash
+                  occurred_at, canonical_hash, previous_canonical_hash, acknowledged_warnings::text AS acknowledged,
+                  masked_by_default_inputs::text AS masked_by_default
                 FROM rle_version_history
                 WHERE tenant_id = :tenant AND version_id = :versionId
                   AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED','DRAFT_UPDATED')
@@ -290,7 +329,8 @@ public final class JdbcRuleStore implements RuleStore {
                         rs.getString("from_status") == null ? null : VersionStatus.valueOf(rs.getString("from_status")),
                         VersionStatus.valueOf(rs.getString("to_status")), rs.getString("actor"), rs.getString("reason"),
                         rs.getLong("lock_version"), instant(rs, "occurred_at"), rs.getString("canonical_hash"),
-                        rs.getString("previous_canonical_hash")))
+                        rs.getString("previous_canonical_hash"), acknowledged(rs.getString("acknowledged")),
+                        strings(rs.getString("masked_by_default"))))
                 .list();
     }
 
