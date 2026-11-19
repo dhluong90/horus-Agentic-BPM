@@ -134,7 +134,7 @@ class DefinitionLifecycleIT {
     }
 
     @Test
-    void an_unknown_version_is_not_found() throws Exception {
+    void TR_TEN_02_an_unknown_version_answers_definition_not_found_as_another_tenants_version_does() throws Exception {
         HttpResponse<String> missing = get("minh", BASE + "/kyc-onboarding/versions/99");
 
         assertThat(missing.statusCode()).isEqualTo(404);

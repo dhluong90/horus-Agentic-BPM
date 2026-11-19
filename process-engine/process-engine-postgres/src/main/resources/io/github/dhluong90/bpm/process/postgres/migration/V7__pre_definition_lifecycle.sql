@@ -33,3 +33,25 @@ CREATE TABLE pre_definition_history (
   FOREIGN KEY (tenant_id, definition_id) REFERENCES pre_definition (tenant_id, id)
 );
 CREATE INDEX idx_pre_definition_history ON pre_definition_history (tenant_id, definition_id, occurred_at, id);
+
+-- pre_definition_history is an audit trail (TR-OBS-01): rows are appended and never changed. The engine never updates
+-- or deletes a row; these triggers make the database refuse it too, as rle_version_history does in the Rule Engine.
+-- A refusal raises SQLSTATE 55000 naming the table. Defence in depth, not a replacement for privileges: a role that
+-- owns the table can drop the trigger, so hosts that separate the migration role from the runtime role should also
+-- REVOKE UPDATE, DELETE, TRUNCATE ON pre_definition_history FROM <runtime role>.
+-- Rollback, if ever needed, is a new forward migration that drops the two triggers and the function.
+CREATE FUNCTION pre_definition_history_append_only() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'pre_definition_history is append-only: % is not allowed', TG_OP
+    USING ERRCODE = '55000';
+END;
+$$;
+
+CREATE TRIGGER pre_definition_history_no_change
+  BEFORE UPDATE OR DELETE ON pre_definition_history
+  FOR EACH ROW EXECUTE FUNCTION pre_definition_history_append_only();
+
+CREATE TRIGGER pre_definition_history_no_truncate
+  BEFORE TRUNCATE ON pre_definition_history
+  FOR EACH STATEMENT EXECUTE FUNCTION pre_definition_history_append_only();

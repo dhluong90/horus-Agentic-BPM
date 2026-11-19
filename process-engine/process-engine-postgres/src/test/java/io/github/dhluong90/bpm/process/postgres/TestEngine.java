@@ -191,8 +191,12 @@ final class TestEngine {
 
     /** Empties every engine table, so a sweep across tenants sees only the current test's jobs. */
     static void reset() {
-        jdbc().sql("TRUNCATE pre_timer, pre_history, pre_task, pre_token, pre_instance, pre_idempotency, "
-                + "pre_definition_history, pre_definition CASCADE").update();
+        // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary
+        // triggers off for this one statement batch, on one connection.
+        jdbc().sql("SET session_replication_role = replica; "
+                + "TRUNCATE pre_timer, pre_history, pre_task, pre_token, pre_instance, pre_idempotency, "
+                + "pre_definition_history, pre_definition CASCADE; "
+                + "SET session_replication_role = origin").update();
     }
 
     static byte[] resource(String path) {

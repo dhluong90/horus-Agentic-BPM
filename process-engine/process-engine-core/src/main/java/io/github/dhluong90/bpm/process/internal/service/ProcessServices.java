@@ -109,6 +109,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     static final String PERMISSION_AUTHOR = "processes:author";
     static final String PERMISSION_APPROVE = "processes:approve";
     static final String DEV_APPROVER = "system:dev-auto-approve";
+    /** Prefix of the engine's own identities; refused for callers of lifecycle commands. */
+    static final String SYSTEM_PREFIX = "system:";
     /** Actor of a retirement made because a newer version took effect. */
     static final String EFFECTIVE_DATE_ACTOR = "system:effective-date";
     /** Version of the BPMN reader whose output an approval binds (DESIGN section 5.8). */
@@ -303,6 +305,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment, String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_APPROVE);
+        requireNotSystemIdentity(caller);
         String note = boundedComment(comment, false);
         String requestHash = Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
                 Long.toString(expectedLockVersion), note);
@@ -366,6 +369,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     public DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason, String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_APPROVE);
+        requireNotSystemIdentity(caller);
         String why = boundedComment(reason, true);
         String requestHash = Hashes.sha256Parts("reject", caller, ref.key(), Integer.toString(ref.version()),
                 Long.toString(expectedLockVersion), why);
@@ -612,6 +616,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (caller == null || caller.isBlank()) {
             throw new UnauthenticatedException("No caller in the security context");
         }
+        requireNotSystemIdentity(caller);
         java.util.Set<String> held = callers.currentPermissions();
         for (String p : permissions) {
             if (held.contains(p)) {
@@ -619,6 +624,18 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             }
         }
         throw new PermissionDeniedException("Needs " + String.join(" or ", permissions));
+    }
+
+    /**
+     * Identities starting with {@code system:} are the engine's own ({@code system:dev-auto-approve},
+     * {@code system:effective-date}, {@code system:startup}). The table's four-eyes CHECK exempts
+     * {@code system:dev-auto-approve}, so no caller may act under such an id in a lifecycle command.
+     */
+    private static void requireNotSystemIdentity(String caller) {
+        if (caller.startsWith(SYSTEM_PREFIX)) {
+            throw new PermissionDeniedException("Identities starting with " + SYSTEM_PREFIX + " are reserved for the "
+                    + "engine");
+        }
     }
 
     /** Every handler a definition names must be registered, and decisions need a Rule Engine. */

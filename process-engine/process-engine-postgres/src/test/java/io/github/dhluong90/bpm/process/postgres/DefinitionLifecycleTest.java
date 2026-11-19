@@ -209,6 +209,35 @@ class DefinitionLifecycleTest {
     }
 
     @Test
+    void TR_OBS_01_definition_history_refuses_update_delete_and_truncate() {
+        importAs(1);
+
+        for (String sql : new String[] {"UPDATE pre_definition_history SET actor_id = 'mallory'",
+                "DELETE FROM pre_definition_history", "TRUNCATE pre_definition_history"}) {
+            assertThatThrownBy(() -> TestEngine.jdbc().sql(sql).update()).as(sql)
+                    .hasMessageContaining("pre_definition_history is append-only");
+        }
+        assertThat(TestEngine.jdbc().sql("SELECT actor_id FROM pre_definition_history").query(String.class).single())
+                .isEqualTo("pipeline");
+    }
+
+    @Test
+    void PRE_019_a_caller_cannot_act_under_the_engines_system_identities() {
+        // Given a pending version; the table's four-eyes CHECK exempts system:dev-auto-approve
+        DefinitionVersion pending = request(importAs(1), null);
+
+        // When a caller claiming that id requests or approves
+        engine.identity.as("bank-a", "system:dev-auto-approve", "processes:approve", "processes:author",
+                "processes:read");
+        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), null, null))
+                // Then it is refused and nothing is written
+                .isInstanceOf(PermissionDeniedException.class).hasMessageContaining("reserved");
+        assertThatThrownBy(() -> engine.services.reject(pending.ref(), pending.lockVersion(), "no", null))
+                .isInstanceOf(PermissionDeniedException.class);
+        assertThat(stored(1).status()).isEqualTo("PENDING_APPROVAL");
+    }
+
+    @Test
     void PRE_019_the_table_refuses_an_approver_equal_to_the_requester() {
         DefinitionVersion pending = request(importAs(1), null);
 
@@ -359,7 +388,7 @@ class DefinitionLifecycleTest {
     }
 
     @Test
-    void another_tenants_version_is_not_found_and_nothing_is_written() {
+    void TR_TEN_01_another_tenants_version_is_not_found_and_nothing_is_written() {
         DefinitionVersion pending = request(importAs(1), null);
         int history = count("SELECT count(*) FROM pre_definition_history");
 
@@ -375,7 +404,7 @@ class DefinitionLifecycleTest {
     }
 
     @Test
-    void a_stale_lock_version_is_a_conflict_and_a_replayed_key_returns_the_first_answer() {
+    void TR_IDEM_01_a_stale_lock_version_is_a_conflict_and_a_replayed_key_returns_the_first_answer() {
         DefinitionVersion v1 = importAs(1);
         DefinitionVersion pending = request(v1, null);
 
@@ -390,7 +419,7 @@ class DefinitionLifecycleTest {
     }
 
     @Test
-    void permissions_are_checked_in_the_service() {
+    void TR_SEC_04_lifecycle_permissions_are_checked_in_the_service() {
         DefinitionVersion v1 = importAs(1);
 
         engine.identity.as("bank-a", "teller", "processes:read", "processes:start");
@@ -577,7 +606,7 @@ class DefinitionLifecycleTest {
     }
 
     @Test
-    void retiring_an_active_version_needs_processes_approve() {
+    void PRE_053_retiring_an_active_version_needs_processes_approve() {
         DefinitionVersion v1 = activate(1);
 
         engine.identity.as("bank-a", "carol", "processes:author", "processes:read");
