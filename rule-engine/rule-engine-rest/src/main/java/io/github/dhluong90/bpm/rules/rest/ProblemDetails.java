@@ -24,7 +24,8 @@ import tools.jackson.databind.node.ObjectNode;
  * Maps engine exceptions to RFC 9457 {@code application/problem+json} with {@code code},
  * {@code detail} and {@code correlationId} (ADR-0010). Applies to the engine controllers only.
  */
-@RestControllerAdvice(assignableTypes = {RuleSetController.class, DecisionController.class})
+@RestControllerAdvice(assignableTypes = {RuleSetController.class, DecisionController.class,
+    DecisionLogController.class})
 public class ProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProblemDetails.class.getName());
@@ -47,6 +48,7 @@ public class ProblemDetails {
             Map.entry("RULE_SET_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("VERSION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("NO_EFFECTIVE_VERSION", HttpStatus.NOT_FOUND),
+            Map.entry("DECISION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("VERSION_CONFLICT", HttpStatus.CONFLICT),
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
@@ -54,6 +56,7 @@ public class ProblemDetails {
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
             Map.entry("PRECONDITION_REQUIRED", HttpStatus.PRECONDITION_REQUIRED),
             Map.entry("DRAFT_AUTHORING_DISABLED", HttpStatus.FORBIDDEN),
+            Map.entry("RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
@@ -83,6 +86,10 @@ public class ProblemDetails {
             body.put("violationsTruncated", failed.truncated());
         }
         ResponseEntity<byte[]> response = response(status, body);
+        if (e instanceof io.github.dhluong90.bpm.rules.api.RateLimitedException limited) {
+            return ResponseEntity.status(status).header("Retry-After", Long.toString(limited.retryAfterSeconds()))
+                    .contentType(PROBLEM).body(response.getBody());
+        }
         if (status == HttpStatus.CONFLICT && "IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {
             return ResponseEntity.status(status).header("Retry-After", "1").contentType(PROBLEM).body(response.getBody());
         }

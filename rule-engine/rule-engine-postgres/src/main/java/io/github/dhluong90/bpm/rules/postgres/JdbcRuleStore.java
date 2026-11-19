@@ -13,6 +13,7 @@ import io.github.dhluong90.bpm.rules.internal.json.Ulid;
 import io.github.dhluong90.bpm.rules.internal.store.HistoryRow;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
 import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
+import io.github.dhluong90.bpm.rules.internal.store.VersionInputs;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -308,6 +309,21 @@ public final class JdbcRuleStore implements RuleStore {
     public Optional<byte[]> findEngineKey(String name) {
         return jdbc.sql("SELECT key_bytes FROM rle_engine_key WHERE name = :name")
                 .param("name", name).query(byte[].class).optional();
+    }
+
+    @Override
+    public List<VersionInputs> liveVersionInputs() {
+        // Engine-internal, across tenants on purpose: the start-up masking check (RLE-035) runs outside any request.
+        return jdbc.sql("""
+                SELECT v.tenant_id, s.name, v.version_num, (v.canonical_json -> 'inputs')::text AS inputs
+                FROM rle_version v
+                JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
+                WHERE v.status <> 'RETIRED'
+                ORDER BY v.tenant_id, s.name, v.version_num
+                """)
+                .query((rs, row) -> new VersionInputs(rs.getString("tenant_id"), rs.getString("name"),
+                        rs.getInt("version_num"), rs.getString("inputs")))
+                .list();
     }
 
     private static RuleSetSummary summary(ResultSet rs, int row) throws SQLException {
