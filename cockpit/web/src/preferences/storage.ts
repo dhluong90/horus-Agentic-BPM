@@ -6,6 +6,7 @@ import type { Locale } from '../i18n/I18nProvider';
  */
 const LOCALE_KEY = 'horus.cockpit.locale';
 const THEME_KEY = 'horus.cockpit.theme';
+const MENU_KEY = 'horus.cockpit.menu';
 
 export type Theme = 'light' | 'dark';
 
@@ -41,4 +42,13 @@ export function readStoredTheme(): Theme | undefined {
 
 export function storeTheme(theme: Theme): void {
   write(THEME_KEY, theme);
+}
+
+/** Whether the left menu shows icons only. */
+export function readMenuCollapsed(): boolean {
+  return read(MENU_KEY) === 'collapsed';
+}
+
+export function storeMenuCollapsed(collapsed: boolean): void {
+  write(MENU_KEY, collapsed ? 'collapsed' : 'expanded');
 }
