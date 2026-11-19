@@ -21,7 +21,18 @@ As built, a host that wants processes and no decision tables still pulls in the 
 
    It depends on the JDK only. It has no storage and no Spring, and ArchUnit rules equal to those of `rule-engine-core`.
 2. **`rule-engine-core` depends on `bpm-expression`.** Decision tables, the lifecycle and the decision log stay in the Rule Engine.
-3. **`process-engine-core` depends on `bpm-expression`, and not on `rule-engine-core`.** A `businessRuleTask` calls a `DecisionPort` in the process core: `evaluate(decisionRef, inputs, clock)` returns a sealed result (matched, no match, failed). The process starter provides an adapter to `RuleEngine` when a `RuleEngine` bean is present (`@ConditionalOnBean`). Without one, activating a definition that contains a `businessRuleTask` is refused with `422 BPMN_NOT_EXECUTABLE`, naming the step and the reason, and nothing fails at run time. The starter declares `rule-engine-core` as an optional dependency.
+3. **`process-engine-core` depends on `bpm-expression`, and not on `rule-engine-core`.** A `businessRuleTask` calls a `DecisionPort` in the process core:
+
+   `DecisionOutcome evaluate(String tenantId, DecisionCaller caller, String decisionRef, Map<String, Object> inputs, Instant evaluationTime, String idempotencyKey)`
+
+   The result is sealed: matched, no match, or failed. The port's rules:
+   - **Tenant.** Explicit, read from `pre_instance.tenant_id` under the instance lock, never from variables, inputs or the thread's security context.
+   - **Caller.** The engine identity `system:process-engine`, acting on behalf of the human who triggered the step (`onBehalfOf`, which is null for a timer or poller). Both are written to `rle_decision`, so the log stays attributable without granting `rules:evaluate` to task workers.
+   - **Idempotency key.** Derived from the instance id, the node id and the attempt id, so a retried step replays the logged decision instead of writing a second one.
+   - **Evaluation time.** The engine clock at the step, never a value taken from instance data.
+   - **The adapter.** The process starter provides it when a `RuleEngine` bean is present (`@ConditionalOnBean`). It calls a tenant-scoped Rule Engine entry point. When a request context exists, it asserts that the `EngineAccess` tenant equals the instance tenant, and refuses with `403 TENANT_NOT_ALLOWED` otherwise.
+   - **No Rule Engine.** Activating a definition that contains a `businessRuleTask` is refused with `422 BPMN_NOT_EXECUTABLE`, naming the step and the reason, and nothing fails at run time. The starter declares `rule-engine-core` as an optional dependency.
+   - **Tests.** A decision step evaluated with no principal uses the instance tenant (`PRE-046`). A tenant mismatch between the request and the instance is refused (`PRE-047`).
 4. **Timing.** The extraction ships in the same change as the package rename (#21), before the `0.1.0` tag, so 0.1.0 publishes the final coordinates and packages once. If #21 lands without it, the extraction is the first change of 0.2.0, documented as a breaking change of a 0.x release.
 5. **Until then.** Pull request #149 may keep its `rule-engine-core` dependency and its internal `ExpressionEvaluator` port. That port's condition subset must follow the `horus-expr-v1` semantics already decided: FEEL null logic (PD-058), `DECIMAL128` numbers, and money compared only within one currency. Tests named by the rule engine ids prove it (`RLE-006` cases for conditions). Once this library exists, the port is replaced by the `ExpressionLanguage` SPI.
 
