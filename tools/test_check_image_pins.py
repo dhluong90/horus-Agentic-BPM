@@ -113,6 +113,24 @@ class ImagePinsTest(unittest.TestCase):
         self.assertEqual(1, len(errors), errors)
         self.assertIn("testcontainers.properties:1: image 'testcontainers/ryuk:0.14.0'", errors[0])
 
+    def test_module_using_testcontainers_without_the_runtime_guard_fails(self) -> None:
+        uses = {"examples/host/src/test/java/io/example/HostIT.java":
+                "import org.testcontainers.postgresql.PostgreSQLContainer;\n"}
+        missing = pins.runtime_guard(self.tree(uses))
+        self.assertEqual(1, len(missing), missing)
+        self.assertIn("examples/host/src/test/resources/testcontainers.properties: the tests of examples/host use "
+                      "Testcontainers, but this file does not set image.substitutor", missing[0])
+        without = pins.runtime_guard(self.tree({**uses, "examples/host/src/test/resources/testcontainers.properties":
+                                                f"ryuk.container.image=testcontainers/ryuk@{DIGEST}\n#image.substitutor=x\n"}))
+        self.assertEqual(1, len(without), without)
+
+    def test_module_with_the_runtime_guard_or_without_testcontainers_passes(self) -> None:
+        self.assertEqual([], pins.runtime_guard(self.tree({
+            "examples/host/src/test/java/io/example/HostIT.java": "import org.testcontainers.postgresql.PostgreSQLContainer;\n",
+            "examples/host/src/test/resources/testcontainers.properties": "image.substitutor=io.example.DigestPinnedImages\n",
+            "rule-engine/core/src/test/java/io/example/PlainTest.java": "import org.junit.jupiter.api.Test;\n",
+        })))
+
     def test_exempt_line_and_paths_outside_the_scope_are_skipped(self) -> None:
         self.assertEqual([], self.errors({
             ".github/workflows/deploy.yml": "      IMAGE: horus/host:local # pin-exempt: built in this job\n",

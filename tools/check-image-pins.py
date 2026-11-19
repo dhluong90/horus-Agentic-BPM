@@ -19,7 +19,10 @@ What:    an image reference is
          It fails when a reference has no @sha256:<64 hex digits>, and when a reference that Testcontainers
          reads (test code, POM properties, workflow *IMAGE variables) carries a tag and a digest together,
          which Testcontainers 2 refuses: write <name>@sha256:<digest> and name the tag in a comment.
-Exit:    0 when every reference is pinned, 1 otherwise, naming file and line.
+         It also fails when a module's tests use Testcontainers and its src/test/resources/
+         testcontainers.properties does not set image.substitutor: the runtime guard that refuses any container
+         image without a digest, Ryuk included.
+Exit:    0 when every reference is pinned and every such module has the guard, 1 otherwise, naming the file.
 """
 
 from __future__ import annotations
@@ -126,13 +129,33 @@ def check(root: Path) -> list[str]:
     return errors
 
 
+def runtime_guard(root: Path) -> list[str]:
+    """A module whose tests use Testcontainers must register the runtime guard in its testcontainers.properties."""
+    errors: list[str] = []
+    modules: set[str] = set()
+    for path, rel, kind in files(root):
+        if kind == "code" and "org.testcontainers" in path.read_text(encoding="utf-8", errors="replace"):
+            modules.add(rel.split("/src/test/", 1)[0] if not rel.startswith("src/test/") else "")
+    for module in sorted(modules):
+        props = root / module / "src/test/resources/testcontainers.properties"
+        shown = props.relative_to(root).as_posix()
+        configured = props.is_file() and any(
+            re.match(r"^\s*image\.substitutor\s*[=:]\s*\S", line)
+            for line in props.read_text(encoding="utf-8", errors="replace").splitlines())
+        if not configured:
+            errors.append(f"{shown}: the tests of {module or 'the root module'} use Testcontainers, but this file does not set "
+                          f"image.substitutor, so containers start without the digest check. Add "
+                          f"image.substitutor=<package>.DigestPinnedImages and that class (PD-100).")
+    return errors
+
+
 def main(argv: list[str]) -> int:
     root = Path(argv[1]) if len(argv) > 1 else Path(__file__).resolve().parent.parent
-    errors = check(root)
+    errors = check(root) + runtime_guard(root)
     for error in errors:
         print(f"::error title=Image not pinned by digest::{error}")
     if errors:
-        print(f"check-image-pins: {len(errors)} image reference(s) not pinned by digest.")
+        print(f"check-image-pins: {len(errors)} problem(s): an image not pinned by digest, or a module without the runtime guard.")
         return 1
     print("check-image-pins: every container image in tests, workflows, POMs and tool scripts is pinned by digest.")
     return 0
