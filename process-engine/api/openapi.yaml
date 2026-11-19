@@ -4,15 +4,20 @@ info:
   version: 0.1.0
   description: |
     REST API of the Process Engine, served by the host application under `/api/bpm/processes/v1`.
-    Preview in 0.1.0: this file covers the endpoints of the walking skeleton (import a BPMN document, start an
-    instance, read it, complete a user task). Outside the `dev` profile an imported definition stays `DRAFT` and
-    nothing in this release can activate it; the approval flow and the remaining endpoints of
+    Preview: this file covers importing a BPMN document, reading and listing definitions, starting, listing,
+    reading and cancelling instances, and completing a user task. Outside the `dev` profile an imported definition
+    stays `DRAFT` and nothing in this release can activate it; the approval flow and the remaining endpoints of
     process-engine/docs/DESIGN.md section 6.2 follow with the features that implement them.
+
+    Every body is read and written with the engine's own JSON mapper, so the host's `spring.jackson.*` settings
+    never change an engine payload (PRE-045): keys are camelCase and times are ISO 8601 strings in UTC.
 
     The tenant is never part of a request: it comes from the host's authenticated context (`EngineAccess`). Money is
     `{currency, amount}` with the amount in minor units. Errors are RFC 9457 `application/problem+json`; clients
     branch on `code`. Request bodies are read bounded: a BPMN document above `definitions.max-bytes` (1 MB) or a
-    JSON body above 256 KB is `413 PAYLOAD_TOO_LARGE` before it is read.
+    JSON body above 256 KB is `413 PAYLOAD_TOO_LARGE` before it is read. Lists are keyset pages
+    `{data, nextCursor, hasNext}`; pass `nextCursor` back unchanged as `cursor`. Cursors are signed for the tenant and
+    the list that issued them, so an edited, forged or other-tenant cursor is `400 QUERY_INVALID`.
   license:
     name: PolyForm Noncommercial 1.0.0
     url: https://polyformproject.org/licenses/noncommercial/1.0.0/
@@ -22,9 +27,9 @@ security:
   - hostAuth: []
 tags:
   - name: definitions
-    description: Import of BPMN process definitions
+    description: Import, list and read BPMN process definitions
   - name: instances
-    description: Start and read process instances
+    description: Start, list, read and cancel process instances
   - name: tasks
     description: Complete user tasks
 paths:
@@ -67,7 +72,96 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [definitions]
+      operationId: listDefinitions
+      summary: List the definition keys of the tenant
+      description: |
+        One item per key, ordered by key: the latest version and its status, the version a start uses now, and the
+        time of the last change. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of keys
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DefinitionSummaryPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}:
+    get:
+      tags: [definitions]
+      operationId: getDefinitionVersion
+      summary: Read one version of a definition
+      description: |
+        Status, hashes and approval fields of the version; the source document is not part of the answer. The
+        `ETag` is the definition hash, quoted. Permission `processes:read`.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$', maxLength: 200 }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: The version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DefinitionVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /instances:
+    get:
+      tags: [instances]
+      operationId: listInstances
+      summary: List the instances of the tenant, newest first
+      description: |
+        Filters: `status` (one or more, comma separated; `RUNNING` when absent), `definitionKey`, and a start-time
+        range `startedFrom` (inclusive) to `startedTo` (exclusive) of at most `query.max-range` (31 days). With only
+        one bound the other is that range away; with neither the list is not limited in time. Ordered by `startedAt`
+        then `id`, both descending. Items carry no variables, tokens or tasks; read one instance for those.
+        Permission `processes:read`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, example: 'RUNNING,COMPLETED' }
+        - name: definitionKey
+          in: query
+          required: false
+          schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$', maxLength: 200 }
+        - name: startedFrom
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: startedTo
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of instances
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstanceSummaryPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
     post:
       tags: [instances]
       operationId: startInstance
@@ -122,6 +216,53 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /instances/{id}:cancel:
+    post:
+      tags: [instances]
+      operationId: cancelInstance
+      summary: Cancel a running instance
+      description: |
+        Cancels every live token and open task of the instance in one transaction, writes the `INSTANCE_ENDED`
+        history entry and hands `processes.instance.cancelled.v1` to the host publisher. Only a `RUNNING` instance
+        can be cancelled (`409 INVALID_STATE`). Permission `processes:start`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, minLength: 26, maxLength: 26 }
+        - name: If-Match
+          in: header
+          required: true
+          description: |
+            The instance's `lockVersion` (its `ETag`), quoted. Missing is `428 PRECONDITION_REQUIRED`; stale is
+            `409 VERSION_CONFLICT`.
+          schema: { type: string, example: '"2"' }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Required; missing is `428 PRECONDITION_REQUIRED`. See the IdempotencyKey parameter.
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 1000 }
+            example: { reason: Customer withdrew the card application }
+      responses:
+        '200':
+          $ref: '#/components/responses/Instance'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /tasks/{id}:complete:
     post:
@@ -180,6 +321,18 @@ components:
       scheme: bearer
       description: The host's own authentication. The engine reads the caller and tenant from the host's security context.
   parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Items per page, 1 to `query.max-page-size` (200); 50 when absent. Outside the range is `400 QUERY_INVALID`.
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: The `nextCursor` of the previous page, unchanged; absent for the first page.
+      schema: { type: string, maxLength: 400 }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -204,7 +357,9 @@ components:
           schema: { $ref: '#/components/schemas/ProcessInstance' }
     Problem:
       description: >-
-        RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `401 UNAUTHENTICATED`
+        RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `400` is `INPUT_INVALID`
+        or `QUERY_INVALID` (a list limit, cursor or range). `404` is `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`,
+        `INSTANCE_NOT_FOUND` or `TASK_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
         carries a `WWW-Authenticate` challenge. `403` is `PERMISSION_DENIED` (missing engine permission),
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `409` is
@@ -242,6 +397,49 @@ components:
           type: object
           additionalProperties: true
           description: At most 256 KB of JSON. Floating-point numbers are read as decimals; money is a Money object.
+    DefinitionSummary:
+      type: object
+      required: [key, latestVersion, latestStatus, lastChangedAt]
+      properties:
+        key: { type: string }
+        name: { type: [string, 'null'], description: Name of the latest version }
+        latestVersion: { type: integer, minimum: 1 }
+        latestStatus: { type: string, enum: [DRAFT, PENDING_APPROVAL, ACTIVE, RETIRED] }
+        effectiveVersion:
+          type: [integer, 'null']
+          description: The version a start uses now, or null when the key has no active version
+        lastChangedAt: { type: string, format: date-time }
+    DefinitionSummaryPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/DefinitionSummary' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
+    InstanceSummary:
+      type: object
+      required: [id, definitionKey, definitionVersion, status, lockVersion, startedAt]
+      properties:
+        id: { type: string }
+        definitionKey: { type: string }
+        definitionVersion: { type: integer }
+        businessKey: { type: [string, 'null'] }
+        status: { type: string, enum: [RUNNING, COMPLETED, CANCELLED, COMPENSATING, FAILED] }
+        lockVersion: { type: integer }
+        startedBy: { type: [string, 'null'] }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: [string, 'null'], format: date-time }
+    InstanceSummaryPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceSummary' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
     DefinitionVersion:
       type: object
       required: [id, key, version, status, definitionHash, sourceFormat, sourceHash, nodeCount, createdBy, createdAt]
@@ -260,6 +458,8 @@ components:
           description: SHA-256 of the stored source document; checked before every compile
         nodeCount: { type: integer }
         approvedBy: { type: [string, 'null'] }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        effectiveFrom: { type: [string, 'null'], format: date-time }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
     ProcessInstance:
@@ -321,8 +521,9 @@ components:
         status: { type: integer }
         code:
           type: string
-          enum: [INPUT_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED, SELF_APPROVAL_FORBIDDEN,
-            TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, INSTANCE_NOT_FOUND, TASK_NOT_FOUND, INVALID_STATE,
+          enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED,
+            SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND,
+            TASK_NOT_FOUND, INVALID_STATE,
             VERSION_CONFLICT, IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
             BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, PRECONDITION_REQUIRED,
             DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]
