@@ -35,7 +35,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-016 | `RLE_016_sample_simulation_leaves_decision_log_untouched` | Integration, SQL capture | M1 | `TR-OBS-01`, `TR-DET-01` | Planned |
 | RLE-017 | `RLE_017_decision_log_monthly_partitions_and_retention_by_drop` | Testcontainers migration, SQL capture | M1 | `TR-OPS-04`, `TR-OBS-01` | Planned |
 | RLE-018 | `RLE_018_tenant_header_accepted_only_within_allowed_tenants` | WebMvc, log capture | M2 | `TR-SEC-03`, `TR-TEN-01` | Planned |
-| RLE-019 | `RLE_019_meta_and_me_describe_host_and_caller` | WebMvc, JSON Schema contract | M1 | `TR-UI-08`, `TR-SEC-08` | Planned |
+| RLE-019 | `RLE_019_meta_and_me_describe_host_and_caller`; also `HostMetadataEndpointsTest.RLE_019_*` (role mapping, `401`, empty permissions, vocabulary filter, cache headers), `HostMetadataContractTest.RLE_019_*` (JSON Schema and OpenAPI), `RuleEngineModuleDescriptorTest.RLE_019_*`, `HostMetadataIT.RLE_019_*` (bearer tokens) and `SessionSignInIT.RLE_019_*` (form sign-in and session) in the example host | WebMvc, JSON Schema contract, example host over HTTP | M1 | `TR-UI-08`, `TR-SEC-08` | Implemented |
 | RLE-020 | `RLE_020_import_keeps_source_document_and_canonical_hash` | Integration, WebMvc | M1 | `TR-STD-01`, `TR-STD-03` | Planned |
 | RLE-021 | `RLE_021_v1_expressions_match_their_feel_translation` | Property, differential against a reference FEEL in test scope | M1 | `TR-STD-02`, `TR-DET-01` | Planned |
 | RLE-022 | `RLE_022_today_uses_rule_set_time_zone` | Unit, replay | M1 | `TR-DET-01`, `TR-DET-05` | Planned |
@@ -53,7 +53,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-034 | `RLE_034_compiled_cache_is_bounded_and_heap_stays_flat` | Integration with heap measurement (median of three after full GC), metrics check | M1 | `TR-PERF-06` | Planned |
 | RLE-035 | `RLE_035_masking_key_required_at_startup_and_never_leaked` | Context runner, example host start-up, log capture | M1 | `TR-SEC-10` | Planned |
 | RLE-036 | `RLE_036_every_rest_error_is_problem_details_with_stable_code` | WebMvc over the error matrix, injected failure | M1 | `TR-SEC-08` | Planned |
-| RLE-037 | `RLE_037_tenant_from_principal_session_or_token_never_from_browser` | Starter context runner with session and token principals, WebMvc | M1 | `TR-SEC-03`, `TR-TEN-01`, `TR-EXT-02` | Planned |
+| RLE-037 | `RLE_037_tenant_from_principal_session_or_token_never_from_browser` | Starter context runner with session and token principals, WebMvc | M1 | `TR-SEC-03`, `TR-TEN-01`, `TR-EXT-02` | Implemented for `/api/bpm/meta` and `/api/bpm/me` (`TenantResolutionTest.RLE_037_*`); the rule-set read, `:evaluate` and decision-row cases run again when those endpoints arrive |
 | RLE-038 | `RLE_038_four_eyes_retirement_needs_second_approver` | Service, WebMvc, two-replica Testcontainers, event capture | M3 | `TR-SEC-04`, `TR-OBS-04`, `TR-EXT-05` | Planned |
 
 ## Compatibility matrix
@@ -77,6 +77,9 @@ Tests that prove a platform requirement directly, before any `SPEC.md` statement
 | `TR-OPS-04` | `RuleEngineSchemaMigratorIT.TR_OPS_04_*`, `RuleEngineOnlyHostIT.TR_OPS_04_*`, `RuleEngineAutoConfigurationTest.TR_OPS_04_*` | Testcontainers with fixed instants, context runner | **Partial.** Start-up creation of the current and next UTC month, UTC boundaries and the move of rows out of the default partition. Scheduled creation up to `partitions-ahead`, retention by drop and the default-rows gauge are `RLE-017` |
 | `TR-AGT-03` | `CoreArchitectureTest.TR_AGT_03_core_uses_no_http_or_model_client_library`, `PostgresArchitectureTest.TR_AGT_03_postgres_uses_no_http_or_model_client_library`, plus the shared Enforcer execution `enforce-no-network-client` | ArchUnit, build | **Partial.** The "never calls a model" boundary. Adapter timeouts and retries arrive with the process engine (M2) |
 | `TR-SEC-01` | `CoreArchitectureTest.TR_SEC_01_core_has_no_scripting_reflection_class_loading_or_deserialisation` | ArchUnit | Partial: the boundary rule. The parser and evaluator tests of `RLE-004` and `RLE-007` complete it |
+| `TR-SEC-03` | `TenantResolutionTest.TR_SEC_03_*` and `RLE_037_*`, `HostMetadataIT.TR_SEC_03_*`, `SessionSignInIT.TR_SEC_03_*` | WebMvc, log capture, example host | **Partial.** The tenant of `/api/bpm/meta` and `/api/bpm/me` comes from the principal (token claim or session attribute), a host resolver or `tenancy.dev-tenant` on `dev` only, never from a query parameter or header; a different `X-Tenant-Id`, a host resolver that contradicts the principal's tenant, or a malformed tenant is `403 TENANT_NOT_ALLOWED` and logged. Request bodies and cross-tenant reads of engine resources are `RLE-011` |
+| `TR-SEC-09` | `HostMetadataEndpointsTest.TR_SEC_09_*` | WebMvc | **Partial.** `Cache-Control: no-store` on engine API responses. The cockpit headers are tested with the cockpit starter |
+| `TR-SEC-12` | `HostSecurityConfigurationTest.TR_SEC_12_*`, `HostMetadataIT.RLE_019_example_host_answers_401_problem_without_a_valid_token` | Unit, example host | **Partial.** The example host refuses to accept tokens without an audience and answers `401` to a token issued for another audience. The starter's own start-up check with CORS arrives with the REST layer |
 
 ## Known gaps
 | Gap | Plan |

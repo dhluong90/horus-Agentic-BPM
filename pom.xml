@@ -43,6 +43,7 @@
 
   <modules>
     <module>bpm-bom</module>
+    <module>bpm-host-metadata</module>
     <module>rule-engine</module>
     <module>examples</module>
   </modules>
@@ -80,6 +81,8 @@
     <!-- JUnit tags of tests that apply to one Spring Boot line only; the 3.5 profile swaps the value. -->
     <excludedGroups>spring-boot-3.5-only</excludedGroups>
     <archunit.version>1.5.1</archunit.version>
+    <!-- Test scope only: validates REST responses against the published JSON Schemas (Apache 2.0). -->
+    <json-schema-validator.version>2.0.1</json-schema-validator.version>
 
     <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
     <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
@@ -120,6 +123,11 @@
         <groupId>com.tngtech.archunit</groupId>
         <artifactId>archunit-junit5</artifactId>
         <version>${archunit.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.networknt</groupId>
+        <artifactId>json-schema-validator</artifactId>
+        <version>${json-schema-validator.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

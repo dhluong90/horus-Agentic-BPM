@@ -40,7 +40,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | Identifiers | ULID strings, for example `01JD2X5K9T1Q4N8V2M7B3C6D0E` |
 | Timestamps | ISO 8601 UTC, `2026-12-01T00:00:00Z` |
 | Money | `{ "currency": "VND", "amount": 60000000 }`: ISO 4217 code and an integer in minor units. Never a JSON float. In Java, `Money.ofMinor("VND", 60_000_000)` or `Money.ofMajor("USD", "12.50")` |
-| Tenant | Resolved from the security context or a trusted gateway header. A `tenantId` field in any request body is ignored (`TR-SEC-03`, `RLE-011`). With tenant switching on, `X-Tenant-Id` may name another tenant from the token's allowed list; any other value is `403 TENANT_NOT_ALLOWED` |
+| Tenant | Resolved by the `TenantResolver` from the authenticated principal, session or token, never from a header ([[Multi-Tenancy and Security]]). A `tenantId` field in any request body is ignored (`TR-SEC-03`, `RLE-011`). With tenant switching on, `X-Tenant-Id` may name another tenant from the token's allowed list; any other value is `403 TENANT_NOT_ALLOWED` |
 | Authentication | Every endpoint requires an authenticated principal from the host's Spring Security; see [[Multi Tenancy and Security]] |
 | Errors | RFC 9457 `application/problem+json` with a stable `code`; see the error matrix and [[Common Error Codes]]. Clients branch on `code`, never on `type` |
 | Idempotency | `Idempotency-Key` header on every `POST` and `PUT`; semantics below |
