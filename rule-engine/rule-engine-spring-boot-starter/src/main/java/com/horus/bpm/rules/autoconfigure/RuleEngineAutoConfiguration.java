@@ -9,11 +9,12 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnSingleCandidate;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -84,15 +85,48 @@ public class RuleEngineAutoConfiguration {
         return clock.getIfUnique(Clock::systemUTC);
     }
 
+    /** Health API of Spring Boot 4 (module spring-boot-health). */
+    static final String SPRING_BOOT_4_HEALTH = "org.springframework.boot.health.contributor.HealthIndicator";
+    /** Health API of Spring Boot 3.5 (module spring-boot-actuator). */
+    static final String SPRING_BOOT_3_5_HEALTH = "org.springframework.boot.actuate.health.HealthIndicator";
+    /** Bean name on both lines; a host bean of this name replaces the engine's (TR-EXT-02). */
+    static final String HEALTH_BEAN = "ruleEngineHealthIndicator";
+
+    static RuleEngineHealthCheck healthCheck(
+            RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, ObjectProvider<Clock> clock) {
+        return new RuleEngineHealthCheck(migrator, partitions, engineClock(clock));
+    }
+
+    /** Spring Boot 4 hosts with the health module. Contributed as {@code ruleEngine}. */
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnClass(HealthIndicator.class)
+    @ConditionalOnClass(name = SPRING_BOOT_4_HEALTH)
+    @Conditional(OnRuleEngineHealthEnabledCondition.class)
     static class RuleEngineHealthConfiguration {
 
-        @Bean
-        @ConditionalOnMissingBean(name = "ruleEngineHealthIndicator")
-        HealthIndicator ruleEngineHealthIndicator(
+        @Bean(HEALTH_BEAN)
+        @ConditionalOnMissingBean(name = HEALTH_BEAN)
+        org.springframework.boot.health.contributor.HealthIndicator ruleEngineHealthIndicator(
                 RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, ObjectProvider<Clock> clock) {
-            return new RuleEngineHealthIndicator(migrator, partitions, engineClock(clock));
+            return new RuleEngineHealthIndicator(healthCheck(migrator, partitions, clock));
+        }
+    }
+
+    /**
+     * Spring Boot 3.5 hosts with Actuator: only when the 3.5 health API is present and the Spring Boot 4
+     * health module is absent, so exactly one adapter is active on any host. Contributed as
+     * {@code ruleEngine}.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = SPRING_BOOT_3_5_HEALTH)
+    @ConditionalOnMissingClass(SPRING_BOOT_4_HEALTH)
+    @Conditional(OnRuleEngineHealthEnabledCondition.class)
+    static class RuleEngineSpringBoot35HealthConfiguration {
+
+        @Bean(HEALTH_BEAN)
+        @ConditionalOnMissingBean(name = HEALTH_BEAN)
+        org.springframework.boot.actuate.health.HealthIndicator ruleEngineHealthIndicator(
+                RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, ObjectProvider<Clock> clock) {
+            return new RuleEngineSpringBoot35HealthIndicator(healthCheck(migrator, partitions, clock));
         }
     }
 }

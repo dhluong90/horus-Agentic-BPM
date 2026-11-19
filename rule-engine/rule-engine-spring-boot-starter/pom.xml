@@ -38,14 +38,31 @@
       <artifactId>spring-jdbc</artifactId>
     </dependency>
     <!--
-      Optional: the ruleEngine health contributor is added only when the host has Spring Boot 4 health
-      (ADR-0011); Spring Boot 3.5 hosts get theirs with #116. The 3.5 test leg excludes this module from
-      the test classpath (root POM, profile spring-boot-3.5).
+      The ruleEngine health contributor, one per Spring Boot line (RuleEngineHealthCheck plus an adapter).
+      Spring Boot 4: the optional spring-boot-health module. The 3.5 test leg excludes it from the test
+      classpath (root POM, profile spring-boot-3.5).
     -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-health</artifactId>
       <optional>true</optional>
+    </dependency>
+    <!--
+      Spring Boot 3.5: the Actuator health API, compile only. Provided scope is never passed to hosts, so
+      a Spring Boot 4 host gets no 3.5 artifact; a 3.5 host with Actuator has this jar already. Only the
+      jar itself is used, none of its Spring Boot 3.5 dependencies.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-actuator</artifactId>
+      <version>${spring-boot-3.5.version}</version>
+      <scope>provided</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <dependency>
