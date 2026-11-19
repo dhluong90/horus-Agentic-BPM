@@ -24,7 +24,7 @@ import tools.jackson.databind.node.ObjectNode;
  * Maps engine exceptions to RFC 9457 {@code application/problem+json} with {@code code},
  * {@code detail} and {@code correlationId} (ADR-0010). Applies to the engine controllers only.
  */
-@RestControllerAdvice(assignableTypes = {RuleSetController.class, DecisionController.class})
+@RestControllerAdvice(assignableTypes = {RuleSetController.class, DecisionController.class, SimulationController.class})
 public class ProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProblemDetails.class.getName());

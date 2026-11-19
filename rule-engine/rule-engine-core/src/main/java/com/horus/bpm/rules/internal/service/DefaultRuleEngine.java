@@ -7,6 +7,9 @@ import com.horus.bpm.rules.api.InputInvalidException;
 import com.horus.bpm.rules.api.NoEffectiveVersionException;
 import com.horus.bpm.rules.api.RuleEngine;
 import com.horus.bpm.rules.api.RuleSetNotFoundException;
+import com.horus.bpm.rules.api.SimulationResult;
+import com.horus.bpm.rules.api.ValidationFailedException;
+import com.horus.bpm.rules.api.VersionNotFoundException;
 import com.horus.bpm.rules.internal.eval.CompiledRuleSet;
 import com.horus.bpm.rules.internal.json.CanonicalJson;
 import com.horus.bpm.rules.internal.json.CorrelationIds;
@@ -22,15 +25,20 @@ import com.horus.bpm.rules.internal.store.DecisionRecord;
 import com.horus.bpm.rules.internal.store.RuleStore;
 import com.horus.bpm.rules.internal.store.StoredVersion;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import tools.jackson.databind.node.ArrayNode;
 
 /**
- * Evaluates the effective version and logs one decision row in the caller's transaction (RLE-013).
- * Compiled versions are cached by version id: a stored version never changes, so the cache needs no
- * invalidation. Its size is bounded by {@code cache.max-entries}; a full cache is cleared. Thread-safe.
+ * Evaluates the effective version and logs one decision row in the caller's transaction (RLE-013), and simulates a
+ * stored version over sample inputs without logging anything (RLE-016). Compiled versions are cached by version id
+ * and canonical hash, so a cached entry is never served for other content and the cache needs no invalidation. Its size is bounded by {@code cache.max-entries}; a full cache is cleared. Thread-safe.
  */
 public final class DefaultRuleEngine implements RuleEngine {
 
@@ -75,6 +83,106 @@ public final class DefaultRuleEngine implements RuleEngine {
                 EngineValues::decisionFromJson);
     }
 
+    @Override
+    public SimulationResult simulate(String ruleSet, int version, List<DecisionInput> samples) {
+        String tenant = context.tenant();
+        // Permission first: a caller without rules:simulate never makes the engine read or evaluate anything.
+        context.callerWith("rules:simulate");
+        int limit = context.settings().simulationMaxInputs();
+        if (samples == null || samples.isEmpty() || samples.size() > limit) {
+            throw new InputInvalidException("samples must hold 1 to " + limit + " input sets (simulation.max-inputs)");
+        }
+        for (int i = 0; i < samples.size(); i++) {
+            DecisionInput sample = samples.get(i);
+            if (sample == null) {
+                throw new InputInvalidException("samples[" + i + "] must be an input set");
+            }
+            int index = i;
+            atSample(index, () -> InputLimits.check(sample, EngineDefaults.DECIMAL_PRECISION,
+                    context.settings().maxInputScale(), context.settings().maxStringLength()));
+        }
+        return context.withoutDooming(() -> doSimulate(tenant, ruleSet, version, samples));
+    }
+
+    private SimulationResult doSimulate(String tenant, String ruleSet, int number, List<DecisionInput> samples) {
+        Instant now = context.clock().instant();
+        if (!RuleSetReader.isRuleSetName(ruleSet)) {
+            throw new VersionNotFoundException("(invalid name)", number);
+        }
+        // Any tenant but the caller's has no such version: the same answer whether or not the rule set exists.
+        StoredVersion simulated = store.findVersion(tenant, ruleSet, number, false)
+                .orElseThrow(() -> new VersionNotFoundException(ruleSet, number));
+        CompiledRuleSet draftRules = validated(simulated);
+        StoredVersion effective = store.findEffective(tenant, ruleSet, now).orElse(null);
+        CompiledRuleSet baselineRules = effective == null ? null : validated(effective);
+        Set<String> baselineInputs = new HashSet<>();
+        if (baselineRules != null) {
+            baselineRules.inputs().forEach(clause -> baselineInputs.add(clause.name()));
+        }
+        List<SimulationResult.Sample> results = new ArrayList<>(samples.size());
+        for (int i = 0; i < samples.size(); i++) {
+            DecisionInput sample = samples.get(i);
+            if (context.settings().rejectUndeclaredInputs()) {
+                atSample(i, () -> draftRules.requireOnlyDeclared(sample));
+            }
+            DecisionResult.Outcome draft = draftRules.evaluate(sample);
+            DecisionResult.Outcome baseline = baselineRules == null ? null
+                    : baselineRules.evaluate(only(sample, baselineInputs));
+            results.add(new SimulationResult.Sample(i, draft, baseline, baseline == null || changed(draft, baseline)));
+        }
+        return new SimulationResult(simulated.ruleSet(), simulated.version(), simulated.status(),
+                effective == null ? null : effective.version(), now, results);
+    }
+
+    /** Validation runs first: the stored version must still match its hash and compile, else VALIDATION_FAILED. */
+    private CompiledRuleSet validated(StoredVersion version) {
+        try {
+            return compiled(version);
+        } catch (IntegrityFailure failure) {
+            System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
+                    "ALERT rule set integrity: tenant " + version.tenantId() + ", " + failure.getMessage());
+            throw new ValidationFailedException(failure.getMessage());
+        }
+    }
+
+    /** Runs a check of one sample, naming the sample in the refusal. */
+    private static void atSample(int index, Runnable check) {
+        try {
+            check.run();
+        } catch (InputInvalidException e) {
+            throw new InputInvalidException("samples[" + index + "]: " + e.getMessage());
+        }
+    }
+
+    private static DecisionInput only(DecisionInput sample, Set<String> declared) {
+        Map<String, Object> kept = new LinkedHashMap<>();
+        sample.values().forEach((name, value) -> {
+            if (declared.contains(name)) {
+                kept.put(name, value);
+            }
+        });
+        return DecisionInput.of(kept);
+    }
+
+    /**
+     * Compares what a customer gets: the outcome kind, the failure code and the outputs by exact value, so
+     * {@code 30000} and {@code 30000.00} are equal. Matched rule ids are not compared.
+     */
+    static boolean changed(DecisionResult.Outcome draft, DecisionResult.Outcome baseline) {
+        return switch (draft) {
+            case DecisionResult.Matched d when baseline instanceof DecisionResult.Matched b ->
+                    !sameValues(d.outputs(), b.outputs());
+            case DecisionResult.NoMatch d when baseline instanceof DecisionResult.NoMatch b ->
+                    !sameValues(d.outputs(), b.outputs());
+            case DecisionResult.Failed d when baseline instanceof DecisionResult.Failed b -> !d.code().equals(b.code());
+            default -> true;
+        };
+    }
+
+    private static boolean sameValues(Map<String, Object> a, Map<String, Object> b) {
+        return ExactForm.of(DecisionInput.of(a)).equals(ExactForm.of(DecisionInput.of(b)));
+    }
+
     private DecisionResult doEvaluate(String tenant, String caller, DecisionRequest request) {
         Instant now = context.clock().instant();
         if (!com.horus.bpm.rules.internal.read.RuleSetReader.isRuleSetName(request.ruleSet())) {
@@ -110,7 +218,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     }
 
     private CompiledRuleSet compiled(StoredVersion version) {
-        String key = version.tenantId() + "/" + version.id();
+        String key = version.tenantId() + "/" + version.id() + "/" + version.canonicalHash();
         CompiledRuleSet cached = compiled.get(key);
         if (cached != null) {
             return cached;

@@ -36,7 +36,7 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `evaluation.max-output-bytes` | `1048576` | Built | Estimated JSON size of one decision's outputs, checked while `collect` values accumulate. A breach fails the decision with a logged `EVALUATION_ERROR` and no outputs. `1` to `1048576`; may be lowered, never raised |
 | `evaluation.max-string-length` | `65536` | Built | Longest string input (`400 INPUT_INVALID`) and longest string that `+` may build (`EVALUATION_ERROR`, checked before the string is built), in UTF-16 code units. `1` to `65536`; may be lowered, never raised |
 | `evaluation.max-batch` | `1000` | M2, may move to M3 | Largest `:evaluate-batch` request |
-| `simulation.max-inputs` | `1000` | 0.1 (M1) | Largest set of sample inputs per `:simulate`; may be lowered, never raised |
+| `simulation.max-inputs` | `1000` | Built | Most sample input sets per `:simulate` (`400 INPUT_INVALID` above it). `1` to `1000`; may be lowered, never raised |
 | `evaluation.regex-timeout-ms` | `50` | 0.1 (M1) | Bounded matcher timeout; a hit fails the decision with `EVALUATION_ERROR` |
 | `evaluation.regex-max-input-length` | `4096` | 0.1 (M1) | Longer inputs fail `matches()` deterministically |
 | `evaluation.max-input-scale` | `34` | Built | Largest absolute scale of a number input (`1e-35` and `1e35` are refused with `400 INPUT_INVALID`; at most 34 significant digits always). `0` to `34`; may be lowered, never raised. An invalid value stops start-up |

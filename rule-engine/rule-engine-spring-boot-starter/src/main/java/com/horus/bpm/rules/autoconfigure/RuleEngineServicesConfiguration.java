@@ -9,6 +9,7 @@ import com.horus.bpm.rules.postgres.RuleEngineTransactions;
 import com.horus.bpm.rules.rest.DecisionController;
 import com.horus.bpm.rules.rest.ProblemDetails;
 import com.horus.bpm.rules.rest.RuleSetController;
+import com.horus.bpm.rules.rest.SimulationController;
 import com.horus.bpm.rules.spi.CallerResolver;
 import com.horus.bpm.rules.spi.TenantResolver;
 import java.time.Clock;
@@ -119,6 +120,12 @@ class RuleEngineServicesConfiguration {
         @ConditionalOnMissingBean
         DecisionController ruleEngineDecisionController(RuleEngine engine, CallerResolver callers) {
             return new DecisionController(engine, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        SimulationController ruleEngineSimulationController(RuleEngine engine, CallerResolver callers) {
+            return new SimulationController(engine, callers);
         }
 
         @Bean

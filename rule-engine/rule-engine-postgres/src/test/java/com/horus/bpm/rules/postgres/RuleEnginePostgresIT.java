@@ -341,6 +341,77 @@ class RuleEnginePostgresIT {
         engines.versionService().approve(name, 1, WriteOptions.none());
     }
 
+    @Test
+    void RLE_016_sample_simulation_leaves_decision_log_untouched() {
+        // Given card-fee v1 in force, v2 drafted with the default fee lowered to 30,000 VND, and one logged decision
+        publishCardFee();
+        caller.as("bank-a", "alice");
+        engines.versionService().importVersion("card-fee", ImportRequest.yaml(cardFeeV2()));
+        caller.as("bank-a", "teller-01");
+        engines.ruleEngine().evaluate("card-fee", DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5)));
+        long decisions = decisionRows();
+        long outbox = count("rle_decision_outbox");
+        long keys = count("rle_idempotency");
+        caller.as("bank-a", "pricing-approver", Set.of("rules:simulate"));
+        statements.clear();
+
+        // When five customers are simulated in the host's transaction
+        com.horus.bpm.rules.api.SimulationResult result = host.execute(status ->
+                engines.ruleEngine().simulate("card-fee", 2, fiveCustomers()));
+
+        // Then two are flagged, and the engine sent reads only
+        assertThat(result.baselineVersion()).isEqualTo(1);
+        assertThat(result.samples()).extracting(com.horus.bpm.rules.api.SimulationResult.Sample::changed)
+                .containsExactly(false, false, false, true, true);
+        assertThat(statements).isNotEmpty();
+        assertThat(statements).noneMatch(sql -> sql.strip().toUpperCase().matches("(?s)^(INSERT|UPDATE|DELETE|MERGE).*"));
+        assertThat(decisionRows()).isEqualTo(decisions);
+        assertThat(count("rle_decision_outbox")).isEqualTo(outbox);
+        assertThat(count("rle_idempotency")).isEqualTo(keys);
+    }
+
+    @Test
+    void RLE_016_caller_without_rules_simulate_gets_403_and_nothing_is_evaluated() {
+        // Given
+        publishCardFee();
+        caller.as("bank-a", "alice");
+        engines.versionService().importVersion("card-fee", ImportRequest.yaml(cardFeeV2()));
+        statements.clear();
+
+        // When / Then: refused before any rule set is read
+        assertThatThrownBy(() -> engines.ruleEngine().simulate("card-fee", 2, fiveCustomers()))
+                .isInstanceOf(com.horus.bpm.rules.api.PermissionDeniedException.class);
+        assertThat(statements).noneMatch(sql -> sql.contains("rle_version") || sql.contains("rle_rule_set"));
+    }
+
+    @Test
+    void RLE_016_a_version_of_another_tenant_is_404_version_not_found() {
+        // Given card-fee v2 exists only in bank-a
+        publishCardFee();
+        caller.as("bank-a", "alice");
+        engines.versionService().importVersion("card-fee", ImportRequest.yaml(cardFeeV2()));
+
+        // When / Then
+        caller.as("tenant-b", "carol", Set.of("rules:simulate"));
+        assertThatThrownBy(() -> engines.ruleEngine().simulate("card-fee", 2, fiveCustomers()))
+                .isInstanceOf(com.horus.bpm.rules.api.VersionNotFoundException.class)
+                .hasMessageContaining("Version 2 of rule set card-fee not found");
+    }
+
+    private static byte[] cardFeeV2() {
+        return new String(cardFee(), StandardCharsets.UTF_8).replace("fee: \"50000 VND\"", "fee: \"30000 VND\"")
+                .getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static List<DecisionInput> fiveCustomers() {
+        return List.of(
+                DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5)),
+                DecisionInput.of(Map.of("tier", "SILVER", "txCount", 4)),
+                DecisionInput.of(Map.of("tier", "SILVER", "txCount", 3)),
+                DecisionInput.of(Map.of("tier", "SILVER", "txCount", 0)),
+                DecisionInput.of(Map.of("tier", "STANDARD", "txCount", 1)));
+    }
+
     private void publishCardFee() {
         caller.as("bank-a", "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()));
@@ -395,12 +466,19 @@ class RuleEnginePostgresIT {
 
     /** The host security context: same for every thread of a test. */
     static final class Caller implements TenantResolver, CallerResolver {
+        static final Set<String> ALL = Set.of("rules:author", "rules:approve", "rules:evaluate", "rules:read");
         private volatile String tenant = "bank-a";
         private volatile String user = "alice";
+        private volatile Set<String> permissions = ALL;
 
         void as(String tenant, String user) {
+            as(tenant, user, ALL);
+        }
+
+        void as(String tenant, String user, Set<String> permissions) {
             this.tenant = tenant;
             this.user = user;
+            this.permissions = Set.copyOf(permissions);
         }
 
         @Override
@@ -415,7 +493,7 @@ class RuleEnginePostgresIT {
 
         @Override
         public Set<String> currentPermissions() {
-            return Set.of("rules:author", "rules:approve", "rules:evaluate", "rules:read");
+            return permissions;
         }
     }
 

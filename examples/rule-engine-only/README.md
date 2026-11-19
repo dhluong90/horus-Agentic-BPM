@@ -96,7 +96,7 @@ curl -s -i localhost:8080/api/bpm/meta
 # {"type":"https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#unauthenticated","title":"Authentication required","status":401,"code":"UNAUTHENTICATED","detail":"Sign in, or send a token issued for this host.","instance":"/api/bpm/meta","correlationId":"01M7RR0S1MJ2AFNEK9G00A9E1N"}
 ```
 
-Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve"]`. Calls that change state with the session need the CSRF token: the host sets it in the `XSRF-TOKEN` cookie and expects it back as `X-XSRF-TOKEN`.
+Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve","rules:simulate"]`. Calls that change state with the session need the CSRF token: the host sets it in the `XSRF-TOKEN` cookie and expects it back as `X-XSRF-TOKEN`.
 
 The demo users exist only on the `dev` profile, and the host refuses to start on `dev` beside another profile (other than `test`) or with a token issuer that is not on this machine. Without `dev` the user store is empty. The host accepts bearer tokens when an issuer, JWK set or public key is configured, and then requires its own audience; token claim `roles` becomes `ROLE_*` authorities and claim `tenant_id` the tenant.
 
@@ -108,8 +108,8 @@ This walkthrough uses the demo users of the `dev` profile, in tenant `bank-a` (t
 
 | User | Roles | Engine permissions |
 |---|---|---|
-| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve` |
-| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
+| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve`, `rules:simulate` |
+| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve`, `rules:simulate` |
 | `tuan` | `TELLER` | `rules:evaluate` |
 
 Start PostgreSQL as above, then start the host on the `dev` profile:
@@ -208,6 +208,29 @@ H=localhost:8080/api/bpm/rules/v1
     #   {"ruleId":"R2","column":"balance","message":"compares a money with a number"},
     #   {"ruleId":"R3","column":"fee","message":"output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code"}]}
     ```
+
+### Simulate a changed fee table before approving it
+
+Version 2 of the card fee, [`rules/card-fee-v2.yaml`](src/main/resources/rules/card-fee-v2.yaml), lowers the default fee from 50,000 VND to 30,000 VND. Before Minh approves it, he runs the five sample customers of [`rules/card-fee-samples.json`](src/main/resources/rules/card-fee-samples.json) through v2 and through v1, which is in force. Nothing is logged. After steps 1 to 6 (if a version 2 exists already, the import gets the next number; simulate that one):
+
+```bash
+curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' \
+  --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee-v2.yaml
+# 201 {"ruleSet":"card-fee","version":2,"status":"DRAFT",...}
+curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:simulate -H 'Content-Type: application/json' \
+  --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee-samples.json
+# 200 {"ruleSet":"card-fee","version":2,"status":"DRAFT","baselineVersion":1,"evaluatedAt":"...",
+#      "sampleCount":5,"changedCount":2,"results":[
+#      {"index":0,"changed":false,"simulated":{"outcome":"MATCHED","matchedRuleIds":["R1"],"outputs":{"fee":{"currency":"VND","amount":0}}},...},
+#      ...
+#      {"index":3,"changed":true,"simulated":{...,"outputs":{"fee":{"currency":"VND","amount":30000}}},
+#                                "baseline":{...,"outputs":{"fee":{"currency":"VND","amount":50000}}}},
+#      {"index":4,"changed":true,...}]}
+docker exec horus-pg psql -U horus -d horus -tc 'SELECT count(*) FROM rle_decision'
+# 1   (the decision of step 5 only)
+```
+
+The approver role has `rules:simulate` in [`application.yml`](src/main/resources/application.yml); Tuan, a teller, gets `403 PERMISSION_DENIED`. `SimulationIT` runs the same steps with bearer tokens and prints each sample with its two fees.
 
 ### Hit policies: exactly one row, or every matching row
 

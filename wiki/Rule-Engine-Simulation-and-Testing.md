@@ -2,21 +2,44 @@
 
 Check what a draft would decide before anyone approves it, and keep rule sets covered by unit tests in CI.
 
-Design preview: simulation against sample inputs and the test library describe the 0.1 target; replay against decision history is a Cockpit 0.2 target, and attaching simulation reports to publication requests is a 1.0 target. Milestone scope is owned by the [[Roadmap]].
+Simulation against sample inputs over REST and the Java API is built (0.2.0). The cockpit Simulation screen and the test library describe the 0.1 target; replay against decision history is a Cockpit 0.2 target, and attaching simulation reports to publication requests is a 1.0 target. Milestone scope is owned by the [[Roadmap]].
 
 ## Before you start
 
 - A draft version exists (see [[Rule Engine Versioning and Publishing]]).
-- For simulation by API you need the `rules:simulate` permission ([[Rule Engine Configuration]]).
-- Simulation never writes to the decision log. The same inputs through the normal evaluate call would.
+- For simulation by API you need the `rules:simulate` permission ([[Rule Engine Configuration]]). An approver needs it too, to see what a change does before approving it.
+- Simulation never writes anything: no decision row, no idempotency record, no event. The same inputs through the normal evaluate call would log decisions.
 
 ## Simulate a draft against sample inputs
 
 ![Simulation versus evaluate](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/simulation-vs-evaluate.svg)
 
-In the cockpit: open the rule set, choose the draft, open Simulation, paste rows or upload a CSV with one column per input, run. The screen shows outputs and matched rule ids per row.
+In the cockpit (Sprint 2): open the rule set, choose the draft, open Simulation, paste rows or upload a CSV with one column per input, run. The screen shows outputs and matched rule ids per row.
 
-By API, one row at a time:
+By API, up to 1,000 customers at once (`simulation.max-inputs`), each run through the draft and through the version in force today. Here `card-fee` v1 is in force and v2 lowers the default fee from 50,000 VND to 30,000 VND:
+
+```bash
+curl -s -X POST http://localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/2:simulate \
+  -H 'Content-Type: application/json' \
+  -d '{ "samples": [
+        { "inputs": { "tier": "GOLD",     "txCount": 5 } },
+        { "inputs": { "tier": "SILVER",   "txCount": 4 } },
+        { "inputs": { "tier": "SILVER",   "txCount": 3 } },
+        { "inputs": { "tier": "SILVER",   "txCount": 0 } },
+        { "inputs": { "tier": "STANDARD", "txCount": 1 } } ] }'
+```
+
+Expected: `200` with `"version": 2`, `"baselineVersion": 1`, `"sampleCount": 5` and `"changedCount": 2`. Each entry of `results` has the sample's `index`, `changed`, and for `simulated` (v2) and `baseline` (v1) the `outcome`, `matchedRuleIds` and `outputs`:
+
+```json
+{ "index": 3, "changed": true,
+  "simulated": { "outcome": "MATCHED", "matchedRuleIds": ["R3"], "outputs": { "fee": { "currency": "VND", "amount": 30000 } } },
+  "baseline":  { "outcome": "MATCHED", "matchedRuleIds": ["R3"], "outputs": { "fee": { "currency": "VND", "amount": 50000 } } } }
+```
+
+A sample is `changed` when the outcome kind, an output value or the failure code differs. A different matched row that gives the same fee is not flagged; both rule lists are shown. When nothing is in force yet, `baseline` is `null` and every sample is `changed`. The same draft, samples and clock always give the same response. Before any sample runs, the version is checked against its stored hash and compiled; a failure is `422 VALIDATION_FAILED`. In Java: `ruleEngine.simulate("card-fee", 2, samples)` returns a `SimulationResult`.
+
+One row at a time through the versioned evaluate (planned):
 
 ```bash
 curl -s -X POST http://localhost:8080/api/bpm/rules/v1/decisions/card-fee/versions/3:evaluate \
@@ -69,6 +92,9 @@ Given the same version, inputs and clock, outputs and matched rule ids are ident
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| `403 PERMISSION_DENIED` on `:simulate` | Caller lacks `rules:simulate`; nothing was evaluated | Grant the permission to the author and approver roles |
+| `404 VERSION_NOT_FOUND` on `:simulate` | The version does not exist in your tenant (another tenant's version gives the same answer) | Check the rule set name, the version number and the signed-in tenant |
+| `400 INPUT_INVALID` naming `samples[3]` | That sample has an input the version does not declare, a value of the wrong type, or a number out of bounds; or there are no samples or more than `simulation.max-inputs` | Fix that sample, or split the samples |
 | `403` on `versions/{v}:evaluate` for a draft | Caller lacks `rules:simulate` | Grant the permission to the simulation role |
 | `403` when sending `clock` | `clock` requires `rules:simulate` even on a published version | Same |
 | Simulation rows appear in the Decisions screen | The call went to `/decisions/{ruleSet}:evaluate` instead of the versioned path | Use `/versions/{v}:evaluate` for drafts |

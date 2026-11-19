@@ -345,8 +345,9 @@ class RuleLifecycleIT {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(renamed("card-fee-roles-2"))).build(),
                 HttpResponse.BodyHandlers.ofString());
 
-        // Then /me lists read and approve, and the engine allows exactly those
-        assertThat(JSON.readTree(me.body()).path("permissions").toString()).isEqualTo("[\"rules:read\",\"rules:approve\"]");
+        // Then /me lists read, approve and simulate, and the engine allows exactly those
+        assertThat(JSON.readTree(me.body()).path("permissions").toString())
+                .isEqualTo("[\"rules:read\",\"rules:approve\",\"rules:simulate\"]");
         assertThat(approve.statusCode()).isEqualTo(200);
         assertThat(JSON.readTree(approve.body()).path("approvedBy").asString()).isEqualTo("minh");
         assertThat(importAttempt.statusCode()).isEqualTo(403);

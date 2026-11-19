@@ -31,7 +31,7 @@ horus:
         # The host's roles mapped to engine permissions, listed by GET /api/bpm/me.
         role-permissions:
           ROLE_PRICING_AUTHOR: [rules:read, rules:author]
-          ROLE_PRICING_APPROVER: [rules:read, rules:approve]
+          ROLE_PRICING_APPROVER: [rules:read, rules:approve, rules:simulate]
           ROLE_TELLER: [rules:evaluate]
     cockpit:
       # How the cockpit header names this service.

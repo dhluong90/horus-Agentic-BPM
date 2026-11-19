@@ -99,7 +99,7 @@ class HostMetadataIT {
         // And the two callers get different permission lists from their roles; /me is revalidated each time
         assertThat(strings(lan, "permissions")).containsExactly("rules:read", "rules:author");
         assertThat(strings(lan, "roles")).containsExactly("ROLE_PRICING_AUTHOR");
-        assertThat(strings(minh, "permissions")).containsExactly("rules:read", "rules:approve");
+        assertThat(strings(minh, "permissions")).containsExactly("rules:read", "rules:approve", "rules:simulate");
         assertThat(JSON.readTree(lan.body()).path("tenant").path("current").asString()).isEqualTo("bank-a");
         assertThat(lan.headers().firstValue("Cache-Control")).hasValue("private, no-cache");
     }

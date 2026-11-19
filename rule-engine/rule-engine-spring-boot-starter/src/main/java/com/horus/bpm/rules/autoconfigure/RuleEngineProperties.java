@@ -23,6 +23,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
  * @param authoring how rule changes may be made on this host
+ * @param simulation limits of {@code :simulate}
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -34,7 +35,17 @@ public record RuleEngineProperties(
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle,
         @DefaultValue Security security,
-        @DefaultValue Authoring authoring) {
+        @DefaultValue Authoring authoring,
+        @DefaultValue Simulation simulation) {
+
+    /**
+     * Limits of {@code POST .../versions/{v}:simulate} (RLE-016).
+     *
+     * @param maxInputs the most sample input sets one simulation accepts, 1 to 1000; default 1000. May be lowered,
+     *     never raised
+     */
+    public record Simulation(Integer maxInputs) {
+    }
 
     /**
      * How rule changes may be made on this host (PD-075, PD-094).
@@ -111,7 +122,8 @@ public record RuleEngineProperties(
                 lifecycle.reasonMaxLength() == null ? EngineDefaults.REASON_MAX_LENGTH : lifecycle.reasonMaxLength(),
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
-                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows());
+                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows(),
+                simulation.maxInputs() == null ? EngineDefaults.SIMULATION_MAX_SAMPLES : simulation.maxInputs());
     }
 
     /**

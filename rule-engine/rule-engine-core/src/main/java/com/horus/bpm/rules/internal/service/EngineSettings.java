@@ -18,10 +18,12 @@ import java.time.Duration;
  * @param maxOutputBytes {@code horus.bpm.rules.evaluation.max-output-bytes}, 1 to {@value EngineDefaults#OUTPUT_MAX_BYTES}
  * @param maxStringLength {@code horus.bpm.rules.evaluation.max-string-length}, 1 to {@value EngineDefaults#STRING_MAX_LENGTH}
  * @param maxRows {@code horus.bpm.rules.evaluation.max-rows}, 1 to {@value EngineDefaults#RULES_MAX}
+ * @param simulationMaxInputs {@code horus.bpm.rules.simulation.max-inputs}, 1 to
+ *     {@value EngineDefaults#SIMULATION_MAX_SAMPLES}: the most sample input sets one {@code :simulate} accepts
  */
 public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
         boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
-        int maxStringLength, int maxRows) {
+        int maxStringLength, int maxRows, int simulationMaxInputs) {
 
     public EngineSettings {
         if (cacheMaxEntries < 1 || cacheMaxEntries > EngineDefaults.CACHE_MAX_ENTRIES_LIMIT) {
@@ -43,6 +45,28 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         requireLowerOnly("horus.bpm.rules.evaluation.max-output-bytes", maxOutputBytes, EngineDefaults.OUTPUT_MAX_BYTES);
         requireLowerOnly("horus.bpm.rules.evaluation.max-string-length", maxStringLength, EngineDefaults.STRING_MAX_LENGTH);
         requireLowerOnly("horus.bpm.rules.evaluation.max-rows", maxRows, EngineDefaults.RULES_MAX);
+        requireLowerOnly("horus.bpm.rules.simulation.max-inputs", simulationMaxInputs,
+                EngineDefaults.SIMULATION_MAX_SAMPLES);
+    }
+
+    /**
+     * Creates settings with the default simulation limit.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     * @param queryMaxPageSize see the record
+     * @param reasonMaxLength see the record
+     * @param maxOutputBytes see the record
+     * @param maxStringLength see the record
+     * @param maxRows see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
+            int maxStringLength, int maxRows) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, EngineDefaults.SIMULATION_MAX_SAMPLES);
     }
 
     private static void requireLowerOnly(String property, int value, int ceiling) {
@@ -102,7 +126,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withRejectUndeclaredInputs(boolean reject) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, reject, queryMaxPageSize,
-                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows);
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, simulationMaxInputs);
     }
 
     /**
@@ -115,6 +139,17 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withSizeLimits(int outputBytes, int stringLength, int rows) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows);
+                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows, simulationMaxInputs);
+    }
+
+    /**
+     * Returns a copy with {@code simulation.max-inputs} set.
+     *
+     * @param maxInputs the most sample input sets of one simulation
+     * @return the settings
+     */
+    public EngineSettings withSimulationMaxInputs(int maxInputs) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, maxInputs);
     }
 }
