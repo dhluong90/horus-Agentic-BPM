@@ -23,6 +23,8 @@ import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
+import io.github.dhluong90.bpm.rules.api.VersionStatus;
 import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
 import io.github.dhluong90.bpm.rules.internal.read.RuleSetReader;
 import io.github.dhluong90.bpm.testing.property.Gen;
@@ -31,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -48,7 +51,10 @@ class EffectiveDatesAndReplayTest {
 
     static final Set<String> AUTHOR = Set.of("rules:read", "rules:author");
     static final Set<String> APPROVER = Set.of("rules:read", "rules:approve");
-    static final Set<String> PRICING = Set.of("rules:evaluate", "rules:simulate");
+    /** Chooses clocks and pins versions: a test role; no role holds rules:pin by default. */
+    static final Set<String> PRICING = Set.of("rules:evaluate", "rules:simulate", "rules:pin");
+    static final Set<String> ANALYST = Set.of("rules:evaluate", "rules:simulate");
+    static final Set<String> PINNER = Set.of("rules:evaluate", "rules:pin");
     static final Set<String> TELLER = Set.of("rules:evaluate");
     static final Set<String> AUDITOR = Set.of("rules:log:read");
 
@@ -188,10 +194,11 @@ class EffectiveDatesAndReplayTest {
         assertThatThrownBy(() -> engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withClock(NOV_20)))
                 .isInstanceOf(ClockNotAllowedException.class)
                 .extracting(e -> ((HorusBpmException) e).code()).isEqualTo("CLOCK_NOT_ALLOWED");
+        caller.become("bank-a", "pinner", PINNER);
         assertThatThrownBy(() -> engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1).withClock(NOV_20)))
                 .isInstanceOf(ClockNotAllowedException.class);
         assertThat(stores.decisions).isEmpty();
-        // and pinning a published version at the host clock needs only rules:evaluate
+        // and pinning a published version at the host clock needs rules:pin, not rules:simulate
         clock.set(DEC_05);
         DecisionResult pinned = engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1));
         assertThat(pinned.version()).isEqualTo(1);
@@ -303,6 +310,81 @@ class EffectiveDatesAndReplayTest {
         assertThatThrownBy(() -> engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withClock(NOV_20).withVersion(1)
                 .withIdempotencyKey("k-801"))).isInstanceOf(IdempotencyKeyReuseException.class);
         assertThat(stores.decisions).hasSize(1);
+    }
+
+    @Test
+    void RLE_008_a_pinned_evaluation_needs_rules_pin_and_writes_nothing_without_it() {
+        // Given the two card fees; an analyst may choose clocks but holds no rules:pin, nor does a teller
+        givenTheTwoCardFees();
+
+        for (Set<String> permissions : List.of(ANALYST, TELLER)) {
+            caller.become("bank-a", "someone", permissions);
+            // Then pinning v1, which would bypass the version in force, is 403 naming rules:pin
+            assertThatThrownBy(() -> engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1)))
+                    .isInstanceOf(PermissionDeniedException.class).hasMessageContaining("rules:pin");
+        }
+        assertThat(stores.decisions).isEmpty();
+        // and the same callers still evaluate the version in force
+        clock.set(DEC_05);
+        assertThat(engine.evaluate(DecisionRequest.of("card-fee", STANDARD)).version()).isEqualTo(2);
+    }
+
+    @Test
+    void RLE_008_pinning_a_retired_version_is_refused_unless_the_host_allows_it() {
+        // Given card-fee v1, decided on 20 Nov, then taken out of service (RETIRED)
+        givenTheTwoCardFees();
+        caller.become("bank-a", "pricing", PRICING);
+        String november = engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withClock(NOV_20)).decisionId();
+        for (int i = 0; i < stores.versions.size(); i++) {
+            StoredVersion v = stores.versions.get(i);
+            if (v.version() == 1) {
+                stores.versions.set(i, new StoredVersion(v.tenantId(), v.id(), v.ruleSetId(), v.ruleSet(), v.version(),
+                        VersionStatus.RETIRED, v.hitPolicy(), v.effectiveFrom(), v.canonicalJson(), v.canonicalHash(),
+                        v.sourceFormat(), v.sourceDocument(), v.sourceHash(), v.lockVersion() + 1, v.requestedBy(),
+                        v.requestedAt(), v.approvedBy(), v.approvedAt(), v.approvalComment(), v.createdBy(),
+                        v.createdAt()));
+            }
+        }
+        int rows = stores.decisions.size();
+
+        // When a caller with rules:pin pins it, by default
+        // Then 409 INVALID_STATE naming the setting, and no decision row
+        assertThatThrownBy(() -> engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1)))
+                .isInstanceOf(InvalidStateException.class).hasMessageContaining("evaluation.pin-retired")
+                .hasMessageContaining("RETIRED");
+        assertThat(stores.decisions).hasSize(rows);
+        // and replay of its logged decision is unaffected: it writes nothing
+        caller.become("bank-a", "thu", AUDITOR);
+        assertThat(engine.replay(november).outputs()).containsEntry("fee", vnd(50_000));
+
+        // When the host turns evaluation.pin-retired on, Then the pin is accepted and logged
+        RuleEngine allowing = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
+                EngineSettings.defaults().withPinRetired(true)), stores, stores, stores).ruleEngine();
+        caller.become("bank-a", "pricing", PRICING);
+        assertThat(allowing.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1)).version()).isEqualTo(1);
+        assertThat(stores.decisions).hasSize(rows + 1);
+    }
+
+    @Test
+    void RLE_008_a_decision_at_a_chosen_clock_is_flagged_as_back_dated() {
+        givenTheTwoCardFees();
+        clock.set(DEC_05);
+        caller.become("bank-a", "pricing", PRICING);
+
+        DecisionResult backDated = engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withClock(NOV_20));
+        DecisionResult now = engine.evaluate(DecisionRequest.of("card-fee", STANDARD));
+
+        // Then the result and the decision row mark the chosen clock; a host-clock decision is not marked
+        assertThat(backDated.clockChosen()).isTrue();
+        assertThat(now.clockChosen()).isFalse();
+        assertThat(stores.decisions.get(0).evalClock()).isNotEqualTo(stores.decisions.get(0).createdAt());
+        assertThat(stores.decisions.get(1).evalClock()).isEqualTo(stores.decisions.get(1).createdAt());
+        assertThat(io.github.dhluong90.bpm.rules.internal.json.EngineValues.decision(backDated).path("clockChosen")
+                .asBoolean()).isTrue();
+        // and a replay keeps the mark, from the row
+        caller.become("bank-a", "thu", AUDITOR);
+        assertThat(engine.replay(backDated.decisionId()).clockChosen()).isTrue();
+        assertThat(engine.replay(now.decisionId()).clockChosen()).isFalse();
     }
 
     // ------------------------------------------------------------------ RLE-022

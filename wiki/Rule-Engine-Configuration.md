@@ -40,6 +40,7 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `evaluation.regex-timeout-ms` | `50` | 0.1 (M1) | Bounded matcher timeout; a hit fails the decision with `EVALUATION_ERROR` |
 | `evaluation.regex-max-input-length` | `4096` | 0.1 (M1) | Longer inputs fail `matches()` deterministically |
 | `evaluation.max-input-scale` | `34` | Built | Largest absolute scale of a number input (`1e-35` and `1e35` are refused with `400 INPUT_INVALID`; at most 34 significant digits always). `0` to `34`; may be lowered, never raised. An invalid value stops start-up |
+| `evaluation.pin-retired` | `false` | 0.2 | Whether a pinned evaluation (`rules:pin`) may name a `RETIRED` version. `false` refuses it with `409 INVALID_STATE`, so a rule taken out of service produces no new decision; replay of logged decisions is not affected |
 | `evaluation.reject-undeclared-inputs` | `true` | Built | Refuse an input name the rule set does not declare with `400 INPUT_INVALID`, so a misspelt name such as `txcount` never falls to a default row. With `false`, undeclared inputs are ignored; they are never written to the decision log either way |
 | `cache.max-entries` | `1000` | Built | Compiled versions kept per replica, `1` to `100000`; the cache is cleared when full (LRU eviction from 0.1). An invalid value stops start-up |
 | `cache.listen-notify` | `true` | 0.1 (M1) | Open one session-mode connection for `LISTEN horus_rle_cache`; set `false` behind a transaction-mode pooler |
@@ -60,7 +61,7 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `tenancy.dev-tenant` | unset | Built as the host-wide `horus.bpm.tenancy.dev-tenant` | Fixed tenant for local work without an identity provider. `dev` profile only: start-up is refused when it is set outside `dev` |
 | `events.decision-evaluated` | `false` | 0.1 (M1) | Publish `rules.decision.evaluated.v1` for every decision |
 | `scheduler.enabled` | `true` | 0.1 (M1) | Run the engine's scheduler thread (outbox relay, partition creation, partition drop, idempotency cleanup) on this replica |
-| `security.role-permissions` | empty | Built | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities). Read by `/api/bpm/me` today; the engine endpoints use it from 0.1. A permission outside the six below stops the start-up |
+| `security.role-permissions` | empty | Built | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities). Read by `/api/bpm/me` today; the engine endpoints use it from 0.1. A permission outside the seven below stops the start-up |
 
 ### Host-wide properties
 
@@ -165,8 +166,9 @@ The engine's default beans are `@ConditionalOnMissingBean`, so a host bean repla
 | `rules:read` | Read rule sets, versions, diffs, exports |
 | `rules:author` | Create and edit drafts, validate, import, `:request-publish` |
 | `rules:approve` | `:approve`, `:reject`, `:retire`. Approval by the requester is refused regardless |
-| `rules:simulate` | `:simulate`, evaluate drafts, set `clock` on `:evaluate` |
-| `rules:log:read` | Read the decision log and explanations |
+| `rules:simulate` | `:simulate`, set `clock` on `:evaluate` and `/versions/{v}:evaluate` |
+| `rules:log:read` | Read the decision log and explanations, and replay a logged decision |
+| `rules:pin` | `/versions/{v}:evaluate`: evaluate a named published version instead of the version in force. Held by no role by default; grant it only to a service identity, such as the account a host's process steps run under |
 
 ### Mapping permissions to the host's authorities
 

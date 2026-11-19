@@ -459,6 +459,7 @@ paths:
                 version: 1
                 clock: '2026-12-15T02:00:00Z'
                 evaluatedAt: '2026-12-15T02:00:00Z'
+                clockChosen: false
                 outcome: MATCHED
                 matchedRuleIds: [R1]
                 outputs:
@@ -477,9 +478,12 @@ paths:
       summary: Evaluate one approved version, at the host clock or a chosen clock, and log one decision
       description: |
         Pins the version instead of selecting it, for example to show what version 1 gave on a past
-        date. Permission `rules:evaluate`; setting `clock` also needs `rules:simulate`
-        (`403 CLOCK_NOT_ALLOWED`). The version must have been approved (`PUBLISHED` or `RETIRED`): a
-        retired version stays evaluable for explanation and proof. A `DRAFT` or `PENDING_APPROVAL`
+        date. A pin bypasses the selection of the version in force, so it needs `rules:pin` beside
+        `rules:evaluate` (`403 PERMISSION_DENIED`); no role holds `rules:pin` by default. Setting `clock`
+        also needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`). The version must be `PUBLISHED`; a
+        `RETIRED` version is `409 INVALID_STATE` unless the host sets
+        `horus.bpm.rules.evaluation.pin-retired: true` (replay of its logged decisions is not
+        affected). A `DRAFT` or `PENDING_APPROVAL`
         version is `409 INVALID_STATE`, because it would put an unapproved rule in the decision log;
         simulate it with `:simulate`, which writes no decision row. Writes one `rle_decision` row with
         the version and the clock, as `:evaluate` does, with the same `422` answers and body limit.
@@ -516,6 +520,7 @@ paths:
                 version: 1
                 clock: '2026-11-20T10:00:00Z'
                 evaluatedAt: '2026-12-05T08:00:00Z'
+                clockChosen: true
                 outcome: MATCHED
                 matchedRuleIds: [R3]
                 outputs:
@@ -565,6 +570,7 @@ paths:
                 version: 1
                 clock: '2026-11-20T10:00:00Z'
                 evaluatedAt: '2026-11-20T10:00:00Z'
+                clockChosen: false
                 outcome: MATCHED
                 matchedRuleIds: [R3]
                 outputs:
@@ -886,7 +892,7 @@ components:
             Needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`); default the host clock.
     DecisionResult:
       type: object
-      required: [decisionId, ruleSet, version, clock, evaluatedAt, outcome, matchedRuleIds, outputs]
+      required: [decisionId, ruleSet, version, clock, evaluatedAt, clockChosen, outcome, matchedRuleIds, outputs]
       properties:
         decisionId: { type: string }
         ruleSet: { type: string }
@@ -899,6 +905,11 @@ components:
           type: string
           format: date-time
           description: When the evaluation ran; equals `clock` unless a clock was chosen
+        clockChosen:
+          type: boolean
+          description: |
+            True when the caller chose the clock, so the decision is back-dated or forward-dated. The
+            decision row records it the same way, as an `eval_clock` different from `created_at`.
         outcome:
           type: string
           enum: [MATCHED, NO_MATCH]

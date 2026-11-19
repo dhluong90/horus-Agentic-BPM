@@ -253,6 +253,7 @@ public final class EngineValues {
         node.put("version", result.version());
         node.put("clock", result.clock().toString());
         node.put("evaluatedAt", result.evaluatedAt().toString());
+        node.put("clockChosen", result.clockChosen());
         switch (result.outcome()) {
             case DecisionResult.Matched matched -> {
                 node.put("outcome", "MATCHED");

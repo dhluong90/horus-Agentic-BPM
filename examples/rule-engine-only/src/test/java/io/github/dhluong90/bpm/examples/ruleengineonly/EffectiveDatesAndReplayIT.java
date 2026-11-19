@@ -41,7 +41,8 @@ class EffectiveDatesAndReplayIT {
     static final Map<String, List<String>> PERMISSIONS = Map.of(
             "lan", List.of("rules:read", "rules:author"),
             "minh", List.of("rules:read", "rules:approve"),
-            "pricing", List.of("rules:evaluate", "rules:simulate"),
+            "pricing", List.of("rules:evaluate", "rules:simulate", "rules:pin"),
+            "analyst", List.of("rules:evaluate", "rules:simulate"),
             "teller", List.of("rules:evaluate"),
             "thu", List.of("rules:log:read"));
 
@@ -152,6 +153,7 @@ class EffectiveDatesAndReplayIT {
         assertThat(november.json().path("outputs").path("fee").toString()).isEqualTo("{\"currency\":\"VND\",\"amount\":50000}");
         assertThat(november.json().path("clock").asString()).isEqualTo("2026-11-20T10:00:00Z");
         assertThat(november.json().path("evaluatedAt").asString()).isEqualTo("2026-11-26T09:00:00Z");
+        assertThat(november.json().path("clockChosen").asBoolean()).as("back-dated decision is flagged").isTrue();
         assertThat(december.json().path("version").asInt()).isEqualTo(2);
         assertThat(december.json().path("outputs").path("fee").toString()).isEqualTo("{\"currency\":\"VND\",\"amount\":30000}");
         assertThat(december.json().path("clock").asString()).isEqualTo("2026-12-01T00:00:00Z");
@@ -166,7 +168,8 @@ class EffectiveDatesAndReplayIT {
 
         // Then version, fee and matchedRuleIds are identical to the logged decision; the replay wrote nothing
         assertThat(replayed.status()).as(replayed.body()).isEqualTo(200);
-        for (String field : List.of("decisionId", "version", "clock", "evaluatedAt", "outcome", "matchedRuleIds", "outputs")) {
+        for (String field : List.of("decisionId", "version", "clock", "evaluatedAt", "clockChosen", "outcome",
+                "matchedRuleIds", "outputs")) {
             assertThat(replayed.json().path(field)).as(field).isEqualTo(november.json().path(field));
         }
         assertThat(pinned.status()).as(pinned.body()).isEqualTo(200);
@@ -175,8 +178,9 @@ class EffectiveDatesAndReplayIT {
         }
         assertThat(decisions(t)).isEqualTo(rows + 1);
         // and at the host clock alone, v2 is in force
-        assertThat(send(t, "teller", "/decisions/card-fee:evaluate", body(STANDARD + "}"), "application/json")
-                .json().path("version").asInt()).isEqualTo(2);
+        Reply hostClock = send(t, "teller", "/decisions/card-fee:evaluate", body(STANDARD + "}"), "application/json");
+        assertThat(hostClock.json().path("version").asInt()).isEqualTo(2);
+        assertThat(hostClock.json().path("clockChosen").asBoolean()).isFalse();
     }
 
     @Test
@@ -197,6 +201,9 @@ class EffectiveDatesAndReplayIT {
         // a clock that is not an instant
         assertProblem(send(t, "pricing", "/decisions/card-fee:evaluate",
                 body(STANDARD + ",\"clock\":\"20 Nov 2026\"}"), "application/json"), 400, "INPUT_INVALID");
+        // a pin without rules:pin, even with rules:simulate
+        assertProblem(send(t, "analyst", "/decisions/card-fee/versions/1:evaluate", body(STANDARD + "}"),
+                "application/json"), 403, "PERMISSION_DENIED");
         // a pinned draft, and a version that does not exist
         assertProblem(send(t, "pricing", "/decisions/card-fee/versions/2:evaluate", body(STANDARD + "}"),
                 "application/json"), 409, "INVALID_STATE");

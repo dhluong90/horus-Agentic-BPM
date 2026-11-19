@@ -72,9 +72,11 @@ public record RuleEngineProperties(
      * @param maxOutputBytes estimated JSON size of one decision's outputs, 1 to 1048576; default 1048576. Lower only
      * @param maxStringLength longest string input or string built by {@code +}, 1 to 65536; default 65536. Lower only
      * @param maxRows most rules a version may contain, checked at import, 1 to 5000; default 5000. Lower only
+     * @param pinRetired whether a pinned evaluation ({@code rules:pin}) may name a {@code RETIRED} version; default
+     *     false. Replay of a logged decision is not affected
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
-            Integer maxStringLength, Integer maxRows) {
+            Integer maxStringLength, Integer maxRows, Boolean pinRetired) {
     }
 
     /**
@@ -111,7 +113,8 @@ public record RuleEngineProperties(
                 lifecycle.reasonMaxLength() == null ? EngineDefaults.REASON_MAX_LENGTH : lifecycle.reasonMaxLength(),
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
-                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows());
+                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows())
+                .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired());
     }
 
     /**

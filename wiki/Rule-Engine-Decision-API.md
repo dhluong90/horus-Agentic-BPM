@@ -48,7 +48,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 |---|---|
 | Tenant and caller | From the host's `TenantResolver` and `CallerResolver` (defaults read Spring Security). `DecisionRequest.tenantId` is for batch jobs that run without a security context and requires the host to grant it explicitly |
 | Clock | `DecisionRequest.withClock(at)` selects the version in force and feeds `today()` and `now()`, read in the rule set's `timeZone`; default is the engine `Clock` bean. A chosen clock needs `rules:simulate` (`CLOCK_NOT_ALLOWED`) |
-| Pin and replay | `DecisionRequest.withVersion(v)` evaluates one approved version instead of selecting. `RuleEngine.replay(decisionId)` evaluates a logged decision again with its version, inputs and clock, writes nothing and needs `rules:log:read` (`TR-DET-05`) |
+| Pin and replay | `DecisionRequest.withVersion(v)` evaluates one published version instead of selecting; it needs `rules:pin`, which no role holds by default. A decision at a chosen clock has `clockChosen()` true, and so does its log row (`eval_clock` differs from `created_at`). `RuleEngine.replay(decisionId)` evaluates a logged decision again with its version, inputs and clock, writes nothing and needs `rules:log:read` (`TR-DET-05`) |
 | Errors | `UNIQUE_HIT_VIOLATION` and `EVALUATION_ERROR` come back as a `Failed` outcome with `code()`, because they are logged decisions; `evaluateAs` throws `DecisionFailedException` with the same code. Other failures throw an unchecked `HorusBpmException` subtype whose `code()` equals the REST error code (ADR-0016) |
 | Idempotency | `DecisionRequest.idempotencyKey` returns the stored decision instead of logging a second one (ADR-0006) |
 
@@ -75,7 +75,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | Method and path | Purpose | Permission | Headers |
 |---|---|---|---|
 | `POST /decisions/{ruleSet}:evaluate` | Evaluate the effective version at `clock` (default now) | `rules:evaluate`; `rules:simulate` when `clock` is set | `Idempotency-Key` optional |
-| `POST /decisions/{ruleSet}/versions/{v}:evaluate` | Evaluate one approved version (`PUBLISHED` or `RETIRED`) at the host clock or `clock`; a draft is `409 INVALID_STATE` and is simulated with `:simulate` instead | `rules:evaluate`; `rules:simulate` when `clock` is set | `Idempotency-Key` optional |
+| `POST /decisions/{ruleSet}/versions/{v}:evaluate` | Evaluate one published version at the host clock or `clock`, instead of the version in force; a `RETIRED` version only with `evaluation.pin-retired: true`; a draft is `409 INVALID_STATE` and is simulated with `:simulate` instead | `rules:evaluate` and `rules:pin` (held by no role by default); `rules:simulate` when `clock` is set | `Idempotency-Key` optional |
 | `POST /decisions/{decisionId}:replay` | Evaluate a logged decision again with its version, inputs and clock; writes nothing. `404 DECISION_NOT_FOUND` for another tenant's id; `422 REPLAY_NOT_POSSIBLE` when a masked input had a value | `rules:log:read` | none |
 | `POST /decisions/{ruleSet}:evaluate-batch` | Up to 1 000 input sets; one decision row each; partial failures reported per item | `rules:evaluate` | `Idempotency-Key` optional |
 | `GET /rule-sets` | List rule sets with effective version and pending approvals | `rules:read` | cursor pagination |

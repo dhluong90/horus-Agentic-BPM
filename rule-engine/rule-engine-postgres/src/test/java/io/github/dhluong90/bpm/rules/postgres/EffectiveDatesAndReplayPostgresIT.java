@@ -49,7 +49,7 @@ class EffectiveDatesAndReplayPostgresIT {
     static final Instant DEC_05 = Instant.parse("2026-12-05T08:00:00Z");
     static final Set<String> AUTHOR = Set.of("rules:read", "rules:author");
     static final Set<String> APPROVER = Set.of("rules:read", "rules:approve");
-    static final Set<String> PRICING = Set.of("rules:evaluate", "rules:simulate");
+    static final Set<String> PRICING = Set.of("rules:evaluate", "rules:simulate", "rules:pin");
     static final Set<String> AUDITOR = Set.of("rules:log:read");
 
     final Caller caller = new Caller();

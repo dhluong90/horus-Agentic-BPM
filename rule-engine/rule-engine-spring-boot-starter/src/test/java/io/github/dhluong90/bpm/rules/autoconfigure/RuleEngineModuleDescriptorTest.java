@@ -30,7 +30,8 @@ class RuleEngineModuleDescriptorTest {
                     .doesNotContain("${").matches("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$");
             assertThat(rules.features()).isEmpty();
             assertThat(rules.permissions()).containsExactly(
-                    "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read");
+                    "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read",
+                    "rules:pin");
             assertThat(rules.rolePermissions()).isEmpty();
         });
     }

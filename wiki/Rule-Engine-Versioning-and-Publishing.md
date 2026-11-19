@@ -50,12 +50,13 @@ Example: `card-fee` v1 charges 50,000 VND from 1 Nov 2026, and v2 charges 30,000
 | 1. Evaluate at a chosen instant | pricing (`rules:evaluate` and `rules:simulate`) | `POST /api/bpm/rules/v1/decisions/card-fee:evaluate` with `{ "inputs": { "tier": "STANDARD", "txCount": 1 }, "clock": "2026-11-20T10:00:00Z" }` | `200`, `"version": 1`, `"fee": { "currency": "VND", "amount": 50000 }`, `"clock": "2026-11-20T10:00:00Z"`, and `evaluatedAt` the time it ran |
 | 2. The same at the change | pricing | the same with `"clock": "2026-12-01T00:00:00Z"` | `"version": 2`, fee 30,000 VND |
 | 3. Replay the November decision after 5 Dec | an (`rules:log:read`) | `POST /api/bpm/rules/v1/decisions/{decisionId}:replay`, no body | `200` with the logged `decisionId`, `"version": 1`, fee 50,000 VND, the same `matchedRuleIds` and `clock`; nothing is written |
-| 4. Or pin the version and the clock | pricing | `POST /api/bpm/rules/v1/decisions/card-fee/versions/1:evaluate` with the inputs and `"clock": "2026-11-20T10:00:00Z"` | The same version, fee and `matchedRuleIds`, logged as a new decision |
+| 4. Or pin the version and the clock | a service identity with `rules:pin` | `POST /api/bpm/rules/v1/decisions/card-fee/versions/1:evaluate` with the inputs and `"clock": "2026-11-20T10:00:00Z"` | The same version, fee and `matchedRuleIds`, logged as a new decision |
 
 In Java: `engine.evaluate(DecisionRequest.of("card-fee", input).withClock(at))`, `.withVersion(1)` to pin, and `engine.replay(decisionId)`.
 
 - A chosen `clock` needs `rules:simulate`; without it the call is `403 CLOCK_NOT_ALLOWED`. Leave `clock` out to use the host clock.
-- A pinned version must have been approved. A retired version still evaluates and replays. A draft is `409 INVALID_STATE`: simulate it instead, which writes no decision row.
+- Pinning needs `rules:pin`, which no role holds by default: a pin bypasses the version in force, so grant it only to a service identity. A pinned version must be published; a retired one is refused unless `evaluation.pin-retired` is on, and still replays. A draft is `409 INVALID_STATE`: simulate it instead, which writes no decision row.
+- A decision at a chosen clock is marked back-dated: `"clockChosen": true` in the response, and an `eval_clock` different from `created_at` in the log.
 - Replay never selects a version: it loads the logged one, so a later change, supersession or retirement cannot alter the answer.
 - A decision of another tenant, or an unknown id, is `404 DECISION_NOT_FOUND`.
 - A decision whose inputs include a masked value (`mask: true`) is `422 REPLAY_NOT_POSSIBLE`, because the log keeps only `masked`. The response names the inputs and never their values.

@@ -71,6 +71,17 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
     }
 
     /**
+     * Tells whether the decision reasoned about another instant than the one it ran at: the caller chose the clock
+     * ({@code rules:simulate}). The decision row records it the same way, as an {@code eval_clock} different from
+     * {@code created_at}, so a back-dated decision is visible in the log.
+     *
+     * @return true when {@code clock} differs from {@code evaluatedAt}
+     */
+    public boolean clockChosen() {
+        return !clock.equals(evaluatedAt);
+    }
+
+    /**
      * Tells whether the evaluation failed.
      *
      * @return true for {@link Failed}

@@ -48,6 +48,11 @@ public final class DefaultRuleEngine implements RuleEngine {
     static final String PERMISSION_EVALUATE = "rules:evaluate";
     static final String PERMISSION_SIMULATE = "rules:simulate";
     static final String PERMISSION_LOG_READ = "rules:log:read";
+    /**
+     * Evaluating a named version instead of the version in force: a separate permission, held by no role by default,
+     * because a pin bypasses the selection of the four-eyes-approved version in force (ADR-0025).
+     */
+    static final String PERMISSION_PIN = "rules:pin";
 
     private final EngineContext context;
     private final RuleStore store;
@@ -77,6 +82,9 @@ public final class DefaultRuleEngine implements RuleEngine {
         Objects.requireNonNull(request, "request must not be null");
         String tenant = context.tenant();
         String caller = context.callerWith(PERMISSION_EVALUATE);
+        if (request.version() != null && !context.holds(PERMISSION_PIN)) {
+            throw new io.github.dhluong90.bpm.rules.api.PermissionDeniedException(PERMISSION_PIN);
+        }
         if (request.clock() != null && !context.holds(PERMISSION_SIMULATE)) {
             // A chosen instant reaches versions and dates the caller would not get at the host clock (DESIGN 4.2).
             throw new ClockNotAllowedException();
@@ -202,6 +210,12 @@ public final class DefaultRuleEngine implements RuleEngine {
                         : new RuleSetNotFoundException(ruleSet));
         if (version.approvedAt() == null) {
             throw new InvalidStateException(ruleSet, number, version.status(), "evaluate (simulate a draft instead)");
+        }
+        if (version.status() == io.github.dhluong90.bpm.rules.api.VersionStatus.RETIRED
+                && !context.settings().pinRetired()) {
+            // A rule taken out of service must not produce new logged decisions through the pin; replay still reads it.
+            throw new InvalidStateException(ruleSet, number, version.status(),
+                    "evaluate (pinning a retired version is off: horus.bpm.rules.evaluation.pin-retired)");
         }
         return version;
     }
