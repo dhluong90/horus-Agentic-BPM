@@ -8,7 +8,7 @@ Reference for the libraries and tools the project uses, what each one is for, an
 | Area | Choice | Licence | Rejected, and why |
 |---|---|---|---|
 | Language | Java 21 baseline, Java 25 in CI | | Kotlin: a runtime in every host |
-| Integration | Spring Boot 4.x starters (ADR-0011; 3.5.x support lands with the compatibility matrix, #9) with `@AutoConfiguration`; `*-core` is framework-free | Apache 2.0 | Quarkus, Micronaut, Jakarta EE: later if asked |
+| Integration | Spring Boot 4.x starters, also tested on 3.5.x until 1.0 (ADR-0011) with `@AutoConfiguration`; `*-core` is framework-free | Apache 2.0 | Quarkus, Micronaut, Jakarta EE: later if asked |
 | Data access | Spring JDBC `JdbcClient` | Apache 2.0 | JPA/Hibernate: hidden queries and entity lifecycle inside a library; jOOQ: code generation and dual licence |
 | Database | PostgreSQL 14+ until 1.0, 15+ from 1.0, behind a storage port. On 14 we fix engine defects, not database ones | | Multi-database in 0.x: doubles the matrix before the design is proven |
 | Migrations | Flyway community edition, one history table per engine | Apache 2.0 | Liquibase: heavier |
