@@ -83,17 +83,58 @@ public final class MaskingKey {
      * + tenantId, 32 bytes)} (RFC 5869). The subkey keeps this key's id. A key configured for one tenant only is
      * used as it is and never derived.
      *
-     * @param tenantId the tenant
+     * @param tenantId the tenant: not blank, no control character, no unpaired surrogate, so its UTF-8 bytes in the
+     *     derivation are exactly the id
      * @return the tenant's subkey, with the same key id
+     * @throws IllegalArgumentException for an id that cannot name a tenant; the message does not echo it
      */
     public MaskingKey forTenant(String tenantId) {
-        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        requireUsableTenantId(tenantId);
         byte[] ikm = key.getEncoded();
         try {
             return new MaskingKey(keyId, hkdfSha256(ikm, new byte[0],
                     (TENANT_INFO_PREFIX + tenantId).getBytes(StandardCharsets.UTF_8), MIN_BYTES));
         } finally {
             java.util.Arrays.fill(ikm, (byte) 0);
+        }
+    }
+
+    private static void requireUsableTenantId(String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new IllegalArgumentException("a tenant id for a masking subkey must not be blank");
+        }
+        for (int i = 0; i < tenantId.length(); i++) {
+            char c = tenantId.charAt(i);
+            if (Character.isISOControl(c)) {
+                throw new IllegalArgumentException("a tenant id for a masking subkey must not contain a control"
+                        + " character");
+            }
+            if (Character.isHighSurrogate(c) && i + 1 < tenantId.length()
+                    && Character.isLowSurrogate(tenantId.charAt(i + 1))) {
+                i++;
+            } else if (Character.isSurrogate(c)) {
+                // An unpaired surrogate has no UTF-8 form: two different ids would derive the same subkey.
+                throw new IllegalArgumentException("a tenant id for a masking subkey must not contain an unpaired"
+                        + " surrogate");
+            }
+        }
+    }
+
+    /**
+     * Tells whether two keys hold the same bytes, comparing in constant time; the key ids are not compared.
+     *
+     * @param other the other key
+     * @return true when the key bytes are equal
+     */
+    public boolean sameKeyAs(MaskingKey other) {
+        Objects.requireNonNull(other, "other must not be null");
+        byte[] a = key.getEncoded();
+        byte[] b = other.key.getEncoded();
+        try {
+            return java.security.MessageDigest.isEqual(a, b);
+        } finally {
+            java.util.Arrays.fill(a, (byte) 0);
+            java.util.Arrays.fill(b, (byte) 0);
         }
     }
 

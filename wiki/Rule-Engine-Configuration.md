@@ -75,13 +75,15 @@ A rule set marks personal data with `mask: true`; the decision log then stores `
 |---|---|
 | A version that is not retired masks an input (by `mask: true` or by the tenant's masking default) and its tenant has no key | Start-up fails with a message that names `horus.bpm.rules.masking.hmac-key`, the tenant and the rule set |
 | A key setting holds a value that is not Base64 or decodes to fewer than 32 bytes | Start-up fails naming the setting; the value is never printed |
+| A tenant key equals the host key or another tenant's key | Start-up fails naming the setting; keys are compared in constant time and never printed |
+| A tenant key's id equals the host key id (`k1` when neither is set) | Start-up fails naming `masking.tenants.<tenant>.hmac-key-id`; give each tenant key an id of its own |
 | No rule set masks anything and no key is set | The host starts |
 | An output cell or default reads an input declared `mask: true` | Import is refused with `422 VALIDATION_FAILED` naming the output and the input |
 | An output reads an input that only the tenant's masking default masks | Its decisions fail closed: `422 EVALUATION_ERROR`, `error_code = MASKED_INPUT_IN_OUTPUT`, no inputs or outputs logged |
 | A rule set that masks an input is imported later into a tenant without a key | Its decisions fail closed: `422 EVALUATION_ERROR`, the row has `error_code = MASKING_KEY_MISSING` and no inputs, so nothing is logged in plain text |
 
 ```bash
-# A new 32-byte key, kept in your secret store and passed as an environment variable
+# Generate each key like this: 32 random bytes, Base64. Keep it in your secret store and pass it as an environment variable
 export HORUS_BPM_RULES_MASKING_HMAC_KEY="$(openssl rand -base64 32)"
 ```
 

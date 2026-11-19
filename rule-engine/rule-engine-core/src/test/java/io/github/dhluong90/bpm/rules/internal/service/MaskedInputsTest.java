@@ -576,6 +576,26 @@ class MaskedInputsTest {
         assertThat(MaskingKey.of("k7", host).forTenant("bank-a").keyId()).isEqualTo("k7");
     }
 
+    @Test
+    void TR_SEC_10_a_subkey_is_refused_for_a_tenant_id_that_cannot_name_a_tenant() {
+        MaskingKey host = MaskingKey.of(KEY_A);
+        for (String bad : new String[] {"", "  ", "bank\u0000a", "bank-a\n", "bank\uD800a", "bank\uDC00"}) {
+            assertThatThrownBy(() -> host.forTenant(bad)).as("tenant id %s", bad.codePoints().boxed().toList())
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("tenant id");
+        }
+        assertThatThrownBy(() -> host.forTenant(null)).isInstanceOf(IllegalArgumentException.class);
+        // A paired surrogate is a real character and derives a subkey of its own.
+        assertThat(host.forTenant("bank-\uD83D\uDE00").fingerprint(NATIONAL_ID))
+                .isNotEqualTo(host.forTenant("bank-a").fingerprint(NATIONAL_ID));
+    }
+
+    @Test
+    void TR_SEC_10_keys_compare_by_their_bytes_not_their_ids() {
+        assertThat(MaskingKey.of("k1", KEY_A).sameKeyAs(MaskingKey.of("k9", KEY_A))).isTrue();
+        assertThat(MaskingKey.of("k1", KEY_A).sameKeyAs(MaskingKey.of("k1", KEY_B))).isFalse();
+        assertThat(MaskingKey.of(KEY_A).sameKeyAs(MaskingKey.of(KEY_A).forTenant("bank-a"))).isFalse();
+    }
+
     static String hmacHex(byte[] key, String value) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));

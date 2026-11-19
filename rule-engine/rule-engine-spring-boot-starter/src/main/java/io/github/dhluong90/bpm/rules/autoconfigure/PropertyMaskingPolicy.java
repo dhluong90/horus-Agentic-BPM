@@ -73,9 +73,42 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
                         "horus.bpm.rules.masking.tenants." + tenant + ".search.max-per-minute"));
             }
         });
+        checkDistinct(hostKey, tenantKeys, invalid);
         Boolean maskDefault = properties.decisionLog().maskDefault();
         return new PropertyMaskingPolicy(hostKey, tenantKeys, maskDefault == null ? EngineDefaults.MASK_DEFAULT
                 : maskDefault, tenantDefaults, invalid, hostLimit, tenantLimits);
+    }
+
+    /**
+     * Refuses tenant keys that would defeat the separation of tenants or make a token's key ambiguous: a tenant key
+     * equal to the host key or to another tenant's key (compared in constant time), and a tenant key whose id is
+     * the host key's id. Reported by setting name, never by value; the start-up check then refuses to start.
+     */
+    private static void checkDistinct(Optional<MaskingKey> hostKey, Map<String, Optional<MaskingKey>> tenantKeys,
+            List<String> invalid) {
+        List<String> tenants = new ArrayList<>(new java.util.TreeSet<>(tenantKeys.keySet()));
+        for (int i = 0; i < tenants.size(); i++) {
+            String tenant = tenants.get(i);
+            Optional<MaskingKey> own = tenantKeys.get(tenant);
+            if (own.isEmpty()) {
+                continue;
+            }
+            String property = "horus.bpm.rules.masking.tenants." + tenant + ".hmac-key";
+            if (hostKey.isPresent() && own.get().sameKeyAs(hostKey.get())) {
+                invalid.add(property + " (equals the host key; a tenant key must be a key of its own)");
+            }
+            if (hostKey.isPresent() && own.get().keyId().equals(hostKey.get().keyId())) {
+                invalid.add(property + "-id (equals the host key id " + hostKey.get().keyId()
+                        + "; give the tenant key an id of its own)");
+            }
+            for (int j = i + 1; j < tenants.size(); j++) {
+                Optional<MaskingKey> other = tenantKeys.get(tenants.get(j));
+                if (other.isPresent() && own.get().sameKeyAs(other.get())) {
+                    invalid.add(property + " (equals the key of tenant " + tenants.get(j)
+                            + "; every tenant key must be different)");
+                }
+            }
+        }
     }
 
     /** A search limit below 1 stops start-up: the search cannot be left unlimited. */
