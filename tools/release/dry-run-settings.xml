@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven settings of the release dry run, passed as both user and global settings (-s and -gs), so a
+  maintainer's ~/.m2/settings.xml and the Maven installation's conf/settings.xml are never read: no
+  servers, no credentials, no mirrors, no proxies. Artifacts come from Maven Central only, and with no
+  server credentials nothing can be uploaded anywhere, even if a publishing plugin were bound by mistake
+  (release-sbom.py deploy-plugins also fails the build on one).
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+  <interactiveMode>false</interactiveMode>
+</settings>
