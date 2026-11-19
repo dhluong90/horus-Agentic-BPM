@@ -99,13 +99,6 @@
                     <exclude>com.fasterxml.jackson.core:jackson-core:*:*:runtime</exclude>
                     <exclude>com.fasterxml.jackson.core:jackson-core:*:*:provided</exclude>
                     <exclude>com.fasterxml.jackson.dataformat:*</exclude>
-                    <!-- RLE-021: the reference FEEL implementation and its Scala runtime are test scope only; never shipped. -->
-                    <exclude>org.camunda.feel:*:*:*:compile</exclude>
-                    <exclude>org.camunda.feel:*:*:*:runtime</exclude>
-                    <exclude>org.camunda.feel:*:*:*:provided</exclude>
-                    <exclude>org.scala-lang:*:*:*:compile</exclude>
-                    <exclude>org.scala-lang:*:*:*:runtime</exclude>
-                    <exclude>org.scala-lang:*:*:*:provided</exclude>
                     <exclude>com.fasterxml.jackson.module:*:*:*:compile</exclude>
                     <exclude>com.fasterxml.jackson.module:*:*:*:runtime</exclude>
                     <exclude>com.fasterxml.jackson.module:*:*:*:provided</exclude>

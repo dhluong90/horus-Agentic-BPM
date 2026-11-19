@@ -165,6 +165,51 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  feel-differential-nightly:
+    # RLE-021 (TR-STD-02): the differential property test against the reference FEEL implementation at
+    # 100,000 tries per property. Every pull request runs the same test at 1,000 tries in the verify job.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    name: FEEL differential test, 100,000 tries per property
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-boot-4.x-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-boot-4.x-
+            maven-${{ runner.os }}-
+
+      - name: Drop remembered download failures from the Maven cache
+        run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
+
+      # A failure prints the seed and the try; replay it with -Dbpm.property.seed and -Dbpm.property.try.
+      - name: Differential property test, 100,000 tries per property
+        run: >-
+          tools/mvn-retry.sh -B -ntp -pl rule-engine/rule-engine-core -am test
+          -Dtest=FeelDifferentialTest -Dsurefire.failIfNoSpecifiedTests=false
+          -Dbpm.property.tries=100000
+
+      # The full report lists 500,000 tries; keep only the summary and any failure.
+      - name: Upload the summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: feel-differential-nightly
+          path: rule-engine/rule-engine-core/target/surefire-reports/*FeelDifferentialTest.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
   dependency-gates:
     # TR-SEC-06, TR-LIC-01 and TR-LIC-02: policy checks, licence gate, SBOMs, licence notices in jars
     # and vulnerability scans. Tests run in the verify job; this job builds without them so both

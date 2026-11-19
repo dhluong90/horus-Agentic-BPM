@@ -253,6 +253,30 @@ public Money cardFee(String tier, int txCount) {
 }
 ```
 
+### Missing values and mixed currencies
+
+[`null-check.yaml`](src/main/resources/rules/null-check.yaml) is the table of `RLE-006`: missing values follow FEEL, and a row matches only when its condition is `true`, never when it is `null`. Import, request and approve it as in steps 1 to 4, then evaluate with both inputs missing:
+
+```bash
+curl -s -u tuan:demo-only -X POST $H/decisions/null-check:evaluate \
+  -H 'Content-Type: application/json' -d '{"inputs":{"income":null,"tier":null}}'
+# 200 {"outcome":"MATCHED","matchedRuleIds":["R2","R3","R5","R7"],
+#      "outputs":{"hit":["R2","R3","R5","R7"]},...}
+```
+
+`R3` (`tier != 'GOLD'`) and `R5` (`tier not in [...]`) match a missing tier, as in FEEL; `R1` (`income < 5000000 VND`) and `R4` (`not (income < 5000000 VND)`) are both `null` and match nothing.
+
+Money never mixes currencies. A cell that adds 5 USD to a balance and compares it with a VND amount is refused at import, and a USD balance compared with a VND limit fails the decision:
+
+```bash
+curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+  --data-binary @examples/rule-engine-only/src/test/resources/rules/mixed-currency.yaml
+# 422 {"code":"VALIDATION_FAILED","violations":[
+#   {"ruleId":"R1","column":"balance","message":"mixes the currencies USD and VND"}]}
+```
+
+`RuleLifecycleFailurePathsIT` runs both, and `RLE_005_money_currency_mismatch_is_rejected` the run-time case (`422 EVALUATION_ERROR`, no outputs, logged).
+
 ## Demo: import a DMN decision table
 
 A `.dmn` file goes through the same import endpoint as YAML, with `Content-Type: application/xml` (or `text/xml`, `application/dmn+xml`). It becomes a `DRAFT` that a second person approves before it evaluates. The sample is a hand-written table in the style a common DMN modeller writes: [`card-fee-modeller.dmn`](src/test/resources/rules/dmn/card-fee-modeller.dmn).

@@ -49,3 +49,11 @@ then | decimal  | 0.1000000000000000055511151231257827        | 0.10000000000000
 then | integer  | 9007199254740993                            | 9007199254740993
 then | integer  | -5                                          | #-5
 then | nulloutput | null                                        | <omitted>
+# Appended in 0.2.0 (#19): the function call production. No line above changes; the 0.1.0 lines stay a pinned prefix.
+when | string   | matches(x, '^VIP-[0-9]+')                   | matches(x, '^VIP-[0-9]+')
+when | string   | matches(x, '\\d')                           | matches(x, '\\d')
+when | integer  | round(x, 0) > 2                             | round(x, 0) > 2
+when | date     | daysBetween(x, date('2027-03-01')) >= 365   | daysBetween(x, date('2027-03-01')) >= 365
+then | decimal  | round(x * 0.015, 0)                         | round(x * 0.015, 0)
+then | integer  | daysBetween(date('2027-01-01'), date('2027-03-01')) | daysBetween(date('2027-01-01'), date('2027-03-01'))
+then | boolean  | matches('ab12', '[0-9]+')                   | matches('ab12', '[0-9]+')

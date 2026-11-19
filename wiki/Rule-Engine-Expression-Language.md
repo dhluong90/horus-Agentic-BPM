@@ -33,12 +33,44 @@ Design preview: describes the 0.1 target.
 | Comparison | `==` `!=` `<` `<=` `>` `>=` | Both sides must have the same type. Money compares only within one currency; a currency mismatch is an evaluation error (TR-DET-03) |
 | Logic | `and` `or` `not` | Three-valued with `null`, as in FEEL; see [Null values](#null-values) |
 | Membership | `in [..]`, `not in [..]` | List element type must match |
-| Range | `between a and b` | Inclusive on both ends |
+| Range | `between a and b` | Inclusive on both ends; means `x >= a and x <= b`, as in DMN |
 | Arithmetic | `+` `-` `*` `/` | Number with number; money with money of the same currency for `+` and `-`; `money * number` and `money / number`; `money / money` is not allowed |
-| String | `startsWith(s, 'x')`, `endsWith(s, 'x')`, `contains(s, 'x')`, `matches(s, 'regex')` | Plain function form only; there is no method-call syntax. `matches` is bounded by `evaluation.regex-timeout-ms` and `evaluation.regex-max-input-length` |
+| String | `startsWith(s, 'x')`, `endsWith(s, 'x')`, `contains(s, 'x')`, `matches(s, 'regex')` | Plain function form only; there is no method-call syntax. `matches` is bounded; see [Regular expressions](#regular-expressions) |
 | Null | `is null`, `is not null` | Always `true` or `false`. Other operators follow [Null values](#null-values) |
 
 Precedence from lowest to highest: `or`, `and`, `not`, comparison, `+ -`, `* /`, unary minus. Parentheses override.
+
+## Numbers, rounding and text
+
+These rules follow FEEL, so a rule gives the same result in this engine and in any DMN engine (ADR-0019). A test checks this on every change: generated expressions are evaluated here and, translated to FEEL, by a reference FEEL implementation, which runs in tests only and never ships.
+
+| Topic | Rule | Example |
+|---|---|---|
+| Numbers | `integer` and `decimal` are one number type, exact decimal with 34 significant digits (IEEE 754 `decimal128`), rounded half-even past that. Never binary floating point | `7 / 2` is `3.5`; `0.1 + 0.2 == 0.3` is `true` |
+| Division by zero | An evaluation error. FEEL gives `null`; a v1 rule set runs in strict error mode, so the decision fails instead | `1 / 0` fails with `EVALUATION_ERROR` |
+| Rounding | `round(x, scale)` rounds half-even (to the nearest, ties to the even digit), as FEEL `decimal(x, scale)` and `round half even(x, scale)`. The scale is a whole number from -34 to 34; a negative scale rounds left of the point | `round(2.5, 0)` is `2`; `round(3.5, 0)` is `4`; `round(12.345, 2)` is `12.34`; `round(1250, -2)` is `1200` |
+| Money rounding | Money keeps its own rule: `money * number` and `money / number` round to the currency's scale with the rule set's `moneyRounding` (default half-even) | `12.50 USD * 0.015` is `0.19 USD` |
+| Text order | `<`, `>`, `min` and `max` compare strings by Unicode code point, never by locale or by UTF-16 unit. No Unicode normalisation is applied | `'GOLD' < 'SILVER'` is `true`; `'Z' < 'a'` is `true` |
+| Days | `daysBetween(d1, d2)` counts calendar days from `d1` to `d2`, negative when `d2` is earlier; FEEL `(d2 - d1).days` | `daysBetween(date('2027-01-01'), date('2027-03-01'))` is `59` |
+
+### Regular expressions
+
+`matches(s, 'pattern')` is an unanchored search, as FEEL `matches`: the pattern may occur anywhere in the text. Write `^` and `$` to anchor it. `matches('ab12', '[0-9]+')` is `true`; `matches('AB', '^a')` is `false`.
+
+- The pattern is a string literal, checked when the rule set is imported, so a bad pattern never reaches a decision. In a pattern, write a backslash as `\\`: `matches(code, '\\d{3}')`.
+- The dialect is the part of the XPath regular expressions of FEEL that every engine reads the same way. Refused at import: back-references (`\\1`), look-ahead and look-behind (`(?=`, `(?<=`), inline flags (`(?i)`), possessive quantifiers (`a++`), character class intersection or nesting (`[a-z&&[^b]]`), Unicode block names (`\\p{IsBasicLatin}`; general categories such as `\\p{L}` are allowed) and escapes that XPath does not have (`\\b`, `\\Q`). Non-capturing groups `(?:...)` are allowed.
+- A search stops with `EVALUATION_ERROR` after it has read one million characters, so a pattern that backtracks without end fails the same way on every replica instead of holding a thread. A time limit (`evaluation.regex-timeout-ms`) is planned on top of this budget.
+
+### Money is a HORUS extension
+
+FEEL has no money type. Money values carry their currency, and an operation never mixes currencies:
+
+| Case | Result |
+|---|---|
+| Two money literals of different currencies in one cell, such as `x + 5 USD >= 50000000 VND` or `in [5 USD, 10 VND]` | Refused at import: `422 VALIDATION_FAILED` naming the rule and column |
+| `balance >= 50000000 VND` evaluated with `balance` = 3,000.00 USD | `EVALUATION_ERROR` (`422` over REST), no partial outputs, logged with outcome `EVALUATION_ERROR` |
+
+Exported to DMN, money is written with the HORUS function `money(amount, 'CUR')`, which other DMN engines do not know.
 
 ## Null values
 
@@ -47,13 +79,16 @@ A missing input or a `null` value follows FEEL, the DMN expression language, so 
 | Expression with `tier = null` and `income = null` | Result | Matches |
 |---|---|---|
 | `income < 5000000 VND`, `income between 1 VND and 9 VND` | `null` | No |
+| `txCount between 1 and limit` with `txCount = 5`, `limit = null` | `null` (`true and null`) | No |
+| `txCount between 1 and limit` with `txCount = 0`, `limit = null` | `false` (`false and null`) | No |
 | `tier == 'GOLD'` | `false` | No |
 | `tier != 'GOLD'` | `true` | Yes |
 | `tier in ['GOLD', 'PLATINUM']` | `false` | No |
 | `tier not in ['GOLD', 'PLATINUM']` | `true` | Yes |
+| `tier in ['GOLD', null]` | `true` (an element equals the missing value) | Yes |
 | `tier is null` | `true` | Yes |
 | `not(income < 5000000 VND)` | `null` | No |
-| `income + 1 VND > 0 VND`, `len(tier) > 3` (arithmetic and functions give `null`) | `null` | No |
+| `income + 1 VND > 0 VND`, `matches(tier, '^G')`, `round(score, 0) > 3` with `score = null` (arithmetic and functions give `null`) | `null` | No |
 | `coalesce(tier, 'STANDARD') == 'STANDARD'` | `true` | Yes |
 
 `and` and `or` with `null`:
@@ -87,6 +122,8 @@ A `when` entry is a boolean expression. A `then` entry is an expression whose ty
 | Date | `daysBetween(d1, d2)`, `monthsBetween(d1, d2)`, `addDays(d, n)`, `yearOf(d)`, `monthOf(d)` |
 | Money | `amount(m)`, `currency(m)`, `money(amount, 'VND')` |
 
+In 0.2.0 the engine evaluates `round`, `daysBetween` and `matches`; the other functions are planned. An unknown function is refused at import.
+
 Hosts register additional functions through the `RuleFunctionRegistry` SPI. A registered function must be deterministic and side-effect free. The cockpit lists registered functions with their signatures.
 
 ## Errors
@@ -94,7 +131,8 @@ Hosts register additional functions through the `RuleFunctionRegistry` SPI. A re
 | When | Condition | Result |
 |---|---|---|
 | Publication | Syntax error, unknown identifier, type mismatch, unknown function | `422 VALIDATION_FAILED` with the row id; the version stays a draft |
-| Evaluation | Currency mismatch, division by zero, regex timeout | The decision fails with `EVALUATION_ERROR` (`422` over REST), returns no partial outputs, and is logged with that outcome |
+| Publication | Two money literals of different currencies in one cell; a regular expression outside the dialect; a function argument of the wrong type | `422 VALIDATION_FAILED` with the row id |
+| Evaluation | Currency mismatch, division by zero, a regular expression past its step budget | The decision fails with `EVALUATION_ERROR` (`422` over REST), returns no partial outputs, and is logged with that outcome |
 
 Error codes and HTTP mapping are owned by [[Rule Engine Decision API]].
 
@@ -109,7 +147,8 @@ cmp      := sum (('=='|'!='|'<'|'<='|'>'|'>=') sum | 'in' list | 'not' 'in' list
 sum      := term (('+'|'-') term)*
 term     := unary (('*'|'/') unary)*
 unary    := '-' unary | primary
-primary  := literal | ident | ident '(' args ')' | '(' expr ')' | money
+primary  := literal | ident | call | '(' expr ')' | money
+call     := ('round' | 'daysBetween') '(' expr ',' expr ')' | 'matches' '(' expr ',' string ')'
 ```
 
 Examples of use are in [[Rule Engine Authoring Decision Tables]].

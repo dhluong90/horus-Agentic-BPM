@@ -221,7 +221,22 @@ class NormalFormTest {
         assertThat(sha).isEqualTo(GOLDEN_V1_SHA256);
     }
 
-    static final String GOLDEN_V1_SHA256 = "dc44beae55cd278fe820d7c9e22def959b854655946bbfa4711387ca6f7eb40f";
+    static final String GOLDEN_V1_SHA256 = "83b06c4b455b26c711bd156afe5be524f237fedee4f1c7400c65df5e834cb7e0";
+
+    @Test
+    void RLE_045_the_golden_lines_of_0_1_0_are_an_unchanged_prefix() throws Exception {
+        // A later release may append golden lines for a new production (0.2.0: function calls, #19); it may never
+        // change a line that 0.1.0 shipped. The first GOLDEN_0_1_0_LENGTH bytes are the 0.1.0 file, byte for byte.
+        byte[] golden = DmnRuleSetTest.resource("/rules/normal-form.v1.txt");
+        byte[] prefix = java.util.Arrays.copyOf(golden, GOLDEN_0_1_0_LENGTH);
+        String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(prefix));
+        assertThat(sha).isEqualTo(GOLDEN_0_1_0_SHA256);
+    }
+
+    /** The golden file as 0.1.0 shipped it: its length and SHA-256, the pin of that release. */
+    static final int GOLDEN_0_1_0_LENGTH = 4003;
+
+    static final String GOLDEN_0_1_0_SHA256 = "dc44beae55cd278fe820d7c9e22def959b854655946bbfa4711387ca6f7eb40f";
 
     // ------------------------------------------------------------------ helpers
 
