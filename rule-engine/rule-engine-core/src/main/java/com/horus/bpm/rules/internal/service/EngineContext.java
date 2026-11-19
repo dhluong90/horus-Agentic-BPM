@@ -9,7 +9,6 @@ import com.horus.bpm.rules.internal.store.TransactionRunner;
 import com.horus.bpm.rules.spi.CallerResolver;
 import com.horus.bpm.rules.spi.TenantResolver;
 import java.time.Clock;
-import java.time.Duration;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -22,11 +21,11 @@ import java.util.function.Supplier;
  * @param clock the host clock
  * @param transactions joins or opens a transaction
  * @param idempotency idempotency records
- * @param idempotencyTtl how long a key is remembered
+ * @param settings validated engine settings
  */
 public record EngineContext(
         TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
-        IdempotencyStore idempotency, Duration idempotencyTtl) {
+        IdempotencyStore idempotency, EngineSettings settings) {
 
     /** Longest idempotency key accepted. */
     static final int MAX_KEY_LENGTH = 200;
@@ -37,7 +36,7 @@ public record EngineContext(
         Objects.requireNonNull(clock, "clock must not be null");
         Objects.requireNonNull(transactions, "transactions must not be null");
         Objects.requireNonNull(idempotency, "idempotency must not be null");
-        Objects.requireNonNull(idempotencyTtl, "idempotencyTtl must not be null");
+        Objects.requireNonNull(settings, "settings must not be null");
     }
 
     String tenant() {
@@ -76,7 +75,7 @@ public record EngineContext(
                 case IdempotencyStore.Fresh ignored -> {
                     T result = action.get();
                     idempotency.record(tenant, operation, key, requestHash, statusCode, toJson.apply(result),
-                            now.plus(idempotencyTtl));
+                            now.plus(settings.idempotencyRetention()));
                     yield result;
                 }
             };

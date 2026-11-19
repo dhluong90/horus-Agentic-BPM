@@ -29,12 +29,9 @@ import tools.jackson.databind.node.ArrayNode;
 /**
  * Evaluates the effective version and logs one decision row in the caller's transaction (RLE-013).
  * Compiled versions are cached by version id: a stored version never changes, so the cache needs no
- * invalidation. Thread-safe.
+ * invalidation. Its size is bounded by {@code cache.max-entries}; a full cache is cleared. Thread-safe.
  */
 public final class DefaultRuleEngine implements RuleEngine {
-
-    /** Bound of the compiled cache; cleared when full. */
-    static final int MAX_CACHED = 1000;
 
     private final EngineContext context;
     private final RuleStore store;
@@ -102,7 +99,7 @@ public final class DefaultRuleEngine implements RuleEngine {
         if (cached != null) {
             return cached;
         }
-        if (compiled.size() >= MAX_CACHED) {
+        if (compiled.size() >= context.settings().cacheMaxEntries()) {
             compiled.clear();
         }
         CompiledRuleSet fresh = CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()));

@@ -44,9 +44,9 @@ class RuleEngineServicesConfiguration {
     @Bean
     @ConditionalOnMissingBean
     RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
-            CallerResolver callers, ObjectProvider<Clock> clock) {
+            CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties) {
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock));
+                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings());
     }
 
     @Bean

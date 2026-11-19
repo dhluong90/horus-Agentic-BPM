@@ -160,7 +160,15 @@ public final class RuleSetReader {
                 throw invalid("Duplicate output '" + outputName + "'");
             }
             Cell defaultValue = output.has("default") ? cell(output.get("default"), outputName) : null;
-            outputs.add(new OutputClause(outputName, type(output, outputName), defaultValue));
+            OutputClause.Aggregate aggregate = switch (output.has("collect") ? text(output, "collect") : "none") {
+                case "none" -> OutputClause.Aggregate.NONE;
+                case "sum" -> OutputClause.Aggregate.SUM;
+                case "min" -> OutputClause.Aggregate.MIN;
+                case "max" -> OutputClause.Aggregate.MAX;
+                case "count" -> OutputClause.Aggregate.COUNT;
+                default -> throw invalid("Output '" + outputName + "': collect must be sum, min, max or count");
+            };
+            outputs.add(new OutputClause(outputName, type(output, outputName), defaultValue, aggregate));
         }
         List<Rule> rules = new ArrayList<>();
         Set<String> ruleIds = new HashSet<>();

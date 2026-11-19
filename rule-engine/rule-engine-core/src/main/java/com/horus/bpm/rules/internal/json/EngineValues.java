@@ -246,7 +246,7 @@ public final class EngineValues {
             }
             case DecisionResult.Failed failed -> {
                 node.put("outcome", "FAILED");
-                node.set("matchedRuleIds", EngineJson.NODES.arrayNode());
+                node.set("matchedRuleIds", value(failed.matchedRuleIds()));
                 node.putObject("outputs");
                 node.putObject("error").put("code", failed.code()).put("detail", failed.detail());
             }
@@ -271,8 +271,12 @@ public final class EngineValues {
                 yield new DecisionResult.Matched(ids, outputs);
             }
             case "NO_MATCH" -> new DecisionResult.NoMatch();
-            default -> new DecisionResult.Failed(node.get("error").get("code").stringValue(),
-                    node.get("error").get("detail").stringValue());
+            default -> {
+                List<String> ids = new ArrayList<>();
+                node.get("matchedRuleIds").forEach(id -> ids.add(id.stringValue()));
+                yield new DecisionResult.Failed(node.get("error").get("code").stringValue(),
+                        node.get("error").get("detail").stringValue(), ids);
+            }
         };
         return new DecisionResult(node.get("decisionId").stringValue(), node.get("ruleSet").stringValue(),
                 node.get("version").asInt(), Instant.parse(node.get("evaluatedAt").stringValue()), outcome);

@@ -14,7 +14,6 @@ import com.horus.bpm.rules.api.NoEffectiveVersionException;
 import com.horus.bpm.rules.api.RuleSetNotFoundException;
 import com.horus.bpm.rules.api.WriteOptions;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Map;
@@ -26,7 +25,7 @@ class RuleEngineServiceTest {
     final TestCaller caller = new TestCaller("bank-a", "alice");
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, Duration.ofHours(24)),
+                    stores, stores, EngineSettings.defaults()),
             stores, stores, stores);
 
     void publishCardFee() {

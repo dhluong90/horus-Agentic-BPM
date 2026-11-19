@@ -14,6 +14,7 @@ import com.horus.bpm.rules.api.RuleSetVersion;
 import com.horus.bpm.rules.api.SelfApprovalForbiddenException;
 import com.horus.bpm.rules.api.VersionStatus;
 import com.horus.bpm.rules.api.WriteOptions;
+import com.horus.bpm.rules.internal.service.EngineSettings;
 import com.horus.bpm.rules.internal.service.RuleEngines;
 import com.horus.bpm.rules.spi.CallerResolver;
 import com.horus.bpm.rules.spi.TenantResolver;
@@ -76,7 +77,8 @@ class RuleEnginePostgresIT {
         RuleEngineTransactions transactions = new RuleEngineTransactions(transactionManager);
         new DecisionLogPartitions(db, transactions).ensureCurrentAndNextMonth(NOW);
         host = new TransactionTemplate(transactionManager);
-        engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC));
+        engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
+                EngineSettings.defaults());
     }
 
     @Test

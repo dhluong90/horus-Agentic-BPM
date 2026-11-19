@@ -67,8 +67,8 @@ public final class CompiledRuleSet {
      */
     public static CompiledRuleSet compile(Definitions model) {
         DecisionTable table = model.decision().table();
-        if (table.hitPolicy() != HitPolicy.FIRST) {
-            throw new ValidationFailedException("Hit policy " + table.hitPolicy() + " is not available in this release");
+        for (OutputClause output : table.outputs()) {
+            checkOutput(table.hitPolicy(), output);
         }
         Map<String, Integer> slots = new HashMap<>();
         for (int i = 0; i < table.inputs().size(); i++) {
@@ -129,20 +129,84 @@ public final class CompiledRuleSet {
     public DecisionResult.Outcome evaluate(DecisionInput input) {
         Object[] slots = bind(input);
         try {
-            for (CompiledRule rule : rules) {
-                if (evaluator.matches(rule.condition(), slots)) {
-                    Map<String, Object> values = new LinkedHashMap<>();
-                    for (int i = 0; i < outputs.size(); i++) {
-                        OutputClause output = outputs.get(i);
-                        values.put(output.name(), output(output, evaluator.evaluate(rule.thens().get(i), slots), rule.id()));
-                    }
-                    return new DecisionResult.Matched(List.of(rule.id()), values);
-                }
-            }
-            return new DecisionResult.NoMatch();
+            return switch (hitPolicy) {
+                case FIRST -> first(slots);
+                case UNIQUE -> unique(slots);
+                case COLLECT -> collect(slots);
+            };
         } catch (EvaluationException e) {
             return new DecisionResult.Failed("EVALUATION_ERROR", e.getMessage());
         }
+    }
+
+    private DecisionResult.Outcome first(Object[] slots) {
+        for (CompiledRule rule : rules) {
+            if (evaluator.matches(rule.condition(), slots)) {
+                return new DecisionResult.Matched(List.of(rule.id()), rowOutputs(rule, slots));
+            }
+        }
+        return new DecisionResult.NoMatch();
+    }
+
+    /** Exactly one rule must match; zero or several is {@code UNIQUE_HIT_VIOLATION} with no outputs (RLE-002). */
+    private DecisionResult.Outcome unique(Object[] slots) {
+        List<CompiledRule> matched = matching(slots);
+        if (matched.size() != 1) {
+            List<String> ids = matched.stream().map(CompiledRule::id).toList();
+            String detail = matched.isEmpty()
+                    ? "No rule matched; a unique table must match exactly one rule"
+                    : matched.size() + " rules matched " + ids + "; a unique table must match exactly one rule";
+            return new DecisionResult.Failed("UNIQUE_HIT_VIOLATION", detail, ids);
+        }
+        CompiledRule rule = matched.getFirst();
+        return new DecisionResult.Matched(List.of(rule.id()), rowOutputs(rule, slots));
+    }
+
+    /** Every matching rule contributes: a list in rule order, or the output's aggregate (RLE-003). */
+    private DecisionResult.Outcome collect(Object[] slots) {
+        List<CompiledRule> matched = matching(slots);
+        if (matched.isEmpty()) {
+            return new DecisionResult.NoMatch();
+        }
+        Map<String, Object> values = new LinkedHashMap<>();
+        for (int i = 0; i < outputs.size(); i++) {
+            OutputClause output = outputs.get(i);
+            ValueType element = new ValueType(output.type().kind(), false);
+            List<Object> column = new ArrayList<>();
+            for (CompiledRule rule : matched) {
+                Object value = evaluator.evaluate(rule.thens().get(i), slots);
+                if (value != null) {
+                    column.add(output.aggregate() == OutputClause.Aggregate.COUNT
+                            ? value : checkType(output.name(), element, value, rule.id()));
+                }
+            }
+            values.put(output.name(), Aggregates.apply(output.aggregate(), column, output.name()));
+        }
+        return new DecisionResult.Matched(matched.stream().map(CompiledRule::id).toList(), values);
+    }
+
+    private List<CompiledRule> matching(Object[] slots) {
+        List<CompiledRule> matched = new ArrayList<>();
+        for (CompiledRule rule : rules) {
+            if (evaluator.matches(rule.condition(), slots)) {
+                matched.add(rule);
+            }
+        }
+        return matched;
+    }
+
+    private Map<String, Object> rowOutputs(CompiledRule rule, Object[] slots) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        for (int i = 0; i < outputs.size(); i++) {
+            OutputClause output = outputs.get(i);
+            Object value = evaluator.evaluate(rule.thens().get(i), slots);
+            if (output.type().list()) {
+                throw new EvaluationException("Rule " + rule.id() + ": list output " + output.name()
+                        + " is available under the collect hit policy only");
+            }
+            values.put(output.name(), value == null ? null : checkType(output.name(), output.type(), value, rule.id()));
+        }
+        return values;
     }
 
     /**
@@ -160,11 +224,8 @@ public final class CompiledRuleSet {
         return slots;
     }
 
-    private static Object output(OutputClause output, Object value, String ruleId) {
-        if (value == null) {
-            return null;
-        }
-        boolean ok = switch (output.type().kind()) {
+    private static Object checkType(String name, ValueType type, Object value, String ruleId) {
+        boolean ok = switch (type.kind()) {
             case STRING -> value instanceof String;
             case INTEGER -> value instanceof BigDecimal number && isIntegral(number);
             case DECIMAL -> value instanceof BigDecimal;
@@ -173,10 +234,37 @@ public final class CompiledRuleSet {
             case DATE -> value instanceof LocalDate;
             case DATETIME -> value instanceof Instant;
         };
-        if (output.type().list() || !ok) {
-            throw new EvaluationException("Rule " + ruleId + ": output " + output.name() + " is not of type " + output.type());
+        if (type.list() || !ok) {
+            throw new EvaluationException("Rule " + ruleId + ": output " + name + " is not of type " + type);
         }
         return value;
+    }
+
+    /** Publish-time checks of an output against the hit policy and its aggregate. */
+    private static void checkOutput(HitPolicy policy, OutputClause output) {
+        OutputClause.Aggregate aggregate = output.aggregate();
+        ValueType type = output.type();
+        if (policy != HitPolicy.COLLECT) {
+            if (aggregate != OutputClause.Aggregate.NONE) {
+                throw new ValidationFailedException("Output " + output.name() + ": collect is allowed only with hitPolicy collect");
+            }
+            if (type.list()) {
+                throw new ValidationFailedException("Output " + output.name() + ": a list output needs hitPolicy collect");
+            }
+            return;
+        }
+        boolean ok = switch (aggregate) {
+            case NONE -> type.list();
+            case SUM -> !type.list() && (type.kind() == ValueType.Kind.INTEGER || type.kind() == ValueType.Kind.DECIMAL
+                    || type.kind() == ValueType.Kind.MONEY);
+            case MIN, MAX -> !type.list() && type.kind() != ValueType.Kind.BOOLEAN;
+            case COUNT -> !type.list() && type.kind() == ValueType.Kind.INTEGER;
+        };
+        if (!ok) {
+            throw new ValidationFailedException("Output " + output.name() + ": type " + type + " does not fit "
+                    + (aggregate == OutputClause.Aggregate.NONE ? "a collected list; declare list<T>"
+                    : "collect: " + aggregate.name().toLowerCase(java.util.Locale.ROOT)));
+        }
     }
 
     private static Object normalize(Object value, ValueType type, String name) {
