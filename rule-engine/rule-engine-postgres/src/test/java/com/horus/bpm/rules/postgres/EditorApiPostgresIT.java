@@ -187,6 +187,47 @@ class EditorApiPostgresIT {
                 .isEqualTo(approved.canonicalHash());
     }
 
+    /** V3 backfills one CREATED row per version that existed before it, so their history starts at creation. */
+    @Test
+    void RLE_025_versions_created_before_the_history_table_get_their_created_row() {
+        // Given a database at V2 with card-fee v1 by lan (published) and v2 written before authors were recorded
+        DataSource db = freshDatabase();
+        org.flywaydb.core.Flyway.configure().dataSource(db).table("rle_schema_history")
+                .locations(RuleEngineSchemaMigrator.MIGRATION_LOCATION).baselineOnMigrate(true).baselineVersion("0")
+                .target("2").load().migrate();
+        JdbcClient old = JdbcClient.create(db);
+        old.sql("INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES "
+                + "('bank-a', '01KD00000000000000000RS001', 'card-fee', '2026-11-01T00:00:00Z')").update();
+        String insert = """
+                INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy, canonical_json,
+                  canonical_hash, source_format, source_document, source_hash, lock_version, requested_by, approved_by,
+                  created_by, created_at)
+                VALUES ('bank-a', :id, '01KD00000000000000000RS001', :num, :status, 'FIRST', '{}', :hash, 'YAML', '',
+                  :hash, :lock, :requestedBy, :approvedBy, :createdBy, CAST(:at AS timestamptz))
+                """;
+        String hash = "0".repeat(64);
+        old.sql(insert).param("id", "01KD00000000000000000VS001").param("num", 1).param("status", "PUBLISHED")
+                .param("hash", hash).param("lock", 2).param("requestedBy", "lan").param("approvedBy", "minh")
+                .param("createdBy", "lan").param("at", "2026-11-01T00:00:00Z").update();
+        old.sql(insert).param("id", "01KD00000000000000000VS002").param("num", 2).param("status", "DRAFT")
+                .param("hash", hash).param("lock", 0).param("requestedBy", null).param("approvedBy", null)
+                .param("createdBy", null).param("at", "2026-11-05T00:00:00Z").update();
+
+        // When V3 runs
+        new RuleEngineSchemaMigrator(db).migrate();
+
+        // Then each version has exactly one CREATED row: actor the author, or system when none was recorded
+        assertThat(old.sql("""
+                SELECT string_agg(version_id || ' ' || action || ' ' || to_status || ' ' || actor || ' ' || lock_version
+                  || ' ' || to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), ', ' ORDER BY version_id)
+                FROM rle_version_history WHERE tenant_id = 'bank-a'
+                """).query(String.class).single()).isEqualTo(
+                "01KD00000000000000000VS001 CREATED DRAFT lan 0 2026-11-01, "
+                        + "01KD00000000000000000VS002 CREATED DRAFT system 0 2026-11-05");
+        assertThat(old.sql("SELECT count(*) FROM rle_version_history WHERE from_status IS NOT NULL")
+                .query(Long.class).single()).isZero();
+    }
+
     @Test
     void RLE_042_money_output_without_currency_is_refused_at_import() {
         caller.as("bank-a", "lan");
