@@ -20,7 +20,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -54,8 +53,16 @@ class RuleLifecycleFailurePathsIT {
     }
 
     @Container
-    @ServiceConnection
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES =
+            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+
+    // Plain properties, not @ServiceConnection: the same test runs on both Spring Boot lines (TR-EMB-02).
+    @org.springframework.test.context.DynamicPropertySource
+    static void database(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.username", POSTGRES::getUsername);
+        registry.add("spring.datasource.password", POSTGRES::getPassword);
+    }
 
     @Autowired
     Environment environment;

@@ -42,7 +42,8 @@ class RuleSetReaderAcceptanceTest {
         assertThat(parsed.canonicalHash()).isEqualTo(Hashes.sha256(parsed.canonicalJson()));
     }
 
-    @ParameterizedTest(name = "{0}")
+    // "[{index}] {0}": the empty document would give a blank name, which JUnit 5 (the Spring Boot 3.5 leg) refuses.
+    @ParameterizedTest(name = "[{index}] {0}")
     @ValueSource(strings = {
         "schemaVersion: 1\nruleSet: probe\n  hitPolicy: first\n",                 // bad indentation
         "schemaVersion: 1\nruleSet: [probe\n",                                     // unclosed flow sequence

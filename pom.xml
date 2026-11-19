@@ -512,6 +512,11 @@
             <artifactId>jackson-core</artifactId>
             <version>${jackson-3.version}</version>
           </dependency>
+          <dependency>
+            <groupId>tools.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
+            <version>${jackson-3.version}</version>
+          </dependency>
         </dependencies>
       </dependencyManagement>
     </profile>
