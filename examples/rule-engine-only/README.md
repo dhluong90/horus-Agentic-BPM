@@ -255,12 +255,12 @@ public Money cardFee(String tier, int txCount) {
 
 ## Demo: a fee change on a date, replay and the bank's time zone
 
-`card-fee` v1 charges a default of 50,000 VND. [`rules/card-fee-december.yaml`](src/main/resources/rules/card-fee-december.yaml) is the same table with a default of 30,000 VND and `effectiveFrom: "2026-12-01T00:00:00Z"`, so it is approved now and takes over on that instant. Choosing the evaluation clock needs `rules:simulate`, pinning a version needs `rules:pin`, and replay needs `rules:log:read`; the demo roles hold none of them by default. `rules:pin` is meant for a service identity only, because a pin bypasses the version in force, so grant it on the command line for this demo and never to a person's role in a real host. Start the host with two extra mappings, then run steps 1 to 4 of the demo above for v1:
+`card-fee` v1 charges a default of 50,000 VND. [`rules/card-fee-december.yaml`](src/main/resources/rules/card-fee-december.yaml) is the same table with a default of 30,000 VND and `effectiveFrom: "2026-12-01T00:00:00Z"`, so it is approved now and takes over on that instant. Choosing the evaluation clock needs `rules:simulate` and replay needs `rules:log:read`, which the demo roles do not hold by default. Start the host with two extra mappings, then run steps 1 to 4 of the demo above for v1:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
   java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar \
-  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate,rules:simulate,rules:pin' \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate,rules:simulate' \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:log:read'
 H=localhost:8080/api/bpm/rules/v1
 R=examples/rule-engine-only/src/main/resources/rules
@@ -303,7 +303,7 @@ R=examples/rule-engine-only/src/main/resources/rules
    #  1 | 2026-11-20 10:00:00+00 | 2026-11-19 15:25:08.804765+00 | ["R3"]
    ```
 
-   Pinning gives the same answer as a new logged decision: `POST $H/decisions/card-fee/versions/1:evaluate` with the same body. Without `rules:pin` it is `403 PERMISSION_DENIED`, and a retired version is refused unless `horus.bpm.rules.evaluation.pin-retired` is `true`. A pinned draft is `409 INVALID_STATE`. Tuan's replay is `403 PERMISSION_DENIED`, and an unknown id, or one of another tenant, is `404 DECISION_NOT_FOUND`.
+   Pinning, `POST $H/decisions/card-fee/versions/1:evaluate` with the same body, gives the same answer as a new logged decision. It needs `rules:pin`, which this host grants to nobody, because a pin bypasses the version in force; the [rule-and-process example](../rule-and-process) grants it only to the Process Engine's service identity, and `EffectiveDatesAndReplayIT` runs the call as one. Hoa's pin is `403 PERMISSION_DENIED`. A retired version is refused unless `horus.bpm.rules.evaluation.pin-retired` is `true`. A pinned draft is `409 INVALID_STATE`. Tuan's replay is `403 PERMISSION_DENIED`, and an unknown id, or one of another tenant, is `404 DECISION_NOT_FOUND`.
 
 4. [`rules/same-day-cutoff.yaml`](src/main/resources/rules/same-day-cutoff.yaml) declares `timeZone: Asia/Ho_Chi_Minh`. At `2027-01-15T18:30:00Z` it is 01:30 on 16 January in Ho Chi Minh City, so a transfer dated 16 January is same-day and one dated 15 January is not. In UTC it would be the other way round. Import, request and approve it as above, then:
 

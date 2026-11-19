@@ -478,8 +478,8 @@ paths:
       summary: Evaluate one approved version, at the host clock or a chosen clock, and log one decision
       description: |
         Pins the version instead of selecting it, for example to show what version 1 gave on a past
-        date. A pin bypasses the selection of the version in force, so it needs `rules:pin` beside
-        `rules:evaluate` (`403 PERMISSION_DENIED`); no role holds `rules:pin` by default. Setting `clock`
+        date. A pin bypasses the selection of the version in force, so its permission is `rules:pin`
+        (`403 PERMISSION_DENIED`), not `rules:evaluate`; no role holds `rules:pin` by default. Setting `clock`
         also needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`). The version must be `PUBLISHED`; a
         `RETIRED` version is `409 INVALID_STATE` unless the host sets
         `horus.bpm.rules.evaluation.pin-retired: true` (replay of its logged decisions is not

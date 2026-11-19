@@ -75,7 +75,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | Method and path | Purpose | Permission | Headers |
 |---|---|---|---|
 | `POST /decisions/{ruleSet}:evaluate` | Evaluate the effective version at `clock` (default now) | `rules:evaluate`; `rules:simulate` when `clock` is set | `Idempotency-Key` optional |
-| `POST /decisions/{ruleSet}/versions/{v}:evaluate` | Evaluate one published version at the host clock or `clock`, instead of the version in force; a `RETIRED` version only with `evaluation.pin-retired: true`; a draft is `409 INVALID_STATE` and is simulated with `:simulate` instead | `rules:evaluate` and `rules:pin` (held by no role by default); `rules:simulate` when `clock` is set | `Idempotency-Key` optional |
+| `POST /decisions/{ruleSet}/versions/{v}:evaluate` | Evaluate one published version at the host clock or `clock`, instead of the version in force; a `RETIRED` version only with `evaluation.pin-retired: true`; a draft is `409 INVALID_STATE` and is simulated with `:simulate` instead | `rules:pin` (held by no role by default); `rules:simulate` when `clock` is set | `Idempotency-Key` optional |
 | `POST /decisions/{decisionId}:replay` | Evaluate a logged decision again with its version, inputs and clock; writes nothing. `404 DECISION_NOT_FOUND` for another tenant's id; `422 REPLAY_NOT_POSSIBLE` when a masked input had a value | `rules:log:read` | none |
 | `POST /decisions/{ruleSet}:evaluate-batch` | Up to 1 000 input sets; one decision row each; partial failures reported per item | `rules:evaluate` | `Idempotency-Key` optional |
 | `GET /rule-sets` | List rule sets with effective version and pending approvals | `rules:read` | cursor pagination |

@@ -60,12 +60,12 @@ public class DecisionController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId)
             throws IOException {
-        return evaluate(ruleSet, null, requestBody, contentLength, idempotencyKey, correlationId);
+        return evaluate(ruleSet, null, "rules:evaluate", requestBody, contentLength, idempotencyKey, correlationId);
     }
 
     /**
      * {@code POST /decisions/{ruleSet}/versions/{v}:evaluate}: one approved version, at {@code clock} or the host
-     * clock. A draft is {@code 409 INVALID_STATE}; it is simulated instead, which writes no decision row.
+     * clock. Needs {@code rules:pin}, checked before the body is read. A draft is {@code 409 INVALID_STATE}; it is simulated instead, which writes no decision row.
      */
     @PostMapping("/{ruleSet}/versions/{version:\\d+}:evaluate")
     public ResponseEntity<byte[]> evaluateVersion(
@@ -79,7 +79,7 @@ public class DecisionController {
         if (version < 1) {
             throw new InputInvalidException("version must be at least 1");
         }
-        return evaluate(ruleSet, version, requestBody, contentLength, idempotencyKey, correlationId);
+        return evaluate(ruleSet, version, "rules:pin", requestBody, contentLength, idempotencyKey, correlationId);
     }
 
     /**
@@ -94,9 +94,9 @@ public class DecisionController {
         return answer(engine.replay(decisionId), ProblemDetails.correlationId(correlationId));
     }
 
-    private ResponseEntity<byte[]> evaluate(String ruleSet, Integer version, InputStream requestBody,
+    private ResponseEntity<byte[]> evaluate(String ruleSet, Integer version, String permission, InputStream requestBody,
             Long contentLength, String idempotencyKey, String correlationId) throws IOException {
-        RestSupport.require(callers, "rules:evaluate");
+        RestSupport.require(callers, permission);
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.EVALUATE_BODY_MAX_BYTES);
         String correlation = ProblemDetails.correlationId(correlationId);
         JsonNode request = EngineValues.readRequest(body);

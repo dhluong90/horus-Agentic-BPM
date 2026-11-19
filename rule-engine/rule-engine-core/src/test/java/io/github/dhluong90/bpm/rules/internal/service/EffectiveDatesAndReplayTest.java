@@ -327,6 +327,11 @@ class EffectiveDatesAndReplayTest {
         // and the same callers still evaluate the version in force
         clock.set(DEC_05);
         assertThat(engine.evaluate(DecisionRequest.of("card-fee", STANDARD)).version()).isEqualTo(2);
+        // and rules:pin alone is the permission of a pinned evaluation, as a service identity holds it
+        caller.become("bank-a", "process-engine", Set.of("rules:pin"));
+        assertThat(engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1)).version()).isEqualTo(1);
+        assertThatThrownBy(() -> engine.evaluate(DecisionRequest.of("card-fee", STANDARD)))
+                .isInstanceOf(PermissionDeniedException.class).hasMessageContaining("rules:evaluate");
     }
 
     @Test

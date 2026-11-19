@@ -81,10 +81,8 @@ public final class DefaultRuleEngine implements RuleEngine {
     public DecisionResult evaluate(DecisionRequest request) {
         Objects.requireNonNull(request, "request must not be null");
         String tenant = context.tenant();
-        String caller = context.callerWith(PERMISSION_EVALUATE);
-        if (request.version() != null && !context.holds(PERMISSION_PIN)) {
-            throw new io.github.dhluong90.bpm.rules.api.PermissionDeniedException(PERMISSION_PIN);
-        }
+        // A pinned evaluation is its own permission (DESIGN 4.2): rules:pin, never rules:evaluate alone.
+        String caller = context.callerWith(request.version() == null ? PERMISSION_EVALUATE : PERMISSION_PIN);
         if (request.clock() != null && !context.holds(PERMISSION_SIMULATE)) {
             // A chosen instant reaches versions and dates the caller would not get at the host clock (DESIGN 4.2).
             throw new ClockNotAllowedException();
