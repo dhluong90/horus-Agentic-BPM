@@ -196,8 +196,8 @@ Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ER
 
 | `eventType` | When | Payload |
 |---|---|---|
-| `rules.version.publish-requested.v1` | `:request-publish` | `ruleSet`, `version`, `requestedBy` |
-| `rules.version.published.v1` | `:approve` | `ruleSet`, `version`, `effectiveFrom`, `approvedBy`, `requestedBy` |
+| `rules.version.publish-requested.v1` | `:request-publish` | `ruleSet`, `version`, `canonicalHash`, `requestedBy`, `effectiveFrom` (the requested date, or null for at approval) |
+| `rules.version.published.v1` | `:approve` | `ruleSet`, `version`, `canonicalHash`, `effectiveFrom`, `requestedBy`, `approvedBy` |
 | `rules.version.rejected.v1` | `:reject` | `ruleSet`, `version`, `rejectedBy`, `reason` |
 | `rules.version.retire-requested.v1` | `:retire` in `four-eyes` mode (M3) | `ruleSet`, `version`, `requestedBy`, `reason` |
 | `rules.version.retired.v1` | `:retire` in `single` mode, `:confirm-retire`, or superseded | `ruleSet`, `version`, `retiredBy` (`system` when superseded; the confirmer in `four-eyes` mode), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the requester in `four-eyes` mode, else null), `retiredAt` |
