@@ -32,8 +32,31 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <groupId>com.horus.bpm</groupId>
+      <artifactId>rule-engine-rest</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-autoconfigure</artifactId>
+    </dependency>
+    <!-- Optional: the REST controllers are registered only in a servlet web host. -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-webmvc</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <!-- Optional: with Spring Security the caller and its rules:* permissions come from the security context. -->
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-core</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <!-- Optional: token claims (tenant_id) of an OAuth2 principal, read only when the host has OAuth2. -->
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-oauth2-core</artifactId>
+      <optional>true</optional>
     </dependency>
     <!--
       Spring Framework artifact present on both Spring Boot lines. No Boot 4-only module is a required

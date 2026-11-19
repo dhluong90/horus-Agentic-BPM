@@ -1,0 +1,24 @@
+# Monthly card fee, the rule set of the Rule Engine walking skeleton (RLE-001).
+# Keys are in author order on purpose: the canonical form sorts them, the source keeps them.
+schemaVersion: 1
+ruleSet: card-fee
+description: Monthly card fee by tier and transaction count
+hitPolicy: first            # the first matching row wins
+
+inputs:
+  - { name: tier,    type: string }
+  - { name: txCount, type: integer, description: card transactions in the month }
+
+outputs:
+  - { name: fee, type: money }
+
+rules:
+  - id: R1                  # Gold customers pay nothing
+    when: { tier: "== 'GOLD'" }
+    then: { fee: "0 VND" }
+  - id: R2                  # active cards get the reduced fee
+    when: { txCount: ">= 3" }
+    then: { fee: "10000 VND" }
+  - id: R3                  # default row, last under first
+    when: {}
+    then: { fee: "50000 VND" }
