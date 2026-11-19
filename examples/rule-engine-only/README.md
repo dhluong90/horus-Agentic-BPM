@@ -166,7 +166,7 @@ Two more rule sets ship with the example. [`loan-pricing.yaml`](src/main/resourc
 9. A customer who matches both pricing rows gets no price, only an error. The decision is still logged with both rule ids:
 
    ```bash
-   curl -s -u teller:demo-only -X POST $H/decisions/loan-pricing:evaluate -H 'Content-Type: application/json' \
+   curl -s -u tuan:demo-only -X POST $H/decisions/loan-pricing:evaluate -H 'Content-Type: application/json' \
      -d '{"inputs":{"score":750,"income":{"currency":"VND","amount":25000000}}}'
    # 422 {"code":"UNIQUE_HIT_VIOLATION","detail":"2 rules matched [R1, R2]; a unique table must match exactly one rule",
    #      "decisionId":"...","matchedRuleIds":["R1","R2"],...}
@@ -177,7 +177,7 @@ Two more rule sets ship with the example. [`loan-pricing.yaml`](src/main/resourc
 10. A card transaction with high velocity from a new device fires two flags, and their penalties add up to 15:
 
     ```bash
-    curl -s -u teller:demo-only -X POST $H/decisions/risk-flags:evaluate -H 'Content-Type: application/json' \
+    curl -s -u tuan:demo-only -X POST $H/decisions/risk-flags:evaluate -H 'Content-Type: application/json' \
       -d '{"inputs":{"txPerHour":12,"country":"VN","newDevice":true}}'
     # 200 {"outcome":"MATCHED","matchedRuleIds":["R1","R3"],"outputs":{"flags":["HIGH_VELOCITY","NEW_DEVICE"],"penalty":15},...}
     ```
