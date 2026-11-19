@@ -34,7 +34,7 @@
       <artifactId>flyway-database-postgresql</artifactId>
     </dependency>
     <dependency>
-      <groupId>com.horus.bpm</groupId>
+      <groupId>io.github.dhluong90.bpm</groupId>
       <artifactId>process-engine-bpmn</artifactId>
       <version>${project.version}</version>
       <scope>test</scope>
