@@ -70,7 +70,8 @@ The lenses that fill these tiers (canvas home with the docked decision table, ma
 
 | Tier | Purpose | Screens | Rule |
 |---|---|---|---|
-| 1. Workspace and context | Where am I, for whom, in which environment | Top bar with host (or "All hosts" for merged lists), tenant, environment banner and user; workspaces Inbox, Incidents, Processes, Rules, Approvals | A workspace the user has no permission for on any host is hidden. There is no landing strip of key figures in 0.x (PD-016 is pending); counts appear in queue headers and on diagrams, where the operator acts (PD-038) |
+| 1. Workspace and context | Where am I, for whom, in which environment | Top bar with host (or "All hosts" for merged lists), tenant, environment banner and user; workspaces Inbox, Incidents, Processes, Rules, Approvals | A workspace the user has no permission for on any host is hidden. There is no landing strip of key figures in 0.x (PD-016, decided 2026-11-19); each queue shows its own count in its header (pending approvals, open incidents, overdue tasks) and counts appear on diagrams, where the operator acts (PD-038); metrics stay in the host's monitoring through Micrometer. The KPI strip of the approved prototype is not built (CK-F-21, later) |
+| Landing area | Where the cockpit opens | Host property `horus.bpm.cockpit.landing`, published as `cockpit.landing` in `/api/bpm/meta` settings, default `by-role` (PD-078): an approver opens on Changes (pending approvals), an author on Changes filtered to their own drafts and requests, an auditor or support user on Decisions, anyone else on the rule set list; from 0.2 the process canvas only where a Process Engine host is registered. A fixed value (`changes`, `decisions`, `rule-sets`, `processes`) overrides the role rule; a deep link always wins (`CKP-031`) |
 | 2. Queues and lists | What needs attention, in order | Merged inbox by due date; merged incidents by age; definitions and instances per host; rule sets and decisions per host; pending approvals | Every list is a bounded API call with a cursor (ADR-0015); a count above 200 shows as "200+"; filters map one to one to API parameters |
 | 3. Detail and action | Do the work, see the evidence | Task form, instance diagram with tokens and activities, incident detail with retry and resolve, version diff and simulation, definition diagram and graph diff, agent task inspector, modeller (M3) | Every action shows its outcome only after the API answers `200` or `201`; nothing is marked done optimistically |
 
@@ -193,15 +194,17 @@ Both endpoints are served once per host by a small shared module that both engin
 }
 ```
 
-## 7. Tenant switching (PD-037, ADR-0014)
+## 7. Tenant resolution and switching (PD-037, PD-079, ADR-0014)
 
 | Rule | Detail |
 |---|---|
-| Source of the tenant | The resolver reads `tenant_id` from the token (claim name `tenancy.claim`, default `tenant_id`). A tenant in a request body is ignored (`TR-SEC-03`) |
+| Source of the tenant | The `TenantResolver` extension point (PD-079). Its default reads the tenant from the authenticated principal in the host's security context: the `tenancy.claim` attribute (default `tenant_id`) of a server-side session principal, when the cockpit is embedded in a bank web application with its own login, or the claim of the same name in a validated token. A host may replace the resolver with its own bean, for example one that reads its user directory. A tenant in a request body is always ignored, and nothing else the browser sends selects a tenant except the switch request below (`TR-SEC-03`, `RLE-037`) |
+| No tenant | A call whose principal yields no tenant is refused with `401 UNAUTHENTICATED`, and nothing is read or written |
 | Switching | With `horus.bpm.tenancy.switching.enabled: true` the cockpit may send `X-Tenant-Id`; the host accepts it only if the value is in the token's allowed-tenants claim (`tenancy.allowed-tenants-claim`, default `allowed_tenants`, a JSON array of strings) |
 | Refusal | A header naming a tenant outside that list, or any header that differs from the token tenant while switching is off, returns **`403 TENANT_NOT_ALLOWED`** with no data, and the host writes a security log entry `tenant.switch.refused` with user, requested tenant and `correlationId` |
 | Why 403 and not 404 | The `404` rule hides whether another tenant's resource exists. This refusal reveals only that the caller's own token lacks the tenant, which the caller already knows; a `404` would make a misconfigured identity provider look like missing data |
-| Gateway mode | `tenancy.resolver: header:X-Tenant-Id` (a trusted gateway sets the header) is a different mode and cannot be combined with switching; the starter refuses both at once |
+| No trusted-header mode | The engines ship no resolver that trusts a header set by a gateway (PD-079 option 2, rejected): a misconfigured gateway would expose one tenant's data to another tenant's operator. A host that writes such a resolver owns that risk; the documentation says so |
+| Development | In the `dev` profile only, `tenancy.dev-tenant` fixes the tenant for local work without an identity provider; start-up is refused when it is set outside `dev` (`TR-EXT-05`) |
 | One tenant per screen | The cockpit keeps one selected tenant per host; changing it reloads every open list. No screen and no API call combines tenants; merged lists merge hosts, never tenants |
 
 ![Tenant switch accepted and refused](images/tenant-switch.svg)
@@ -278,7 +281,7 @@ Source: [`diagrams/diagram-render.mmd`](diagrams/diagram-render.mmd).
 |---|---|---|
 | Process approvals | Pending definition versions from every `READY` host; graph diff (`GET .../diff`) drawn on the diagram (added, removed, changed nodes and edges marked in text and colour) and as a list; Approve disabled with a tooltip when `/me` user equals `requestedBy`; the API returns `403 SELF_APPROVAL_FORBIDDEN` regardless (CK-F-31) | M3 |
 | Content hash | Every version shows `definitionHash` and its source (`IMPORT`, `STARTUP`, `AUTHORED`, `BPMN`), so an operator can compare production with the hash a pipeline computed from Git | M2 |
-| Cockpit drafts off | When `/meta` reports `processes.authoring.cockpit-drafts: false`, the cockpit hides "New draft", "Edit" and the modeller for that host and shows "Changes to this environment arrive through your release pipeline". Approval, diff, hash and layout saving stay available | M2 (flag), M3 (screens) |
+| Cockpit drafts off | When `/meta` reports `processes.authoring.cockpit-drafts: false` (process definitions) or `rules.authoring.cockpit-drafts: false` (rule sets, from M1, PD-075; property `horus.bpm.rules.authoring.cockpit-drafts`), the cockpit hides "New draft", "Edit" and the modeller or cell editor for that host and shows "Changes to this environment arrive through your release pipeline". Approval, diff, hash and layout saving stay available | M2 (flag), M3 (screens) |
 | Modeller | The palette lists only entries of `GET /step-catalogue`; property panels are forms generated from each entry's input schema; save calls `PUT .../versions/{v}` and shows the engine's validation problems on the nodes; the result is always a draft that needs approval (CK-F-32, first M3 cut, fallback 1.1) | M3 |
 
 ## 12. State, validation, i18n and accessibility
@@ -286,6 +289,7 @@ Source: [`diagrams/diagram-render.mmd`](diagrams/diagram-render.mmd).
 - Server state with `@tanstack/react-query`, query keys `[hostId, tenantId, resource, params]`, so switching host or tenant can never show another key's data. Mutations never update the cache optimistically for approvals, task completion or incident commands.
 - Every response is validated with the generated `zod` schema; an unexpected shape is shown as an error with the `correlationId`, never rendered partially.
 - RFC 9457 bodies map to field errors (by JSON Pointer) and to banners with `code` and `correlationId`.
+- Settings that change behaviour come from the host's `/api/bpm/meta` settings, never from cockpit code: `cockpit.landing` (section 3, PD-078), `rules.authoring.cockpit-drafts` and `processes.authoring.cockpit-drafts` (section 11, PD-075, PD-036), `rules.readings.style` (`sentence` or `shorthand`, host property `horus.bpm.rules.readings.style`, PD-077) for rule readings in the change dossier and the version view, and `rules.lifecycle.retire-approval` (PD-080) for the retire dialog.
 - Every mutating request carries an `Idempotency-Key` generated per user action and reused on retry, and `If-Match` where the API uses it.
 - English and Vietnamese dictionaries with key parity checked in CI (`TR-UI-04`); keyboard navigation, visible focus and `axe-core` checks in Playwright in light and dark themes (`TR-UI-03`).
 - Visual rules come from [ux-design.md](../../docs/product/ux-design.md): one token stylesheet in `cockpit/web` holds every colour, light and dark, with the values and contrast ratios of ux-design.md section 6; feature styles use the variables only. Money colours follow the bank's fee-income view (section 5); one language at a time and readings from the engine (section 9); 44 px targets and the 1440x900 above-the-fold and 1440x1200 checks in both themes (section 8).
@@ -308,16 +312,16 @@ Source: [`diagrams/diagram-render.mmd`](diagrams/diagram-render.mmd).
 
 | Release | Scope |
 |---|---|
-| Cockpit 0.1 (M1, 15 Jan 2027) | Host registry with one host at a time, PKCE sign-in, `/meta` and `/me` gating (CK-F-23, X-F-22); rule set browser, YAML and table viewer, version diff, simulation over sample inputs, maker-checker approvals, decision log and explanation |
-| Cockpit 0.2 (M2, 26 Mar 2027) | Grid editor; definitions with diagrams and automatic layout (CK-F-24); instance diagram with tokens and activities (CK-F-25); live counts on the diagram (CK-F-26, cut candidate); merged inbox and incidents (CK-F-28, CK-F-29); task forms (CK-F-30); agent task inspector; compensation runs; SLA breach filter; tenant switcher (X-F-23); content hash and cockpit-drafts flag |
+| Cockpit 0.1 (M1, 15 Jan 2027) | Host registry with one host at a time, PKCE sign-in, `/meta` and `/me` gating (CK-F-23, X-F-22); landing area by role (PD-078); rule set browser, table viewer, import and export (`CKP-030`); minimal editing of a draft (CK-F-43, `CKP-032`, PD-075); version diff, simulation over sample inputs, maker-checker approvals, decision log and explanation |
+| Cockpit 0.2 (M2, 26 Mar 2027) | Grid editor; definitions with diagrams and automatic layout (CK-F-24); instance diagram with tokens and activities (CK-F-25); live counts on the diagram (CK-F-26, cut candidate); merged inbox and incidents (CK-F-28, CK-F-29); task forms (CK-F-30); agent task inspector; compensation runs in the instance timeline (`CKP-033`); SLA breach filter of the task queue (`CKP-034`); diagram step lists (`CKP-035`); tenant switcher (X-F-23); content hash and cockpit-drafts flag |
 | M3 (21 May 2027) | Process approvals with graph diff (CK-F-31); modeller (CK-F-32, first cut, fallback 1.1); heatmap (CK-F-27, cut candidate); migration wizard with side-by-side diagrams (CK-F-33); replay simulation (CK-F-11); business calendar editor (CK-F-18); simulation report on publication requests (CK-F-20) |
 
 ## 15. Open questions
 
 | # | Question | Recommendation | Owner and gate |
 |---|---|---|---|
-| 15.1 | Supported federation envelope (15 hosts, 2,000 operators, merged p95 300 ms) | Pending PD-046; the design above holds to that envelope | Product owner, M2 |
+| 15.1 | Supported federation envelope (15 hosts, 2,000 operators, merged p95 300 ms) | Decided (PD-046): the tested envelope, not a coded limit (`TR-UI-05`) | Closed |
 | 15.2 | Some bank identity providers do not issue refresh tokens to browser clients | Fallback: one authorization request per host with `prompt=none` through a full-page redirect on first use; document the cost (one redirect per host per session). Ask the K17 pilot candidates in M1 | Architect, M1 |
-| 15.3 | Keyboard node list and canvas exemption notice | Pending PD-048 | Product owner, M2 |
-| 15.4 | Landing strip of key figures | Pending PD-016; none in 0.x | Product owner |
+| 15.3 | Keyboard node list and canvas exemption notice | Decided (PD-048): step list and text-not-only-colour on every diagram in M2 (`CKP-035`); the M3 canvas is exempt and names the import path on screen (`CKP-036`) | Closed |
+| 15.4 | Landing strip of key figures | Decided (PD-016): none in 0.x; counts in queue headers | Closed |
 | 15.5 | Reference gateway configuration for option D | Write it with the M2 documentation | Documentation, M2 |

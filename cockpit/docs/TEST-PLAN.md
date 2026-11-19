@@ -44,6 +44,12 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-028 | `CKP_028_bundle_budget_and_lazy_diagram_chunk` | CI bundle check, Playwright throttled | M2 | `TR-UI-06` | Planned |
 | CKP-029 | `CKP_029_diagram_nodes_by_bpmn_type_unknown_rendered_generic` | Component | M2 | `TR-UI-07`, `TR-UI-08` | Planned |
 | CKP-030 | `CKP_030_rule_set_browser_lists_reads_imports_and_exports` | Playwright at 1440x900 and 1440x1200, network capture | M1 | `TR-UI-02`, `TR-IDEM-01` | Planned |
+| CKP-031 | `CKP_031_landing_area_by_role_or_host_setting` | Playwright with stubbed `/meta` and `/me` | M1 | `TR-UI-08`, `TR-EXT-08` | Planned |
+| CKP-032 | `CKP_032_minimal_draft_editing_shows_errors_on_cells` | Playwright at 1440x900, network capture | M1 | `TR-UI-02`, `TR-IDEM-01` | Planned |
+| CKP-033 | `CKP_033_compensation_runs_in_instance_timeline` | Playwright against the process example host | M2 | `TR-COMP-01`, `TR-OBS-01` | Planned |
+| CKP-034 | `CKP_034_sla_breach_filter_uses_task_deadlines` | Playwright, network capture | M2 | `TR-CAL-01`, `TR-PERF-07` | Planned |
+| CKP-035 | `CKP_035_diagram_step_list_and_text_states` | Playwright keyboard and axe-core, both themes | M2 | `TR-UI-03` | Planned |
+| CKP-036 | `CKP_036_canvas_exemption_names_import_path` | Playwright with screen-reader assertions | M3 | `TR-UI-03`, `TR-DEF-04` | Planned |
 
 ## Known gaps
 | Gap | Plan |

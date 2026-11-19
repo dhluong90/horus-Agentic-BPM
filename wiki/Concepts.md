@@ -31,7 +31,7 @@ Design preview: describes the 0.1 target (Rule Engine) and the Process Engine 0.
 |---|---|---|---|
 | Draft | Yes | Only by simulation | An author requests publication |
 | Pending approval | No | Only by simulation | A second identity approves (to published) or rejects (back to draft) |
-| Published | No | Yes, from its effective date | A later version becomes effective, or an approver retires it |
+| Published | No | Yes, from its effective date | A later version becomes effective, or an approver retires it (one approver with a reason by default; a host can require a second approver from M3) |
 | Retired | No | No, but it still explains the decisions it made | Never; history is not rewritten |
 
 The decision log records the version each decision used, so a retired version can still explain a past decision.
@@ -58,4 +58,4 @@ Behaviour of these terms is described in [[Process Engine Overview]].
 
 ## What the engines are not
 
-Not a BPMN 2.0 or DMN FEEL implementation: processes use the engine's own notation, with a BPMN subset for import and export. Not a server you deploy separately, not a workflow tool for infrastructure. The reasons are in [[Principles]] and [[FAQ]].
+Not yet a full BPMN 2.0 or DMN implementation. BPMN 2.0 and DMN are the models, and the engines' JSON is their canonical serialisation; each release executes exactly what the [standards compliance](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md) page lists, and full execution arrives in stages after 1.0. Never CMMN. Not a server you deploy separately, not a workflow tool for infrastructure. Not built for one business: business behaviour is configured, not coded into the engines (principle 13). The reasons are in [[Principles]] and [[FAQ]].

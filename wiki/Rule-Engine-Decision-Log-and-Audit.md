@@ -48,7 +48,11 @@ Filters: `ruleSet`, `from`, `to`, `outcome`, matched rule id, and any output val
   "text": "Rule R2 of card-fee version 2 matched because tier is GOLD and balance is 60000000 VND, which is at least 50000000 VND. Result: fee 0 VND." }
 ```
 
-`matched`, `outputs` and `reasons` are the contract; `text` is one English rendering with locale-neutral numbers (no grouping, money in major units with its currency code). The cockpit renders the reasons in English or Vietnamese with local number formatting. The explanation is built from the log entry and the stored version only: nothing is evaluated again, rows that did not match are not explained, masked inputs show as `hmac:<hex>` and missing inputs as "has no value". Generated explanations in 0.1 depend on a pending product decision (PD-027); templates per rule set can override the wording later (see [[Roadmap]]).
+`matched`, `outputs` and `reasons` are the contract; `text` is rendered from `reasons` through a message catalogue per language, with locale-neutral numbers (no grouping, money in major units with its currency code). English and Vietnamese catalogues ship. Ask for a language with `?lang=vi` or `Accept-Language`; without one, `text` uses `horus.bpm.rules.explain.default-language` (default `en`), and a missing entry falls back to English. The cockpit reads the same catalogues, so the plain-language readings and the explanations use one wording.
+
+To change the wording or add a language, place your own catalogue resource on the host's classpath; no code is needed. To replace the renderer entirely, declare a `DecisionExplainer` bean ([[Configuration and Extension Points]]). `reasons` never change.
+
+The explanation is built from the log entry and the stored version only: nothing is evaluated again, rows that did not match are not explained, masked inputs show as `hmac:<hex>` and missing inputs as "has no value". Templates per rule set can override the wording in M3 (see [[Roadmap]]).
 
 ## Mask personal data
 
@@ -68,13 +72,13 @@ The log stores a keyed HMAC of the value instead of the value. The same national
 | Mode | Behaviour | Use it for |
 |---|---|---|
 | `transactional` (default) | One insert in the caller's transaction. A rolled-back business transaction leaves no decision | Everything where the decision has a business effect |
-| `async` | The entry is written through an outbox after the call returns and is marked as async | High-volume read paths, for example a fee preview on every page load |
+| `async` (from M2) | The entry is written through an outbox after the call returns and is marked as async | High-volume read paths, for example a fee preview on every page load |
 
 Set `horus.bpm.rules.decision-log.mode`. To turn logging off entirely, set `decision-log.enabled: false`; decisions then return no `decisionId`.
 
 ## Keep the log within retention
 
-Retention is the host's decision. The table `rle_decision` can be partitioned by month by configuration (TR-OPS-04); drop old partitions with your database tooling. The engine never deletes.
+Retention is the host's decision; no product default deletes audit data. The table `rle_decision` is partitioned by calendar month in every install (ADR-0010). From M3 you set `horus.bpm.rules.decision-log.retention` in whole months, at least `P12M`, and the engine's scheduler drops whole monthly partitions older than that period. Outside the `dev` profile the engine then refuses to start until the period is set. Before M3 the engine deletes nothing. Details: [[Rule Engine Configuration]].
 
 ## React to events
 
