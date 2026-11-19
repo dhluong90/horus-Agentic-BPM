@@ -57,8 +57,31 @@ jobs:
               -e "s/^HORUS_DEMO_PASSWORD=.*/HORUS_DEMO_PASSWORD=$demo/" .env.example > .env
           git check-ignore -q .env
 
-      - name: Build the image
-        run: docker compose build
+      # Layer cache across runs (GitHub Actions cache, this workflow's scope). The dependency layer of
+      # deploy/docker/Dockerfile is reused while no POM changes. GitHub keeps caches per branch, so a
+      # pull request's cache is never restored on main.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the image (layer cache from earlier runs)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64
+          build-args: EXAMPLE=rule-engine-only
+          tags: ${{ env.IMAGE }}
+          load: true
+          push: false
+          provenance: false
+          cache-from: type=gha,scope=deploy-rule-engine-only
+          cache-to: type=gha,scope=deploy-rule-engine-only,mode=max
+
+      - name: Content digest of the application files (compare across runs)
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE" -c \
+            'cd /app && find . -type f | sort | xargs sha256sum' > "$RUNNER_TEMP/app-files.txt"
+          echo "$(wc -l < "$RUNNER_TEMP/app-files.txt") files, digest $(sha256sum < "$RUNNER_TEMP/app-files.txt" | cut -d' ' -f1)" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Start PostgreSQL and the host, wait for healthy
         run: docker compose up --wait --wait-timeout 180

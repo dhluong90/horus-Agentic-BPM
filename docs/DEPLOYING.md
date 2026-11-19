@@ -49,7 +49,7 @@ sed -i.bak "s/^HORUS_DB_ADMIN_PASSWORD=.*/HORUS_DB_ADMIN_PASSWORD=$(openssl rand
 docker compose up --build --wait
 ```
 
-The first build downloads dependencies and takes 2 to 5 minutes; later builds reuse the cache. `--wait` returns when both containers report healthy:
+The first build downloads dependencies and takes 2 to 5 minutes. Later builds reuse the dependency layer until a `pom.xml` changes (see [Build cache](#build-cache)). `--wait` returns when both containers report healthy:
 
 ```
  Image horus-bpm/rule-engine-only:local Built
@@ -268,6 +268,17 @@ PASS  no high or critical vulnerability in horus-bpm/rule-engine-only:local (rep
 | Size | about 82 MB |
 
 Base images are pinned by digest. To update one, resolve the new digest, replace tag, digest and version comment together in [`deploy/docker/Dockerfile`](../deploy/docker/Dockerfile) or [`docker-compose.yml`](../docker-compose.yml), then rebuild and run steps 6 and 7.
+
+### Build cache
+
+The build stage resolves Maven dependencies in a layer of their own, before the sources are copied: it runs the `package` lifecycle of the example host on the `pom.xml` files alone, with `.mvn/`, `LICENSE` and `COMMERCIAL-LICENSE.md`. That layer changes only when one of those files changes, so a commit that touches only sources reuses it and compiles offline (`mvn -o`). If the offline build misses an artifact, the log says so and the build continues online.
+
+| You want | Command |
+|---|---|
+| The normal build, reusing layers | `docker compose build` |
+| A build with no cache at all, as a release would | `docker compose build --no-cache` |
+
+The Deploy workflow keeps the layers between runs in the GitHub Actions cache (`docker/build-push-action`, `cache-from` and `cache-to` of type `gha`). Its log shows the dependency layer as `CACHED` after a source-only change, and the step summary prints a SHA-256 digest of every file under `/app`, so a cached and an uncached build can be compared. The release workflow builds no image.
 
 ### Updating the JRE
 
