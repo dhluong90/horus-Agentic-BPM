@@ -174,7 +174,7 @@ class RuleEnginePostgresIT {
     }
 
     @Test
-    void RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches() {
+    void RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several() {
         // Given
         publish("/rules/loan-pricing.yaml", "loan-pricing");
         caller.as("bank-a", "teller-01");
@@ -187,21 +187,21 @@ class RuleEnginePostgresIT {
 
         // Then
         assertThat(overlap.outputs()).isEmpty();
-        assertThat(none.outputs()).isEmpty();
+        assertThat(none.outputs()).containsOnlyKeys("rate").containsEntry("rate", null);
         assertThat(JdbcClient.create(db).sql("""
                 SELECT outcome || ' ' || error_code || ' ' || matched_rule_ids::text || ' ' || COALESCE(outputs::text, 'no-outputs')
                 FROM rle_decision WHERE tenant_id = 'bank-a' AND rule_set_name = 'loan-pricing' AND error_code IS NOT NULL
                 """).query(String.class).list())
                 .containsExactlyInAnyOrder("UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [\"R1\", \"R2\"] no-outputs");
-        // Zero matches is NO_MATCH (PD-088); V3 allows that outcome in rle_decision
+        // Zero matches is a no-match, logged as OK with [] exactly as under first (PD-088)
         assertThat(JdbcClient.create(db).sql("""
                 SELECT outcome || ' ' || matched_rule_ids::text FROM rle_decision
                 WHERE tenant_id = 'bank-a' AND rule_set_name = 'loan-pricing' AND error_code IS NULL
-                """).query(String.class).single()).isEqualTo("NO_MATCH []");
+                """).query(String.class).single()).isEqualTo("OK []");
     }
 
     @Test
-    void RLE_003_collect_hit_policy_aggregates_matched_rules() {
+    void RLE_003_collect_hit_policy_keeps_null_entries_and_aggregates_non_null_values() {
         publish("/rules/risk-flags.yaml", "risk-flags");
         caller.as("bank-a", "teller-01");
 

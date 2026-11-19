@@ -35,8 +35,8 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.initialVersion()).isNull();
-        assertThat(result.currentVersion()).isEqualTo("3");
-        assertThat(result.migrationsExecuted()).isEqualTo(3);
+        assertThat(result.currentVersion()).isEqualTo("2");
+        assertThat(result.migrationsExecuted()).isEqualTo(2);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
                 "rle_rule_set",
@@ -119,10 +119,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
-        assertThat(result.currentVersion()).isEqualTo("3");
-        assertThat(result.migrationsExecuted()).isEqualTo(3);
+        assertThat(result.currentVersion()).isEqualTo("2");
+        assertThat(result.migrationsExecuted()).isEqualTo(2);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3");
+                .containsExactly("0", "1", "2");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -135,44 +135,12 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult second = migrator.migrate();
 
-        assertThat(second.initialVersion()).isEqualTo("3");
-        assertThat(second.currentVersion()).isEqualTo("3");
+        assertThat(second.initialVersion()).isEqualTo("2");
+        assertThat(second.currentVersion()).isEqualTo("2");
         assertThat(second.migrationsExecuted()).isZero();
-        assertThat(migrator.currentVersion()).contains("3");
+        assertThat(migrator.currentVersion()).contains("2");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
-                .isEqualTo(3L);
-    }
-
-    @Test
-    void RLE_002_v3_lets_partitions_created_before_it_store_no_match() {
-        // Given a schema at V2 with this month's partitions already attached
-        DataSource db = freshDatabase();
-        org.flywaydb.core.Flyway.configure(RuleEngineSchemaMigrator.class.getClassLoader()).dataSource(db)
-                .table("rle_schema_history").locations(RuleEngineSchemaMigrator.MIGRATION_LOCATION)
-                .baselineOnMigrate(true).baselineVersion("0").target("2").load().migrate();
-        partitions(db).ensureCurrentAndNextMonth(Instant.parse("2027-01-26T00:00:00Z"));
-        JdbcClient jdbc = JdbcClient.create(db);
-
-        // When V3 runs
-        new RuleEngineSchemaMigrator(db).migrate();
-
-        // Then the existing partition and the default partition accept NO_MATCH, and other outcomes are still refused
-        insertOutcome(jdbc, "01JD000000000000000000NM01", "2027-01-26T01:00:00Z", "NO_MATCH");
-        insertOutcome(jdbc, "01JD000000000000000000NM02", "2030-06-01T00:00:00Z", "NO_MATCH");
-        assertThat(partitionOf(jdbc, "01JD000000000000000000NM01")).isEqualTo("rle_decision_2027_01");
-        assertThat(partitionOf(jdbc, "01JD000000000000000000NM02")).isEqualTo("rle_decision_default");
-        org.assertj.core.api.Assertions.assertThatThrownBy(
-                () -> insertOutcome(jdbc, "01JD000000000000000000NM03", "2027-01-26T02:00:00Z", "MAYBE"))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
-    }
-
-    private static void insertOutcome(JdbcClient jdbc, String id, String createdAt, String outcome) {
-        jdbc.sql("""
-                INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy, outcome,
-                  masked_inputs, matched_rule_ids, eval_clock, duration_micros, log_mode)
-                VALUES ('bank-a', CAST(:at AS timestamptz), :id, 'card-fee', 1, 'FIRST', :outcome, '{}', '[]',
-                  CAST(:at AS timestamptz), 1, 'TRANSACTIONAL')
-                """).param("at", createdAt).param("id", id).param("outcome", outcome).update();
+                .isEqualTo(2L);
     }
 
     @Test
@@ -180,12 +148,12 @@ class RuleEngineSchemaMigratorIT {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 3));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 2));
         assertThat(migrator.status().isCurrent()).isFalse();
 
         migrator.migrate();
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus("3", 0));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus("2", 0));
         assertThat(migrator.status().isCurrent()).isTrue();
     }
 

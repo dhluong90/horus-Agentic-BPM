@@ -40,8 +40,8 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
     }
 
     /**
-     * Returns the outputs: those of {@link Matched}; for a {@code collect} table with no match, an empty list for
-     * each list output and null for each aggregate (DMN 1.5); empty otherwise.
+     * Returns the outputs: those of {@link Matched}; for {@link NoMatch}, every declared output with the value null;
+     * empty for {@link Failed}.
      *
      * @return the outputs by output name
      */
@@ -82,7 +82,7 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
     /**
      * No rule matched.
      *
-     * @param outputs empty, except for a {@code collect} table: an empty list per list output and null per aggregate
+     * @param outputs every declared output with the value null (DMN 1.5: a decision table with no match gives null)
      */
     public record NoMatch(Map<String, Object> outputs) implements Outcome {
         public NoMatch {

@@ -178,7 +178,7 @@ public final class CompiledRuleSet {
                 return new DecisionResult.Matched(List.of(rule.id()), rowOutputs(rule, slots));
             }
         }
-        return new DecisionResult.NoMatch();
+        return noMatch();
     }
 
     /**
@@ -188,7 +188,7 @@ public final class CompiledRuleSet {
     private DecisionResult.Outcome unique(Object[] slots) {
         List<CompiledRule> matched = matching(slots);
         if (matched.isEmpty()) {
-            return new DecisionResult.NoMatch();
+            return noMatch();
         }
         if (matched.size() > 1) {
             return new DecisionResult.Failed("UNIQUE_HIT_VIOLATION",
@@ -201,11 +201,15 @@ public final class CompiledRuleSet {
 
     /**
      * Every matching rule contributes (RLE-003, DMN 1.5): a list output keeps one entry per matched rule, null
-     * included, so parallel lists stay aligned with each other and with the matched rule ids; an aggregate skips
-     * null values. With no match: an empty list per list output and null per aggregate.
+     * included, so parallel lists stay aligned with each other and with the matched rule ids; {@code sum},
+     * {@code min} and {@code max} skip nulls and are null when every value is null; {@code count} counts the
+     * non-null values. With no match every output is null.
      */
     private DecisionResult.Outcome collect(Object[] slots) {
         List<CompiledRule> matched = matching(slots);
+        if (matched.isEmpty()) {
+            return noMatch();
+        }
         Map<String, Object> values = new LinkedHashMap<>();
         long[] bytes = {0};
         for (int i = 0; i < outputs.size(); i++) {
@@ -228,16 +232,20 @@ public final class CompiledRuleSet {
                     addBytes(bytes, value);
                 }
             }
-            Object result = matched.isEmpty() && !list ? null : Aggregates.apply(output.aggregate(), column, output.name());
+            Object result = Aggregates.apply(output.aggregate(), column, output.name());
             if (!list) {
                 addBytes(bytes, result);
             }
             values.put(output.name(), result);
         }
-        if (matched.isEmpty()) {
-            return new DecisionResult.NoMatch(values);
-        }
         return new DecisionResult.Matched(matched.stream().map(CompiledRule::id).toList(), values);
+    }
+
+    /** No rule matched: every declared output is null, under every hit policy (RLE-002, RLE-003). */
+    private DecisionResult.NoMatch noMatch() {
+        Map<String, Object> values = new LinkedHashMap<>();
+        outputs.forEach(output -> values.put(output.name(), null));
+        return new DecisionResult.NoMatch(values);
     }
 
     private List<CompiledRule> matching(Object[] slots) {

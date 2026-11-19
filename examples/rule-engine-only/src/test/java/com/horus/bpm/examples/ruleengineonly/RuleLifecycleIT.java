@@ -195,7 +195,7 @@ class RuleLifecycleIT {
     }
 
     @Test
-    void RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches() throws Exception {
+    void RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several() throws Exception {
         // Given
         publishFile("/rules/loan-pricing.yaml", "loan-pricing");
 
@@ -213,20 +213,22 @@ class RuleLifecycleIT {
         assertThat(overlap.json().path("code").asString()).isEqualTo("UNIQUE_HIT_VIOLATION");
         assertThat(overlap.json().path("matchedRuleIds").toString()).isEqualTo("[\"R1\",\"R2\"]");
         assertThat(overlap.json().has("outputs")).isFalse();
-        // Zero matches is NO_MATCH with no outputs, as under first (PD-088)
+        // Zero matches is a no-match with every output null, logged as OK with [] as under first (PD-088)
         assertThat(none.status()).isEqualTo(200);
         assertThat(none.json().path("outcome").asString()).isEqualTo("NO_MATCH");
+        assertThat(none.json().path("matched").asBoolean()).isFalse();
+        assertThat(none.json().path("outputs").toString()).isEqualTo("{\"rate\":null}");
         assertThat(none.json().path("matchedRuleIds").toString()).isEqualTo("[]");
         assertThat(jdbc.sql("SELECT outcome FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id")
                 .param("id", none.json().path("decisionId").asString()).query(String.class).single())
-                .isEqualTo("NO_MATCH");
+                .isEqualTo("OK");
         assertThat(jdbc.sql("SELECT outcome FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id")
                 .param("id", overlap.json().path("decisionId").asString()).query(String.class).single())
                 .isEqualTo("UNIQUE_HIT_VIOLATION");
     }
 
     @Test
-    void RLE_003_collect_hit_policy_aggregates_matched_rules() throws Exception {
+    void RLE_003_collect_hit_policy_keeps_null_entries_and_aggregates_non_null_values() throws Exception {
         publishFile("/rules/risk-flags.yaml", "risk-flags");
 
         Reply decision = send("teller", "POST", "/decisions/risk-flags:evaluate",

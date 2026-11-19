@@ -373,6 +373,9 @@ components:
           type: string
           enum: [MATCHED, NO_MATCH]
           description: A failed evaluation is answered with a Problem instead, carrying decisionId and matchedRuleIds
+        matched:
+          type: boolean
+          description: False for a no-match, where every output is null and matchedRuleIds is empty
         matchedRuleIds:
           type: array
           items: { type: string }

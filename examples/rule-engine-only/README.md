@@ -172,7 +172,7 @@ Two more rule sets ship with the example. [`loan-pricing.yaml`](src/main/resourc
    #      "decisionId":"...","matchedRuleIds":["R1","R2"],...}
    ```
 
-   With `{"score":500, "income":{"currency":"VND","amount":5000000}}` no row matches: `200` with `"outcome":"NO_MATCH"` and no outputs, as under `first` (DMN 1.5). With a score of 750 and an income of 10,000,000 VND only `R1` matches: `200` and `"outputs":{"rate":0.085}`.
+   With `{"score":500, "income":{"currency":"VND","amount":5000000}}` no row matches: `200` with `"outcome":"NO_MATCH"`, `"matched":false` and `"outputs":{"rate":null}`, as under `first` (DMN 1.5), logged as `OK` with no matched rules. With a score of 750 and an income of 10,000,000 VND only `R1` matches: `200` and `"outputs":{"rate":0.085}`.
 
 10. A card transaction with high velocity from a new device fires two flags, and their penalties add up to 15:
 
@@ -188,7 +188,7 @@ Two more rule sets ship with the example. [`loan-pricing.yaml`](src/main/resourc
     docker exec horus-pg psql -U horus -d horus -c \
       "SELECT rule_set_name, outcome, matched_rule_ids, outputs FROM rle_decision WHERE rule_set_name <> 'card-fee'"
     #  loan-pricing | UNIQUE_HIT_VIOLATION | ["R1", "R2"] |
-    #  loan-pricing | NO_MATCH             | []           | {}
+    #  loan-pricing | OK                   | []           | {"rate": null}
     #  loan-pricing | OK                   | ["R1"]       | {"rate": 0.085}
     #  risk-flags   | OK                   | ["R1", "R3"] | {"flags": ["HIGH_VELOCITY", "NEW_DEVICE"], "penalty": 15}
     ```

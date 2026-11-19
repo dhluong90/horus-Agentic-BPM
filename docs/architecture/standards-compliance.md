@@ -117,16 +117,16 @@ Option B wins because full BPMN means the model must be able to hold every eleme
 
 A rule set is a DMN `definitions` named after the rule set, holding one `decision` with a `decisionTable`, one `inputData` per declared input, and an `itemDefinition` per declared type. Hit policies map `first` to `F`, `unique` to `U`, `collect` to `C` with the aggregator. The v1 per-output aggregate (`collect: sum` on one output and a plain list on another) has no single-table DMN form; DMN export writes an inner `C` table and an outer literal decision with a FEEL projection (`sum(for r in table return r.penalty)`), so the exported model evaluates to the same outputs.
 
-Hit policy behaviour follows DMN 1.5 (PD-088):
+Hit policy behaviour follows DMN 1.5 (PD-088; `RLE-002`, `RLE-003`). DMN 1.5 gives no explicit rule for nulls inside the `C+`, `C<`, `C>` and `C#` aggregators; the rules below are the engine's stated, deterministic rule, checked against DMN 1.5 section 8.2.11 and the FEEL built-ins before 0.1.0:
 
 | Case | Result |
 |---|---|
-| `unique`, no match | `NO_MATCH` with no outputs, as `first`; the decision row records `NO_MATCH` |
+| `unique`, no match | No match, as `first`: every output null; logged as outcome `OK` with no matched rule ids |
 | `unique`, several matches | `UNIQUE_HIT_VIOLATION`: no outputs, every matched rule id logged |
 | `collect` list output (no aggregator) | One entry per matched rule in `matchedRuleIds` order, `null` included, so lists stay aligned |
-| `collect` with `sum`, `min`, `max` | Null values are skipped; null when every value is null or no rule matched |
-| `collect` with `count` | Counts the non-null values; `0` when every value is null, null when no rule matched |
-| `collect`, no match | `NO_MATCH`, with an empty list per list output and null per aggregate |
+| `collect` with `sum`, `min`, `max` | Null values are skipped; null when every value is null |
+| `collect` with `count` | Counts the matched rules whose value is not null (not distinct values); `0` when every value is null |
+| Any hit policy, no match | Every output null, lists and aggregates (`count` included); logged as `OK` with no matched rule ids |
 | `sum` of numbers | Exact; a sum that needs more than 34 significant digits is `EVALUATION_ERROR`, never rounded |
 | `min`, `max` of strings | Unicode code point order, the order of `<` |
 

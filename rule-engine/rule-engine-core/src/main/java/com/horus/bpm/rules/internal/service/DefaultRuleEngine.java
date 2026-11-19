@@ -92,8 +92,7 @@ public final class DefaultRuleEngine implements RuleEngine {
         result.matchedRuleIds().forEach(matched::add);
         String errorCode = outcome instanceof DecisionResult.Failed failed ? failed.code() : null;
         log.append(new DecisionRecord(tenant, result.decisionId(), now, version.ruleSet(), version.version(),
-                version.hitPolicy(), errorCode != null ? errorCode : outcome instanceof DecisionResult.NoMatch ? "NO_MATCH" : "OK",
-                errorCode,
+                version.hitPolicy(), errorCode == null ? "OK" : errorCode, errorCode,
                 EngineValues.write(EngineValues.loggedInputs(request.input(), rules.inputs())),
                 errorCode == null ? EngineValues.write(EngineValues.decision(result).get("outputs")) : null,
                 EngineValues.write(matched), caller, request.correlationId(), now, micros));

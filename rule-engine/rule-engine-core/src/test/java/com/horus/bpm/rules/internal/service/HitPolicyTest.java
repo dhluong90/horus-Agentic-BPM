@@ -41,7 +41,7 @@ class HitPolicyTest {
     }
 
     @Test
-    void RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches() {
+    void unique_loan_pricing_fixture_fails_on_overlap_and_is_no_match_on_zero() {
         // Given
         publish(CardFee.resource("/rules/loan-pricing.yaml"), "loan-pricing");
 
@@ -54,14 +54,97 @@ class HitPolicyTest {
         assertThat(((DecisionResult.Failed) overlap.outcome()).code()).isEqualTo("UNIQUE_HIT_VIOLATION");
         assertThat(overlap.outputs()).isEmpty();
         assertThat(overlap.matchedRuleIds()).containsExactly("R1", "R2");
-        // Zero matches is NO_MATCH, as under first (PD-088)
+        // Zero matches is a no-match with every output null, logged as OK with [] as under first (PD-088)
         assertThat(none.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
-        assertThat(none.outputs()).isEmpty();
+        assertThat(none.outputs()).containsOnlyKeys("rate").containsEntry("rate", null);
         assertThat(none.matchedRuleIds()).isEmpty();
         assertThat(stores.decisions).extracting(r -> r.outcome() + " " + r.errorCode() + " " + r.matchedRuleIdsJson()
                         + " " + r.outputsJson())
                 .containsExactly("UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [\"R1\",\"R2\"] null",
-                        "NO_MATCH null [] {}");
+                        "OK null [] {\"rate\":null}");
+    }
+
+    /** RLE-002 as the SPEC states it (PD-088). */
+    @Test
+    void RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several() {
+        // Given loan-pricing v1: R1 (score >= 700 -> 0.08) and R2 (income >= 20000000 VND -> 0.09) overlap
+        publish(yaml("""
+                schemaVersion: 1
+                ruleSet: loan-pricing
+                hitPolicy: unique
+                inputs:
+                  - { name: score,  type: integer }
+                  - { name: income, type: money }
+                outputs:
+                  - { name: rate, type: decimal }
+                rules:
+                  - { id: R1, when: { score: ">= 700" }, then: { rate: 0.08 } }
+                  - { id: R2, when: { income: ">= 20000000 VND" }, then: { rate: 0.09 } }
+                """), "loan-pricing");
+
+        // When (a) one match, (b) zero matches, (c) two matches
+        DecisionResult one = evaluate("loan-pricing", Map.of("score", 750, "income", Money.ofMinor("VND", 10_000_000)));
+        DecisionResult zero = evaluate("loan-pricing", Map.of("score", 500, "income", Money.ofMinor("VND", 5_000_000)));
+        DecisionResult two = evaluate("loan-pricing", Map.of("score", 750, "income", Money.ofMinor("VND", 25_000_000)));
+
+        // Then (a)
+        assertThat(one.matchedRuleIds()).containsExactly("R1");
+        assertThat(one.outputs()).containsEntry("rate", new BigDecimal("0.08"));
+        // (b) NoMatch, every output null, logged as OK with [] exactly as for first; never UNIQUE_HIT_VIOLATION
+        assertThat(zero.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
+        assertThat(zero.outputs()).containsOnlyKeys("rate").containsEntry("rate", null);
+        assertThat(zero.matchedRuleIds()).isEmpty();
+        // (c) UNIQUE_HIT_VIOLATION, no partial outputs, both rule ids in rule order
+        assertThat(((DecisionResult.Failed) two.outcome()).code()).isEqualTo("UNIQUE_HIT_VIOLATION");
+        assertThat(two.outputs()).isEmpty();
+        assertThat(two.matchedRuleIds()).containsExactly("R1", "R2");
+        assertThat(stores.decisions).extracting(r -> r.outcome() + " " + r.matchedRuleIdsJson())
+                .containsExactly("OK [\"R1\"]", "OK []", "UNIQUE_HIT_VIOLATION [\"R1\",\"R2\"]");
+    }
+
+    /** RLE-003 as the SPEC states it (PD-088). */
+    @Test
+    void RLE_003_collect_hit_policy_keeps_null_entries_and_aggregates_non_null_values() {
+        // Given risk-flags v1 with a list, sum, max and count; R2 gives null for every output
+        publish(yaml("""
+                schemaVersion: 1
+                ruleSet: risk-flags
+                hitPolicy: collect
+                inputs:
+                  - { name: velocity,  type: boolean }
+                  - { name: unknownIp, type: boolean }
+                  - { name: newDevice, type: boolean }
+                outputs:
+                  - { name: flags,   type: list<string> }
+                  - { name: penalty, type: integer, collect: sum }
+                  - { name: worst,   type: integer, collect: max }
+                  - { name: hits,    type: integer, collect: count }
+                rules:
+                  - { id: R1, when: { velocity: "== true" }, then: { flags: "'HIGH_VELOCITY'", penalty: 10, worst: 10, hits: 1 } }
+                  - { id: R2, when: { unknownIp: "== true" }, then: { flags: null, penalty: null, worst: null, hits: null } }
+                  - { id: R3, when: { newDevice: "== true" }, then: { flags: "'NEW_DEVICE'", penalty: 5, worst: 5, hits: 1 } }
+                """), "risk-flags");
+
+        // When (a) all three match, (b) only R2, (c) none
+        DecisionResult all = evaluate("risk-flags", Map.of("velocity", true, "unknownIp", true, "newDevice", true));
+        DecisionResult onlyNull = evaluate("risk-flags", Map.of("velocity", false, "unknownIp", true, "newDevice", false));
+        DecisionResult none = evaluate("risk-flags", Map.of("velocity", false, "unknownIp", false, "newDevice", false));
+
+        // Then (a) lists keep the null entry, aligned with matchedRuleIds; aggregates skip it
+        assertThat(all.matchedRuleIds()).containsExactly("R1", "R2", "R3");
+        assertThat(all.outputs().get("flags")).isEqualTo(java.util.Arrays.asList("HIGH_VELOCITY", null, "NEW_DEVICE"));
+        assertThat(all.outputs()).containsEntry("penalty", BigDecimal.valueOf(15))
+                .containsEntry("worst", BigDecimal.valueOf(10)).containsEntry("hits", BigDecimal.valueOf(2));
+        // (b) every value null: list [null], sum and max null, count 0
+        assertThat(onlyNull.outputs().get("flags")).isEqualTo(java.util.Arrays.asList((Object) null));
+        assertThat(onlyNull.outputs()).containsEntry("penalty", null).containsEntry("worst", null)
+                .containsEntry("hits", BigDecimal.ZERO);
+        // (c) NoMatch, every output null (count included), logged as OK with []
+        assertThat(none.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
+        assertThat(none.outputs()).containsEntry("flags", null).containsEntry("penalty", null)
+                .containsEntry("worst", null).containsEntry("hits", null);
+        assertThat(stores.decisions).extracting(r -> r.outcome() + " " + r.matchedRuleIdsJson())
+                .containsExactly("OK [\"R1\",\"R2\",\"R3\"]", "OK [\"R2\"]", "OK []");
     }
 
     @Test
@@ -75,7 +158,7 @@ class HitPolicyTest {
     }
 
     @Test
-    void RLE_003_collect_hit_policy_aggregates_matched_rules() {
+    void collect_risk_flags_fixture_sums_two_flags_to_fifteen() {
         // Given
         publish(CardFee.resource("/rules/risk-flags.yaml"), "risk-flags");
 
@@ -101,10 +184,11 @@ class HitPolicyTest {
 
         assertThat(result.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
         assertThat(result.matchedRuleIds()).isEmpty();
-        // DMN 1.5 (N2 of the QA review): an empty list per list output, null per aggregate
-        assertThat(result.outputs()).containsEntry("flags", List.of()).containsEntry("penalty", null);
-        assertThat(stores.decisions.getFirst().outcome()).isEqualTo("NO_MATCH");
-        assertThat(stores.decisions.getFirst().outputsJson()).isEqualTo("{\"flags\":[],\"penalty\":null}");
+        // RLE-003 (c): every output null, lists and aggregates included; logged as OK with []
+        assertThat(result.outputs()).containsEntry("flags", null).containsEntry("penalty", null);
+        assertThat(stores.decisions.getFirst().outcome()).isEqualTo("OK");
+        assertThat(stores.decisions.getFirst().matchedRuleIdsJson()).isEqualTo("[]");
+        assertThat(stores.decisions.getFirst().outputsJson()).isEqualTo("{\"flags\":null,\"penalty\":null}");
     }
 
     @Test

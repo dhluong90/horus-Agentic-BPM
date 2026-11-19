@@ -11,7 +11,8 @@ import java.time.Instant;
  * @param ruleSet the rule set name
  * @param version the version number
  * @param hitPolicy the hit policy name
- * @param outcome {@code OK}, {@code NO_MATCH}, {@code UNIQUE_HIT_VIOLATION} or {@code EVALUATION_ERROR}
+ * @param outcome {@code OK} (also for no match, with no matched rule ids), {@code UNIQUE_HIT_VIOLATION} or
+ *     {@code EVALUATION_ERROR}
  * @param errorCode the error code, or null
  * @param maskedInputsJson inputs as JSON, masked inputs replaced
  * @param outputsJson outputs as JSON, or null

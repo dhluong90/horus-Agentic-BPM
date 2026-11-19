@@ -255,12 +255,14 @@ public final class EngineValues {
         switch (result.outcome()) {
             case DecisionResult.Matched matched -> {
                 node.put("outcome", "MATCHED");
+                node.put("matched", true);
                 node.set("matchedRuleIds", value(matched.ruleIds()));
                 ObjectNode outputs = node.putObject("outputs");
                 matched.outputs().forEach((name, v) -> outputs.set(name, value(v)));
             }
             case DecisionResult.NoMatch noMatch -> {
                 node.put("outcome", "NO_MATCH");
+                node.put("matched", false);
                 node.set("matchedRuleIds", EngineJson.NODES.arrayNode());
                 ObjectNode outputs = node.putObject("outputs");
                 noMatch.outputs().forEach((name, v) -> outputs.set(name, value(v)));

@@ -21,7 +21,7 @@ effectiveFrom: 2026-12-01T00:00:00+07:00   # optional ISO instant; otherwise eff
 | Policy | Behaviour | Use it for |
 |---|---|---|
 | `first` | Rows are checked top to bottom; the first match wins | Eligibility, routing, tiered fees with a default row |
-| `unique` | Exactly one row must match; several matches fail the decision with `UNIQUE_HIT_VIOLATION`, no match is `NO_MATCH` as under `first` | Pricing tables that must be complete and non-overlapping |
+| `unique` | Exactly one row should match: several matches fail the decision with `UNIQUE_HIT_VIOLATION`; zero matches is no match, as with `first` | Pricing tables that must be complete and non-overlapping |
 | `collect` | Every matching row contributes; each output becomes a list or an aggregate (`collect: sum`, `min`, `max`, `count`) | Accumulating fees, collecting reason codes or risk flags |
 
 ## 2. Declare inputs and outputs
@@ -109,11 +109,11 @@ With rows R1 (`penalty: 10`) and R3 (`penalty: 5`) both matching, `penalty` is `
 | `collect: min`, `collect: max` | Any scalar type except `boolean` | The smallest or largest value; strings in Unicode code point order, as `<` |
 | `collect: count` | `integer` | How many matched rows gave a value |
 
-A list keeps one entry per matched rule, `null` included, so parallel lists line up with each other and with `matchedRuleIds`. Aggregates skip `null` values: `sum`, `min` and `max` are `null` when every value is `null`, and `count` is `0`. When no row matches, the outcome is `NO_MATCH` with an empty list for each list output and `null` for each aggregate (DMN 1.5). `collect:` on an output of a `first` or `unique` table, a list output outside `collect`, or a type that does not fit the aggregate is refused at import with `422 VALIDATION_FAILED`.
+A list keeps one entry per matched rule, `null` included, so parallel lists line up with each other and with `matchedRuleIds`. Aggregates skip `null` values: `sum`, `min` and `max` are `null` when every value is `null`, and `count` counts the rules whose value is not `null` (`0` when every value is `null`). When no row matches, every output is `null`, lists and `count` included. `collect:` on an output of a `first` or `unique` table, a list output outside `collect`, or a type that does not fit the aggregate is refused at import with `422 VALIDATION_FAILED`.
 
 ### Exactly one row with `unique`
 
-Under `unique`, several matching rows fail the decision with `422 UNIQUE_HIT_VIOLATION`: no outputs are returned, and the decision row records that outcome and the matched rule ids. No matching row is `NO_MATCH` with no outputs, exactly as under `first` (DMN 1.5); add a catch-all row if no match must be an error. A pricing table where two rows overlap fails loudly instead of quietly charging the first row's price. The example [`loan-pricing.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-engine-only/src/main/resources/rules/loan-pricing.yaml) overlaps on purpose.
+Under `unique`, several matching rows fail the decision with `422 UNIQUE_HIT_VIOLATION`: no outputs are returned, and the decision row records that outcome and the matched rule ids. Zero matches is no match, as with `first`: every output is `null` and the decision is logged as `OK` with no matched rules (DMN 1.5). Add a catch-all row if no match must be handled differently. A pricing table where two rows overlap fails loudly instead of quietly charging the first row's price. The example [`loan-pricing.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-engine-only/src/main/resources/rules/loan-pricing.yaml) overlaps on purpose.
 
 ## 4. Validate
 
@@ -145,6 +145,6 @@ Endpoint details, headers and error codes are in [[Rule Engine Decision API]].
 |---|---|---|
 | `422 VALIDATION_FAILED` at row `R2`, "unknown identifier" | A condition refers to an input that is not declared | Add the input in `inputs` or fix the spelling |
 | `422 VALIDATION_FAILED`, "money + integer" | Arithmetic mixes money and a plain number | Multiply money by a number (`balance * 0.01`) or add money to money of the same currency |
-| `422 UNIQUE_HIT_VIOLATION` at run time | A `unique` table had several matches for real inputs | Add the missing row, or switch to `first` with a default row if order is intended |
+| `422 UNIQUE_HIT_VIOLATION` at run time | A `unique` table had several matches for real inputs | Remove the overlap, or switch to `first` if the order of rows is intended |
 | Default row never matches | It is not the last row under `first` | Move `when: {}` to the end |
 | Validation warns about an unreachable row | An earlier row under `first` already covers it | Delete the row or reorder |
