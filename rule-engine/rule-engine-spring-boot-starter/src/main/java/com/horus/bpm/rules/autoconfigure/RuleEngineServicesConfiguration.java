@@ -54,6 +54,12 @@ class RuleEngineServicesConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngines engines) {
+        return new RuleEngineCursorKeyInitializer(engines.cursorKeys());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     RuleEngine ruleEngine(RuleEngines engines) {
         return engines.ruleEngine();
     }

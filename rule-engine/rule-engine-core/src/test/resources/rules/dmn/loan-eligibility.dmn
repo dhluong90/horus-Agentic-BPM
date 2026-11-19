@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Every construct of the FEEL subset, one per cell. -->
+<definitions xmlns="https://www.omg.org/spec/DMN/20230324/MODEL/" id="loan_defs" name="loan-eligibility" namespace="urn:example:loan">
+  <decision id="loan-eligibility" name="Loan eligibility">
+    <description>Personal loan eligibility by age, country, amount and application date</description>
+    <decisionTable id="loan_table" hitPolicy="FIRST">
+      <input id="in_age" label="age"><inputExpression typeRef="number"><text>age</text></inputExpression></input>
+      <input id="in_country" label="country"><inputExpression typeRef="string"><text>country</text></inputExpression>
+        <inputValues><text>"VN", "SG", "TH", "US"</text></inputValues></input>
+      <input id="in_amount" label="amount"><inputExpression typeRef="number"><text>amount</text></inputExpression></input>
+      <input id="in_applied" label="appliedOn"><inputExpression typeRef="date"><text>appliedOn</text></inputExpression></input>
+      <input id="in_vip" label="vip"><inputExpression typeRef="boolean"><text>vip</text></inputExpression></input>
+      <output id="out_ok" name="eligible" typeRef="boolean"/>
+      <output id="out_reason" name="reason" typeRef="string"/>
+      <rule id="L1"><description>Under age or over age</description>
+        <inputEntry><text>&lt; 18, &gt; 65</text></inputEntry><inputEntry><text>-</text></inputEntry>
+        <inputEntry><text>-</text></inputEntry><inputEntry><text>-</text></inputEntry><inputEntry><text>-</text></inputEntry>
+        <outputEntry><text>false</text></outputEntry><outputEntry><text>"AGE"</text></outputEntry></rule>
+      <rule id="L2">
+        <inputEntry><text>-</text></inputEntry><inputEntry><text>not("VN", "SG")</text></inputEntry>
+        <inputEntry><text>-</text></inputEntry><inputEntry><text>-</text></inputEntry><inputEntry><text>-</text></inputEntry>
+        <outputEntry><text>false</text></outputEntry><outputEntry><text>"COUNTRY"</text></outputEntry></rule>
+      <rule id="L3">
+        <inputEntry><text>-</text></inputEntry><inputEntry><text>-</text></inputEntry>
+        <inputEntry><text>null</text></inputEntry><inputEntry><text>-</text></inputEntry><inputEntry><text>-</text></inputEntry>
+        <outputEntry><text>false</text></outputEntry><outputEntry><text>"NO_AMOUNT"</text></outputEntry></rule>
+      <rule id="L4">
+        <inputEntry><text>[18..65]</text></inputEntry><inputEntry><text>"VN"</text></inputEntry>
+        <inputEntry><text>(0..500000000]</text></inputEntry><inputEntry><text>&gt;= date("2026-01-01")</text></inputEntry><inputEntry><text>-</text></inputEntry>
+        <outputEntry><text>true</text></outputEntry><outputEntry><text>"OK_VN"</text></outputEntry></rule>
+      <rule id="L5">
+        <inputEntry><text>[18..65]</text></inputEntry><inputEntry><text>-</text></inputEntry>
+        <inputEntry><text>-</text></inputEntry><inputEntry><text>-</text></inputEntry><inputEntry><text>true</text></inputEntry>
+        <outputEntry><text>true</text></outputEntry><outputEntry><text>"OK_VIP"</text></outputEntry></rule>
+      <rule id="L6">
+        <inputEntry><text>-</text></inputEntry><inputEntry><text>-</text></inputEntry>
+        <inputEntry><text>-</text></inputEntry><inputEntry><text>-</text></inputEntry><inputEntry><text>-</text></inputEntry>
+        <outputEntry><text>false</text></outputEntry><outputEntry><text>null</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+</definitions>

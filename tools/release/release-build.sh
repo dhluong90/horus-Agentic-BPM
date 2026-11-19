@@ -6,9 +6,10 @@
 # Needs:   JDK 21 or later, Maven 3.9, Docker (Testcontainers tests), Python 3.9, git, and Node.js at
 #          exactly the version in tools/release/node-version with npm, and network access to Maven
 #          Central and the npm registry.
-# Env:     BPM_RELEASE_TAG=<module>/vX.Y.Z   a tag build: the version must be exactly X.Y.Z (never a
-#                                            SNAPSHOT), the group id io.github.dhluong90.bpm
-#                                            (ADR-0022) and the commit must be on origin/main
+# Env:     BPM_RELEASE_TAG=vX.Y.Z            a tag build, one project tag (PD-087): the root and every
+#                                            module at exactly X.Y.Z (never a SNAPSHOT), the group id
+#                                            io.github.dhluong90.bpm (ADR-0022), the commit on
+#                                            origin/main (tools/release/check-release-tag.sh)
 #          BPM_RELEASE_TRIAL=true            local trial: accepts another Node version and a dirty
 #                                            working tree. BUILD-INFO.json and the SBOM record
 #                                            "trial": true. Refused when CI or GITHUB_ACTIONS is true.
@@ -50,8 +51,6 @@ SETTINGS="$ROOT/tools/release/dry-run-settings.xml"
 NODE_PINNED="$(tr -d '[:space:]' < "$ROOT/tools/release/node-version")"
 MVN=(mvn -B -ntp -s "$SETTINGS" -gs "$SETTINGS")
 HELP_PLUGIN="org.apache.maven.plugins:maven-help-plugin:3.6.0"
-# ADR-0022: the coordinates every release is published under. Tag builds refuse any other group id.
-RELEASE_GROUP_ID="io.github.dhluong90.bpm"
 NPM_CI=(npm ci --ignore-scripts --no-audit --no-fund)
 LOCKFILE_LINT=(lockfile-lint --type npm --allowed-hosts npm --validate-https --validate-integrity
   --validate-package-names --empty-hostname false)
@@ -87,31 +86,9 @@ fi
 
 tag="${BPM_RELEASE_TAG:-}"
 if [[ -n "$tag" ]]; then
-  # Every tag check runs and reports before the build refuses, so one run names every problem.
-  module="${tag%%/*}"
-  tag_ok=true
-  poms=("$ROOT/pom.xml")
-  if [[ -f "$ROOT/$module/pom.xml" ]]; then
-    poms+=("$ROOT/$module/pom.xml")
-  else
-    echo "ERROR: tag $tag names module '$module', which has no $module/pom.xml." >&2
-    tag_ok=false
-  fi
-  versions=()
-  for pom in "${poms[@]}"; do
-    group="$(evaluate project.groupId -N -f "$pom")"
-    if [[ "$group" != "$RELEASE_GROUP_ID" ]]; then
-      echo "ERROR: tag $tag: ${pom#"$ROOT"/} has group id $group; releases are published as $RELEASE_GROUP_ID (ADR-0022, rename #21)." >&2
-      tag_ok=false
-    fi
-    versions+=("$(evaluate project.version -N -f "$pom")")
-  done
-  python3 "$SBOM_PY" tag-version "$tag" "${versions[@]}" || tag_ok=false
-  [[ "$tag_ok" == true ]] || die "tag $tag: the checks above failed; nothing was built."
-  git rev-parse --verify -q origin/main >/dev/null \
-    || die "origin/main is not available; a tag build needs the full history (actions/checkout fetch-depth: 0)."
-  git merge-base --is-ancestor HEAD origin/main || die "tag $tag points at a commit that is not on main."
-  echo "Tag $tag: commit $(git rev-parse --short HEAD) is on main."
+  # One project tag vX.Y.Z (PD-087): every module at X.Y.Z under the release group id, commit on main.
+  # Every check reports before the guard refuses.
+  "$ROOT/tools/release/check-release-tag.sh" "$tag" || die "tag $tag refused by the release tag guard (above)."
 fi
 
 node_actual="$(node --version 2>/dev/null || echo none)"

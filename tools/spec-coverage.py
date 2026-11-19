@@ -32,9 +32,10 @@ It warns when an allow-listed id already has a test, so the entry can be removed
 What counts as a test (read from source, so no build is needed; comments and
 string contents are ignored):
   * Java under src/test/java: a method or ArchUnit field annotated @Test,
-    @ParameterizedTest, @RepeatedTest, @TestFactory, @TestTemplate, @Property,
-    @Example or @ArchTest, whatever its return type, unless the member or an
-    enclosing class carries @Disabled or another @Disabled... annotation;
+    @ParameterizedTest, @RepeatedTest, @TestFactory, @TestTemplate or @ArchTest,
+    whatever its return type, unless the member or an enclosing class carries
+    @Disabled or another @Disabled... annotation (property tests are
+    @TestFactory methods, PD-090);
   * TypeScript and JavaScript test files (*.test.* and *.spec.*, .ts .tsx .js
     .jsx .mjs .cjs .mts .cts, plus the testMatch patterns of any
     playwright.config.*): the title of an it() or test() call, including
@@ -156,8 +157,7 @@ def matching_close(masked: str, open_index: int) -> int:
 # Java
 
 JAVA_TEST_ANNOTATIONS = {
-    "Test", "ParameterizedTest", "RepeatedTest", "TestFactory", "TestTemplate",
-    "Property", "Example", "ArchTest",
+    "Test", "ParameterizedTest", "RepeatedTest", "TestFactory", "TestTemplate", "ArchTest",
 }
 JAVA_MEMBER_NAME = re.compile(r"(?<![\w.$])([A-Z][A-Z]*_\w+)\s*(?=[(=;])")
 JAVA_CLASS = re.compile(r"(?<![\w.$])(?:class|interface|enum|record)\s+\w+[^{;]*\{")

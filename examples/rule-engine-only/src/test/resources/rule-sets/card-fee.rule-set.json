@@ -15,7 +15,7 @@
   ],
   "rules": [
     { "id": "R1", "when": { "tier": "== 'GOLD'" }, "then": { "fee": "0 VND" } },
-    { "id": "R2", "when": { "balance": ">= 50000000 VND" }, "then": { "fee": "0 VND", "discountRate": 0.015 } },
-    { "id": "R3", "when": {}, "then": { "fee": "50000 VND", "discountRate": 0.1000000000000000055511151231257827 } }
+    { "id": "R2", "when": { "balance": ">= 50000000 VND" }, "then": { "fee": "0 VND", "discountRate": "0.015" } },
+    { "id": "R3", "when": {}, "then": { "fee": "50000 VND", "discountRate": "0.1000000000000000055511151231257827" } }
   ]
 }

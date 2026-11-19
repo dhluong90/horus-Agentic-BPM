@@ -122,6 +122,19 @@ Option B wins because full BPMN means the model must be able to hold every eleme
 
 A rule set is a DMN `definitions` named after the rule set, holding one `decision` with a `decisionTable`, one `inputData` per declared input, and an `itemDefinition` per declared type. Hit policies map `first` to `F`, `unique` to `U`, `collect` to `C` with the aggregator. The v1 per-output aggregate (`collect: sum` on one output and a plain list on another) has no single-table DMN form; DMN export writes an inner `C` table and an outer literal decision with a FEEL projection (`sum(for r in table return r.penalty)`), so the exported model evaluates to the same outputs.
 
+Hit policy behaviour follows DMN 1.5 (PD-066, PD-088; `RLE-002`, `RLE-003`), checked against DMN 1.5 sections 8.2.11, 10.3.2.10 and 10.3.4.4. The export projection above therefore needs no null filter: FEEL `count` counts nulls as the engine does, and a null under `sum`, `min` or `max` fails in the engine before any export could differ.
+
+| Case | Result |
+|---|---|
+| `unique`, no match | No match, as `first`: every output null; logged as outcome `OK` with no matched rule ids |
+| `unique`, several matches | `UNIQUE_HIT_VIOLATION`: no outputs, every matched rule id logged |
+| `collect` list output (no aggregator) | One entry per matched rule in `matchedRuleIds` order, `null` included, so lists stay aligned |
+| `collect` with `count` | The number of matched rules, `null` values included (FEEL `count`, 10.3.4.4); not distinct values |
+| `collect` with `sum`, `min`, `max` | Over the values of all matched rules, not distinct values (8.2.11). A `null` value is outside the domain of these functions: under `errorMode: strict`, the v1 default (PD-066), the decision is `EVALUATION_ERROR` naming the output and the rule, with no partial outputs and the matched rule ids logged. Under `errorMode: spec` (imported DMN, from S1) the result is `null` with a trace warning |
+| Any hit policy, no match | Every output null, lists, aggregates and `count` included (10.3.2.10); logged as `OK` with no matched rule ids |
+| `sum` of numbers | Exact; a sum that needs more than 34 significant digits is `EVALUATION_ERROR`, never rounded |
+| `min`, `max` of strings | Unicode code point order, the order of `<` |
+
 ## 4. Expression strategy: FEEL
 
 ### 4.1 Decision
@@ -550,6 +563,7 @@ Published per release (`TR-STD-05`). The claim is "BPMN 2.0.2 Process Execution 
 | FEEL evaluation without bounds | Step budget and recursion depth | Principle 3 |
 | FEEL errors as `null` | Per-model `errorMode`; guardrails fail closed | Banking fail-closed rule |
 | Choreography and conversation | Imported with that part kept untouched in the stored source document and a warning naming it; not displayed or executed | Not targeted (PD-065) |
+| DMN vendor `extensionElements`, foreign attributes and DMNDI on export | Accepted on import and kept only in the stored source document; not read, never executed, and not written back by DMN export, so an exported file has no diagram and no vendor extensions | DMNDI round trip arrives in stage S3 (section 6.2); until then the source document (`?include=source`) keeps them byte for byte |
 
 ## 13. Decisions needed and open questions
 

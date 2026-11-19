@@ -82,7 +82,7 @@ An embedded cockpit also works when your web application signs users in with a s
 
 ### Where the cockpit opens
 
-A link into a screen always opens that screen. Otherwise the cockpit opens on a landing area chosen by the user's role. This is the host property `horus.bpm.cockpit.landing`, default `by-role`, which the cockpit reads from `/api/bpm/meta` as `cockpit.landing`; the host can set another landing area.
+A link into a screen always opens that screen. Otherwise the cockpit opens on Home, whose content follows the user's role: an approver sees the requests waiting for them first, an author their own drafts and requests, anyone else the recently changed rule sets. The host property `horus.bpm.cockpit.landing`, read from `/api/bpm/meta` as `cockpit.landing`, is `home` by default and can be set to `rules` or `approvals`; `decisions` arrives with 0.2.0.
 
 | User | Cockpit 0.1 opens on |
 |---|---|

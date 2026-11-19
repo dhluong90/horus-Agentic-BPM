@@ -195,6 +195,59 @@ class RuleLifecycleIT {
     }
 
     @Test
+    void RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several() throws Exception {
+        // Given
+        publishFile("/rules/loan-pricing.yaml", "loan-pricing");
+
+        // When
+        Reply overlap = send("teller", "POST", "/decisions/loan-pricing:evaluate",
+                "{\"inputs\":{\"score\":750,\"income\":{\"currency\":\"VND\",\"amount\":25000000}}}"
+                        .getBytes(StandardCharsets.UTF_8), "application/json", null);
+        Reply none = send("teller", "POST", "/decisions/loan-pricing:evaluate",
+                "{\"inputs\":{\"score\":500,\"income\":{\"currency\":\"VND\",\"amount\":5000000}}}"
+                        .getBytes(StandardCharsets.UTF_8), "application/json", null);
+
+        // Then
+        assertThat(overlap.status()).isEqualTo(422);
+        assertThat(overlap.contentType()).startsWith("application/problem+json");
+        assertThat(overlap.json().path("code").asString()).isEqualTo("UNIQUE_HIT_VIOLATION");
+        assertThat(overlap.json().path("matchedRuleIds").toString()).isEqualTo("[\"R1\",\"R2\"]");
+        assertThat(overlap.json().has("outputs")).isFalse();
+        // Zero matches is a no-match with every output null, logged as OK with [] as under first (PD-088)
+        assertThat(none.status()).isEqualTo(200);
+        assertThat(none.json().path("outcome").asString()).isEqualTo("NO_MATCH");
+        assertThat(none.json().path("matched").asBoolean()).isFalse();
+        assertThat(none.json().path("outputs").toString()).isEqualTo("{\"rate\":null}");
+        assertThat(none.json().path("matchedRuleIds").toString()).isEqualTo("[]");
+        assertThat(jdbc.sql("SELECT outcome FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id")
+                .param("id", none.json().path("decisionId").asString()).query(String.class).single())
+                .isEqualTo("OK");
+        assertThat(jdbc.sql("SELECT outcome FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id")
+                .param("id", overlap.json().path("decisionId").asString()).query(String.class).single())
+                .isEqualTo("UNIQUE_HIT_VIOLATION");
+    }
+
+    @Test
+    void RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules() throws Exception {
+        publishFile("/rules/risk-flags.yaml", "risk-flags");
+
+        Reply decision = send("teller", "POST", "/decisions/risk-flags:evaluate",
+                "{\"inputs\":{\"txPerHour\":12,\"country\":\"VN\",\"newDevice\":true}}".getBytes(StandardCharsets.UTF_8),
+                "application/json", null);
+
+        assertThat(decision.status()).isEqualTo(200);
+        assertThat(decision.json().path("matchedRuleIds").toString()).isEqualTo("[\"R1\",\"R3\"]");
+        assertThat(decision.json().path("outputs").toString())
+                .isEqualTo("{\"flags\":[\"HIGH_VELOCITY\",\"NEW_DEVICE\"],\"penalty\":15}");
+    }
+
+    void publishFile(String resource, String name) throws Exception {
+        assertThat(send("alice", "POST", "/rule-sets", resource(resource), "application/yaml", null).status()).isEqualTo(201);
+        assertThat(send("alice", "POST", "/rule-sets/" + name + "/versions/1:request-publish", null, null, null).status()).isEqualTo(200);
+        assertThat(send("bob", "POST", "/rule-sets/" + name + "/versions/1:approve", null, null, null).status()).isEqualTo(200);
+    }
+
+    @Test
     void RLE_014_a_request_whose_key_is_still_in_flight_gets_409_with_retry_after() throws Exception {
         // Given alice's import with key k-in-flight is running in another transaction
         publish("card-fee-flight");

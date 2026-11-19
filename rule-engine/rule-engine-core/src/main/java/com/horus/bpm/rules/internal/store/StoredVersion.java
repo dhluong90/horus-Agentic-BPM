@@ -75,4 +75,26 @@ public record StoredVersion(
                 effectiveFrom == null ? at : effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument,
                 sourceHash, lockVersion + 1, requestedBy, requestedAt, approver, at, comment, createdBy, createdAt);
     }
+
+    /**
+     * Returns a copy sent back to {@code DRAFT} by a rejection; the request is cleared so the author can edit and
+     * request again.
+     *
+     * @return the new state with the lock version incremented
+     */
+    public StoredVersion rejected() {
+        return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.DRAFT, hitPolicy,
+                effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
+                null, null, null, null, approvalComment, createdBy, createdAt);
+    }
+
+    /**
+     * Returns the list view.
+     *
+     * @return the summary
+     */
+    public com.horus.bpm.rules.api.VersionSummary toSummary() {
+        return new com.horus.bpm.rules.api.VersionSummary(ruleSet, version, status, hitPolicy, effectiveFrom,
+                lockVersion, canonicalHash, createdBy, createdAt, requestedBy, requestedAt, approvedBy, approvedAt);
+    }
 }

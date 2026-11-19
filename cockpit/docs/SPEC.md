@@ -321,14 +321,19 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ## Landing, Minimal Editing, Process Views and Diagram Accessibility (PD-013, PD-024, PD-048, PD-075, PD-078)
 
-### CKP-031 The cockpit opens on the work the user's role needs, unless the host fixes the landing area
-- **Traces to:** `TR-UI-08`, `TR-EXT-08`
+### CKP-031 The cockpit opens on Home, whose content follows the user's role, unless the host fixes the landing area
+- **Traces to:** `TR-UI-08`, `TR-EXT-08`, PD-092
 - **Milestone:** M1
-- **Given:** Host `loans` runs only the Rule Engine; `/api/bpm/meta` reports `cockpit.landing: by-role`. Users: `bob` holds `rules:approve`; `lan` holds `rules:author`; `dan` holds `rules:log:read` only; `eve` holds `rules:read` only. Second case: the host sets `cockpit.landing: decisions`. Third case: `bob` follows a link to `card-fee` v2.
+- **Given:** Host `loans` runs only the Rule Engine. `/api/bpm/meta` reports no `cockpit.landing`, so the default `home` applies. Users: `bob` holds `rules:approve`; `lan` holds `rules:author`; `dan` holds `rules:log:read` only; `eve` holds `rules:read` only; `zoe` holds no `rules:*` permission. Second case: the host sets `cockpit.landing: approvals`. Third case: `bob` follows a link to `card-fee` v2. Fourth case: the host sets the retired value `by-role`.
 - **When:** Each user signs in and the cockpit opens.
-- **Then:** `bob` lands on Changes showing pending approvals; `lan` on Changes filtered to her own drafts and requests; `dan` on Decisions; `eve` on the rule set list; nobody lands on a process canvas, because no Process Engine host is registered. In the second case every user lands on Decisions. In the third case `bob` opens `card-fee` v2 directly, whatever the setting.
-- **Example:** `by-role: approver -> Changes, auditor -> Decisions; landing: decisions -> everyone on Decisions; deep link wins`.
-- **Test ID:** `CKP_031_landing_area_by_role_or_host_setting`
+- **Then:**
+  - Every user lands on Home. `bob`'s Home shows first the requests waiting for his approval, his own requests marked "Your request" with no Approve. `lan`'s Home shows first her own drafts and requests. `eve`'s Home shows the recently changed rule sets. `dan` cannot read rule sets, so his Home shows one line saying there is nothing for him here yet; Decisions is a Preview in 0.1.0 and is never the landing. `zoe`'s Home shows one line saying her permissions show nothing on this service, never a blank page, and the menu offers only Home.
+  - Processes appears in the menu only when a Process Engine host is registered; here it does not.
+  - In the second case every user who may open Approvals lands there; a user who may not lands on Home.
+  - In the third case `bob` opens `card-fee` v2 directly, whatever the setting.
+  - In the fourth case the cockpit treats the unknown value as `home`, and the host's start-up log names the retired value (PD-092).
+- **Example:** `default -> Home for everyone, approver sees waiting requests first, user without rule permissions sees one line; landing: approvals -> Approvals; deep link wins; by-role -> home`.
+- **Test ID:** `CKP_031_cockpit_opens_on_home_with_role_content_or_host_landing`
 
 ### CKP-032 An author edits a draft in the cockpit with cell text and row actions, and errors show on their cells
 - **Traces to:** `TR-UI-02`, `TR-IDEM-01`
