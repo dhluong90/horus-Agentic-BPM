@@ -112,6 +112,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-088](#pd-088-unique-and-collect-follow-dmn-15) | `unique` and `collect` follow DMN 1.5 | Decided (product manager, delegated, PD-073) |
 | [PD-089](#pd-089-a-requester-withdraws-their-own-pending-request) | A requester withdraws their own pending request | Decided (product manager, delegated, PD-073) |
 | [PD-090](#pd-090-property-tests-without-jqwik) | Property tests without jqwik | Decided |
+| [PD-091](#pd-091-no-tag-ruleset-or-immutable-releases-for-now) | No tag ruleset or immutable releases for now | Decided (revisitable) |
 
 ---
 
@@ -2513,6 +2514,8 @@ Committed: the release does not ship without these.
 | New issue: Docker Compose example | The example host and PostgreSQL start with one command from a fresh clone | X-F-14 (deployable part) |
 | New issue: release review and GitHub Release | The go or no-go review and the GitHub Release with artifacts, checksums, bill of materials and release notes | X-F-09, X-F-19 |
 
+**Added to the committed scope, 2026-11-19 (product manager, delegated, on the product owner's feedback).** The product owner found the cockpit empty, with no menu, and the sign-in page unattractive. The release review is visual, so the cockpit navigation shell, a non-empty Home and a branded sign-in page for the example host are committed for the Fri 20 Nov review (#180). The shell follows the approved prototype (PD-056): Home, Rules, Approvals, and Decisions and Processes labelled Preview. Home shows only pending approvals and recent rule sets (PD-078). Decisions has no read API in 0.1.0, and logged decisions may hold personal data until masking arrives, so the Decisions area shows a one-line "comes in 0.2.0" empty state and no decision data. Sign-in stays the host's page; the cockpit library has no login of its own.
+
 Pulled in by PD-084: in the release only if each meets the same readiness bar at the Fri 20 Nov review; otherwise cut in the order below.
 
 | Issue | What ships | Feature map |
@@ -2742,3 +2745,30 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Consequences.** Every property test keeps its specification id in its name and its coverage (`TR-QA-01`); only the generator changes. Each run uses a recorded seed, and a failing case prints it. The PD-053 allow-list keeps the JUnit Jupiter API and JMH. Nothing that ships changes.
 
 **Follow-ups.** Maintainers (engineering): the removal and the in-house generator. Architect: remove jqwik from `TR-LIC-01` in [requirements](requirements.md), the allow-list in the build and the test plans that name it. Documentation: wiki pages that mention jqwik.
+
+### PD-091 No tag ruleset or immutable releases for now
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Should release tags (`v*`) be protected by a repository ruleset, and should published GitHub Releases be made immutable? |
+| Raised by | Security review of the release workflow |
+| Decision | Decided by the product owner, 2026-11-19, option 2. Revisitable |
+
+**The product owner's words.** "Not needed for now; team velocity and self-operation come first."
+
+**Options considered**
+
+1. A tag ruleset for `v*` (only the release workflow or named maintainers may create release tags) and immutable releases. Consequence: a release tag and its assets cannot be created or replaced by mistake; every release needs an admin-configured path, which slows the team in the release week.
+2. Neither, for now (chosen). Consequence: the team tags and publishes on its own; the protection rests on the release workflow's checks and on the rule below, not on repository settings.
+
+**Residual risk (security review).** Anyone with write access can push a `v*` tag and publish a Release, and the assets of a published Release can be replaced.
+
+**Mitigations, in place once #166 and #168 merge, before the `v0.1.0` tag.**
+- The tag guard of the release workflow (#166) refuses a tag that is not on `main`, is not of the form `vX.Y.Z`, does not match every module's version, or builds a group id other than `io.github.dhluong90.bpm`.
+- Verification before publishing (#168): the publishing job checks the checksums and the build information before the Release is published; the bill of materials is validated earlier, by the release build.
+- A bad release is fixed with a new patch release (`v0.1.1`); a published tag is never moved, deleted and re-created, and published assets are never replaced.
+
+**Revisit when** any of these happens: an outside contributor gets write access; a tag or Release asset is created or changed outside the release workflow; or an adopter or bank review asks for tamper-evident releases. The product manager then brings option 1 back to the product owner. Same pattern as PD-081 for branch protection.
+
+**Follow-ups.** Maintainers (engineering): the "never re-tag, release a patch" rule in `CONTRIBUTING.md` and the release runbook. Security: confirm the guard and the verification cover the risk above at the Fri 20 Nov review.
