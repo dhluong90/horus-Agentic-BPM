@@ -52,13 +52,13 @@ class ReleaseTagTest(unittest.TestCase):
         self.assertIn("(a SNAPSHOT is never released)", self.errors("v0.1.0", projects)[0])
 
     def test_every_module_needs_the_release_group_id(self):
-        projects = REACTOR + [("bpm-host-metadata", "com.horus.bpm", "0.1.0")]
+        projects = REACTOR + [("bpm-host-metadata", "org.example.bpm", "0.1.0")]
         errors = self.errors("v0.1.0", projects)
         self.assertEqual(1, len(errors))
-        self.assertIn("module bpm-host-metadata has group id com.horus.bpm", errors[0])
+        self.assertIn("module bpm-host-metadata has group id org.example.bpm", errors[0])
 
     def test_every_problem_is_reported_at_once(self):
-        projects = [("bpm-parent", "com.horus.bpm", "0.1.0-SNAPSHOT"), ("bpm-bom", GROUP, "0.2.0")]
+        projects = [("bpm-parent", "org.example.bpm", "0.1.0-SNAPSHOT"), ("bpm-bom", GROUP, "0.2.0")]
         errors = self.errors("rule-engine/v0.1.0", projects)
         self.assertEqual(4, len(errors), errors)
 
