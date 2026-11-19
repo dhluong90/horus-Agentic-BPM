@@ -3,7 +3,7 @@ package io.github.dhluong90.bpm.process.test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.rules.api.Money;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
@@ -185,18 +185,18 @@ class ProcessServicesQaTest {
                 .build();
     }
 
-    private static com.horus.bpm.rules.api.RuleEngine ruleEngine(AtomicInteger evaluations) {
-        return new com.horus.bpm.rules.api.RuleEngine() {
+    private static io.github.dhluong90.bpm.rules.api.RuleEngine ruleEngine(AtomicInteger evaluations) {
+        return new io.github.dhluong90.bpm.rules.api.RuleEngine() {
             @Override
-            public com.horus.bpm.rules.api.DecisionResult evaluate(String ruleSet, com.horus.bpm.rules.api.DecisionInput input) {
-                return evaluate(com.horus.bpm.rules.api.DecisionRequest.of(ruleSet, input));
+            public io.github.dhluong90.bpm.rules.api.DecisionResult evaluate(String ruleSet, io.github.dhluong90.bpm.rules.api.DecisionInput input) {
+                return evaluate(io.github.dhluong90.bpm.rules.api.DecisionRequest.of(ruleSet, input));
             }
 
             @Override
-            public com.horus.bpm.rules.api.DecisionResult evaluate(com.horus.bpm.rules.api.DecisionRequest request) {
+            public io.github.dhluong90.bpm.rules.api.DecisionResult evaluate(io.github.dhluong90.bpm.rules.api.DecisionRequest request) {
                 evaluations.incrementAndGet();
-                return new com.horus.bpm.rules.api.DecisionResult("01JDDECISION00000000000000", request.ruleSet(), 1,
-                        Instant.parse("2027-01-04T09:00:00Z"), new com.horus.bpm.rules.api.DecisionResult.Matched(
+                return new io.github.dhluong90.bpm.rules.api.DecisionResult("01JDDECISION00000000000000", request.ruleSet(), 1,
+                        Instant.parse("2027-01-04T09:00:00Z"), new io.github.dhluong90.bpm.rules.api.DecisionResult.Matched(
                                 List.of("R1"), Map.of("fee", Money.ofMinor("VND", 0))));
             }
         };
@@ -242,7 +242,7 @@ class ProcessServicesQaTest {
     // ---- wiring ---------------------------------------------------------------------------------------------
 
     private ProcessServices services(Process process, io.github.dhluong90.bpm.process.spi.TenantResolver tenants,
-            Optional<com.horus.bpm.rules.api.RuleEngine> rules, io.github.dhluong90.bpm.process.spi.ProcessEventPublisher events) {
+            Optional<io.github.dhluong90.bpm.rules.api.RuleEngine> rules, io.github.dhluong90.bpm.process.spi.ProcessEventPublisher events) {
         CallerResolver caller = new CallerResolver() {
             @Override
             public String currentCallerId() {

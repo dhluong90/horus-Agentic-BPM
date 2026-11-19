@@ -1,6 +1,6 @@
 package io.github.dhluong90.bpm.rules.internal.dmn.ruleset;
 
-import com.horus.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
