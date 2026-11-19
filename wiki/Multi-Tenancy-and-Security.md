@@ -28,8 +28,8 @@ The REST layer checks one permission string per endpoint with `@PreAuthorize`; t
 
 | Engine | Permissions | Reference |
 |---|---|---|
-| Rule Engine | `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read` | [[Rule Engine Configuration]] |
-| Process Engine | `processes:read`, `processes:deploy`, `processes:start`, `tasks:work`, `tasks:manage`, `incidents:manage`, `migrations:manage`, `calendars:manage` | [[Process Engine Overview]] |
+| Rule Engine | `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read`, `rules:pin` (0.2.0; held by no role by default) | [[Rule Engine Configuration]] |
+| Process Engine | `processes:read`, `processes:deploy`, `processes:author`, `processes:approve`, `processes:start`, `processes:cancel`, `processes:task:work`, `processes:task:manage`, `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage` | [[Process Engine Overview]] |
 
 ## Maker-checker in the service layer
 
@@ -62,10 +62,21 @@ Expressions are parsed by a hand-written recursive-descent parser into a sealed,
 
 | Shape | Headers set by `cockpit-spring-boot-starter` |
 |---|---|
-| Embedded at `horus.bpm.cockpit.path` | `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. The host may frame the cockpit in its own admin UI on the same origin; no other site can. Assets are served only to authenticated sessions. `Cache-Control: no-store` on engine API responses is tracked separately (see the cockpit page) |
+| Embedded at `horus.bpm.cockpit.path` | `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. The host may frame the cockpit in its own admin UI on the same origin; no other site can. Assets are served only to authenticated sessions. Engine API responses are covered by the next section |
 | Standalone | The host sets `rest.cors.allowed-origins` to the exact cockpit origin, and allows the request headers `Authorization`, `Accept`, `X-Requested-With`, `X-Tenant-Id`, `If-None-Match`, `If-Match` and `Idempotency-Key`; credentials via bearer token, not cookies; `connect-src` on the cockpit side lists the host URLs |
 
 The cockpit holds no secrets and no state (ADR-0005). It never marks an approval, a task completion or an incident retry as done before the API returns `200` or `201`.
+
+## Caching of engine responses
+
+Every response under `/api/bpm/**` carries `Cache-Control: no-store`, so rule sets, decisions and personal data are never kept in a shared browser cache or an intermediate proxy (`TR-SEC-09`). The rule comes from the host metadata module that every engine starter brings, so it holds for the embedded and the standalone cockpit alike, and the host configures nothing.
+
+| Path | `Cache-Control` |
+|---|---|
+| `/api/bpm/rules/**`, `/api/bpm/processes/**` and any other path under `/api/bpm/**`: success, problem and `304` answers | `no-store` |
+| `/api/bpm/meta` | `private, max-age=60` (errors: `no-store`) |
+| `/api/bpm/me` | `private, no-cache`, so a revoked role is never shown from cache (errors: `no-store`) |
+| Host endpoints outside `/api/bpm/**` | Unchanged: the host's own policy |
 
 ## Threat model (STRIDE)
 
