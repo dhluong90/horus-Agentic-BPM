@@ -251,7 +251,7 @@ describe('menu', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Processes Preview' })).toBeInTheDocument();
     expect(screen.getByText('No process is deployed on this service yet.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'How the Process Engine works' })).toHaveAttribute('href', expect.stringContaining('Process-Engine-Overview'));
+    expect(screen.getByRole('link', { name: 'How to import a BPMN file' })).toHaveAttribute('href', expect.stringContaining('Process-Engine-Importing-BPMN'));
     expect(screen.queryByText(/is installed on this service/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('link', { name: 'Decisions' }));
     expect(await screen.findByText('Decision history comes in 0.2.0.')).toBeInTheDocument();

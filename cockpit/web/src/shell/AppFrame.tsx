@@ -18,13 +18,15 @@ import { NavRail } from './NavRail';
 import '../components/frame.css';
 
 /**
- * The host's authoring.cockpit-drafts setting from the rules module of /meta (PD-075, PD-036). On by default;
- * a host that keeps production rule changes in Git turns it off and the cockpit offers no editing.
+ * The host's authoring.cockpit-drafts setting from the rules module of /meta (PD-075, PD-036, PD-094).
+ * Off by default in 0.1.0 (PD-094): the cockpit edits drafts only where the host says true. Import from a
+ * file is not affected.
  */
 export function cockpitDraftsOn(meta: BpmMetaV1): boolean {
   const settings = meta.modules.find((module) => module.module === 'rules')?.settings ?? {};
   const value = settings['authoring.cockpit-drafts'] ?? settings['rules.authoring.cockpit-drafts'];
-  return value !== false && value !== 'false';
+  // Off by default in 0.1.0 (PD-094)
+  return value === true || value === 'true';
 }
 
 export interface FrameProps {

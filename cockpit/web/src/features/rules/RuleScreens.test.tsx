@@ -234,6 +234,23 @@ describe('four eyes', () => {
     expect(approve).toHaveAccessibleDescription(/Approve is not available to you for this version\./);
   });
 
+  it('PD_094_without_the_setting_draft_editing_is_off_and_import_stays', async () => {
+    const user = userEvent.setup();
+    open('#/rules/card-fee/1', 'rules-author-drafts-default');
+    expect(await screen.findByText('Changes to this environment arrive through your release pipeline.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.getByRole('menuitem', { name: 'Import new version' })).toBeEnabled();
+    window.location.hash = '#/rules';
+    expect(await screen.findByRole('button', { name: 'Import rule set' })).toBeInTheDocument();
+  });
+
+  it('PD_094_a_host_that_turns_drafts_on_offers_editing', async () => {
+    open('#/rules/card-fee/1', 'rules-author');
+    expect(await screen.findByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    expect(screen.queryByText('Changes to this environment arrive through your release pipeline.')).not.toBeInTheDocument();
+  });
+
   it('PD_075_cockpit_drafts_off_hides_editing_and_keeps_import', async () => {
     open('#/rules/card-fee/1', 'rules-author-drafts-off');
     expect(await screen.findByText('Changes to this environment arrive through your release pipeline.')).toBeInTheDocument();

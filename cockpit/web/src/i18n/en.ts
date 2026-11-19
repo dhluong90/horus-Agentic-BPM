@@ -133,7 +133,7 @@ export const en = {
   'processes.title': 'Processes',
   'processes.subtitle': 'Process definitions, instances and tasks arrive in a later release.',
   'processes.empty': 'No process is deployed on this service yet.',
-  'processes.guide': 'How the Process Engine works',
+  'processes.guide': 'How to import a BPMN file',
 
   'error.problem.title': 'The service refused the request',
   'error.problem.body': 'Share the error code and reference with your support team.',

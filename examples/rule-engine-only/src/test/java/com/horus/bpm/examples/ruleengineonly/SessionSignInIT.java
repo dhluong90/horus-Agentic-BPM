@@ -64,6 +64,8 @@ class SessionSignInIT {
 
             assertThat(meta.statusCode()).as(user).isEqualTo(200);
             assertThat(JSON.readTree(meta.body()).path("hostId").asString()).isEqualTo("rule-engine-only");
+            // PD-094: the dev profile of this example turns cockpit draft editing on for the demo.
+            assertThat(JSON.readTree(meta.body()).path("modules").get(0).path("settings").path("authoring.cockpit-drafts").asBoolean()).isTrue();
             assertThat(me.statusCode()).as(user).isEqualTo(200);
             JsonNode body = JSON.readTree(me.body());
             assertThat(body.path("user").path("id").asString()).isEqualTo(user);
