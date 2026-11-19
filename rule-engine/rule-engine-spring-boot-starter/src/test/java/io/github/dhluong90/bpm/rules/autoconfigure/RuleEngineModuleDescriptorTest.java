@@ -38,13 +38,28 @@ class RuleEngineModuleDescriptorTest {
     @Test
     void PD_094_cockpit_drafts_setting_is_published_false_by_default_and_true_when_the_host_sets_it() {
         runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", false)));
+                .containsEntry("authoring.cockpit-drafts", false));
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=true")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                        .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", true)));
+                        .containsEntry("authoring.cockpit-drafts", true));
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=false")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                        .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", false)));
+                        .containsEntry("authoring.cockpit-drafts", false));
+    }
+
+    @Test
+    void RLE_026_the_retirement_mode_is_published_and_four_eyes_is_refused_until_it_ships() {
+        // PD-080: the mode in force is always in /api/bpm/meta, after the draft-editing setting
+        runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                .containsExactly(Map.entry("authoring.cockpit-drafts", false),
+                        Map.entry("lifecycle.retire-approval", "single")));
+        runner.withPropertyValues("horus.bpm.rules.lifecycle.retire-approval=single")
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                        .containsEntry("lifecycle.retire-approval", "single"));
+        runner.withPropertyValues("horus.bpm.rules.lifecycle.retire-approval=four-eyes")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.lifecycle.retire-approval")
+                        .hasMessageContaining("M3"));
     }
 
     @Test

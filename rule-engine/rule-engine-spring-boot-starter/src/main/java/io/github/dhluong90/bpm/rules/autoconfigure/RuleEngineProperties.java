@@ -87,12 +87,41 @@ public record RuleEngineProperties(
     }
 
     /**
-     * Version lifecycle commands.
+     * Version lifecycle commands and the automatic retirement of superseded versions (ADR-0025).
      *
-     * @param reasonMaxLength the longest reason of {@code :reject}, in characters, 1 to 2000; default 2000. May be
-     *     lowered, never raised
+     * @param reasonMaxLength the longest reason of {@code :reject} and {@code :retire}, in characters, 1 to 2000;
+     *     default 2000. May be lowered, never raised
+     * @param sweepInterval how often the lifecycle sweep retires versions a newer version in effect has superseded,
+     *     {@code PT1S} to {@code PT1H}; default {@code PT1M}. Status only: selection follows the effective date
+     * @param systemActor the actor recorded on the history row and event of a superseded version; default
+     *     {@code system}
+     * @param retireApproval the approval mode of a retirement by hand (PD-080): {@code single}, the default and the
+     *     only value of this release; {@code four-eyes} arrives in M3 and is refused at start-up until then. Shown
+     *     in {@code /api/bpm/meta} as the rules setting {@code lifecycle.retire-approval}
      */
-    public record Lifecycle(Integer reasonMaxLength) {
+    public record Lifecycle(Integer reasonMaxLength, Duration sweepInterval, String systemActor,
+            String retireApproval) {
+
+        /** Shortest accepted {@code sweep-interval}. */
+        static final Duration SWEEP_MIN = Duration.ofSeconds(1);
+
+        /** Longest accepted {@code sweep-interval}: the status of a superseded version lags at most this long. */
+        static final Duration SWEEP_MAX = Duration.ofHours(1);
+
+        /**
+         * Returns the validated sweep interval.
+         *
+         * @return the interval, the default when unset
+         * @throws IllegalArgumentException when it is outside {@code PT1S} to {@code PT1H}, naming the property
+         */
+        public Duration sweepIntervalOrDefault() {
+            Duration interval = sweepInterval == null ? EngineDefaults.SWEEP_INTERVAL : sweepInterval;
+            if (interval.compareTo(SWEEP_MIN) < 0 || interval.compareTo(SWEEP_MAX) > 0) {
+                throw new IllegalArgumentException("horus.bpm.rules.lifecycle.sweep-interval must be PT1S to PT1H,"
+                        + " was " + interval);
+            }
+            return interval;
+        }
     }
 
     /**
@@ -111,7 +140,10 @@ public record RuleEngineProperties(
                 lifecycle.reasonMaxLength() == null ? EngineDefaults.REASON_MAX_LENGTH : lifecycle.reasonMaxLength(),
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
-                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows());
+                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows())
+                .withLifecycle(
+                        lifecycle.systemActor() == null ? EngineDefaults.SYSTEM_ACTOR : lifecycle.systemActor(),
+                        lifecycle.retireApproval() == null ? EngineDefaults.RETIRE_APPROVAL : lifecycle.retireApproval());
     }
 
     /**

@@ -60,6 +60,13 @@ class RuleEngineServicesConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    RuleEngineLifecycleSweeper ruleEngineLifecycleSweeper(RuleEngines engines, RuleEngineProperties properties) {
+        return new RuleEngineLifecycleSweeper(engines.lifecycleSweep()::run,
+                properties.lifecycle().sweepIntervalOrDefault());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     RuleEngine ruleEngine(RuleEngines engines) {
         return engines.ruleEngine();
     }

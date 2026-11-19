@@ -70,6 +70,33 @@ class RuleEngineSettingsTest {
     }
 
     @org.junit.jupiter.api.Test
+    void RLE_027_lifecycle_settings_default_to_system_single_and_one_minute() {
+        runner.run(context -> {
+            assertThat(context.getBean(EngineSettings.class))
+                    .extracting(EngineSettings::systemActor, EngineSettings::retireApproval)
+                    .containsExactly("system", "single");
+            assertThat(context.getBean(RuleEngineProperties.class).lifecycle().sweepIntervalOrDefault())
+                    .isEqualTo(Duration.ofMinutes(1));
+        });
+        runner.withPropertyValues("horus.bpm.rules.lifecycle.system-actor=pricing-sweeper",
+                        "horus.bpm.rules.lifecycle.sweep-interval=PT1S")
+                .run(context -> {
+                    assertThat(context.getBean(EngineSettings.class).systemActor()).isEqualTo("pricing-sweeper");
+                    assertThat(context.getBean(RuleEngineProperties.class).lifecycle().sweepIntervalOrDefault())
+                            .isEqualTo(Duration.ofSeconds(1));
+                });
+    }
+
+    @ParameterizedTest
+    @CsvSource({"PT0.5S", "PT1H0.001S", "PT2H"})
+    void RLE_027_a_sweep_interval_outside_one_second_to_one_hour_is_refused(String interval) {
+        runner.withPropertyValues("horus.bpm.rules.lifecycle.sweep-interval=" + interval)
+                .run(context -> org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                                context.getBean(RuleEngineProperties.class).lifecycle().sweepIntervalOrDefault())
+                        .hasMessageContaining("horus.bpm.rules.lifecycle.sweep-interval"));
+    }
+
+    @org.junit.jupiter.api.Test
     void TR_EXT_01_undeclared_inputs_can_be_ignored_instead_of_refused() {
         runner.withPropertyValues("horus.bpm.rules.evaluation.reject-undeclared-inputs=false")
                 .run(context -> assertThat(context.getBean(EngineSettings.class).rejectUndeclaredInputs()).isFalse());

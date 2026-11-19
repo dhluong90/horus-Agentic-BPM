@@ -27,6 +27,9 @@ final class RuleEngineModule {
     /** The rules setting clients read to offer or hide draft editing (PD-075, PD-094). */
     static final String COCKPIT_DRAFTS = "authoring.cockpit-drafts";
 
+    /** The rules setting clients read to show how a retirement is approved (PD-080, ADR-0025). */
+    static final String RETIRE_APPROVAL = "lifecycle.retire-approval";
+
     private static final String VERSION_RESOURCE = "rule-engine.properties";
 
     private RuleEngineModule() {
@@ -37,11 +40,16 @@ final class RuleEngineModule {
      *
      * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
      * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}; null (unset) is published as false
+     * @param retireApproval the validated {@code horus.bpm.rules.lifecycle.retire-approval}
      * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
      */
-    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts) {
-        // Always published, false unless the host turns it on (PD-094), so clients never guess.
-        Map<String, Object> settings = Map.of(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
+    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
+            String retireApproval) {
+        // Always published, so clients never guess: draft editing false unless the host turns it on (PD-094), and
+        // the retirement mode in force (PD-080).
+        Map<String, Object> settings = new java.util.LinkedHashMap<>();
+        settings.put(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
+        settings.put(RETIRE_APPROVAL, retireApproval);
         return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);
     }
 
