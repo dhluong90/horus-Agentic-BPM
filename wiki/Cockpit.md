@@ -59,9 +59,16 @@ What the starter sends with every cockpit file:
 | Header | Value |
 |---|---|
 | `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'` |
+| `X-Frame-Options` | `SAMEORIGIN`, held on cockpit paths even when Spring Security sends `DENY` elsewhere. Together with `frame-ancestors 'self'`: your admin UI may frame the cockpit on the same origin, no other site can |
 | `X-Content-Type-Options` | `nosniff` |
 | `Referrer-Policy` | `no-referrer` |
 | `Cache-Control` | `no-store` for the page and `cockpit-hosts.json`; `private, max-age=31536000, immutable` for the hashed files under `assets/` |
+
+A cockpit route such as `/bpm/cockpit/rules/card-fee`, reloaded or bookmarked, gets the cockpit page; a missing file under the path stays `404`.
+
+**CSRF in `host-session` mode.** Keep the CSRF token in a cookie the cockpit can read and accept it in the `X-XSRF-TOKEN` header. With Spring Security that is one line: `http.csrf(csrf -> csrf.spa())` (cookie `XSRF-TOKEN`). The starter loads the token whenever a cockpit file is served, so the cookie exists before the cockpit's first change request.
+
+**Tenant in `host-session` mode.** The tenant comes from your session principal, through your `TenantResolver` bean, and never from a header the browser sets.
 
 If the service answers `/api/bpm/me` or `/api/bpm/meta` with an error, the cockpit shows the error `code` and `correlationId` (give the `correlationId` to the service's operators) and does not show a partial header. A `404` there means the service does not serve the host metadata endpoints yet.
 
@@ -76,7 +83,7 @@ An embedded cockpit shows only the service that serves it. To see several servic
 1. Download the cockpit archive of the matching release and serve it from any static web server.
 2. List your services in the cockpit's host registry, one base URL per service (TR-UI-01). The configuration format will be documented here before Cockpit 0.1 ships.
 3. Configure one OpenID Connect identity provider whose tokens every listed service accepts. The cockpit signs in once, as a public client with PKCE, and uses that sign-in for every host.
-4. Allow the cockpit's origin in each service's CORS configuration; the cockpit calls `/api/bpm/rules/v1` and, from 0.2, `/api/bpm/processes/v1` directly.
+4. Allow the cockpit's origin in each service's CORS configuration; the cockpit calls `/api/bpm/rules/v1` and, from 0.2, `/api/bpm/processes/v1` directly. Allow the request headers the cockpit sends: `Authorization`, `Accept`, `X-Requested-With`, `X-Tenant-Id`, `If-None-Match`, `If-Match` and `Idempotency-Key`.
 
 Each host answers two endpoints the cockpit reads after sign-in:
 
