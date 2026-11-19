@@ -34,7 +34,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-016 | `PRE_016_deploy_rejects_guardrail_rule_set_breaking_contract` | WebMvc | M2 | `TR-AGT-01` | Planned |
 | PRE-017 | `PRE_017_async_lease_is_timeout_plus_margin` | Two-replica fault injection | M2 | `TR-AGT-03`, `TR-PERF-05` | Planned |
 | PRE-018 | `PRE_018_import_creates_draft_not_active_version` | WebMvc, integration | M2 | `TR-DEF-03`, `TR-DEF-04` | Planned |
-| PRE-019 | `PRE_019_definition_requester_cannot_approve` | Service, WebMvc | M2 | `TR-SEC-04`, `TR-DEF-03` | Planned |
+| PRE-019 | `PRE_019_no_maker_of_a_definition_version_can_approve` | Service, WebMvc, start-up log capture | M2 | `TR-SEC-04`, `TR-DEF-03` | Planned |
 | PRE-020 | `PRE_020_effective_date_switches_version_and_retires_previous` | Integration, TestClock | M2 | `TR-DEF-03`, `TR-DET-01` | Planned |
 | PRE-021 | `PRE_021_reject_returns_draft_and_superseded_approval_refused` | WebMvc | M2 | `TR-DEF-03` | Planned |
 | PRE-022 | `PRE_022_dev_only_relaxations_refused_outside_dev` | Starter boot tests | M2 | `TR-SEC-11` | Planned |
@@ -64,6 +64,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-046 | `PRE_046_decision_step_uses_the_instance_tenant_and_the_engine_identity` | Service with both engines, no-principal harness, Testcontainers two tenants | M2 | `TR-TEN-01`, `TR-IDEM-04` | Planned |
 | PRE-047 | `PRE_047_decision_port_refuses_a_request_tenant_other_than_the_instance_tenant` | Service, security log capture | M2 | `TR-TEN-01` | Planned |
 | PRE-048 | `PRE_048_kernel_runs_only_the_approved_source` | Testcontainers with a tampered row, event and audit capture | M2 | `TR-DEF-04`, `TR-STD-01` | Planned |
+| PRE-052 | `PRE_052_requester_withdraws_own_pending_definition_to_draft` | Service, WebMvc, Testcontainers history and event capture | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Planned |
 
 ## Known gaps
 | Gap | Plan |
