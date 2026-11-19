@@ -91,6 +91,9 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-067](#pd-067-product-roadmap-approved-sprint-planning-starts) | Product roadmap approved; sprint planning starts | Decided |
 | [PD-068](#pd-068-human-readable-issues-and-planning-artefacts) | Human-readable issues and planning artefacts | Decided |
 | [PD-069](#pd-069-development-starts-on-a-10-sprint-plan-with-reviewed-sprints) | Development starts on a 10-sprint plan with reviewed sprints | Decided |
+| [PD-070](#pd-070-maven-groupid-and-java-package-root) | Maven groupId and Java package root | Pending product owner |
+| [PD-071](#pd-071-jackson-major-used-inside-the-engine-cores) | Jackson major used inside the engine cores | Pending product owner |
+| [PD-072](#pd-072-fixed-or-configurable-rule-engine-table-prefix) | Fixed or configurable Rule Engine table prefix | Pending product owner |
 
 ---
 
@@ -1917,3 +1920,83 @@ Effort (assumption): S1 about 24 engineer-weeks (BPMN 12, DMN 8, cockpit 4), S2 
 - UI features are reviewed at 1440x900, with the primary action and its result visible without scrolling, and at 1440x1200 (PD-068, rule 7).
 
 **Follow-ups.** Product manager: review every sprint and publish the review with each review video. Maintainers (engineering): end every sprint with a recorded demo and per-feature evidence. Documentation: the wiki Roadmap page states that development has started.
+
+## Pending: first publish and core dependencies
+
+The architecture review of the first engine pull request (the Maven skeleton and example host, [#12](https://github.com/dhluong90/horus-Agentic-BPM/pull/12#pullrequestreview-5967480926)) raised three choices that are cheap now and expensive once an artifact is published or Sprint 1 code builds on them. All three are due at the M0 exit (Fri 4 Dec 2026). PD-071 gates the first core pull request that parses definitions (Sprint 1, from 7 Dec 2026); PD-070 and PD-072 gate the first published artifact (M1 release, 15 Jan 2027).
+
+### PD-070 Maven groupId and Java package root
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Under which Maven `groupId` do the engines publish to Maven Central, and does the Java package root follow it? The code uses `com.horus.bpm` as a literal in 14 places across 7 POMs, and as the package root of every Java class |
+| Raised by | Architect, review of pull request #12 (should-fix 9); [rule engine DESIGN](../../rule-engine/docs/DESIGN.md) section 7.2 |
+| Decision | Pending product owner. Due 4 Dec 2026 (M0 exit). Gate: Maven Central namespace registered before the first publish (M1 release, 15 Jan 2027); package root fixed before Sprint 1 code (7 Dec 2026) |
+
+**Facts.** Maven Central only accepts a `groupId` whose namespace the publisher has verified: a reversed domain proven by a DNS record, or `io.github.<account>` proven through that GitHub account. A WHOIS lookup on 2026-11-19 shows `horus.com` registered since 1995 to an unrelated company, so `com.horus` cannot be verified by this project. `io.github.dhluong90` can be verified today. A `groupId` and the Java package root may differ, but Java convention expects the package root to be a namespace the project controls.
+
+**Options considered**
+
+1. `io.github.dhluong90.bpm` for the `groupId` and the Java package root. Consequence: verifiable today at no cost; one search-and-replace across the POMs and a package rename across 17 Java files, about half a day before Sprint 1. The coordinates name the repository owner's personal account; moving later means a Maven relocation POM for the `groupId` and a breaking package rename for every adopter.
+2. A domain the project registers and controls, reversed, for both. Consequence: the most durable coordinates, independent of any personal account; costs a domain registration and a DNS record, about one day of lead time, plus the same rename effort as option 1. Needs a name chosen and checked against existing trademarks by 4 Dec, or option 1 applies.
+3. Publish under `io.github.dhluong90.bpm` but keep the `com.horus.bpm` package root. Consequence: no Java rename now; the package root claims a domain owned by another company, which bank reviewers and dependency scanners can flag, and fixing it after the first publish breaks every adopter.
+4. Keep `com.horus.bpm` for both. Consequence: Maven Central refuses the namespace, so the M1 publish is blocked. Listed only to close it.
+
+**Recommendation (product manager).** Option 1, applied to the `groupId` and the package root together before Sprint 1 code starts. It is the only option that needs nothing outside the team's control and matches the repository's public address. If the product owner prefers coordinates that do not name a personal account, choose option 2 now, not after the first publish: a later move costs every adopter a breaking change.
+
+**Assumption to test.** [ASSUMPTION] Coordinates under a personal GitHub account are acceptable to bank procurement and dependency review. Cheap test: ask one bank architect in the pilot conversations already planned for M1. If two of three object, apply option 2 before 1.0, while the adopter count is small.
+
+**Consequences if accepted.** The POMs, the BOM, the example host and every Java package change in one pull request before Sprint 1 code; the wiki Technical Stack page and DESIGN section 7.2 are updated; the Maven Central namespace is registered before the release slice of Sprint 3.
+
+**Follow-ups.** Maintainers (engineering): rename and register the namespace. Architect: close DESIGN 7.2 and correct the "one edit" comment in the parent POM. Documentation: wiki Technical Stack and Getting Started coordinates.
+
+### PD-071 Jackson major used inside the engine cores
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Which Jackson major do `rule-engine-core` and `process-engine-core` use to parse definitions, given that Spring Boot 4 defaults to Jackson 3 and Spring Boot 3.5, tested until 1.0, uses Jackson 2? |
+| Raised by | Architect, [ADR-0011](../adr/0011-spring-boot-4-baseline.md) consequences; [rule engine DESIGN](../../rule-engine/docs/DESIGN.md) section 7.1; review of pull request #12 |
+| Decision | Pending product owner. Due 4 Dec 2026 (M0 exit). Gate: before the first core pull request that parses definitions (Sprint 1, from 7 Dec 2026) |
+
+**Facts.** Jackson 2 and Jackson 3 use different Java packages and can sit on one classpath. ADR-0016 keeps Jackson types out of the public `api` and `spi`, so the choice is internal to the engine and can change in a later minor release. What must not change is the serialised form of definitions and decision log rows, because replay depends on it.
+
+**Options considered**
+
+1. Jackson 3 inside the cores only (recommended by the architect). On a 3.5 host the engine brings Jackson 3 as a private dependency, and the REST module reads request bodies with the engine's own mapper rather than the host's message converters. Consequence: the cores are built on the line Spring Boot 4 uses from now on; a 3.5 host carries both majors; the engine's REST module does not follow the host's JSON settings, which the wiki must say.
+2. Jackson 2 inside the cores. Consequence: native on 3.5 hosts; on Spring Boot 4 hosts Jackson 2 is the deprecated line, so the engine adds a second major there instead, and a move to Jackson 3 is still due before or soon after 1.0, with a check that the serialised form does not change.
+3. No JSON library in the cores: the cores read a neutral parsed tree through a small port, and each starter supplies an adapter on the host's own Jackson major. Consequence: the cores keep zero compile dependencies (as today) and follow the host's JSON settings; two adapters to build and test, with number and money precision handled in both, about 3 to 5 extra days in M1 [ASSUMPTION], in a six-week milestone that already carries a cut list.
+
+**Recommendation (product manager).** Option 1, with a condition: the Spring Boot 3.5 test leg proves in Sprint 1 that a 3.5 host resolves Jackson 3 next to its own Jackson 2 and parses a definition. If that test fails, the architect returns with option 3 before the parsing pull request merges. Option 1 is the least work in M1 and puts the cores on the line every supported Spring Boot release will use; the choice stays internal, so it is reversible without breaking adopters.
+
+**Assumption to test.** [ASSUMPTION] Jackson 3 runs on a Spring Boot 3.5 host whose dependency management pins Jackson 2 artifacts, including the annotations artifact the two majors share. Cheap test: a dependency-tree check and one parse test in the 3.5 test leg, in the first parsing pull request. Kill criterion: the test fails or needs the host to override its own Jackson versions.
+
+**Consequences if accepted.** DESIGN section 7.1 in both engines is closed; the core module adds Jackson 3 as its only compile dependency, and the core boundary rules allow it explicitly; the wiki Getting Started page states that the engine's REST endpoints use the engine's own JSON settings.
+
+**Follow-ups.** Architect: DESIGN 7.1 in the rule engine and process engine, and the core dependency rules. Maintainers (engineering): the 3.5 coexistence test. Documentation: wiki Getting Started.
+
+### PD-072 Fixed or configurable Rule Engine table prefix
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Does the Rule Engine keep the documented property `horus.bpm.rules.schema-prefix`, or are its table names fixed at `rle_`? The first migration hard-codes `rle_` in every table name |
+| Raised by | Architect, review of pull request #12 (should-fix 4); [rule engine DESIGN](../../rule-engine/docs/DESIGN.md) section 1, line 17 |
+| Decision | Pending product owner. Due 4 Dec 2026 (M0 exit). Gate: before the first published artifact (M1 release, 15 Jan 2027) |
+
+**Facts.** Flyway checks every applied migration against a checksum of its file. If the first migration ships with literal `rle_` names and is later changed to use a placeholder, its checksum changes and every existing install fails validation at start-up. The Flyway history table is already fixed as `rle_schema_history` (`TR-EMB-06`).
+
+**Options considered**
+
+1. Drop the property; table names are fixed at `rle_` (recommended by the architect). Consequence: one code path, simpler SQL and tests, no checksum risk; DESIGN section 1 changes; a host that already has its own `rle_` tables cannot install the engine in the same schema.
+2. Keep the property and put a Flyway placeholder in every table name of the first migration now, before any publish. Consequence: the documented promise holds; every migration and every SQL statement in the engine carries the placeholder from now on, the test matrix gains a prefix dimension, and a mistake in any later migration is a checksum or naming defect in the field.
+3. Drop the property now and, if an adopter needs isolation, offer a dedicated PostgreSQL schema later as an additive option. Consequence: same as option 1 for M1; a later schema option leaves the migration files unchanged, so no checksum breaks [ASSUMPTION]; it is built only when an adopter asks.
+
+**Recommendation (product manager).** Option 1, recorded with option 3 as the stated path if an adopter needs isolation. The prefix protects against a name clash no adopter has reported, and keeping it costs every future migration a placeholder. Fixed names are what adopters of embedded engines expect.
+
+**Assumption to test.** [ASSUMPTION] No pilot host already uses tables named `rle_` or needs several Rule Engine installs in one schema. Cheap test: one question in the M1 pilot conversations. [ASSUMPTION] A dedicated schema can be added later without changing migration checksums. Cheap test: run the first migration into a non-default schema in a Testcontainers test and compare the checksum.
+
+**Consequences if accepted.** DESIGN section 1 drops the property; `TR-EMB-06` wording is checked; the wiki Rule Engine Configuration page drops the `schema-prefix` row.
+
+**Follow-ups.** Architect: DESIGN section 1 and `TR-EMB-06`. Maintainers (engineering): close should-fix 4 of the pull request #12 review. Documentation: wiki Rule Engine Configuration page.
