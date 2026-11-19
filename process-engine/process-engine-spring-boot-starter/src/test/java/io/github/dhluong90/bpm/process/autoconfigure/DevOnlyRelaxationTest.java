@@ -54,6 +54,28 @@ class DevOnlyRelaxationTest {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void PRE_019_start_up_logs_one_warn_for_the_requester_relaxation_and_none_for_makers(
+            org.springframework.boot.test.system.CapturedOutput output) {
+        String relaxation = "horus.bpm.lifecycle.approver-must-differ-from=requester";
+
+        // Given the default (makers), when the starter checks its settings at start-up
+        startUp(new String[] {"prod"}, "horus.bpm.lifecycle.approver-must-differ-from", "makers");
+        String afterMakers = output.getAll();
+
+        // Then no WARN names the relaxation
+        assertThat(afterMakers).doesNotContain(relaxation);
+
+        // Given requester, when the starter checks its settings at start-up
+        startUp(new String[] {"prod"}, "horus.bpm.lifecycle.approver-must-differ-from", "requester");
+        String added = output.getAll().substring(afterMakers.length());
+
+        // Then exactly one WARN line names the relaxed setting
+        java.util.List<String> lines = added.lines().filter(l -> l.contains(relaxation)).toList();
+        assertThat(lines).singleElement().satisfies(l -> assertThat(l).contains("WARN"));
+    }
+
+    @Test
     void PRE_019_shared_approver_setting_is_published_in_meta_for_the_process_module() {
         MockEnvironment defaults = new MockEnvironment();
         ProcessEngineProperties properties = org.springframework.boot.context.properties.bind.Binder.get(defaults)
