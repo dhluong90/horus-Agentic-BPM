@@ -30,8 +30,13 @@ RUN set -eu; \
 
 # Stage 2: build the example host and the engine modules it needs.
 # Maven 3.9.16 (the line CI uses), Eclipse Temurin JDK 21.
+# Maven runs through tools/mvn-retry.sh, as in CI: a run that failed only because Maven Central did not
+# deliver an artifact (a false 404, or a 429 after the resolver's own retries in .mvn/maven.config) runs
+# again with -U, at most 3 attempts, after MVN_RETRY_WAIT then twice that many seconds. Any other failure
+# ends the build at once. Retries are plain "mvn-retry: warning: ... Retrying" lines in the build log.
 FROM --platform=$BUILDPLATFORM maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS build
 ARG EXAMPLE
+ARG MVN_RETRY_WAIT=60
 WORKDIR /src
 COPY . .
 COPY --from=cockpit /out/dist/ /tmp/cockpit-dist/
@@ -43,7 +48,7 @@ RUN --mount=type=cache,id=horus-bpm-m2,target=/root/.m2/repository \
       rm -rf cockpit/web/dist && mkdir -p cockpit/web/dist && cp -R /tmp/cockpit-dist/. cockpit/web/dist/; \
       skip_cockpit=false; \
     fi; \
-    mvn -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests -Dcockpit.bundle.skip="${skip_cockpit}"; \
+    bash tools/mvn-retry.sh -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests -Dcockpit.bundle.skip="${skip_cockpit}"; \
     jar="$(find "examples/${EXAMPLE}/target" -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' | head -n 1)"; \
     test -n "$jar"; \
     mkdir -p /layers; \

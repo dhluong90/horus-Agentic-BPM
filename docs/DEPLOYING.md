@@ -269,6 +269,18 @@ PASS  no high or critical vulnerability in horus-bpm/rule-engine-only:local (rep
 
 Base images are pinned by digest. To update one, resolve the new digest, replace tag, digest and version comment together in [`deploy/docker/Dockerfile`](../deploy/docker/Dockerfile) or [`docker-compose.yml`](../docker-compose.yml), then rebuild and run steps 6 and 7.
 
+### Maven Central during the build
+
+The Maven build stage resolves dependencies from Maven Central, from the BuildKit cache mount `horus-bpm-m2` when it has them. Two layers absorb Maven Central's faults:
+
+| Fault | Handled by | What the build log shows |
+|---|---|---|
+| Dropped connection, 429 or 5xx | The resolver retries up to 5 times, honouring `Retry-After` ([`.mvn/maven.config`](../.mvn/maven.config)) | Nothing unless every retry fails |
+| A false 404 for an artifact that exists, or a 429 that outlasts the resolver's retries | [`tools/mvn-retry.sh`](../tools/mvn-retry.sh) runs Maven again with `-U` after removing the `*.lastUpdated` markers, at most 3 attempts, after 60 then 120 seconds | `mvn-retry: warning: Attempt 1 of 3: <artifact> not delivered. Retrying with -U in 60 s` |
+| A compile error, an enforcer rule, or any failure that is not a resolution failure | Not retried | Maven's own error, once |
+
+The build argument `MVN_RETRY_WAIT` sets the first wait in seconds (default 60), for example `docker build --build-arg MVN_RETRY_WAIT=10 ...`. After three failed attempts the log ends with `mvn-retry: error: Maven Central did not deliver <artifact> in 3 attempts`; run the build again later.
+
 ### Updating the JRE
 
 The build checks the JRE archive twice in a throwaway stage, so `gnupg` never reaches the runtime image:
@@ -342,6 +354,7 @@ The host refuses to start with an issuer and no audience, and refuses the `dev` 
 | `required variable HORUS_DB_PASSWORD is missing a value` | No `.env`, or the value is empty | Step 1 |
 | `Bind for 127.0.0.1:8080 failed: port is already allocated` | Another process uses 8080 | Set `HORUS_HTTP_PORT=18080` in `.env` and use that port in the commands |
 | Host restarts; log shows `password authentication failed for user "horus"` | A database password changed after the database was created, or the volume is from a version of this guide before the `horus` role existed | `docker compose down -v`, then start again |
+| Build fails with `mvn-retry: error: Maven Central did not deliver ...` | Maven Central did not deliver an artifact in 3 attempts | Run `docker compose build` again later; see [Maven Central during the build](#maven-central-during-the-build) |
 | Sign-in redirects to `/login?error` | Wrong demo password, or the host is not on the `dev` profile | `grep -E 'SPRING_PROFILES_ACTIVE|HORUS_DEMO_PASSWORD' .env` |
 | `No patched Temurin JRE for arm64 yet` during the build | The build was asked for `linux/arm64` | Build through compose, or add `--platform linux/amd64` to `docker build` |
 | `docker compose up --wait` reports `host` unhealthy | The host did not start | `docker compose logs host` shows the reason, usually the database or a configuration check |
