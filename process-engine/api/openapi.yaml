@@ -5,7 +5,7 @@ info:
   description: |
     REST API of the Process Engine, served by the host application under `/api/bpm/processes/v1`.
     Preview: this file covers importing a BPMN document, reading and listing definitions, starting, listing,
-    reading and cancelling instances, and completing a user task. Outside the `dev` profile an imported definition
+    reading and cancelling instances, and reading, claiming, unclaiming and completing a user task. Outside the `dev` profile an imported definition
     stays `DRAFT` and nothing in this release can activate it; the approval flow and the remaining endpoints of
     process-engine/docs/DESIGN.md section 6.2 follow with the features that implement them.
 
@@ -31,7 +31,7 @@ tags:
   - name: instances
     description: Start, list, read and cancel process instances
   - name: tasks
-    description: Complete user tasks
+    description: Read, claim, unclaim and complete user tasks
 paths:
   /definitions:
     post:
@@ -264,16 +264,87 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}:
+    get:
+      tags: [tasks]
+      operationId: getTask
+      summary: Read a user task with the actions the caller may take
+      description: |
+        The task, its instance and step, its assignment, claim and completion, and `allowedActions`: what this caller
+        may do now (`claim`, `unclaim`, `complete`), from the task status, the caller's assignment and four eyes. The
+        `ETag` is the task's `lockVersion`, quoted, to send as `If-Match`. Permission `processes:task:work`.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          $ref: '#/components/responses/Task'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}:claim:
+    post:
+      tags: [tasks]
+      operationId: claimTask
+      summary: Claim an open user task
+      description: |
+        `OPEN` to `CLAIMED` by the caller, who must be the assigned user, hold the assigned role or belong to the
+        assigned group (`403 TASK_NOT_ASSIGNED`). On a four-eyes task the identity that started the instance or
+        completed an earlier task of it is refused (`403 SELF_APPROVAL_FORBIDDEN`, PRE-007). A task that is not
+        open is `409 INVALID_STATE`. Writes a `TASK_CLAIMED` history entry and hands `processes.task.claimed.v1` to
+        the host publisher in the same transaction. Permission `processes:task:work`.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/TaskIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      responses:
+        '200':
+          $ref: '#/components/responses/Task'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}:unclaim:
+    post:
+      tags: [tasks]
+      operationId: unclaimTask
+      summary: Hand a claimed task back to its candidates
+      description: |
+        `CLAIMED` to `OPEN`; only the claimant may unclaim (`403 TASK_NOT_ASSIGNED`). A task that is not claimed is
+        `409 INVALID_STATE`. Writes a `TASK_UNCLAIMED` history entry and hands `processes.task.unclaimed.v1` to the
+        host publisher in the same transaction. Permission `processes:task:work`.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/TaskIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      responses:
+        '200':
+          $ref: '#/components/responses/Task'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /tasks/{id}:complete:
     post:
       tags: [tasks]
       operationId: completeTask
-      summary: Complete an open user task
+      summary: Complete a task the caller has claimed
       description: |
-        The caller must hold `processes:task:work` and be the assigned user, hold the assigned role or belong to
-        the assigned group (`403 TASK_NOT_ASSIGNED`). On a four-eyes task the identity that started the instance or
-        completed an earlier task of it is refused (`403 SELF_APPROVAL_FORBIDDEN`, PRE-007). The result is stored
-        in the task's result variable. The following synchronous steps run in the same transaction.
+        The caller must hold `processes:task:work` and have claimed the task: an `OPEN` task is
+        `409 INVALID_STATE` (claim it first), a task claimed by someone else is `403 TASK_NOT_ASSIGNED`. The caller
+        must still be the assigned user, hold the assigned role or belong to the assigned group. On a four-eyes task
+        the identity that started the instance or completed an earlier task of it is refused
+        (`403 SELF_APPROVAL_FORBIDDEN`, PRE-007). A stale `If-Match` is `409 VERSION_CONFLICT` and writes nothing
+        (PRE-003). The result is stored in the task's result variable. The following synchronous steps run in the
+        same transaction.
       parameters:
         - name: id
           in: path
@@ -283,9 +354,9 @@ paths:
           in: header
           required: true
           description: |
-            The task's `lockVersion` from the instance view (not the instance `ETag`), quoted. Missing is
-            `428 PRECONDITION_REQUIRED`; stale is `409 VERSION_CONFLICT`.
-          schema: { type: string, example: '"0"' }
+            The task's `lockVersion` (the `ETag` of `GET /tasks/{id}`, or the task in the instance view; not the
+            instance `ETag`), quoted. Missing is `428 PRECONDITION_REQUIRED`; stale is `409 VERSION_CONFLICT`.
+          schema: { type: string, example: '"1"' }
         - name: Idempotency-Key
           in: header
           required: true
@@ -321,6 +392,25 @@ components:
       scheme: bearer
       description: The host's own authentication. The engine reads the caller and tenant from the host's security context.
   parameters:
+    TaskId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 26, maxLength: 26 }
+    TaskIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: |
+        The task's `lockVersion` (the `ETag` of `GET /tasks/{id}`), quoted. Missing is `428 PRECONDITION_REQUIRED`;
+        stale is `409 VERSION_CONFLICT`.
+      schema: { type: string, example: '"0"' }
+    RequiredIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Required; missing is `428 PRECONDITION_REQUIRED`. See the IdempotencyKey parameter.
+      schema: { type: string, minLength: 1, maxLength: 200 }
     Limit:
       name: limit
       in: query
@@ -344,6 +434,15 @@ components:
         `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`. Remembered for `idempotency-retention` (24 hours).
       schema: { type: string, minLength: 1, maxLength: 200 }
   responses:
+    Task:
+      description: The task after the call
+      headers:
+        ETag:
+          description: The task's `lockVersion`, quoted; send it as `If-Match`
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Task' }
     Instance:
       description: The instance after the call
       headers:
@@ -397,6 +496,31 @@ components:
           type: object
           additionalProperties: true
           description: At most 256 KB of JSON. Floating-point numbers are read as decimals; money is a Money object.
+    Task:
+      type: object
+      required: [id, instanceId, definitionKey, definitionVersion, nodeId, assignee, fourEyes, status, lockVersion,
+        createdAt, allowedActions]
+      properties:
+        id: { type: string }
+        instanceId: { type: string }
+        definitionKey: { type: string }
+        definitionVersion: { type: integer }
+        businessKey: { type: [string, 'null'] }
+        nodeId: { type: string }
+        name: { type: [string, 'null'] }
+        assignee: { type: string, description: 'user:<id>, role:<role> or group:<group>' }
+        fourEyes: { type: boolean }
+        status: { type: string, enum: [OPEN, CLAIMED, COMPLETED, CANCELLED] }
+        lockVersion: { type: integer, description: The value to send as If-Match }
+        claimedBy: { type: [string, 'null'] }
+        claimedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        completedBy: { type: [string, 'null'] }
+        completedAt: { type: [string, 'null'], format: date-time }
+        allowedActions:
+          type: array
+          description: What this caller may do now; computed per caller, never stored
+          items: { type: string, enum: [claim, unclaim, complete] }
     DefinitionSummary:
       type: object
       required: [key, latestVersion, latestStatus, lastChangedAt]
@@ -497,7 +621,9 @@ components:
               name: { type: [string, 'null'] }
               assignee: { type: string, description: 'user:<id>, role:<role> or group:<group>' }
               status: { type: string, enum: [OPEN, CLAIMED, COMPLETED, CANCELLED] }
-              lockVersion: { type: integer, description: The value to send as If-Match when completing the task }
+              lockVersion: { type: integer, description: The value to send as If-Match to claim, unclaim or complete }
+              claimedBy: { type: [string, 'null'] }
+              claimedAt: { type: [string, 'null'], format: date-time }
               completedBy: { type: [string, 'null'] }
         lockVersion: { type: integer }
         startedBy: { type: [string, 'null'] }
