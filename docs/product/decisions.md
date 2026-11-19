@@ -2926,9 +2926,12 @@ The requester can never approve under either value. The refusal is `403 SELF_APP
 - `fastparse` 3.1.1 and its `sourcecode` and `geny` dependencies (MIT);
 - `jackson-module-scala` and `java-uuid-generator` (Apache 2.0);
 - `slf4j-api` (MIT);
-- the Jackson 2 libraries that `jackson-module-scala` brings in: `jackson-databind`, `jackson-core` and `jackson-annotations` (Apache 2.0), test scope only.
+- the Jackson 2 libraries that `jackson-module-scala` brings in: `jackson-databind` and `jackson-core` (Apache 2.0), test scope only;
+- `com.thoughtworks.paranamer:paranamer` 2.8.3 (BSD-3-Clause), also brought in by `jackson-module-scala`, test scope only.
 
-Their versions are the ones `feel-engine` 1.22.1 pulls in. They are recorded in the build's allow-list file, so an unannounced version change fails the licence check. The enforcer bans every `org.camunda.feel` and `org.scala-lang` artifact outside test scope, and ArchUnit keeps the oracle out of engine code.
+`jackson-annotations` is not a test-only entry. It is already a compile dependency of `rule-engine-core` through Jackson 3 (`tools.jackson` databind 3.1.7 uses `com.fasterxml.jackson.core:jackson-annotations` 2.21), and the oracle's copy resolves to that same artifact.
+
+The versions are the ones resolved in the build, recorded in the build's allow-list file, so an unannounced version change fails the licence check. Some of them come from the Spring Boot BOM rather than the `feel-engine` POM, for example `slf4j-api` 2.0.20 and `jackson-module-scala` 2.21.7. Corrected on 2026-11-20 from the resolved dependency tree of #252. The enforcer bans every `org.camunda.feel` and `org.scala-lang` artifact outside test scope, and ArchUnit keeps the oracle out of engine code.
 
 **Options considered**
 
