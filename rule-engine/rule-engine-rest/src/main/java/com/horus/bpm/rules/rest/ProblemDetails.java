@@ -51,11 +51,11 @@ public class ProblemDetails {
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
+            Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
             Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE),
-            Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
             Map.entry("INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR),
             Map.entry("SCHEMA_NOT_READY", HttpStatus.SERVICE_UNAVAILABLE));
 

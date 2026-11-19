@@ -2,15 +2,10 @@
 # The spec-to-test gate (tools/spec-coverage.py, TR-QA-01) skips these ids and warns when one gains a test.
 # Remove the line in the pull request that adds the test. Format: <ID> <milestone>, the milestone as in SPEC.md.
 
-RLE-002 M1
-RLE-003 M1
 RLE-004 M1
-RLE-006 M1
 RLE-007 M1
 RLE-008 M1
 RLE-010 M1
-# RLE-011: the evaluation half is tested (#1); the decision read GET /decisions/{id} is not built yet.
-RLE-011 M1
 RLE-012 M1
 RLE-015 M3
 RLE-016 M1
@@ -33,5 +28,4 @@ RLE-035 M1
 # RLE-036: the 500 INTERNAL_ERROR half is tested (#147, UnexpectedErrorProblemTest); every code of the matrix is not.
 RLE-036 M1
 RLE-038 M3
-RLE-045 M1
 RLE-046 M1

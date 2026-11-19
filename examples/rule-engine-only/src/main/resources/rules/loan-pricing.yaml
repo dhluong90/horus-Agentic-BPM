@@ -1,0 +1,21 @@
+# Loan pricing that must match exactly one row (RLE-002). R1 and R2 overlap on purpose:
+# a customer with a high score and a high income matches both, which is an authoring defect.
+schemaVersion: 1
+ruleSet: loan-pricing
+description: Annual interest rate by credit score or income
+hitPolicy: unique
+
+inputs:
+  - { name: score,  type: integer, description: credit score }
+  - { name: income, type: money,   description: monthly income }
+
+outputs:
+  - { name: rate, type: decimal }
+
+rules:
+  - id: R1
+    when: { score: ">= 700" }
+    then: { rate: 0.085 }
+  - id: R2
+    when: { income: ">= 20000000 VND" }
+    then: { rate: 0.09 }

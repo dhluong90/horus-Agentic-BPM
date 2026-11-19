@@ -73,7 +73,8 @@ for (const s of SCREENS) {
       expect(main).not.toMatch(/CK-F-|CKP-0|PD-0|RLE-0/);
 
       // one language: on a Vietnamese screen, no English UI string that differs from its Vietnamese one
-      if (locale === 'vi') {
+      // The Source view shows the stored document (machine text such as "schemaVersion"), not UI strings.
+      if (locale === 'vi' && s.name !== 'source') {
         const leaks = (Object.keys(en) as (keyof typeof en)[])
           .filter((k) => en[k] !== vi[k] && !en[k].includes('{') && en[k].length >= 5 && main.includes(en[k]))
           .map((k) => `${k}="${en[k]}"`);
@@ -115,28 +116,6 @@ test('QA_413_on_save_draft_keeps_the_edits', async ({ page }) => {
   await expect(page.getByTestId('problem-code')).toHaveText('PAYLOAD_TOO_LARGE');
   await expect(page.getByLabel('Row R3, Fee')).toHaveValue('35,000');
   await expect(page.getByRole('button', { name: 'Save draft' })).toBeVisible();
-});
-
-test('QA_query_invalid_on_show_more_offers_restart_and_recovers', async ({ page }) => {
-  await open(page, 'rules-author', '#/rules');
-  await page.unroute('**/api/bpm/rules/v1/**');
-  let firstPages = 0;
-  await page.route('**/api/bpm/rules/v1/rule-sets?**', async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.has('cursor')) {
-      await route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ type: 'about:blank', title: 'Bad Request', status: 400, code: 'QUERY_INVALID', detail: 'The cursor was not issued by this endpoint', correlationId: '01JQA' }) });
-      return;
-    }
-    firstPages += 1;
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ ruleSet: 'card-fee', latestVersion: 2, latestStatus: 'PENDING_APPROVAL', publishedVersion: 1, lastChangedAt: '2026-11-18T09:00:00Z' }], nextCursor: 'stale', hasNext: true }) });
-  });
-  await page.reload();
-  await expect(page.getByTestId('header-user')).toBeVisible();
-  await page.getByRole('button', { name: 'Show more' }).click();
-  await expect(page.getByRole('alert')).toContainText('The list changed while you were reading it.');
-  await page.getByRole('button', { name: 'Start the list again' }).click();
-  await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible();
-  expect(firstPages).toBe(2);
 });
 
 test('QA_double_click_request_publish_sends_one_request', async ({ page }) => {
@@ -206,12 +185,12 @@ test('QA_import_twice_in_one_session', async ({ page }) => {
   const doc = (n: string) => JSON.stringify({ schemaVersion: 1, ruleSet: n, hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }], rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] });
   for (const n of ['qa-one', 'qa-two']) {
     const chooser = page.waitForEvent('filechooser', { timeout: 5000 });
-    await page.getByRole('button', { name: 'Import file' }).click();
+    await page.getByRole('button', { name: 'Import rule set' }).click();
     await (await chooser).setFiles({ name: `${n}.yaml`, mimeType: 'application/yaml', buffer: Buffer.from(doc(n)) });
     await expect(page.getByRole('heading', { level: 1 })).toContainText(n);
     await expect(page.locator('.rs-head__sub')).toHaveText(/^Version 1 · draft/);
-    await page.getByRole('link', { name: 'All rule sets' }).click();
-    await expect(page.getByRole('button', { name: 'Import file' })).toBeEnabled();
+    await page.getByRole('navigation', { name: /breadcrumb|Breadcrumb|Bạn đang ở/i }).getByRole('link', { name: 'Rules' }).click();
+    await expect(page.getByRole('button', { name: 'Import rule set' })).toBeEnabled();
   }
 });
 

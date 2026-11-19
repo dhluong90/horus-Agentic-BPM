@@ -12,8 +12,6 @@ const record = ({ request }: { request: Request }) => {
 };
 
 beforeEach(() => {
-  // These tests are about the shell; the service overview is its own area since the rule screens arrived.
-  window.location.hash = '#/service';
   requested = [];
   mockHost.events.on('request:start', record);
 });
@@ -32,27 +30,25 @@ describe('embedded shell, case A', () => {
     expect(await screen.findByTestId('header-user')).toHaveTextContent('Nguyễn Thị Lan');
     expect(screen.getByTestId('header-host')).toHaveTextContent('Loan origination');
     expect(screen.getByTestId('header-tenant')).toHaveTextContent('bank-a');
-    expect(screen.getByRole('heading', { level: 1, name: 'Service overview' })).toBeInTheDocument();
-    expect(screen.getByText('Rule Engine')).toBeInTheDocument();
-    expect(screen.getByText('View rule sets')).toBeInTheDocument();
-    expect(screen.getByText('Edit rule sets')).toBeInTheDocument();
-    expect(screen.queryByText('Approve rule changes')).not.toBeInTheDocument();
-    // No backend of its own: the registry, then the host's two metadata endpoints, same origin.
+    expect(screen.getByRole('heading', { level: 1, name: /Nguyễn Thị Lan/ })).toBeInTheDocument();
+    // No backend of its own: the registry, then the host's two metadata endpoints, then only engine endpoints, same origin.
     expect(requested[0]).toMatch(/\/cockpit-hosts\.json$/);
-    expect([...requested.slice(1)].sort()).toEqual(['/api/bpm/me', '/api/bpm/meta']);
+    expect([...requested.slice(1, 3)].sort()).toEqual(['/api/bpm/me', '/api/bpm/meta']);
+    await screen.findByRole('link', { name: 'kyc-risk' });
+    expect(requested.slice(3).every((path) => path.startsWith('/api/bpm/rules/v1/'))).toBe(true);
   });
 
-  it('CKP_001_header_shows_only_the_permissions_the_host_lists_for_the_user', async () => {
+  it('TR_UI_08_menu_shows_only_the_areas_the_host_runs_and_the_user_may_use', async () => {
     setScenario('ready-approver');
     render(<App />);
 
     expect(await screen.findByTestId('header-user')).toHaveTextContent('Trần Văn Minh');
-    const access = screen.getByRole('list', { name: 'Your access' });
-    expect(within(access).getAllByRole('listitem').map((item) => item.textContent.trim())).toEqual([
-      '✓ View rule sets',
-      '✓ Approve rule changes',
-      '✓ Read the decision log',
-    ]);
+    const menu = screen.getByRole('navigation', { name: 'Cockpit menu' });
+    expect(within(menu).getAllByRole('link').map((link) => link.querySelector('.navrail__title')?.textContent)).toEqual(['Home', 'Rules', 'Approvals', 'Decisions']);
+    expect(within(menu).getByText('Preview')).toBeInTheDocument();
+    expect(within(menu).getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
+    // The approver may review lan's card-fee version 2: one count on Approvals.
+    expect(await within(menu).findByRole('link', { name: 'Approvals, 1 to review' })).toBeInTheDocument();
   });
 });
 
@@ -166,10 +162,10 @@ describe('language', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'VI' }));
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Tổng quan dịch vụ' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /^Chào buổi/ })).toBeInTheDocument();
     expect(screen.getByTestId('header-host')).toHaveTextContent('Khởi tạo khoản vay');
-    expect(screen.getByText('Xem bộ quy tắc')).toBeInTheDocument();
-    expect(screen.queryByText('Service overview')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Quy tắc' })).toBeInTheDocument();
+    expect(screen.queryByText('Home')).not.toBeInTheDocument();
     expect(document.documentElement.lang).toBe('vi');
     expect(screen.getByRole('button', { name: 'VI' })).toHaveAttribute('aria-pressed', 'true');
     expect(window.localStorage.getItem('horus.cockpit.locale')).toBe('vi');
@@ -188,6 +184,6 @@ describe('language', () => {
     );
     render(<App />);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Tổng quan dịch vụ' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /^Chào buổi/ })).toBeInTheDocument();
   });
 });

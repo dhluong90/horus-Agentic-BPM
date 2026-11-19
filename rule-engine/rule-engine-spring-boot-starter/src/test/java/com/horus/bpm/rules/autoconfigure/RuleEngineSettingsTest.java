@@ -47,6 +47,16 @@ class RuleEngineSettingsTest {
                         .isEqualTo(new EngineSettings(maxEntries, Duration.parse(retention), maxScale, true)));
     }
 
+    @ParameterizedTest
+    @CsvSource({"1, 1, 1", "1048576, 65536, 5000", "4096, 256, 200"})
+    void TR_EXT_03_size_limits_within_the_bounds_are_accepted(int outputBytes, int stringLength, int rows) {
+        runner.withPropertyValues("horus.bpm.rules.evaluation.max-output-bytes=" + outputBytes,
+                        "horus.bpm.rules.evaluation.max-string-length=" + stringLength,
+                        "horus.bpm.rules.evaluation.max-rows=" + rows)
+                .run(context -> assertThat(context.getBean(EngineSettings.class))
+                        .isEqualTo(EngineSettings.defaults().withSizeLimits(outputBytes, stringLength, rows)));
+    }
+
     @Test
     void TR_EXT_03_page_size_and_reason_length_may_be_lowered() {
         runner.withPropertyValues("horus.bpm.rules.query.max-page-size=50",
@@ -73,6 +83,12 @@ class RuleEngineSettingsTest {
         "horus.bpm.rules.idempotency.retention=P31D, horus.bpm.rules.idempotency.retention",
         "horus.bpm.rules.evaluation.max-input-scale=35, horus.bpm.rules.evaluation.max-input-scale",
         "horus.bpm.rules.evaluation.max-input-scale=-1, horus.bpm.rules.evaluation.max-input-scale",
+        "horus.bpm.rules.evaluation.max-output-bytes=1048577, horus.bpm.rules.evaluation.max-output-bytes",
+        "horus.bpm.rules.evaluation.max-output-bytes=0, horus.bpm.rules.evaluation.max-output-bytes",
+        "horus.bpm.rules.evaluation.max-string-length=65537, horus.bpm.rules.evaluation.max-string-length",
+        "horus.bpm.rules.evaluation.max-string-length=0, horus.bpm.rules.evaluation.max-string-length",
+        "horus.bpm.rules.evaluation.max-rows=5001, horus.bpm.rules.evaluation.max-rows",
+        "horus.bpm.rules.evaluation.max-rows=0, horus.bpm.rules.evaluation.max-rows",
         "horus.bpm.rules.query.max-page-size=0, horus.bpm.rules.query.max-page-size",
         "horus.bpm.rules.query.max-page-size=201, horus.bpm.rules.query.max-page-size",
         "horus.bpm.rules.lifecycle.reason-max-length=0, horus.bpm.rules.lifecycle.reason-max-length",

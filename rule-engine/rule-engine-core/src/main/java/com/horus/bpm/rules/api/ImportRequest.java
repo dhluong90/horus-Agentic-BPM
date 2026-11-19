@@ -37,6 +37,15 @@ public record ImportRequest(SourceFormat format, byte[] source, String idempoten
         return new ImportRequest(format, source, key);
     }
 
+    /**
+     * Returns the size of the document without copying it.
+     *
+     * @return the number of bytes
+     */
+    public int size() {
+        return source.length;
+    }
+
     @Override
     public byte[] source() {
         return source.clone();

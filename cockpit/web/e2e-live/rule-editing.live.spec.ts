@@ -79,7 +79,7 @@ test('CKP_030_live_json_files_import_on_the_list_and_on_the_rule_set_page', asyn
     await lan.getByRole('button', { name: button }).click();
     await (await chooser).setFiles({ name: `${name}.json`, mimeType: 'application/json', buffer: Buffer.from(doc(fee)) });
   };
-  await pick('Import file', '0 VND');
+  await pick('Import rule set', '0 VND');
   await expect(lan.locator('.rs-head__sub')).toHaveText(/^Version 1 · draft/);
   await lan.getByRole('button', { name: 'More' }).click();
   const chooser = lan.waitForEvent('filechooser');
@@ -97,7 +97,7 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
 
   // Import a file: one POST with an Idempotency-Key, then the new draft opens.
   const chooser = lan.waitForEvent('filechooser');
-  await lan.getByRole('button', { name: 'Import file' }).click();
+  await lan.getByRole('button', { name: 'Import rule set' }).click();
   await (await chooser).setFiles({ name: `${NAME}.yaml`, mimeType: 'application/yaml', buffer: Buffer.from(DOCUMENT) });
   await expect(lan.locator('.rs-head__sub')).toHaveText(/^Version 1 · draft/);
   await expect(lan.getByText('50,000,000 VND')).toBeVisible();

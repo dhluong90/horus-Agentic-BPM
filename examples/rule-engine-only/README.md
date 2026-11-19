@@ -209,6 +209,40 @@ H=localhost:8080/api/bpm/rules/v1
     #   {"ruleId":"R3","column":"fee","message":"output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code"}]}
     ```
 
+### Hit policies: exactly one row, or every matching row
+
+Two more rule sets ship with the example. [`loan-pricing.yaml`](src/main/resources/rules/loan-pricing.yaml) uses `hitPolicy: unique`, and its rows `R1` (score 700 or more) and `R2` (income 20,000,000 VND or more) overlap on purpose. [`risk-flags.yaml`](src/main/resources/rules/risk-flags.yaml) uses `hitPolicy: collect`: every matching row adds a flag and a penalty. Import, request and approve each one as in steps 1 to 4, then:
+
+12. A customer who matches both pricing rows gets no price, only an error. The decision is still logged with both rule ids:
+
+    ```bash
+    curl -s -u tuan:demo-only -X POST $H/decisions/loan-pricing:evaluate -H 'Content-Type: application/json' \
+      -d '{"inputs":{"score":750,"income":{"currency":"VND","amount":25000000}}}'
+    # 422 {"code":"UNIQUE_HIT_VIOLATION","detail":"2 rules matched; a unique table must match exactly one rule",
+    #      "decisionId":"...","matchedRuleIds":["R1","R2"],...}
+    ```
+
+    With `{"score":500, "income":{"currency":"VND","amount":5000000}}` no row matches: `200` with `"outcome":"NO_MATCH"`, `"matched":false` and `"outputs":{"rate":null}`, as under `first` (DMN 1.5), logged as `OK` with no matched rules. With a score of 750 and an income of 10,000,000 VND only `R1` matches: `200` and `"outputs":{"rate":0.085}`.
+
+13. A card transaction with high velocity from a new device fires two flags, and their penalties add up to 15:
+
+    ```bash
+    curl -s -u tuan:demo-only -X POST $H/decisions/risk-flags:evaluate -H 'Content-Type: application/json' \
+      -d '{"inputs":{"txPerHour":12,"country":"VN","newDevice":true}}'
+    # 200 {"outcome":"MATCHED","matchedRuleIds":["R1","R3"],"outputs":{"flags":["HIGH_VELOCITY","NEW_DEVICE"],"penalty":15},...}
+    ```
+
+14. The log holds every decision, the refusals included:
+
+    ```bash
+    docker exec horus-pg psql -U horus -d horus -c \
+      "SELECT rule_set_name, outcome, matched_rule_ids, outputs FROM rle_decision WHERE rule_set_name <> 'card-fee'"
+    #  loan-pricing | UNIQUE_HIT_VIOLATION | ["R1", "R2"] |
+    #  loan-pricing | OK                   | []           | {"rate": null}
+    #  loan-pricing | OK                   | ["R1"]       | {"rate": 0.085}
+    #  risk-flags   | OK                   | ["R1", "R3"] | {"flags": ["HIGH_VELOCITY", "NEW_DEVICE"], "penalty": 15}
+    ```
+
 The same path in Java, inside the host's own transaction:
 
 ```java
@@ -217,6 +251,43 @@ public Money cardFee(String tier, int txCount) {
     DecisionResult result = ruleEngine.evaluate("card-fee", DecisionInput.of(Map.of("tier", tier, "txCount", txCount)));
     return (Money) result.outputs().get("fee");   // rolls back with the host's work; one rle_decision row on commit
 }
+```
+
+## Demo: import a DMN decision table
+
+A `.dmn` file goes through the same import endpoint as YAML, with `Content-Type: application/xml` (or `text/xml`, `application/dmn+xml`). It becomes a `DRAFT` that a second person approves before it evaluates. The sample is a hand-written table in the style a common DMN modeller writes: [`card-fee-modeller.dmn`](src/test/resources/rules/dmn/card-fee-modeller.dmn).
+
+Start the host on the `dev` profile as in [Host metadata with two demo users](#host-metadata-with-two-demo-users), then sign in `lan` (author), `minh` (approver) and `tuan` (teller), each with their own cookie jar, and send the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on every `POST`:
+
+```bash
+DMN=examples/rule-engine-only/src/test/resources/rules/dmn/card-fee-modeller.dmn
+xsrf() { awk '$6=="XSRF-TOKEN"{print $7}' "$1"; }
+
+curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -H 'Content-Type: application/xml' \
+  -H 'Idempotency-Key: demo-dmn-1' --data-binary @$DMN localhost:8080/api/bpm/rules/v1/rule-sets
+# {"ruleSet":"card-fee","version":1,"status":"DRAFT",...,"sourceFormat":"DMN_XML",...,
+#  "definition":{...,"rules":[{"description":"Gold customers pay nothing","id":"DecisionRule_0fk2x7a",
+#  "then":{"fee":0},"when":{"tier":"== 'GOLD'"}},...]}}
+
+curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -X POST \
+  localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:request-publish
+curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -X POST \
+  localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve
+# {"ruleSet":"card-fee","version":1,"status":"PUBLISHED",...,"requestedBy":"lan",...,"approvedBy":"minh",...}
+
+curl -s -b tuan -c tuan -H "X-XSRF-TOKEN: $(xsrf tuan)" -H 'Content-Type: application/json' \
+  -d '{"inputs":{"tier":"GOLD","txCount":5}}' localhost:8080/api/bpm/rules/v1/decisions/card-fee:evaluate
+# {"decisionId":"...","ruleSet":"card-fee","version":1,...,"outcome":"MATCHED","matchedRuleIds":["DecisionRule_0fk2x7a"],"outputs":{"fee":0}}
+
+curl -s -b lan -OJ 'localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=dmn'
+# writes card-fee-v1.dmn (DMN 1.5); importing it as the next version gives the same canonicalHash
+```
+
+Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..500000000]`), lists (`"VN", "SG"`), `not(...)`, `-`, `null`, strings, numbers, booleans, `date("2026-01-01")` and `date and time("...")`; `money(12.50, "USD")` is an extension other DMN tools do not read. Anything else is refused as a whole, naming the cell:
+
+```
+422 VALIDATION_FAILED  Rule DecisionRule_1lh0wd3, input txCount: '? >= 3': '?' (a unary test expression)
+                       is not supported before full FEEL (line 32)
 ```
 
 ## Environment variables
@@ -245,6 +316,27 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choos
 
 Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
 
+The cockpit opens on Home for every role. Home's content depends on the user: Lan sees her drafts and requests, Minh the requests waiting for his review, and Tuan, who has no rule permission, one line saying so. The menu shows Home, Rules, Approvals and, under Preview, Decisions to anyone with a rule permission; Processes appears only where a Process Engine is registered. A host can open the cockpit on `rules` or `approvals` with the `cockpit.landing` setting in `/api/bpm/meta`.
+
+### Sign-in page
+
+The sign-in page belongs to the host, not to the cockpit library. This example serves its own page at `GET /login`, and Spring Security still handles `POST /login`, CSRF and the redirect back to the cockpit.
+
+| Part | File |
+|---|---|
+| Template | [`sign-in/sign-in.html`](src/main/resources/sign-in/sign-in.html) |
+| Text in English and Vietnamese | [`sign-in/messages*.properties`](src/main/resources/sign-in) |
+| Styles and script, served from `/sign-in/` | [`static/sign-in/`](src/main/resources/static/sign-in) |
+| Rendering and headers | [`SignInPage`](src/main/java/com/horus/bpm/examples/ruleengineonly/SignInPage.java), [`SignInController`](src/main/java/com/horus/bpm/examples/ruleengineonly/SignInController.java) |
+
+- **Language:** `?lang=en` or `?lang=vi`, otherwise a Vietnamese browser, otherwise `horus.bpm.cockpit.default-locale`. The page also follows the language and theme chosen in the cockpit.
+- **Brand panel:** the service name, what it is for and three points, from the host's own messages. A bank replaces this panel.
+- **Demo users:** listed by name and role on the `dev` profile, and only when `HORUS_DEMO_PASSWORD` is set. Choosing one fills the username. The page never shows a password.
+- **Security:** no inline script or style, so the page has its own strict `Content-Security-Policy`, with `frame-ancestors 'none'` and `Cache-Control: no-store`.
+- **Changing it:** copy the template and set `host.sign-in.template` to your copy, for example `file:/etc/loans/sign-in.html`. Double braces always insert escaped text; triple braces are allowed only for the page's own markup blocks. An unknown or misused placeholder stops the page with an error that names it.
+
+![Sign-in page](../../cockpit/docs/images/screenshots/example-host-signin-1440x900-light-en.png)
+
 ### Edit rules in the cockpit
 
 The cockpit lists rule sets, shows a version as a decision table, edits a draft, sends it for approval and lets a second person approve or reject it. "Try it" runs sample inputs; it needs `rules:evaluate`, which the demo roles do not hold, so add it on the command line for this walkthrough:
@@ -256,9 +348,9 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choos
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:evaluate'
 ```
 
-1. As `lan`, open Rule sets, choose **Import file** and pick [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml). Version 1 opens as a draft table. Choose **Request publish**: the dock shows "Approve is unavailable. You requested this change. Another approver must decide."
+1. As `lan`, open Rules, choose **Import file** and pick [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml). Version 1 opens as a draft table. Choose **Request publish**: the dock shows "Approve is unavailable. You requested this change. Another approver must decide."
 2. In a private window, sign in as `minh` and open the same address (the link in the address bar works as is). Version 1 opens on Changes. Add a comment and choose **Approve and publish**.
-3. Back as `lan`, reload, choose **New draft**. Type `== GOLD` (without quotes) in row R1's tier cell, then **Save draft**: the engine's error appears on that cell and the other edits stay. Put the quotes back (`== 'GOLD'`), change R2 to `>= 5`, add a row, move it with the arrows, and save again. Version 2 opens as a draft. **Request publish**.
+3. Back as `lan`, reload and choose **New draft**. Cells edit as values: pick tiers, choose a comparison and type an amount (VND sits inside the field), toggle Yes or No. Add a row from **Add row** and move it with its ⋯ menu. Choose a comparison for the new row's balance but leave the amount empty, then **Save draft**: the cell says "Enter a value." and your other edits stay. Type the amount and save again. Version 2 opens as a draft. **Request publish**.
 4. As `minh`, open version 2: Changes lists the added and changed rows with the same labels and amounts as the table. Write a reason and choose **Reject**: version 2 goes back to `lan` as a draft, and **History** under the approval dock shows who rejected it and why. As `lan`, **Request publish** again; as `minh`, approve it.
 5. As either user, use **Try it**: tier `GOLD` matches R1 and the table marks the row.
 
@@ -296,9 +388,11 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `SessionSignInIT.RLE_019_*` | The curl demo above on the `dev` profile: form sign-in, then `200` from `/meta` and `/me` with the session for both users |
 | `SessionSignInIT.TR_SEC_03_*`, `SessionSignInIT.session_*` | A session caller cannot choose its tenant with a header; a state-changing call with the session needs the CSRF token; other pages still redirect to `/login` |
 | `CockpitEmbeddedIT.TR_SEC_09_*` | Without a session the cockpit path redirects to the host's sign-in and serves no file; the cockpit page carries the strict CSP and `X-Frame-Options: SAMEORIGIN` |
+| `CockpitEmbeddedIT.TR_SEC_09_the_host_sign_in_page_*` | `/login?lang=vi` is the branded page with the demo user names and no password, a strict CSP (`frame-ancestors 'none'`, no `unsafe-inline`) and `no-store`; its styles and script load before sign-in |
+| `SignInPageTest` | The page in English and Vietnamese, the error and signed-out states, the escaped CSRF field, demo users only on `dev` with a password, no inline script or style, and the same message keys in both languages |
 | `CockpitEmbeddedIT.CKP_001_*` | On the `dev` profile: form sign-in, the cockpit page and its one-host registry, then `200` from `/api/bpm/meta` and `/api/bpm/me` with the session, valid against the cockpit schemas; a call that changes data needs `X-XSRF-TOKEN` from the cookie |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
-| `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
+| `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*`, `RLE_002_*`, `RLE_003_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.
 

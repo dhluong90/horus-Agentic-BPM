@@ -16,6 +16,8 @@ import com.horus.bpm.rules.internal.model.OutputClause;
 import com.horus.bpm.rules.internal.model.Rule;
 import com.horus.bpm.rules.internal.model.ValueType;
 import com.horus.bpm.rules.internal.model.When;
+import io.github.dhluong90.bpm.rules.internal.dmn.ruleset.CanonicalCells;
+import io.github.dhluong90.bpm.rules.internal.dmn.ruleset.DmnReader;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.DateTimeException;
@@ -29,6 +31,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 import org.snakeyaml.engine.v2.api.LoadSettings;
 import org.snakeyaml.engine.v2.api.lowlevel.Parse;
@@ -39,10 +42,13 @@ import org.snakeyaml.engine.v2.events.NodeEvent;
 import org.snakeyaml.engine.v2.events.ScalarEvent;
 import org.snakeyaml.engine.v2.exceptions.YamlEngineException;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
- * Reads a schema version 1 rule set document (YAML or JSON) into the DMN-shaped model and its RFC 8785
+ * Reads a schema version 1 rule set document (YAML or JSON, or a DMN decision table) into the DMN-shaped model and its RFC 8785
  * canonical form. Structure only: nothing in the document is evaluated (TR-STD-01). Checks follow
  * {@code rule-engine/api/schema/rule-set.v1.schema.json}.
  */
@@ -81,15 +87,24 @@ public final class RuleSetReader {
     /**
      * Reads a source document.
      *
-     * @param format {@link SourceFormat#YAML} or {@link SourceFormat#JSON}
+     * @param format {@link SourceFormat#YAML}, {@link SourceFormat#JSON} or {@link SourceFormat#DMN_XML}
      * @param source the document bytes
      * @return the model, canonical JSON and canonical hash
      * @throws ValidationFailedException when the document is not a valid schema version 1 rule set
      */
     public static ParsedRuleSet read(SourceFormat format, byte[] source) {
+        return read(format, source, UnaryOperator.identity());
+    }
+
+    /**
+     * Reads a source document, with a hook on the printed canonical JSON. Package-private for the test that proves
+     * a printer which does not reproduce the model is refused (ADR-0026 decision 4); identity everywhere else.
+     */
+    static ParsedRuleSet read(SourceFormat format, byte[] source, UnaryOperator<String> printed) {
         if (source.length > MAX_SOURCE_BYTES) {
             throw new ValidationFailedException("Document larger than " + MAX_SOURCE_BYTES + " bytes");
         }
+        requireCleanText(source);
         JsonNode tree;
         try {
             tree = switch (format) {
@@ -98,7 +113,8 @@ public final class RuleSetReader {
                     yield EngineJson.YAML.readTree(source);
                 }
                 case JSON -> EngineJson.JSON.readTree(source);
-                case DMN_XML -> throw new ValidationFailedException("DMN XML import is not available in this release");
+                // DMN is read into the lowest schema version that expresses it (TR-STD-03), then checked as JSON.
+                case DMN_XML -> EngineJson.JSON.readTree(EngineJson.JSON.writeValueAsBytes(DmnReader.toRuleSet(source)));
             };
         } catch (JacksonException e) {
             throw new ValidationFailedException("Document is not well-formed " + format + ": " + e.getOriginalMessage());
@@ -106,9 +122,24 @@ public final class RuleSetReader {
         if (tree == null || !tree.isObject()) {
             throw new ValidationFailedException("Document must be a mapping");
         }
+        model(tree);
+        String inexact = firstInexactNumber(tree, "");
+        if (inexact != null) {
+            throw invalid("Number at " + inexact + " cannot be stored exactly" + numberLine(format, source)
+                    + "; write it as a string, for example \"0.1000000000000000055511151231257827\", or use at most"
+                    + " 15 significant digits");
+        }
+        // The behaviour hash covers the model as the engine prints it: one normal form per value (ADR-0026).
+        CanonicalCells.normalize((ObjectNode) tree);
+        requireOnlySafeIntegers(tree, "");
         Definitions model = model(tree);
-        requireExactNumbers(tree, "");
-        String canonical = CanonicalJson.write(tree);
+        String canonical = printed.apply(CanonicalJson.write(tree));
+        // What runs is what was hashed: the printed form must parse back to the same model (fail closed).
+        JsonNode reread = EngineJson.JSON.readTree(canonical);
+        if (!model(reread).equals(model) || !CanonicalJson.write(reread).equals(canonical)) {
+            throw invalid("The canonical form of this document does not reproduce it, so it cannot be approved;"
+                    + " nothing was stored. Please report this document");
+        }
         return new ParsedRuleSet(model, canonical, Hashes.sha256(canonical));
     }
 
@@ -193,7 +224,15 @@ public final class RuleSetReader {
                 throw invalid("Duplicate output '" + outputName + "'");
             }
             Cell defaultValue = output.has("default") ? cell(output.get("default")) : null;
-            outputs.add(new OutputClause(outputName, type(output, outputName), defaultValue));
+            OutputClause.Aggregate aggregate = switch (output.has("collect") ? text(output, "collect") : "none") {
+                case "none" -> OutputClause.Aggregate.NONE;
+                case "sum" -> OutputClause.Aggregate.SUM;
+                case "min" -> OutputClause.Aggregate.MIN;
+                case "max" -> OutputClause.Aggregate.MAX;
+                case "count" -> OutputClause.Aggregate.COUNT;
+                default -> throw invalid("Output '" + outputName + "': collect must be sum, min, max or count");
+            };
+            outputs.add(new OutputClause(outputName, type(output, outputName), defaultValue, aggregate));
         }
         List<Rule> rules = new ArrayList<>();
         Set<String> ruleIds = new HashSet<>();
@@ -258,30 +297,94 @@ public final class RuleSetReader {
     }
 
     /**
-     * Refuses a number that the RFC 8785 form would change (I-JSON): the hash, the stored canonical JSON and
-     * the evaluation must all carry the value the checker read in the source.
+     * Refuses source bytes that are not valid UTF-8, contain NUL or start with a byte order mark, so the stored
+     * {@code source_document} holds exactly the bytes {@code source_hash} was taken over (ADR-0026 decision 5).
      */
-    private static void requireExactNumbers(JsonNode node, String path) {
-        if (node.isNumber()) {
-            BigDecimal value = node.decimalValue();
-            boolean exact;
-            try {
-                exact = new BigDecimal(CanonicalJson.number(value)).compareTo(value) == 0;
-            } catch (IllegalArgumentException | ArithmeticException e) {
-                exact = false;
+    private static void requireCleanText(byte[] source) {
+        if (source.length >= 3 && (source[0] & 0xFF) == 0xEF && (source[1] & 0xFF) == 0xBB && (source[2] & 0xFF) == 0xBF) {
+            throw invalid("Document starts with a byte order mark; save it as UTF-8 without BOM");
+        }
+        for (byte b : source) {
+            if (b == 0) {
+                throw invalid("Document contains a NUL character");
             }
-            if (!exact) {
-                throw invalid("Number at " + (path.isEmpty() ? "/" : path)
-                        + " cannot be stored exactly; use at most 15 significant digits or a string expression");
+        }
+        try {
+            java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(source));
+        } catch (java.nio.charset.CharacterCodingException e) {
+            throw invalid("Document is not valid UTF-8");
+        }
+    }
+
+    /** Whether every JSON number survives an exact RFC 8785 round trip (I-JSON, RFC 7493); never read through double. */
+    private static String firstInexactNumber(JsonNode node, String path) {
+        if (node.isNumber()) {
+            return exact(node.decimalValue()) ? null : (path.isEmpty() ? "/" : path);
+        }
+        if (node.isObject()) {
+            for (Map.Entry<String, JsonNode> member : node.properties()) {
+                String found = firstInexactNumber(member.getValue(), path + "/" + member.getKey());
+                if (found != null) {
+                    return found;
+                }
             }
         } else if (node.isArray()) {
             int i = 0;
             for (JsonNode element : node) {
-                requireExactNumbers(element, path + "/" + i++);
+                String found = firstInexactNumber(element, path + "/" + i++);
+                if (found != null) {
+                    return found;
+                }
             }
-        } else if (node.isObject()) {
+        }
+        return null;
+    }
+
+    private static boolean exact(BigDecimal value) {
+        try {
+            return new BigDecimal(CanonicalJson.number(value)).compareTo(value) == 0;
+        } catch (IllegalArgumentException | ArithmeticException e) {
+            return false;
+        }
+    }
+
+    /** Finds the line of the first inexact number in the source, for the refusal; empty when not found. */
+    private static String numberLine(SourceFormat format, byte[] source) {
+        if (format == SourceFormat.DMN_XML) {
+            return "";
+        }
+        try (JsonParser parser = (format == SourceFormat.YAML ? EngineJson.YAML : EngineJson.JSON).createParser(source)) {
+            for (JsonToken token = parser.nextToken(); token != null; token = parser.nextToken()) {
+                if ((token == JsonToken.VALUE_NUMBER_INT || token == JsonToken.VALUE_NUMBER_FLOAT)
+                        && !exact(parser.getDecimalValue())) {
+                    return " (line " + parser.currentTokenLocation().getLineNr() + ")";
+                }
+            }
+        } catch (JacksonException e) {
+            return "";
+        }
+        return "";
+    }
+
+    /**
+     * After normalisation a canonical rule set holds JSON numbers only for integers within plus or minus 2^53 - 1;
+     * every other number is a string with its scale (ADR-0026 decision 2). A violation is an engine bug.
+     */
+    private static void requireOnlySafeIntegers(JsonNode node, String path) {
+        if (node.isNumber() && !CanonicalJson.isSafeInteger(node.decimalValue())) {
+            throw new IllegalStateException("Canonical rule set holds the non-integer number at " + path);
+        }
+        if (node.isObject()) {
             for (Map.Entry<String, JsonNode> member : node.properties()) {
-                requireExactNumbers(member.getValue(), path + "/" + member.getKey());
+                requireOnlySafeIntegers(member.getValue(), path + "/" + member.getKey());
+            }
+        } else if (node.isArray()) {
+            int i = 0;
+            for (JsonNode element : node) {
+                requireOnlySafeIntegers(element, path + "/" + i++);
             }
         }
     }

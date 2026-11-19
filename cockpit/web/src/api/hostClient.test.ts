@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createHostClient, csrfHeaders } from './hostClient';
+import { createHostClient, csrfHeaders, sameOrigin, signOutOfHost } from './hostClient';
 import { HostCallError, type HostError } from './hostError';
 
 function respond(response: Response | Error): typeof fetch {
@@ -85,5 +85,46 @@ describe('host client', () => {
   it('CKP_001_safe_requests_and_a_missing_cookie_send_no_xsrf_header', () => {
     expect(csrfHeaders('GET', 'XSRF-TOKEN=abc')).toEqual({});
     expect(csrfHeaders('POST', 'JSESSIONID=abc')).toEqual({});
+  });
+});
+
+describe('sign-out on the host', () => {
+  const answer = (init: { type?: ResponseType; status: number }) => {
+    const calls: RequestInit[] = [];
+    const fetchImpl: typeof fetch = async (_input, request) => {
+      calls.push(request ?? {});
+      // A browser reports a redirect it did not follow as type opaqueredirect, status 0.
+      return { type: init.type ?? 'basic', status: init.status } as unknown as Response;
+    };
+    return { fetchImpl, calls };
+  };
+
+  it('TR_SEC_09_a_redirect_or_a_2xx_is_a_sign_out', async () => {
+    expect(await signOutOfHost('', answer({ type: 'opaqueredirect', status: 0 }).fetchImpl)).toBe(true);
+    expect(await signOutOfHost('', answer({ status: 204 }).fetchImpl)).toBe(true);
+  });
+
+  it('TR_SEC_09_an_error_status_or_no_answer_is_not_a_sign_out', async () => {
+    expect(await signOutOfHost('', answer({ status: 403 }).fetchImpl)).toBe(false);
+    expect(await signOutOfHost('', answer({ status: 500 }).fetchImpl)).toBe(false);
+    expect(await signOutOfHost('', respond(new TypeError('network')))).toBe(false);
+  });
+
+  it('TR_SEC_09_the_csrf_token_goes_to_the_page_origin_only', async () => {
+    document.cookie = 'XSRF-TOKEN=t-1';
+    const local = answer({ type: 'opaqueredirect', status: 0 });
+    await signOutOfHost('', local.fetchImpl, 'https://loans.bank.example');
+    expect(local.calls[0]?.headers).toMatchObject({ 'X-XSRF-TOKEN': 't-1' });
+    const other = answer({ type: 'opaqueredirect', status: 0 });
+    await signOutOfHost('https://cards.bank.example', other.fetchImpl, 'https://loans.bank.example');
+    expect(other.calls[0]?.headers).not.toHaveProperty('X-XSRF-TOKEN');
+    document.cookie = 'XSRF-TOKEN=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+  });
+
+  it('same_origin_compares_the_full_origin', () => {
+    expect(sameOrigin('', 'https://a.example')).toBe(true);
+    expect(sameOrigin('https://a.example/api', 'https://a.example')).toBe(true);
+    expect(sameOrigin('https://a.example:8443', 'https://a.example')).toBe(false);
+    expect(sameOrigin('not a url', 'https://a.example')).toBe(true);
   });
 });

@@ -4,7 +4,7 @@ import type { Scenario } from '../src/mocks/fixtures';
 import { cspViolations, mockHost, mockRuleEngine, rememberLocale } from './mockHost';
 
 // Rule screens for the visual check: 1440x900 and 1440x1200, light and dark, English and Vietnamese.
-// At 1440x900 the screen's primary action must be fully visible without scrolling.
+// The screen's primary action must be fully visible without scrolling, at 1440x900 and at 1440x1200.
 const VIEWPORTS = [
   { width: 1440, height: 900 },
   { width: 1440, height: 1200 },
@@ -27,8 +27,8 @@ const SCREENS: readonly Screen[] = [
     name: 'list',
     scenario: 'rules-author',
     hash: '#/rules',
-    primary: { en: 'Import file', vi: 'Nhập tệp' },
-    ready: async (page) => { await expect(page.locator('.dt--list .badge').first()).toBeVisible(); },
+    primary: { en: 'Import rule set', vi: 'Nhập bộ quy tắc' },
+    ready: async (page) => { await expect(page.getByRole('table').getByText('card-fee')).toBeVisible(); },
   },
   {
     name: 'table-try-it',
@@ -107,7 +107,8 @@ for (const screen of SCREENS) {
           await screen.ready(page, locale);
           const primary = await page.getByRole('button', { name: screen.primary[locale], exact: true }).first().boundingBox();
           expect(primary, 'primary action is rendered').not.toBeNull();
-          expect((primary?.y ?? 0) + (primary?.height ?? 0)).toBeLessThanOrEqual(900);
+          // Visible without scrolling: at 1440x900 that is the laptop fold (ux-design section 8).
+          expect((primary?.y ?? 0) + (primary?.height ?? 0)).toBeLessThanOrEqual(viewport.height);
           expect(primary?.height ?? 0).toBeGreaterThanOrEqual(44);
           // No raw expressions in read views and no spec ids anywhere.
           await expect(page.locator('main')).not.toContainText(/CK-F-|CKP-0|PD-0/);

@@ -60,7 +60,7 @@ export type VersionStatus = (typeof VERSION_STATUSES)[number];
 const nullableString = z.string().nullable().optional();
 
 /** Lifecycle actions the engine says the caller may take now. A hint for screens; the engine checks again. */
-export const ALLOWED_ACTIONS = ['request-publish', 'approve', 'reject'] as const;
+export const ALLOWED_ACTIONS = ['request-publish', 'approve', 'reject', 'withdraw'] as const;
 export type AllowedAction = (typeof ALLOWED_ACTIONS)[number];
 /** Unknown actions from a newer engine are dropped, never rejected. */
 const allowedActions = z.array(z.string()).transform((items) => items.filter((item): item is AllowedAction => (ALLOWED_ACTIONS as readonly string[]).includes(item)));

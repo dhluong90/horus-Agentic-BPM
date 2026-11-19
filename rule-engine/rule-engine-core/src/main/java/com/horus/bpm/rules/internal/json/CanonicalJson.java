@@ -81,6 +81,10 @@ public final class CanonicalJson {
      * @return the canonical number text
      */
     public static String number(BigDecimal value) {
+        if (isSafeInteger(value)) {
+            // Exact, never through double: the only numbers a canonical rule set holds (ADR-0026).
+            return value.toBigIntegerExact().toString();
+        }
         double d = value.doubleValue();
         if (Double.isNaN(d) || Double.isInfinite(d)) {
             throw new IllegalArgumentException("Number out of the IEEE 754 double range: " + value);
@@ -145,5 +149,19 @@ public final class CanonicalJson {
             }
         }
         out.append('"');
+    }
+
+    /** Largest integer a JSON number may carry in a canonical document: 2^53 - 1 (I-JSON, RFC 7493). */
+    public static final BigDecimal MAX_SAFE_INTEGER = BigDecimal.valueOf(9_007_199_254_740_991L);
+
+    /**
+     * Tells whether a value is an integer within plus or minus 2^53 - 1, the only numbers a canonical rule set holds.
+     *
+     * @param value the number
+     * @return whether it is a safe integer
+     */
+    public static boolean isSafeInteger(BigDecimal value) {
+        return value.signum() == 0
+                || (value.stripTrailingZeros().scale() <= 0 && value.abs().compareTo(MAX_SAFE_INTEGER) <= 0);
     }
 }

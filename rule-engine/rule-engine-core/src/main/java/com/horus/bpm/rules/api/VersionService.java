@@ -13,8 +13,8 @@ import java.util.Optional;
  * {@code TenantResolver} and {@code CallerResolver}, never from an argument.
  *
  * <p>Permissions (ADR-0010) are checked here, not only over REST: import and {@code requestPublish} need
- * {@code rules:author}, {@code approve} and {@code reject} need {@code rules:approve}, every read needs
- * {@code rules:read}. A
+ * {@code rules:author}, {@code approve} and {@code reject} need {@code rules:approve}, every read and
+ * {@code export} need {@code rules:read}. A
  * caller without them gets {@link PermissionDeniedException}; an unresolved caller or tenant gets
  * {@link UnauthenticatedException}. The approver must be neither the requester nor the author of the version.
  */
@@ -126,4 +126,20 @@ public interface VersionService {
      * @return the version, or empty when absent in the caller's tenant
      */
     Optional<RuleSetVersion> find(String ruleSet, int version, boolean includeSource);
+
+    /**
+     * Exports a version of the caller's tenant as a file that imports back with the same canonical hash. The file
+     * carries no tenant, status, lock version, effective date, requester, approver or decision data. Writes nothing.
+     * Needs {@code rules:read}.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param format {@link SourceFormat#JSON} (the canonical document) or {@link SourceFormat#DMN_XML} (DMN 1.5)
+     * @return the document text, UTF-8
+     * @throws RuleSetNotFoundException when the tenant has no such rule set
+     * @throws VersionNotFoundException when the rule set has no such version
+     * @throws InputInvalidException for a format this release cannot write
+     * @throws ValidationFailedException when the version uses a construct with no DMN decision table form
+     */
+    String export(String ruleSet, int version, SourceFormat format);
 }

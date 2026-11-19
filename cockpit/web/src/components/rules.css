@@ -380,3 +380,19 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .try__tile dd { font-size: 18px; white-space: nowrap; }
 .changes__note { padding: 12px 20px 0; color: var(--muted); font-size: 13px; }
 .changes__summary .nonascii-mark { margin-top: 0; }
+
+/* 44 px targets on the Rules list toolbar (styleguide 9, ux-design 8): the search field and the status filter. */
+.toolbar .search input { min-height: var(--target-min); }
+.toolbar .seg button { min-height: calc(var(--target-min) - 4px); }
+.toolbar .seg button.hit, .toolbar .seg button { position: relative; }
+.toolbar .seg button::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, var(--target-min)); height: max(100%, var(--target-min)); transform: translate(-50%, -50%); }
+/* Editor cells keep usable widths in the framed layout; a wide table scrolls sideways in its region. */
+.dt--edit .compare { min-width: 176px; }
+.dt--edit .amount { min-width: 104px; }
+.dt--edit .picker { min-width: 132px; }
+.dt--edit .cell-any-edit { min-width: 88px; }
+.dt--edit .seg--cell { white-space: nowrap; }
+/* In the framed layout the draft table needs the full width: Changes in this draft moves below it. */
+.workbench--editing { grid-template-columns: minmax(0, 1fr); }
+.workbench--editing .workbench__side { position: static; }
+.workbench--editing .draft-changes { max-width: 720px; }

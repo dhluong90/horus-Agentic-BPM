@@ -23,10 +23,12 @@ import { formatDateTime } from './model/dates';
 import { draftReducer, initialDraft } from './model/draft';
 import { placeErrors } from './model/engineErrors';
 import { toDocument, toRows } from './model/table';
-import { useRulesNavigation, type Lens, type RulesRoute } from './routes';
+import { formatRoute, type Lens, type Route } from '../../app/route';
 import type { RuleDocument } from '../../api/rules/rulesClient';
 
-type Navigate = (route: RulesRoute) => void;
+type Navigate = (route: Route) => void;
+
+const navigate: Navigate = (route) => { window.location.hash = formatRoute(route); };
 
 /** The version the diff compares with: the newest earlier version that was published, else the one before. Versions arrive newest first. */
 function baseOf(versions: readonly VersionSummary[], current: number): VersionSummary | undefined {
@@ -183,7 +185,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
           </div>
         ) : null}
       </div>
-      <div className="workbench">
+      <div className={editing ? 'workbench workbench--editing' : 'workbench'}>
         {main}
         <aside className="workbench__side">
           {editing ? <DraftChanges definition={version.definition} base={version.definition.rules} next={draftRules} /> : null}
@@ -208,7 +210,6 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
 
 export function RuleSetPage({ name, versionNumber, lens }: { name: string; versionNumber: number | undefined; lens: Lens | undefined }) {
   const { t } = useI18n();
-  const { go: navigate, href } = useRulesNavigation();
   const versions = useVersions(name);
   const [toast, setToast] = useState<string | undefined>(undefined);
   const closeToast = useCallback(() => { setToast(undefined); }, []);
@@ -233,12 +234,8 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
     }
   }, [missing, name, selected, refetch]);
 
-  const back = (
-    <a className="back-link hit" href={href({ name: 'list' })}>
-      <span aria-hidden="true">←</span> {t('ruleSet.back')}
-    </a>
-  );
-  const frame = (content: ReactNode) => <section className="workspace">{back}{content}</section>;
+  // The shell's breadcrumb (Rules / card-fee / Version N) leads back to the list.
+  const frame = (content: ReactNode) => <section className="workspace">{content}</section>;
   if (versions.isPending || (missing && versions.isFetching)) return frame(<p className="empty" role="status">{t('ruleSets.loading')}</p>);
   if (versions.isError) return frame(<ProblemNotice error={versions.error} />);
   if (!latest || selected === undefined) return frame(<p className="empty" role="alert">{t('ruleSets.empty')}</p>);
@@ -250,7 +247,6 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
 
   return (
     <section className="workspace rs" aria-labelledby="rule-set-title">
-      {back}
       <Workbench
         key={`${name}-${String(current.version)}-${String(current.lockVersion)}`}
         version={current}

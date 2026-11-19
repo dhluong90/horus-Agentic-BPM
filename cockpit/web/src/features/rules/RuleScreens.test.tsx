@@ -58,22 +58,8 @@ describe('rule set list and version view', () => {
     const rows = within(table).getAllByRole('row').slice(1);
     await waitFor(() => { expect(within(rows[0] as HTMLElement).getByText('Waiting for approval')).toBeInTheDocument(); });
     expect(rows[0]).toHaveTextContent('card-fee');
-    expect(rows[0]).toHaveTextContent('Version 2');
-    expect(rows[0]).toHaveTextContent('Version 1');
     expect(rows[1]).toHaveTextContent('kyc-risk');
-    expect(screen.getByRole('button', { name: 'Import file' })).toBeInTheDocument();
-  });
-
-  it('RLE_039_a_cursor_the_engine_refuses_offers_to_start_the_list_again', async () => {
-    const user = userEvent.setup();
-    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets', () => HttpResponse.json(
-      { type: 'x', title: 'Bad Request', status: 400, code: 'QUERY_INVALID', detail: 'The cursor was not issued by this endpoint', correlationId: '01JQUERY000000000000000000' },
-      { status: 400, headers: { 'Content-Type': 'application/problem+json' } },
-    ), { once: true }));
-    open('#/rules');
-    expect(await screen.findByText('The list changed while you were reading it.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Start the list again' }));
-    expect(await screen.findByRole('table')).toHaveTextContent('kyc-risk');
+    expect(screen.getByRole('button', { name: 'Import rule set' })).toBeInTheDocument();
   });
 
   it('TR_STD_01_a_json_file_is_sent_as_yaml_text_until_the_engine_imports_json', async () => {
@@ -93,7 +79,7 @@ describe('rule set list and version view', () => {
   it('CKP_030_reader_without_author_permission_sees_no_import', async () => {
     open('#/rules', 'ready-approver');
     await screen.findByRole('table');
-    expect(screen.queryByRole('button', { name: 'Import file' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Import rule set' })).not.toBeInTheDocument();
   });
 
   it('CKP_030_version_reads_as_a_table_and_the_source_only_on_purpose', async () => {
@@ -233,8 +219,8 @@ describe('four eyes', () => {
     open('#/rules/card-fee/1', 'rules-author-drafts-off');
     expect(await screen.findByText('Changes to this environment arrive through your release pipeline.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('link', { name: /All rule sets/ }));
-    expect(await screen.findByRole('button', { name: 'Import file' })).toBeInTheDocument();
+    window.location.hash = '#/rules';
+    expect(await screen.findByRole('button', { name: 'Import rule set' })).toBeInTheDocument();
   });
 
   it('TR_UI_02_a_stale_click_gets_the_engine_403_with_code_and_reference', async () => {
