@@ -25,3 +25,8 @@ horus:
   bpm:
     rules:
       enabled: true
+
+# Demo users of the scripted demo (ExampleSecurity). No password in this file: without
+# HORUS_DEMO_PASSWORD there are no demo users and every API call is refused.
+example:
+  demo-password: ${HORUS_DEMO_PASSWORD:}
