@@ -302,13 +302,11 @@ jobs:
     timeout-minutes: 20
     # Chromium and the system libraries it needs come with Playwright's own image, pinned by digest, so
     # no apt download is on this job's critical path (an Ubuntu mirror outage failed every run). The tag
-    # is the @playwright/test version in cockpit/web/package-lock.json; the first step below checks it.
-    # Update the tag, the digest and PLAYWRIGHT_IMAGE_VERSION together with the lockfile.
+    # is the @playwright/test version in cockpit/web/package-lock.json; the first step below reads the tag
+    # from this file and checks it. Update the tag and the digest together with the lockfile.
     container:
       image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
       options: --ipc=host
-    env:
-      PLAYWRIGHT_IMAGE_VERSION: "1.65.1"
     defaults:
       run:
         working-directory: cockpit/web
@@ -318,20 +316,22 @@ jobs:
           # npm install scripts run in this job; keep the token out of .git/config.
           persist-credentials: false
 
+      # The exact Node of the release bundle build (tools/release/build-cockpit.sh), so the tests run on it.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: tools/release/node-version
           cache: npm
           cache-dependency-path: cockpit/web/package-lock.json
 
       - name: The Playwright image matches the lockfile
         run: |
+          image="$(sed -nE 's#^ +image: mcr\.microsoft\.com/playwright:v([0-9]+\.[0-9]+\.[0-9]+)-.*#\1#p' ../../.github/workflows/ci.yml)"
           locked="$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")"
-          if [ "$locked" != "$PLAYWRIGHT_IMAGE_VERSION" ]; then
-            echo "::error title=Playwright image out of date::package-lock.json has @playwright/test $locked, the job image is $PLAYWRIGHT_IMAGE_VERSION. Update the image tag and digest in ci.yml."
+          if [ -z "$image" ] || [ "$locked" != "$image" ]; then
+            echo "::error title=Playwright image out of date::package-lock.json has @playwright/test $locked, the job image in ci.yml is '${image}'. Update the image tag and digest in ci.yml."
             exit 1
           fi
-          echo "@playwright/test $locked, image $PLAYWRIGHT_IMAGE_VERSION: browsers come from the image."
+          echo "@playwright/test $locked, image $image, Node $(node --version): browsers come from the image."
 
       - name: Install
         run: npm ci
