@@ -41,6 +41,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 409 | [RULE_SET_EXISTS](#rule_set_exists) | rules | M1 |
 | 409 | [LAST_VERSION_IN_EFFECT](#last_version_in_effect) | rules | 0.2.0 |
 | 409 | [VERSION_SUPERSEDED](#version_superseded) | processes | M2 |
+| 409 | [LAST_VERSION_IN_EFFECT](#last_version_in_effect) | both | 0.2.0 |
 | 413 | [PAYLOAD_TOO_LARGE](#payload_too_large) | rules | M1 |
 | 428 | [PRECONDITION_REQUIRED](#precondition_required) | rules | M1 (0.2.0) |
 | 422 | [VALIDATION_FAILED](#validation_failed) | both | M1 |
@@ -114,6 +115,12 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 
 ### PRECONDITION_REQUIRED
 `428`. A command that must be conditional was sent without `If-Match`, for example `:retire`, so it could overwrite a change the caller has not seen (RFC 6585). Read the version, then send its `ETag` back as `If-Match: "3"`. Nothing is written.
+
+### LAST_VERSION_IN_EFFECT
+`409`. The retirement would leave no version of the rule set or definition key in effect. After it, evaluations or new starts would fail until a new version is approved (PD-101).
+- **Body.** Besides `detail`, the body carries the rule set or definition key, `version`, `setting` and `nextEffectiveFrom`. `setting` is the value of `lifecycle.retire-last-version`; `nextEffectiveFrom` is the start of a later approved version, or null.
+- **What to do under `confirm`, the default.** If stopping it is intended, send the retire again with `"confirmNoVersionInEffect": true`.
+- **What to do under `refuse`.** Approve a replacement first, then retire.
 
 ### VERSION_SUPERSEDED
 `409`. Processes only. An older pending version cannot be approved because a version with a higher number is already `ACTIVE` (ADR-0012). Create a new draft from the effective version and request approval again.

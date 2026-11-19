@@ -65,6 +65,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-047 | `PRE_047_decision_port_refuses_a_request_tenant_other_than_the_instance_tenant` | Service, security log capture | M2 | `TR-TEN-01` | Planned |
 | PRE-048 | `PRE_048_kernel_runs_only_the_approved_source` | Testcontainers with a tampered row, event and audit capture | M2 | `TR-DEF-04`, `TR-STD-01` | Planned |
 | PRE-052 | `PRE_052_requester_withdraws_own_pending_definition_to_draft` | Service, WebMvc, Testcontainers history and event capture | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Planned |
+| PRE-053 | `PRE_053_retire_stops_new_starts_keeps_running_instances_and_confirms_last_version` | Service, WebMvc, Testcontainers history, event and job capture | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Planned |
+| PRE-054 | `PRE_054_cancel_needs_processes_cancel_and_a_reason` | Service, WebMvc, Testcontainers history and event capture | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Planned |
 
 ## Known gaps
 | Gap | Plan |
