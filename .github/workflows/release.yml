@@ -244,6 +244,7 @@ jobs:
 
       - name: Verify the uploaded assets against SHA256SUMS, then publish
         env:
+          ARCHIVE: ${{ runner.temp }}/archive/release
           ASSETS: ${{ runner.temp }}/assets.txt
           DOWNLOADED: ${{ runner.temp }}/downloaded
         run: |
@@ -254,9 +255,12 @@ jobs:
           actual="$(ls -1 | sort)"
           [[ "$expected" == "$actual" ]] || { diff <(echo "$expected") <(echo "$actual") || true; \
             echo "ERROR: the draft's assets differ from the chosen files (above); the draft stays unpublished."; exit 1; }
-          # The command the release notes give adopters, run on the draft's own downloads.
+          # Checked against the SHA256SUMS of the archive verified before the draft, never the draft's own copy.
+          cmp -s "$ARCHIVE/SHA256SUMS" SHA256SUMS \
+            || { echo "ERROR: the draft's SHA256SUMS differs from the checked archive's; the draft stays unpublished."; exit 1; }
+          # The command the release notes give adopters, on the draft's downloads.
           while read -r hash path; do name="${path##*/}"; [ -f "$name" ] && printf '%s  %s\n' "$hash" "$name"; done \
-            < SHA256SUMS | shasum -a 256 -c - | tee "$RUNNER_TEMP/verify.log"
+            < "$ARCHIVE/SHA256SUMS" | shasum -a 256 -c - | tee "$RUNNER_TEMP/verify.log"
           checked="$(grep -c ': OK$' "$RUNNER_TEMP/verify.log")"
           [[ "$checked" == "$(( $(wc -l < "$ASSETS") - 1 ))" ]] \
             || { echo "ERROR: $checked asset(s) checked, expected every asset but SHA256SUMS."; exit 1; }

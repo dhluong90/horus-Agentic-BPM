@@ -113,7 +113,7 @@ On a tag run that passed the release build, the job `github-release` publishes t
 | 3 | `BUILD-INFO.json` must say `"trial": false`, `"workingTree": "clean"`, and the tag and commit of this run | Any field differs: no draft |
 | 4 | Assets: every jar and POM under `maven-repo` (no `maven-metadata`, no checksum side files), `bom-release.json`, `SHA256SUMS`, `BUILD-INFO.json` | Two assets share a file name, or there is no jar: no draft |
 | 5 | `gh release create "$TAG" --verify-tag --draft` with every asset and the release notes | An upload fails: a draft only, never a published Release |
-| 6 | The draft's assets are downloaded and checked against `SHA256SUMS`; then `gh release edit --draft=false` | An asset is missing, extra or different: the draft stays unpublished |
+| 6 | The draft's assets are downloaded and checked against the `SHA256SUMS` of the archive checked in step 2 (the draft's own copy must be identical to it); then `gh release edit --draft=false` | An asset is missing, extra or different: the draft stays unpublished |
 
 The release notes link this page and give the check adopters run in the folder of their downloads:
 
