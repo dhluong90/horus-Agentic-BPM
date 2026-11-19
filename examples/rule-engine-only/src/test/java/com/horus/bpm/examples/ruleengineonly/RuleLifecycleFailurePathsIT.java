@@ -36,7 +36,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"example.demo-password=it-only-password"})
+        properties = {})
 @Testcontainers
 class RuleLifecycleFailurePathsIT {
 
@@ -62,6 +62,7 @@ class RuleLifecycleFailurePathsIT {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+        TestTokens.register(registry);
     }
 
     @Autowired
@@ -355,8 +356,7 @@ class RuleLifecycleFailurePathsIT {
     Reply send(String user, String method, String path, byte[] body, String contentType, String idempotencyKey,
             Map<String, String> headers) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(uri(path))
-                .header("Authorization", "Basic " + Base64.getEncoder()
-                        .encodeToString((user + ":it-only-password").getBytes(StandardCharsets.UTF_8)))
+                .header("Authorization", TestTokens.bearer(user))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
         if (contentType != null) {
             request.header("Content-Type", contentType);

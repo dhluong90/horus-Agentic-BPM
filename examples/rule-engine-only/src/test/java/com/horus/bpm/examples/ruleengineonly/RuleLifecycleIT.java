@@ -35,7 +35,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"example.demo-password=it-only-password", "spring.jackson.property-naming-strategy=SNAKE_CASE"})
+        properties = "spring.jackson.property-naming-strategy=SNAKE_CASE")
 @Testcontainers
 class RuleLifecycleIT {
 
@@ -61,6 +61,7 @@ class RuleLifecycleIT {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+        TestTokens.register(registry);
     }
 
     @Autowired
@@ -200,9 +201,11 @@ class RuleLifecycleIT {
         java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
         Thread running = Thread.ofVirtual().start(() -> {
             org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
-                    org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated("alice", null,
-                            org.springframework.security.core.authority.AuthorityUtils.createAuthorityList(
-                                    "rules:author", "tenant:bank-a")));
+                    new org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken(
+                            org.springframework.security.oauth2.jwt.Jwt.withTokenValue("in-flight").header("alg", "none")
+                                    .subject("alice").claim("tenant_id", "bank-a").build(),
+                            org.springframework.security.core.authority.AuthorityUtils.createAuthorityList("rules:author"),
+                            "alice"));
             new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(status -> {
                 versions.importVersion("card-fee-flight", com.horus.bpm.rules.api.ImportRequest.yaml(renamed("card-fee-flight"))
                         .withIdempotencyKey("k-in-flight"));
@@ -218,8 +221,7 @@ class RuleLifecycleIT {
 
         // When alice sends the same request over REST
         HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets/card-fee-flight/versions"))
-                .header("Authorization", "Basic " + Base64.getEncoder().encodeToString(
-                        "alice:it-only-password".getBytes(StandardCharsets.UTF_8)))
+                .header("Authorization", TestTokens.bearer("alice"))
                 .header("Content-Type", "application/yaml").header("Idempotency-Key", "k-in-flight")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(renamed("card-fee-flight"))).build(),
                 HttpResponse.BodyHandlers.ofString());
@@ -262,8 +264,7 @@ class RuleLifecycleIT {
     @Test
     void a_malformed_correlation_id_is_replaced_not_echoed() throws Exception {
         HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(uri("/decisions/no-such-rule-set:evaluate"))
-                .header("Authorization", "Basic " + Base64.getEncoder().encodeToString(
-                        "teller:it-only-password".getBytes(StandardCharsets.UTF_8)))
+                .header("Authorization", TestTokens.bearer("teller"))
                 .header("Content-Type", "application/json").header("X-Correlation-Id", "x".repeat(300))
                 .POST(HttpRequest.BodyPublishers.ofString("{\"inputs\":{}}")).build(), HttpResponse.BodyHandlers.ofString());
 
@@ -305,8 +306,7 @@ class RuleLifecycleIT {
     Reply send(String user, String method, String path, byte[] body, String contentType, String idempotencyKey)
             throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(uri(path))
-                .header("Authorization", "Basic " + Base64.getEncoder()
-                        .encodeToString((user + ":it-only-password").getBytes(StandardCharsets.UTF_8)))
+                .header("Authorization", TestTokens.bearer(user))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
         if (contentType != null) {
             request.header("Content-Type", contentType);

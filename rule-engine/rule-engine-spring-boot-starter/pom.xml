@@ -25,6 +25,12 @@
       <artifactId>rule-engine-postgres</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!-- The host contract: the starter contributes the rules entry of /api/bpm/meta and /api/bpm/me. -->
+    <dependency>
+      <groupId>com.horus.bpm</groupId>
+      <artifactId>bpm-host-metadata</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <dependency>
       <groupId>com.horus.bpm</groupId>
       <artifactId>rule-engine-rest</artifactId>
@@ -46,6 +52,12 @@
       <artifactId>spring-security-core</artifactId>
       <optional>true</optional>
     </dependency>
+    <!-- Optional: token claims (tenant_id) of an OAuth2 principal, read only when the host has OAuth2. -->
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-oauth2-core</artifactId>
+      <optional>true</optional>
+    </dependency>
     <!--
       Spring Framework artifact present on both Spring Boot lines. No Boot 4-only module is a required
       dependency: auto-configuration ordering uses class names as strings (ADR-0011).
@@ -55,14 +67,31 @@
       <artifactId>spring-jdbc</artifactId>
     </dependency>
     <!--
-      Optional: the ruleEngine health contributor is added only when the host has Spring Boot 4 health
-      (ADR-0011); Spring Boot 3.5 hosts get theirs with #116. The 3.5 test leg excludes this module from
-      the test classpath (root POM, profile spring-boot-3.5).
+      The ruleEngine health contributor, one per Spring Boot line (RuleEngineHealthCheck plus an adapter).
+      Spring Boot 4: the optional spring-boot-health module. The 3.5 test leg excludes it from the test
+      classpath (root POM, profile spring-boot-3.5).
     -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-health</artifactId>
       <optional>true</optional>
+    </dependency>
+    <!--
+      Spring Boot 3.5: the Actuator health API, compile only. Provided scope is never passed to hosts, so
+      a Spring Boot 4 host gets no 3.5 artifact; a 3.5 host with Actuator has this jar already. Only the
+      jar itself is used, none of its Spring Boot 3.5 dependencies.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-actuator</artifactId>
+      <version>${spring-boot-3.5.version}</version>
+      <scope>provided</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <dependency>
@@ -70,10 +99,44 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>false</filtering>
+      </resource>
+      <!-- Only the engine version file is filtered: it carries ${project.version} into /api/bpm/meta. -->
+      <resource>
+        <directory>src/main/resources-filtered</directory>
+        <filtering>true</filtering>
+      </resource>
+      <!-- Repeated from the parent, which this list replaces (TR-LIC-02). -->
+      <resource>
+        <directory>${bpm.root}</directory>
+        <targetPath>META-INF</targetPath>
+        <includes>
+          <include>LICENSE</include>
+          <include>COMMERCIAL-LICENSE.md</include>
+        </includes>
+      </resource>
+    </resources>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <rule-engine.version>${project.version}</rule-engine.version>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>

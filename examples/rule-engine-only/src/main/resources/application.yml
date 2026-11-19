@@ -23,10 +23,13 @@ management:
 # The one configuration block a host adds for the Rule Engine.
 horus:
   bpm:
+    # Shown by clients for this host; returned by GET /api/bpm/meta.
+    host-id: rule-engine-only
     rules:
       enabled: true
-
-# Demo users of the scripted demo (ExampleSecurity). No password in this file: without
-# HORUS_DEMO_PASSWORD there are no demo users and every API call is refused.
-example:
-  demo-password: ${HORUS_DEMO_PASSWORD:}
+      security:
+        # The host's roles mapped to engine permissions, listed by GET /api/bpm/me.
+        role-permissions:
+          ROLE_PRICING_AUTHOR: [rules:read, rules:author]
+          ROLE_PRICING_APPROVER: [rules:read, rules:approve]
+          ROLE_TELLER: [rules:evaluate]
