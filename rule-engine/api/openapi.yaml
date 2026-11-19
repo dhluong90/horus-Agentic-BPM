@@ -5,7 +5,7 @@ info:
   description: |
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
-    export, request publication, approve, reject, history and evaluate. The remaining endpoints of
+    export, request publication, approve, reject, history, evaluate and the decision log search. The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
     The tenant is never part of a request: it comes from the host's authenticated context
@@ -410,6 +410,85 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /decisions:
+    get:
+      tags: [decisions]
+      operationId: searchDecisions
+      summary: List one rule set's logged decisions in a period of at most 31 days, newest first
+      description: |
+        Permission `rules:log:read`. The decisions of the caller's tenant for `ruleSet` with
+        `from <= loggedAt < to`, newest first, keyset-paged by log time and decision id; follow
+        `nextCursor` until it is null. The cursor is signed for the tenant, the rule set and the period:
+        reusing it with another rule set or period is `400 QUERY_INVALID`. The period is at most
+        `query.max-range` (default 31 days, ADR-0015), so one page reads at most two monthly partitions
+        of the decision log. Inputs declared `mask: true` are returned as stored (`hmac:<hex>`); the
+        plain value is never kept. A rule set the tenant does not have gives an empty page. Writes nothing.
+      parameters:
+        - name: ruleSet
+          in: query
+          required: true
+          description: The rule set name. Missing is `400 QUERY_INVALID`.
+          schema:
+            type: string
+            pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+        - name: from
+          in: query
+          required: true
+          description: First instant of the period, inclusive, ISO 8601 in UTC. Missing or malformed is `400 QUERY_INVALID`.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          description: |
+            End of the period, exclusive, after `from` and at most `query.max-range` (default 31 days)
+            later. Otherwise `400 QUERY_INVALID`.
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          description: Decisions per page, 1 to `query.max-page-size` (default 200, also the default page). Outside that range is `400 QUERY_INVALID`.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 200
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of decisions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionLogPage'
+              example:
+                data:
+                  - decisionId: 01KF8ZQ3M5T7V9X1B3D5F7H9K2
+                    ruleSet: card-fee
+                    version: 1
+                    hitPolicy: FIRST
+                    outcome: MATCHED
+                    matchedRuleIds: [R2]
+                    inputs:
+                      tier: SILVER
+                      txCount: 5
+                      nationalId: hmac:9f2c41d07a5be3c89f2c41d07a5be3c89f2c41d07a5be3c89f2c41d07a5be3c8
+                    outputs:
+                      fee: { currency: VND, amount: 10000 }
+                    callerId: teller-01
+                    correlationId: null
+                    evaluatedAt: '2027-01-31T22:50:00Z'
+                    loggedAt: '2027-01-31T22:50:00Z'
+                    durationMicros: 31
+                nextCursor: ZGVjaXNpb25zOjIwMjctMDEtMDFUMDA6MTA6MDBafDAxS0Y4WlEzTTVUN1Y5WDFCM0Q1RjdIOUsy.k2Yp0yq9R1y8JmB3V5tWcA
+                hasNext: true
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}:evaluate:
     post:
       tags: [decisions]
@@ -656,6 +735,57 @@ components:
           type: string
           format: date-time
           description: The latest creation, request, approval or rejection of any version of the rule set
+    DecisionLogPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DecisionLogEntry'
+        nextCursor:
+          type: [string, 'null']
+          description: Pass as `cursor`, with the same `ruleSet`, `from` and `to`, for the next page; null on the last page
+        hasNext:
+          type: boolean
+          description: True when `nextCursor` is set
+    DecisionLogEntry:
+      type: object
+      description: One logged decision, as stored in the append-only decision log
+      required: [decisionId, ruleSet, version, hitPolicy, outcome, matchedRuleIds, inputs, outputs, callerId, correlationId, evaluatedAt, loggedAt, durationMicros]
+      properties:
+        decisionId: { type: string }
+        ruleSet: { type: string }
+        version: { type: integer }
+        hitPolicy:
+          type: string
+          description: The hit policy of the evaluated version, for example `FIRST`
+        outcome:
+          type: string
+          enum: [MATCHED, NO_MATCH, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR]
+        matchedRuleIds:
+          type: array
+          description: Matched rules in rule order; for `UNIQUE_HIT_VIOLATION` every overlapping rule
+          items: { type: string }
+        inputs:
+          type: object
+          description: The declared inputs as logged; an input declared `mask` is its stored hash, never the plain value
+          additionalProperties: true
+        outputs:
+          type: object
+          description: The outputs; empty for a failed evaluation. Money is `{currency, amount}` in minor units
+          additionalProperties: true
+        callerId: { type: [string, 'null'] }
+        correlationId: { type: [string, 'null'] }
+        evaluatedAt:
+          type: string
+          format: date-time
+          description: The evaluation clock
+        loggedAt:
+          type: string
+          format: date-time
+          description: The time of the log row, which places it in its monthly partition
+        durationMicros: { type: integer }
     RuleSetPage:
       type: object
       required: [data, nextCursor, hasNext]
