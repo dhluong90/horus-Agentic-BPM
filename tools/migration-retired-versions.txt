@@ -1,0 +1,6 @@
+# Engine migration versions that nothing may use, read by tools/check-migration-order.py (#296).
+# One line per version: <engine> V<version> <reason>. A retired version is never reused, even when it is
+# above the highest version on main: a branch that once held it may already have run on a database.
+rule-engine V7 reserved for the approval seal (#237) and withdrawn after V10 and V11 were taken; arriving after V10 it would be out of order
+rule-engine V8 reserved for the duplicate guard (#25) and withdrawn unused after V10 and V11 were taken
+rule-engine V9 reserved for decision input masking (#24) and withdrawn unused after V10 and V11 were taken
