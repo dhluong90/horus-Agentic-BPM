@@ -5,13 +5,16 @@ import com.horus.bpm.rules.api.DecisionResult;
 import com.horus.bpm.rules.api.InputInvalidException;
 import com.horus.bpm.rules.api.RuleEngine;
 import com.horus.bpm.rules.internal.json.EngineValues;
+import com.horus.bpm.rules.internal.service.EngineDefaults;
 import com.horus.bpm.rules.spi.CallerResolver;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Objects;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -40,14 +43,21 @@ public class DecisionController {
         this.callers = Objects.requireNonNull(callers, "callers must not be null");
     }
 
-    /** {@code POST /decisions/{ruleSet}:evaluate}. A failed evaluation is logged and answered {@code 422}. */
+    /**
+     * {@code POST /decisions/{ruleSet}:evaluate}. A failed evaluation ({@code UNIQUE_HIT_VIOLATION},
+     * {@code EVALUATION_ERROR}) is logged and answered {@code 422} with its {@code decisionId} and
+     * {@code matchedRuleIds}, never with partial outputs.
+     */
     @PostMapping("/{ruleSet}:evaluate")
     public ResponseEntity<byte[]> evaluate(
             @PathVariable("ruleSet") String ruleSet,
-            @RequestBody byte[] body,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) {
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId)
+            throws IOException {
         RestSupport.require(callers, "rules:evaluate");
+        byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.EVALUATE_BODY_MAX_BYTES);
         String correlation = ProblemDetails.correlationId(correlationId);
         JsonNode request = EngineValues.readRequest(body);
         if (!request.isObject()) {
@@ -62,6 +72,7 @@ public class DecisionController {
             ObjectNode problem = ProblemDetails.body(failed.code(), ProblemDetails.UNPROCESSABLE, failed.detail(),
                     correlation);
             problem.put("decisionId", result.decisionId());
+            problem.set("matchedRuleIds", EngineValues.value(failed.matchedRuleIds()));
             return ProblemDetails.response(ProblemDetails.UNPROCESSABLE, problem);
         }
         return RestSupport.json(HttpStatus.OK, json);

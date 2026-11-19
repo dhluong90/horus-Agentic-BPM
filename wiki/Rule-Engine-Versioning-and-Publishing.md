@@ -27,7 +27,7 @@ Design preview: describes the 0.1 target.
 
 From step 6 the new version is effective immediately, unless it carries a future `effectiveFrom`. The previous version stays readable and still explains its past decisions.
 
-To reject instead of approve: `POST .../versions/3:reject` with `{ "reason": "..." }`; the reason is required. The version returns to draft and the reason stays in its history (`GET .../versions/3/history`). The requester may reject their own request to withdraw it; that publishes nothing, so it needs no second identity.
+To reject instead of approve: `POST .../versions/3:reject` with `{ "reason": "..." }`; the reason is required. The version returns to draft and the reason stays in its history (`GET .../versions/3/history`). The requester cannot reject their own request (`403 SELF_APPROVAL_FORBIDDEN`); they take it back with `:withdraw`, so the history keeps "the author took it back" apart from "an approver refused it" (PD-089).
 
 ## Schedule a change for a date
 

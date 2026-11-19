@@ -32,9 +32,6 @@ target/
 .vscode/
 .DS_Store
 
-# jqwik failure database
-.jqwik-database
-
 # Local secrets for docker compose (docs/DEPLOYING.md); only .env.example is committed.
 .env
 .env.*

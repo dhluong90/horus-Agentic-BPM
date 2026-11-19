@@ -79,8 +79,10 @@ public class RuleEngineAutoConfiguration {
             RuleEngineSchemaMigrator migrator,
             DecisionLogPartitions partitions,
             RuleEngineProperties properties,
-            ObjectProvider<Clock> clock) {
-        return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock));
+            ObjectProvider<Clock> clock,
+            ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys) {
+        return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
+                cursorKeys.getIfAvailable());
     }
 
     /**
