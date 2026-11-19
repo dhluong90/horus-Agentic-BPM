@@ -45,7 +45,8 @@ ARG EXAMPLE
 WORKDIR /src
 # Dependency layer: the real package lifecycle of the example host and the modules it needs, run on the
 # POMs alone, puts every dependency and plugin the build uses into /root/.m2/repository in this layer.
-# It changes only when a POM, .mvn/ or the licence files (checked by the enforcer) change.
+# With no sources the compiler skips its annotation processor, so that one is fetched by name.
+# The layer changes only when a POM, .mvn/ or the licence files (checked by the enforcer) change.
 COPY --from=poms /poms/ ./
 COPY .mvn/ .mvn/
 COPY LICENSE COMMERCIAL-LICENSE.md ./
@@ -53,18 +54,24 @@ RUN set -eu; \
     test -f "examples/${EXAMPLE}/pom.xml" || { echo "examples/${EXAMPLE} is not an example host" >&2; exit 1; }; \
     mvn -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests \
       -Dcockpit.bundle.skip=true -Dspring-boot.repackage.skip=true; \
+    boot="$(mvn -B -ntp -q -N help:evaluate -Dexpression=spring-boot.version -DforceStdout)"; \
+    mvn -B -ntp -q dependency:get -Dartifact="org.springframework.boot:spring-boot-configuration-processor:${boot}"; \
     find . -name target -type d -prune -exec rm -rf {} +
 COPY . .
 COPY --from=cockpit /out/dist/ /tmp/cockpit-dist/
-# Offline from the dependency layer; online only if that layer missed an artifact, which the log names.
+# Online, as before, so every plugin runs exactly as in CI (CycloneDX skips itself offline); with the
+# dependency layer in place Maven fetches only what that layer lacks. The last line counts those downloads.
 RUN set -eu; \
     skip_cockpit=true; \
     if [ -f /tmp/cockpit-dist/index.html ]; then \
       rm -rf cockpit/web/dist && mkdir -p cockpit/web/dist && cp -R /tmp/cockpit-dist/. cockpit/web/dist/; \
       skip_cockpit=false; \
     fi; \
-    build="-B -ntp -pl examples/${EXAMPLE} -am package -DskipTests -Dcockpit.bundle.skip=${skip_cockpit}"; \
-    mvn -o $build || { echo "Offline build failed: an artifact is missing from the dependency layer; building online."; mvn $build; }; \
+    mvn -B -pl "examples/${EXAMPLE}" -am package -DskipTests -Dcockpit.bundle.skip="${skip_cockpit}" \
+      > /tmp/build.log 2>&1 || { grep -v '^\[INFO\] Download' /tmp/build.log; exit 1; }; \
+    grep -v '^\[INFO\] Download' /tmp/build.log; \
+    echo "Maven downloads in this step, beyond the dependency layer: $(grep -c '^\[INFO\] Downloaded from' /tmp/build.log || true)"; \
+    grep '^\[INFO\] Downloaded from' /tmp/build.log | sed 's/^/  /' || true; \
     jar="$(find "examples/${EXAMPLE}/target" -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' | head -n 1)"; \
     test -n "$jar"; \
     mkdir -p /layers; \

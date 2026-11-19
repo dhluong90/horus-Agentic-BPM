@@ -271,7 +271,7 @@ Base images are pinned by digest. To update one, resolve the new digest, replace
 
 ### Build cache
 
-The build stage resolves Maven dependencies in a layer of their own, before the sources are copied: it runs the `package` lifecycle of the example host on the `pom.xml` files alone, with `.mvn/`, `LICENSE` and `COMMERCIAL-LICENSE.md`. That layer changes only when one of those files changes, so a commit that touches only sources reuses it and compiles offline (`mvn -o`). If the offline build misses an artifact, the log says so and the build continues online.
+The build stage resolves Maven dependencies in a layer of their own, before the sources are copied: it runs the `package` lifecycle of the example host on the `pom.xml` files alone, with `.mvn/`, `LICENSE` and `COMMERCIAL-LICENSE.md`. It also fetches the compiler's annotation processor, which Maven resolves only when there are sources. That layer changes only when one of those files changes, so a commit that touches only sources reuses it. The build step that follows runs online, as before, so every plugin behaves as in CI; Maven then fetches only what the layer lacks, and the step's last log lines count and name those downloads (`Maven downloads in this step, beyond the dependency layer: 0` when the layer is complete).
 
 | You want | Command |
 |---|---|
