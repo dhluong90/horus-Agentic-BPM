@@ -216,10 +216,18 @@ class MigrationOrderTest(unittest.TestCase):
         self.assertIn("V11__late.sql", out)
         self.assertIn("highest rule-engine version on main, V12", out)
 
-    def test_retired_list_is_valid_and_holds_rule_engine_v7_to_v9(self) -> None:
+    def test_retired_list_is_valid_and_holds_rule_engine_v7_to_v9_and_process_engine_v5(self) -> None:
         retired = check.read_retired(REAL_RETIRED)
         self.assertEqual({(7,), (8,), (9,)}, set(retired["rule-engine"]))
-        self.assertEqual({}, retired["process-engine"])
+        self.assertEqual({(5,)}, set(retired["process-engine"]))
+
+    def test_retired_process_engine_v5_fails_and_next_free_number_skips_it(self) -> None:
+        repo = self.repo()
+        repo.commit({process(5, "join"): "-- join\n"}, "add process V5")
+        status, out = repo.run()
+        self.assertEqual(1, status, out)
+        self.assertIn("V5 is a retired process-engine version", out)
+        self.assertIn("highest process-engine version on main: V2; next free number: V3", out)
 
     def test_malformed_retired_line_is_a_usage_error(self) -> None:
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as bad:
