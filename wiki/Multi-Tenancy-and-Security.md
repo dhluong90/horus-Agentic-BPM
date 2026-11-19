@@ -62,8 +62,8 @@ Expressions are parsed by a hand-written recursive-descent parser into a sealed,
 
 | Shape | Headers set by `cockpit-spring-boot-starter` |
 |---|---|
-| Embedded at `horus.bpm.cockpit.path` | `Content-Security-Policy: default-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` on API responses. Assets are served only to authenticated sessions |
-| Standalone | The host sets `rest.cors.allowed-origins` to the exact cockpit origin; credentials via bearer token, not cookies; `connect-src` on the cockpit side lists the host URLs |
+| Embedded at `horus.bpm.cockpit.path` | `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. The host may frame the cockpit in its own admin UI on the same origin; no other site can. Assets are served only to authenticated sessions. `Cache-Control: no-store` on engine API responses is tracked separately (see the cockpit page) |
+| Standalone | The host sets `rest.cors.allowed-origins` to the exact cockpit origin, and allows the request headers `Authorization`, `Accept`, `X-Requested-With`, `X-Tenant-Id`, `If-None-Match`, `If-Match` and `Idempotency-Key`; credentials via bearer token, not cookies; `connect-src` on the cockpit side lists the host URLs |
 
 The cockpit holds no secrets and no state (ADR-0005). It never marks an approval, a task completion or an incident retry as done before the API returns `200` or `201`.
 
