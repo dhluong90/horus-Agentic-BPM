@@ -1,8 +1,8 @@
 package io.github.dhluong90.bpm.rules.internal.dmn.ruleset;
 
-import com.horus.bpm.rules.api.ValidationFailedException;
-import com.horus.bpm.rules.internal.json.CanonicalJson;
-import com.horus.bpm.rules.internal.json.EngineJson;
+import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.internal.json.CanonicalJson;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
