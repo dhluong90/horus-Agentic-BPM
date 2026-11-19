@@ -88,7 +88,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 | Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-13 | Tighten an eligibility threshold (minimum income, maximum debt-to-income) | Credit policy change approved by the credit committee | CSV round-trip (M1); grid (M2) | M2 | M1 | CK-F-35, CK-F-10, RE-F-02 |
-| UC-RE-14 | Write conditions without expression syntax (equals, one of, between, at least, any) | Every edit | Cell shorthand in CSV (M1); drop-downs and plain-language reading in the grid (M2) | later | M1 | CK-F-35, CK-F-37 |
+| UC-RE-14 | Write conditions without expression syntax (equals, one of, between, at least, any) | Every edit | Cell shorthand in CSV (M1); read-only plain-language reading of each row (M1, PD-056); drop-downs and readings while editing in the matrix (M2) | later | M1 | CK-F-35, CK-F-37 |
 | UC-RE-15 | Create a new rule set from a template | New lending product | Cockpit grid: New rule set; then a developer wires it (journey 2) | later | M2 | CK-F-36, CK-F-10, RE-F-02 |
 | UC-RE-16 | Create a new rule set from scratch: name, hit policy, inputs, outputs, allowed values | New product with no similar table | Cockpit grid, blank template; today only through a business analyst in YAML | later | M2 | CK-F-36, CK-F-10 |
 | UC-RE-17 | Return every reason for a decline, not only the first | Customers and regulators ask why | `collect` hit policy with a reason code output | M1 | M1 | RE-F-01 |
@@ -114,7 +114,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 | Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-29 | Learn that a change waits for approval | Author requests publication | Cockpit: Approvals; the bank's email or chat from the `publish-requested` event | M1 | M1 | CK-F-04, RE-F-29 |
-| UC-RE-30 | Read a change as a row diff in business terms | Opens a pending request | Cockpit: Diff; plain-language conditions from M2 | M1 | M1 | CK-F-03, RE-F-08, CK-F-37 |
+| UC-RE-30 | Read a change as a row diff in business terms | Opens a pending request | Cockpit: change dossier with the matrix diff and a plain-language redline of each row (M1, PD-056) | M1 | M1 | CK-F-03, RE-F-08, CK-F-44 |
 | UC-RE-31 | Try their own cases on the pending version | Doubt about an edge case | Cockpit: Simulation | M1 | M1 | CK-F-05, RE-F-21 |
 | UC-RE-32 | Approve, confirming the effective date | Change is understood | Cockpit: Approvals | M1 | M1 | CK-F-04, RE-F-06 |
 | UC-RE-33 | Reject with a reason that goes back to the author | Change is wrong or unclear | Cockpit: Approvals | M1 | M1 | CK-F-04, RE-F-07 |

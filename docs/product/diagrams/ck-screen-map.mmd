@@ -1,46 +1,44 @@
 flowchart LR
   subgraph T1 ["Tier 1: shell"]
-    SH["Cockpit shell<br/>sign-in, host switcher 0.1,<br/>tenant switcher 0.2"]
+    SH["Cockpit shell<br/>sign-in, host switcher 0.1,<br/>tenant switcher 0.2,<br/>one language at a time"]
   end
-  subgraph T2 ["Tier 2: areas, each opens on a ranked queue or list"]
-    A1["Rule sets 0.1"]
-    A2["Approvals 0.1"]
+  subgraph T2 ["Tier 2: areas, each opens on a ranked queue, a list or the canvas"]
+    A0["Process canvas, home from 0.2<br/>decision table docked below"]
+    A1["Rule sets 0.1<br/>home in 0.1"]
+    A2["Changes and approvals 0.1"]
     A3["Decisions 0.1"]
-    A4["Processes 0.2"]
-    A5["Task inbox across hosts 0.2"]
-    A6["Incidents across hosts 0.2"]
+    A5["Control tower 0.2<br/>inbox and incidents across hosts"]
   end
   subgraph T3 ["Tier 3: detail and action screens"]
-    S11["Version view, import and export 0.1"]
-    S12["Simulation over sample inputs 0.1"]
-    S13["Grid editor 0.2"]
-    S14["Replay simulation M3"]
-    S21["Rule version approval with diff 0.1"]
-    S22["Process definition approval<br/>with graph diff M3"]
-    S31["Decision detail with explanation 0.1"]
-    S41["Definition diagram 0.2"]
-    S42["Instance diagram with tokens<br/>and node history 0.2"]
-    S43["Modeller canvas M3, cut candidate"]
-    S44["Migration plan as two diagrams M3"]
-    S45["Historical heatmap M3, cut candidate"]
+    S01["Instance on the canvas<br/>tokens and node history 0.2"]
+    S02["Modeller canvas M3, cut candidate"]
+    S03["Migration plan as two diagrams M3"]
+    S04["Duration heat on nodes M3, cut candidate"]
+    S11["Docked table, read only,<br/>with policy readings 0.1"]
+    S12["Spreadsheet round-trip 0.1"]
+    S13["Dense matrix editor 0.2"]
+    S15["Condition builder lens M3, cut candidate"]
+    S21["Change dossier 0.1<br/>matrix diff, policy redline,<br/>simulation, four-eyes gate"]
+    S22["Process graph diff in the dossier M3"]
+    S23["Replay and stored report M3"]
+    S31["Decision page with trace<br/>and reading 0.1"]
     S51["Task form 0.2"]
-    S52["Agent task inspector 0.2"]
+    S52["Agent guardrail inspector 0.2"]
     S61["Incident detail: retry, resolve 0.2"]
     S62["Compensation runs, SLA breaches 0.2"]
     S63["Business calendar editor M3"]
   end
-  SH --> A1 & A2 & A3 & A4 & A5 & A6
+  SH --> A0 & A1 & A2 & A3 & A5
+  A0 --> S01 & S11
+  A0 -.-> S02 & S03 & S04
   A1 --> S11 & S12 & S13
-  A1 -.-> S14
+  A1 -.-> S15
   A2 --> S21
-  A2 -.-> S22
+  A2 -.-> S22 & S23
   A3 --> S31
-  A4 --> S41 & S42
-  A4 -.-> S43 & S44 & S45
-  A5 --> S51 & S52
-  A6 --> S61 & S62
-  A6 -.-> S63
-  NOTE["Solid line: Cockpit 0.1 or 0.2. Dotted line: M3.<br/>Pulse strip of KPIs on landing views: not scheduled, PD-016"]
+  A5 --> S51 & S52 & S61 & S62
+  A5 -.-> S63
+  NOTE["Solid line: Cockpit 0.1 or 0.2. Dotted line: M3.<br/>Checked at 1440x900 and 1440x1200, light and dark.<br/>Pulse strip of KPIs: not scheduled, PD-016"]
 
   classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F;
   classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F;
@@ -48,8 +46,8 @@ flowchart LR
   classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F;
   classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F;
   classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F;
-  class SH,A1,A2,A3,A4,A5,A6 client;
-  class S11,S12,S13,S14,S21,S22,S31,S41,S42,S43,S44,S45,S51,S52,S61,S62,S63 client;
+  class SH,A0,A1,A2,A3,A5 client;
+  class S01,S02,S03,S04,S11,S12,S13,S15,S21,S22,S23,S31,S51,S52,S61,S62,S63 client;
   class NOTE obs;
   style T1 fill:none,stroke:#1565C0,stroke-dasharray:5 5
   style T2 fill:none,stroke:#1565C0,stroke-dasharray:5 5

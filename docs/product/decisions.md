@@ -77,7 +77,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-053](#pd-053-licence-rule-for-test-and-build-tools) | Licence rule for test and build tools | Pending product owner |
 | [PD-054](#pd-054-deprecation-length) | Deprecation length | Pending product owner |
 | [PD-055](#pd-055-postgresql-version-range) | PostgreSQL version range | Pending product owner |
-| [PD-056](#pd-056-rule-management-ux-direction) | Rule management UX direction | Pending product owner |
+| [PD-056](#pd-056-rule-management-ux-direction) | Rule management UX direction | Decided |
 | [PD-057](#pd-057-full-bpmn-20-and-dmn-support-no-cmmn) | Full BPMN 2.0 and DMN support, no CMMN | Decided |
 | [PD-058](#pd-058-feel-null-semantics-in-the-expression-language-from-m1) | FEEL null semantics in the expression language from M1 | Decided |
 | [PD-059](#pd-059-execution-tree-with-scope-tokens-in-m2) | Execution tree with scope tokens in M2 | Decided |
@@ -1599,7 +1599,7 @@ The architect reviewed the technical, non-functional and developer requirements 
 
 **Follow-ups.** Architect: confirm the end-of-life date and the CI matrix. Product manager: the pilot question in M1.
 
-## Pending: rule management UX
+## Decided: rule management UX
 
 ### PD-056 Rule management UX direction
 
@@ -1608,7 +1608,8 @@ The architect reviewed the technical, non-functional and developer requirements 
 | Date | 2026-11-18 |
 | Question | Three directions for rule management were published for review: A, a grid that works like a spreadsheet; B, rules read and edited as sentences; C, a change request page that carries the draft, checks, simulation, diff, approval and history, with an assistant that suggests. Which direction does the cockpit build, and in which release does each part land? |
 | Raised by | Product manager, from the published rule management directions and the [cockpit UX design](ux-design.md) |
-| Decision | Pending product owner. The product owner asked for a redesigned prototype that shows four paradigms side by side (a spatial canvas with a docked decision table, a quantitative backtest view, a four-eyes governance room, an agentic control tower for escalated agent steps) plus a synthesis view of what lands when. That prototype is not yet delivered; this entry should be decided after the product owner has reviewed it |
+| Decision | Decided by the product owner, 2026-11-19, option 4 |
+| History | Recorded on 2026-11-18 with the status: Pending product owner; the product manager recommended option 4. The product owner then asked for a redesigned prototype that shows four paradigms side by side (a spatial canvas with a docked decision table, a quantitative backtest view, a four-eyes governance room, an agentic control tower for escalated agent steps) plus a synthesis view of what lands when. He reviewed the approved cockpit prototype and decided on 2026-11-19, asking for the direction to be applied to the project |
 
 **Options considered**
 
@@ -1641,6 +1642,35 @@ The architect reviewed the technical, non-functional and developer requirements 
 **Consequences if accepted.** [ux-design.md](ux-design.md) status becomes decided; CK-F-37 splits into a 0.1 reading and a 0.2 editing feature; the cockpit SPEC adds the change request page statements.
 
 **Follow-ups.** Product manager: deliver the four-paradigm prototype for review, then the feature map split. Architect: engine readings per language (UX-API-01) and the G3 rule. Documentation: Vietnamese reviewer.
+
+**Applied, 2026-11-19.** The product owner approved option 4, the hybrid, as shown in the approved cockpit prototype and UX design document ([ux-design.md](ux-design.md)). The prototype refines option 4 into six parts, one per job, sharing one set of components:
+
+| # | Part | Who it serves | Cockpit 0.1 (M1) | Cockpit 0.2 (M2) | M3 (1.0) |
+|---|---|---|---|---|---|
+| 1 | Process canvas as home, with the decision table docked below | Operator, auditor, author | No Process Engine yet: the cockpit opens on changes and rule sets, and a rule set shows its table in the same docked layout, read only, with readings (CK-F-02, CK-F-44); a step-through trace of one decision (CK-F-06) | The read-only process canvas is home: definition and instance diagrams with tokens and path; selecting a decision node or a guardrail docks its table below (CK-F-24, CK-F-25); live node counts stay a cut candidate (CK-F-26) | Duration heat on nodes (CK-F-27, cut candidate); link to the modeller canvas (CK-F-32, cut candidate, fallback 1.1) |
+| 2 | Dense grid or matrix editor for authors | Author | Spreadsheet round-trip (CK-F-35, PD-043); minimal cell and row editing on a draft only if the product owner confirms CK-F-43 (PD-013) | Dense editable matrix with typed cells and drop-downs (CK-F-10, CK-F-37); new rule set from a template (CK-F-36) | |
+| 3 | Plain-language policy readings | Approver, support staff, auditor | Read-only reading of every row, in the user's language, in the docked table, the change dossier, the simulation and the decision page (CK-F-44) | Readings update while the author edits (CK-F-37) | |
+| 4 | Change dossier with a three-way diff and the four-eyes gate | Approver | One page per change: header, effective date, maker's note, matrix diff of cells (CK-F-03), policy redline of readings (CK-F-44), sample simulation (CK-F-05), Approve unavailable to the requester and a comment required to reject (CK-F-04, RE-F-06) | | Process graph diff as the third lens, for process definition changes (CK-F-31); stored simulation report (CK-F-20); replay on logged decisions (CK-F-11) |
+| 5 | Control tower with an agent guardrail inspector | Operator, reviewer of agent steps | | One inbox and one incident list across hosts with SLA state (CK-F-28, CK-F-29, CK-F-17); agent task inspector showing masked inputs, the schema verdict, the guardrail row that fired, and approve or override with a reason (CK-F-14); override rate shown against the autonomy ladder (PE-F-22, PE-F-38) | Offline evaluation results beside the ladder (PE-F-37) |
+| 6 | Nested And/Or condition builder lens | Author with complex eligibility conditions | | | One row's conditions edited as nested And, Or and Not groups with typed operators, saved as a draft that the engine validates (CK-F-45, cut candidate) |
+
+Visual rules that every cockpit screen follows from 0.1:
+
+- Uncluttered: specification ids are hidden by default; one view at a time; one language at a time (English or Vietnamese, switched by the user, never mixed on a screen); no raw JSON on business screens.
+- The reviewed colour tokens for light and dark themes, recorded in the UX design document. Status colours carry one meaning each; money direction, diff marks and release stages use their own tokens.
+- Each screen is checked at 1440x900, where the primary action and its result are visible without scrolling, and at 1440x1200, in both themes.
+
+The six sub-questions are answered as recommended above: read-only readings in 0.1 (sub-question 1); one change request per rule set version in 0.x (2); no stored simulation evidence before M3 (3); the engine refuses an approval whose effective date has passed (4, the architect confirms); no assistant before 1.0, and after 1.0 only as suggestion under the same checks and second approver (5); a native writer from a bank reviews every Vietnamese reading and message before Cockpit 0.2 (6).
+
+*Feature map.* CK-F-37 splits as planned: the read-only reading becomes CK-F-44 (M1, spec gap) and CK-F-37 keeps the editing part in M2. The builder lens is CK-F-45 (M3, spec gap), added at the head of the M3 cut list so a new and unsized lens never displaces scope already decided. CK-F-03, CK-F-04, CK-F-08, CK-F-09, CK-F-10, CK-F-14 and CK-F-24 are reworded to the hybrid; their milestones do not change. M1 goes from 56 to 57 features, M3 from 31 to 32, and the total from 184 to 186; cut candidates go from 14 to 15. Elements the prototype marks as proposed (hit counts per row, an override reason tag, a reject comment pinned to a row, a content hash for rule sets) need an engine API first and are not on the feature map; each becomes a proposal issue.
+
+*Consistency with PD-013 and PD-043.* The spreadsheet round-trip stays the M1 authoring path (PD-043). The minimal M1 editing proposed under PD-013 (CK-F-43) is unchanged and still waits for the product owner's confirmation; if confirmed, it opens inside the change dossier on the matrix, and the readings refresh after each save. The dense matrix (CK-F-10) and the builder lens (CK-F-45) build on it.
+
+*Effect on 15 Jan 2027* [ASSUMPTION, to be sized by the maintainers]. CK-F-44 is about 3 to 4 days of cockpit work if the engine returns a reading per row in each language (UX-API-01), reusing the plain-language text that the decision explanation (RE-F-18) already needs; the engine part is sized by the architect. No date moves. Proposed to the product owner together with the CK-F-43 confirmation, and not applied until confirmed: if the 8 Jan 2027 checkpoint fails, CK-F-44 shows the condition shorthand instead of sentences in M1, and sentences arrive with CK-F-37 in M2.
+
+*Kill criterion.* Unchanged, tested in the week 2 M1 sessions (roadmap K24): an approver who reads the change dossier cannot say which customers are affected, or an author cannot reach `PENDING_APPROVAL` within 15 minutes. Then 0.1 falls back to option 1 (the matrix without the dossier) and the dossier moves to 0.2.
+
+Applied now: [prd-cockpit.md](prd-cockpit.md), the [feature map](feature-map.md), the [roadmap](roadmap.md), [Rule Engine users and journeys](rule-engine-users-and-journeys.md) and [README.md](README.md). Not applied here: `CKP-*` statements for the change dossier, the readings and the builder lens (architect); the engine reading contract UX-API-01 and the G3 rule (architect); how nested And/Or groups map to the canonical decision table, where a row is a conjunction of cells (architect, before CK-F-45 is sized); the UX design document status (frontend); the Vietnamese reviewer (documentation).
 
 ## Decided: standards direction
 

@@ -1,6 +1,6 @@
 flowchart LR
   M0["M0 Architecture<br/>18 Nov to 4 Dec 2026<br/>contracts verified on live PostgreSQL;<br/>diagram spike, ADR-0012 to ADR-0015 drafted"]
-  M1["M1 Rule Engine 0.1, Cockpit 0.1<br/>7 Dec 2026 to 15 Jan 2027<br/>business staff change governed rules<br/>through an Excel round-trip, no deployment;<br/>standards foundations DN-01, 02, 04 to 08"]
+  M1["M1 Rule Engine 0.1, Cockpit 0.1<br/>7 Dec 2026 to 15 Jan 2027<br/>business staff change governed rules<br/>through an Excel round-trip, no deployment;<br/>approvers read each change as one dossier;<br/>standards foundations DN-01, 02, 04 to 08"]
   M2["M2 Process Engine 0.1, agentTask, Cockpit 0.2<br/>18 Jan to 26 Mar 2027<br/>guarded agent steps; every instance on its diagram;<br/>one inbox; no definition runs without a second approver;<br/>standards foundations DN-01 to 04, 09 to 11"]
   M3["M3 Agentic depth, compatibility, 1.0<br/>29 Mar to 21 May 2027<br/>offline evaluation of agent changes;<br/>governed process changes; frozen API;<br/>unsupported standards refused by name, no CMMN"]
   S1["S1 Standards 1.1<br/>dates pending PD-062<br/>scopes and errors; full BPMN display;<br/>MIWG round trip; DMN Level 2"]
@@ -16,7 +16,7 @@ flowchart LR
 
   C1["Checkpoint 8 Jan 2027<br/>cut RE-F-15, log filters (PD-031, PD-043)"]
   C2["Checkpoint 5 Mar 2027<br/>fewer than 9 of 17 PRE green:<br/>cut PE-F-30, CK-F-26, PE-F-12,<br/>RE-F-26, RE-F-34"]
-  C3["Checkpoint 23 Apr 2027<br/>cut CK-F-18, CK-F-32, CK-F-27, PE-F-53,<br/>RE-F-30, RE-F-24, X-F-17, CK-F-38"]
+  C3["Checkpoint 23 Apr 2027<br/>cut CK-F-45, CK-F-18, CK-F-32, CK-F-27,<br/>PE-F-53, RE-F-30, RE-F-24, X-F-17, CK-F-38"]
 
   M0 -- "1." --> G0 -- "2." --> M1 -- "3." --> G1 -- "4." --> M2 -- "5." --> G2 -- "6." --> M3
   M3 -- "7. API frozen, X-F-18" --> G3 -- "8." --> S1 -- "9." --> G4 -- "10." --> S2 -- "11." --> S3
