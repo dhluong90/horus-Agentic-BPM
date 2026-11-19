@@ -2514,7 +2514,7 @@ Committed: the release does not ship without these.
 | New issue: Docker Compose example | The example host and PostgreSQL start with one command from a fresh clone | X-F-14 (deployable part) |
 | New issue: release review and GitHub Release | The go or no-go review and the GitHub Release with artifacts, checksums, bill of materials and release notes | X-F-09, X-F-19 |
 
-**Added to the committed scope, 2026-11-19 (product manager, delegated, on the product owner's feedback).** The product owner found the cockpit empty, with no menu, and the sign-in page unattractive. The release review is visual, so the cockpit navigation shell, a non-empty Home and a branded sign-in page for the example host are committed for the Fri 20 Nov review (#180). The shell follows the approved prototype (PD-056): Home, Rules, Approvals, Decisions, and Processes labelled Preview; Home shows pending approvals, recent rule sets and recent decisions (PD-078). Sign-in stays the host's page; the cockpit library has no login of its own.
+**Added to the committed scope, 2026-11-19 (product manager, delegated, on the product owner's feedback).** The product owner found the cockpit empty, with no menu, and the sign-in page unattractive. The release review is visual, so the cockpit navigation shell, a non-empty Home and a branded sign-in page for the example host are committed for the Fri 20 Nov review (#180). The shell follows the approved prototype (PD-056): Home, Rules, Approvals, and Decisions and Processes labelled Preview. Home shows only pending approvals and recent rule sets (PD-078). Decisions has no read API in 0.1.0, and logged decisions may hold personal data until masking arrives, so the Decisions area shows a one-line "comes in 0.2.0" empty state and no decision data. Sign-in stays the host's page; the cockpit library has no login of its own.
 
 Pulled in by PD-084: in the release only if each meets the same readiness bar at the Fri 20 Nov review; otherwise cut in the order below.
 
@@ -2765,8 +2765,8 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Residual risk (security review).** Anyone with write access can push a `v*` tag and publish a Release, and the assets of a published Release can be replaced.
 
 **Mitigations in place.**
-- The tag guard of the release workflow (#166) refuses a tag that is not on `main`, does not match every module's version, or is not of the form `vX.Y.Z`.
-- Verification before publishing (#168): checksums, the bill of materials and the build information are checked before the Release is published.
+- The tag guard of the release workflow (#166) refuses a tag that is not on `main`, is not of the form `vX.Y.Z`, does not match every module's version, or builds a group id other than `io.github.dhluong90.bpm`.
+- Verification before publishing (#168): the publishing job checks the checksums and the build information before the Release is published; the bill of materials is validated earlier, by the release build.
 - A bad release is fixed with a new patch release (`v0.1.1`); a published tag is never moved, deleted and re-created, and published assets are never replaced.
 
 **Revisit when** any of these happens: an outside contributor gets write access; a tag or Release asset is created or changed outside the release workflow; or an adopter or bank review asks for tamper-evident releases. The product manager then brings option 1 back to the product owner. Same pattern as PD-081 for branch protection.
