@@ -123,7 +123,7 @@ The release notes link this page and give the check adopters run in the folder o
 while read -r hash path; do name="${path##*/}"; [ -f "$name" ] && printf '%s  %s\n' "$hash" "$name"; done < SHA256SUMS | shasum -a 256 -c -
 ```
 
-Each downloaded file prints `<name>: OK`. Step 6 runs the same command on the draft's own downloads.
+Each downloaded file prints `<name>: OK`. Step 6 runs the same command on the draft's downloads, reading the archive's `SHA256SUMS`.
 
 The text of steps 2 to 4 sits between `# BEGIN release-archive-check` and `# END release-archive-check` in the workflow. `tools/release/test-release-upload.sh` runs that exact text against fixture archives on every pull request that changes the release files. It checks that a good archive passes; that a changed file, an unlisted file, a trial build, another commit, a dirty tree and duplicate asset names are each refused; and that the adopters' check passes on good downloads and catches a changed one.
 

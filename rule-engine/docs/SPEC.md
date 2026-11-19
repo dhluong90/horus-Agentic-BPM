@@ -15,23 +15,32 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `evaluate("card-fee", { tier: "GOLD", txCount: 5 }) -> R1, 0 VND`.
 - **Test ID:** `RLE_001_first_hit_policy_returns_top_matching_rule`
 
-### RLE-002 `unique` hit policy fails when zero or multiple rules match
-- **Traces to:** `TR-DET-04`
+### RLE-002 `unique` hit policy: one match returns it, zero matches is no match, several matches fail
+- **Traces to:** `TR-DET-04`, `TR-STD-22`, PD-088
 - **Milestone:** M1
-- **Given:** Rule set `loan-pricing` v1 with `hitPolicy: unique` where both `R1` (`score >= 700`) and `R2` (`income >= 20000000 VND`) overlap.
-- **When:** Evaluate `inputs = { score: 750, income: 25000000 VND }` (2 matches) or `{ score: 500, income: 5000000 VND }` (0 matches).
-- **Then:** Result fails with `UNIQUE_HIT_VIOLATION` (`422` over REST, ADR-0010; never `409`, which is reserved for state conflicts), returns **no partial outputs**, and records an audit entry with `outcome = UNIQUE_HIT_VIOLATION`.
-- **Example:** `2 matched rules [R1, R2] -> error UNIQUE_HIT_VIOLATION, outputs = empty`.
-- **Test ID:** `RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches`
+- **Given:** Rule set `loan-pricing` v1 with `hitPolicy: unique`, output `rate` (decimal), rules `R1` (`score >= 700 -> rate: 0.08`) and `R2` (`income >= 20000000 VND -> rate: 0.09`), which overlap.
+- **When:** Evaluate (a) `{ score: 750, income: 10000000 VND }` (1 match), (b) `{ score: 500, income: 5000000 VND }` (0 matches) and (c) `{ score: 750, income: 25000000 VND }` (2 matches).
+- **Then:**
+  - (a) Outcome `Matched`, `matchedRuleIds = ["R1"]`, `outputs.rate = 0.08`.
+  - (b) Outcome `NoMatch` (REST `200`, `matched: false`), every declared output `null`, `matchedRuleIds = []`; one decision log row with `outcome = OK` and `matched_rule_ids = []`, exactly as for `first`. Zero matches is never `UNIQUE_HIT_VIOLATION`.
+  - (c) Outcome `Failed` with `UNIQUE_HIT_VIOLATION` (`422` over REST, ADR-0010; never `409`, which is reserved for state conflicts), **no partial outputs**, `matchedRuleIds = ["R1", "R2"]` in rule order; one decision log row with `outcome = UNIQUE_HIT_VIOLATION` and `matched_rule_ids = ["R1", "R2"]`.
+- **Example:** `1 match [R1] -> rate 0.08; 0 matches -> NoMatch, rate null; 2 matches [R1, R2] -> UNIQUE_HIT_VIOLATION, outputs empty`.
+- **Test ID:** `RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several`
 
-### RLE-003 `collect` hit policy returns ordered lists or aggregated scalars
-- **Traces to:** `TR-DET-01`
+### RLE-003 `collect` hit policy returns aligned lists or aggregated scalars, with the DMN 1.5 null rules
+- **Traces to:** `TR-DET-01`, `TR-STD-22`, PD-066, PD-088
 - **Milestone:** M1
-- **Given:** Rule set `risk-flags` v1 with `hitPolicy: collect` and outputs `flags` (`list<string>`) and `penalty` (`collect: sum`).
-- **When:** Evaluate inputs matching `R1` (`flags: "HIGH_VELOCITY", penalty: 10`) and `R3` (`flags: "NEW_DEVICE", penalty: 5`).
-- **Then:** `matchedRuleIds = ["R1", "R3"]`, `outputs.flags = ["HIGH_VELOCITY", "NEW_DEVICE"]`, `outputs.penalty = 15`.
-- **Example:** `R1 (+10) + R3 (+5) -> penalty = 15, flags = [HIGH_VELOCITY, NEW_DEVICE]`.
-- **Test ID:** `RLE_003_collect_hit_policy_aggregates_matched_rules`
+- **Given:** Rule set `risk-flags` v1 with `hitPolicy: collect` and outputs `flags` (`list<string>`, no aggregate), `penalty` (`integer`, `collect: sum`), `worst` (`integer`, `collect: max`) and `hits` (`integer`, `collect: count`); rules `R1` (`flags: "HIGH_VELOCITY", penalty: 10, worst: 10, hits: 1`), `R2` (`flags: null, penalty: 0, worst: 0, hits: null`) and `R3` (`flags: "NEW_DEVICE", penalty: 5, worst: 5, hits: 1`). Rule set `risk-flags-null` is the same except that `R2` has `penalty: null`.
+- **When:** Evaluate `risk-flags` with (a) inputs matching `R1`, `R2` and `R3`, (b) inputs matching only `R2`, (c) inputs matching no rule; and (d) `risk-flags-null` with inputs matching `R1` and `R2`.
+- **Then:**
+  - **Lists (no aggregate).** One entry per matched rule, in rule order, aligned with `matchedRuleIds`; a `null` output is a `null` entry and is never dropped. (a) `matchedRuleIds = ["R1", "R2", "R3"]`, `flags = ["HIGH_VELOCITY", null, "NEW_DEVICE"]`. (b) `flags = [null]`.
+  - **`count`.** The number of matched rules, `null` values included, as FEEL `count` (DMN 1.5 10.3.4.4); not a count of distinct values. (a) `hits = 3`. (b) `hits = 1`.
+  - **`sum`, `min`, `max`.** Over the values of all matched rules, not distinct values (DMN 1.5 8.2.11). (a) `penalty = 15`, `worst = 10`. (b) `penalty = 0`, `worst = 0`. Money sums are exact in minor units; mixed currencies, and a sum beyond plus or minus 2^53 - 1 minor units, are `EVALUATION_ERROR` (rule engine DESIGN 3.4). `min` and `max` compare numbers, money of one currency, strings by code point, dates and date-times; `boolean` is refused at publish time.
+  - **A `null` value under `sum`, `min` or `max` (d).** `null` is outside the domain of FEEL `sum`, `min` and `max`. A v1 rule set evaluates in `errorMode: strict` (PD-066), so the outcome is `Failed` with `EVALUATION_ERROR` naming the output (`penalty`) and the rule (`R2`), with no partial outputs, and the decision log row has `outcome = EVALUATION_ERROR` and `matched_rule_ids = ["R1", "R2"]`. A model in `errorMode: spec` (imported DMN from S1) gives `penalty = null` with a warning in the decision trace.
+  - **No match (c).** Outcome `NoMatch`, every output `null`, lists, aggregates and `count` included (DMN 1.5 10.3.2.10: no rule matched, the result is `null`), `matchedRuleIds = []`; logged as `outcome = OK` with `matched_rule_ids = []`.
+  - **Publish time.** An aggregate on a non-`collect` table, a list output on a non-`collect` table, `sum` on a non-numeric type and `count` on a non-`integer` output are `422 VALIDATION_FAILED` naming the output.
+- **Example:** `R1 (+10), R2 (+0), R3 (+5) -> penalty 15, worst 10, hits 3, flags [HIGH_VELOCITY, null, NEW_DEVICE]; only R2 -> hits 1, flags [null]; null penalty under sum -> EVALUATION_ERROR (strict); no match -> NoMatch, all null`.
+- **Test ID:** `RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules`
 
 ---
 
@@ -209,7 +218,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-021 Every expression has a FEEL translation that gives the same result
 - **Traces to:** `TR-STD-02`, `TR-DET-01`
 - **Milestone:** M1 (ADR-0019; null cases as `RLE-006`, PD-058)
-- **Given:** jqwik generators for well-typed `horus-expr-v1` expressions over `string`, `integer`, `decimal`, `boolean`, `date`, `datetime` and lists, with inputs including `null`, and the translation table of `standards-compliance.md` section 4.4. The reference FEEL implementation runs in test scope only.
+- **Given:** Seeded generators (the project's own, PD-090; a failure prints its seed) for well-typed `horus-expr-v1` expressions over `string`, `integer`, `decimal`, `boolean`, `date`, `datetime` and lists, with inputs including `null`, and the translation table of `standards-compliance.md` section 4.4. The reference FEEL implementation runs in test scope only.
 - **When:** Each expression is evaluated by the engine and its FEEL translation by the reference implementation with the same inputs and clock; 1,000 tries per property in CI, 100,000 nightly. Fixed cases: `7 / 2`, `round(2.5, 0)`, `matches('ab12', '[0-9]+')`, `daysBetween(date('2027-01-01'), date('2027-03-01'))`.
 - **Then:** Results are equal for every try (money expressions excluded, since money is a HORUS extension); the fixed cases give `3.5`, `2`, `true` and `59`.
 - **Example:** `matches('ab12', '[0-9]+') -> true` (unanchored search, as FEEL).
@@ -250,10 +259,27 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Traces to:** `TR-OBS-04`, `TR-IDEM-01`
 - **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`; `bob` holds `rules:approve`.
-- **When:** `bob` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:reject` with `Idempotency-Key: k-201`, `If-Match: "3"` and body `{ "reason": "R2 waiver needs pricing committee minutes" }`. Failure cases: the same call with body `{ "reason": "" }`; with `If-Match: "2"`; and a reject of `card-fee` v1, which is `PUBLISHED`. Withdrawal case: `fx-margin` v4 is `PENDING_APPROVAL`, requested by `bob`, and `bob` rejects it with reason `"Wrong margin table attached"`.
-- **Then:** `200`; v2 is `DRAFT` with `lockVersion 4`, `requested_by` and `requested_at` cleared, and one `rle_version_history` row `REJECTED` with actor `bob`, the reason, statuses `PENDING_APPROVAL` to `DRAFT` and `lockVersion 4` (`GET .../versions/2/history` returns it after the `CREATED` and `REQUESTED` rows); one `rules.version.rejected.v1` event carries rule set, version, tenant, actor `bob`, reason and timestamp; `alice` can edit v2 again and request publication again. A replay with `k-201` and the same body returns the same `200` and writes no second event. The empty reason returns `400 INPUT_INVALID` naming `reason`; the stale `If-Match` returns `409 VERSION_CONFLICT`; the reject of v1 returns `409 INVALID_STATE`. In each failure case the version, its history and the event count are unchanged. The withdrawal succeeds (`200`, `fx-margin` v4 `DRAFT`, actor `bob`): rejecting one's own request publishes nothing, so `SELF_APPROVAL_FORBIDDEN` does not apply.
+- **When:** `bob` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:reject` with `Idempotency-Key: k-201`, `If-Match: "3"` and body `{ "reason": "R2 waiver needs pricing committee minutes" }`. Failure cases: the same call with body `{ "reason": "" }`; with `If-Match: "2"`; and a reject of `card-fee` v1, which is `PUBLISHED`. Self-reject case: `fx-margin` v4 is `PENDING_APPROVAL`, requested by `bob`, and `bob` rejects it with reason `"Wrong margin table attached"`.
+- **Then:** `200`; v2 is `DRAFT` with `lockVersion 4`, `requested_by` and `requested_at` cleared, and one `rle_version_history` row `REJECTED` with actor `bob`, the reason, statuses `PENDING_APPROVAL` to `DRAFT` and `lockVersion 4` (`GET .../versions/2/history` returns it after the `CREATED` and `REQUESTED` rows); one `rules.version.rejected.v1` event carries rule set, version, tenant, actor `bob`, reason and timestamp; `alice` can edit v2 again and request publication again. A replay with `k-201` and the same body returns the same `200` and writes no second event. The empty reason returns `400 INPUT_INVALID` naming `reason`; the stale `If-Match` returns `409 VERSION_CONFLICT`; the reject of v1 returns `409 INVALID_STATE`. In each failure case the version, its history and the event count are unchanged. The self-reject returns `403 SELF_APPROVAL_FORBIDDEN` with a detail pointing to `:withdraw`, and `fx-margin` v4 stays `PENDING_APPROVAL` (PD-089; the requester withdraws instead, `RLE-046`).
 - **Example:** `bob rejects card-fee v2 with a reason -> DRAFT, lockVersion 4, 1 rejected event; reason "" -> 400 INPUT_INVALID; v1 PUBLISHED -> 409 INVALID_STATE`.
 - **Test ID:** `RLE_025_reject_returns_pending_version_to_draft_with_reason`
+
+### RLE-046 The requester withdraws their own pending request, and it returns to draft without a rejection
+- **Traces to:** `TR-OBS-04`, `TR-IDEM-01`, `TR-SEC-04`, PD-089
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`, who holds `rules:author` only; `card-fee` v1 is `PUBLISHED` and in effect; `bob` holds `rules:approve`; `carol` holds `rules:author`.
+- **When:** `alice` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:withdraw` with `Idempotency-Key: k-301`, `If-Match: "3"` and body `{ "reason": "Wrong fee for GOLD" }`; then she edits v2 and requests publication again. Failure cases: `bob` withdraws v2; `carol` withdraws v2; `alice` withdraws with `If-Match: "2"`; `alice` withdraws `card-fee` v1 (`PUBLISHED`); `alice` withdraws with a 2,001-character reason.
+- **Then:**
+  - `200`; v2 is `DRAFT` with `lockVersion 4`, and `requested_by` and `requested_at` are cleared.
+  - One `rle_version_history` row `WITHDRAWN` is written, with actor `alice`, the reason, and statuses `PENDING_APPROVAL` to `DRAFT`.
+  - One `rules.version.withdrawn.v1` event carries rule set, version, tenant, `withdrawnBy: alice`, the reason and the timestamp. No `rules.version.rejected.v1` event is written.
+  - Evaluation still selects v1, and nothing is published.
+  - A replay with `k-301` and the same body returns the same `200` and writes no second event. A body without `reason` is also accepted, with `reason` null in the history row and the event.
+  - The new request publication starts a new approval: a new `REQUESTED` history row, and `bob` may approve it.
+  - `bob` and `carol` get `403 PERMISSION_DENIED` (an approver uses `:reject`). The stale `If-Match` returns `409 VERSION_CONFLICT`. The withdrawal of v1 returns `409 INVALID_STATE`. The long reason returns `400 INPUT_INVALID` naming `reason`. In each failure case the version, its history and the event count are unchanged.
+  - `allowedActions` on v2, read by `alice` while it is pending, contains `withdraw` and not `approve` or `reject`.
+- **Example:** `alice withdraws her own pending v2 -> DRAFT, WITHDRAWN row, withdrawn event, v1 still in effect; bob or carol withdraws -> 403; stale If-Match -> 409`.
+- **Test ID:** `RLE_046_requester_withdraws_own_pending_request_to_draft`
 
 ### RLE-026 Retiring a published version by hand stops every replica serving it
 - **Traces to:** `TR-OBS-04`, `TR-ASY-04`, `TR-DET-05`
@@ -388,6 +414,68 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `bob requests -> still serving; bob confirms -> 403 SELF_APPROVAL_FORBIDDEN; carol confirms -> RETIRED, approvalMode four-eyes`.
 - **Test ID:** `RLE_038_four_eyes_retirement_needs_second_approver`
 
+---
+
+## Authoring API for the Rule Editor (#147)
+
+### RLE-039 A caller lists the rule sets of their own tenant, by name, a page at a time
+- **Traces to:** `TR-TEN-01`, `TR-SEC-03`, `TR-UI-02`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a` has `card-fee` (v1 `PUBLISHED` effective since `2026-12-01T00:00:00Z`, v2 `PENDING_APPROVAL` requested at `2026-12-10T03:00:00Z`), `fx-margin` (v1 `DRAFT`) and `kyc-risk` (v1 `DRAFT`); tenant `bank-b` has its own `aml-score`. Caller `lan` holds `rules:read` in `bank-a`; the host clock reads `2026-12-10T03:00:00Z`.
+- **When:** `lan` sends `GET /api/bpm/rules/v1/rule-sets?limit=2`, then the same request with the returned `cursor`. Failure cases: `limit=0`, `limit=201`, a `cursor` that was not issued by the endpoint, a cursor whose decoded key is not a rule set name (for example a NUL byte), a cursor issued to `lan` replayed by a `bank-b` caller, and a caller without `rules:read`.
+- **Then:** The first page lists `card-fee` (`latestVersion: 2`, `latestStatus: PENDING_APPROVAL`, `publishedVersion: 1`, `lastChangedAt: 2026-12-10T03:00:00Z`) and `fx-margin` (`latestVersion: 1`, `latestStatus: DRAFT`, `publishedVersion: null`) and a `nextCursor`; the second page lists `kyc-risk` alone and `nextCursor: null`. `aml-score` never appears. `limit=0`, `limit=201`, the forged cursor, the NUL key and the replayed cursor return `400 QUERY_INVALID`, never `500`: a cursor is signed (HMAC-SHA256 over tenant, list and position, with a key stored once per database), so only a cursor issued to the same tenant for the same list is accepted; the caller without the permission gets `403 PERMISSION_DENIED`. `GET /rule-sets/card-fee` returns the same summary as the list item, and a `bank-b` caller reading it gets `404 RULE_SET_NOT_FOUND`. A name that cannot be a rule set name (`card\u0000fee`, upper case) is `404 RULE_SET_NOT_FOUND` on every endpoint that takes one. The list writes nothing.
+- **Example:** `limit=2 -> [card-fee v2 PENDING_APPROVAL published 1, fx-margin v1 DRAFT] + cursor; next -> [kyc-risk]; bank-b's aml-score never listed`.
+- **Test ID:** `RLE_039_rule_sets_are_listed_per_tenant_by_name_with_a_cursor`
+
+### RLE-040 A caller lists the versions of one rule set, newest first, with who created, requested and approved each
+- **Traces to:** `TR-TEN-01`, `TR-SEC-04`, `TR-UI-02`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v1 created by `lan`, requested by `lan` and approved by `minh`; v2 created and requested by `lan`; v3 `DRAFT` created by `lan`. Caller `minh` holds `rules:read` and `rules:approve`.
+- **When:** `minh` sends `GET /api/bpm/rules/v1/rule-sets/card-fee/versions?limit=2`, then follows `nextCursor`. Failure cases: the same request from a `bank-b` caller; `GET /rule-sets/no-such-set/versions`; `limit=500`.
+- **Then:** The first page lists v3 (`DRAFT`, `createdBy: lan`, `requestedBy: null`) then v2 (`PENDING_APPROVAL`, `requestedBy: lan`, `approvedBy: null`); the second page lists v1 (`PUBLISHED`, `approvedBy: minh`) and `nextCursor: null`. Items carry no definition. The `bank-b` caller and the unknown name get `404 RULE_SET_NOT_FOUND`; `limit=500` returns `400 QUERY_INVALID`. The list writes nothing.
+- **Example:** `card-fee versions, limit 2 -> [v3 DRAFT lan, v2 PENDING_APPROVAL requested by lan] + cursor; next -> [v1 PUBLISHED approved by minh]`.
+- **Test ID:** `RLE_040_versions_are_listed_newest_first_with_their_actors`
+
+### RLE-041 A refused document lists every cell problem with its rule id and column
+- **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-SEC-08`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; caller `lan` holds `rules:author`. File `card-fee-bad.yaml` with inputs `tier` (string) and `balance` (money), output `fee` (money), and rows `R2` (`balance: ">= 50000000"`, a number compared with money) and `R4` (`then: { fee: "+ 1" }`, which does not parse). Second file: a document with an unknown root property `maks`.
+- **When:** `lan` posts each file to `POST /api/bpm/rules/v1/rule-sets`.
+- **Then:** The first returns `422 VALIDATION_FAILED` whose `violations` are, in document order (rule by rule; within a rule the conditions, then the outputs, each in the order written, nested `any` and `all` groups after the plain conditions), `{ ruleId: R2, column: balance, message: ... }` and `{ ruleId: R4, column: fee, message: ... }`; each `message` carries no rule id or column prefix. The second returns `422 VALIDATION_FAILED` with one violation whose `ruleId` and `column` are null and whose `message` names `maks`. Neither stores a rule set, a version or a source document. Both carry `violationsTruncated: false`; a document with 150 bad output cells lists the first 100 in document order with `violationsTruncated: true`.
+- **Example:** `R2 balance >= 50000000 and R4 fee "+ 1" -> 422, violations [R2/balance, R4/fee]`.
+- **Test ID:** `RLE_041_validation_failure_lists_each_cell_problem_with_rule_and_column`
+
+### RLE-042 A money output written without a currency is refused at import, not at evaluation
+- **Traces to:** `TR-DET-02`, `TR-DET-03`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee.yaml` whose output `fee` is `money`, with row `R2` (`txCount >= 3 -> fee: "30000"`) and a second file where `R2` writes `fee: 30000` (a YAML number). Third file: output `waived` of type `boolean` with `R1` writing `waived: "'yes'"`. Fourth file: `R2` writes `fee: "30000 VND"`.
+- **When:** `lan` imports each file.
+- **Then:** The first three return `422 VALIDATION_FAILED` with a violation `{ ruleId: R2, column: fee }` (`{ ruleId: R1, column: waived }` for the third) whose message says the output is `money` and must carry a currency (is `boolean` for the third); nothing is stored, so no decision can ever fail with `EVALUATION_ERROR` for this reason. The fourth imports as `DRAFT`, and once approved, evaluating it with `tier = "SILVER"`, `txCount = 5` returns `fee: { "currency": "VND", "amount": 30000 }` from `R2`.
+- **Example:** `fee: "30000" on a money output -> 422 at R2/fee at import; fee: "30000 VND" -> 201 DRAFT`.
+- **Test ID:** `RLE_042_money_output_without_currency_is_refused_at_import`
+
+### RLE-043 A version tells the caller which lifecycle actions they may take, with four eyes applied
+- **Traces to:** `TR-SEC-04`, `TR-UI-02`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v2 `PENDING_APPROVAL`, created and requested by `lan`; v3 `DRAFT` created by `lan`; v1 `PUBLISHED`. `lan` holds `rules:read`, `rules:author` and `rules:approve`; `minh` holds `rules:read` and `rules:approve`; `dan` holds `rules:read` only.
+- **When:** Each of them reads v1, v2 and v3 with `GET .../versions/{v}` and lists the versions.
+- **Then:** On v2 `lan` gets `allowedActions: []` (`approve` and `reject` are absent because `lan` requested it; `withdraw` arrives with `RLE-046`), `minh` gets `["approve", "reject"]`, `dan` gets `[]`. On v3 `lan` gets `["request-publish"]` and `minh` gets `[]`. On v1 everyone gets `[]`. The list items carry the same values. `lan`'s `approve` of v2 is still refused with `403 SELF_APPROVAL_FORBIDDEN`, because `allowedActions` is a hint and the command checks again. An idempotent replay of a command returns the actions computed for the caller at replay time, not the stored ones.
+- **Example:** `v2 requested by lan -> lan: [], minh: [approve, reject], dan: []`.
+- **Test ID:** `RLE_043_allowed_actions_follow_permissions_and_four_eyes`
+
+### RLE-044 Command and evaluation bodies are read up to their limit; a larger body is `413 PAYLOAD_TOO_LARGE`
+- **Traces to:** `TR-SEC-07`, `TR-SEC-08`
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v1 published and v2 `PENDING_APPROVAL`; caller `minh` holds `rules:approve` and `rules:evaluate`. The limits are 16,384 bytes for `:approve` and `:reject` bodies and 1,048,576 bytes for `:evaluate` (`EngineDefaults`), the import limit of `RuleSetReader`.
+- **When:** `minh` sends `:reject` and `:approve` of v2 with a 16,385-byte body; `:reject` with a body that has no `Content-Length` (chunked) and never ends; `:evaluate` of `card-fee` with a 1,048,577-byte body; `POST /rule-sets` with a 1,048,577-byte YAML body, declared and chunked; the same import by a caller with only `rules:read`; and `:reject` with `{ "reason": "R2 waiver needs pricing committee minutes" }`.
+- **Then:** The oversized and endless bodies return `413 PAYLOAD_TOO_LARGE` as problem details; a declared `Content-Length` above the limit is refused before the body is read, and an undeclared one is read at most one byte past the limit. The caller with only `rules:read` gets `403 PERMISSION_DENIED`, because every endpoint checks its permission before it reads the body. None of them changes v2, creates a rule set, writes an event, a history row, a decision row or an idempotency record. The normal reject returns `200`.
+- **Example:** `:reject with 16,385 bytes -> 413 PAYLOAD_TOO_LARGE, v2 still PENDING_APPROVAL; :evaluate with 1 MiB + 1 byte -> 413, 0 rle_decision rows`.
+- **Test ID:** `RLE_044_oversized_command_and_evaluation_bodies_are_refused_with_413`
+
+---
+
+## Canonical Form and Behaviour Hash (ADR-0026)
+
 ### RLE-045 The same behaviour has one hash in any style and serialisation, and different behaviour never shares one
 - **Traces to:** `TR-STD-03`, `TR-STD-25`, `TR-STD-28`, `TR-DEF-04`, ADR-0026
 - **Milestone:** M1
@@ -407,6 +495,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - **(n5)** `country != 'VN'` against the same text with a Cyrillic `В` in place of `V`. The canonical document shows it unchanged, because no normalisation is applied, and the diff marks the changed literal as containing non-ASCII characters.
   - **(n6)** `country != 'V\u200BN'` (a zero-width space) is printed with the `\u200B` escape and has its own hash. `country != 'V\u202EN'` (a bidirectional override) is refused at import with `422` naming the line.
   - **(n7)** A source that is not valid UTF-8, contains NUL, or starts with a byte order mark is refused at import with `422`, and nothing is stored.
+  - **(n8)** For an output with `default: 0`, a rule with an explicit `null` output and the same rule with the cell omitted have different hashes; for an output without a default the two have one hash.
 - **Then (integrity):**
   - A model whose printed form does not parse back to an equal tree is refused at import with `422` and nothing stored. This is tested with a deliberately broken printer in the test harness.
   - A stored version whose `canonical_json` is altered in the database so that it no longer hashes to `canonical_hash` is not served. Evaluation returns `EVALUATION_ERROR` with a detail naming the integrity check, and one audit entry and one alert are written.

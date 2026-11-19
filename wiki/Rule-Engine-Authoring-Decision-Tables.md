@@ -21,7 +21,7 @@ effectiveFrom: 2026-12-01T00:00:00+07:00   # optional ISO instant; otherwise eff
 | Policy | Behaviour | Use it for |
 |---|---|---|
 | `first` | Rows are checked top to bottom; the first match wins | Eligibility, routing, tiered fees with a default row |
-| `unique` | Exactly one row must match; zero or several matches fail the decision with `UNIQUE_HIT_VIOLATION` | Pricing tables that must be complete and non-overlapping |
+| `unique` | At most one row may match; several matches fail the decision with `UNIQUE_HIT_VIOLATION`; zero matches is no match, as with `first` | Pricing tables that must be complete and non-overlapping |
 | `collect` | Every matching row contributes; each output becomes a list or an aggregate (`collect: sum`, `min`, `max`, `count`) | Accumulating fees, collecting reason codes or risk flags |
 
 ## 2. Declare inputs and outputs
@@ -132,6 +132,6 @@ Endpoint details, headers and error codes are in [[Rule Engine Decision API]].
 |---|---|---|
 | `422 VALIDATION_FAILED` at row `R2`, "unknown identifier" | A condition refers to an input that is not declared | Add the input in `inputs` or fix the spelling |
 | `422 VALIDATION_FAILED`, "money + integer" | Arithmetic mixes money and a plain number | Multiply money by a number (`balance * 0.01`) or add money to money of the same currency |
-| `422 UNIQUE_HIT_VIOLATION` at run time | A `unique` table had zero or several matches for real inputs | Add the missing row, or switch to `first` with a default row if order is intended |
+| `422 UNIQUE_HIT_VIOLATION` at run time | A `unique` table had several matches for real inputs | Remove the overlap, or switch to `first` if order is intended |
 | Default row never matches | It is not the last row under `first` | Move `when: {}` to the end |
 | Validation warns about an unreachable row | An earlier row under `first` already covers it | Delete the row or reorder |

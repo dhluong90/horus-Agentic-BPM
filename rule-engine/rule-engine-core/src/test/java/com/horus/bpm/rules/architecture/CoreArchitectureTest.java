@@ -146,7 +146,9 @@ class CoreArchitectureTest {
                         "java..", "tools.jackson..", "com.fasterxml.jackson.annotation..", "com.horus.bpm.rules..",
                         // The YAML parser of jackson-dataformat-yaml, read directly only to refuse anchors, aliases
                         // and tags that Jackson does not report (security review of #1, finding 7).
-                        "org.snakeyaml.engine..")
+                        "org.snakeyaml.engine..",
+                        // JDK cryptography (HMAC-SHA256), used to sign list cursors (RLE-039, QA review of #147).
+                        "javax.crypto..")
                 .because("rule-engine-core depends on the JDK and Jackson 3 only (TR-EMB-03, ADR-0021)")
                 .check(core);
     }
