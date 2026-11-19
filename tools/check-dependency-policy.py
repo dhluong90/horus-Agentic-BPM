@@ -146,7 +146,7 @@ def check_jar_notices(bom: Path) -> int:
     if not bom.exists():
         return fail([f"{bom} not found; run mvn -B verify first"], "")
     components = json.loads(bom.read_text(encoding="utf-8")).get("components", [])
-    jars = [c for c in components if c.get("group") == "io.github.dhluong90.bpm" and "type=jar" in c.get("purl", "")]
+    jars = [c for c in components if c.get("group") == "com.horus.bpm" and "type=jar" in c.get("purl", "")]
     errors, checked = [], 0
     for component in jars:
         name = f"{component['name']}-{component['version']}.jar"

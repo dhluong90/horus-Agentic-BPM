@@ -1,2 +1,2 @@
-io.github.dhluong90.bpm.rules.autoconfigure.RuleEngineAutoConfiguration
-io.github.dhluong90.bpm.rules.autoconfigure.RuleEngineInactiveAutoConfiguration
+com.horus.bpm.rules.autoconfigure.RuleEngineAutoConfiguration
+com.horus.bpm.rules.autoconfigure.RuleEngineInactiveAutoConfiguration
