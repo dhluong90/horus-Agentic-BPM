@@ -158,8 +158,11 @@ export function scenarioUser(scenario: Scenario): string {
   return scenario === 'ready-approver' || scenario === 'rules-approver' ? meMinh.user.id : meLan.user.id;
 }
 
-/** Rule sets this browser has opened, as the cockpit stores them (interim list, see api/rules/catalogue.ts). */
-export const KNOWN_RULE_SETS = { key: 'horus.cockpit.ruleSets.loans.bank-a', value: JSON.stringify(['card-fee', 'kyc-risk']) } as const;
+/** Rule sets the demo users have opened, as the cockpit stores them per user (interim list, see api/rules/catalogue.ts). */
+export const KNOWN_RULE_SETS: readonly { key: string; value: string }[] = [meLan, meMinh].map((me) => ({
+  key: `horus.cockpit.ruleSets.loans.bank-a.${me.user.id}`,
+  value: JSON.stringify(['card-fee', 'kyc-risk']),
+}));
 
 export function isScenario(value: string | null | undefined): value is Scenario {
   return SCENARIOS.some((scenario) => scenario === value);

@@ -77,21 +77,6 @@ final class TestTokens {
         }
     }
 
-    /** A token for any user, tenant and engine permissions ({@code permissions} claim). */
-    static String bearerFor(String user, String tenant, List<String> permissions) {
-        try {
-            JWTClaimsSet claims = new JWTClaimsSet.Builder()
-                    .subject(user).audience(AUDIENCE).claim("tenant_id", tenant).claim("permissions", permissions)
-                    .issueTime(Date.from(Instant.now())).expirationTime(Date.from(Instant.now().plusSeconds(600)))
-                    .build();
-            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.RS256), claims);
-            jwt.sign(new RSASSASigner((RSAPrivateKey) KEYS.getPrivate()));
-            return "Bearer " + jwt.serialize();
-        } catch (com.nimbusds.jose.JOSEException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
     /** A token that carries host roles ({@code roles} claim) instead of engine permissions. */
     static String bearerWithRoles(String user, String tenant, List<String> roles) {
         try {

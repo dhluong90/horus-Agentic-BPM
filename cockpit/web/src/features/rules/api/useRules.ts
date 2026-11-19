@@ -82,9 +82,9 @@ function useSingleFlight<TArgs, TResult>(run: (args: TArgs, key: string) => Prom
 function useRefreshVersions() {
   const queryClient = useQueryClient();
   const keys = useKeys();
-  const { hostId, tenant } = useRulesSession();
+  const { hostId, tenant, userId } = useRulesSession();
   return async (version: RuleSetVersion) => {
-    rememberRuleSet(hostId, tenant, version.ruleSet);
+    rememberRuleSet({ hostId, tenant, userId }, version.ruleSet);
     await queryClient.invalidateQueries({ queryKey: keys.versions(version.ruleSet) });
   };
 }

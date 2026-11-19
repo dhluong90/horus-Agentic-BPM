@@ -59,8 +59,9 @@ function SummaryRow({ name, summary, loaded, onOpen }: { name: string; summary: 
 
 export function RuleSetList({ navigate }: { navigate: (route: Route) => void }) {
   const { t } = useI18n();
-  const { hostId, tenant, can } = useRulesSession();
-  const [names, setNames] = useState(() => knownRuleSets(hostId, tenant));
+  const { hostId, tenant, userId, can } = useRulesSession();
+  const shelf = { hostId, tenant, userId };
+  const [names, setNames] = useState(() => knownRuleSets(shelf));
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const fileInput = useRef<HTMLInputElement>(null);
   const summaries = useSummaries(names);
@@ -69,8 +70,8 @@ export function RuleSetList({ navigate }: { navigate: (route: Route) => void }) 
     navigate({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'table' });
   });
   const open = (name: string) => {
-    rememberRuleSet(hostId, tenant, name);
-    setNames(knownRuleSets(hostId, tenant));
+    rememberRuleSet(shelf, name);
+    setNames(knownRuleSets(shelf));
     navigate({ name: 'rule-set', ruleSet: name, version: undefined, lens: undefined });
   };
 
@@ -114,7 +115,7 @@ export function RuleSetList({ navigate }: { navigate: (route: Route) => void }) 
               </thead>
               <tbody>
                 {names.map((name, index) => (
-                  <SummaryRow key={name} name={name} summary={summaries[index]?.data} loaded={summaries[index]?.isSuccess === true} onOpen={() => { rememberRuleSet(hostId, tenant, name); }} />
+                  <SummaryRow key={name} name={name} summary={summaries[index]?.data} loaded={summaries[index]?.isSuccess === true} onOpen={() => { rememberRuleSet(shelf, name); }} />
                 ))}
               </tbody>
             </table>

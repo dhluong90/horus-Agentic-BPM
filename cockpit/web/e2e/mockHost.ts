@@ -43,8 +43,8 @@ export async function rememberLocale(page: Page, locale: 'en' | 'vi'): Promise<v
 /** Answers the Rule Engine endpoints from the in-memory engine with the demo data, as the scenario's user. */
 export async function mockRuleEngine(page: Page, scenario: Scenario): Promise<void> {
   const engine = createFakeEngine(demoSeed());
-  await page.addInitScript(({ key, value }) => {
-    if (window.localStorage.getItem(key) === null) window.localStorage.setItem(key, value);
+  await page.addInitScript((entries) => {
+    for (const { key, value } of entries) if (window.localStorage.getItem(key) === null) window.localStorage.setItem(key, value);
   }, KNOWN_RULE_SETS);
   await page.route('**/api/bpm/rules/v1/**', async (route) => {
     const request = route.request();
