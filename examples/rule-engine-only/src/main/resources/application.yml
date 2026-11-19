@@ -34,5 +34,6 @@ horus:
           ROLE_PRICING_APPROVER: [rules:read, rules:approve]
           ROLE_TELLER: [rules:evaluate]
     cockpit:
+      # How the cockpit header names this service.
       host-label: Loan origination
       environment: demo

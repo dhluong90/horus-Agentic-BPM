@@ -43,7 +43,7 @@ public record HostMetadataProperties(
             if (claim.isBlank()) {
                 throw new IllegalArgumentException("horus.bpm.tenancy.claim must not be blank.");
             }
-            if (devTenant != null && !CallerResolution.TENANT.matcher(devTenant).matches()) {
+            if (devTenant != null && !DefaultEngineAccess.TENANT.matcher(devTenant).matches()) {
                 throw new IllegalArgumentException("horus.bpm.tenancy.dev-tenant must be 1 to 64 letters, digits, "
                         + "'.', '_' or '-', starting with a letter or digit, was '" + devTenant + "'.");
             }

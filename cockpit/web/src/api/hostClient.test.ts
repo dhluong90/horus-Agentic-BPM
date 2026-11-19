@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createHostClient } from './hostClient';
+import { createHostClient, csrfHeaders } from './hostClient';
 import { HostCallError, type HostError } from './hostError';
 
 function respond(response: Response | Error): typeof fetch {
@@ -73,5 +73,17 @@ describe('host client', () => {
     await failure(fetchImpl);
     expect(url).toBe('/api/bpm/me');
     expect(seen).toMatchObject({ method: 'GET', credentials: 'same-origin', redirect: 'manual' });
+  });
+
+  it('CKP_001_requests_that_change_data_send_the_xsrf_cookie_back_as_x_xsrf_token', () => {
+    const cookies = 'JSESSIONID=abc; XSRF-TOKEN=3f2a%2Bb9; theme=dark';
+    expect(csrfHeaders('POST', cookies)).toEqual({ 'X-XSRF-TOKEN': '3f2a+b9' });
+    expect(csrfHeaders('put', cookies)).toEqual({ 'X-XSRF-TOKEN': '3f2a+b9' });
+    expect(csrfHeaders('DELETE', cookies)).toEqual({ 'X-XSRF-TOKEN': '3f2a+b9' });
+  });
+
+  it('CKP_001_safe_requests_and_a_missing_cookie_send_no_xsrf_header', () => {
+    expect(csrfHeaders('GET', 'XSRF-TOKEN=abc')).toEqual({});
+    expect(csrfHeaders('POST', 'JSESSIONID=abc')).toEqual({});
   });
 });

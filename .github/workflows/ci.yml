@@ -68,7 +68,7 @@ jobs:
           java-version: ${{ matrix.java }}
           cache: maven
 
-      # The cockpit starter packages cockpit/web/dist; the example host's cockpit test needs it.
+      # The cockpit starter packages cockpit/web/dist; every leg builds the starter, and the example host's cockpit test needs it.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"

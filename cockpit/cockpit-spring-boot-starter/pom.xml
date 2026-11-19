@@ -56,11 +56,6 @@
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-webmvc</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-security</artifactId>
       <scope>test</scope>
     </dependency>
@@ -70,6 +65,45 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <!--
+    TR-EMB-02: the tests run on both Spring Boot lines (parent POM, -Dspring-boot.line). Only the name of
+    the web starter differs between the lines.
+  -->
+  <profiles>
+    <profile>
+      <id>host-spring-boot-4</id>
+      <activation>
+        <property>
+          <name>spring-boot.line</name>
+          <value>!3.5</value>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-webmvc</artifactId>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>host-spring-boot-3.5</id>
+      <activation>
+        <property>
+          <name>spring-boot.line</name>
+          <value>3.5</value>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-web</artifactId>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
 
   <build>
     <!-- Replaces the parent's resources, so its TR-LIC-02 licence files are repeated here. -->
