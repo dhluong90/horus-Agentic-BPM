@@ -221,11 +221,17 @@ class NormalFormTest {
         assertThat(sha).isEqualTo(GOLDEN_V1_SHA256);
     }
 
-    static final String GOLDEN_V1_SHA256 = "83b06c4b455b26c711bd156afe5be524f237fedee4f1c7400c65df5e834cb7e0";
+    /**
+     * The pin of the schema version 1 golden file. Changed in 0.2.0 (#19) only by appending the rows of the function
+     * call production (round, daysBetween): appending rows for a new production is allowed within schema version 1,
+     * by the architect's ruling on pull request #252 (ADR-0026 decision 3); editing a shipped row is not, and
+     * {@link #RLE_045_the_golden_lines_of_0_1_0_are_an_unchanged_prefix} proves no 0.1.0 row changed.
+     */
+    static final String GOLDEN_V1_SHA256 = "1412c2592c66ff0db7cc844fa4c47d1234ba8dd5f682f855866fba0f089b97fd";
 
     @Test
     void RLE_045_the_golden_lines_of_0_1_0_are_an_unchanged_prefix() throws Exception {
-        // A later release may append golden lines for a new production (0.2.0: function calls, #19); it may never
+        // A later release may append golden lines for a new production (0.2.0: round and daysBetween, #19); it may never
         // change a line that 0.1.0 shipped. The first GOLDEN_0_1_0_LENGTH bytes are the 0.1.0 file, byte for byte.
         byte[] golden = DmnRuleSetTest.resource("/rules/normal-form.v1.txt");
         byte[] prefix = java.util.Arrays.copyOf(golden, GOLDEN_0_1_0_LENGTH);

@@ -88,17 +88,7 @@ public sealed interface Expr {
         }
     }
 
-    /**
-     * {@code matches(s, 'pattern')}: an unanchored search, as FEEL {@code matches}. The pattern is a string
-     * literal, checked and compiled at import.
-     *
-     * @param target the searched text
-     * @param pattern the compiled pattern
-     */
-    record Matches(Expr target, Regex pattern) implements Expr {
-    }
-
-    /** The pure functions of {@code horus-expr-v1} other than {@code matches}, with their FEEL translation. */
+    /** The pure functions of {@code horus-expr-v1}, with their FEEL translation. */
     enum Function {
         /** {@code round(x, scale)}, half-even; FEEL {@code decimal(x, scale)}, the same as {@code round half even}. */
         ROUND("round"),

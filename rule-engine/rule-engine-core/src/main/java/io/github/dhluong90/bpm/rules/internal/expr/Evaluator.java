@@ -15,9 +15,8 @@ import java.time.temporal.ChronoUnit;
  * comparisons, as DMN 1.5; {@code ==} and {@code !=} are
  * two-valued; {@code in} is true when an element equals the target, so a null target is in a list only
  * when the list holds null; {@code and}, {@code or} and {@code not} follow the FEEL truth tables; a
- * function with a null argument gives null; {@code round} is half-even; {@code matches} is an unanchored
- * search. Mixed currencies, division by zero and a regex search past its step budget raise
- * {@link EvaluationException}.
+ * function with a null argument gives null; {@code round} is half-even. Mixed currencies and division
+ * by zero raise {@link EvaluationException}.
  * Stateless and thread-safe.
  */
 public final class Evaluator {
@@ -74,8 +73,6 @@ public final class Evaluator {
             }
             case Expr.IsNull isNull -> (evaluate(isNull.target(), slots) == null) != isNull.negated();
             case Expr.Call call -> call(call, slots);
-            case Expr.Matches matches -> evaluate(matches.target(), slots) instanceof String text
-                    ? matches.pattern().find(text) : null;
         };
     }
 

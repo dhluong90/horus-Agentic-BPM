@@ -23,7 +23,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * The FEEL-aligned semantics of #19 through import, approval and evaluation: the literal currency check, the
- * function argument checks and a published table that uses {@code round}, {@code matches} and {@code daysBetween}.
+ * function argument checks and a published table that uses {@code round} and {@code daysBetween}.
  */
 class FeelSemanticsLifecycleTest {
 
@@ -106,7 +106,6 @@ class FeelSemanticsLifecycleTest {
     @ParameterizedTest(name = "{1}")
     @CsvSource(delimiter = '|', value = {
         "string  | round(x, 0) > 1                     | round takes a number, not a string",
-        "integer | matches(x, '[0-9]')                 | matches takes a string, not a number",
         "string  | daysBetween(x, date('2027-01-01')) > 1 | daysBetween takes a date, not a string",
         "integer | round(x, 0)                         | the condition does not produce true or false"
     })
@@ -120,8 +119,8 @@ class FeelSemanticsLifecycleTest {
     }
 
     @Test
-    void RLE_021_a_published_table_rounds_half_even_matches_unanchored_and_counts_days() {
-        // Given a dormancy fee table: a VIP code waives the fee, otherwise 0.15% of the balance, rounded half-even
+    void RLE_021_a_published_table_rounds_half_even_and_counts_days() {
+        // Given a dormancy fee table: a VIP code waives the fee; a year without activity costs 0.15% of the balance, rounded half-even
         publish("""
                 schemaVersion: 1
                 ruleSet: dormancy-fee
@@ -133,7 +132,7 @@ class FeelSemanticsLifecycleTest {
                 outputs:
                   - { name: fee, type: decimal }
                 rules:
-                  - { id: R1, when: { code: "matches(code, '^VIP-[0-9]+')" }, then: { fee: "0" } }
+                  - { id: R1, when: { code: "== 'VIP'" }, then: { fee: "0" } }
                   - { id: R2, when: { lastActivity: "daysBetween(lastActivity, date('2027-03-01')) >= 365" },
                       then: { fee: "round(balance * 0.0015, 0)" } }
                   - { id: R3, when: {}, then: { fee: "0" } }
@@ -141,11 +140,11 @@ class FeelSemanticsLifecycleTest {
 
         // When: a balance of 1 230 000 gives 1 845 exactly; 1 233 000 gives 1 849.5, which rounds to the even 1 850;
         // 1 231 000 gives 1 846.5, which rounds to the even 1 846
-        DecisionResult vip = evaluate(Map.of("code", "VIP-7", "balance", new BigDecimal("1230000"),
+        DecisionResult vip = evaluate(Map.of("code", "VIP", "balance", new BigDecimal("1230000"),
                 "lastActivity", LocalDate.parse("2025-01-01")));
         DecisionResult up = evaluate(Map.of("code", "STD", "balance", new BigDecimal("1233000"),
                 "lastActivity", LocalDate.parse("2026-03-01")));
-        DecisionResult down = evaluate(Map.of("code", "X-VIP-7", "balance", new BigDecimal("1231000"),
+        DecisionResult down = evaluate(Map.of("code", "STD", "balance", new BigDecimal("1231000"),
                 "lastActivity", LocalDate.parse("2026-03-01")));
         Map<String, Object> missing = new HashMap<>();
         missing.put("code", null);
@@ -157,7 +156,7 @@ class FeelSemanticsLifecycleTest {
         assertThat(vip.matchedRuleIds()).containsExactly("R1");
         assertThat(up.matchedRuleIds()).containsExactly("R2");
         assertThat((BigDecimal) up.outputs().get("fee")).isEqualByComparingTo("1850");
-        assertThat(down.matchedRuleIds()).as("the search is unanchored, but ^ anchors it").containsExactly("R2");
+        assertThat(down.matchedRuleIds()).containsExactly("R2");
         assertThat((BigDecimal) down.outputs().get("fee")).isEqualByComparingTo("1846");
         assertThat(unknown.matchedRuleIds()).as("null arguments give null, which never matches").containsExactly("R3");
     }

@@ -57,14 +57,13 @@ final class ConditionTypes {
             case Expr.Between between -> firstOf(comparableProblem(between.target(), between.low(), inputs),
                     comparableProblem(between.target(), between.high(), inputs));
             case Expr.IsNull ignored -> null;
-            case Expr.Matches ignored -> null;
             case Expr.Call ignored -> NOT_BOOLEAN;
         };
     }
 
     /**
-     * Checks the argument types of every function call in the tree: {@code round} takes numbers,
-     * {@code daysBetween} dates and {@code matches} a string. An argument whose type is not known statically passes.
+     * Checks the argument types of every function call in the tree: {@code round} takes numbers and
+     * {@code daysBetween} dates. An argument whose type is not known statically passes.
      */
     private static String argumentProblem(Expr expr, List<InputClause> inputs) {
         String own = switch (expr) {
@@ -76,7 +75,6 @@ final class ConditionTypes {
                 }
                 yield problem;
             }
-            case Expr.Matches matches -> argumentKindProblem("matches", matches.target(), Kind.STRING, inputs);
             default -> null;
         };
         if (own != null) {
@@ -170,7 +168,6 @@ final class ConditionTypes {
             case Expr.Between between -> List.of(between.target(), between.low(), between.high());
             case Expr.IsNull isNull -> List.of(isNull.target());
             case Expr.Call call -> call.args();
-            case Expr.Matches matches -> List.of(matches.target());
         };
     }
 
@@ -260,7 +257,6 @@ final class ConditionTypes {
             case Expr.InList ignored -> Kind.BOOLEAN;
             case Expr.Between ignored -> Kind.BOOLEAN;
             case Expr.IsNull ignored -> Kind.BOOLEAN;
-            case Expr.Matches ignored -> Kind.BOOLEAN;
             case Expr.Call ignored -> Kind.NUMBER;
         };
     }

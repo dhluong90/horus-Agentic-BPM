@@ -49,8 +49,7 @@ import org.junit.jupiter.params.provider.CsvSource;
  *       Multilingual Plane. The string alphabet leaves that range out; the engine's own order is proved by
  *       {@code RLE_003_collect_min_and_max_order_strings_like_the_lt_operator}.</li>
  *   <li><b>String escapes.</b> The reference reads {@code "\\\""} (a backslash, then a quote) as three
- *       characters, where FEEL reads two. Generated strings hold quotes but no backslash; patterns hold
- *       backslashes but no quote.</li>
+ *       characters, where FEEL reads two. Generated strings hold quotes but no backslash.</li>
  * </ul>
  */
 class FeelDifferentialTest {
@@ -82,9 +81,6 @@ class FeelDifferentialTest {
      */
     static final int[] ALPHABET = {'a', 'b', 'G', 'O', 'L', 'D', '0', '7', ' ', '-', '\'', '"',
         0x1EA1, 0x00E2, 0x0110, 0x4E2D, 0x1F600};
-
-    static final String[] PATTERNS = {"[0-9]+", "^a", "b$", "GOLD", "^[A-Z]{2}-", "a|b", "(ab)+", "\\d", "\\s",
-        "^$", ".", "[^a-z]", "a.?b", "\\p{L}", "(?:ab)*c"};
 
     static final Instant[] INSTANTS = {Instant.parse("2026-12-01T00:00:00Z"), Instant.parse("2026-11-30T17:00:00Z"),
         Instant.parse("2027-01-15T18:30:00Z"), Instant.parse("2028-02-29T12:00:00Z")};
@@ -127,7 +123,6 @@ class FeelDifferentialTest {
     @CsvSource(delimiter = '|', value = {
         "7 / 2                                                 | 3.5",
         "round(2.5, 0)                                         | 2",
-        "matches('ab12', '[0-9]+')                             | true",
         "daysBetween(date('2027-01-01'), date('2027-03-01'))   | 59"
     })
     void RLE_021_the_fixed_cases_agree_with_the_reference(String v1, String expected) {
@@ -149,7 +144,7 @@ class FeelDifferentialTest {
         for (int i = 0; i < 2_000; i++) {
             String v1 = expression(random, Type.BOOLEAN, MAX_DEPTH);
             Object[] slots = INPUTS.next(random);
-            for (String construct : List.of(" in [", " not in [", " between ", " is null", " is not null", "matches(",
+            for (String construct : List.of(" in [", " not in [", " between ", " is null", " is not null",
                     "round(", "daysBetween(", " / ", "not (", " and ", " or ", " == null", "datetime(")) {
                 if (v1.contains(construct)) {
                     constructs.add(construct.strip());
@@ -168,7 +163,7 @@ class FeelDifferentialTest {
         assertThat(outcomes.getOrDefault(true, 0)).isGreaterThan(300);
         assertThat(outcomes.getOrDefault(false, 0)).isGreaterThan(300);
         assertThat(outcomes.getOrDefault("null", 0)).isGreaterThan(200);
-        assertThat(constructs).hasSize(14);
+        assertThat(constructs).hasSize(13);
     }
 
     // ------------------------------------------------------------------ the check
@@ -311,8 +306,6 @@ class FeelDifferentialTest {
             case 7 -> "(" + expression(random, operand, depth) + " between " + expression(random, operand, depth)
                     + " and " + expression(random, operand, depth) + ")";
             case 8 -> "(" + expression(random, ordered(random), depth) + (random.nextBoolean() ? " is null)" : " is not null)");
-            case 9 -> "matches(" + expression(random, Type.STRING, depth) + ", "
-                    + v1String(PATTERNS[random.nextInt(PATTERNS.length)]) + ")";
             default -> leaf(random, Type.BOOLEAN);
         };
     }

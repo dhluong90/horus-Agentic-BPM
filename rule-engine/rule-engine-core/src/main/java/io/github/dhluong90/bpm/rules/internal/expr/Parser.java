@@ -12,9 +12,8 @@ import java.util.function.ToIntFunction;
 /**
  * Hand-written lexer and recursive-descent parser of {@code urn:horus-bpm:expr:v1} (ADR-0003). No
  * reflection, no scripting; the only calls are the constant literals {@code date('...')} and
- * {@code datetime('...')} and the closed set of pure functions {@code round}, {@code daysBetween} and
- * {@code matches} (whose pattern is a string literal, checked and compiled here). Identifiers are bound to input
- * slots at parse time; an unknown identifier or function is a parse error.
+ * {@code datetime('...')} and the closed set of pure functions {@code round} and {@code daysBetween}.
+ * Identifiers are bound to input slots at parse time; an unknown identifier or function is a parse error.
  *
  * <pre>
  * or         = and { "or" and }
@@ -27,7 +26,7 @@ import java.util.function.ToIntFunction;
  * unary      = "-" unary | primary
  * primary    = number [CURRENCY] | string | "true" | "false" | "null" | identifier | "(" or ")" | list
  *            | "date" "(" string ")" | "datetime" "(" string ")" | call
- * call       = ("round" | "daysBetween") "(" or "," or ")" | "matches" "(" or "," string ")"
+ * call       = ("round" | "daysBetween") "(" or "," or ")"
  * list       = "[" [ or { "," or } ] "]"
  * </pre>
  */
@@ -264,7 +263,7 @@ public final class Parser {
         }
     }
 
-    /** A call of {@code round}, {@code daysBetween} or {@code matches}; any other name is refused. */
+    /** A call of {@code round} or {@code daysBetween}; any other name is refused. */
     private Expr call(Token name) {
         Expr.Function function = null;
         for (Expr.Function candidate : Expr.Function.values()) {
@@ -272,8 +271,7 @@ public final class Parser {
                 function = candidate;
             }
         }
-        boolean matches = name.text().equals("matches");
-        if (function == null && !matches) {
+        if (function == null) {
             throw new ExpressionException("Unknown function '" + name.text() + "'", name.position());
         }
         expect(Kind.LPAREN, "(");
@@ -286,16 +284,6 @@ public final class Parser {
         expect(Kind.RPAREN, ")");
         if (args.size() != 2) {
             throw new ExpressionException(name.text() + " takes 2 arguments, found " + args.size(), name.position());
-        }
-        if (matches) {
-            if (!(args.get(1) instanceof Expr.Literal literal) || !(literal.value() instanceof String pattern)) {
-                throw new ExpressionException("matches takes its pattern as a string literal", name.position());
-            }
-            try {
-                return new Expr.Matches(args.getFirst(), Regex.compile(pattern));
-            } catch (IllegalArgumentException e) {
-                throw new ExpressionException("matches: " + e.getMessage(), name.position());
-            }
         }
         if (function == Expr.Function.ROUND && args.get(1) instanceof Expr.Literal literal
                 && literal.value() instanceof BigDecimal scale && !isScale(scale)) {

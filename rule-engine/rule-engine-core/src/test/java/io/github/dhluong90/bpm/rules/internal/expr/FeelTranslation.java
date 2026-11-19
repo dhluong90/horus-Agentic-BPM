@@ -47,7 +47,6 @@ final class FeelTranslation {
                 case ROUND -> "decimal(" + feel(call.args().get(0)) + ", " + feel(call.args().get(1)) + ")";
                 case DAYS_BETWEEN -> "((" + feel(call.args().get(1)) + " - " + feel(call.args().get(0)) + ").days)";
             };
-            case Expr.Matches matches -> "matches(" + feel(matches.target()) + ", " + string(matches.pattern().source()) + ")";
         };
     }
 
