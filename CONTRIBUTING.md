@@ -21,4 +21,4 @@ Thank you for your interest. Until the first release the maintainers drive the r
 The project is public under a noncommercial licence and licensed commercially by HORUS, so contributions require the CLA in `CLA.md`. Add `I agree to the CLA in CLA.md` to your first pull request.
 
 ## Releases
-Each module is versioned independently (semver) and tagged `<module>/vX.Y.Z`.
+Every module shares one project version (semver), released under one tag `vX.Y.Z` (PD-087). See `docs/RELEASING.md`.

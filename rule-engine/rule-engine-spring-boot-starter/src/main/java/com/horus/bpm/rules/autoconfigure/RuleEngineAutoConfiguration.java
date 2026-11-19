@@ -79,8 +79,10 @@ public class RuleEngineAutoConfiguration {
             RuleEngineSchemaMigrator migrator,
             DecisionLogPartitions partitions,
             RuleEngineProperties properties,
-            ObjectProvider<Clock> clock) {
-        return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock));
+            ObjectProvider<Clock> clock,
+            ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys) {
+        return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
+                cursorKeys.getIfAvailable());
     }
 
     /**
@@ -90,7 +92,7 @@ public class RuleEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "ruleEngineModuleDescriptor")
     ModuleDescriptor ruleEngineModuleDescriptor(RuleEngineProperties properties) {
-        return RuleEngineModule.descriptor(properties.security().rolePermissions());
+        return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts());
     }
 
     /** The host's unique {@code Clock} bean if it has one, otherwise system UTC. Never registered as a bean. */

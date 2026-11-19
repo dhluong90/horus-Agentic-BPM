@@ -73,3 +73,28 @@ export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): Hos
     getMe: (signal) => requestJson('GET', '/api/bpm/me', bpmMeV1, signal),
   };
 }
+
+/** True when `baseUrl` is the page's own origin, the only place the host's CSRF token may be sent. */
+export function sameOrigin(baseUrl: string, pageOrigin: string = window.location.origin): boolean {
+  if (baseUrl === '') return true;
+  try {
+    return new URL(baseUrl, pageOrigin).origin === pageOrigin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Signs out of the host in host-session mode: Spring Security's logout endpoint (`POST /logout`). Success is a
+ * redirect (the browser reports it as opaque, since redirects are not followed) or a 2xx; anything else, or no
+ * answer, is a failure and the session may still be live. The CSRF header goes to the page's own origin only.
+ */
+export async function signOutOfHost(baseUrl: string, fetchImpl: Fetch = fetch, pageOrigin?: string): Promise<boolean> {
+  const csrf = sameOrigin(baseUrl, pageOrigin) ? csrfHeaders('POST') : {};
+  try {
+    const response = await fetchImpl(`${baseUrl}/logout`, { method: 'POST', credentials: 'same-origin', redirect: 'manual', headers: { 'X-Requested-With': 'XMLHttpRequest', ...csrf } });
+    return response.type === 'opaqueredirect' || (response.status >= 200 && response.status < 300);
+  } catch {
+    return false;
+  }
+}

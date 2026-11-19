@@ -24,6 +24,7 @@
 
 **Process Engine**
 - [[Process Engine: overview|Process-Engine-Overview]]
+- [[Process Engine: API|Process-Engine-API]]
 - [[Process Engine: guarded agent steps|Guarded-Agent-Steps]]
 
 **Cockpit**: authors, approvers, operators

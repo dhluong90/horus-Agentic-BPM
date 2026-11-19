@@ -174,6 +174,47 @@ class RuleEnginePostgresIT {
     }
 
     @Test
+    void RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several() {
+        // Given
+        publish("/rules/loan-pricing.yaml", "loan-pricing");
+        caller.as("bank-a", "teller-01");
+
+        // When
+        DecisionResult overlap = engines.ruleEngine().evaluate("loan-pricing",
+                DecisionInput.of(Map.of("score", 750, "income", Money.ofMinor("VND", 25_000_000))));
+        DecisionResult none = engines.ruleEngine().evaluate("loan-pricing",
+                DecisionInput.of(Map.of("score", 500, "income", Money.ofMinor("VND", 5_000_000))));
+
+        // Then
+        assertThat(overlap.outputs()).isEmpty();
+        assertThat(none.outputs()).containsOnlyKeys("rate").containsEntry("rate", null);
+        assertThat(JdbcClient.create(db).sql("""
+                SELECT outcome || ' ' || error_code || ' ' || matched_rule_ids::text || ' ' || COALESCE(outputs::text, 'no-outputs')
+                FROM rle_decision WHERE tenant_id = 'bank-a' AND rule_set_name = 'loan-pricing' AND error_code IS NOT NULL
+                """).query(String.class).list())
+                .containsExactlyInAnyOrder("UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [\"R1\", \"R2\"] no-outputs");
+        // Zero matches is a no-match, logged as OK with [] exactly as under first (PD-088)
+        assertThat(JdbcClient.create(db).sql("""
+                SELECT outcome || ' ' || matched_rule_ids::text FROM rle_decision
+                WHERE tenant_id = 'bank-a' AND rule_set_name = 'loan-pricing' AND error_code IS NULL
+                """).query(String.class).single()).isEqualTo("OK []");
+    }
+
+    @Test
+    void RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules() {
+        publish("/rules/risk-flags.yaml", "risk-flags");
+        caller.as("bank-a", "teller-01");
+
+        DecisionResult result = engines.ruleEngine().evaluate("risk-flags",
+                DecisionInput.of(Map.of("txPerHour", 12, "country", "VN", "newDevice", true)));
+
+        assertThat(result.matchedRuleIds()).containsExactly("R1", "R3");
+        assertThat(JdbcClient.create(db).sql("SELECT outputs::text FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id")
+                .param("id", result.decisionId()).query(String.class).single())
+                .isEqualTo("{\"flags\": [\"HIGH_VELOCITY\", \"NEW_DEVICE\"], \"penalty\": 15}");
+    }
+
+    @Test
     void RLE_009_maker_checker_blocks_self_approval() {
         // Given
         engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()));
@@ -222,7 +263,7 @@ class RuleEnginePostgresIT {
         caller.as("bank-a", "teller-01");
 
         RuleEngines lenient = PostgresRuleEngines.create(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)),
-                caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), new EngineSettings(1000, java.time.Duration.ofHours(24), 34, false));
+                caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), EngineSettings.defaults().withRejectUndeclaredInputs(false));
         assertThatThrownBy(() -> engines.ruleEngine().evaluate("card-fee",
                 DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5, "nationalId", "079090001234"))))
                 .isInstanceOf(com.horus.bpm.rules.api.InputInvalidException.class);
@@ -248,6 +289,39 @@ class RuleEnginePostgresIT {
                 .query(String.class).single()).isEqualTo("R1,R2,R3");
     }
 
+    /** #233: the date is stored on the version row and left out of canonical_json, which still passes the hash check. */
+    @Test
+    void RLE_032_a_dated_version_keeps_its_date_on_the_row_and_out_of_the_canonical_hash() {
+        // Given card-fee imported with effectiveFrom 1 Dec 2026 (before the host clock), approved by a second person
+        byte[] dated = new String(cardFee(), StandardCharsets.UTF_8)
+                .replace("hitPolicy: first", "effectiveFrom: \"2026-12-01T00:00:00Z\"\nhitPolicy: first")
+                .getBytes(StandardCharsets.UTF_8);
+        caller.as("bank-a", "alice");
+        engines.versionService().importRuleSet(ImportRequest.yaml(dated));
+        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        caller.as("bank-a", "bob");
+        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+
+        // Then the row holds the date, canonical_json does not, and the hash is the undated card-fee hash
+        JdbcClient sql = JdbcClient.create(db);
+        assertThat(sql.sql("SELECT effective_from = TIMESTAMPTZ '2026-12-01T00:00:00Z' FROM rle_version WHERE tenant_id = 'bank-a'")
+                .query(Boolean.class).single()).isTrue();
+        assertThat(sql.sql("SELECT jsonb_exists(canonical_json, 'effectiveFrom') FROM rle_version WHERE tenant_id = 'bank-a'")
+                .query(Boolean.class).single()).isFalse();
+        assertThat(sql.sql("SELECT canonical_hash FROM rle_version WHERE tenant_id = 'bank-a'").query(String.class).single())
+                .isEqualTo(com.horus.bpm.rules.internal.json.Hashes.sha256(cardFeeCanonical()));
+        // and the version passes the load-time hash check (ADR-0026 decision 4) and is evaluated
+        caller.as("bank-a", "teller");
+        assertThat(engines.ruleEngine().evaluate("card-fee", DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5)))
+                .version()).isEqualTo(1);
+    }
+
+    /** The canonical form of card-fee.yaml, as the reader prints it. */
+    static String cardFeeCanonical() {
+        return com.horus.bpm.rules.internal.read.RuleSetReader.read(com.horus.bpm.rules.api.SourceFormat.YAML, cardFee())
+                .canonicalJson();
+    }
+
     @Test
     void TR_TEN_01_another_tenant_neither_sees_nor_evaluates_the_rule_set() {
         publishCardFee();
@@ -257,6 +331,29 @@ class RuleEnginePostgresIT {
         assertThatThrownBy(() -> engines.ruleEngine().evaluate("card-fee", DecisionInput.of(Map.of("tier", "GOLD"))))
                 .isInstanceOf(RuleSetNotFoundException.class);
         assertThat(decisionRows()).isZero();
+    }
+
+    /** #237 step 1: the outbox rows of request and approval carry the DESIGN 3.3 fields, through JSONB. */
+    @Test
+    void RLE_009_publication_events_carry_canonical_hash_effective_date_and_both_actors() {
+        caller.as("bank-a", "alice");
+        String hash = engines.versionService().importRuleSet(ImportRequest.yaml(cardFee())).canonicalHash();
+        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        caller.as("bank-a", "bob");
+        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+
+        JdbcClient sql = JdbcClient.create(db);
+        assertThat(sql.sql("""
+                SELECT payload->>'canonicalHash' || ' ' || (payload->>'requestedBy') || ' '
+                  || coalesce(payload->>'effectiveFrom', 'at-approval') || ' ' || jsonb_typeof(payload->'effectiveFrom')
+                FROM rle_decision_outbox WHERE tenant_id = 'bank-a'
+                  AND payload->>'eventType' = 'rules.version.publish-requested.v1'
+                """).query(String.class).single()).isEqualTo(hash + " alice at-approval null");
+        assertThat(sql.sql("""
+                SELECT payload->>'canonicalHash' || ' ' || (payload->>'effectiveFrom') || ' ' || (payload->>'requestedBy')
+                  || ' ' || (payload->>'approvedBy')
+                FROM rle_decision_outbox WHERE tenant_id = 'bank-a' AND payload->>'eventType' = 'rules.version.published.v1'
+                """).query(String.class).single()).isEqualTo(hash + " " + NOW + " alice bob");
     }
 
     private void publish(String resource, String name) {

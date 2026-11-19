@@ -19,7 +19,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param cache the compiled-version cache
  * @param idempotency idempotency records
  * @param evaluation limits on evaluation inputs
+ * @param query bounds of list reads
+ * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
+ * @param authoring how rule changes may be made on this host
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -28,7 +31,20 @@ public record RuleEngineProperties(
         @DefaultValue Cache cache,
         @DefaultValue Idempotency idempotency,
         @DefaultValue Evaluation evaluation,
-        @DefaultValue Security security) {
+        @DefaultValue Query query,
+        @DefaultValue Lifecycle lifecycle,
+        @DefaultValue Security security,
+        @DefaultValue Authoring authoring) {
+
+    /**
+     * How rule changes may be made on this host (PD-075, PD-094).
+     *
+     * @param cockpitDrafts whether the cockpit may create and edit drafts; default false (PD-094). Published to
+     *     clients as the rules setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta}. Import from a
+     *     file is not affected
+     */
+    public record Authoring(Boolean cockpitDrafts) {
+    }
 
     /**
      * The compiled-version cache.
@@ -53,8 +69,30 @@ public record RuleEngineProperties(
      *     never raised
      * @param rejectUndeclaredInputs refuse input names the rule set does not declare; default true. When false,
      *     undeclared inputs are ignored and never logged
+     * @param maxOutputBytes estimated JSON size of one decision's outputs, 1 to 1048576; default 1048576. Lower only
+     * @param maxStringLength longest string input or string built by {@code +}, 1 to 65536; default 65536. Lower only
+     * @param maxRows most rules a version may contain, checked at import, 1 to 5000; default 5000. Lower only
      */
-    public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs) {
+    public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
+            Integer maxStringLength, Integer maxRows) {
+    }
+
+    /**
+     * Bounds of list reads (ADR-0015).
+     *
+     * @param maxPageSize the largest {@code limit} of {@code GET /rule-sets} and {@code GET .../versions}, 1 to 200;
+     *     default 200. May be lowered, never raised
+     */
+    public record Query(Integer maxPageSize) {
+    }
+
+    /**
+     * Version lifecycle commands.
+     *
+     * @param reasonMaxLength the longest reason of {@code :reject}, in characters, 1 to 2000; default 2000. May be
+     *     lowered, never raised
+     */
+    public record Lifecycle(Integer reasonMaxLength) {
     }
 
     /**
@@ -68,7 +106,12 @@ public record RuleEngineProperties(
                 idempotency.retention() == null ? EngineDefaults.IDEMPOTENCY_RETENTION : idempotency.retention(),
                 evaluation.maxInputScale() == null ? EngineDefaults.INPUT_MAX_SCALE : evaluation.maxInputScale(),
                 evaluation.rejectUndeclaredInputs() == null
-                        ? EngineDefaults.REJECT_UNDECLARED_INPUTS : evaluation.rejectUndeclaredInputs());
+                        ? EngineDefaults.REJECT_UNDECLARED_INPUTS : evaluation.rejectUndeclaredInputs(),
+                query.maxPageSize() == null ? EngineDefaults.QUERY_MAX_PAGE_SIZE : query.maxPageSize(),
+                lifecycle.reasonMaxLength() == null ? EngineDefaults.REASON_MAX_LENGTH : lifecycle.reasonMaxLength(),
+                evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
+                evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
+                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows());
     }
 
     /**

@@ -1,6 +1,6 @@
 # ADR-0017: Full BPMN 2.0 and DMN support on the roadmap, no CMMN
 
-- Status: accepted
+- Status: accepted; decision 3 amended 2026-11-19 by PD-084 and PD-085
 - Date: 2026-11-18
 - Deciders: product owner (decision of 2026-11-18), maintainers
 - Module: project
@@ -15,6 +15,7 @@ On 2026-11-18 the product owner decided: CMMN is out of scope; BPMN 2.0 and DMN 
 1. **Target.** BPMN 2.0.2 Process Modeling Conformance (import, display and export of the complete process and collaboration element set) and Process Execution Conformance, and DMN 1.5 (the latest formal OMG version at the time of writing; later versions tracked) Conformance Level 3, each with the published deviations of [`standards-compliance.md`](../architecture/standards-compliance.md) section 12.
 2. **No CMMN.** CMMN documents are refused with `422 CMMN_UNSUPPORTED`; no case-management concept enters the model.
 3. **Staging.** M1 and M2 do not ship full support; M3 keeps the ADR-0013 subset and the DMN decision-table import. Full support arrives in stages S1 (1.1), S2 (1.2) and S3 (1.3), each additive for the Java API, REST and definition formats.
+   **Amended 2026-11-19.** The first release, 0.1.0, carries a first subset early: BPMN 2.0 XML import of `startEvent`, `serviceTask`, `businessRuleTask`, `userTask`, `exclusiveGateway` and `endEvent`, and DMN 1.5 decision table import and export with a FEEL subset; everything else is refused by name ([PD-084](../product/decisions.md#pd-084-first-bpmn-and-dmn-subset-in-the-first-release)). Full support is a target for Sun 22 Nov 2026, measured by the DMN TCK, BPMN MIWG and executable-suite pass rates published daily, and not a claim ([PD-085](../product/decisions.md#pd-085-target-full-bpmn-20-and-dmn-by-sun-22-nov-2026)). Stages S1 to S3 remain the order of work and the content of each conformance step; a stage is announced only when its suites pass (`TR-STD-05`). Decisions 1, 2, 4, 5 and 6 are unchanged.
 4. **Foundations now.** The M1 and M2 designs take the "do now" changes of `standards-compliance.md` section 9.1. The larger changes in section 9.2 are decisions for the product owner; on 2026-11-19 the product owner accepted ADR-0018 (canonical model), ADR-0019 (FEEL) and ADR-0020 (execution tree), and FEEL null semantics from M1 (PD-058).
 5. **Principles.** The standards are implemented inside the principles: libraries in the host JVM, host-owned data, determinism, no code in definitions, Async Wait-State for every network call, maker-checker. Script tasks run only FEEL or our expression language; service tasks bind only to registered handlers; message correlation and signals are in-process, in-transaction APIs and the host owns every transport.
 6. **Diagram library unchanged.** bpmn-js and diagram-js stay excluded, now for the licence reason only (`TR-LIC-01`).
@@ -33,3 +34,7 @@ Proposed wording for principle 9, for the documentation owner: "BPMN 2.0 and DMN
 - Principle 9, the vision non-goal and the process, rule and cockpit PRD non-goals change wording (documentation owner and product manager); a decision log entry records this decision (product manager).
 - New requirements `TR-STD-*` in [`requirements.md`](../product/requirements.md); [`overview.md`](../architecture/overview.md) non-goals change; module DESIGN and SPEC documents carry the applied do-now items, milestone-tagged.
 - New error codes listed in `standards-compliance.md` section 13.4 for the error-code page when their stage is designed.
+
+## History
+- 2026-11-18: accepted (product owner decision of 2026-11-18).
+- 2026-11-19: decision 3 amended by PD-084 (first subset in 0.1.0) and PD-085 (full support targeted for 22 Nov 2026, measured by pass rates). The DMN TCK test cases are allowed as build-time test data by PD-086 (`TR-LIC-01`).

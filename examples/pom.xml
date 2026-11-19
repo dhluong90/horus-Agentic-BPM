@@ -26,5 +26,6 @@
 
   <modules>
     <module>rule-engine-only</module>
+    <module>rule-and-process</module>
   </modules>
 </project>

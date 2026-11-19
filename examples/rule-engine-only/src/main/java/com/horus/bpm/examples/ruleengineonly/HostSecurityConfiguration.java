@@ -37,7 +37,8 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
  * The host's own security, in one chain. The engines and the cockpit add no authentication of their own.
  *
  * <ul>
- *   <li><b>Session sign-in</b> with the host's form ({@code /login}). The embedded cockpit and the engine
+ *   <li><b>Session sign-in</b> with the host's form ({@code /login}, the branded page of
+ *       {@link SignInConfiguration}). The embedded cockpit and the engine
  *       endpoints use the same session. CSRF protection stays on for every state-changing call made with
  *       the session; the token is in the {@code XSRF-TOKEN} cookie for the cockpit to send back as
  *       {@code X-XSRF-TOKEN}.
@@ -63,6 +64,14 @@ class HostSecurityConfiguration {
 
     static final String DEV_PROFILE = "dev";
 
+    /** The demo users of the {@code dev} profile and their roles; the sign-in page lists the names, never a password. */
+    static final List<SignInPage.DemoUser> DEMO_USERS = List.of(
+            new SignInPage.DemoUser("lan", List.of("PRICING_AUTHOR")),
+            new SignInPage.DemoUser("minh", List.of("PRICING_APPROVER")),
+            // hoa may author and approve, so four eyes is visible; tuan prices.
+            new SignInPage.DemoUser("hoa", List.of("PRICING_AUTHOR", "PRICING_APPROVER")),
+            new SignInPage.DemoUser("tuan", List.of("TELLER")));
+
     private static final Log LOG = LogFactory.getLog(HostSecurityConfiguration.class);
     private static final String JWT = "spring.security.oauth2.resourceserver.jwt.";
 
@@ -73,8 +82,12 @@ class HostSecurityConfiguration {
         BpmProblemAuthenticationEntryPoint problemEntryPoint = new BpmProblemAuthenticationEntryPoint();
         http.authorizeHttpRequests(requests -> requests
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        // The sign-in page with any query (?lang=vi, ?error, ?logout), and its own styles and script.
+                        // Form login's permitAll() matches its URLs exactly, query included, so /login?lang=vi needs this.
+                        .requestMatchers("/login", "/sign-in/**").permitAll()
                         .anyRequest().authenticated())
-                .formLogin(Customizer.withDefaults())
+                // The host's branded page at GET /login; Spring Security keeps processing POST /login.
+                .formLogin(form -> form.loginPage("/login").permitAll())
                 .logout(Customizer.withDefaults())
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
@@ -144,11 +157,12 @@ class HostSecurityConfiguration {
         } else {
             PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
             String encoded = encoder.encode(password);
-            users.add(User.withUsername("lan").password(encoded).roles("PRICING_AUTHOR").build());
-            users.add(User.withUsername("minh").password(encoded).roles("PRICING_APPROVER").build());
-            // The walkthrough of the README: hoa may author and approve, so four eyes is visible; tuan prices.
-            users.add(User.withUsername("hoa").password(encoded).roles("PRICING_AUTHOR", "PRICING_APPROVER").build());
-            users.add(User.withUsername("tuan").password(encoded).roles("TELLER").build());
+            for (SignInPage.DemoUser user : DEMO_USERS) {
+                users.add(User.withUsername(user.username()).password(encoded).roles(user.roles().toArray(String[]::new)).build());
+            }
+            LOG.warn("Demo users are on (dev profile): " + users.stream().map(UserDetails::getUsername).toList()
+                    + " share one password and may sign in with HTTP Basic. "
+                    + "Local evaluation only, never a shared or production environment.");
         }
         return new InMemoryUserDetailsManager(users);
     }

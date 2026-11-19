@@ -35,6 +35,9 @@ jobs:
       - name: Spec-to-test gate
         run: python3 tools/spec-coverage.py
 
+      - name: Tests of the Maven retry script (stub mvn, no network)
+        run: tools/test-mvn-retry.sh
+
   verify:
     # TR-EMB-02: the supported matrix (ADR-0011). Each Java version runs on both Spring Boot lines and
     # each Spring Boot line on both PostgreSQL versions (14 and the newest release), pairwise; Spring
@@ -66,7 +69,26 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
-          cache: maven
+
+      # Maven repository cache (#171). Exact key: this leg's Spring Boot line and every pom.xml. When the
+      # POMs changed, restore-keys fall back to the newest cache of the same line, then of any line; a
+      # pull request can restore caches saved on main, so a branch never starts from an empty repository.
+      # The last prefix reads the caches setup-java saved on main before this change.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Written as setup-java writes it (os.homedir() on the hosted runner), so the caches setup-java
+          # saved on main have the same cache version and match the last restore key.
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-boot-${{ matrix.boot }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-boot-${{ matrix.boot }}-
+            maven-${{ runner.os }}-
+            setup-java-${{ runner.os }}-x64-maven-
+
+      # A restored cache can hold *.lastUpdated markers of a download that failed in an earlier run; Maven
+      # then reports the artifact "(absent)" without asking Central again (#171). Ask again.
+      - name: Drop remembered download failures from the Maven cache
+        run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
 
       # The cockpit starter packages cockpit/web/dist; every leg builds the starter, and the example host's cockpit test needs it.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -83,20 +105,20 @@ jobs:
 
       - name: Build, unit and ArchUnit tests, Testcontainers integration tests (Spring Boot 4.x)
         if: matrix.boot == '4.x'
-        run: mvn -B -ntp verify -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
+        run: tools/mvn-retry.sh -B -ntp verify -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
 
       - name: Build the engine on the Spring Boot 4.x baseline, tests compiled but not run
         if: matrix.boot != '4.x'
-        run: mvn -B -ntp install -DskipTests
+        run: tools/mvn-retry.sh -B -ntp install -DskipTests
 
       # The dependency bans and convergence rules, evaluated against this line's dependency tree.
       - name: Enforcer rules on the Spring Boot ${{ matrix.boot }} dependency tree
         if: matrix.boot != '4.x'
         run: |
-          mvn -B -ntp -Dspring-boot.line="$LINE" -pl "!bpm-bom" enforcer:enforce@enforce-build-baseline
-          mvn -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core,rule-engine/rule-engine-postgres \
+          tools/mvn-retry.sh -B -ntp -Dspring-boot.line="$LINE" -pl "!bpm-bom" enforcer:enforce@enforce-build-baseline
+          tools/mvn-retry.sh -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core,rule-engine/rule-engine-postgres \
             enforcer:enforce@enforce-no-network-client
-          mvn -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core \
+          tools/mvn-retry.sh -B -ntp -Dspring-boot.line="$LINE" -pl rule-engine/rule-engine-core \
             enforcer:enforce@enforce-framework-free-core
         env:
           LINE: ${{ matrix.boot == '3.5.x' && '3.5' || '4.0' }}
@@ -104,7 +126,7 @@ jobs:
       - name: Run the same tests on Spring Boot ${{ matrix.boot }}
         if: matrix.boot != '4.x'
         run: >-
-          mvn -B -ntp -Dspring-boot.line="$LINE" -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
+          tools/mvn-retry.sh -B -ntp -Dspring-boot.line="$LINE" -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
           surefire:test failsafe:integration-test failsafe:verify
         env:
           LINE: ${{ matrix.boot == '3.5.x' && '3.5' || '4.0' }}
@@ -112,11 +134,24 @@ jobs:
       - name: Jackson 3 resolves beside the host's own Jackson 2 (TR-EMB-07, PD-071)
         if: matrix.boot == '3.5.x'
         run: |
-          mvn -B -ntp -q -Dspring-boot.line=3.5 -pl examples/rule-engine-only \
+          tools/mvn-retry.sh -B -ntp -q -Dspring-boot.line=3.5 -pl examples/rule-engine-only \
             org.apache.maven.plugins:maven-dependency-plugin:3.11.0:tree \
             -Dincludes=com.fasterxml.jackson.core,tools.jackson.core -DoutputFile=target/jackson-tree.txt
           python3 tools/check-jackson-coexistence.py examples/rule-engine-only/target/jackson-tree.txt \
-            "$(mvn -B -ntp -q help:evaluate -Dexpression=settings.localRepository -DforceStdout)"
+            "$(tools/mvn-retry.sh -B -ntp -q help:evaluate -Dexpression=settings.localRepository -DforceStdout | tail -n 1)"
+
+      - name: Name Maven Central downloads that failed
+        if: failure()
+        run: |
+          failed="$(find ~/.m2/repository -name '*.lastUpdated' 2>/dev/null | sed -E 's#.*/\.m2/repository/##; s#\.lastUpdated$##' | sort)"
+          if [[ -n "$failed" ]]; then
+            echo "::error title=Maven Central download failed::These artifacts could not be downloaded from Maven Central after retries (#171): $(echo $failed | tr '\n' ' ')"
+            printf '%s\n' "$failed"
+          else
+            echo "No failed Maven Central download recorded; the failure has another cause."
+          fi
+          # Never save a remembered failure into the cache.
+          find ~/.m2/repository -name '*.lastUpdated' -delete 2>/dev/null || true
 
       - name: Upload test reports
         if: always()
@@ -133,7 +168,7 @@ jobs:
   dependency-gates:
     # TR-SEC-06, TR-LIC-01 and TR-LIC-02: policy checks, licence gate, SBOMs, licence notices in jars
     # and vulnerability scans. Tests run in the verify job; this job builds without them so both
-    # finish in parallel. Maven runs with --strict-checksums (.mvn/maven.config).
+    # finish in parallel. Maven runs with --strict-checksums and download retries (.mvn/maven.config).
     name: Dependency licences, SBOM and vulnerabilities
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -150,7 +185,24 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: maven
+
+      # Maven repository cache (#171), as in the verify job: exact key, then the newest cache of this job,
+      # then of any job, including those saved on main.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Written as setup-java writes it (os.homedir() on the hosted runner), so the caches setup-java
+          # saved on main have the same cache version and match the last restore key.
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-gates-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-gates-
+            maven-${{ runner.os }}-
+            setup-java-${{ runner.os }}-x64-maven-
+
+      # A restored cache can hold *.lastUpdated markers of a download that failed in an earlier run; Maven
+      # then reports the artifact "(absent)" without asking Central again (#171). Ask again.
+      - name: Drop remembered download failures from the Maven cache
+        run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
 
       - name: Gate settings only in the root POM; Grype config lint
         run: |
@@ -171,7 +223,7 @@ jobs:
           npm run build
 
       - name: Licence gate (TR-LIC-01) and CycloneDX SBOMs (TR-SEC-06)
-        run: mvn -B -ntp verify -DskipTests
+        run: tools/mvn-retry.sh -B -ntp verify -DskipTests
 
       - name: Licence files and manifest entries in every engine jar (TR-LIC-02)
         if: ${{ !cancelled() && hashFiles('target/bom.json') != '' }}
@@ -180,7 +232,7 @@ jobs:
       - name: Add annotation processors to the build SBOM
         if: ${{ !cancelled() && hashFiles('target/bom-build.json') != '' }}
         run: |
-          mvn -B -ntp -q org.apache.maven.plugins:maven-help-plugin:3.6.0:effective-pom -Doutput=target/effective-pom.xml
+          tools/mvn-retry.sh -B -ntp -q org.apache.maven.plugins:maven-help-plugin:3.6.0:effective-pom -Doutput=target/effective-pom.xml
           python3 tools/check-dependency-policy.py add-processors
 
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
@@ -215,6 +267,19 @@ jobs:
         if: ${{ !cancelled() && env.GRYPE != '' }}
         run: tools/scan-dependencies.sh --build
 
+      - name: Name Maven Central downloads that failed
+        if: failure()
+        run: |
+          failed="$(find ~/.m2/repository -name '*.lastUpdated' 2>/dev/null | sed -E 's#.*/\.m2/repository/##; s#\.lastUpdated$##' | sort)"
+          if [[ -n "$failed" ]]; then
+            echo "::error title=Maven Central download failed::These artifacts could not be downloaded from Maven Central after retries (#171): $(echo $failed | tr '\n' ' ')"
+            printf '%s\n' "$failed"
+          else
+            echo "No failed Maven Central download recorded; the failure has another cause."
+          fi
+          # Never save a remembered failure into the cache.
+          find ~/.m2/repository -name '*.lastUpdated' -delete 2>/dev/null || true
+
       - name: Upload SBOMs and scan reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -231,21 +296,42 @@ jobs:
 
   cockpit:
     # The cockpit web application: licences of shipped packages, generated schemas, lint, types,
-    # Vitest, then Playwright on the bundled Chromium against the production build.
+    # Vitest, then Playwright on the Chromium of the Playwright image against the production build.
     name: Cockpit (lint, typecheck, Vitest, Playwright)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Chromium and the system libraries it needs come with Playwright's own image, pinned by digest, so
+    # no apt download is on this job's critical path (an Ubuntu mirror outage failed every run). The tag
+    # is the @playwright/test version in cockpit/web/package-lock.json; the first step below reads the tag
+    # from this file and checks it. Update the tag and the digest together with the lockfile.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+      options: --ipc=host
     defaults:
       run:
         working-directory: cockpit/web
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          # npm install scripts run in this job; keep the token out of .git/config.
+          persist-credentials: false
 
+      # The exact Node of the release bundle build (tools/release/build-cockpit.sh), so the tests run on it.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: tools/release/node-version
           cache: npm
           cache-dependency-path: cockpit/web/package-lock.json
+
+      - name: The Playwright image matches the lockfile
+        run: |
+          image="$(sed -nE 's#^ +image: mcr\.microsoft\.com/playwright:v([0-9]+\.[0-9]+\.[0-9]+)-.*#\1#p' ../../.github/workflows/ci.yml)"
+          locked="$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")"
+          if [ -z "$image" ] || [ "$locked" != "$image" ]; then
+            echo "::error title=Playwright image out of date::package-lock.json has @playwright/test $locked, the job image in ci.yml is '${image}'. Update the image tag and digest in ci.yml."
+            exit 1
+          fi
+          echo "@playwright/test $locked, image $image, Node $(node --version): browsers come from the image."
 
       - name: Install
         run: npm ci
@@ -264,9 +350,6 @@ jobs:
 
       - name: Vitest
         run: npm test
-
-      - name: Install the bundled Chromium
-        run: npx playwright install --with-deps chromium
 
       - name: Playwright (production build, 1440x900 and 1440x1200, light and dark, English and Vietnamese)
         run: npm run e2e

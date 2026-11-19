@@ -22,7 +22,7 @@ Reference for the libraries and tools the project uses, what each one is for, an
 | Observability | Micrometer; OpenTelemetry API optional | Apache 2.0 | Vendor SDKs |
 | Scheduling | Database timers and jobs with `SKIP LOCKED` leases, one scheduler thread per host replica | | Quartz: own tables and clustering; brokers: a new dependency |
 | Cache coherence | PostgreSQL `LISTEN/NOTIFY` plus a `cache_epoch` sweep (ADR-0009) | | Broker topic: new infrastructure; TTL only: stale for the whole TTL |
-| Testing | JUnit 5, AssertJ, Testcontainers (PostgreSQL, PgBouncer), jqwik, ArchUnit, JMH | EPL 2.0 (JUnit), Apache 2.0, MIT | Mockito for the evaluator: pure functions need no mocks. Test-scope licences do not ship |
+| Testing | JUnit 5, AssertJ, Testcontainers (PostgreSQL, PgBouncer), ArchUnit, JMH; property tests with a seeded generator in the project's test sources, each failure printing its seed | EPL 2.0 (JUnit), Apache 2.0, MIT | Mockito for the evaluator: pure functions need no mocks. Test-scope licences do not ship |
 | Build and supply chain | Maven reactors plus `bpm-bom`; Error Prone, Checkstyle, SpotBugs, Dependency-Check, CycloneDX SBOM, licence allowlist | | Gradle: fine, Maven's rigidity suits a library |
 
 New runtime dependencies need a one-paragraph justification in the pull request and a permissive licence (`TR-LIC-01`).
@@ -41,7 +41,7 @@ New runtime dependencies need a one-paragraph justification in the pull request 
 | Area | Choice |
 |---|---|
 | CI | GitHub Actions: Java 21/25 x PostgreSQL 14/16/17, one job through PgBouncer in transaction mode, ArchUnit, benchmark trend, SBOM, licence check, wiki publish |
-| Versioning | Semver per module; tags `<module>/vX.Y.Z`; `bpm-bom` with every release |
+| Versioning | One project-wide semantic version for every module (PD-087); tags `vX.Y.Z`; `bpm-bom` with every release |
 | Distribution | Maven Central via the Sonatype Central Portal, `groupId` `io.github.dhluong90.bpm` (ADR-0022) |
 
 ## Open decisions

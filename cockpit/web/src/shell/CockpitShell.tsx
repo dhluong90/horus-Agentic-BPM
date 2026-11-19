@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
 import { hostLabel } from '../app/config/registry';
 import { useHostSession, type SessionDependencies, type SessionState } from '../app/session/useHostSession';
-import { ServiceOverview } from '../components/ServiceOverview';
-import { SessionHeader, type SessionSummary } from '../components/SessionHeader';
+import { capabilities, SessionHeader, type SessionSummary } from '../components/SessionHeader';
 import { ConfigErrorPanel, HostErrorPanel, LoadingPanel } from '../components/StatePanels';
 import { useI18n, type Locale } from '../i18n/I18nProvider';
+import { AppFrame } from './AppFrame';
+import { Breadcrumb } from './Breadcrumb';
 
 function summary(state: SessionState, locale: Locale): SessionSummary | undefined {
   if (state.status !== 'ready') return undefined;
@@ -15,10 +16,13 @@ function summary(state: SessionState, locale: Locale): SessionSummary | undefine
     tenant: state.me.tenant.current,
     userName: state.me.user.displayName ?? state.me.user.id,
     userId: state.me.user.id,
+    capabilities: capabilities(state.me.permissions),
+    baseUrl: state.host.baseUrl,
   };
 }
 
-function MainContent({ state }: { state: SessionState }) {
+/** Loading and error states fill the page; the menu appears once the host has said who the user is. */
+function StatePanel({ state }: { state: Exclude<SessionState, { status: 'ready' }> }) {
   switch (state.status) {
     case 'loading':
       return <LoadingPanel />;
@@ -26,8 +30,6 @@ function MainContent({ state }: { state: SessionState }) {
       return <ConfigErrorPanel problem={state.problem} />;
     case 'host-error':
       return <HostErrorPanel error={state.error} onRetry={state.retry} />;
-    case 'ready':
-      return <ServiceOverview meta={state.meta} me={state.me} />;
   }
 }
 
@@ -44,10 +46,14 @@ export function CockpitShell(dependencies: SessionDependencies) {
 
   return (
     <div className="app">
-      <SessionHeader session={summary(state, locale)} banner={registry?.ui?.environmentBanner} />
-      <main id="main" className="main" tabIndex={-1}>
-        <MainContent state={state} />
-      </main>
+      <SessionHeader session={summary(state, locale)} banner={registry?.ui?.environmentBanner} breadcrumb={state.status === 'ready' ? <Breadcrumb /> : undefined} />
+      {state.status === 'ready' ? (
+        <AppFrame host={state.host} meta={state.meta} me={state.me} fetchImpl={dependencies.fetchImpl} />
+      ) : (
+        <main id="main" className="main" tabIndex={-1}>
+          <StatePanel state={state} />
+        </main>
+      )}
     </div>
   );
 }

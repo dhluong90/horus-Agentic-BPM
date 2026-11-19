@@ -21,7 +21,7 @@ effectiveFrom: 2026-12-01T00:00:00+07:00   # optional ISO instant; otherwise eff
 | Policy | Behaviour | Use it for |
 |---|---|---|
 | `first` | Rows are checked top to bottom; the first match wins | Eligibility, routing, tiered fees with a default row |
-| `unique` | Exactly one row must match; zero or several matches fail the decision with `UNIQUE_HIT_VIOLATION` | Pricing tables that must be complete and non-overlapping |
+| `unique` | At most one row may match; several matches fail the decision with `UNIQUE_HIT_VIOLATION`; zero matches is no match, as with `first` | Pricing tables that must be complete and non-overlapping |
 | `collect` | Every matching row contributes; each output becomes a list or an aggregate (`collect: sum`, `min`, `max`, `count`) | Accumulating fees, collecting reason codes or risk flags |
 
 ## 2. Declare inputs and outputs
@@ -102,6 +102,19 @@ outputs:
 
 With rows R1 (`penalty: 10`) and R3 (`penalty: 5`) both matching, `penalty` is `15` and `flags` lists both rows' values in row order.
 
+| Output under `collect` | Declared type | Result |
+|---|---|---|
+| No `collect:` | `list<T>`; each row gives one `T` | The matched rows' values in row order |
+| `collect: sum` | `integer`, `decimal` or `money` | The exact sum. Money must be in one currency; a number sum that needs more than 34 significant digits fails. Either failure is `EVALUATION_ERROR` |
+| `collect: min`, `collect: max` | Any scalar type except `boolean` | The smallest or largest value; strings in Unicode code point order, as `<` |
+| `collect: count` | `integer` | How many rules matched, `null` values included |
+
+A list keeps one entry per matched rule, `null` included, so parallel lists line up with each other and with `matchedRuleIds`. `count` counts every matched rule, `null` values included, as FEEL `count` does. A `null` value under `sum`, `min` or `max` fails the decision with `EVALUATION_ERROR` naming the output and the rule (a v1 rule set evaluates in strict mode), so give every row a value for those outputs, for example `0`. Aggregates are over all matched values, not distinct ones. When no row matches, every output is `null`, lists and `count` included. `collect:` on an output of a `first` or `unique` table, a list output outside `collect`, or a type that does not fit the aggregate is refused at import with `422 VALIDATION_FAILED`.
+
+### Exactly one row with `unique`
+
+Under `unique`, several matching rows fail the decision with `422 UNIQUE_HIT_VIOLATION`: no outputs are returned, and the decision row records that outcome and the matched rule ids. Zero matches is no match, as with `first`: every output is `null` and the decision is logged as `OK` with no matched rules (DMN 1.5). Add a catch-all row if no match must be handled differently. A pricing table where two rows overlap fails loudly instead of quietly charging the first row's price. The example [`loan-pricing.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-engine-only/src/main/resources/rules/loan-pricing.yaml) overlaps on purpose.
+
 ## 4. Validate
 
 Validation runs on every save and on every publication request. It reports each problem with the row id.
@@ -132,6 +145,6 @@ Endpoint details, headers and error codes are in [[Rule Engine Decision API]].
 |---|---|---|
 | `422 VALIDATION_FAILED` at row `R2`, "unknown identifier" | A condition refers to an input that is not declared | Add the input in `inputs` or fix the spelling |
 | `422 VALIDATION_FAILED`, "money + integer" | Arithmetic mixes money and a plain number | Multiply money by a number (`balance * 0.01`) or add money to money of the same currency |
-| `422 UNIQUE_HIT_VIOLATION` at run time | A `unique` table had zero or several matches for real inputs | Add the missing row, or switch to `first` with a default row if order is intended |
+| `422 UNIQUE_HIT_VIOLATION` at run time | A `unique` table had several matches for real inputs | Remove the overlap, or switch to `first` if order is intended |
 | Default row never matches | It is not the last row under `first` | Move `when: {}` to the end |
 | Validation warns about an unreachable row | An earlier row under `first` already covers it | Delete the row or reorder |

@@ -1,0 +1,25 @@
+# Card fraud flags where every matching row contributes (RLE-003).
+schemaVersion: 1
+ruleSet: risk-flags
+description: Fraud flags and a penalty score per card transaction
+hitPolicy: collect
+
+inputs:
+  - { name: txPerHour, type: integer }
+  - { name: country,   type: string }
+  - { name: newDevice, type: boolean }
+
+outputs:
+  - { name: flags,   type: list<string> }               # every matched row's flag, in row order
+  - { name: penalty, type: integer, collect: sum }      # the sum of the matched rows' penalties
+
+rules:
+  - id: R1
+    when: { txPerHour: ">= 10" }
+    then: { flags: "'HIGH_VELOCITY'", penalty: 10 }
+  - id: R2
+    when: { country: "not in ['VN']" }
+    then: { flags: "'FOREIGN_COUNTRY'", penalty: 20 }
+  - id: R3
+    when: { newDevice: "== true" }
+    then: { flags: "'NEW_DEVICE'", penalty: 5 }

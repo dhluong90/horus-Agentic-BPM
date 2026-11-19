@@ -1,0 +1,14 @@
+{
+  "name": "@horus-bpm/release-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Release build tools, installed from package-lock.json with npm ci --ignore-scripts and run with npm exec --offline. Never shipped.",
+  "license": "SEE LICENSE IN ../../../LICENSE",
+  "devDependencies": {
+    "@cyclonedx/cyclonedx-npm": "7.0.1",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "ajv-formats-draft2019": "1.6.1",
+    "lockfile-lint": "5.1.0"
+  }
+}

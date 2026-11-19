@@ -5,6 +5,7 @@ import { applyTheme, initialTheme } from './preferences/theme';
 import './components/tokens.css';
 import './components/base.css';
 import './components/shell.css';
+import './components/rules.css';
 
 applyTheme(initialTheme());
 
