@@ -117,6 +117,19 @@ Option B wins because full BPMN means the model must be able to hold every eleme
 
 A rule set is a DMN `definitions` named after the rule set, holding one `decision` with a `decisionTable`, one `inputData` per declared input, and an `itemDefinition` per declared type. Hit policies map `first` to `F`, `unique` to `U`, `collect` to `C` with the aggregator. The v1 per-output aggregate (`collect: sum` on one output and a plain list on another) has no single-table DMN form; DMN export writes an inner `C` table and an outer literal decision with a FEEL projection (`sum(for r in table return r.penalty)`), so the exported model evaluates to the same outputs.
 
+Hit policy behaviour follows DMN 1.5 (PD-088):
+
+| Case | Result |
+|---|---|
+| `unique`, no match | `NO_MATCH` with no outputs, as `first`; the decision row records `NO_MATCH` |
+| `unique`, several matches | `UNIQUE_HIT_VIOLATION`: no outputs, every matched rule id logged |
+| `collect` list output (no aggregator) | One entry per matched rule in `matchedRuleIds` order, `null` included, so lists stay aligned |
+| `collect` with `sum`, `min`, `max` | Null values are skipped; null when every value is null or no rule matched |
+| `collect` with `count` | Counts the non-null values; `0` when every value is null, null when no rule matched |
+| `collect`, no match | `NO_MATCH`, with an empty list per list output and null per aggregate |
+| `sum` of numbers | Exact; a sum that needs more than 34 significant digits is `EVALUATION_ERROR`, never rounded |
+| `min`, `max` of strings | Unicode code point order, the order of `<` |
+
 ## 4. Expression strategy: FEEL
 
 ### 4.1 Decision

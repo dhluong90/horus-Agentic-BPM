@@ -213,8 +213,13 @@ class RuleLifecycleIT {
         assertThat(overlap.json().path("code").asString()).isEqualTo("UNIQUE_HIT_VIOLATION");
         assertThat(overlap.json().path("matchedRuleIds").toString()).isEqualTo("[\"R1\",\"R2\"]");
         assertThat(overlap.json().has("outputs")).isFalse();
-        assertThat(none.status()).isEqualTo(422);
+        // Zero matches is NO_MATCH with no outputs, as under first (PD-088)
+        assertThat(none.status()).isEqualTo(200);
+        assertThat(none.json().path("outcome").asString()).isEqualTo("NO_MATCH");
         assertThat(none.json().path("matchedRuleIds").toString()).isEqualTo("[]");
+        assertThat(jdbc.sql("SELECT outcome FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id")
+                .param("id", none.json().path("decisionId").asString()).query(String.class).single())
+                .isEqualTo("NO_MATCH");
         assertThat(jdbc.sql("SELECT outcome FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id")
                 .param("id", overlap.json().path("decisionId").asString()).query(String.class).single())
                 .isEqualTo("UNIQUE_HIT_VIOLATION");

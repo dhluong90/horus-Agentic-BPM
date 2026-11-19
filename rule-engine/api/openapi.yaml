@@ -171,7 +171,7 @@ paths:
       description: |
         Permission `rules:evaluate`. Writes exactly one `rle_decision` row in the request's
         transaction. A failed evaluation (`EVALUATION_ERROR`, or `UNIQUE_HIT_VIOLATION` when a
-        `unique` table matches zero or several rules) is logged and answered `422` with the
+        `unique` table matches several rules; no match is outcome `NO_MATCH`) is logged and answered `422` with the
         `decisionId` and `matchedRuleIds`, never with partial outputs. Members other than `inputs` are ignored, including `tenantId`.
       parameters:
         - name: ruleSet
@@ -399,4 +399,4 @@ components:
         matchedRuleIds:
           type: array
           items: { type: string }
-          description: On `UNIQUE_HIT_VIOLATION`, every matched rule (empty for zero matches); empty on `EVALUATION_ERROR`
+          description: On `UNIQUE_HIT_VIOLATION`, every matched rule (two or more); empty on `EVALUATION_ERROR`

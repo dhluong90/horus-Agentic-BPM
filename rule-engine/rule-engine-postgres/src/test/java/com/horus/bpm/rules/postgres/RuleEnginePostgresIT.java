@@ -190,10 +190,14 @@ class RuleEnginePostgresIT {
         assertThat(none.outputs()).isEmpty();
         assertThat(JdbcClient.create(db).sql("""
                 SELECT outcome || ' ' || error_code || ' ' || matched_rule_ids::text || ' ' || COALESCE(outputs::text, 'no-outputs')
-                FROM rle_decision WHERE tenant_id = 'bank-a' AND rule_set_name = 'loan-pricing'
+                FROM rle_decision WHERE tenant_id = 'bank-a' AND rule_set_name = 'loan-pricing' AND error_code IS NOT NULL
                 """).query(String.class).list())
-                .containsExactlyInAnyOrder("UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [\"R1\", \"R2\"] no-outputs",
-                        "UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [] no-outputs");
+                .containsExactlyInAnyOrder("UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [\"R1\", \"R2\"] no-outputs");
+        // Zero matches is NO_MATCH (PD-088); V3 allows that outcome in rle_decision
+        assertThat(JdbcClient.create(db).sql("""
+                SELECT outcome || ' ' || matched_rule_ids::text FROM rle_decision
+                WHERE tenant_id = 'bank-a' AND rule_set_name = 'loan-pricing' AND error_code IS NULL
+                """).query(String.class).single()).isEqualTo("NO_MATCH []");
     }
 
     @Test

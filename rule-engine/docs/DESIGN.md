@@ -429,7 +429,7 @@ CREATE TABLE rle_decision (
   rule_set_name    TEXT        NOT NULL,
   version_num      INT         NOT NULL,
   hit_policy       TEXT        NOT NULL,
-  outcome          TEXT        NOT NULL CHECK (outcome IN ('OK','UNIQUE_HIT_VIOLATION','EVALUATION_ERROR')),  -- OK with no matched rule is NoMatch,
+  outcome          TEXT        NOT NULL CHECK (outcome IN ('OK','NO_MATCH','UNIQUE_HIT_VIOLATION','EVALUATION_ERROR')),  -- NO_MATCH from V3 (PD-088),
   error_code       TEXT,
   masked_inputs    JSONB       NOT NULL,        -- inputs with mask=true stored as keyed HMAC-SHA256
   outputs          JSONB,

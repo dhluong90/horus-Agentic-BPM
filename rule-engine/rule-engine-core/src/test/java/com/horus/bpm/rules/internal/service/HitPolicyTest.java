@@ -54,13 +54,14 @@ class HitPolicyTest {
         assertThat(((DecisionResult.Failed) overlap.outcome()).code()).isEqualTo("UNIQUE_HIT_VIOLATION");
         assertThat(overlap.outputs()).isEmpty();
         assertThat(overlap.matchedRuleIds()).containsExactly("R1", "R2");
-        assertThat(((DecisionResult.Failed) none.outcome()).code()).isEqualTo("UNIQUE_HIT_VIOLATION");
+        // Zero matches is NO_MATCH, as under first (PD-088)
+        assertThat(none.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
         assertThat(none.outputs()).isEmpty();
         assertThat(none.matchedRuleIds()).isEmpty();
         assertThat(stores.decisions).extracting(r -> r.outcome() + " " + r.errorCode() + " " + r.matchedRuleIdsJson()
                         + " " + r.outputsJson())
                 .containsExactly("UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [\"R1\",\"R2\"] null",
-                        "UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [] null");
+                        "NO_MATCH null [] {}");
     }
 
     @Test
@@ -100,6 +101,10 @@ class HitPolicyTest {
 
         assertThat(result.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
         assertThat(result.matchedRuleIds()).isEmpty();
+        // DMN 1.5 (N2 of the QA review): an empty list per list output, null per aggregate
+        assertThat(result.outputs()).containsEntry("flags", List.of()).containsEntry("penalty", null);
+        assertThat(stores.decisions.getFirst().outcome()).isEqualTo("NO_MATCH");
+        assertThat(stores.decisions.getFirst().outputsJson()).isEqualTo("{\"flags\":[],\"penalty\":null}");
     }
 
     @Test
