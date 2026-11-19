@@ -17,6 +17,7 @@ import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
 import io.github.dhluong90.bpm.process.api.TaskService;
+import io.github.dhluong90.bpm.process.api.TaskView;
 import io.github.dhluong90.bpm.process.internal.json.EngineJson;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
@@ -203,6 +204,49 @@ public class ProcessController {
         ProcessInstance instance = engine.cancel(id, lockVersion(ifMatch),
                 reason == null || reason.isNull() ? null : reason.stringValue(), idempotencyKey);
         return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
+    }
+
+    /**
+     * Reads a task with the caller's {@code allowedActions} ({@code processes:task:work}); the {@code ETag} is its
+     * lock version.
+     */
+    @GetMapping("/tasks/{id}")
+    public ResponseEntity<byte[]> task(@PathVariable("id") String id) {
+        TaskView task = tasks.task(id);
+        return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
+    }
+
+    /**
+     * Claims an open task for the caller ({@code processes:task:work}). {@code If-Match} carries the task's
+     * {@code lockVersion} and {@code Idempotency-Key} makes a retry safe; both are required.
+     */
+    @PostMapping("/tasks/{id}:claim")
+    public ResponseEntity<byte[]> claim(@PathVariable("id") String id,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        requireTaskPreconditions(ifMatch, idempotencyKey, "claim");
+        TaskView task = tasks.claim(id, lockVersion(ifMatch), idempotencyKey);
+        return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
+    }
+
+    /** Hands a claimed task back ({@code processes:task:work}); only the claimant may. Same headers as a claim. */
+    @PostMapping("/tasks/{id}:unclaim")
+    public ResponseEntity<byte[]> unclaim(@PathVariable("id") String id,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        requireTaskPreconditions(ifMatch, idempotencyKey, "unclaim");
+        TaskView task = tasks.unclaim(id, lockVersion(ifMatch), idempotencyKey);
+        return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
+    }
+
+    private static void requireTaskPreconditions(String ifMatch, String idempotencyKey, String action) {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new PreconditionRequiredException("Send If-Match with the task's lockVersion (its ETag), for example "
+                    + "\"0\"");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot " + action + " twice");
+        }
     }
 
     /**

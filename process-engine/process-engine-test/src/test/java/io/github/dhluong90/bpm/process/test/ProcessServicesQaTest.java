@@ -385,6 +385,16 @@ class ProcessServicesQaTest {
         }
 
         @Override
+        public int claimTask(String tenant, String id, long expectedLockVersion, String claimant, Instant at) {
+            return 1;
+        }
+
+        @Override
+        public int unclaimTask(String tenant, String id, long expectedLockVersion, String claimant) {
+            return 1;
+        }
+
+        @Override
         public void cancelTask(String tenant, String id) {
         }
 

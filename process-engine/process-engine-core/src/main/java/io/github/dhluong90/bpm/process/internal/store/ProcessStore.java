@@ -26,10 +26,10 @@ public interface ProcessStore {
             Instant startedAt, Instant endedAt) {
     }
 
-    /** User task row. */
+    /** User task row; {@code claimedBy} is set while it is {@code CLAIMED} and kept once completed or cancelled. */
     record TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId, String nodeId,
-            String name, String assignee, boolean fourEyes, String status, long lockVersion, String completedBy,
-            Instant createdAt, Instant completedAt) {
+            String name, String assignee, boolean fourEyes, String status, long lockVersion, String claimedBy,
+            Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt) {
     }
 
     /** Recorded answer to an idempotent write; {@code responseJson} is null while the claim is pending. */
@@ -90,8 +90,14 @@ public interface ProcessStore {
 
     Optional<TaskRow> findTask(String tenant, String id);
 
-    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not open */
+    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not claimed by {@code completedBy} */
     int completeTask(String tenant, String id, long expectedLockVersion, String completedBy, Instant at);
+
+    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not open */
+    int claimTask(String tenant, String id, long expectedLockVersion, String claimant, Instant at);
+
+    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not claimed by {@code claimant} */
+    int unclaimTask(String tenant, String id, long expectedLockVersion, String claimant);
 
     void cancelTask(String tenant, String id);
 
