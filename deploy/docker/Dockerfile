@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-#
 # Container image of an example host (a Spring Boot service that embeds the engines).
 # Build context: the repository root.
 #
@@ -17,7 +15,7 @@ ARG EXAMPLE=rule-engine-only
 FROM --platform=$BUILDPLATFORM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS cockpit
 WORKDIR /src
 COPY . .
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=horus-bpm-npm,target=/root/.npm \
     mkdir -p /out \
     && if [ -f cockpit/web/package-lock.json ]; then \
          cd cockpit/web && npm ci --no-audit --no-fund && npm run build && cp -R dist/. /out/; \
@@ -26,13 +24,13 @@ RUN --mount=type=cache,target=/root/.npm \
        fi
 
 # Stage 2: build the example host and the engine modules it needs.
-# Maven 3.10.0, Eclipse Temurin JDK 21.0.13.
-FROM --platform=$BUILDPLATFORM maven:3-eclipse-temurin-21@sha256:851ccd76d49d5646915645e5fb51e9b00ef53ad3dc68b0e9a2a9846b9c56bde3 AS build
+# Maven 3.9.16 (the line CI uses), Eclipse Temurin JDK 21.
+FROM --platform=$BUILDPLATFORM maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS build
 ARG EXAMPLE
 WORKDIR /src
 COPY . .
 COPY --from=cockpit /out/ /tmp/cockpit-dist/
-RUN --mount=type=cache,target=/root/.m2/repository \
+RUN --mount=type=cache,id=horus-bpm-m2,target=/root/.m2/repository \
     set -eu; \
     test -f "examples/${EXAMPLE}/pom.xml" || { echo "examples/${EXAMPLE} is not an example host" >&2; exit 1; }; \
     skip_cockpit=true; \
