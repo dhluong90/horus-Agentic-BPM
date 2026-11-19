@@ -458,6 +458,7 @@ class DefinitionLifecycleTest {
         assertThat(engine.events).isEmpty();
 
         // When bob confirms
+        engine.identity.as("bank-a", "bob", APPROVER);
         DefinitionVersion retired = engine.services.retire(v1.ref(), v1.lockVersion(), "fraud check bypass found",
                 true, null);
 
