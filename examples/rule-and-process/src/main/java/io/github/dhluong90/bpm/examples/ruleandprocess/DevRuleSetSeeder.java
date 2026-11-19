@@ -1,10 +1,10 @@
 package io.github.dhluong90.bpm.examples.ruleandprocess;
 
-import com.horus.bpm.rules.api.ImportRequest;
-import com.horus.bpm.rules.api.RuleSetExistsException;
-import com.horus.bpm.rules.api.RuleSetVersion;
-import com.horus.bpm.rules.api.VersionService;
-import com.horus.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.api.ImportRequest;
+import io.github.dhluong90.bpm.rules.api.RuleSetExistsException;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
+import io.github.dhluong90.bpm.rules.api.VersionService;
+import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;

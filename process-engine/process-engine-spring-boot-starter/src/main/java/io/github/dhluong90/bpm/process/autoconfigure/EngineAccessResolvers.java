@@ -1,8 +1,8 @@
 package io.github.dhluong90.bpm.process.autoconfigure;
 
-import com.horus.bpm.host.spi.EngineAccess;
-import com.horus.bpm.host.spi.EngineAccessDeniedException;
-import com.horus.bpm.host.spi.EngineCaller;
+import io.github.dhluong90.bpm.host.spi.EngineAccess;
+import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException;
+import io.github.dhluong90.bpm.host.spi.EngineCaller;
 import io.github.dhluong90.bpm.process.spi.CallerResolver;
 import io.github.dhluong90.bpm.process.spi.TenantResolver;
 import java.util.Set;
