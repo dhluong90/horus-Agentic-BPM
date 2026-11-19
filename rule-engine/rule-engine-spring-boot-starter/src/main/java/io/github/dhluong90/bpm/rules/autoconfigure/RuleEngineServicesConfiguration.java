@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
+import io.github.dhluong90.bpm.rules.postgres.CacheCoherence;
 import io.github.dhluong90.bpm.rules.postgres.PostgresRuleEngines;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
 import io.github.dhluong90.bpm.rules.rest.DecisionController;
@@ -56,6 +57,26 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngines engines) {
         return new RuleEngineCursorKeyInitializer(engines.cursorKeys());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    RuleEngineCacheCoherence ruleEngineCacheCoherence(DataSource dataSource, RuleEngines engines,
+            RuleEngineProperties properties) {
+        return new RuleEngineCacheCoherence(new CacheCoherence(dataSource, engines.cache(),
+                properties.cache().epochCheckIntervalOrDefault(), properties.cache().listenNotifyOrDefault()));
+    }
+
+    /** The compiled-cache meters, bound by the host's meter registry when Micrometer is present (DESIGN 4.8). */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.core.instrument.binder.MeterBinder")
+    static class CacheMetricsConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(name = "ruleEngineCacheMetrics")
+        RuleEngineCacheMetrics ruleEngineCacheMetrics(RuleEngines engines) {
+            return new RuleEngineCacheMetrics(engines.cache());
+        }
     }
 
     @Bean

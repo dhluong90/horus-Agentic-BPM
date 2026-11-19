@@ -14,6 +14,9 @@ public final class EngineDefaults {
     /** Largest accepted {@code cache.max-entries}. */
     public static final int CACHE_MAX_ENTRIES_LIMIT = 100_000;
 
+    /** How often each replica checks the {@code cache_epoch} of its cached rule sets (ADR-0009). */
+    public static final Duration CACHE_EPOCH_CHECK_INTERVAL = Duration.ofSeconds(5);
+
     /** Default of {@code horus.bpm.rules.idempotency.retention}: how long a key is remembered (ADR-0006). */
     public static final Duration IDEMPOTENCY_RETENTION = Duration.ofHours(24);
 
