@@ -18,8 +18,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | Spec id | Test | Level | Milestone | Traces to | Status |
 |---|---|---|---|---|---|
 | RLE-001 | `RLE_001_first_hit_policy_returns_top_matching_rule` | Unit, Testcontainers, REST | M1 | `TR-DET-01` | Implemented (#1): `RuleEngineServiceTest`, `RuleEnginePostgresIT`, `RuleLifecycleIT`; boundaries, input types and money exactness in `RuleLifecycleAcceptanceTest`, `MoneyPropertiesTest` (jqwik), `ExpressionPropertiesTest` (determinism, jqwik) and `RuleLifecycleFailurePathsIT` |
-| RLE-002 | `RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches` | Unit, WebMvc | M1 | `TR-DET-04` | Planned |
-| RLE-003 | `RLE_003_collect_hit_policy_aggregates_matched_rules` | Unit | M1 | `TR-DET-01` | Planned |
+| RLE-002 | `RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches` | Service, Testcontainers, REST | M1 | `TR-DET-04` | Implemented (#18): `HitPolicyTest`, `RuleEnginePostgresIT` (decision row with outcome and matched rule ids), `RuleLifecycleIT` (`422` problem) |
+| RLE-003 | `RLE_003_collect_hit_policy_aggregates_matched_rules` | Service, Testcontainers, REST | M1 | `TR-DET-01` | Implemented (#18): `HitPolicyTest` (also min, max, count and money sum), `RuleEnginePostgresIT`, `RuleLifecycleIT` |
 | RLE-004 | `RLE_004_publish_rejects_unparsable_or_ill_typed_expressions` | Unit, property | M1 | `TR-DET-02`, `TR-SEC-01` | Planned |
 | RLE-005 | `RLE_005_money_currency_mismatch_is_rejected` | Unit, REST | M1 | `TR-DET-03` | Implemented (#1): `RuleLifecycleFailurePathsIT` (422 `EVALUATION_ERROR`, no outputs, logged outcome); `MoneyPropertiesTest` for the evaluator |
 | RLE-006 | `RLE_006_null_follows_feel_three_valued_logic` | Unit, replay | M1 | `TR-DET-01`, `TR-STD-02` | Partial (#1): truth tables and null operands in `ExpressionPropertiesTest` (jqwik). Stays in `spec-pending.txt` until the `collect` hit policy lands: the statement needs `collect`, the decision log and replay |
@@ -77,6 +77,7 @@ Tests that prove a platform requirement directly, before any `SPEC.md` statement
 | `TR-TEN-01` | `RuleEnginePostgresIT.TR_TEN_01_another_tenant_neither_sees_nor_evaluates_the_rule_set` | Testcontainers | Partial: storage and evaluation; the cross-tenant decision read arrives with `GET /decisions/{id}` |
 | `TR-AGT-03` | `CoreArchitectureTest.TR_AGT_03_core_uses_no_http_or_model_client_library`, `PostgresArchitectureTest.TR_AGT_03_postgres_uses_no_http_or_model_client_library`, plus the shared Enforcer execution `enforce-no-network-client` | ArchUnit, build | **Partial.** The "never calls a model" boundary. Adapter timeouts and retries arrive with the process engine (M2) |
 | `TR-SEC-01` | `CoreArchitectureTest.TR_SEC_01_core_has_no_scripting_reflection_class_loading_or_deserialisation`; parser tests in `ExpressionSemanticsTest` (unknown functions and identifiers refused); `ExpressionPropertiesTest.TR_SEC_01_*` (jqwik: any text gives a tree or an `ExpressionException`, deep nesting refused without a stack overflow) | ArchUnit, unit | Partial: the boundary rule and the closed grammar. The tests of `RLE-004` and `RLE-007` complete it |
+| `TR-DET-01` | `HitPolicyDeterminismTest.TR_DET_01_unique_and_collect_tables_are_deterministic` (1,000 generated `unique` and `collect` tables and inputs, fixed seeds; also recompiled from the canonical form) | Property | Partial: `unique` and `collect`; the replay statements `RLE-006` and `RLE-008` complete it |
 
 ## Known gaps
 | Gap | Plan |

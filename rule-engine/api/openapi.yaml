@@ -170,8 +170,9 @@ paths:
       summary: Evaluate the version effective at the host clock and log one decision
       description: |
         Permission `rules:evaluate`. Writes exactly one `rle_decision` row in the request's
-        transaction. A failed evaluation (`EVALUATION_ERROR`) is logged and answered `422` with
-        the `decisionId`. Members other than `inputs` are ignored, including `tenantId`.
+        transaction. A failed evaluation (`EVALUATION_ERROR`, or `UNIQUE_HIT_VIOLATION` when a
+        `unique` table matches zero or several rules) is logged and answered `422` with the
+        `decisionId` and `matchedRuleIds`, never with partial outputs. Members other than `inputs` are ignored, including `tenantId`.
       parameters:
         - name: ruleSet
           in: path
@@ -360,6 +361,7 @@ components:
         outcome:
           type: string
           enum: [MATCHED, NO_MATCH]
+          description: A failed evaluation is answered with a Problem instead, carrying decisionId and matchedRuleIds
         matchedRuleIds:
           type: array
           items: { type: string }
@@ -377,9 +379,13 @@ components:
           type: string
           enum: [INPUT_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND,
             VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT,
-            RULE_SET_EXISTS, VALIDATION_FAILED, IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR]
+            RULE_SET_EXISTS, VALIDATION_FAILED, IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION]
         detail: { type: string }
         correlationId: { type: string }
         decisionId:
           type: string
-          description: Present on `EVALUATION_ERROR`; the failed decision is logged
+          description: Present on `EVALUATION_ERROR` and `UNIQUE_HIT_VIOLATION`; the failed decision is logged
+        matchedRuleIds:
+          type: array
+          items: { type: string }
+          description: On `UNIQUE_HIT_VIOLATION`, every matched rule (empty for zero matches); empty on `EVALUATION_ERROR`

@@ -102,6 +102,19 @@ outputs:
 
 With rows R1 (`penalty: 10`) and R3 (`penalty: 5`) both matching, `penalty` is `15` and `flags` lists both rows' values in row order.
 
+| Output under `collect` | Declared type | Result |
+|---|---|---|
+| No `collect:` | `list<T>`; each row gives one `T` | The matched rows' values in row order |
+| `collect: sum` | `integer`, `decimal` or `money` | The exact sum; money must be in one currency, otherwise the decision fails with `EVALUATION_ERROR` |
+| `collect: min`, `collect: max` | Any scalar type except `boolean` | The smallest or largest value |
+| `collect: count` | `integer` | How many matched rows gave a value |
+
+Rows that give no value (`null`) are skipped by every aggregate and left out of lists. When no row matches, the result is "no match" with no outputs. `collect:` on an output of a `first` or `unique` table, a list output outside `collect`, or a type that does not fit the aggregate is refused at import with `422 VALIDATION_FAILED`.
+
+### Exactly one row with `unique`
+
+Under `unique`, zero or several matching rows fail the decision with `422 UNIQUE_HIT_VIOLATION`: no outputs are returned, and the decision row records that outcome and the matched rule ids. A pricing table where two rows overlap fails loudly instead of quietly charging the first row's price. The example [`loan-pricing.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-engine-only/src/main/resources/rules/loan-pricing.yaml) overlaps on purpose.
+
 ## 4. Validate
 
 Validation runs on every save and on every publication request. It reports each problem with the row id.

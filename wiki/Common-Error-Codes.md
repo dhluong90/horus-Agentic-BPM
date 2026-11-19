@@ -124,7 +124,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`) and the Process Engine (`
 `409`. `POST /rule-sets` with a name already used in this tenant. Add a version to the existing rule set instead.
 
 ### UNIQUE_HIT_VIOLATION
-`422`. A `unique` table matched zero rows or several rows for these inputs (`TR-DET-04`). This is an authoring defect in the published rule set, so retrying never helps (ADR-0010). The decision is still logged with this outcome. Add the missing row or remove the overlap, or switch to `first` with a default row.
+`422`. A `unique` table matched zero rows or several rows for these inputs (`TR-DET-04`). This is an authoring defect in the published rule set, so retrying never helps (ADR-0010). The decision is still logged with this outcome, with no outputs and with every matched rule id (`[]` when none matched). The problem body carries `decisionId` and `matchedRuleIds`, for example `"matchedRuleIds": ["R1", "R2"]`; it never carries partial outputs. Add the missing row or remove the overlap, or switch to `first` with a default row.
 
 ### EVALUATION_ERROR
 `422`. Evaluation failed: `detail` names `CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT` or `FUNCTION_ERROR`. The decision is logged with this outcome.

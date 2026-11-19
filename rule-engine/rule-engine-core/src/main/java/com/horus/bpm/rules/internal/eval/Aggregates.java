@@ -46,6 +46,9 @@ final class Aggregates {
                     throw new EvaluationException("Output " + output + ": money amount out of range");
                 }
             }
+            if (Math.abs(total) > Money.MAX_JSON_SAFE) {
+                throw new EvaluationException("Output " + output + ": money amount beyond what JSON clients read exactly");
+            }
             return Money.ofMinor(first.currency(), total);
         }
         BigDecimal total = BigDecimal.ZERO;

@@ -155,6 +155,27 @@ class HitPolicyTest {
     }
 
     @Test
+    void a_collected_money_sum_beyond_json_safe_range_is_an_evaluation_error() {
+        publish(yaml("""
+                schemaVersion: 1
+                ruleSet: big-sum
+                hitPolicy: collect
+                inputs:
+                  - { name: amount, type: integer }
+                outputs:
+                  - { name: total, type: money, collect: sum }
+                rules:
+                  - { id: B1, when: {}, then: { total: "5000000000000000 VND" } }
+                  - { id: B2, when: {}, then: { total: "5000000000000000 VND" } }
+                """), "big-sum");
+
+        DecisionResult result = evaluate("big-sum", Map.of("amount", 1));
+
+        assertThat(((DecisionResult.Failed) result.outcome()).code()).isEqualTo("EVALUATION_ERROR");
+        assertThat(result.outputs()).isEmpty();
+    }
+
+    @Test
     void outputs_that_do_not_fit_the_hit_policy_are_refused_at_import() {
         String base = """
                 schemaVersion: 1
