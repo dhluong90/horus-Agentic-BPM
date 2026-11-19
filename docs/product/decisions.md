@@ -120,6 +120,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-097](#pd-097-process-definitions-follow-the-rule-engine-withdraw-not-self-reject) | Process definitions follow the Rule Engine: withdraw, not self-reject | Decided (product manager, delegated, PD-073) |
 | [PD-098](#pd-098-reference-feel-engine-as-a-test-only-oracle) | Reference FEEL engine as a test-only oracle | Decided (product manager, delegated, PD-073) |
 | [PD-099](#pd-099-inputs-are-not-masked-unless-declared-or-set-by-the-host) | Inputs are not masked unless declared or set by the host | Decided (product manager, delegated, PD-073) |
+| [PD-100](#pd-100-container-images-are-not-on-the-licence-allow-list) | Container images are not on the licence allow-list | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2975,3 +2976,28 @@ The versions are the ones resolved in the build, recorded in the build's allow-l
 **Kill criterion.** If, even with these, a pilot bank finds unmasked personal data in the decision log, strict mode becomes the default outside `dev`, by a new entry.
 
 **Follow-ups.** Maintainers (engineering): #255 as built, and the four mitigations in one issue ("Rule Engine: Guard Against Unmasked Personal Data"). Documentation: the authoring guide and the wiki Rule Engine Configuration page (the setting and its per-tenant override). Architect: the setting in DESIGN section 4.4.
+
+### PD-100 Container images are not on the licence allow-list
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | `TR-LIC-01` names the test-scope libraries, but not the container images that only tests use (PostgreSQL, PgBouncer and the Playwright image). Do test images belong on that list? |
+| Raised by | Architect, review of pull request #265 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 2 |
+
+**Facts.** The main software in each test image is under a permissive licence: PostgreSQL under the PostgreSQL License, PgBouncer under ISC, and Playwright under Apache 2.0. Each image also carries an operating system userland with many packages under mixed licences, including GPL. Tests run these images as separate processes; nothing from them is linked into or shipped with an artifact.
+
+**Options considered**
+
+1. List each test image with its licence. Consequence: the list looks complete, but one licence per image misstates what an image contains. Keeping it right would need a per-image package licence scan for something that never ships.
+2. Keep images outside the allow-list, which covers libraries on a classpath or in a bundle (chosen). Consequence: one sentence in `TR-LIC-01` says where images are covered:
+   - test-only images are never shipped and are to be pinned by digest (#288);
+   - the example host image is covered by the image-scan gate and its bill of materials;
+   - third-party images that a deployment file references, such as PostgreSQL in the Compose file, are named in the release notes with their licence.
+
+**Recommendation and decision.** Option 2. `TR-LIC-01` protects what reaches an adopter's service. A test image never does, and a deployment image is the adopter's own choice, which the release notes make visible. This concerns third-party material, not the project's own licence.
+
+**Status, 2026-11-20.** Not every test image is pinned yet. On `main` the PostgreSQL test containers use a tag, and so does PgBouncer in #265. The Playwright image of CI and the PostgreSQL image of the Compose file are already pinned by digest. #288 pins the rest.
+
+**Follow-ups.** Documentation: the release notes name the PostgreSQL image of the Compose file and its licence. Maintainers (engineering): pin every test image by digest (#288), and keep new ones pinned.
