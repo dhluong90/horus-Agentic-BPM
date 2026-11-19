@@ -78,7 +78,9 @@ A tag build (`BPM_RELEASE_TAG`, set by the workflow on tag pushes) runs `tools/r
 - every module has the group id `io.github.dhluong90.bpm` (ADR-0022), so no release ships under the old `com.horus.bpm` coordinates; the rename is #21;
 - the tagged commit is on `main`: an ancestor of `refs/remotes/origin/main` (`git merge-base --is-ancestor`). The guard reads that full ref name, so a tag or branch named `origin/main` cannot stand in for it, and it assumes the remote `origin` is this repository, as `actions/checkout` sets it.
 
-**The guard catches mistakes; it is not access control.** Anyone who can push a tag can run the workflow. Who may create `v*` tags, and whether a published Release can be changed afterwards, are repository settings (a tag ruleset and immutable releases). They are decided outside this file.
+**The guard catches mistakes; it is not access control.** Anyone who can push a tag can run the workflow. Who may create `v*` tags, and whether a published Release can be changed afterwards, are repository settings. For now the repository has no tag ruleset (PD-091).
+
+**Fix a bad release with a new patch release, never by re-tagging (PD-091).** If `v0.1.0` turns out wrong after it is pushed, fix the cause on `main` and release `v0.1.1`. Never delete, move or re-push a release tag: adopters and their caches may already hold the first build, and the same tag must always mean the same bytes.
 
 Every check runs and reports before the guard refuses, so one run names every problem. Maven resolves the imported BOMs to write the effective POM; a failed attempt is tried twice more with `-U`. If Maven still cannot write it, the guard refuses and still checks the tag form. The guard builds nothing, so it can be run on its own before pushing a tag:
 
