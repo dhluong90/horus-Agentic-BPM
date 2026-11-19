@@ -42,7 +42,7 @@ All names are under `horus.bpm.rules.`.
 | `cache.epoch-check-interval` | `PT5S` | 0.1 (M1) | Interval of the `cache_epoch` sweep; this is the staleness bound when NOTIFY is unavailable |
 | `idempotency.retention` | `PT24H` | 0.1 (M1) | Lifetime of `rle_idempotency` rows |
 | `maker-checker.enabled` | `true` | 0.1 (M1) | `false` is refused unless the `dev` profile is active |
-| `tenancy.resolver` | `security-context` | 0.1 (M1) | `security-context`, `header:X-Tenant-Id` (behind a gateway only), or the name of a `TenantResolver` bean. Built for `/api/bpm/meta` and `/api/bpm/me` as the host-wide `horus.bpm.tenancy.resolver`, without the bean option; see [Host-wide properties](#host-wide-properties) |
+| `tenancy.resolver` | `security-context` | Built as the host-wide `horus.bpm.tenancy.resolver` | `security-context` or `header:<name>` (behind a trusted gateway only). A host `TenantResolver` bean replaces both; see [Host-wide properties](#host-wide-properties) |
 | `events.decision-evaluated` | `false` | 0.1 (M1) | Publish `rules.decision.evaluated.v1` for every decision |
 | `scheduler.enabled` | `true` | 0.1 (M1) | Run the engine's scheduler thread (outbox relay, partition creation, partition drop, idempotency cleanup) on this replica |
 | `security.role-permissions` | empty | Built | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities). Read by `/api/bpm/me` today; the engine endpoints use it from 0.1. A permission outside the six below stops the start-up |
@@ -54,8 +54,11 @@ These are under `horus.bpm.` and apply to every engine in the host. They are rea
 | Property | Default | Status | Meaning |
 |---|---|---|---|
 | `host-id` | unset | Built | Id clients show for this host, 1 to 40 characters; returned as `hostId` by `/api/bpm/meta` |
-| `tenancy.resolver` | `security-context` | Built | `security-context`: the tenant is a claim of the caller's token. `header:<name>`: a trusted gateway sets the header; outside the `dev` profile the host logs a warning at start-up. Any other value stops the start-up |
-| `tenancy.claim` | `tenant_id` | Built | Token claim that carries the tenant in `security-context` mode |
+| `host-metadata.enabled` | `true` | Built | `false` turns `/api/bpm/meta` and `/api/bpm/me` off |
+| `tenancy.resolver` | `security-context` | Built | `security-context`: the tenant is a claim of the caller's token. `header:<name>`: a gateway sets the header after authentication. Any other value stops the start-up. Ignored when the host declares a `TenantResolver` bean (host-session mode) |
+| `tenancy.claim` | `tenant_id` | Built | Token claim that carries the tenant. Whatever the resolver, a token with this claim must match the resolved tenant |
+| `tenancy.trusted-gateway` | `false` | Built | Outside the `dev` profile, `header:<name>` does not start without it. Set it only when a gateway authenticates every request and overwrites the header |
+| `security.challenge` | `Bearer` | Built | `WWW-Authenticate` value of a `401` the engine endpoints raise themselves |
 
 Properties with a prefix of `tenancy`, `masking` and `rest.cors` are shared with the Process Engine starter under `horus.bpm.processes.*`; when both engines run in one host, set them once under `horus.bpm.*`.
 
@@ -74,7 +77,7 @@ horus:
       migrate-on-start: true       # default
       security:
         role-permissions:
-          ROLE_PRICING_ANALYST:  [rules:read, rules:author]
+          ROLE_PRICING_AUTHOR:   [rules:read, rules:author]
           ROLE_PRICING_APPROVER: [rules:read, rules:approve]
 ```
 
@@ -108,13 +111,13 @@ The `ruleEngine` health contributor also reports whether next month's partition 
 
 | Bean | Default | Override when |
 |---|---|---|
-| `TenantResolver` | Reads `tenant_id` claim from the JWT, or the configured header | Tenant comes from somewhere else (realm, path, subdomain) |
+| `TenantResolver` | Reads `tenant_id` claim from the JWT, or the configured header | Tenant comes from somewhere else: the signed-in session principal (host-session mode), a realm, a subdomain. Built in `com.horus.bpm.host.spi`; see [[Host Metadata and Permissions]] |
 | `CallerResolver` | Principal name | Audit needs a different identity |
 | `RuleFunctionRegistry` | Built-in pure functions | Host registers extra pure functions, listed in the cockpit |
 | `RuleEventPublisher` | Spring `ApplicationEventPublisher` | Events go to an outbox or a bus |
 | `Clock` | System UTC | Tests and replays. The engine's only source of time: the default for `DecisionRequest.clock`, partition creation and the health check. The engine uses the host's bean when there is exactly one and never registers a `Clock` bean of its own |
 
-The engine's default `TenantResolver`, `CallerResolver`, `RuleFunctionRegistry` and `RuleEventPublisher` beans are `@ConditionalOnMissingBean`, so a host bean replaces them. `Clock` is read from the host and has no engine bean. The starter never component-scans the host. In the first build only `Clock` is read; the others arrive with 0.1.
+The engine's default `TenantResolver`, `CallerResolver`, `RuleFunctionRegistry` and `RuleEventPublisher` beans are `@ConditionalOnMissingBean`, so a host bean replaces them. `Clock` is read from the host and has no engine bean. The starter never component-scans the host. Today `Clock` and `TenantResolver` are read; the others arrive with 0.1.
 
 ## Permissions
 

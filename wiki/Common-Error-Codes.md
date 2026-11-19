@@ -63,13 +63,13 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `400`. A list query breaks a read limit (ADR-0015): `limit` above 200, a time range longer than 31 days, or `GET /decisions` without `ruleSet`, `from` and `to`. Narrow the query and page with the cursor.
 
 ### UNAUTHENTICATED
-`401`. No principal, a token whose audience is another host, or no tenant for the caller (a token without the tenant claim, or a missing gateway header). Sign in again or request a token for this host. The host returns this body when its security chain uses `BpmProblemAuthenticationEntryPoint` ([[Host Metadata and Permissions]]).
+`401`. No principal, a token whose audience is another host, or no tenant for the caller. Always with `WWW-Authenticate`. Sign in again or request a token for this host, but only once: when the challenge says `error="invalid_token"`, the account has no tenant on this host and signing in again with it gives the same answer. The host returns this body from its security chain when the chain uses `BpmProblemAuthenticationEntryPoint` ([[Host Metadata and Permissions]]).
 
 ### PERMISSION_DENIED
 `403`. The principal lacks the permission the endpoint checks. Map the permission to the caller's role; see [[Multi-Tenancy and Security]].
 
 ### TENANT_NOT_ALLOWED
-`403`. `X-Tenant-Id` names a tenant outside the token's allowed-tenants claim, or differs from the token tenant while tenant switching is off. No data is returned and the host writes the security log entry `tenant.switch.refused` (ADR-0014). Ask your identity provider administrator to add the tenant to your token.
+`403`. `X-Tenant-Id` names a tenant outside the token's allowed-tenants claim, or differs from the resolved tenant while tenant switching is off; a gateway tenant header differs from the token's tenant claim; or the tenant is outside the allowed format. No data is returned and the host writes the security log entry `tenant.switch.refused` (ADR-0014). Ask your identity provider administrator to add the tenant to your token.
 
 ### IDEMPOTENCY_IN_FLIGHT
 `409` with `Retry-After: 1`. A request with the same `Idempotency-Key` is still running. Retry after one second with the same key (ADR-0006).

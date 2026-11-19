@@ -52,28 +52,32 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 
 ### Host metadata with two demo users
 
-On the `dev` profile the host has two demo users over HTTP basic: Lan, a pricing analyst, and Minh, a pricing approver. A basic-auth user has no token to carry a tenant, so on `dev` the tenant comes from the `X-Tenant-Id` header ([`application-dev.yml`](src/main/resources/application-dev.yml)).
+On the `dev` profile the host has two demo users, Lan (role `PRICING_AUTHOR`) and Minh (role `PRICING_APPROVER`), both at tenant `bank-a`, with the password from `HORUS_DEMO_PASSWORD`. They sign in with the host's form at `/login`, the same sign-in the embedded cockpit uses, and the engine endpoints then answer for the session. The tenant comes from the signed-in user, never from a header ([`HostSecurityConfiguration`](src/main/java/com/horus/bpm/examples/ruleengineonly/HostSecurityConfiguration.java)).
 
 ```bash
-SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=choose-one HORUS_DB_PASSWORD=change-me \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
 
-curl -s -u lan:lan -H 'X-Tenant-Id: bank-a' localhost:8080/api/bpm/me
-# {"schemaVersion":1,"user":{"id":"lan"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:author"],"roles":["ROLE_PRICING_ANALYST"],"groups":[]}
+# sign in as lan with the form, keeping the session cookie in ./jar
+CSRF=$(curl -s -c jar -b jar localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
+curl -s -c jar -b jar -o /dev/null -d "username=lan&password=choose-one&_csrf=$CSRF" localhost:8080/login
 
-curl -s -u minh:minh -H 'X-Tenant-Id: bank-a' localhost:8080/api/bpm/me
-# {"schemaVersion":1,"user":{"id":"minh"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:approve"],"roles":["ROLE_PRICING_APPROVER"],"groups":[]}
+curl -s -b jar localhost:8080/api/bpm/me
+# {"schemaVersion":1,"user":{"id":"lan"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:author"],"roles":["ROLE_PRICING_AUTHOR"],"groups":[]}
 
-curl -s -u lan:lan -H 'X-Tenant-Id: bank-a' localhost:8080/api/bpm/meta
+curl -s -b jar localhost:8080/api/bpm/meta
 # {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0-SNAPSHOT","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
 
 curl -s -i localhost:8080/api/bpm/meta
 # HTTP/1.1 401
-# WWW-Authenticate: Basic realm="rule-engine-only"
+# WWW-Authenticate: Bearer
 # Content-Type: application/problem+json;charset=UTF-8
 # {"type":"https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#unauthenticated","title":"Authentication required","status":401,"code":"UNAUTHENTICATED","detail":"Sign in, or send a token issued for this host.","instance":"/api/bpm/meta","correlationId":"01M7RR0S1MJ2AFNEK9G00A9E1N"}
 ```
 
-The demo users exist only on the `dev` profile. Without it the host accepts bearer tokens when an issuer is configured (see the environment variables below); token claim `roles` becomes `ROLE_*` authorities and claim `tenant_id` the tenant.
+Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve"]`. Calls that change state with the session need the CSRF token: the host sets it in the `XSRF-TOKEN` cookie and expects it back as `X-XSRF-TOKEN`.
+
+The demo users exist only on the `dev` profile, and the host refuses to start on `dev` beside another profile (other than `test`) or with a token issuer that is not on this machine. Without `dev` the user store is empty. The host accepts bearer tokens when an issuer, JWK set or public key is configured, and then requires its own audience; token claim `roles` becomes `ROLE_*` authorities and claim `tenant_id` the tenant.
 
 To see the `ruleEngine` component locally, start with `--management.endpoint.health.show-components=always`. It reports the schema version, `pendingMigrations`, and whether next month's partition exists.
 
@@ -86,8 +90,9 @@ To see the `ruleEngine` component locally, start with `--management.endpoint.hea
 | `HORUS_DB_PASSWORD` | none | Database password. Never put it in a file in the repository |
 | `PORT` | `8080` | HTTP port |
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` | none | Issuer of the bearer tokens the host accepts. Unset: no bearer tokens, so only health answers outside `dev` |
-| `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES` | none | Audience this host requires in a token; set it whenever a cockpit calls the host from another origin (TR-SEC-12) |
-| `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the two demo users and the `X-Tenant-Id` tenant header. Never in production |
+| `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES` | none | Audience this host requires in every token, for example `rule-engine-only`. Required whenever an issuer, JWK set or public key is set: without it the host does not start (TR-SEC-12) |
+| `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the two demo users. Never in a shared environment |
+| `HORUS_DEMO_PASSWORD` | none | Password of the demo users `lan` and `minh` on the `dev` profile. Without it nobody can sign in |
 
 ## Rule Engine properties
 
@@ -95,14 +100,14 @@ To see the `ruleEngine` component locally, start with `--management.endpoint.hea
 |---|---|---|
 | `horus.bpm.rules.enabled` | `true` | `false` switches the engine off entirely |
 | `horus.bpm.host-id` | unset; `rule-engine-only` here | Id returned by `GET /api/bpm/meta` |
-| `horus.bpm.rules.security.role-permissions` | empty; two roles here | Host role to `rules:*` permissions, listed by `GET /api/bpm/me` |
+| `horus.bpm.rules.security.role-permissions` | empty; `ROLE_PRICING_AUTHOR` and `ROLE_PRICING_APPROVER` here | Host role to `rules:*` permissions, listed by `GET /api/bpm/me` |
 | `horus.bpm.rules.migrate-on-start` | `true` | `false` for hosts that run the `rle_*` migrations in a separate job. If the schema is not current, the `ruleEngine` health contributor is down and partitions are not created until it is |
 
 The full list of properties is on the wiki page Rule Engine Configuration. The starter adds them with the features that use them.
 
 ## Run in CI
 
-`.github/workflows/ci.yml` runs `mvn -B verify` on every pull request on Java 21 and Spring Boot 4.x. In this module, Failsafe runs four Testcontainers suites on `postgres:16-alpine`. `RuleEngineOnlyHostIT` fixes the host's clock at 26 January 2027.
+`.github/workflows/ci.yml` runs `mvn -B verify` on every pull request on Java 21 and Spring Boot 4.x. In this module, Surefire runs `HostSecurityConfigurationTest` (start-up guards) and Failsafe runs four Testcontainers suites on `postgres:16-alpine`. `RuleEngineOnlyHostIT` fixes the host's clock at 26 January 2027.
 
 | Test | Proves |
 |---|---|
@@ -110,8 +115,10 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `RuleEngineOnlyHostIT.TR_OPS_04_*` | Start-up creates `rle_decision_2027_01` and `rle_decision_2027_02` from the host's clock |
 | `RuleEngineOnlyHostIT.TR_EMB_06_*` | Engine migrations are recorded only in `rle_schema_history`; the host's history holds only its own migration |
 | `RuleEngineOnlyHostIT.TR_EMB_04_*` | The engine uses the host's only `DataSource` and the transaction manager that manages it, and the host's Flyway bean is still the Spring Boot one |
-| `HostMetadataIT.RLE_019_*` | Lan's and Minh's bearer tokens get different permission lists through the role mapping; `/meta` names this host and engine version with `Cache-Control: private, max-age=60`; no token or an unknown token gets a `401` problem |
-| `DevUsersIT.RLE_019_*` | The curl demo above on the `dev` profile, including the `401` without credentials |
+| `HostMetadataIT.RLE_019_*` | Bearer tokens validated by Spring Boot with an RSA public key and the audience `rule-engine-only`: Lan and Minh get different permission lists through the role mapping; `/meta` names this host and engine version; no token, a malformed token or a token for another audience gets a `401` problem |
+| `HostMetadataIT.TR_SEC_03_*`, `HostMetadataIT.demo_users_*` | A bearer token for `bank-a` with `X-Tenant-Id: bank-b` gets `403`; on the default profile the demo users cannot sign in even with `HORUS_DEMO_PASSWORD` set |
+| `SessionSignInIT.RLE_019_*` | The curl demo above on the `dev` profile: form sign-in, then `200` from `/meta` and `/me` with the session for both users |
+| `SessionSignInIT.TR_SEC_03_*`, `SessionSignInIT.session_*` | A session caller cannot choose its tenant with a header; a state-changing call with the session needs the CSRF token; other pages still redirect to `/login` |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.

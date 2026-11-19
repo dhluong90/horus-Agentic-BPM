@@ -2,55 +2,174 @@ package com.horus.bpm.examples.ruleengineonly;
 
 import com.horus.bpm.host.autoconfigure.BpmProblemAccessDeniedHandler;
 import com.horus.bpm.host.autoconfigure.BpmProblemAuthenticationEntryPoint;
+import com.horus.bpm.host.spi.TenantResolver;
+import jakarta.servlet.http.HttpServletRequest;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
+import org.springframework.core.env.Environment;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.NegatedRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 
 /**
- * The host's own security. The engines add no authentication: this host accepts bearer tokens from its
- * identity provider, and on the {@code dev} profile two demo users over HTTP basic. Engine endpoints
- * answer {@code 401} and {@code 403} as RFC 9457 problem details through the two engine handlers.
+ * The host's own security, in one chain. The engines and the cockpit add no authentication of their own.
+ *
+ * <ul>
+ *   <li><b>Session sign-in</b> with the host's form ({@code /login}). The embedded cockpit and the engine
+ *       endpoints use the same session. CSRF protection stays on for every state-changing call made with
+ *       the session; the token is in the {@code XSRF-TOKEN} cookie for the cockpit to send back as
+ *       {@code X-XSRF-TOKEN}.
+ *   <li><b>Bearer tokens</b> from the identity provider, when an issuer, JWK set or public key is
+ *       configured. The host must then name its own audience (TR-SEC-12), and a token issued for another
+ *       host is {@code 401}. Bearer calls carry no cookie, so CSRF does not apply to them.
+ * </ul>
+ *
+ * <p>Engine endpoints under {@code /api/bpm/**} answer {@code 401} and {@code 403} as RFC 9457 problem
+ * details; every other path keeps the browser behaviour of a redirect to the sign-in page.
+ *
+ * <p>Demo users exist on the {@code dev} profile only: {@code lan} (role PRICING_AUTHOR) and {@code minh}
+ * (role PRICING_APPROVER), both of tenant {@code bank-a}, with the password from {@code HORUS_DEMO_PASSWORD}.
+ * Their roles map to engine permissions in {@code application.yml}. A real host signs users in through its
+ * identity provider instead.
  */
 @Configuration(proxyBeanMethods = false)
 class HostSecurityConfiguration {
 
+    static final String DEV_PROFILE = "dev";
+    /** The tenant of the demo users, read from the signed-in principal, never from a header. */
+    static final String DEMO_TENANT = "bank-a";
+    static final Set<String> DEMO_USERS = Set.of("lan", "minh");
+    static final String TENANT_CLAIM = "tenant_id";
+
+    private static final Log LOG = LogFactory.getLog(HostSecurityConfiguration.class);
+    private static final String JWT = "spring.security.oauth2.resourceserver.jwt.";
+
     @Bean
-    SecurityFilterChain hostSecurity(
-            HttpSecurity http, ObjectProvider<JwtDecoder> jwtDecoder, ObjectProvider<UserDetailsService> devUsers) {
-        boolean basic = devUsers.getIfAvailable() != null;
-        var entryPoint = basic
-                ? new BpmProblemAuthenticationEntryPoint("Basic realm=\"rule-engine-only\"")
-                : new BpmProblemAuthenticationEntryPoint();
+    SecurityFilterChain hostSecurity(HttpSecurity http, ObjectProvider<JwtDecoder> jwtDecoder, Environment environment) {
+        requireAudience(environment);
+        RequestMatcher engineApi = PathPatternRequestMatcher.withDefaults().matcher("/api/bpm/**");
+        BpmProblemAuthenticationEntryPoint problemEntryPoint = new BpmProblemAuthenticationEntryPoint();
         http.authorizeHttpRequests(requests -> requests
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .anyRequest().authenticated())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .formLogin(Customizer.withDefaults())
+                .logout(Customizer.withDefaults())
+                .csrf(csrf -> csrf.spa().ignoringRequestMatchers(HostSecurityConfiguration::bearerRequest))
+                // Only pages are remembered for the redirect after sign-in, so an anonymous API call creates no session
+                .requestCache(cache -> cache.requestCache(pagesOnly(engineApi)))
                 .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint(entryPoint)
-                        .accessDeniedHandler(new BpmProblemAccessDeniedHandler()));
-        // Bearer tokens when an issuer is configured (SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI).
+                        .defaultAuthenticationEntryPointFor(problemEntryPoint, engineApi)
+                        .defaultAccessDeniedHandlerFor(new BpmProblemAccessDeniedHandler(), engineApi));
         if (jwtDecoder.getIfAvailable() != null) {
             http.oauth2ResourceServer(server -> server
                     .jwt(jwt -> jwt.jwtAuthenticationConverter(rolesAndPermissions()))
-                    .authenticationEntryPoint(entryPoint));
-        }
-        if (basic) {
-            http.httpBasic(httpBasic -> httpBasic.authenticationEntryPoint(entryPoint));
+                    .authenticationEntryPoint(problemEntryPoint));
         }
         return http.build();
+    }
+
+    static HttpSessionRequestCache pagesOnly(RequestMatcher engineApi) {
+        HttpSessionRequestCache requestCache = new HttpSessionRequestCache();
+        requestCache.setRequestMatcher(new NegatedRequestMatcher(engineApi));
+        return requestCache;
+    }
+
+    /** A request authenticated by a bearer token sends no cookie, so a forged cross-site request cannot use it. */
+    static boolean bearerRequest(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        return authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7);
+    }
+
+    /**
+     * The tenant of a request. Token callers: the {@code tenant_id} claim. Session callers: the tenant of the
+     * signed-in demo user. Anyone else has no tenant and gets {@code 401}. No header is read.
+     */
+    @Bean
+    TenantResolver hostTenantResolver() {
+        return caller -> caller.stringClaim(TENANT_CLAIM).or(() ->
+                caller.principal() instanceof UserDetails user && DEMO_USERS.contains(user.getUsername())
+                        ? Optional.of(DEMO_TENANT)
+                        : Optional.empty());
+    }
+
+    /**
+     * The demo users, on the {@code dev} profile only. Outside it the store is empty, so nobody can sign in
+     * with the form and Spring Boot generates no default user either.
+     */
+    @Bean
+    InMemoryUserDetailsManager hostUsers(Environment environment, @Value("${HORUS_DEMO_PASSWORD:}") String password) {
+        List<UserDetails> users = new ArrayList<>();
+        if (!environment.matchesProfiles(DEV_PROFILE)) {
+            return new InMemoryUserDetailsManager(users);
+        }
+        requireLocalDevelopment(environment);
+        if (password.isBlank()) {
+            LOG.warn("HORUS_DEMO_PASSWORD is not set, so no demo user can sign in.");
+        } else {
+            PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
+            String encoded = encoder.encode(password);
+            users.add(User.withUsername("lan").password(encoded).roles("PRICING_AUTHOR").build());
+            users.add(User.withUsername("minh").password(encoded).roles("PRICING_APPROVER").build());
+        }
+        return new InMemoryUserDetailsManager(users);
+    }
+
+    /**
+     * Stops a {@code dev} start-up that looks like a shared environment: another profile active beside
+     * {@code dev} (other than {@code test}), or a token issuer that is not on this machine.
+     */
+    static void requireLocalDevelopment(Environment environment) {
+        for (String profile : environment.getActiveProfiles()) {
+            if (!profile.equals(DEV_PROFILE) && !profile.equals("test")) {
+                throw new IllegalStateException("The dev profile turns on demo users and must run alone, but profile '"
+                        + profile + "' is active too. Remove dev outside local development.");
+            }
+        }
+        String issuer = environment.getProperty(JWT + "issuer-uri", "");
+        if (!issuer.isBlank()) {
+            String host = URI.create(issuer).getHost();
+            if (host == null || !(host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]"))) {
+                throw new IllegalStateException("The dev profile turns on demo users, but the token issuer " + issuer
+                        + " is not on this machine. Remove dev outside local development.");
+            }
+        }
+    }
+
+    /**
+     * TR-SEC-12: whenever the host accepts bearer tokens it must name its own audience, so a token minted for
+     * another client of the same identity provider is refused.
+     */
+    static void requireAudience(Environment environment) {
+        boolean acceptsTokens = List.of("issuer-uri", "jwk-set-uri", "public-key-location").stream()
+                .anyMatch(name -> !environment.getProperty(JWT + name, "").isBlank());
+        if (acceptsTokens && environment.getProperty(JWT + "audiences", "").isBlank()) {
+            throw new IllegalStateException("The host accepts bearer tokens but names no audience. Set "
+                    + "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES to this host's audience, so a token "
+                    + "issued for another host is refused.");
+        }
     }
 
     /**
@@ -72,18 +191,5 @@ class HostSecurityConfiguration {
             return authorities;
         });
         return converter;
-    }
-
-    /**
-     * Two demo users for the {@code dev} profile only: Lan, a pricing analyst, and Minh, a pricing
-     * approver. Their roles map to engine permissions in {@code application.yml}. Never use these
-     * outside local development.
-     */
-    @Bean
-    @Profile("dev")
-    UserDetailsService devUsers() {
-        return new InMemoryUserDetailsManager(
-                User.withUsername("lan").password("{noop}lan").roles("PRICING_ANALYST").build(),
-                User.withUsername("minh").password("{noop}minh").roles("PRICING_APPROVER").build());
     }
 }

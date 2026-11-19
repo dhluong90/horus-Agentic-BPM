@@ -4,9 +4,9 @@ Every host that embeds an engine answers two requests: `GET /api/bpm/meta` says 
 
 ## What a host adds
 
-Nothing beyond the engine starter and its own security. The starter brings the small host metadata module `bpm-host-metadata`, which serves both endpoints once per host, whatever engines run in it. The endpoints are active when the host is a servlet application with Spring MVC and Spring Security.
+Nothing beyond the engine starter and its own security. The starter brings the small host metadata module `bpm-host-metadata`, which serves both endpoints once per host, whatever engines run in it. The endpoints are active when the host is a servlet application with Spring MVC and Spring Security; `horus.bpm.host-metadata.enabled=false` turns them off.
 
-The host owns its security chain, so it adds one call that makes engine errors RFC 9457 problem details:
+The host owns its security chain, so it adds one call that makes engine errors RFC 9457 problem details. Every other path keeps the host's own behaviour, for example a redirect to its sign-in page:
 
 ```java
 @Bean
@@ -21,7 +21,7 @@ SecurityFilterChain hostSecurity(HttpSecurity http) {
 }
 ```
 
-Both classes are in `com.horus.bpm.host.autoconfigure`. Without them the host's own handlers answer, usually with an empty `401` body.
+Both classes are in `com.horus.bpm.host.autoconfigure`. Without them the host's own handlers answer, usually with an empty `401` body or a redirect. Even a chain that lets every request through never exposes data: the endpoints check the caller themselves and answer `401` as a problem.
 
 ## How a client uses the two endpoints
 
@@ -31,22 +31,25 @@ sequenceDiagram
     participant C as Client (cockpit)
     participant S as Host security chain
     participant M as Host metadata module
+    participant R as Tenant resolver
     participant E as Engine starters
-    C->>S: GET /api/bpm/meta with bearer token
-    alt no token or token rejected
-        S-->>C: 401 problem, code UNAUTHENTICATED
+    C->>S: GET /api/bpm/meta with session cookie or bearer token
+    alt not signed in, or token rejected (bad signature, another audience)
+        S-->>C: 401 problem, code UNAUTHENTICATED, WWW-Authenticate
     else authenticated
         S->>M: request with the caller
+        M->>R: tenant of this caller
+        R-->>M: tenant from the token claim or the signed-in principal
         M->>E: engine entries (version, features, permissions)
         M-->>C: 200 meta, Cache-Control private, max-age=60, ETag
     end
     C->>M: GET /api/bpm/me
-    alt token has no tenant claim
-        M-->>C: 401 problem, code UNAUTHENTICATED
-    else X-Tenant-Id names another tenant
+    alt no tenant for the caller
+        M-->>C: 401 problem, WWW-Authenticate Bearer error="invalid_token"
+    else a header names another tenant than the token or session
         M-->>C: 403 problem, code TENANT_NOT_ALLOWED, security log entry
     else
-        M-->>C: 200 me, permissions held for this host
+        M-->>C: 200 me, Cache-Control private, no-cache, ETag
     end
     C->>M: GET /api/bpm/me with If-None-Match
     M-->>C: 304 Not Modified while nothing changed
@@ -56,7 +59,7 @@ The client turns screens on by the feature flags in `/meta` and the permissions 
 
 ## `GET /api/bpm/meta`
 
-Requires an authenticated caller and no permission. Schema: [`bpm-meta.v1.schema.json`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/cockpit/api/schema/bpm-meta.v1.schema.json).
+Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm-meta.v1.schema.json`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/cockpit/api/schema/bpm-meta.v1.schema.json).
 
 ```json
 {
@@ -82,7 +85,7 @@ Requires an authenticated caller and no permission. Schema: [`bpm-meta.v1.schema
 
 ## `GET /api/bpm/me`
 
-Requires an authenticated caller and no permission. Schema: [`bpm-me.v1.schema.json`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/cockpit/api/schema/bpm-me.v1.schema.json).
+Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm-me.v1.schema.json`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/cockpit/api/schema/bpm-me.v1.schema.json).
 
 ```json
 {
@@ -90,7 +93,7 @@ Requires an authenticated caller and no permission. Schema: [`bpm-me.v1.schema.j
   "user": { "id": "lan", "displayName": "Lan Nguyen" },
   "tenant": { "current": "bank-a", "allowed": ["bank-a"] },
   "permissions": ["rules:read", "rules:author"],
-  "roles": ["ROLE_PRICING_ANALYST"],
+  "roles": ["ROLE_PRICING_AUTHOR"],
   "groups": []
 }
 ```
@@ -102,7 +105,7 @@ Requires an authenticated caller and no permission. Schema: [`bpm-me.v1.schema.j
 | `tenant.current` | The tenant the request resolved to; see [Tenant](#tenant) |
 | `tenant.allowed` | The current tenant only, until tenant switching arrives in M2 |
 | `permissions` | Engine permissions the caller holds, in each engine's order; see [Permissions](#permissions) |
-| `roles` | The caller's `ROLE_` authorities, sorted |
+| `roles` | The caller's host roles that an engine role mapping names, sorted. Other host roles are left out, so the host's role model does not reach the browser |
 | `groups` | Claim `groups` when the token has one, otherwise empty |
 
 A caller with no engine permission gets `200` with `"permissions": []`, not an error.
@@ -116,7 +119,7 @@ A caller with no engine permission gets `200` with `"permissions": []`, not an e
 
 ```yaml
 horus.bpm.rules.security.role-permissions:
-  ROLE_PRICING_ANALYST:  [rules:read, rules:author]
+  ROLE_PRICING_AUTHOR:   [rules:read, rules:author]
   ROLE_PRICING_APPROVER: [rules:read, rules:approve]
 ```
 
@@ -126,27 +129,61 @@ The mapping is read today for `/me`. The Rule Engine's own endpoints use the sam
 
 ## Tenant
 
-| `horus.bpm.tenancy.resolver` | Tenant from | Use when |
-|---|---|---|
-| `security-context` (default) | The token claim `horus.bpm.tenancy.claim` (default `tenant_id`) | OIDC hosts |
-| `header:X-Tenant-Id` | The header, set by a trusted gateway after authentication | Behind a gateway; local development. Outside the `dev` profile the host logs a warning at start-up |
+A `TenantResolver` finds the tenant of each request. The host picks one of three modes:
 
-A tenant in a query parameter or a body is ignored. With `security-context`, a request whose token has no tenant claim is `401 UNAUTHENTICATED`. An `X-Tenant-Id` header that differs from the token tenant is `403 TENANT_NOT_ALLOWED`, and the host writes the security log entry `tenant.switch.refused user=<user> requestedTenant=<tenant> correlationId=<id>` on the logger `com.horus.bpm.security`. A header equal to the token tenant is accepted.
+| Mode | How | Use when |
+|---|---|---|
+| Token (default) | `horus.bpm.tenancy.resolver: security-context`. The token claim `horus.bpm.tenancy.claim` (default `tenant_id`) | OIDC hosts with bearer tokens |
+| Host session | The host declares its own `TenantResolver` bean that reads the tenant from the signed-in principal, `CallerContext.principal()`. It never reads a header, because in a browser any header can be set by script | Hosts with their own sign-in (form, SAML, LDAP), and the embedded cockpit, which uses that session |
+| Gateway | `horus.bpm.tenancy.resolver: header:<name>`. A gateway sets the header after it has authenticated the caller. Outside the `dev` profile the host does not start unless `horus.bpm.tenancy.trusted-gateway=true` confirms that the gateway overwrites the header on every request | Behind such a gateway only |
+
+A host bean replaces the built-in modes. A host that accepts both sessions and bearer tokens returns the claim for token callers and the principal's tenant for session callers:
+
+```java
+@Bean
+TenantResolver hostTenantResolver() {
+    return caller -> caller.stringClaim("tenant_id")
+            .or(() -> caller.principal() instanceof BankUser user ? Optional.of(user.tenant()) : Optional.empty());
+}
+```
+
+Whatever the mode, these rules hold:
+
+| Rule | Answer |
+|---|---|
+| No tenant for the caller | `401 UNAUTHENTICATED` with `WWW-Authenticate: Bearer error="invalid_token"` and a security log entry `tenant.unresolved` |
+| The caller's token carries the tenant claim and the resolved tenant differs from it, for example a gateway header of `bank-b` on a `bank-a` token | `403 TENANT_NOT_ALLOWED` |
+| An `X-Tenant-Id` header differs from the resolved tenant (tenant switching is off) | `403 TENANT_NOT_ALLOWED` |
+| The tenant is not 1 to 64 letters, digits, `.`, `_` or `-`, starting with a letter or digit | `403 TENANT_NOT_ALLOWED` |
+| A tenant in a query parameter or a body | Ignored |
+
+Every refusal writes one entry on the logger `com.horus.bpm.security`:
+
+```text
+tenant.switch.refused reason=switching-off user=lan%40bank-a.vn tokenTenant=bank-a requestedTenant=bank-b correlationId=01M7RT1NNKHDP8JWFNE563SNP6 clientCorrelationId=-
+```
+
+`reason` is `switching-off`, `differs-from-token-tenant` or `invalid-tenant`. Values are percent-encoded outside letters, digits, `.`, `_` and `-`, and cut at 128 characters, so a value cannot forge another field and can still be read back.
 
 ## Headers and errors
 
 | Header | Value |
 |---|---|
-| `Cache-Control` | `private, max-age=60` on `200`; `no-store` on errors |
+| `Cache-Control` | `/meta`: `private, max-age=60`. `/me`: `private, no-cache`, so the browser asks again every time (cheaply, with `If-None-Match`) and a revoked role or a sign-out is never shown from cache. Errors: `no-store` |
 | `ETag` | A weak validator of the body; send it back as `If-None-Match` to get `304` |
-| `Vary` | `Authorization, Cookie, X-Tenant-Id` on `/me`, whose body depends on the caller |
-| `X-Correlation-Id` | Your value when it is 1 to 64 letters, digits, `.`, `_` or `-`; otherwise a new ULID. The same value is in every problem body |
+| `Vary` | On `/me`: `Authorization, Cookie, X-Tenant-Id`, plus the gateway tenant header when it has another name |
+| `X-Correlation-Id` | A ULID issued by the host for every request, also in every problem body. A caller's own `X-Correlation-Id` is never adopted; it is logged as `clientCorrelationId` |
+| `WWW-Authenticate` | On every `401`. `Bearer` by default (`horus.bpm.security.challenge`); for a caller without a tenant a bearer challenge adds `error="invalid_token"` |
+
+Engine API responses under `/api/bpm/rules/**` and `/api/bpm/processes/**` get `Cache-Control: no-store` from the same module.
 
 | Status | `code` | When |
 |---|---|---|
-| `401` | [UNAUTHENTICATED](Common-Error-Codes#unauthenticated) | No principal, a rejected token, or no tenant for the caller |
-| `403` | [TENANT_NOT_ALLOWED](Common-Error-Codes#tenant_not_allowed) | `X-Tenant-Id` names a tenant other than the token tenant |
-| `403` | [PERMISSION_DENIED](Common-Error-Codes#permission_denied) | The host's chain refuses the request (`BpmProblemAccessDeniedHandler`) |
+| `401` | [UNAUTHENTICATED](Common-Error-Codes#unauthenticated) | No principal, a rejected token (another audience, a bad signature), or no tenant for the caller |
+| `403` | [TENANT_NOT_ALLOWED](Common-Error-Codes#tenant_not_allowed) | A header names another tenant than the token or session, or a tenant outside the allowed format |
+| `403` | [PERMISSION_DENIED](Common-Error-Codes#permission_denied) | The host's chain refuses the request, for example a session call without its CSRF token (`BpmProblemAccessDeniedHandler`) |
+
+A client must not repeat the sign-in more than once on `UNAUTHENTICATED` with `error="invalid_token"`: the same account gets the same token and the same answer. The cockpit treats a `401` on `/me` as "no access to this service" and does not sign in again.
 
 ```json
 {
@@ -165,21 +202,25 @@ A tenant in a query parameter or a body is ignored. With `security-context`, a r
 | Property | Default | Meaning |
 |---|---|---|
 | `horus.bpm.host-id` | unset | Id clients show for this host, 1 to 40 characters |
-| `horus.bpm.tenancy.resolver` | `security-context` | `security-context` or `header:<name>` |
-| `horus.bpm.tenancy.claim` | `tenant_id` | Token claim that carries the tenant |
+| `horus.bpm.host-metadata.enabled` | `true` | `false` turns both endpoints off, for hosts that already serve them another way |
+| `horus.bpm.tenancy.resolver` | `security-context` | `security-context` or `header:<name>`; ignored when the host declares a `TenantResolver` bean |
+| `horus.bpm.tenancy.claim` | `tenant_id` | Token claim that carries the tenant; always compared with the resolved tenant |
+| `horus.bpm.tenancy.trusted-gateway` | `false` | Required outside the `dev` profile before `header:<name>` starts |
+| `horus.bpm.security.challenge` | `Bearer` | `WWW-Authenticate` value of a `401` the endpoints raise themselves |
 | `horus.bpm.rules.security.role-permissions` | empty | Host authority to `rules:*` permissions |
 
 ## Try it
 
-The example host [`examples/rule-engine-only`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/rule-engine-only) has two demo users on the `dev` profile, Lan (pricing analyst) and Minh (pricing approver):
+The example host [`examples/rule-engine-only`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/rule-engine-only) has two demo users on the `dev` profile, Lan (pricing author) and Minh (pricing approver), both at `bank-a`, with the password from `HORUS_DEMO_PASSWORD`. They sign in with the host's form and then call the endpoints with the session, as the embedded cockpit does:
 
 ```bash
-curl -s -u lan:lan   -H 'X-Tenant-Id: bank-a' localhost:8080/api/bpm/me
-# {"schemaVersion":1,"user":{"id":"lan"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:author"],"roles":["ROLE_PRICING_ANALYST"],"groups":[]}
-curl -s -u minh:minh -H 'X-Tenant-Id: bank-a' localhost:8080/api/bpm/me
-# ... "permissions":["rules:read","rules:approve"],"roles":["ROLE_PRICING_APPROVER"] ...
+P=choose-one   # the HORUS_DEMO_PASSWORD the host was started with
+CSRF=$(curl -s -c jar -b jar localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
+curl -s -c jar -b jar -o /dev/null -d "username=lan&password=$P&_csrf=$CSRF" localhost:8080/login
+curl -s -b jar localhost:8080/api/bpm/me
+# {"schemaVersion":1,"user":{"id":"lan"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:author"],"roles":["ROLE_PRICING_AUTHOR"],"groups":[]}
 curl -s -i localhost:8080/api/bpm/meta
-# HTTP/1.1 401, Content-Type: application/problem+json, "code":"UNAUTHENTICATED"
+# HTTP/1.1 401, WWW-Authenticate: Bearer, Content-Type: application/problem+json, "code":"UNAUTHENTICATED"
 ```
 
 The OpenAPI 3.1 document for both endpoints is [`bpm-host-metadata/api/openapi.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/bpm-host-metadata/api/openapi.yaml); it references the two schemas above.
