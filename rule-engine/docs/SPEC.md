@@ -15,23 +15,32 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `evaluate("card-fee", { tier: "GOLD", txCount: 5 }) -> R1, 0 VND`.
 - **Test ID:** `RLE_001_first_hit_policy_returns_top_matching_rule`
 
-### RLE-002 `unique` hit policy fails when zero or multiple rules match
-- **Traces to:** `TR-DET-04`
+### RLE-002 `unique` hit policy: one match returns it, zero matches is no match, several matches fail
+- **Traces to:** `TR-DET-04`, `TR-STD-22`, PD-088
 - **Milestone:** M1
-- **Given:** Rule set `loan-pricing` v1 with `hitPolicy: unique` where both `R1` (`score >= 700`) and `R2` (`income >= 20000000 VND`) overlap.
-- **When:** Evaluate `inputs = { score: 750, income: 25000000 VND }` (2 matches) or `{ score: 500, income: 5000000 VND }` (0 matches).
-- **Then:** Result fails with `UNIQUE_HIT_VIOLATION` (`422` over REST, ADR-0010; never `409`, which is reserved for state conflicts), returns **no partial outputs**, and records an audit entry with `outcome = UNIQUE_HIT_VIOLATION`.
-- **Example:** `2 matched rules [R1, R2] -> error UNIQUE_HIT_VIOLATION, outputs = empty`.
-- **Test ID:** `RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches`
+- **Given:** Rule set `loan-pricing` v1 with `hitPolicy: unique`, output `rate` (decimal), rules `R1` (`score >= 700 -> rate: 0.08`) and `R2` (`income >= 20000000 VND -> rate: 0.09`), which overlap.
+- **When:** Evaluate (a) `{ score: 750, income: 10000000 VND }` (1 match), (b) `{ score: 500, income: 5000000 VND }` (0 matches) and (c) `{ score: 750, income: 25000000 VND }` (2 matches).
+- **Then:**
+  - (a) Outcome `Matched`, `matchedRuleIds = ["R1"]`, `outputs.rate = 0.08`.
+  - (b) Outcome `NoMatch` (REST `200`, `matched: false`), every declared output `null`, `matchedRuleIds = []`; one decision log row with `outcome = OK` and `matched_rule_ids = []`, exactly as for `first`. Zero matches is never `UNIQUE_HIT_VIOLATION`.
+  - (c) Outcome `Failed` with `UNIQUE_HIT_VIOLATION` (`422` over REST, ADR-0010; never `409`, which is reserved for state conflicts), **no partial outputs**, `matchedRuleIds = ["R1", "R2"]` in rule order; one decision log row with `outcome = UNIQUE_HIT_VIOLATION` and `matched_rule_ids = ["R1", "R2"]`.
+- **Example:** `1 match [R1] -> rate 0.08; 0 matches -> NoMatch, rate null; 2 matches [R1, R2] -> UNIQUE_HIT_VIOLATION, outputs empty`.
+- **Test ID:** `RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several`
 
-### RLE-003 `collect` hit policy returns ordered lists or aggregated scalars
-- **Traces to:** `TR-DET-01`
+### RLE-003 `collect` hit policy returns aligned lists or aggregated scalars, with the DMN 1.5 null rules
+- **Traces to:** `TR-DET-01`, `TR-STD-22`, PD-066, PD-088
 - **Milestone:** M1
-- **Given:** Rule set `risk-flags` v1 with `hitPolicy: collect` and outputs `flags` (`list<string>`) and `penalty` (`collect: sum`).
-- **When:** Evaluate inputs matching `R1` (`flags: "HIGH_VELOCITY", penalty: 10`) and `R3` (`flags: "NEW_DEVICE", penalty: 5`).
-- **Then:** `matchedRuleIds = ["R1", "R3"]`, `outputs.flags = ["HIGH_VELOCITY", "NEW_DEVICE"]`, `outputs.penalty = 15`.
-- **Example:** `R1 (+10) + R3 (+5) -> penalty = 15, flags = [HIGH_VELOCITY, NEW_DEVICE]`.
-- **Test ID:** `RLE_003_collect_hit_policy_aggregates_matched_rules`
+- **Given:** Rule set `risk-flags` v1 with `hitPolicy: collect` and outputs `flags` (`list<string>`, no aggregate), `penalty` (`integer`, `collect: sum`), `worst` (`integer`, `collect: max`) and `hits` (`integer`, `collect: count`); rules `R1` (`flags: "HIGH_VELOCITY", penalty: 10, worst: 10, hits: 1`), `R2` (`flags: null, penalty: 0, worst: 0, hits: null`) and `R3` (`flags: "NEW_DEVICE", penalty: 5, worst: 5, hits: 1`). Rule set `risk-flags-null` is the same except that `R2` has `penalty: null`.
+- **When:** Evaluate `risk-flags` with (a) inputs matching `R1`, `R2` and `R3`, (b) inputs matching only `R2`, (c) inputs matching no rule; and (d) `risk-flags-null` with inputs matching `R1` and `R2`.
+- **Then:**
+  - **Lists (no aggregate).** One entry per matched rule, in rule order, aligned with `matchedRuleIds`; a `null` output is a `null` entry and is never dropped. (a) `matchedRuleIds = ["R1", "R2", "R3"]`, `flags = ["HIGH_VELOCITY", null, "NEW_DEVICE"]`. (b) `flags = [null]`.
+  - **`count`.** The number of matched rules, `null` values included, as FEEL `count` (DMN 1.5 10.3.4.4); not a count of distinct values. (a) `hits = 3`. (b) `hits = 1`.
+  - **`sum`, `min`, `max`.** Over the values of all matched rules, not distinct values (DMN 1.5 8.2.11). (a) `penalty = 15`, `worst = 10`. (b) `penalty = 0`, `worst = 0`. Money sums are exact in minor units; mixed currencies, and a sum beyond plus or minus 2^53 - 1 minor units, are `EVALUATION_ERROR` (rule engine DESIGN 3.4). `min` and `max` compare numbers, money of one currency, strings by code point, dates and date-times; `boolean` is refused at publish time.
+  - **A `null` value under `sum`, `min` or `max` (d).** `null` is outside the domain of FEEL `sum`, `min` and `max`. A v1 rule set evaluates in `errorMode: strict` (PD-066), so the outcome is `Failed` with `EVALUATION_ERROR` naming the output (`penalty`) and the rule (`R2`), with no partial outputs, and the decision log row has `outcome = EVALUATION_ERROR` and `matched_rule_ids = ["R1", "R2"]`. A model in `errorMode: spec` (imported DMN from S1) gives `penalty = null` with a warning in the decision trace.
+  - **No match (c).** Outcome `NoMatch`, every output `null`, lists, aggregates and `count` included (DMN 1.5 10.3.2.10: no rule matched, the result is `null`), `matchedRuleIds = []`; logged as `outcome = OK` with `matched_rule_ids = []`.
+  - **Publish time.** An aggregate on a non-`collect` table, a list output on a non-`collect` table, `sum` on a non-numeric type and `count` on a non-`integer` output are `422 VALIDATION_FAILED` naming the output.
+- **Example:** `R1 (+10), R2 (+0), R3 (+5) -> penalty 15, worst 10, hits 3, flags [HIGH_VELOCITY, null, NEW_DEVICE]; only R2 -> hits 1, flags [null]; null penalty under sum -> EVALUATION_ERROR (strict); no match -> NoMatch, all null`.
+- **Test ID:** `RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules`
 
 ---
 
@@ -200,10 +209,10 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-020 Import keeps the source document beside the canonical version
 - **Traces to:** `TR-STD-01`, `TR-STD-03`
 - **Milestone:** M1
-- **Given:** The YAML file `card-fee.yaml` (1,834 bytes, with comments and keys in author order) in Git, and its RFC 8785 hash computed by the pipeline.
+- **Given:** The YAML file `card-fee.yaml` (1,834 bytes, with comments and keys in author order) in Git, and the SHA-256 of its committed blob computed by the pipeline (`git show HEAD:card-fee.yaml | sha256sum`).
 - **When:** It is imported with `POST /api/bpm/rules/v1/rule-sets`, then read with `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1?include=source` and without the parameter.
-- **Then:** `rle_version` stores `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` the SHA-256 of those bytes, and `canonical_hash` equal to the pipeline's hash; with `include=source` the response carries the original text including comments and its hash; without it, the canonical document only. Nothing in the source document is evaluated.
-- **Example:** `import card-fee.yaml -> source_format YAML, source bytes equal, canonical_hash = pipeline hash`.
+- **Then:** `rle_version` stores `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` the SHA-256 of the raw request bytes, equal to the pipeline's hash, and `canonical_hash` the SHA-256 of the RFC 8785 form of the canonical document written from the model, with cells in their normal form (ADR-0026); with `include=source` the response carries the original text including comments and its hash; without it, the canonical document only. Nothing in the source document is evaluated.
+- **Example:** `import card-fee.yaml -> source_format YAML, source bytes equal, source_hash = sha256sum, canonical_hash = hash of the printed model`.
 - **Test ID:** `RLE_020_import_keeps_source_document_and_canonical_hash`
 
 ### RLE-021 Every expression has a FEEL translation that gives the same result
@@ -236,9 +245,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-024 A v1 rule set reads into the DMN model and writes back to the same canonical JSON
 - **Traces to:** `TR-STD-28`, `TR-STD-03`
 - **Milestone:** M1
-- **Given:** `card-fee.yaml` (v1, `hitPolicy: first`, inputs `tier` and `txCount`, output `fee`, rules `R1` to `R3`) and the RFC 8785 hash the pipeline computed from it.
+- **Given:** `card-fee.yaml` (v1, `hitPolicy: first`, inputs `tier` and `txCount`, output `fee`, rules `R1` to `R3`, every cell already in normal form) and the RFC 8785 hash of that document.
 - **When:** The v1 reader builds the in-memory model and the canonical writer prints it back.
-- **Then:** The model is one `Definitions` named `card-fee` holding one `Decision` `card-fee` whose `DecisionTable` has hit policy `FIRST`, input clauses `tier` and `txCount`, output clause `fee` and rules with ids `R1`, `R2`, `R3` in document order; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document and its SHA-256 equals the pipeline hash and the stored `canonical_hash`.
+- **Then:** The model is one `Definitions` named `card-fee` holding one `Decision` `card-fee` whose `DecisionTable` has hit policy `FIRST`, input clauses `tier` and `txCount`, output clause `fee` and rules with ids `R1`, `R2`, `R3` in document order; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document (it is already in normal form) and its SHA-256 equals that hash and the stored `canonical_hash`.
 - **Example:** `card-fee.yaml -> Definitions(card-fee) / Decision(card-fee) / DecisionTable(FIRST, 2 inputs, 1 output, 3 rules) -> same hash`.
 - **Test ID:** `RLE_024_v1_rule_set_round_trips_through_dmn_model`
 
@@ -387,3 +396,28 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The request returns `200` with v1 still `PUBLISHED` and a pending retirement (`retireRequestedBy: bob`), one history row `RETIRE_REQUESTED` and one `rules.version.retire-requested.v1` event; the evaluation still selects v1. `bob`'s confirmation returns `403 SELF_APPROVAL_FORBIDDEN` and changes nothing. `carol`'s confirmation returns `200`: v1 is `RETIRED` with the same effects as `RLE-026` (retired event, cache epoch, `404 NO_EFFECTIVE_VERSION` on every replica within 5 s), and the event and the history row record `approvalMode: four-eyes`, requester `bob`, confirmer `carol` and the reason. The empty reason returns `400 INPUT_INVALID`; the second request and the confirmation without a request return `409 INVALID_STATE`; none changes anything.
 - **Example:** `bob requests -> still serving; bob confirms -> 403 SELF_APPROVAL_FORBIDDEN; carol confirms -> RETIRED, approvalMode four-eyes`.
 - **Test ID:** `RLE_038_four_eyes_retirement_needs_second_approver`
+
+### RLE-045 The same behaviour has one hash in any style and serialisation, and different behaviour never shares one
+- **Traces to:** `TR-STD-03`, `TR-STD-25`, `TR-STD-28`, `TR-DEF-04`, ADR-0026
+- **Milestone:** M1
+- **Given:** Rule set `style-check` v1 (`hitPolicy: first`) with inputs `x` (integer), `y` (integer), `country` (string), `at` (datetime) and `amount` (money, USD), and output `rate` (decimal), written twice. Document A uses author style: `x >= 3`, `x between 1 and 5`, `x is not null`, `country != 'VN'`, `country in ['VN','SG']`, `at == datetime('2026-12-01T00:00:00+07:00')`, `amount == 12.5 USD`. Document B uses the normal form: `>= 3`, `between 1 and 5`, `is not null`, `!= 'VN'`, `in ['VN', 'SG']`, `== datetime('2026-11-30T17:00:00Z')`, `== 12.50 USD`. Both have `rate: "0.10"`.
+- **When:** A and B are imported as YAML in two tenants. A is exported as DMN and imported again, then exported and imported once more. Separately, the DMN cells `money(12.5, "USD")`, `money(10000.00, "VND")` and `money(-5, "USD")` go through import, export and import. Then each negative case below is imported as its own version of `style-check`.
+- **Then (same behaviour, one hash):**
+  - A and B have the same `canonical_hash` and different `source_hash` values.
+  - Every DMN round trip keeps that `canonical_hash`.
+  - The row-level diff of A against B reports no change.
+  - `?include=source` on A returns A's bytes unchanged.
+  - Money is printed at the currency scale (`12.50 USD`, `10000 VND`, `-5.00 USD`) and keeps its hash through the round trip.
+- **Then (different behaviour, different hash):** each case below gets a `canonical_hash` different from the base version, and the diff reports the change.
+  - **(n1)** `rate` written as the JSON number `0.1` against the JSON number `0.1000000000000000055511151231257827`, which is refused at import with `422 VALIDATION_FAILED` naming the line, because it does not survive an exact RFC 8785 round trip. The same value as the string `"0.1000000000000000055511151231257827"` is accepted and gets its own hash.
+  - **(n2)** `rate: "0.10"` against `rate: "0.1"`, because the scale is kept.
+  - **(n3)** The integer `9007199254740993` as a JSON number is refused with `422`. As a string it is accepted, with a hash different from `"9007199254740992"`.
+  - **(n4)** In column `x`, `y >= 3` against `>= 3`, and `x > y` against `> y`: each keeps its operands.
+  - **(n5)** `country != 'VN'` against the same text with a Cyrillic `В` in place of `V`. The canonical document shows it unchanged, because no normalisation is applied, and the diff marks the changed literal as containing non-ASCII characters.
+  - **(n6)** `country != 'V\u200BN'` (a zero-width space) is printed with the `\u200B` escape and has its own hash. `country != 'V\u202EN'` (a bidirectional override) is refused at import with `422` naming the line.
+  - **(n7)** A source that is not valid UTF-8, contains NUL, or starts with a byte order mark is refused at import with `422`, and nothing is stored.
+- **Then (integrity):**
+  - A model whose printed form does not parse back to an equal tree is refused at import with `422` and nothing stored. This is tested with a deliberately broken printer in the test harness.
+  - A stored version whose `canonical_json` is altered in the database so that it no longer hashes to `canonical_hash` is not served. Evaluation returns `EVALUATION_ERROR` with a detail naming the integrity check, and one audit entry and one alert are written.
+- **Example:** `x >= 3 (YAML) == >= 3 (YAML) == >= 3 (DMN) -> one canonical_hash; 0.1 vs 0.1000000000000000055511151231257827 -> 422 as numbers, two hashes as strings; y >= 3 stays y >= 3; Cyrillic V -> different hash, marked in the diff`.
+- **Test ID:** `RLE_045_one_hash_per_behaviour_in_any_style_and_never_for_different_behaviour`
