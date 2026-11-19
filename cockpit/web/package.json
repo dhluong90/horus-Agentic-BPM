@@ -18,7 +18,8 @@
     "e2e": "playwright test",
     "schemas": "node scripts/generate-schemas.mjs",
     "schemas:check": "node scripts/generate-schemas.mjs --check",
-    "licences": "node scripts/check-licences.mjs"
+    "licences": "node scripts/check-licences.mjs",
+    "e2e:live": "playwright test -c playwright.live.config.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.108.0",

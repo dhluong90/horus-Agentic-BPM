@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
 import { hostLabel } from '../app/config/registry';
 import { useHostSession, type SessionDependencies, type SessionState } from '../app/session/useHostSession';
-import { ServiceOverview } from '../components/ServiceOverview';
 import { SessionHeader, type SessionSummary } from '../components/SessionHeader';
 import { ConfigErrorPanel, HostErrorPanel, LoadingPanel } from '../components/StatePanels';
 import { useI18n, type Locale } from '../i18n/I18nProvider';
+import { Workspace } from './Workspace';
 
 function summary(state: SessionState, locale: Locale): SessionSummary | undefined {
   if (state.status !== 'ready') return undefined;
@@ -18,7 +18,7 @@ function summary(state: SessionState, locale: Locale): SessionSummary | undefine
   };
 }
 
-function MainContent({ state }: { state: SessionState }) {
+function MainContent({ state, fetchImpl }: { state: SessionState; fetchImpl: typeof fetch | undefined }) {
   switch (state.status) {
     case 'loading':
       return <LoadingPanel />;
@@ -27,7 +27,7 @@ function MainContent({ state }: { state: SessionState }) {
     case 'host-error':
       return <HostErrorPanel error={state.error} onRetry={state.retry} />;
     case 'ready':
-      return <ServiceOverview meta={state.meta} me={state.me} />;
+      return <Workspace hostId={state.host.id} baseUrl={state.host.baseUrl} meta={state.meta} me={state.me} fetchImpl={fetchImpl} />;
   }
 }
 
@@ -46,7 +46,7 @@ export function CockpitShell(dependencies: SessionDependencies) {
     <div className="app">
       <SessionHeader session={summary(state, locale)} banner={registry?.ui?.environmentBanner} />
       <main id="main" className="main" tabIndex={-1}>
-        <MainContent state={state} />
+        <MainContent state={state} fetchImpl={dependencies.fetchImpl} />
       </main>
     </div>
   );

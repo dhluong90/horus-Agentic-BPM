@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
-import { scenarioResponses, type MockResponse, type Scenario } from '../src/mocks/fixtures';
+import { KNOWN_RULE_SETS, scenarioResponses, scenarioUser, type MockResponse, type Scenario } from '../src/mocks/fixtures';
+import { createFakeEngine, demoSeed } from '../src/mocks/ruleEngine';
 
 /** Answers the registry, /api/bpm/meta and /api/bpm/me from the shared fixtures, and records the calls. */
 export async function mockHost(page: Page, scenario: Scenario = 'ready'): Promise<string[]> {
@@ -37,4 +38,17 @@ export async function rememberLocale(page: Page, locale: 'en' | 'vi'): Promise<v
   await page.addInitScript((value) => {
     window.localStorage.setItem('horus.cockpit.locale', value);
   }, locale);
+}
+
+/** Answers the Rule Engine endpoints from the in-memory engine with the demo data, as the scenario's user. */
+export async function mockRuleEngine(page: Page, scenario: Scenario): Promise<void> {
+  const engine = createFakeEngine(demoSeed());
+  await page.addInitScript(({ key, value }) => {
+    if (window.localStorage.getItem(key) === null) window.localStorage.setItem(key, value);
+  }, KNOWN_RULE_SETS);
+  await page.route('**/api/bpm/rules/v1/**', async (route) => {
+    const request = route.request();
+    const answer = engine.handle({ method: request.method(), path: request.url(), headers: request.headers(), body: request.postData() ?? '', user: scenarioUser(scenario) });
+    await route.fulfill({ status: answer.status, headers: answer.headers, body: answer.body });
+  });
 }

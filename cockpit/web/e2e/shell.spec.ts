@@ -24,7 +24,7 @@ test.describe('embedded cockpit, case A', () => {
       if (!request.url().startsWith('http://127.0.0.1:4173/')) external.push(request.url());
     });
 
-    await page.goto('./');
+    await page.goto('./#/service');
 
     const header = page.getByTestId('session-header');
     await expect(header.getByTestId('header-host')).toHaveText('Loan origination');
@@ -39,7 +39,7 @@ test.describe('embedded cockpit, case A', () => {
   test('CKP_001_header_with_host_tenant_and_user_is_above_the_fold_at_1440x900', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockHost(page);
-    await page.goto('./');
+    await page.goto('./#/service');
 
     const header = page.getByTestId('session-header');
     await expect(header.getByTestId('header-user')).toBeVisible();
@@ -53,7 +53,7 @@ test.describe('embedded cockpit, case A', () => {
   test('CKP_001_header_at_1440x1200_has_the_same_geometry_and_no_layout_shift', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockHost(page);
-    await page.goto('./');
+    await page.goto('./#/service');
     const header = page.getByTestId('session-header');
     await expect(header.getByTestId('header-user')).toBeVisible();
     const at900 = await box(header);
@@ -87,7 +87,7 @@ test.describe('embedded cockpit, case A', () => {
 test.describe('failure paths', () => {
   test('CKP_001_me_problem_shows_code_and_correlation_id_and_no_partial_header', async ({ page }) => {
     await mockHost(page, 'me-forbidden');
-    await page.goto('./');
+    await page.goto('./#/service');
 
     const alert = page.getByRole('alert');
     await expect(alert.getByTestId('error-code')).toHaveText('PERMISSION_DENIED');
@@ -100,7 +100,7 @@ test.describe('failure paths', () => {
 
   test('CKP_012_invalid_registry_shows_the_json_pointer_and_calls_no_host', async ({ page }) => {
     const calls = await mockHost(page, 'registry-invalid');
-    await page.goto('./');
+    await page.goto('./#/service');
 
     await expect(page.getByTestId('config-pointer')).toHaveText('/hosts/0/baseUrl');
     expect(calls).toEqual(['/cockpit-hosts.json']);
@@ -111,7 +111,7 @@ test.describe('security headers', () => {
   test('TR_SEC_09_production_bundle_runs_under_script_src_self_with_no_violation', async ({ page }) => {
     const violations = cspViolations(page);
     await mockHost(page);
-    const response = await page.goto('./');
+    const response = await page.goto('./#/service');
 
     const headers = response?.headers() ?? {};
     expect(headers['content-security-policy']).toContain("script-src 'self'");
@@ -127,7 +127,7 @@ test.describe('security headers', () => {
 test.describe('keyboard', () => {
   test('TR_UI_03_skip_link_language_and_theme_switches_work_from_the_keyboard', async ({ page }) => {
     await mockHost(page);
-    await page.goto('./');
+    await page.goto('./#/service');
     await expect(page.getByTestId('header-user')).toBeVisible();
 
     await page.keyboard.press('Tab');
@@ -147,7 +147,7 @@ test.describe('header geometry', () => {
   test('CKP_001_header_keeps_one_height_while_loading_on_error_and_when_ready', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockHost(page, 'me-forbidden');
-    await page.goto('./');
+    await page.goto('./#/service');
     await expect(page.getByRole('alert')).toBeVisible();
     const onError = await box(page.getByTestId('session-header'));
 
@@ -165,7 +165,7 @@ test.describe('header with the longest values', () => {
   test('CKP_001_vietnamese_header_with_longest_label_chip_and_banner_stays_one_line_above_the_fold_at_1440x900', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockHost(page, 'ready-longest-labels');
-    await page.goto('./');
+    await page.goto('./#/service');
 
     const header = page.getByTestId('session-header');
     await expect(header.getByTestId('header-user')).toBeVisible();
@@ -191,7 +191,7 @@ test.describe('theme before the script runs', () => {
   test('TR_UI_03_dark_system_preference_applies_without_data_theme', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await mockHost(page);
-    await page.goto('./');
+    await page.goto('./#/service');
     await expect(page.getByTestId('header-user')).toBeVisible();
 
     const background = await page.evaluate(() => {
@@ -208,7 +208,7 @@ test.describe('targets and fold (ux-design section 8)', () => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await rememberLocale(page, 'vi');
       await mockHost(page, scenario);
-      await page.goto('./');
+      await page.goto('./#/service');
       await expect(scenario === 'ready' ? page.getByTestId('header-user') : page.getByRole('alert')).toBeVisible();
 
       const tooSmall = await page.evaluate(() => {
@@ -245,7 +245,8 @@ test.describe('targets and fold (ux-design section 8)', () => {
     for (const [scenario, action] of cases) {
       await page.unrouteAll();
       await mockHost(page, scenario);
-      await page.goto('./');
+      await page.goto('./#/service');
+      await page.reload();
       const button = page.getByRole('button', { name: action });
       await expect(button, scenario).toBeVisible();
       await expectInsideViewport(page, button);
@@ -257,7 +258,7 @@ test.describe('targets and fold (ux-design section 8)', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await rememberLocale(page, 'vi');
     await mockHost(page, 'ready');
-    await page.goto('./');
+    await page.goto('./#/service');
     await expect(page.getByTestId('header-user')).toBeVisible();
 
     const cut = await page.evaluate(() =>
