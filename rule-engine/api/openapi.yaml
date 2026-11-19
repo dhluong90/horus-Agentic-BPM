@@ -285,8 +285,19 @@ components:
           schema:
             $ref: '#/components/schemas/RuleSetVersion'
     Problem:
-      description: RFC 9457 problem; see the wiki page Common Error Codes
+      description: >-
+        RFC 9457 problem; see the wiki page Common Error Codes. `401 UNAUTHENTICATED` carries a
+        `WWW-Authenticate` challenge (the host's `horus.bpm.security.challenge`, `Bearer` by default, with
+        `error="invalid_token"` when no tenant could be resolved for the caller). `403` is
+        `PERMISSION_DENIED` when the caller lacks the endpoint's permission, `SELF_APPROVAL_FORBIDDEN` for a
+        maker approving their own version, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
+        another tenant than the caller's while tenant switching is off, or the principal's tenant attribute
+        contradicts the resolved tenant (RLE-018, RLE-037).
       headers:
+        WWW-Authenticate:
+          description: Sent with every `401`
+          schema:
+            type: string
         Retry-After:
           description: Seconds to wait; sent with `409 IDEMPOTENCY_IN_FLIGHT`
           schema:
@@ -375,7 +386,7 @@ components:
         status: { type: integer }
         code:
           type: string
-          enum: [INPUT_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND,
+          enum: [INPUT_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED, SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND,
             VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT,
             RULE_SET_EXISTS, VALIDATION_FAILED, IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR]
         detail: { type: string }
