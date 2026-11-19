@@ -284,8 +284,9 @@ class TaskLifecycleIT {
         String etag = send("tuan", "GET", "/api/bpm/processes/v1/instances/" + instance, null, Map.of()).headers()
                 .firstValue("ETag").orElseThrow();
 
-        HttpResponse<String> cancelled = send("tuan", "POST", "/api/bpm/processes/v1/instances/" + instance + ":cancel",
-                null, Map.of("If-Match", etag, "Idempotency-Key", "cancel-claimed"));
+        HttpResponse<String> cancelled = send("hoa", "POST", "/api/bpm/processes/v1/instances/" + instance + ":cancel",
+                "{\"reason\":\"Customer withdrew the card application\"}", Map.of("If-Match", etag,
+                        "Idempotency-Key", "cancel-claimed", "Content-Type", "application/json"));
 
         assertThat(cancelled.statusCode()).as(cancelled.body()).isEqualTo(200);
         assertThat(task(task).get("status").stringValue()).isEqualTo("CANCELLED");

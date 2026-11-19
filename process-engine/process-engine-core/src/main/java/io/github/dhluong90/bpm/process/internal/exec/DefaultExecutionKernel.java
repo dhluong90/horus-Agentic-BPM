@@ -99,7 +99,15 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         ctx.cancelSubtree(root);
         ctx.status(InstanceStatus.CANCELLED);
         ctx.history("INSTANCE_ENDED", null, Map.of("status", "CANCELLED", "reason", String.valueOf(cancel.reason())));
-        ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.instance.cancelled.v1", Map.of("instanceId", ctx.snapshot().instanceId())));
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("instanceId", ctx.snapshot().instanceId());
+        if (cancel.actor() != null) {
+            payload.put("cancelledBy", cancel.actor());
+        }
+        if (cancel.reason() != null) {
+            payload.put("reason", cancel.reason());
+        }
+        ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.instance.cancelled.v1", payload));
     }
 
     private void drain(WorkingContext ctx) {

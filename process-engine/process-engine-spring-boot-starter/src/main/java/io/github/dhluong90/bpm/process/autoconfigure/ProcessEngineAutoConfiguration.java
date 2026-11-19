@@ -70,7 +70,7 @@ public class ProcessEngineAutoConfiguration {
 
     static final String DEV_PROFILE = "dev";
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:start",
-            "processes:task:work");
+            "processes:cancel", "processes:task:work");
     private static final Log LOG = LogFactory.getLog(ProcessEngineAutoConfiguration.class);
 
     @Bean

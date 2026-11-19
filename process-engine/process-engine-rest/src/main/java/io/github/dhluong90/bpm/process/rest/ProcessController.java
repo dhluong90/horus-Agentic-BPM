@@ -180,7 +180,7 @@ public class ProcessController {
     }
 
     /**
-     * Cancels a running instance ({@code processes:start}). Body: optional {@code reason}. {@code If-Match} carries
+     * Cancels a running instance ({@code processes:cancel}, PD-103). Body: the required {@code reason}. {@code If-Match} carries
      * the instance {@code lockVersion} (its {@code ETag}) and {@code Idempotency-Key} makes a retry safe; both are
      * required ({@code 428 PRECONDITION_REQUIRED}).
      */

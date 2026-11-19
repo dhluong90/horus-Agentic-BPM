@@ -34,7 +34,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-016 | `PRE_016_deploy_rejects_guardrail_rule_set_breaking_contract` | WebMvc | M2 | `TR-AGT-01` | Planned |
 | PRE-017 | `PRE_017_async_lease_is_timeout_plus_margin` | Two-replica fault injection | M2 | `TR-AGT-03`, `TR-PERF-05` | Planned |
 | PRE-018 | `PRE_018_import_creates_draft_not_active_version` | WebMvc, integration | M2 | `TR-DEF-03`, `TR-DEF-04` | Planned |
-| PRE-019 | `PRE_019_definition_requester_cannot_approve` | Service, WebMvc | M2 | `TR-SEC-04`, `TR-DEF-03` | Planned |
+| PRE-019 | `PRE_019_no_maker_of_a_definition_version_can_approve` | Service, WebMvc, start-up log capture | M2 | `TR-SEC-04`, `TR-DEF-03` | Planned |
 | PRE-020 | `PRE_020_effective_date_switches_version_and_retires_previous` | Integration, TestClock | M2 | `TR-DEF-03`, `TR-DET-01` | Planned |
 | PRE-021 | `PRE_021_reject_returns_draft_and_superseded_approval_refused` | WebMvc | M2 | `TR-DEF-03` | Planned |
 | PRE-022 | `PRE_022_dev_only_relaxations_refused_outside_dev` | Starter boot tests | M2 | `TR-SEC-11` | Planned |
@@ -67,6 +67,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-049 | `PRE_049_*` in `ProcessRestApiIT` | Testcontainers host over HTTP, two tenants | M2 | `TR-TEN-01`, `TR-PERF-07` | Done (the query-plan check of `TR-PERF-07` is still planned) |
 | PRE-050 | `PRE_050_*` in `ProcessRestApiIT` | Testcontainers host over HTTP, concurrent requests, event capture after commit | M2 | `TR-IDEM-01`, `TR-IDEM-03`, `TR-OBS-04` | Done |
 | PRE-051 | `PRE_051_*` in `TaskLifecycleIT` | Testcontainers host over HTTP, concurrent claims, event capture after commit, two tenants | M2 | `TR-IDEM-01`, `TR-IDEM-03`, `TR-SEC-04`, `TR-TEN-01` | Done |
+| PRE-052 | `PRE_052_requester_withdraws_own_pending_definition_to_draft` | Service, WebMvc, Testcontainers history and event capture | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Planned |
 
 The error matrix of the REST layer (`TR-SEC-08`) is `ProcessRestErrorMatrixTest` in `process-engine-rest`: MockMvc over the controller with in-memory services, every code of `ProcessProblemDetails.STATUS` answered as `application/problem+json` with `code`, `correlationId` and `type`, and an injected failure answered `500 INTERNAL` with no message, class name or SQL. Tenant isolation over HTTP (`TR-TEN-01`) is `ProcessRestApiIT.TR_TEN_01_*`: another tenant's read, list and cancel are not found and write nothing, and a tenant header for another tenant is `403 TENANT_NOT_ALLOWED`.
 
