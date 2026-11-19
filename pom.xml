@@ -21,6 +21,7 @@
   <modules>
     <module>bpm-bom</module>
     <module>rule-engine</module>
+    <module>cockpit</module>
     <module>examples/rule-engine-only</module>
   </modules>
 
