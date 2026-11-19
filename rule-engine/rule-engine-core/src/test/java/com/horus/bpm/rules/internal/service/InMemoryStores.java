@@ -188,4 +188,9 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     public byte[] engineKey(String name, byte[] candidate, Instant now) {
         return engineKeys.computeIfAbsent(name, ignored -> candidate.clone()).clone();
     }
+
+    @Override
+    public Optional<byte[]> findEngineKey(String name) {
+        return Optional.ofNullable(engineKeys.get(name)).map(byte[]::clone);
+    }
 }

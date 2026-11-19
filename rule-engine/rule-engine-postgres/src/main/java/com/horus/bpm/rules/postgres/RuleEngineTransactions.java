@@ -24,6 +24,7 @@ public final class RuleEngineTransactions implements TransactionRunner {
     private final PlatformTransactionManager transactionManager;
     private final TransactionTemplate newTransaction;
     private final TransactionTemplate callerTransaction;
+    private final TransactionTemplate readOnlyTransaction;
 
     /**
      * Creates the engine's transaction access on the host's transaction manager.
@@ -36,6 +37,9 @@ public final class RuleEngineTransactions implements TransactionRunner {
         this.newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.callerTransaction = new TransactionTemplate(transactionManager);
         this.callerTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+        this.readOnlyTransaction = new TransactionTemplate(transactionManager);
+        this.readOnlyTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+        this.readOnlyTransaction.setReadOnly(true);
     }
 
     /**
@@ -53,17 +57,18 @@ public final class RuleEngineTransactions implements TransactionRunner {
     }
 
     /**
-     * Runs engine-internal work in a new transaction ({@code REQUIRES_NEW}, not read-only), suspending the caller's,
-     * so the work is committed even when the caller's transaction rolls back or is read-only.
+     * Runs a read in a read-only transaction ({@code REQUIRED}: it joins a caller's transaction when there is one,
+     * which never happens on the scheduler thread that uses it). Never suspends a transaction or takes a second
+     * connection.
      *
      * @param work the work to run
      * @param <T> the result type
      * @return the work's result
      */
     @Override
-    public <T> T inOwnTransaction(Supplier<T> work) {
+    public <T> T inReadOnlyTransaction(Supplier<T> work) {
         Objects.requireNonNull(work, "work must not be null");
-        return newTransaction.execute(status -> work.get());
+        return readOnlyTransaction.execute(status -> work.get());
     }
 
     /**

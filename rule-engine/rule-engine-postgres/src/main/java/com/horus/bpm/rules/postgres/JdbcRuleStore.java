@@ -271,6 +271,12 @@ public final class JdbcRuleStore implements RuleStore {
                 .param("name", name).query(byte[].class).single();
     }
 
+    @Override
+    public Optional<byte[]> findEngineKey(String name) {
+        return jdbc.sql("SELECT key_bytes FROM rle_engine_key WHERE name = :name")
+                .param("name", name).query(byte[].class).optional();
+    }
+
     private static RuleSetSummary summary(ResultSet rs, int row) throws SQLException {
         int published = rs.getInt("published_version");
         Integer publishedVersion = rs.wasNull() ? null : published;

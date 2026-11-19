@@ -15,23 +15,32 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `evaluate("card-fee", { tier: "GOLD", txCount: 5 }) -> R1, 0 VND`.
 - **Test ID:** `RLE_001_first_hit_policy_returns_top_matching_rule`
 
-### RLE-002 `unique` hit policy fails when zero or multiple rules match
-- **Traces to:** `TR-DET-04`
+### RLE-002 `unique` hit policy: one match returns it, zero matches is no match, several matches fail
+- **Traces to:** `TR-DET-04`, `TR-STD-22`, PD-088
 - **Milestone:** M1
-- **Given:** Rule set `loan-pricing` v1 with `hitPolicy: unique` where both `R1` (`score >= 700`) and `R2` (`income >= 20000000 VND`) overlap.
-- **When:** Evaluate `inputs = { score: 750, income: 25000000 VND }` (2 matches) or `{ score: 500, income: 5000000 VND }` (0 matches).
-- **Then:** Result fails with `UNIQUE_HIT_VIOLATION` (`422` over REST, ADR-0010; never `409`, which is reserved for state conflicts), returns **no partial outputs**, and records an audit entry with `outcome = UNIQUE_HIT_VIOLATION`.
-- **Example:** `2 matched rules [R1, R2] -> error UNIQUE_HIT_VIOLATION, outputs = empty`.
-- **Test ID:** `RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches`
+- **Given:** Rule set `loan-pricing` v1 with `hitPolicy: unique`, output `rate` (decimal), rules `R1` (`score >= 700 -> rate: 0.08`) and `R2` (`income >= 20000000 VND -> rate: 0.09`), which overlap.
+- **When:** Evaluate (a) `{ score: 750, income: 10000000 VND }` (1 match), (b) `{ score: 500, income: 5000000 VND }` (0 matches) and (c) `{ score: 750, income: 25000000 VND }` (2 matches).
+- **Then:**
+  - (a) Outcome `Matched`, `matchedRuleIds = ["R1"]`, `outputs.rate = 0.08`.
+  - (b) Outcome `NoMatch` (REST `200`, `matched: false`), every declared output `null`, `matchedRuleIds = []`; one decision log row with `outcome = OK` and `matched_rule_ids = []`, exactly as for `first`. Zero matches is never `UNIQUE_HIT_VIOLATION`.
+  - (c) Outcome `Failed` with `UNIQUE_HIT_VIOLATION` (`422` over REST, ADR-0010; never `409`, which is reserved for state conflicts), **no partial outputs**, `matchedRuleIds = ["R1", "R2"]` in rule order; one decision log row with `outcome = UNIQUE_HIT_VIOLATION` and `matched_rule_ids = ["R1", "R2"]`.
+- **Example:** `1 match [R1] -> rate 0.08; 0 matches -> NoMatch, rate null; 2 matches [R1, R2] -> UNIQUE_HIT_VIOLATION, outputs empty`.
+- **Test ID:** `RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several`
 
-### RLE-003 `collect` hit policy returns ordered lists or aggregated scalars
-- **Traces to:** `TR-DET-01`
+### RLE-003 `collect` hit policy returns aligned lists or aggregated scalars, with the DMN 1.5 null rules
+- **Traces to:** `TR-DET-01`, `TR-STD-22`, PD-066, PD-088
 - **Milestone:** M1
-- **Given:** Rule set `risk-flags` v1 with `hitPolicy: collect` and outputs `flags` (`list<string>`) and `penalty` (`collect: sum`).
-- **When:** Evaluate inputs matching `R1` (`flags: "HIGH_VELOCITY", penalty: 10`) and `R3` (`flags: "NEW_DEVICE", penalty: 5`).
-- **Then:** `matchedRuleIds = ["R1", "R3"]`, `outputs.flags = ["HIGH_VELOCITY", "NEW_DEVICE"]`, `outputs.penalty = 15`.
-- **Example:** `R1 (+10) + R3 (+5) -> penalty = 15, flags = [HIGH_VELOCITY, NEW_DEVICE]`.
-- **Test ID:** `RLE_003_collect_hit_policy_aggregates_matched_rules`
+- **Given:** Rule set `risk-flags` v1 with `hitPolicy: collect` and outputs `flags` (`list<string>`, no aggregate), `penalty` (`integer`, `collect: sum`), `worst` (`integer`, `collect: max`) and `hits` (`integer`, `collect: count`); rules `R1` (`flags: "HIGH_VELOCITY", penalty: 10, worst: 10, hits: 1`), `R2` (`flags: null, penalty: 0, worst: 0, hits: null`) and `R3` (`flags: "NEW_DEVICE", penalty: 5, worst: 5, hits: 1`). Rule set `risk-flags-null` is the same except that `R2` has `penalty: null`.
+- **When:** Evaluate `risk-flags` with (a) inputs matching `R1`, `R2` and `R3`, (b) inputs matching only `R2`, (c) inputs matching no rule; and (d) `risk-flags-null` with inputs matching `R1` and `R2`.
+- **Then:**
+  - **Lists (no aggregate).** One entry per matched rule, in rule order, aligned with `matchedRuleIds`; a `null` output is a `null` entry and is never dropped. (a) `matchedRuleIds = ["R1", "R2", "R3"]`, `flags = ["HIGH_VELOCITY", null, "NEW_DEVICE"]`. (b) `flags = [null]`.
+  - **`count`.** The number of matched rules, `null` values included, as FEEL `count` (DMN 1.5 10.3.4.4); not a count of distinct values. (a) `hits = 3`. (b) `hits = 1`.
+  - **`sum`, `min`, `max`.** Over the values of all matched rules, not distinct values (DMN 1.5 8.2.11). (a) `penalty = 15`, `worst = 10`. (b) `penalty = 0`, `worst = 0`. Money sums are exact in minor units; mixed currencies, and a sum beyond plus or minus 2^53 - 1 minor units, are `EVALUATION_ERROR` (rule engine DESIGN 3.4). `min` and `max` compare numbers, money of one currency, strings by code point, dates and date-times; `boolean` is refused at publish time.
+  - **A `null` value under `sum`, `min` or `max` (d).** `null` is outside the domain of FEEL `sum`, `min` and `max`. A v1 rule set evaluates in `errorMode: strict` (PD-066), so the outcome is `Failed` with `EVALUATION_ERROR` naming the output (`penalty`) and the rule (`R2`), with no partial outputs, and the decision log row has `outcome = EVALUATION_ERROR` and `matched_rule_ids = ["R1", "R2"]`. A model in `errorMode: spec` (imported DMN from S1) gives `penalty = null` with a warning in the decision trace.
+  - **No match (c).** Outcome `NoMatch`, every output `null`, lists, aggregates and `count` included (DMN 1.5 10.3.2.10: no rule matched, the result is `null`), `matchedRuleIds = []`; logged as `outcome = OK` with `matched_rule_ids = []`.
+  - **Publish time.** An aggregate on a non-`collect` table, a list output on a non-`collect` table, `sum` on a non-numeric type and `count` on a non-`integer` output are `422 VALIDATION_FAILED` naming the output.
+- **Example:** `R1 (+10), R2 (+0), R3 (+5) -> penalty 15, worst 10, hits 3, flags [HIGH_VELOCITY, null, NEW_DEVICE]; only R2 -> hits 1, flags [null]; null penalty under sum -> EVALUATION_ERROR (strict); no match -> NoMatch, all null`.
+- **Test ID:** `RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules`
 
 ---
 
@@ -255,6 +264,23 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `bob rejects card-fee v2 with a reason -> DRAFT, lockVersion 4, 1 rejected event; reason "" -> 400 INPUT_INVALID; v1 PUBLISHED -> 409 INVALID_STATE`.
 - **Test ID:** `RLE_025_reject_returns_pending_version_to_draft_with_reason`
 
+### RLE-046 The requester withdraws their own pending request, and it returns to draft without a rejection
+- **Traces to:** `TR-OBS-04`, `TR-IDEM-01`, `TR-SEC-04`, PD-089
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`, who holds `rules:author` only; `card-fee` v1 is `PUBLISHED` and in effect; `bob` holds `rules:approve`; `carol` holds `rules:author`.
+- **When:** `alice` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:withdraw` with `Idempotency-Key: k-301`, `If-Match: "3"` and body `{ "reason": "Wrong fee for GOLD" }`; then she edits v2 and requests publication again. Failure cases: `bob` withdraws v2; `carol` withdraws v2; `alice` withdraws with `If-Match: "2"`; `alice` withdraws `card-fee` v1 (`PUBLISHED`); `alice` withdraws with a 2,001-character reason.
+- **Then:**
+  - `200`; v2 is `DRAFT` with `lockVersion 4`, and `requested_by` and `requested_at` are cleared.
+  - One `rle_version_history` row `WITHDRAWN` is written, with actor `alice`, the reason, and statuses `PENDING_APPROVAL` to `DRAFT`.
+  - One `rules.version.withdrawn.v1` event carries rule set, version, tenant, `withdrawnBy: alice`, the reason and the timestamp. No `rules.version.rejected.v1` event is written.
+  - Evaluation still selects v1, and nothing is published.
+  - A replay with `k-301` and the same body returns the same `200` and writes no second event. A body without `reason` is also accepted, with `reason` null in the history row and the event.
+  - The new request publication starts a new approval: a new `REQUESTED` history row, and `bob` may approve it.
+  - `bob` and `carol` get `403 PERMISSION_DENIED` (an approver uses `:reject`). The stale `If-Match` returns `409 VERSION_CONFLICT`. The withdrawal of v1 returns `409 INVALID_STATE`. The long reason returns `400 INPUT_INVALID` naming `reason`. In each failure case the version, its history and the event count are unchanged.
+  - `allowedActions` on v2, read by `alice` while it is pending, contains `withdraw` and not `approve` or `reject`.
+- **Example:** `alice withdraws her own pending v2 -> DRAFT, WITHDRAWN row, withdrawn event, v1 still in effect; bob or carol withdraws -> 403; stale If-Match -> 409`.
+- **Test ID:** `RLE_046_requester_withdraws_own_pending_request_to_draft`
+
 ### RLE-026 Retiring a published version by hand stops every replica serving it
 - **Traces to:** `TR-OBS-04`, `TR-ASY-04`, `TR-DET-05`
 - **Milestone:** M1
@@ -469,6 +495,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - **(n5)** `country != 'VN'` against the same text with a Cyrillic `В` in place of `V`. The canonical document shows it unchanged, because no normalisation is applied, and the diff marks the changed literal as containing non-ASCII characters.
   - **(n6)** `country != 'V\u200BN'` (a zero-width space) is printed with the `\u200B` escape and has its own hash. `country != 'V\u202EN'` (a bidirectional override) is refused at import with `422` naming the line.
   - **(n7)** A source that is not valid UTF-8, contains NUL, or starts with a byte order mark is refused at import with `422`, and nothing is stored.
+  - **(n8)** For an output with `default: 0`, a rule with an explicit `null` output and the same rule with the cell omitted have different hashes; for an output without a default the two have one hash.
 - **Then (integrity):**
   - A model whose printed form does not parse back to an equal tree is refused at import with `422` and nothing stored. This is tested with a deliberately broken printer in the test harness.
   - A stored version whose `canonical_json` is altered in the database so that it no longer hashes to `canonical_hash` is not served. Evaluation returns `EVALUATION_ERROR` with a detail naming the integrity check, and one audit entry and one alert are written.

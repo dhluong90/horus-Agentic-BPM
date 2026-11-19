@@ -60,6 +60,7 @@ class EditorApiPostgresIT {
         RuleEngineTransactions transactions = new RuleEngineTransactions(new DataSourceTransactionManager(db));
         jdbc = JdbcClient.create(db);
         RuleEngines engines = PostgresRuleEngines.create(db, transactions, caller, caller, clock, EngineSettings.defaults());
+        engines.cursorKeys().load();   // as the starter does at start-up, after the migrations
         versions = engines.versionService();
     }
 
@@ -238,29 +239,122 @@ class EditorApiPostgresIT {
                 .isInstanceOf(com.horus.bpm.rules.api.QueryInvalidException.class);
     }
 
-    /** The cursor key is committed in its own transaction: a host rollback cannot strand a replica's key. */
+    /** Replicas that start together race safely on the insert and all hold the same key (architecture review). */
     @Test
-    void RLE_039_the_cursor_key_survives_a_rolled_back_first_read_and_every_replica_shares_it() {
+    void RLE_039_two_replicas_starting_together_create_the_cursor_key_once() throws Exception {
         DataSource db = freshDatabase();
         new RuleEngineSchemaMigrator(db).migrate();
         DataSourceTransactionManager manager = new DataSourceTransactionManager(db);
-        VersionService replicaA = replica(db, manager);
-        caller.as("bank-a", "lan");
-        replicaA.importRuleSet(ImportRequest.yaml(renamed("card-fee", null)));
-        replicaA.importRuleSet(ImportRequest.yaml(renamed("fx-margin", null)));
+        RuleEngines replicaA = engines(db, manager);
+        RuleEngines replicaB = engines(db, manager);
+        java.util.concurrent.CyclicBarrier together = new java.util.concurrent.CyclicBarrier(2);
 
-        // When replica A's first list read runs in a host transaction that rolls back
-        String[] cursor = new String[1];
-        new org.springframework.transaction.support.TransactionTemplate(manager).executeWithoutResult(status -> {
-            cursor[0] = replicaA.listRuleSets(new PageRequest(1, null)).nextCursor();
-            status.setRollbackOnly();
-        });
+        // When both start at the same instant
+        try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var a = pool.submit(() -> { together.await(); replicaA.cursorKeys().load(); return null; });
+            var b = pool.submit(() -> { together.await(); replicaB.cursorKeys().load(); return null; });
+            a.get();
+            b.get();
+        }
 
-        // Then the key row is committed, and replica B, started afterwards, accepts A's cursor
+        // Then one row, and each replica accepts the other's cursors
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_engine_key").query(Long.class).single()).isEqualTo(1L);
-        VersionService replicaB = replica(db, manager);
-        assertThat(replicaB.listRuleSets(new PageRequest(1, cursor[0])).items()).extracting(RuleSetSummary::ruleSet)
-                .containsExactly("fx-margin");
+        caller.as("bank-a", "lan");
+        replicaA.versionService().importRuleSet(ImportRequest.yaml(renamed("card-fee", null)));
+        replicaA.versionService().importRuleSet(ImportRequest.yaml(renamed("fx-margin", null)));
+        String fromA = replicaA.versionService().listRuleSets(new PageRequest(1, null)).nextCursor();
+        String fromB = replicaB.versionService().listRuleSets(new PageRequest(1, null)).nextCursor();
+        assertThat(fromA).isEqualTo(fromB);
+        assertThat(replicaB.versionService().listRuleSets(new PageRequest(1, fromA)).items())
+                .extracting(RuleSetSummary::ruleSet).containsExactly("fx-margin");
+    }
+
+    /** A forged cursor costs one HMAC in memory: no connection, no statement, no write (architecture review). */
+    @Test
+    void RLE_039_a_forged_cursor_makes_no_database_call() {
+        DataSource db = freshDatabase();
+        new RuleEngineSchemaMigrator(db).migrate();
+        java.util.concurrent.atomic.AtomicInteger connections = new java.util.concurrent.atomic.AtomicInteger();
+        DataSource counting = new org.springframework.jdbc.datasource.DelegatingDataSource(db) {
+            @Override
+            public java.sql.Connection getConnection() throws java.sql.SQLException {
+                connections.incrementAndGet();
+                return super.getConnection();
+            }
+        };
+        DataSourceTransactionManager manager = new DataSourceTransactionManager(counting);
+        RuleEngines replica = engines(counting, manager);
+        replica.cursorKeys().load();
+        caller.as("bank-a", "lan");
+        replica.versionService().importRuleSet(ImportRequest.yaml(renamed("card-fee", null)));
+        replica.versionService().importRuleSet(ImportRequest.yaml(renamed("fx-margin", null)));
+        String issued = replica.versionService().listRuleSets(new PageRequest(1, null)).nextCursor();
+        // Keep the real signature, change the position it signs
+        String forged = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("rule-sets:zz-forged".getBytes(StandardCharsets.UTF_8)) + issued.substring(issued.indexOf('.'));
+        caller.as("bank-a", "dan");
+        connections.set(0);
+
+        for (String cursor : new String[] {forged, "not-a-cursor", issued + "x"}) {
+            assertThatThrownBy(() -> replica.versionService().listRuleSets(new PageRequest(10, cursor))).as(cursor)
+                    .isInstanceOf(com.horus.bpm.rules.api.QueryInvalidException.class);
+            assertThatThrownBy(() -> replica.versionService().listVersions("card-fee", new PageRequest(10, cursor)))
+                    .isInstanceOf(com.horus.bpm.rules.api.QueryInvalidException.class);
+        }
+
+        assertThat(connections.get()).isZero();
+    }
+
+    @Test
+    void RLE_039_start_up_fails_naming_the_table_when_the_user_cannot_insert_the_key() {
+        DataSource db = freshDatabase();
+        new RuleEngineSchemaMigrator(db).migrate();
+        JdbcClient admin = JdbcClient.create(db);
+        admin.sql("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rle_reader') THEN "
+                + "CREATE ROLE rle_reader LOGIN PASSWORD 'reader'; END IF; END $$").update();
+        admin.sql("GRANT SELECT ON ALL TABLES IN SCHEMA public TO rle_reader").update();
+        admin.sql("GRANT USAGE ON SCHEMA public TO rle_reader").update();
+        org.postgresql.ds.PGSimpleDataSource reader = new org.postgresql.ds.PGSimpleDataSource();
+        reader.setUrl(((org.postgresql.ds.PGSimpleDataSource) db).getUrl());
+        reader.setUser("rle_reader");
+        reader.setPassword("reader");
+        RuleEngines replica = engines(reader, new DataSourceTransactionManager(reader));
+
+        assertThatThrownBy(() -> replica.cursorKeys().load())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("rle_engine_key")
+                .hasMessageContaining("INSERT");
+        assertThat(admin.sql("SELECT count(*) FROM rle_engine_key").query(Long.class).single()).isZero();
+    }
+
+    @Test
+    void RLE_039_a_refresh_swaps_in_a_changed_key_and_keeps_the_previous_one() {
+        DataSource db = freshDatabase();
+        new RuleEngineSchemaMigrator(db).migrate();
+        DataSourceTransactionManager manager = new DataSourceTransactionManager(db);
+        RuleEngines replicaA = engines(db, manager);
+        replicaA.cursorKeys().load();
+        caller.as("bank-a", "lan");
+        replicaA.versionService().importRuleSet(ImportRequest.yaml(renamed("card-fee", null)));
+        replicaA.versionService().importRuleSet(ImportRequest.yaml(renamed("fx-margin", null)));
+        String oldCursor = replicaA.versionService().listRuleSets(new PageRequest(1, null)).nextCursor();
+
+        // When the key row changes and replica B starts with the new key
+        JdbcClient admin = JdbcClient.create(db);
+        admin.sql("UPDATE rle_engine_key SET key_bytes = decode(repeat('ab', 32), 'hex') WHERE name = 'cursor-hmac'").update();
+        RuleEngines replicaB = engines(db, manager);
+        replicaB.cursorKeys().load();
+        String newCursor = replicaB.versionService().listRuleSets(new PageRequest(1, null)).nextCursor();
+        assertThatThrownBy(() -> replicaA.versionService().listRuleSets(new PageRequest(1, newCursor)))
+                .as("before the refresh, A does not know the new key")
+                .isInstanceOf(com.horus.bpm.rules.api.QueryInvalidException.class);
+
+        // Then after A's scheduled refresh: new cursors verify, and the previous key still verifies old ones
+        replicaA.cursorKeys().refresh();
+        assertThat(replicaA.versionService().listRuleSets(new PageRequest(1, newCursor)).items())
+                .extracting(RuleSetSummary::ruleSet).containsExactly("fx-margin");
+        assertThat(replicaA.versionService().listRuleSets(new PageRequest(1, oldCursor)).items())
+                .extracting(RuleSetSummary::ruleSet).containsExactly("fx-margin");
     }
 
     @Test
@@ -284,34 +378,15 @@ class EditorApiPostgresIT {
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_engine_key").query(Long.class).single()).isEqualTo(1L);
     }
 
-    @Test
-    void RLE_039_after_rotation_a_replica_with_the_old_key_rereads_it_and_accepts_new_cursors() {
-        DataSource db = freshDatabase();
-        new RuleEngineSchemaMigrator(db).migrate();
-        DataSourceTransactionManager manager = new DataSourceTransactionManager(db);
-        VersionService replicaA = replica(db, manager);
-        caller.as("bank-a", "lan");
-        replicaA.importRuleSet(ImportRequest.yaml(renamed("card-fee", null)));
-        replicaA.importRuleSet(ImportRequest.yaml(renamed("fx-margin", null)));
-        String oldCursor = replicaA.listRuleSets(new PageRequest(1, null)).nextCursor();
-
-        // When the operator rotates the key and replica B signs with the new one
-        JdbcClient.create(db).sql("DELETE FROM rle_engine_key WHERE name = 'cursor-hmac'").update();
-        VersionService replicaB = replica(db, manager);
-        String newCursor = replicaB.listRuleSets(new PageRequest(1, null)).nextCursor();
-
-        // Then A, still holding the old key, re-reads once and accepts B's cursor; the old cursor is refused
-        assertThat(replicaA.listRuleSets(new PageRequest(1, newCursor)).items()).extracting(RuleSetSummary::ruleSet)
-                .containsExactly("fx-margin");
-        assertThatThrownBy(() -> replicaA.listRuleSets(new PageRequest(1, oldCursor)))
-                .isInstanceOf(com.horus.bpm.rules.api.QueryInvalidException.class);
-        assertThatThrownBy(() -> replicaB.listRuleSets(new PageRequest(1, oldCursor)))
-                .isInstanceOf(com.horus.bpm.rules.api.QueryInvalidException.class);
+    VersionService replica(DataSource db, DataSourceTransactionManager manager) {
+        RuleEngines engines = engines(db, manager);
+        engines.cursorKeys().load();
+        return engines.versionService();
     }
 
-    VersionService replica(DataSource db, DataSourceTransactionManager manager) {
+    RuleEngines engines(DataSource db, DataSourceTransactionManager manager) {
         return PostgresRuleEngines.create(db, new RuleEngineTransactions(manager), caller, caller, clock,
-                EngineSettings.defaults()).versionService();
+                EngineSettings.defaults());
     }
 
     /** V3 backfills one CREATED row per version that existed before it, so their history starts at creation. */
