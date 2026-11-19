@@ -23,7 +23,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKFLOW="$ROOT/.github/workflows/release.yml"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# Keep the exit status: bash 3.2 would otherwise exit with the status of the clean-up.
+trap 'status=$?; rm -rf "$WORK"; exit $status' EXIT
 TAG="v0.1.0"
 COMMIT="0123456789abcdef0123456789abcdef01234567"
 
