@@ -253,6 +253,71 @@ public Money cardFee(String tier, int txCount) {
 }
 ```
 
+## Demo: a fee change on a date, replay and the bank's time zone
+
+`card-fee` v1 charges a default of 50,000 VND. [`rules/card-fee-december.yaml`](src/main/resources/rules/card-fee-december.yaml) is the same table with a default of 30,000 VND and `effectiveFrom: "2026-12-01T00:00:00Z"`, so it is approved now and takes over on that instant. Choosing the evaluation clock needs `rules:simulate` and replay needs `rules:log:read`, which the demo roles do not hold by default. Start the host with two extra mappings, then run steps 1 to 4 of the demo above for v1:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate,rules:simulate' \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:log:read'
+H=localhost:8080/api/bpm/rules/v1
+R=examples/rule-engine-only/src/main/resources/rules
+```
+
+1. Hoa imports the December version and requests publication, and Minh approves it. It is published but not yet in force:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' \
+     --data-binary @$R/card-fee-december.yaml
+   # 201 {"ruleSet":"card-fee","version":2,"status":"DRAFT","effectiveFrom":"2026-12-01T00:00:00Z",...}
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/2:request-publish
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:approve
+   # 200 {"version":2,"status":"PUBLISHED","effectiveFrom":"2026-12-01T00:00:00Z",...}
+   ```
+
+2. The clock chooses the version in force. On 20 November it is v1, from 1 December v2:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"tier":"STANDARD","txCount":1},"clock":"2026-11-20T10:00:00Z"}'
+   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9","ruleSet":"card-fee","version":1,"clock":"2026-11-20T10:00:00Z",
+   #      "evaluatedAt":"2026-11-19T15:25:08.804765Z","outcome":"MATCHED","matchedRuleIds":["R3"],
+   #      "outputs":{"fee":{"currency":"VND","amount":50000}}}
+   curl -s -u hoa:demo-only -X POST $H/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"tier":"STANDARD","txCount":1},"clock":"2026-12-01T00:00:00Z"}'
+   # 200 {...,"version":2,"clock":"2026-12-01T00:00:00Z",...,"outputs":{"fee":{"currency":"VND","amount":30000}}}
+   ```
+
+   Without a `clock` the host clock is used. Tuan, who holds `rules:evaluate` only, gets `403 CLOCK_NOT_ALLOWED` when he sends one.
+
+3. Minh replays the November decision by its id, with the version, inputs and clock its row recorded. The answer is the logged one, and the decision log gains no row:
+
+   ```bash
+   curl -s -u minh:demo-only -X POST $H/decisions/01M7T6JQT4SA6RT95E8KW201Y9:replay
+   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9","version":1,"clock":"2026-11-20T10:00:00Z",...,
+   #      "matchedRuleIds":["R3"],"outputs":{"fee":{"currency":"VND","amount":50000}}}
+   docker exec horus-pg psql -U horus -d horus -c \
+     "SELECT version_num, eval_clock, created_at, matched_rule_ids FROM rle_decision WHERE id = '01M7T6JQT4SA6RT95E8KW201Y9'"
+   #  1 | 2026-11-20 10:00:00+00 | 2026-11-19 15:25:08.804765+00 | ["R3"]
+   ```
+
+   Pinning gives the same answer as a new logged decision: `POST $H/decisions/card-fee/versions/1:evaluate` with the same body. A pinned draft is `409 INVALID_STATE`. Tuan's replay is `403 PERMISSION_DENIED`, and an unknown id, or one of another tenant, is `404 DECISION_NOT_FOUND`.
+
+4. [`rules/same-day-cutoff.yaml`](src/main/resources/rules/same-day-cutoff.yaml) declares `timeZone: Asia/Ho_Chi_Minh`. At `2027-01-15T18:30:00Z` it is 01:30 on 16 January in Ho Chi Minh City, so a transfer dated 16 January is same-day and one dated 15 January is not. In UTC it would be the other way round. Import, request and approve it as above, then:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/decisions/same-day-cutoff:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"txDate":"2027-01-16"},"clock":"2027-01-15T18:30:00Z"}'
+   # 200 {...,"matchedRuleIds":["R1"],"outputs":{"sameDay":true}}
+   curl -s -u hoa:demo-only -X POST $H/decisions/same-day-cutoff:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"txDate":"2027-01-15"},"clock":"2027-01-15T18:30:00Z"}'
+   # 200 {...,"matchedRuleIds":["R2"],"outputs":{"sameDay":false}}
+   ```
+
+The same steps run as `EffectiveDatesAndReplayIT` against a Testcontainers database on every build.
+
 ## Demo: import a DMN decision table
 
 A `.dmn` file goes through the same import endpoint as YAML, with `Content-Type: application/xml` (or `text/xml`, `application/dmn+xml`). It becomes a `DRAFT` that a second person approves before it evaluates. The sample is a hand-written table in the style a common DMN modeller writes: [`card-fee-modeller.dmn`](src/test/resources/rules/dmn/card-fee-modeller.dmn).
