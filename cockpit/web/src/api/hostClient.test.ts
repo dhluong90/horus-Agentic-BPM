@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { meLan, UNREADABLE_PERMISSION } from '../mocks/fixtures';
 import { createHostClient, csrfHeaders, sameOrigin, signOutOfHost } from './hostClient';
 import { HostCallError, type HostError } from './hostError';
 
@@ -56,6 +57,29 @@ describe('host client', () => {
     expect(await failure(respond(new Response(body, { status: 401, headers: problemHeaders })))).toMatchObject({
       kind: 'problem', status: 401, code: 'UNAUTHENTICATED', correlationId: 'c-3',
     });
+  });
+
+  it('CKP_001_me_with_an_unreadable_permission_resolves_without_it_and_warns_once', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const body = JSON.stringify({ ...meLan, permissions: [...meLan.permissions, UNREADABLE_PERMISSION] });
+    const me = await createHostClient('', respond(new Response(body, { status: 200 }))).getMe();
+    expect(me.permissions).toEqual(meLan.permissions);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain(UNREADABLE_PERMISSION);
+    warn.mockRestore();
+  });
+
+  it('CKP_001_well_formed_me_resolves_with_no_console_note', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const me = await createHostClient('', respond(new Response(JSON.stringify(meLan), { status: 200 }))).getMe();
+    expect(me).toEqual(meLan);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('CKP_001_me_with_a_bad_user_id_is_still_an_unexpected_response', async () => {
+    const body = JSON.stringify({ ...meLan, user: { id: '' }, permissions: [UNREADABLE_PERMISSION] });
+    expect(await failure(respond(new Response(body, { status: 200 })))).toEqual({ kind: 'unexpected-response', status: 200, correlationId: undefined });
   });
 
   it('CKP_001_network_failure_is_unreachable', async () => {
