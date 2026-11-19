@@ -148,7 +148,7 @@ The `ruleEngine` health contributor also reports whether next month's partition 
 
 | Bean | Default | Override when |
 |---|---|---|
-| `TenantResolver` | Reads the `tenancy.claim` attribute of the authenticated principal in the security context: a validated token or a server-side session login. A call with no resolvable tenant gets `401 UNAUTHENTICATED` | Tenant comes from somewhere else, such as your user directory, realm, path or subdomain. No header-based resolver ships; a resolver you write that trusts a request header is your risk Built in `com.horus.bpm.host.spi`; see [[Host Metadata and Permissions]] |
+| `TenantResolver` | Reads the `tenancy.claim` attribute of the authenticated principal in the security context: a validated token or a server-side session login. A call with no resolvable tenant gets `401 UNAUTHENTICATED` | Tenant comes from somewhere else, such as your user directory, realm, path or subdomain. No header-based resolver ships; a resolver you write that trusts a request header is your risk Built in `io.github.dhluong90.bpm.host.spi`; see [[Host Metadata and Permissions]] |
 | `CallerResolver` | Principal name | Audit needs a different identity |
 | `RuleFunctionRegistry` | Built-in pure functions | Host registers extra pure functions, listed in the cockpit |
 | `RuleEventPublisher` | Spring `ApplicationEventPublisher` | Events go to an outbox or a bus |
