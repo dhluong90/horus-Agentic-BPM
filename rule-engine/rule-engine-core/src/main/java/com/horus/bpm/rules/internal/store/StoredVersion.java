@@ -89,6 +89,16 @@ public record StoredVersion(
     }
 
     /**
+     * Returns a copy sent back to {@code DRAFT} by its requester's withdrawal (PD-089); like a rejection, the request
+     * is cleared so the author can edit and request again.
+     *
+     * @return the new state with the lock version incremented
+     */
+    public StoredVersion withdrawn() {
+        return rejected();
+    }
+
+    /**
      * Returns the list view.
      *
      * @return the summary

@@ -153,6 +153,35 @@ final class RestSupport {
     }
 
     /**
+     * Parses a required {@code If-Match}; absent or blank is {@code 428 PRECONDITION_REQUIRED}.
+     *
+     * @param header the header value
+     * @param operation the command, named in the problem detail
+     * @return the lock version
+     */
+    static long requiredIfMatch(String header, String operation) {
+        Long lock = ifMatch(header);
+        if (lock == null) {
+            throw new com.horus.bpm.rules.api.PreconditionRequiredException(operation);
+        }
+        return lock;
+    }
+
+    /**
+     * Returns a required {@code Idempotency-Key}; absent or blank is {@code 400 INPUT_INVALID} naming the header.
+     *
+     * @param key the header value
+     * @param operation the command, named in the problem detail
+     * @return the key
+     */
+    static String requiredIdempotencyKey(String key, String operation) {
+        if (key == null || key.isBlank()) {
+            throw new com.horus.bpm.rules.api.InputInvalidException(operation + " requires an Idempotency-Key header");
+        }
+        return key;
+    }
+
+    /**
      * Reads an import body of at most {@link RuleSetReader#MAX_SOURCE_BYTES} bytes. A larger declared
      * {@code Content-Length} is refused before anything is read; otherwise at most one byte more than the limit is
      * read, so an oversized body never sits in memory whole.

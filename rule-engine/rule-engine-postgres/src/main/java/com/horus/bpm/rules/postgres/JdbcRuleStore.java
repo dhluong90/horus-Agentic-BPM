@@ -247,7 +247,7 @@ public final class JdbcRuleStore implements RuleStore {
                   occurred_at
                 FROM rle_version_history
                 WHERE tenant_id = :tenant AND version_id = :versionId
-                  AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED')
+                  AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED','WITHDRAWN')
                 ORDER BY occurred_at, id
                 """)
                 .param("tenant", tenantId).param("versionId", versionId)

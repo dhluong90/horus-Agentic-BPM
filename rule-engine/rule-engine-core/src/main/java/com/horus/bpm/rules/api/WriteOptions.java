@@ -5,7 +5,8 @@ package com.horus.bpm.rules.api;
  *
  * @param idempotencyKey optional key; a replay returns the original result
  * @param expectedLockVersion optional optimistic lock ({@code If-Match}); a stale value is {@code VERSION_CONFLICT}
- * @param comment the comment stored with an approval (optional), or the reason of a reject (required)
+ * @param comment the comment stored with an approval (optional), the reason of a reject (required) or of a
+ *     withdrawal (optional)
  */
 public record WriteOptions(String idempotencyKey, Long expectedLockVersion, String comment) {
 
