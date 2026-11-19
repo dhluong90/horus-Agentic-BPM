@@ -76,7 +76,7 @@ class EditorApiPostgresIT {
         caller.as("bank-a", "lan");
         versions.requestPublish("card-fee", 2, WriteOptions.none());
         caller.as("bank-a", "minh");
-        versions.approve("card-fee", 2, WriteOptions.none());
+        versions.approve("card-fee", 2, new WriteOptions(null, 1L, null));
         caller.as("bank-a", "lan");
         versions.importVersion("card-fee", ImportRequest.yaml(renamed("card-fee", null)));
         clock.set(DEC_10);
@@ -313,8 +313,8 @@ class EditorApiPostgresIT {
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         caller.as("bank-a", "minh");
 
-        io.github.dhluong90.bpm.rules.api.RuleSetVersion approved = versions.approve("card-fee", 1, WriteOptions.idempotencyKey("k-301"));
-        io.github.dhluong90.bpm.rules.api.RuleSetVersion replay = versions.approve("card-fee", 1, WriteOptions.idempotencyKey("k-301"));
+        io.github.dhluong90.bpm.rules.api.RuleSetVersion approved = versions.approve("card-fee", 1, new WriteOptions("k-301", 1L, null));
+        io.github.dhluong90.bpm.rules.api.RuleSetVersion replay = versions.approve("card-fee", 1, new WriteOptions("k-301", 1L, null));
 
         assertThat(approved.canonicalDocument()).isEqualTo(imported.canonicalDocument());
         assertThat(replay).isEqualTo(approved);
@@ -333,7 +333,7 @@ class EditorApiPostgresIT {
         versions.importVersion("card-fee", ImportRequest.yaml(renamed("card-fee", null)));
         versions.requestPublish("card-fee", 2, WriteOptions.none());
         caller.as("bank-a", "minh");
-        versions.reject("card-fee", 2, new WriteOptions(null, null, "R2 waiver needs pricing committee minutes"));
+        versions.reject("card-fee", 2, new WriteOptions(null, 1L, "R2 waiver needs pricing committee minutes"));
         long rows = count("rle_version_history");
 
         // Then the application role can neither rewrite, remove nor truncate it
@@ -583,7 +583,7 @@ class EditorApiPostgresIT {
         versions.importRuleSet(ImportRequest.yaml(renamed(name, effectiveFrom)));
         versions.requestPublish(name, 1, WriteOptions.none());
         caller.as("bank-a", "minh");
-        versions.approve(name, 1, WriteOptions.none());
+        versions.approve(name, 1, new WriteOptions(null, 1L, null));
     }
 
     void imported(String name) {

@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.rules.internal.service;
 import io.github.dhluong90.bpm.rules.api.DraftAuthoringDisabledException;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
+import io.github.dhluong90.bpm.rules.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.rules.api.VersionDiff;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
@@ -271,6 +272,7 @@ public final class DefaultVersionService implements VersionService {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_APPROVE);
+        requireLockVersion(opts, ":approve");
         requireCommentLength(opts.comment());
         String requestHash = Hashes.sha256Parts("approve", actor, ruleSet, Integer.toString(version),
                 String.valueOf(opts.expectedLockVersion()), opts.comment());
@@ -304,6 +306,7 @@ public final class DefaultVersionService implements VersionService {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_APPROVE);
+        requireLockVersion(opts, ":reject");
         String reason = requireReason(opts.comment());
         String requestHash = Hashes.sha256Parts("reject", actor, ruleSet, Integer.toString(version),
                 String.valueOf(opts.expectedLockVersion()), reason);
@@ -514,6 +517,18 @@ public final class DefaultVersionService implements VersionService {
                 store.findRuleSetId(tenant, ruleSet).isPresent()
                         ? new VersionNotFoundException(ruleSet, version)
                         : new RuleSetNotFoundException(ruleSet));
+    }
+
+    /**
+     * An approval or a rejection must name the lock version the decision was based on (#234 security review, #275).
+     * A version number can carry other content over time (replace in place, withdraw, request again), so without the
+     * lock an approver could publish content nobody reviewed. Missing is {@code 428 PRECONDITION_REQUIRED}; a stale
+     * value is {@code 409 VERSION_CONFLICT} in {@link #checkLock}.
+     */
+    private static void requireLockVersion(WriteOptions options, String operation) {
+        if (options.expectedLockVersion() == null) {
+            throw new PreconditionRequiredException(operation);
+        }
     }
 
     private static void checkLock(StoredVersion current, WriteOptions options) {

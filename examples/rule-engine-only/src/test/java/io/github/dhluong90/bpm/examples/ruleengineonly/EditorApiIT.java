@@ -363,7 +363,7 @@ class EditorApiIT {
                 413, "PAYLOAD_TOO_LARGE");
         // a chunked body without Content-Length is cut off as well
         HttpResponse<String> chunked = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets/card-fee/versions/2:reject"))
-                .header("Authorization", TestTokens.bearerFor("minh", t, APPROVER))
+                .header("Authorization", TestTokens.bearerFor("minh", t, APPROVER)).header("If-Match", "\"1\"")
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofInputStream(() -> new java.io.ByteArrayInputStream(command))).build(),
                 HttpResponse.BodyHandlers.ofString());
@@ -487,8 +487,11 @@ class EditorApiIT {
         if (idempotencyKey != null) {
             request.header("Idempotency-Key", idempotencyKey);
         }
-        if (ifMatch != null) {
-            request.header("If-Match", ifMatch);
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        String lock = ifMatch == null && path.matches(".*:(approve|reject)$") ? "\"1\"" : ifMatch;
+        if (lock != null) {
+            request.header("If-Match", lock);
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""),

@@ -211,6 +211,7 @@ public class RuleSetController {
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
         RestSupport.require(callers, "rules:approve");
+        long lock = RestSupport.requiredIfMatch(ifMatch, ":approve");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         String comment = null;
         if (body.length > 0) {
@@ -223,7 +224,7 @@ public class RuleSetController {
                 comment = value.stringValue();
             }
         }
-        WriteOptions options = new WriteOptions(idempotencyKey, RestSupport.ifMatch(ifMatch), comment);
+        WriteOptions options = new WriteOptions(idempotencyKey, lock, comment);
         return RestSupport.version(HttpStatus.OK, versions.approve(name, version, options), callers);
     }
 
@@ -237,6 +238,7 @@ public class RuleSetController {
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
         RestSupport.require(callers, "rules:approve");
+        long lock = RestSupport.requiredIfMatch(ifMatch, ":reject");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         String reason = null;
         if (body.length > 0) {
@@ -248,7 +250,7 @@ public class RuleSetController {
                 reason = value.stringValue();
             }
         }
-        WriteOptions options = new WriteOptions(idempotencyKey, RestSupport.ifMatch(ifMatch), reason);
+        WriteOptions options = new WriteOptions(idempotencyKey, lock, reason);
         return RestSupport.version(HttpStatus.OK, versions.reject(name, version, options), callers);
     }
 

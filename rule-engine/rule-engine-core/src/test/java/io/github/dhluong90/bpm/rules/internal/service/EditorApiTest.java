@@ -127,18 +127,18 @@ class EditorApiTest {
         int history = stores.history.size();
 
         // Then an empty reason is 400 INPUT_INVALID naming reason
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, 1L, "")))
                 .isInstanceOf(InputInvalidException.class).hasMessageContaining("reason");
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "   ")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, 1L, "   ")))
                 .isInstanceOf(InputInvalidException.class).hasMessageContaining("reason");
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "x".repeat(2001))))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, 1L, "x".repeat(2001))))
                 .isInstanceOf(InputInvalidException.class).hasMessageContaining("2000");
         // a stale If-Match is 409 VERSION_CONFLICT
         assertThatThrownBy(() -> versions.reject("card-fee", 2,
                 new WriteOptions(null, pending.lockVersion() - 1, "R2 waiver needs pricing committee minutes")))
                 .isInstanceOf(VersionConflictException.class);
         // a published version is 409 INVALID_STATE
-        assertThatThrownBy(() -> versions.reject("card-fee", 1, new WriteOptions(null, null, "too late")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 1, new WriteOptions(null, 1L, "too late")))
                 .isInstanceOf(InvalidStateException.class).extracting(e -> ((InvalidStateException) e).code())
                 .isEqualTo("INVALID_STATE");
 
@@ -158,7 +158,7 @@ class EditorApiTest {
         int history = stores.history.size();
 
         // When minh rejects it, then PD-089: 403 SELF_APPROVAL_FORBIDDEN pointing to :withdraw, nothing changes
-        assertThatThrownBy(() -> versions.reject("fx-margin", 1, new WriteOptions(null, null, "Wrong margin table attached")))
+        assertThatThrownBy(() -> versions.reject("fx-margin", 1, new WriteOptions(null, 1L, "Wrong margin table attached")))
                 .isInstanceOfSatisfying(SelfApprovalForbiddenException.class, e -> {
                     assertThat(e.code()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
                     assertThat(e.getMessage()).contains(":withdraw");
@@ -169,7 +169,7 @@ class EditorApiTest {
 
         // and an approver who did not request it still can
         caller.become("bank-a", "lan", APPROVER);
-        assertThat(versions.reject("fx-margin", 1, new WriteOptions(null, null, "Wrong margin table attached")).status())
+        assertThat(versions.reject("fx-margin", 1, new WriteOptions(null, 1L, "Wrong margin table attached")).status())
                 .isEqualTo(VersionStatus.DRAFT);
     }
 
@@ -180,10 +180,10 @@ class EditorApiTest {
         versions.importVersion("card-fee", ImportRequest.yaml(cardFee("10000 VND", "card-fee")));
         versions.requestPublish("card-fee", 2, WriteOptions.none());
         caller.become("bank-a", "minh", APPROVER);
-        versions.reject("card-fee", 2, new WriteOptions("k-202", null, "first reason"));
+        versions.reject("card-fee", 2, new WriteOptions("k-202", 1L, "first reason"));
         int events = stores.outbox.size();
 
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions("k-202", null, "another reason")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions("k-202", 1L, "another reason")))
                 .isInstanceOf(IdempotencyKeyReuseException.class)
                 .extracting(e -> ((IdempotencyKeyReuseException) e).code()).isEqualTo("IDEMPOTENCY_KEY_REUSE_MISMATCH");
         assertThat(stores.outbox).hasSize(events);
@@ -197,10 +197,10 @@ class EditorApiTest {
         versions.requestPublish("card-fee", 2, WriteOptions.none());
 
         caller.become("bank-a", "dan", READER);
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "no")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, 1L, "no")))
                 .isInstanceOf(PermissionDeniedException.class);
         caller.become("bank-b", "minh", APPROVER);
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "no")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, 1L, "no")))
                 .isInstanceOf(RuleSetNotFoundException.class);
 
         caller.become("bank-a", "dan", READER);
@@ -424,7 +424,7 @@ class EditorApiTest {
         versions.requestPublish("card-fee", 2, WriteOptions.none());
         clock.set(DEC_10);
         caller.become("bank-a", "minh", APPROVER);
-        versions.reject("card-fee", 2, new WriteOptions(null, null, "R2 waiver needs pricing committee minutes"));
+        versions.reject("card-fee", 2, new WriteOptions(null, 1L, "R2 waiver needs pricing committee minutes"));
 
         RuleSetSummary summary = versions.findRuleSet("card-fee").orElseThrow();
 
@@ -624,7 +624,7 @@ class EditorApiTest {
         versions.importRuleSet(ImportRequest.yaml(good));
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "minh", Set.of("rules:approve", "rules:evaluate"));
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
         RuleEngine engine = engines.ruleEngine();
         DecisionResult result = engine.evaluate("card-fee", DecisionInput.of(Map.of("tier", "SILVER", "txCount", 5)));
         assertThat(result.outcome()).isEqualTo(new DecisionResult.Matched(List.of("R2"),
@@ -742,12 +742,12 @@ class EditorApiTest {
         caller.become("bank-a", "minh", APPROVER);
         int history = stores.history.size();
 
-        assertThatThrownBy(() -> versions.approve("card-fee", 1, new WriteOptions(null, null, "x".repeat(2001))))
+        assertThatThrownBy(() -> versions.approve("card-fee", 1, new WriteOptions(null, 1L, "x".repeat(2001))))
                 .isInstanceOf(InputInvalidException.class).hasMessageContaining("comment").hasMessageContaining("2000");
         assertThat(stores.history).hasSize(history);
         assertThat(versions.find("card-fee", 1, false).orElseThrow().status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
 
-        assertThat(versions.approve("card-fee", 1, new WriteOptions(null, null, "y".repeat(2000))).status())
+        assertThat(versions.approve("card-fee", 1, new WriteOptions(null, 1L, "y".repeat(2000))).status())
                 .isEqualTo(VersionStatus.PUBLISHED);
         assertThat(versions.history("card-fee", 1).getLast().reason()).hasSize(2000);
     }
@@ -800,7 +800,7 @@ class EditorApiTest {
         assertThat(VersionActions.allowed(pending.status(), pending.createdBy(), pending.requestedBy(), "lan",
                 AUTHOR_APPROVER)).doesNotContain("approve");
 
-        assertThatThrownBy(() -> versions.approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> versions.approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
     }
 
@@ -812,7 +812,7 @@ class EditorApiTest {
         versions.importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "minh", APPROVER);
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
     }
 
     /** card-fee.yaml with R2's fee replaced and the rule set renamed. */

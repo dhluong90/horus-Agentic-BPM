@@ -142,14 +142,14 @@ H=localhost:8080/api/bpm/rules/v1
 3. Hoa tries to approve her own request and is refused:
 
    ```bash
-   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
    # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
    ```
 
-4. Minh approves; the version is published and takes effect now:
+4. Minh approves; the version is published and takes effect now. `If-Match` names the lock version he reviewed (the `ETag` of the version he read); without it the answer is `428 PRECONDITION_REQUIRED`, and if the version changed since, `409 VERSION_CONFLICT`:
 
    ```bash
-   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve \
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"' \
      -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
    # 200 {"status":"PUBLISHED","requestedBy":"hoa","approvedBy":"minh",...}
    ```
@@ -284,7 +284,7 @@ curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -H 'Content-Type: applicati
 
 curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:request-publish
-curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -X POST \
+curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -H 'If-Match: "1"' -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve
 # {"ruleSet":"card-fee","version":1,"status":"PUBLISHED",...,"requestedBy":"lan",...,"approvedBy":"minh",...}
 

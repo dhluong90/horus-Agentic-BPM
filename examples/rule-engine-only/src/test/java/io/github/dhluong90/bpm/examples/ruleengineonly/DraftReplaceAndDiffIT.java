@@ -139,6 +139,48 @@ class DraftReplaceAndDiffIT {
                 .path("detail").asString()).contains("?copyOf=2");
     }
 
+    /** Security review of #234 (#275): an approval decided on replaced content is refused over HTTP. */
+    @Test
+    void RLE_047_an_approval_based_on_content_that_was_replaced_since_is_refused() throws Exception {
+        // Given v2 requested by lan; minh reads it and keeps its ETag
+        String t = "bank-replace-approve";
+        publish(t);
+        Reply draft = send(t, "lan", "POST", "/rule-sets/card-fee/versions", cardFee("10000 VND"), "application/yaml", null, null);
+        Reply requested = send(t, "lan", "POST", "/rule-sets/card-fee/versions/2:request-publish", null, null, "k-r1", draft.etag());
+        String reviewed = send(t, "minh", "GET", "/rule-sets/card-fee/versions/2", null, null, null, null).etag();
+        assertThat(reviewed).isEqualTo(requested.etag());
+
+        // When bob sends it back, lan replaces R2 and requests again
+        Reply rejected = send(t, "bob", "POST", "/rule-sets/card-fee/versions/2:reject",
+                "{\"reason\":\"Please double-check R2\"}".getBytes(StandardCharsets.UTF_8), "application/json", "k-j1", reviewed);
+        Reply replaced = send(t, "lan", "PUT", "/rule-sets/card-fee/versions/2", cardFee("0 VND"), "application/yaml", "k-p1",
+                rejected.etag());
+        Reply again = send(t, "lan", "POST", "/rule-sets/card-fee/versions/2:request-publish", null, null, "k-r2", replaced.etag());
+        long before = rows(t);
+
+        // Then minh's approval with the ETag he reviewed is 409, and approve or reject without If-Match is 428
+        assertProblem(send(t, "minh", "POST", "/rule-sets/card-fee/versions/2:approve", null, null, "k-a1", reviewed),
+                409, "VERSION_CONFLICT");
+        for (String action : new String[] {":approve", ":reject"}) {
+            java.net.http.HttpResponse<String> bare = HTTP.send(java.net.http.HttpRequest.newBuilder(
+                            uri("/rule-sets/card-fee/versions/2" + action))
+                    .header("Authorization", TestTokens.bearerFor("minh", t, PERMISSIONS.get("minh")))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString("{\"reason\":\"no lock\"}")).build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+            assertThat(bare.statusCode()).as(action).isEqualTo(428);
+            assertThat(JSON.readTree(bare.body()).path("code").asString()).isEqualTo("PRECONDITION_REQUIRED");
+        }
+        assertThat(rows(t)).isEqualTo(before);
+        assertThat(send(t, "dan", "GET", "/rule-sets/card-fee/versions/2", null, null, null, null).json().path("status")
+                .asString()).isEqualTo("PENDING_APPROVAL");
+
+        // When minh reviews the new content and approves with its ETag, it publishes
+        Reply approved = send(t, "minh", "POST", "/rule-sets/card-fee/versions/2:approve", null, null, "k-a2", again.etag());
+        assertThat(approved.status()).as(approved.body()).isEqualTo(200);
+        assertThat(approved.json().path("status").asString()).isEqualTo("PUBLISHED");
+    }
+
     @Test
     void RLE_028_version_diff_lists_added_changed_removed_and_moved_rows() throws Exception {
         // Given card-fee v1 published (R2 30000 VND), v2 with R2 at 0 VND and R6 inserted before R3
@@ -256,8 +298,11 @@ class DraftReplaceAndDiffIT {
         if (idempotencyKey != null) {
             request.header("Idempotency-Key", idempotencyKey);
         }
-        if (ifMatch != null) {
-            request.header("If-Match", ifMatch);
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        String lock = ifMatch == null && path.matches(".*:(approve|reject)$") ? "\"1\"" : ifMatch;
+        if (lock != null) {
+            request.header("If-Match", lock);
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""),
