@@ -2,7 +2,7 @@ package io.github.dhluong90.bpm.examples.ruleandprocess;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.horus.bpm.host.spi.TenantResolver;
+import io.github.dhluong90.bpm.host.spi.TenantResolver;
 import io.github.dhluong90.bpm.process.spi.ProcessEventPublisher;
 import java.net.URI;
 import java.net.http.HttpClient;
