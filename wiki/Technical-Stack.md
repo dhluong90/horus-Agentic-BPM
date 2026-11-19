@@ -22,7 +22,7 @@ Reference for the libraries and tools the project uses, what each one is for, an
 | Observability | Micrometer; OpenTelemetry API optional | Apache 2.0 | Vendor SDKs |
 | Scheduling | Database timers and jobs with `SKIP LOCKED` leases, one scheduler thread per host replica | | Quartz: own tables and clustering; brokers: a new dependency |
 | Cache coherence | PostgreSQL `LISTEN/NOTIFY` plus a `cache_epoch` sweep (ADR-0009) | | Broker topic: new infrastructure; TTL only: stale for the whole TTL |
-| Testing | JUnit 5, AssertJ, Testcontainers (PostgreSQL, PgBouncer), ArchUnit, JMH; property tests with an in-house seeded generator (PD-090) | EPL 2.0 (JUnit), Apache 2.0, MIT | Mockito for the evaluator: pure functions need no mocks. Test-scope licences do not ship |
+| Testing | JUnit 5, AssertJ, Testcontainers (PostgreSQL, PgBouncer), jqwik, ArchUnit, JMH | EPL 2.0 (JUnit), Apache 2.0, MIT | Mockito for the evaluator: pure functions need no mocks. Test-scope licences do not ship |
 | Build and supply chain | Maven reactors plus `bpm-bom`; Error Prone, Checkstyle, SpotBugs, Dependency-Check, CycloneDX SBOM, licence allowlist | | Gradle: fine, Maven's rigidity suits a library |
 
 New runtime dependencies need a one-paragraph justification in the pull request and a permissive licence (`TR-LIC-01`).

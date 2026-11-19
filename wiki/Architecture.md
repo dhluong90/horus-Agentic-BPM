@@ -200,7 +200,7 @@ Engines keep no state outside the database. Replicas coordinate only through Pos
 | Gate | Proves | Tooling |
 |---|---|---|
 | Module boundaries | `*-core` free of Spring, SQL, network, scripting, reflection | ArchUnit in every build (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`) |
-| Determinism | Same version, inputs and clock give the same result | Seeded property tests (`TR-DET-01`; JUnit 5 with the in-house generator, PD-090), replay tests (`TR-DET-05`) |
+| Determinism | Same version, inputs and clock give the same result | jqwik property tests (`TR-DET-01`), replay tests (`TR-DET-05`) |
 | Async Wait-State | No connection held during adapter calls; lease takeover exactly once | Testcontainers with a 2-connection pool and a 2 s stub adapter (`TR-ASY-01`, `TR-ASY-02`) |
 | Concurrency | Join without lost wakeup; stale completion rejected; duplicate-key semantics | Two-replica Testcontainers tests (`TR-ASY-03`, `TR-IDEM-03`, `TR-IDEM-05`) |
 | Cache coherence | A replica serves the new version within the bound, with and without NOTIFY | Two-replica test, once direct and once through PgBouncer in transaction mode (`TR-ASY-04`) |

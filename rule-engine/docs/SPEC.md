@@ -218,7 +218,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-021 Every expression has a FEEL translation that gives the same result
 - **Traces to:** `TR-STD-02`, `TR-DET-01`
 - **Milestone:** M1 (ADR-0019; null cases as `RLE-006`, PD-058)
-- **Given:** Seeded generators (JUnit 5 with the in-house generator, PD-090) for well-typed `horus-expr-v1` expressions over `string`, `integer`, `decimal`, `boolean`, `date`, `datetime` and lists, with inputs including `null`, and the translation table of `standards-compliance.md` section 4.4. The reference FEEL implementation runs in test scope only.
+- **Given:** jqwik generators for well-typed `horus-expr-v1` expressions over `string`, `integer`, `decimal`, `boolean`, `date`, `datetime` and lists, with inputs including `null`, and the translation table of `standards-compliance.md` section 4.4. The reference FEEL implementation runs in test scope only.
 - **When:** Each expression is evaluated by the engine and its FEEL translation by the reference implementation with the same inputs and clock; 1,000 tries per property in CI, 100,000 nightly. Fixed cases: `7 / 2`, `round(2.5, 0)`, `matches('ab12', '[0-9]+')`, `daysBetween(date('2027-01-01'), date('2027-03-01'))`.
 - **Then:** Results are equal for every try (money expressions excluded, since money is a HORUS extension); the fixed cases give `3.5`, `2`, `true` and `59`.
 - **Example:** `matches('ab12', '[0-9]+') -> true` (unanchored search, as FEEL).

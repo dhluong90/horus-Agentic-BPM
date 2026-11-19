@@ -234,7 +234,7 @@ The architect reviewed the technical, non-functional and developer requirements 
 | PD-049 | WCAG, ASVS, coverage at 1.0 | Must at 1.0 for `TR-UI-03`, `TR-SEC-07`, `TR-QA-03`, and `TR-OPS-02` (zero-downtime upgrade, promised by the M3 outcome) |
 | PD-051 | Tenant exit | Export and a governed purge (second approver, purge record) in 1.1; not supported before, and documented as such |
 | PD-052 | Tamper evidence | In 1.1; prefer sealing each closed monthly partition over a per-row chain; from 1.0 state that append-only protects against the engine's code, not against a database administrator |
-| PD-053 | Licence rule for tests | Runtime and the shipped cockpit bundle stay Apache, MIT or BSD; JUnit Jupiter API as `provided` in `*-test` artifacts; JMH build-only; every exception named. jqwik removed by PD-090 |
+| PD-053 | Licence rule for tests | Runtime and the shipped cockpit bundle stay Apache, MIT or BSD; JUnit Jupiter API as `provided` in `*-test` artifacts; jqwik and JMH build-only; every exception named |
 | PD-054 | Deprecation length | One minor release and at least six months; removal only in a major release |
 | PD-055 | PostgreSQL range | 14 tested until 1.0, 15 or later from 1.0; ask pilots for their version in M1 |
 
