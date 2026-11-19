@@ -73,3 +73,15 @@ export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): Hos
     getMe: (signal) => requestJson('GET', '/api/bpm/me', bpmMeV1, signal),
   };
 }
+
+/**
+ * Signs out of the host in host-session mode: Spring Security's logout endpoint (`POST /logout`) with the CSRF
+ * header. Never throws; the caller reloads, and the host's security sends the browser to its sign-in page.
+ */
+export async function signOutOfHost(baseUrl: string, fetchImpl: Fetch = fetch): Promise<void> {
+  try {
+    await fetchImpl(`${baseUrl}/logout`, { method: 'POST', credentials: 'same-origin', redirect: 'manual', headers: { 'X-Requested-With': 'XMLHttpRequest', ...csrfHeaders('POST') } });
+  } catch {
+    // The reload that follows shows the host's answer either way.
+  }
+}

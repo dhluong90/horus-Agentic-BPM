@@ -3,40 +3,25 @@ import type { BpmMetaV1 } from '../api/generated/bpm-meta.v1';
 import type { Area } from './route';
 
 /**
- * Which menu areas this user may use on this host. Each area needs its engine module in /meta and a
- * permission in /me; nothing depends on a role name. An area the user cannot use is not shown, so the
- * menu never offers a dead link.
+ * Permissions that make the rule areas useful in the cockpit (PD-093). `rules:evaluate` is for the host's own
+ * calls, such as a teller application, and opens nothing here.
  */
-type Module = BpmMetaV1['modules'][number]['module'];
+const RULE_PERMISSIONS: ReadonlySet<string> = new Set(['rules:read', 'rules:author', 'rules:approve', 'rules:log:read']);
 
-interface AreaRule {
-  module: Module | undefined;
-  /** Every permission in `all` and at least one in `any` (when given). */
-  all: readonly string[];
-  any?: readonly string[];
-}
-
-const AREA_RULES: Record<Area, AreaRule> = {
-  home: { module: undefined, all: [] },
-  rules: { module: 'rules', all: ['rules:read'] },
-  // Approvers review others' requests; authors follow and withdraw their own.
-  approvals: { module: 'rules', all: ['rules:read'], any: ['rules:approve', 'rules:author'] },
-  decisions: { module: 'rules', all: ['rules:log:read'] },
-  processes: { module: 'processes', all: ['processes:read'] },
-};
-
-/** Menu order. */
-const ORDER: readonly Area[] = ['home', 'rules', 'approvals', 'decisions', 'processes'];
-
+/**
+ * The menu (PD-093): Home always; Rules, Approvals and Decisions for anyone with a rule permission on a host
+ * that runs the Rule Engine; Processes only where a Process Engine is registered. A user with no rule
+ * permission sees Home only. Nothing depends on a role name.
+ */
 export function availableAreas(meta: BpmMetaV1, me: BpmMeV1): Area[] {
   const modules = new Set(meta.modules.map((module) => module.module));
-  const granted = new Set(me.permissions);
-  return ORDER.filter((area) => {
-    const rule = AREA_RULES[area];
-    if (rule.module !== undefined && !modules.has(rule.module)) return false;
-    if (!rule.all.every((permission) => granted.has(permission))) return false;
-    return rule.any === undefined || rule.any.some((permission) => granted.has(permission));
-  });
+  const rules = modules.has('rules') && me.permissions.some((permission) => RULE_PERMISSIONS.has(permission));
+  const processes = modules.has('processes') && (rules || me.permissions.some((permission) => permission.startsWith('processes:')));
+  return [
+    'home',
+    ...(rules ? (['rules', 'approvals', 'decisions'] as const) : []),
+    ...(processes ? (['processes'] as const) : []),
+  ];
 }
 
 /**
@@ -45,8 +30,11 @@ export function availableAreas(meta: BpmMetaV1, me: BpmMeV1): Area[] {
  */
 export const PREVIEW_AREAS: ReadonlySet<Area> = new Set<Area>(['decisions', 'processes']);
 
-/** Values of the host setting `cockpit.landing` (CKP-031) that name one area. */
-const FIXED_LANDING: Readonly<Record<string, Area>> = { home: 'home', changes: 'approvals', 'rule-sets': 'rules', decisions: 'decisions', processes: 'processes' };
+/**
+ * Values of the host setting `cockpit.landing` (PD-092): `home` (the default), `rules` or `approvals`.
+ * `decisions` becomes a value in 0.2.0, when Decisions has data.
+ */
+const LANDING: Readonly<Record<string, Area>> = { home: 'home', rules: 'rules', approvals: 'approvals' };
 
 /** The host setting `cockpit.landing`, from the settings of any module in /meta. */
 export function landingSetting(meta: BpmMetaV1): string | undefined {
@@ -57,25 +45,20 @@ export function landingSetting(meta: BpmMetaV1): string | undefined {
   return undefined;
 }
 
-/** `by-role` (CKP-031): approvers and authors open on Approvals, auditors on Decisions, readers on Rules. */
-function byRole(me: BpmMeV1, available: readonly Area[]): Area {
-  const granted = new Set(me.permissions);
-  const order: [boolean, Area][] = [
-    [granted.has('rules:approve') || granted.has('rules:author'), 'approvals'],
-    [granted.has('rules:log:read'), 'decisions'],
-    [granted.has('rules:read'), 'rules'],
-  ];
-  return order.find(([applies, area]) => applies && available.includes(area))?.[1] ?? 'home';
+/**
+ * The area the cockpit opens on when no screen is linked: Home for every role, whose content depends on the
+ * role (PD-092), unless the host sets `cockpit.landing`. An area this user may not use, or an unknown value,
+ * falls back to Home. A link into a screen always wins.
+ */
+export function landingArea(meta: BpmMetaV1, available: readonly Area[]): Area {
+  const setting = landingSetting(meta);
+  const area = setting === undefined ? undefined : LANDING[setting];
+  return area !== undefined && available.includes(area) ? area : 'home';
 }
 
-/**
- * The area the cockpit opens on when no screen is linked. Home unless the host sets `cockpit.landing` in /meta:
- * `by-role`, or one fixed area. An area this user may not use falls back to Home. A link always wins (PD-078).
- */
-export function landingArea(meta: BpmMetaV1, me: BpmMeV1, available: readonly Area[]): Area {
+/** A note for the browser console when the host's `cockpit.landing` is retired (`by-role`) or unknown. */
+export function landingNote(meta: BpmMetaV1): string | undefined {
   const setting = landingSetting(meta);
-  if (setting === undefined) return 'home';
-  if (setting === 'by-role') return byRole(me, available);
-  const area = FIXED_LANDING[setting];
-  return area !== undefined && available.includes(area) ? area : 'home';
+  if (setting === undefined || setting in LANDING) return undefined;
+  return `cockpit.landing "${setting}" is ${setting === 'by-role' ? 'retired' : 'not a known value'}; the cockpit opens on Home (PD-092).`;
 }

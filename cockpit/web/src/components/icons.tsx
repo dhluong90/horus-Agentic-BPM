@@ -17,8 +17,8 @@ const PATHS: Record<Area, ReactElement> = {
   ),
   approvals: (
     <>
-      <rect x="3" y="8.5" width="14" height="9" rx="2" />
-      <path d="M6.5 8.5V6a3.5 3.5 0 0 1 7 0v2.5M10 12v2" />
+      <path d="M10 2.5l6 2.5v5c0 3.8-2.6 6.3-6 7.5-3.4-1.2-6-3.7-6-7.5V5z" />
+      <path d="M7.2 10l2 2 3.8-4" />
     </>
   ),
   decisions: (

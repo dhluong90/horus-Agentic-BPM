@@ -28,12 +28,13 @@ async function everyRuleSet(client: RulesClient, limit: number, signal: AbortSig
 }
 
 /** Every rule set of the tenant, read with the host's largest page size. */
-export function useEveryRuleSet(pageLimit: number): Loadable<RuleSetSummary[]> {
+export function useEveryRuleSet(pageLimit: number, enabled = true): Loadable<RuleSetSummary[]> {
   const { client, hostId, tenant } = useRulesSession();
   const query = useQuery({
     queryKey: [hostId, tenant, 'rules', 'every-rule-set', pageLimit],
     queryFn: ({ signal }) => everyRuleSet(client, pageLimit, signal),
     staleTime: 10_000,
+    enabled,
   });
   if (query.isError) return { status: 'error', error: query.error };
   if (query.data === undefined) return { status: 'loading' };
@@ -78,10 +79,13 @@ export function relevantRequests(versions: readonly VersionSummary[], userId: st
     .sort((a, b) => Date.parse(b.version.requestedAt ?? b.version.createdAt) - Date.parse(a.version.requestedAt ?? a.version.createdAt));
 }
 
-/** Pending requests across the tenant: the versions of every rule set whose latest version waits for approval. */
-export function usePendingRequests(ruleSets: Loadable<RuleSetSummary[]>): Loadable<PendingRequest[]> {
-  const { client, hostId, tenant, userId } = useRulesSession();
-  const names = ruleSets.status === 'ready' ? ruleSets.data.filter((item) => item.latestStatus === 'PENDING_APPROVAL').map((item) => item.ruleSet) : [];
+/** Latest statuses whose versions Home and Approvals need: requests to review and the author's own work. */
+const OPEN_STATUSES: ReadonlySet<string> = new Set(['PENDING_APPROVAL', 'DRAFT']);
+
+/** Every version of the rule sets whose latest version is pending or a draft, read with the rule screens' key. */
+export function useOpenVersions(ruleSets: Loadable<RuleSetSummary[]>): Loadable<VersionSummary[]> {
+  const { client, hostId, tenant } = useRulesSession();
+  const names = ruleSets.status === 'ready' ? ruleSets.data.filter((item) => OPEN_STATUSES.has(item.latestStatus)).map((item) => item.ruleSet) : [];
   const versionQueries = useQueries({
     queries: names.map((name) => ({
       // The same key as the rule screens' version list, so both read one cache entry.
@@ -94,5 +98,37 @@ export function usePendingRequests(ruleSets: Loadable<RuleSetSummary[]>): Loadab
   const failed = versionQueries.find((query) => query.isError);
   if (failed) return { status: 'error', error: failed.error };
   if (versionQueries.some((query) => query.data === undefined)) return { status: 'loading' };
-  return { status: 'ready', data: relevantRequests(versionQueries.flatMap((query) => query.data ?? []), userId) };
+  return { status: 'ready', data: versionQueries.flatMap((query) => query.data ?? []) };
+}
+
+/** Pending requests this user may review or asked for themselves (the Approvals queue). */
+export function usePendingRequests(ruleSets: Loadable<RuleSetSummary[]>): Loadable<PendingRequest[]> {
+  const { userId } = useRulesSession();
+  const versions = useOpenVersions(ruleSets);
+  if (versions.status !== 'ready') return versions;
+  return { status: 'ready', data: relevantRequests(versions.data, userId) };
+}
+
+/** One item of an author's own work: a draft they created or a request they made. */
+export interface OwnWork {
+  version: VersionSummary;
+  kind: 'draft' | 'request';
+  /** The engine lists withdraw on this request. */
+  canWithdraw: boolean;
+}
+
+/** The author's drafts and requests, newest change first. */
+export function ownWork(versions: readonly VersionSummary[], userId: string): OwnWork[] {
+  const changed = (version: VersionSummary) => Date.parse(version.requestedAt ?? version.createdAt);
+  return versions
+    .flatMap((version): OwnWork[] => {
+      if (version.status === 'DRAFT' && version.createdBy === userId) return [{ version, kind: 'draft', canWithdraw: false }];
+      if (version.status === 'PENDING_APPROVAL' && version.requestedBy === userId) return [{ version, kind: 'request', canWithdraw: version.allowedActions.includes('withdraw') }];
+      return [];
+    })
+    .sort((a, b) => changed(b.version) - changed(a.version));
+}
+
+export function mapLoadable<T, U>(value: Loadable<T>, map: (data: T) => U): Loadable<U> {
+  return value.status === 'ready' ? { status: 'ready', data: map(value.data) } : value;
 }

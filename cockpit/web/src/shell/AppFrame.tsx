@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { BpmMeV1 } from '../api/generated/bpm-me.v1';
 import type { BpmMetaV1 } from '../api/generated/bpm-meta.v1';
 import type { RegistryHost } from '../app/config/registry';
-import { availableAreas, landingArea } from '../app/navigation';
+import { availableAreas, landingArea, landingNote } from '../app/navigation';
 import { areaOf, areaRoute, formatRoute, useRoute, type Area, type Route } from '../app/route';
 import { EmptyState, PageHead } from '../components/PageParts';
 import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
@@ -12,6 +12,8 @@ import { ProcessesPage } from '../features/processes/ProcessesPage';
 import { RulesProvider } from '../features/rules/api/rulesContext';
 import { RulesArea } from '../features/rules/RulesArea';
 import { useI18n } from '../i18n/I18nProvider';
+import { PeopleProvider } from '../app/people';
+import { usePendingRequests, useEveryRuleSet } from '../features/overview/useRuleOverview';
 import { NavRail } from './NavRail';
 import '../components/frame.css';
 
@@ -34,27 +36,41 @@ export interface FrameProps {
 
 /** The signed-in cockpit: the menu of the areas this user may use and the current area beside it. */
 export function AppFrame({ host, meta, me, fetchImpl }: FrameProps) {
-  const areas = availableAreas(meta, me);
-  const [route] = useRoute(areaRoute(landingArea(meta, me, areas)));
-  const area = areaOf(route);
-  const main = useFocusOnNavigation(formatRoute(route));
   return (
     <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} fetchImpl={fetchImpl}>
-      <div className="frame">
-        <NavRail areas={areas} current={area} />
-        <main id="main" ref={main} className="main main--framed" tabIndex={-1}>
-          {areas.includes(area) ? <AreaContent route={route} meta={meta} areas={areas} /> : <NotAvailable />}
-        </main>
-      </div>
+      <PeopleProvider me={me.user}>
+        <Frame meta={meta} me={me} />
+      </PeopleProvider>
     </RulesProvider>
   );
 }
 
-function AreaContent({ route, meta, areas }: { route: Route; meta: BpmMetaV1; areas: readonly Area[] }) {
+function Frame({ meta, me }: { meta: BpmMetaV1; me: BpmMeV1 }) {
+  const areas = availableAreas(meta, me);
+  const [route] = useRoute(areaRoute(landingArea(meta, areas)));
+  const area = areaOf(route);
+  const main = useFocusOnNavigation(formatRoute(route));
+  const reviewCount = useReviewCount(meta.limits.maxPageSize, areas.includes('approvals'));
+  const note = landingNote(meta);
+  useEffect(() => {
+    // A start-up log line for the host's operators; the user simply lands on Home.
+    if (note !== undefined) console.warn(note);
+  }, [note]);
+  return (
+    <div className="frame">
+      <NavRail areas={areas} current={area} reviewCount={reviewCount} />
+      <main id="main" ref={main} className="main main--framed" tabIndex={-1}>
+        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} /> : <NotAvailable />}
+      </main>
+    </div>
+  );
+}
+
+function AreaContent({ route, meta, me, areas }: { route: Route; meta: BpmMetaV1; me: BpmMeV1; areas: readonly Area[] }) {
   const pageLimit = meta.limits.maxPageSize;
   switch (route.name) {
     case 'home':
-      return <HomePage pageLimit={pageLimit} showApprovals={areas.includes('approvals')} />;
+      return <HomePage pageLimit={pageLimit} me={me} areas={areas} />;
     case 'rule-sets':
     case 'rule-set':
       return <RulesArea route={route} pageLimit={pageLimit} />;
@@ -63,7 +79,7 @@ function AreaContent({ route, meta, areas }: { route: Route; meta: BpmMetaV1; ar
     case 'decisions':
       return <DecisionsPage rulesAvailable={areas.includes('rules')} />;
     case 'processes':
-      return <ProcessesPage module={meta.modules.find((module) => module.module === 'processes')} />;
+      return <ProcessesPage />;
   }
 }
 
@@ -90,4 +106,10 @@ function useFocusOnNavigation(location: string) {
     main.current?.focus({ preventScroll: false });
   }, [location]);
   return main;
+}
+
+/** How many requests this user may review now: the count on the Approvals menu item. */
+function useReviewCount(pageLimit: number, enabled: boolean): number {
+  const pending = usePendingRequests(useEveryRuleSet(pageLimit, enabled));
+  return pending.status === 'ready' ? pending.data.filter((request) => request.canApprove).length : 0;
 }

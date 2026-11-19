@@ -1,147 +1,177 @@
-import { formatRoute } from '../../app/route';
-import { EmptyState, LoadingLine, AreaError, PageHead } from '../../components/PageParts';
+import { useState } from 'react';
+import type { BpmMeV1 } from '../../api/generated/bpm-me.v1';
+import type { VersionSummary } from '../../api/rules/schemas';
+import { suppliedName, usePersonName } from '../../app/people';
+import { formatRoute, type Area } from '../../app/route';
+import { AreaError, EmptyState, LoadingRows } from '../../components/PageParts';
+import type { MessageKey } from '../../i18n/en';
 import { useI18n } from '../../i18n/I18nProvider';
 import { PendingList } from '../approvals/PendingList';
 import { useRetryRules } from '../overview/useRetryRules';
-import { recentFirst, usePendingRequests, useEveryRuleSet, type Loadable, type PendingRequest } from '../overview/useRuleOverview';
-import { StatusBadge } from '../rules/components/StatusBadge';
+import { mapLoadable, ownWork, relevantRequests, useEveryRuleSet, useOpenVersions, type Loadable, type OwnWork, type PendingRequest } from '../overview/useRuleOverview';
+import { RuleSetTable } from '../rules/RuleSetTable';
 import { formatDateTime } from '../rules/model/dates';
-import { VERSION_STATUSES, type RuleSetSummary } from '../../api/rules/schemas';
+import { useRulesSession } from '../rules/api/rulesContext';
 
-/** Rows each Home card shows; the full list is one click away. */
-const HOME_ROWS = 8;
+/** Rows of the recent rule sets card; the full list is one click away. */
+const RECENT_ROWS = 5;
 
 /**
- * Home: what needs this user now. Pending approvals they may act on (their own requests without Approve) and
- * the most recently changed rule sets, with counts from the engine. Nothing here is a placeholder number.
+ * Home, the landing page for every role (PD-092). Its content follows what /me allows: an approver sees the
+ * requests waiting for them, an author their own drafts and requests, anyone who reads rules the recent
+ * rule sets, and a user with no rule permission one line saying so. Every number comes from the engine.
  */
-export function HomePage({ pageLimit, showApprovals }: { pageLimit: number; showApprovals: boolean }) {
+export function HomePage({ pageLimit, me, areas }: { pageLimit: number; me: BpmMeV1; areas: readonly Area[] }) {
   const { t } = useI18n();
-  const ruleSets = useEveryRuleSet(pageLimit);
-  const pending = usePendingRequests(ruleSets);
-  const reviewable = pending.status === 'ready' ? pending.data.filter((request) => request.canApprove).length : 0;
-  const action =
-    showApprovals && reviewable > 0 ? (
-      <a className="btn btn--primary" href={formatRoute({ name: 'approvals' })}>
-        {t('home.reviewApprovals', { count: String(reviewable) })}
-      </a>
-    ) : (
-      <a className="btn btn--primary" href={formatRoute({ name: 'rule-sets' })}>
-        {t('home.openRules')}
-      </a>
-    );
+  const rules = areas.includes('rules');
+  const name = me.user.displayName ?? me.user.id;
   return (
     <section className="workspace" aria-labelledby="home-title">
-      <PageHead id="home-title" title={t('home.title')} subtitle={t('home.subtitle')} action={action} />
-      <div className={showApprovals ? 'bento bento--home' : 'bento bento--single'}>
-        {showApprovals ? <ApprovalsCard pending={pending} /> : null}
-        <RecentRuleSetsCard ruleSets={ruleSets} />
+      <div className="page-head">
+        <h1 id="home-title">{t(greeting(new Date().getHours()), { name })}</h1>
+        <p className="page-head__sub">{t(subtitle(me.permissions, rules))}</p>
       </div>
+      {rules ? <RoleContent pageLimit={pageLimit} me={me} /> : (
+        <article className="card">
+          <EmptyState icon="home" text={t('home.nothingForRole')} />
+        </article>
+      )}
     </section>
   );
 }
 
-function CardHead({ id, title, count, href, linkLabel }: { id: string; title: string; count: number | undefined; href: string; linkLabel: string }) {
+function greeting(hour: number): MessageKey {
+  if (hour < 12) return 'home.greeting.morning';
+  if (hour < 18) return 'home.greeting.afternoon';
+  return 'home.greeting.evening';
+}
+
+function subtitle(permissions: readonly string[], rules: boolean): MessageKey {
+  if (!rules) return 'home.subtitle.none';
+  const author = permissions.includes('rules:author');
+  const approver = permissions.includes('rules:approve');
+  if (author && approver) return 'home.subtitle.both';
+  if (author) return 'home.subtitle.author';
+  if (approver) return 'home.subtitle.approver';
+  return 'home.subtitle.reader';
+}
+
+function RoleContent({ pageLimit, me }: { pageLimit: number; me: BpmMeV1 }) {
+  const { userId } = useRulesSession();
+  const ruleSets = useEveryRuleSet(pageLimit);
+  const versions = useOpenVersions(ruleSets);
+  const author = me.permissions.includes('rules:author');
+  const approver = me.permissions.includes('rules:approve');
+  const toReview = mapLoadable(versions, (data) => relevantRequests(data, userId).filter((request) => request.canApprove));
+  const mine = mapLoadable(versions, (data) => ownWork(data, userId));
+  const focus = focalItem(toReview, mine);
   return (
-    <div className="card__head">
-      <h2 id={id} className="card__title">
-        {title}
-        {count !== undefined ? <span className="count tnum">{count}</span> : null}
-      </h2>
-      <a className="link-action" href={href}>
-        {linkLabel} <span aria-hidden="true">→</span>
-      </a>
+    <div className="home">
+      {(author || approver) ? (
+        <div className={focus === undefined ? 'home__top home__top--single' : 'home__top'}>
+          {focus !== undefined ? <FocusCard focus={focus} /> : null}
+          <PendingCard toReview={approver ? toReview : undefined} mine={author ? mine : undefined} />
+        </div>
+      ) : null}
+      <RecentCard ruleSets={ruleSets} />
     </div>
   );
 }
 
-function ApprovalsCard({ pending }: { pending: Loadable<PendingRequest[]> }) {
-  const { t } = useI18n();
-  const retry = useRetryRules();
-  return (
-    <article className="card card--list" aria-labelledby="home-approvals">
-      <CardHead
-        id="home-approvals"
-        title={t('home.approvals')}
-        count={pending.status === 'ready' ? pending.data.length : undefined}
-        href={formatRoute({ name: 'approvals' })}
-        linkLabel={t('home.allApprovals')}
-      />
-      <ApprovalsBody pending={pending} onRetry={retry} />
-      {pending.status === 'ready' && pending.data.length > 0 ? <ApprovalsFoot requests={pending.data} /> : null}
-    </article>
-  );
+type Focus = { kind: 'review'; request: PendingRequest; waiting: number } | { kind: 'draft'; version: VersionSummary };
+
+/** The one next step: the oldest request to review, else the author's latest draft. */
+function focalItem(toReview: Loadable<PendingRequest[]>, mine: Loadable<OwnWork[]>): Focus | undefined {
+  if (toReview.status === 'ready' && toReview.data.length > 0) {
+    const oldest = toReview.data[toReview.data.length - 1];
+    if (oldest !== undefined) return { kind: 'review', request: oldest, waiting: toReview.data.length };
+  }
+  if (mine.status === 'ready') {
+    const draft = mine.data.find((item) => item.kind === 'draft');
+    if (draft !== undefined) return { kind: 'draft', version: draft.version };
+  }
+  return undefined;
 }
 
-function ApprovalsBody({ pending, onRetry }: { pending: Loadable<PendingRequest[]>; onRetry: () => void }) {
-  const { t } = useI18n();
-  if (pending.status === 'loading') return <LoadingLine />;
-  if (pending.status === 'error') return <AreaError error={pending.error} onRetry={onRetry} />;
-  if (pending.data.length === 0) return <EmptyState text={t('approvals.empty')} action={{ label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) }} />;
-  return <PendingList requests={pending.data.slice(0, HOME_ROWS)} compact />;
-}
-
-function RecentRuleSetsCard({ ruleSets }: { ruleSets: Loadable<RuleSetSummary[]> }) {
-  const { t } = useI18n();
-  const retry = useRetryRules();
-  return (
-    <article className="card card--list" aria-labelledby="home-rule-sets">
-      <CardHead
-        id="home-rule-sets"
-        title={t('home.recentRuleSets')}
-        count={ruleSets.status === 'ready' ? ruleSets.data.length : undefined}
-        href={formatRoute({ name: 'rule-sets' })}
-        linkLabel={t('home.allRuleSets')}
-      />
-      <RecentRuleSetsBody ruleSets={ruleSets} onRetry={retry} />
-      {ruleSets.status === 'ready' && ruleSets.data.length > 0 ? <StatusFoot items={ruleSets.data} /> : null}
-    </article>
-  );
-}
-
-function RecentRuleSetsBody({ ruleSets, onRetry }: { ruleSets: Loadable<RuleSetSummary[]>; onRetry: () => void }) {
+/** The single contrast card of the screen (styleguide: one focal point). */
+function FocusCard({ focus }: { focus: Focus }) {
   const { t, locale } = useI18n();
-  if (ruleSets.status === 'loading') return <LoadingLine />;
-  if (ruleSets.status === 'error') return <AreaError error={ruleSets.error} onRetry={onRetry} />;
-  if (ruleSets.data.length === 0) return <EmptyState text={t('rulesArea.empty')} action={{ label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) }} />;
+  const personName = usePersonName();
+  if (focus.kind === 'review') {
+    const { version } = focus.request;
+    const requester = personName(version.requestedBy ?? '', suppliedName(version, 'requestedBy'));
+    return (
+      <article className="focus-card" aria-labelledby="focus-title">
+        <p className="focus-card__eyebrow">{t('home.focus.review')}</p>
+        <h2 id="focus-title" className="focus-card__title">{t('rules.nameVersion', { name: version.ruleSet, version: String(version.version) })}</h2>
+        <p className="focus-card__meta tnum">{t('home.sentBy', { date: formatDateTime(version.requestedAt ?? version.createdAt, locale) ?? '', name: requester })}</p>
+        <div className="focus-card__actions">
+          <a className="btn btn--contrast" href={formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'changes' })}>{t('approvals.review')}</a>
+          <a className="link-action link-action--contrast" href={formatRoute({ name: 'approvals' })}>{t('home.focus.allWaiting', { count: String(focus.waiting) })} <span aria-hidden="true">→</span></a>
+        </div>
+      </article>
+    );
+  }
+  const { version } = focus;
   return (
-    <ul className="rows">
-      {recentFirst(ruleSets.data).slice(0, HOME_ROWS).map((item) => (
-        <li key={item.ruleSet} className="row">
-          <a className="row__main mono" href={formatRoute({ name: 'rule-set', ruleSet: item.ruleSet, version: undefined, lens: undefined })}>
-            {item.ruleSet}
-          </a>
-          <span className="row__meta tnum">{t('rulesArea.versionShort', { version: String(item.latestVersion) })}</span>
-          <StatusBadge status={item.latestStatus} />
-          <span className="row__time tnum">{formatDateTime(item.lastChangedAt, locale)}</span>
-        </li>
-      ))}
-    </ul>
+    <article className="focus-card" aria-labelledby="focus-title">
+      <p className="focus-card__eyebrow">{t('home.focus.continue')}</p>
+      <h2 id="focus-title" className="focus-card__title">{t('rules.nameDraft', { name: version.ruleSet, version: String(version.version) })}</h2>
+      <p className="focus-card__meta tnum">{t('home.savedAt', { date: formatDateTime(version.createdAt, locale) ?? '' })}</p>
+      <div className="focus-card__actions">
+        <a className="btn btn--contrast" href={formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'table' })}>{t('home.focus.continueEditing')}</a>
+        <a className="link-action link-action--contrast" href={formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: undefined, lens: undefined })}>{t('home.focus.openRuleSet')} <span aria-hidden="true">→</span></a>
+      </div>
+    </article>
   );
 }
 
-/** How the waiting requests split between those this user may review and their own. */
-function ApprovalsFoot({ requests }: { requests: readonly PendingRequest[] }) {
+/** Pending approvals: the user's own requests and drafts, and the requests they may review, one view at a time. */
+function PendingCard({ toReview, mine }: { toReview: Loadable<PendingRequest[]> | undefined; mine: Loadable<OwnWork[]> | undefined }) {
   const { t } = useI18n();
-  const toReview = requests.filter((request) => request.canApprove).length;
-  const mine = requests.filter((request) => request.mine).length;
+  const retry = useRetryRules();
+  const [view, setView] = useState<'review' | 'mine'>(toReview !== undefined ? 'review' : 'mine');
+  const count = (value: Loadable<unknown[]> | undefined) => (value?.status === 'ready' ? value.data.length : undefined);
+  const shown = view === 'review' ? toReview : mine;
   return (
-    <p className="card__foot tnum">
-      <span><b>{toReview}</b> {t('home.foot.toReview')}</span>
-      <span><b>{mine}</b> {t('home.foot.yours')}</span>
-    </p>
+    <article className="card card--list" aria-labelledby="home-pending">
+      <div className="card__head">
+        <h2 id="home-pending" className="card__title">{t('home.pending')}</h2>
+        {toReview !== undefined && mine !== undefined ? (
+          <div className="seg seg--small" role="group" aria-label={t('home.pending')}>
+            <button type="button" className="hit" aria-pressed={view === 'mine'} onClick={() => { setView('mine'); }}>
+              {t('home.yourWork')} <span className="seg__count tnum">{count(mine) ?? ''}</span>
+            </button>
+            <button type="button" className="hit" aria-pressed={view === 'review'} onClick={() => { setView('review'); }}>
+              {t('home.toReview')} <span className="seg__count tnum">{count(toReview) ?? ''}</span>
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {shown === undefined ? null : <PendingBody view={view} items={shown} onRetry={retry} />}
+    </article>
   );
 }
 
-/** The latest status of every rule set, counted from the engine's list. */
-function StatusFoot({ items }: { items: readonly RuleSetSummary[] }) {
+function PendingBody({ view, items, onRetry }: { view: 'review' | 'mine'; items: Loadable<PendingRequest[]> | Loadable<OwnWork[]>; onRetry: () => void }) {
   const { t } = useI18n();
-  const counts = VERSION_STATUSES.map((status) => ({ status, count: items.filter((item) => item.latestStatus === status).length })).filter((entry) => entry.count > 0);
+  if (items.status === 'loading') return <LoadingRows rows={2} />;
+  if (items.status === 'error') return <AreaError error={items.error} onRetry={onRetry} />;
+  if (items.data.length === 0) {
+    return <EmptyState text={view === 'review' ? t('approvals.empty') : t('home.noOwnWork')} action={{ label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) }} />;
+  }
+  return <PendingList items={items.data.slice(0, RECENT_ROWS)} compact />;
+}
+
+function RecentCard({ ruleSets }: { ruleSets: ReturnType<typeof useEveryRuleSet> }) {
+  const { t } = useI18n();
   return (
-    <p className="card__foot tnum">
-      {counts.map(({ status, count }) => (
-        <span key={status}><b>{count}</b> {t(`status.${status}`)}</span>
-      ))}
-    </p>
+    <article className="card card--table" aria-labelledby="home-recent">
+      <div className="card__head card__head--padded">
+        <h2 id="home-recent" className="card__title">{t('home.recentRuleSets')}</h2>
+        <a className="link-action" href={formatRoute({ name: 'rule-sets' })}>{t('home.allRuleSets')} <span aria-hidden="true">→</span></a>
+      </div>
+      <RuleSetTable ruleSets={ruleSets} limit={RECENT_ROWS} recentFirst emptyText={t('rulesArea.empty')} />
+    </article>
   );
 }

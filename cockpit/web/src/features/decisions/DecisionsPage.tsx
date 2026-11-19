@@ -12,7 +12,7 @@ export function DecisionsPage({ rulesAvailable }: { rulesAvailable: boolean }) {
     <section className="workspace" aria-labelledby="decisions-title">
       <PageHead id="decisions-title" title={t('decisions.title')} subtitle={t('decisions.subtitle')} preview />
       <article className="card">
-        <EmptyState text={t('decisions.empty')} action={rulesAvailable ? { label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) } : { label: t('menu.home'), href: formatRoute({ name: 'home' }) }} />
+        <EmptyState icon="decisions" text={t('decisions.empty')} action={rulesAvailable ? { label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) } : undefined} />
       </article>
     </section>
   );

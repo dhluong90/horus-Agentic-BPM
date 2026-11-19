@@ -1,50 +1,68 @@
+import { suppliedName, usePersonName } from '../../app/people';
 import { formatRoute } from '../../app/route';
 import { useI18n } from '../../i18n/I18nProvider';
-import type { PendingRequest } from '../overview/useRuleOverview';
+import type { OwnWork, PendingRequest } from '../overview/useRuleOverview';
+import { StatusPill } from '../rules/components/StatusPill';
 import { formatDateTime } from '../rules/model/dates';
 
+type Item = PendingRequest | OwnWork;
+
+/** One row's meaning: a request this user may review, their own request, or their own draft. */
+type Row = { kind: 'review' | 'request' | 'draft'; item: Item };
+
+function toRow(item: Item): Row {
+  if ('kind' in item) return { kind: item.kind, item };
+  return { kind: item.mine ? 'request' : 'review', item };
+}
+
 /**
- * Requests waiting for a second person. Review appears only where the engine lists approve for this user;
- * on the user's own request the row says so and never offers Approve (four eyes). Withdraw is offered on the
- * Approvals page only, where the reason can be typed.
+ * Requests and drafts as rows. Review appears only where the engine lists approve for this user; the user's
+ * own request never offers Approve (four eyes). Withdraw is offered where the engine lists it and the caller
+ * can take the reason (the Approvals page).
  */
-export function PendingList({ requests, compact = false, onWithdraw }: { requests: readonly PendingRequest[]; compact?: boolean; onWithdraw?: (request: PendingRequest) => void }) {
+export function PendingList({ items, compact = false, onWithdraw }: { items: readonly Item[]; compact?: boolean; onWithdraw?: (item: Item) => void }) {
   return (
     <ul className="rows">
-      {requests.map((request) => (
-        <PendingRow key={`${request.version.ruleSet}/${request.version.version}`} request={request} compact={compact} onWithdraw={onWithdraw} />
+      {items.map((item) => (
+        <PendingRow key={`${item.version.ruleSet}/${String(item.version.version)}`} row={toRow(item)} compact={compact} onWithdraw={onWithdraw} />
       ))}
     </ul>
   );
 }
 
-function PendingRow({ request, compact, onWithdraw }: { request: PendingRequest; compact: boolean; onWithdraw: ((request: PendingRequest) => void) | undefined }) {
+function PendingRow({ row, compact, onWithdraw }: { row: Row; compact: boolean; onWithdraw: ((item: Item) => void) | undefined }) {
   const { t, locale } = useI18n();
-  const { version } = request;
-  const changes = formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'changes' });
-  const requester = request.mine ? t('approvals.yourRequest') : t('approvals.requestedBy', { user: version.requestedBy ?? t('error.notProvided') });
-  const label = t('approvals.rowLabel', { name: version.ruleSet, version: String(version.version) });
+  const personName = usePersonName();
+  const { version } = row.item;
+  const lens = row.kind === 'draft' ? 'table' : 'changes';
+  const href = formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens });
+  const title = t('rules.nameVersion', { name: version.ruleSet, version: String(version.version) });
+  const date = formatDateTime(version.requestedAt ?? version.createdAt, locale) ?? '';
+  const meta =
+    row.kind === 'review'
+      ? t('home.sentBy', { date, name: personName(version.requestedBy ?? '', suppliedName(version, 'requestedBy')) })
+      : row.kind === 'request'
+        ? t('home.sentWaiting', { date })
+        : t('home.savedAt', { date });
+  const canApprove = 'canApprove' in row.item && row.item.canApprove;
+  const canWithdraw = row.item.canWithdraw && onWithdraw !== undefined && !compact;
   return (
-    <li className="row">
-      <a className="row__main mono" href={changes}>
-        {version.ruleSet}
-      </a>
-      <span className="row__meta tnum">{t('rulesArea.versionShort', { version: String(version.version) })}</span>
-      <span className={request.mine ? 'row__who row__who--mine' : 'row__who'}>{requester}</span>
-      {compact ? null : <span className="row__time tnum">{formatDateTime(version.requestedAt ?? version.createdAt, locale)}</span>}
-      <span className="row__actions">
-        {request.canApprove ? (
-          <a className="btn btn--primary btn--small hit" href={changes} aria-label={`${t('approvals.review')}: ${label}`}>
-            {t('approvals.review')}
-          </a>
-        ) : null}
-        {request.canWithdraw && onWithdraw !== undefined ? (
-          <button type="button" className="btn btn--quiet btn--small hit" aria-label={`${t('approvals.withdraw')}: ${label}`} onClick={() => { onWithdraw(request); }}>
-            {t('approvals.withdraw')}
-          </button>
-        ) : null}
-        {request.mine && !(request.canWithdraw && onWithdraw !== undefined) ? <span className="row__note">{t('approvals.waitingForOther')}</span> : null}
-      </span>
+    <li className="row row--link">
+      <div className="row__text">
+        <a className="row__main" href={href}>{title}</a>
+        <span className="row__meta tnum">{meta}</span>
+      </div>
+      <StatusPill status={version.status} />
+      {canApprove ? (
+        <a className="btn btn--primary btn--small hit row__action" href={href} aria-label={`${t('approvals.review')}: ${title}`}>
+          {t('approvals.review')}
+        </a>
+      ) : null}
+      {canWithdraw ? (
+        <button type="button" className="btn btn--quiet btn--small hit row__action" aria-label={`${t('approvals.withdraw')}: ${title}`} onClick={() => { onWithdraw(row.item); }}>
+          {t('approvals.withdraw')}
+        </button>
+      ) : null}
     </li>
   );
 }

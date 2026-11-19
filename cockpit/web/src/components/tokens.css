@@ -45,6 +45,25 @@
   --node-hover: drop-shadow(0 4px 10px rgba(15, 23, 42, .16));
   --target-min: 44px;
   color-scheme: light;
+
+  /* Styleguide (docs/product/ux/styleguide.md section 12): contrast card, primary states, menu, type, layout. */
+  --surface-contrast: #0F172A; --contrast-line: transparent;
+  --on-contrast: #F8FAFC; --on-contrast-muted: #A9B4C6; --on-contrast-accent: #7DD3FC;
+  --contrast-action: #F8FAFC; --on-contrast-action: #0F172A;
+  --primary-hover: #075985; --primary-active: #0C4A6E;
+  --rail: #FFFFFF; --rail-line: var(--line);
+  --type-display: 700 32px/1.25 var(--font-ui);
+  --type-h1: 650 24px/1.4 var(--font-ui);
+  --type-h2: 600 16px/1.4 var(--font-ui);
+  --type-body: 400 14px/1.5 var(--font-ui);
+  --type-label: 500 13px/1.45 var(--font-ui);
+  --type-caption: 500 12px/1.4 var(--font-ui);
+  --space-8: 32px; --space-10: 40px; --space-12: 48px;
+  --radius-xs: 4px; --radius-seg: 10px; --radius-xl: 16px; --radius-pill: 999px;
+  --topbar-h: 64px; --rail-w: 248px; --rail-w-collapsed: 72px; --inspector-w: 360px;
+  --card-pad: 20px; --gap: 16px;
+  --sh-dock: 0 -8px 24px -12px rgba(15, 23, 42, .18);
+  --sh-pop: 0 16px 40px -8px rgba(15, 23, 42, .18), 0 2px 6px rgba(15, 23, 42, .06);
 }
 
 :root[data-theme="dark"] {
@@ -76,6 +95,14 @@
   --sh-node: 0 0 0 1px rgba(148, 163, 184, .34), 0 6px 16px rgba(0, 0, 0, .6);
   --node-hover: drop-shadow(0 0 1px rgba(148, 163, 184, .9)) drop-shadow(0 6px 16px rgba(0, 0, 0, .6));
   color-scheme: dark;
+
+  --surface-contrast: #1B2840; --contrast-line: #3B5A86;
+  --on-contrast: #F1F5F9; --on-contrast-muted: #A9B4C6; --on-contrast-accent: #7DD3FC;
+  --contrast-action: #F1F5F9; --on-contrast-action: #0B0F17;
+  --primary-hover: #38BDF8; --primary-active: #0284C7;
+  --rail: #0E141F; --rail-line: var(--line);
+  --sh-dock: 0 1px 0 rgba(255, 255, 255, .07) inset, 0 -12px 28px -12px rgba(0, 0, 0, .8);
+  --sh-pop: 0 0 0 1px rgba(148, 163, 184, .34), 0 16px 40px -8px rgba(0, 0, 0, .8);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -108,5 +135,13 @@
     --sh-node: 0 0 0 1px rgba(148, 163, 184, .34), 0 6px 16px rgba(0, 0, 0, .6);
     --node-hover: drop-shadow(0 0 1px rgba(148, 163, 184, .9)) drop-shadow(0 6px 16px rgba(0, 0, 0, .6));
     color-scheme: dark;
+
+    --surface-contrast: #1B2840; --contrast-line: #3B5A86;
+    --on-contrast: #F1F5F9; --on-contrast-muted: #A9B4C6; --on-contrast-accent: #7DD3FC;
+    --contrast-action: #F1F5F9; --on-contrast-action: #0B0F17;
+    --primary-hover: #38BDF8; --primary-active: #0284C7;
+    --rail: #0E141F; --rail-line: var(--line);
+    --sh-dock: 0 1px 0 rgba(255, 255, 255, .07) inset, 0 -12px 28px -12px rgba(0, 0, 0, .8);
+    --sh-pop: 0 0 0 1px rgba(148, 163, 184, .34), 0 16px 40px -8px rgba(0, 0, 0, .8);
   }
 }

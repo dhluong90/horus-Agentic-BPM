@@ -30,7 +30,7 @@ describe('embedded shell, case A', () => {
     expect(await screen.findByTestId('header-user')).toHaveTextContent('Nguyễn Thị Lan');
     expect(screen.getByTestId('header-host')).toHaveTextContent('Loan origination');
     expect(screen.getByTestId('header-tenant')).toHaveTextContent('bank-a');
-    expect(screen.getByRole('heading', { level: 1, name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /Nguyễn Thị Lan/ })).toBeInTheDocument();
     // No backend of its own: the registry, then the host's two metadata endpoints, then only engine endpoints, same origin.
     expect(requested[0]).toMatch(/\/cockpit-hosts\.json$/);
     expect([...requested.slice(1, 3)].sort()).toEqual(['/api/bpm/me', '/api/bpm/meta']);
@@ -44,9 +44,11 @@ describe('embedded shell, case A', () => {
 
     expect(await screen.findByTestId('header-user')).toHaveTextContent('Trần Văn Minh');
     const menu = screen.getByRole('navigation', { name: 'Cockpit menu' });
-    expect(within(menu).getAllByRole('link').map((link) => link.querySelector('.navrail__title')?.textContent)).toEqual(['Home', 'Rules', 'Approvals', 'Decisions · Preview']);
-    expect(within(menu).getByRole('link', { name: 'Decisions · Preview' })).toBeInTheDocument();
+    expect(within(menu).getAllByRole('link').map((link) => link.querySelector('.navrail__title')?.textContent)).toEqual(['Home', 'Rules', 'Approvals', 'Decisions']);
+    expect(within(menu).getByText('Preview')).toBeInTheDocument();
     expect(within(menu).getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
+    // The approver may review lan's card-fee version 2: one count on Approvals.
+    expect(await within(menu).findByRole('link', { name: 'Approvals, 1 to review' })).toBeInTheDocument();
   });
 });
 
@@ -160,7 +162,7 @@ describe('language', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'VI' }));
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Trang chủ' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /^Chào buổi/ })).toBeInTheDocument();
     expect(screen.getByTestId('header-host')).toHaveTextContent('Khởi tạo khoản vay');
     expect(screen.getByRole('link', { name: 'Quy tắc' })).toBeInTheDocument();
     expect(screen.queryByText('Home')).not.toBeInTheDocument();
@@ -182,6 +184,6 @@ describe('language', () => {
     );
     render(<App />);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Trang chủ' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /^Chào buổi/ })).toBeInTheDocument();
   });
 });
