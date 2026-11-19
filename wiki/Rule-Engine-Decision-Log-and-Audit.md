@@ -25,7 +25,7 @@ Design preview: describes the 0.1 target.
 ## Find decisions
 
 ```bash
-curl -s 'http://localhost:8080/api/bpm/rules/v1/decisions?ruleSet=card-fee&from=2026-12-01T00:00:00Z&to=2026-12-31T23:59:59Z&outcome=error'
+curl -s 'http://localhost:8080/api/bpm/rules/v1/decisions?ruleSet=card-fee&from=2026-12-01T00:00:00Z&to=2027-01-01T00:00:00Z'
 ```
 
 Filters: `ruleSet`, `from`, `to`, `outcome`, matched rule id, and any output value. Results are paginated by cursor; exact parameter names are in [[Rule Engine Decision API]]. The Decisions screen in the [[Cockpit]] offers the same filters.

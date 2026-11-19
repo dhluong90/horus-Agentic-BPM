@@ -95,7 +95,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions:import` | Create a draft from YAML or JSON | `rules:author` | `Idempotency-Key` |
 | `GET /decisions/{id}` | One decision; masked inputs stay hashed | `rules:log:read` | |
 | `GET /decisions/{id}/explain` | Plain-language explanation | `rules:log:read` | |
-| `GET /decisions?ruleSet=&from=&to=&outcome=&matchedRuleId=&cursor=&limit=` | Decision log, newest first. `ruleSet`, `from` and `to` are required; the range is at most 31 days | `rules:log:read` | cursor pagination |
+| `GET /decisions?ruleSet=&from=&to=&cursor=&limit=` | Decision log of one rule set, newest first, `from` inclusive and `to` exclusive. `ruleSet`, `from` and `to` are required; the range is at most 31 days (`query.max-range`); a page holds up to 200 decisions (`query.max-page-size`, also the default). Masked inputs stay hashed. Built in 0.2; the `outcome` and `matchedRuleId` filters come later | `rules:log:read` | cursor pagination; the cursor is bound to the rule set and period |
 
 Permission strings match [[Rule Engine Configuration]].
 

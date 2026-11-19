@@ -182,6 +182,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** The engine migration runs and the partition job runs in each case, with SQL captured.
 - **Then:** After migration `rle_decision` is range-partitioned with `rle_decision_default`, `rle_decision_2027_01` and `rle_decision_2027_02` (7 days ahead reaches February). In the retention run only `rle_decision_2027_01` is dropped (its upper bound `2027-02-01` is before `2027-02-03`); no `DELETE` statement on `rle_decision` appears. In the third run the straggler is moved into the new `2027_03` partition before `ATTACH` and the default partition is empty afterwards. With `decision-log.retention` unset, no partition is ever dropped.
 - **Example:** `retention P12M at 2028-02-03 -> drop rle_decision_2027_01 only; 0 DELETE statements`.
+- **Delivery:** creation ahead and the overflow case are tested by `RLE_017_*` in `DecisionLogPartitionMaintenanceIT` and `DecisionLogSearchIT`; the retention run lands with the retention slice (RE-F-31), and until then nothing is dropped.
 - **Test ID:** `RLE_017_decision_log_monthly_partitions_and_retention_by_drop`
 
 ### RLE-018 `X-Tenant-Id` is accepted only for a tenant in the token's allowed list
