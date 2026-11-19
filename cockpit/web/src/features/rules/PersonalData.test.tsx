@@ -150,7 +150,7 @@ describe('personal data on the approval screen (PD-099, PD-104)', () => {
     const warning = await screen.findByRole('group', { name: 'Dữ liệu cá nhân chưa có quy tắc che' });
     expect(within(warning).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['National ID: chưa có quy tắc che', 'Email: chưa có quy tắc che']);
     expect(warning).toHaveTextContent('Các giá trị này sẽ được lưu không che trong nhật ký quyết định và không thể sửa về sau.');
-    expect(within(warning).getByRole('checkbox', { name: 'Tôi chấp nhận các trường sau được ghi log không che: National ID, Email' })).toBeInTheDocument();
+    expect(within(warning).getByRole('checkbox', { name: 'Tôi chấp nhận các trường sau được lưu không che trong nhật ký quyết định: National ID, Email' })).toBeInTheDocument();
     const notes = await screen.findByRole('list', { name: 'Thay đổi ngoài các dòng' });
     expect(within(notes).getAllByRole('listitem')[0]).toHaveTextContent('National ID: bỏ che (đã che → không che theo mặc định)');
     expect(screen.getByText('Bỏ che ở 1 cột')).toBeInTheDocument();
@@ -163,7 +163,7 @@ describe('the warning text follows the number of inputs', () => {
 
   it.each([
     ['en', 'Its values will be kept unmasked in the decision log, which cannot be changed later.', 'I accept that this input is logged without masking: National ID'],
-    ['vi', 'Giá trị của trường này sẽ được lưu không che trong nhật ký quyết định và không thể sửa về sau.', 'Tôi chấp nhận trường sau được ghi log không che: National ID'],
+    ['vi', 'Giá trị của trường này sẽ được lưu không che trong nhật ký quyết định và không thể sửa về sau.', 'Tôi chấp nhận trường sau được lưu không che trong nhật ký quyết định: National ID'],
   ] as const)('TR_UI_04_one_input_reads_in_the_singular_%s', (locale, why, accept) => {
     render(<I18nProvider initialLocale={locale}><PersonalDataWarnings warnings={one} definition={definition} acceptance={{ checked: false, onChange: () => undefined, needed: false, id: 'a' }} /></I18nProvider>);
     expect(screen.getByText(why)).toBeInTheDocument();

@@ -16,7 +16,7 @@ const THEMES = ['light', 'dark'] as const;
 const LOCALES = ['en', 'vi'] as const;
 const TEXT = {
   en: { approve: 'Approve and publish', warning: 'Personal data without a masking rule', accept: 'I accept that these inputs are logged without masking: National ID, Email' },
-  vi: { approve: 'Phê duyệt và xuất bản', warning: 'Dữ liệu cá nhân chưa có quy tắc che', accept: 'Tôi chấp nhận các trường sau được ghi log không che: National ID, Email' },
+  vi: { approve: 'Phê duyệt và xuất bản', warning: 'Dữ liệu cá nhân chưa có quy tắc che', accept: 'Tôi chấp nhận các trường sau được lưu không che trong nhật ký quyết định: National ID, Email' },
 } as const;
 
 /** Answers the Rule Engine from the personal-data demo, as `user` with `permissions`. */
