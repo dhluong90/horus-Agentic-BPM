@@ -41,7 +41,7 @@ import org.junit.jupiter.api.TestFactory;
 /**
  * RLE-008 and RLE-022 (#22): the clock selects the version in force, a decision pinned to a version and clock or
  * replayed by its id gives the logged answer, and {@code today()} follows the rule set's time zone. Users of
- * {@code bank-a}: lan authors, minh approves, an the auditor reads the log, pricing evaluates (with
+ * {@code bank-a}: lan authors, minh approves, thu the auditor reads the log, pricing evaluates (with
  * {@code rules:simulate}) and teller evaluates without it.
  */
 class EffectiveDatesAndReplayTest {
@@ -148,7 +148,7 @@ class EffectiveDatesAndReplayTest {
         // When the November decision is replayed by its id after 5 Dec, and evaluated pinned to (v1, 20 Nov)
         clock.set(DEC_05);
         int rowsBefore = stores.decisions.size();
-        caller.become("bank-a", "an", AUDITOR);
+        caller.become("bank-a", "thu", AUDITOR);
         DecisionResult replayed = engine.replay(november.decisionId());
         caller.become("bank-a", "pricing", PRICING);
         DecisionResult pinned = engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1).withClock(NOV_20));
@@ -228,7 +228,7 @@ class EffectiveDatesAndReplayTest {
         int rows = stores.decisions.size();
 
         // When bank-a's auditor replays it, or an id that cannot exist, or one that was never written
-        caller.become("bank-a", "an", AUDITOR);
+        caller.become("bank-a", "thu", AUDITOR);
 
         // Then 404 DECISION_NOT_FOUND each time, and nothing is written
         assertThatThrownBy(() -> engine.replay(bankB)).isInstanceOf(DecisionNotFoundException.class)
@@ -238,7 +238,7 @@ class EffectiveDatesAndReplayTest {
         assertThatThrownBy(() -> engine.replay("01KCS3W1DQ0M8V6T2B9R5N7K4E")).isInstanceOf(DecisionNotFoundException.class);
         assertThat(stores.decisions).hasSize(rows);
         // and bank-b's own auditor gets it
-        caller.become("bank-b", "an", AUDITOR);
+        caller.become("bank-b", "thu", AUDITOR);
         assertThat(engine.replay(bankB).outputs()).containsEntry("fee", vnd(45_000));
     }
 
@@ -279,7 +279,7 @@ class EffectiveDatesAndReplayTest {
         String withNull = engine.evaluate(DecisionRequest.of("id-check-fee", DecisionInput.of(nullId))).decisionId();
 
         // When the auditor replays both
-        caller.become("bank-a", "an", AUDITOR);
+        caller.become("bank-a", "thu", AUDITOR);
 
         // Then the first is 422 REPLAY_NOT_POSSIBLE naming the input, never its value; the second replays
         assertThatThrownBy(() -> engine.replay(withValue)).isInstanceOf(ReplayNotPossibleException.class)
@@ -325,7 +325,7 @@ class EffectiveDatesAndReplayTest {
         assertThat(v1.outputs()).containsEntry("sameDay", true);
         assertThat(v2.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
         // and replaying either decision with its logged version and clock gives the same result
-        caller.become("bank-a", "an", AUDITOR);
+        caller.become("bank-a", "thu", AUDITOR);
         assertThat(engine.replay(v1.decisionId()).outcome()).isEqualTo(v1.outcome());
         assertThat(engine.replay(v2.decisionId()).outcome()).isEqualTo(v2.outcome());
         // and the zone is part of the version, not of the hash's metadata: the two versions hash differently

@@ -30,7 +30,7 @@ import tools.jackson.databind.json.JsonMapper;
  * RLE-008 and RLE-022 over HTTP (#22), as the demo runs them: a fee change scheduled for 1 December, the November
  * decision replayed after the change, the same answer pinned to version 1, and a same-day cut-off in Ho Chi Minh City
  * time. Each test uses its own tenant. Users: lan authors, minh approves, pricing evaluates with
- * {@code rules:simulate}, teller evaluates without it, an reads the decision log.
+ * {@code rules:simulate}, teller evaluates without it, thu reads the decision log.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
@@ -43,7 +43,7 @@ class EffectiveDatesAndReplayIT {
             "minh", List.of("rules:read", "rules:approve"),
             "pricing", List.of("rules:evaluate", "rules:simulate"),
             "teller", List.of("rules:evaluate"),
-            "an", List.of("rules:log:read"));
+            "thu", List.of("rules:log:read"));
 
     /** The host clock, moved between steps: approvals in October and November, the replay in December. */
     static final class HostClock extends Clock {
@@ -160,7 +160,7 @@ class EffectiveDatesAndReplayIT {
         clock.set(Instant.parse("2026-12-05T08:00:00Z"));
         long rows = decisions(t);
         String id = november.json().path("decisionId").asString();
-        Reply replayed = send(t, "an", "/decisions/" + id + ":replay", null, null);
+        Reply replayed = send(t, "thu", "/decisions/" + id + ":replay", null, null);
         Reply pinned = send(t, "pricing", "/decisions/card-fee/versions/1:evaluate",
                 body(STANDARD + ",\"clock\":\"2026-11-20T10:00:00Z\"}"), "application/json");
 
@@ -203,8 +203,8 @@ class EffectiveDatesAndReplayIT {
         assertProblem(send(t, "pricing", "/decisions/card-fee/versions/9:evaluate", body(STANDARD + "}"),
                 "application/json"), 404, "VERSION_NOT_FOUND");
         // replay: another tenant, an unknown id, a caller without rules:log:read
-        assertProblem(send("bank-replay-c", "an", "/decisions/" + id + ":replay", null, null), 404, "DECISION_NOT_FOUND");
-        assertProblem(send(t, "an", "/decisions/01KCS3W1DQ0M8V6T2B9R5N7K4E:replay", null, null), 404, "DECISION_NOT_FOUND");
+        assertProblem(send("bank-replay-c", "thu", "/decisions/" + id + ":replay", null, null), 404, "DECISION_NOT_FOUND");
+        assertProblem(send(t, "thu", "/decisions/01KCS3W1DQ0M8V6T2B9R5N7K4E:replay", null, null), 404, "DECISION_NOT_FOUND");
         assertProblem(send(t, "teller", "/decisions/" + id + ":replay", null, null), 403, "PERMISSION_DENIED");
 
         assertThat(decisions(t)).isEqualTo(rows);
@@ -243,7 +243,7 @@ class EffectiveDatesAndReplayIT {
         assertThat(v1.json().path("outputs").path("sameDay").asBoolean()).isTrue();
         assertThat(v2.json().path("outcome").asString()).isEqualTo("NO_MATCH");
         for (Reply logged : List.of(v1, v2)) {
-            Reply replayed = send(t, "an", "/decisions/" + logged.json().path("decisionId").asString() + ":replay", null, null);
+            Reply replayed = send(t, "thu", "/decisions/" + logged.json().path("decisionId").asString() + ":replay", null, null);
             assertThat(replayed.json().path("outcome")).isEqualTo(logged.json().path("outcome"));
             assertThat(replayed.json().path("outputs")).isEqualTo(logged.json().path("outputs"));
         }

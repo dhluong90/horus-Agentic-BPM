@@ -139,7 +139,7 @@ class EffectiveDatesAndReplayPostgresIT {
         // When pod B replays the November decision after 5 Dec, and pod A evaluates pinned to (v1, 20 Nov)
         clock.set(DEC_05);
         long rows = count("rle_decision");
-        caller.as("bank-a", "an", AUDITOR);
+        caller.as("bank-a", "thu", AUDITOR);
         DecisionResult replayed = podB.ruleEngine().replay(november.decisionId());
         caller.as("bank-a", "pricing", PRICING);
         DecisionResult pinned = podA.ruleEngine().evaluate(DecisionRequest.of("card-fee", STANDARD)
@@ -168,7 +168,7 @@ class EffectiveDatesAndReplayPostgresIT {
         DecisionResult earlier = podA.ruleEngine().evaluate(DecisionRequest.of("card-fee", STANDARD));
 
         // When it is replayed, Then the second lookup finds it
-        caller.as("bank-a", "an", AUDITOR);
+        caller.as("bank-a", "thu", AUDITOR);
         DecisionResult replayed = podB.ruleEngine().replay(earlier.decisionId());
         assertThat(replayed.outcome()).isEqualTo(earlier.outcome());
         assertThat(replayed.clock()).isEqualTo(Instant.parse("2026-11-26T09:00:00Z"));
@@ -181,7 +181,7 @@ class EffectiveDatesAndReplayPostgresIT {
         String bankA = podA.ruleEngine().evaluate(DecisionRequest.of("card-fee", STANDARD).withClock(NOV_20)).decisionId();
         long rows = count("rle_decision");
 
-        caller.as("bank-b", "an", AUDITOR);
+        caller.as("bank-b", "thu", AUDITOR);
         assertThatThrownBy(() -> podB.ruleEngine().replay(bankA)).isInstanceOf(DecisionNotFoundException.class);
         assertThat(count("rle_decision")).isEqualTo(rows);
     }
@@ -208,7 +208,7 @@ class EffectiveDatesAndReplayPostgresIT {
                 return null;
             });
             Future<List<DecisionResult>> replay = pool.submit(() -> {
-                caller.asThread("bank-a", "an", AUDITOR);
+                caller.asThread("bank-a", "thu", AUDITOR);
                 together.await();
                 List<DecisionResult> results = new ArrayList<>();
                 for (int i = 0; i < 20; i++) {
@@ -265,7 +265,7 @@ class EffectiveDatesAndReplayPostgresIT {
         // Then v1 matches and v2 does not; replaying either on pod B gives the same
         assertThat(v1.matchedRuleIds()).containsExactly("R1");
         assertThat(v2.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
-        caller.as("bank-a", "an", AUDITOR);
+        caller.as("bank-a", "thu", AUDITOR);
         assertThat(podB.ruleEngine().replay(v1.decisionId()).outcome()).isEqualTo(v1.outcome());
         assertThat(podB.ruleEngine().replay(v2.decisionId()).outcome()).isEqualTo(v2.outcome());
     }
