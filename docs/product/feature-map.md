@@ -302,6 +302,19 @@ Decided by the product manager under delegated authority (PD-073) on 2026-11-19:
 
 Decided on 2026-11-19 and now counted: RE-F-41 (M1, PD-058, specified by RLE-021); PE-F-58 (M2, PD-059, spec gap); X-F-28 (M1 and M2, PD-060, spec gap, counted in M1). The same session moved PE-F-39 (agent-chosen steps) from M3 to later as a design preview (PD-028). Net change: M1 from 52 to 54, M2 from 60 to 61, M3 from 31 to 30, later from 9 to 10; total from 173 to 176. None of the three foundation features is a cut candidate.
 
+### First release 0.1.0 (reviewed 20 Nov, shipped by 22 Nov 2026)
+
+The first release ships part of M1, and a first BPMN and DMN subset, early ([PD-082](decisions.md#pd-082-first-release-reviewed-by-fri-20-nov-shipped-by-sun-22-nov-2026), [PD-084](decisions.md#pd-084-first-bpmn-and-dmn-subset-in-the-first-release)). Features keep their milestone in the tables above: a feature delivered in part keeps its milestone for the rest, and the milestone counts do not change. The label is `0.1.0` ([PD-083](decisions.md#pd-083-version-label-of-the-first-release)); M1 ships as `0.2.0`, M2 as `0.3.0` and M3 as `1.0.0` ([PD-087](decisions.md#pd-087-release-labels-after-010)).
+
+| Group | Count | Features |
+|---|---|---|
+| Committed, whole | 12 | RE-F-06, RE-F-11, RE-F-14, RE-F-38, X-F-01, X-F-02, X-F-03, X-F-06 (rules), X-F-09, X-F-12, X-F-13, X-F-22 |
+| Committed, in part | 5 | RE-F-01 (`first` only), RE-F-20 (lifecycle endpoints and Java API), RE-F-25 (YAML import only), CK-F-01 (embedded only), X-F-14 (Docker Compose example, without the Cockpit 0.1 journey) |
+| BPMN and DMN subset, if it passes the checklist | 10 | RE-F-30 (DMN 1.5 table import and export, FEEL subset), RE-F-04 (time limit on regular expressions), PE-F-41 (BPMN 2.0 XML subset import), PE-F-01, PE-F-02, PE-F-04, PE-F-07, PE-F-08 (local only), PE-F-09, CK-F-43 |
+| **Total** | **27** | 17 committed and 10 conditional, out of 190 |
+
+The full BPMN 2.0 and DMN target for 22 Nov 2026 ([PD-085](decisions.md#pd-085-target-full-bpmn-20-and-dmn-by-sun-22-nov-2026)) is measured by conformance pass rates; standards-track features move into a release only when their suites pass, so the 1.1 to 1.3 columns above are unchanged.
+
 Cut candidates: 16 features (0 in M1, 6 in M2, 10 in M3).
 
 | Milestone | Checkpoint | Cut, in this order | Decision |
