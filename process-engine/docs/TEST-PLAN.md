@@ -5,7 +5,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 ## Strategy
 | Layer | Tool | Scope | Gate |
 |---|---|---|---|
-| Unit and property | JUnit 5, AssertJ, jqwik | Lifecycle guards, graph diff, RFC 8785 canonicaliser, calendar arithmetic, BPMN reader | Every pull request |
+| Unit and property | JUnit 5, AssertJ, the project's seeded generator (PD-090) | Lifecycle guards, graph diff, RFC 8785 canonicaliser, calendar arithmetic, BPMN reader | Every pull request |
 | Storage contract | Shared suite | In-memory and PostgreSQL adapters | Every pull request |
 | Integration and fault | Testcontainers, Toxiproxy | Two replicas, paused claimants, 2-connection pool, failover, rollup, partitions | Every pull request (PostgreSQL 16), nightly (full matrix) |
 | Query plans | `EXPLAIN (FORMAT JSON)` on a seeded database (1 million instances, 20 million history rows) | Every registered list query (`TR-PERF-07`) | Every pull request touching `process-engine-postgres` |
@@ -61,6 +61,9 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-043 | `PRE_043_v1_definition_round_trips_through_bpmn_model` | Unit over every example definition, RFC 8785 vectors | M2 | `TR-STD-28`, `TR-STD-03`, `TR-DEF-04` | Planned |
 | PRE-044 | `PRE_044_joins_and_compensation_keyed_by_scope_token` | Testcontainers integration, SQL capture of `pre_token` and `pre_compensation_stack` | M2 | `TR-STD-29`, `TR-ASY-03`, `TR-COMP-01` | Planned |
 | PRE-045 | `PRE_045_engine_rest_bodies_ignore_host_json_settings` | WebMvc in the Spring Boot 4.x and 3.5 legs, dependency-tree check | M2 | `TR-EMB-07`, `TR-API-06` | Planned |
+| PRE-046 | `PRE_046_decision_step_uses_the_instance_tenant_and_the_engine_identity` | Service with both engines, no-principal harness, Testcontainers two tenants | M2 | `TR-TEN-01`, `TR-IDEM-04` | Planned |
+| PRE-047 | `PRE_047_decision_port_refuses_a_request_tenant_other_than_the_instance_tenant` | Service, security log capture | M2 | `TR-TEN-01` | Planned |
+| PRE-048 | `PRE_048_kernel_runs_only_the_approved_source` | Testcontainers with a tampered row, event and audit capture | M2 | `TR-DEF-04`, `TR-STD-01` | Planned |
 
 ## Known gaps
 | Gap | Plan |
