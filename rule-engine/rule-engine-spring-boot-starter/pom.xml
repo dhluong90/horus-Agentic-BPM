@@ -68,6 +68,15 @@
         <directory>src/main/resources-filtered</directory>
         <filtering>true</filtering>
       </resource>
+      <!-- Repeated from the parent, which this list replaces (TR-LIC-02). -->
+      <resource>
+        <directory>${bpm.root}</directory>
+        <targetPath>META-INF</targetPath>
+        <includes>
+          <include>LICENSE</include>
+          <include>COMMERCIAL-LICENSE.md</include>
+        </includes>
+      </resource>
     </resources>
     <plugins>
       <plugin>
