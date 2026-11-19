@@ -39,9 +39,9 @@ public record RuleEngineProperties(
     /**
      * How rule changes may be made on this host (PD-075, PD-094).
      *
-     * @param cockpitDrafts whether the cockpit may create and edit drafts. Reported to clients as the rules
-     *     setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta} when set; unset reports nothing,
-     *     and the cockpit of 0.1.0 then offers no editing (PD-094). Import from a file is not affected
+     * @param cockpitDrafts whether the cockpit may create and edit drafts; default false (PD-094). Published to
+     *     clients as the rules setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta}. Import from a
+     *     file is not affected
      */
     public record Authoring(Boolean cockpitDrafts) {
     }

@@ -5,3 +5,7 @@ horus:
   bpm:
     tenancy:
       dev-tenant: bank-a
+    # Draft editing in the cockpit is off by default in 0.1.0 (PD-094); the demo turns it on.
+    rules:
+      authoring:
+        cockpit-drafts: true

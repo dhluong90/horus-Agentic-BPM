@@ -36,8 +36,9 @@ class RuleEngineModuleDescriptorTest {
     }
 
     @Test
-    void PD_094_cockpit_drafts_setting_is_reported_only_when_the_host_sets_it() {
-        runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings()).isEmpty());
+    void PD_094_cockpit_drafts_setting_is_published_false_by_default_and_true_when_the_host_sets_it() {
+        runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", false)));
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=true")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
                         .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", true)));

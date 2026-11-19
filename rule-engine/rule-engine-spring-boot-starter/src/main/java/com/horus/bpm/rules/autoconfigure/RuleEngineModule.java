@@ -36,11 +36,12 @@ final class RuleEngineModule {
      * The descriptor for this host.
      *
      * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
-     * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}, or null when the host leaves it unset
+     * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}; null (unset) is published as false
      * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
      */
     static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts) {
-        Map<String, Object> settings = cockpitDrafts == null ? Map.of() : Map.of(COCKPIT_DRAFTS, cockpitDrafts);
+        // Always published, false unless the host turns it on (PD-094), so clients never guess.
+        Map<String, Object> settings = Map.of(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
         return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);
     }
 

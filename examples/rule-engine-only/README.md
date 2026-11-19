@@ -339,7 +339,7 @@ The sign-in page belongs to the host, not to the cockpit library. This example s
 
 ### Edit rules in the cockpit
 
-Draft editing in the cockpit is off by default in 0.1.0 (PD-094); this example turns it on with `horus.bpm.rules.authoring.cockpit-drafts: true` in `application.yml`. The cockpit lists rule sets, shows a version as a decision table, edits a draft, sends it for approval and lets a second person approve or reject it. "Try it" runs sample inputs; it needs `rules:evaluate`, which the demo roles do not hold, so add it on the command line for this walkthrough:
+Draft editing in the cockpit is off by default in 0.1.0 (PD-094); this example turns it on with `horus.bpm.rules.authoring.cockpit-drafts: true` in `application-dev.yml`, so the `dev` profile shows editing. The cockpit lists rule sets, shows a version as a decision table, edits a draft, sends it for approval and lets a second person approve or reject it. "Try it" runs sample inputs; it needs `rules:evaluate`, which the demo roles do not hold, so add it on the command line for this walkthrough:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
