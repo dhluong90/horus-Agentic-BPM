@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: rule-and-process
+  datasource:
+    # Credentials come from the environment only; see README.md.
+    url: ${HORUS_DB_URL:jdbc:postgresql://localhost:5432/horus}
+    username: ${HORUS_DB_USERNAME:horus}
+    password: ${HORUS_DB_PASSWORD:}
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-components: when-authorized
+
+# The configuration a host adds for the two engines.
+horus:
+  bpm:
+    host-id: rule-and-process
+    rules:
+      security:
+        role-permissions:
+          ROLE_PRICING_AUTHOR: [rules:read, rules:author]
+          ROLE_PRICING_APPROVER: [rules:read, rules:approve]
+          # Starting a process and completing a task run its businessRuleTask steps as the caller.
+          ROLE_TELLER: [rules:evaluate]
+          ROLE_CARD_OFFICER: [rules:evaluate]
+    processes:
+      definitions:
+        # Imported at start-up for each start-up tenant, through the normal import path.
+        locations:
+          - classpath:processes/card-fee-review.bpmn
+      security:
+        role-permissions:
+          ROLE_PROCESS_DEPLOYER: [processes:deploy, processes:read]
+          ROLE_TELLER: [processes:start, processes:read]
+          ROLE_CARD_OFFICER: [processes:read, processes:task:work]

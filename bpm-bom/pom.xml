@@ -80,6 +80,21 @@
         <artifactId>process-engine-test</artifactId>
         <version>${project.version}</version>
       </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
+        <artifactId>process-engine-postgres</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
+        <artifactId>process-engine-rest</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
+        <artifactId>process-engine-spring-boot-starter</artifactId>
+        <version>${project.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 </project>

@@ -1,0 +1,514 @@
+package io.github.dhluong90.bpm.process.bpmn.subset;
+
+import io.github.dhluong90.bpm.process.api.BpmnUnsafeXmlException;
+import io.github.dhluong90.bpm.process.api.BpmnUnsupportedElementException;
+import io.github.dhluong90.bpm.process.api.DefinitionProblem;
+import io.github.dhluong90.bpm.process.api.DefinitionTooLargeException;
+import io.github.dhluong90.bpm.process.api.ValidationFailedException;
+import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
+import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ElementInfo;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Expression;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ExtensionBag;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.GatewayDirection;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ProcessType;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
+import io.github.dhluong90.bpm.process.internal.model.foreign.ForeignFragment;
+import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.HorusExtension;
+import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
+import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
+import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
+import java.io.ByteArrayInputStream;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
+
+/**
+ * Reads the executable BPMN subset of the first release into the semantic model: none {@code startEvent} and
+ * {@code endEvent}, {@code serviceTask} ({@code horus:handler}), {@code businessRuleTask} ({@code horus:ruleSet}),
+ * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} with {@code default}, and
+ * {@code sequenceFlow} with an optional {@code conditionExpression} in {@code urn:horus-bpm:expr:v1}. Inputs are
+ * {@code horus:input} elements and the result variable is {@code horus:resultVariable}.
+ *
+ * <p>Every other BPMN element is listed with its id, line and the stage that adds it, in one
+ * {@code BPMN_UNSUPPORTED_ELEMENT}. BPMNDI is skipped (layout is not behaviour). Foreign extensions are skipped and
+ * never executed.
+ *
+ * <p>Safety: DTD support and external entities are off; any {@code DOCTYPE} or entity is {@code BPMN_UNSAFE_XML}
+ * and nothing is resolved; size, depth and element count are bounded while reading.
+ *
+ * <p>Owned by the walking skeleton. Replaced by {@code BpmnXmlReader} when the BPMN XML stream lands; the subset
+ * tests stay and run against that reader.
+ */
+public final class SubsetBpmnReader {
+
+    private static final String BPMN = BpmnNamespaces.BPMN;
+    private static final String HORUS = BpmnNamespaces.HORUS;
+    private static final Pattern KEY = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
+    private static final Pattern ASSIGNEE = Pattern.compile("^(user|role|group):[A-Za-z0-9_.@-]{1,100}$");
+    private static final Set<String> IGNORED_CHILDREN = Set.of("incoming", "outgoing", "documentation");
+    private static final Map<String, String> LATER = Map.ofEntries(
+            Map.entry("parallelGateway", "the next sprint"),
+            Map.entry("intermediateCatchEvent", "the next sprint (timer catch)"),
+            Map.entry("callActivity", "the next sprint"),
+            Map.entry("transaction", "the next sprint (saga)"),
+            Map.entry("intermediateThrowEvent", "the next sprint (compensate throw)"),
+            Map.entry("boundaryEvent", "S1"),
+            Map.entry("subProcess", "S1"),
+            Map.entry("inclusiveGateway", "S1"),
+            Map.entry("scriptTask", "S1"),
+            Map.entry("task", "S1"),
+            Map.entry("manualTask", "S1"),
+            Map.entry("dataObject", "S1"),
+            Map.entry("dataObjectReference", "S1"),
+            Map.entry("dataStoreReference", "S1"),
+            Map.entry("laneSet", "S1 (display)"),
+            Map.entry("sendTask", "S2"),
+            Map.entry("receiveTask", "S2"),
+            Map.entry("eventBasedGateway", "S2"),
+            Map.entry("complexGateway", "S3"),
+            Map.entry("adHocSubProcess", "S3"));
+
+    private final Limits limits;
+
+    /** @param limits size, depth and element limits */
+    public SubsetBpmnReader(Limits limits) {
+        this.limits = limits;
+    }
+
+    /**
+     * @param source the XML bytes
+     * @return the executable process of the document
+     */
+    public Process read(byte[] source) {
+        if (source.length > limits.maxBytes()) {
+            throw new DefinitionTooLargeException("The document has " + source.length + " bytes; at most "
+                    + limits.maxBytes() + " are accepted (horus.bpm.processes.definitions.max-bytes)");
+        }
+        XMLInputFactory factory = XMLInputFactory.newFactory();
+        factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
+        factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
+        factory.setProperty(XMLInputFactory.IS_REPLACING_ENTITY_REFERENCES, false);
+        factory.setProperty(XMLInputFactory.IS_NAMESPACE_AWARE, true);
+        try {
+            XMLStreamReader xml = factory.createXMLStreamReader(new ByteArrayInputStream(source));
+            try {
+                return new Pass(xml).document();
+            } finally {
+                xml.close();
+            }
+        } catch (XMLStreamException e) {
+            String message = e.getMessage() == null ? "" : e.getMessage();
+            if (message.contains("DOCTYPE") || message.contains("DTD") || message.contains("ntity")) {
+                throw new BpmnUnsafeXmlException("DOCTYPE and entity declarations are not accepted");
+            }
+            throw new ValidationFailedException(List.of(new DefinitionProblem("XML_MALFORMED",
+                    "The document is not well-formed XML", null, null,
+                    e.getLocation() == null ? 0 : e.getLocation().getLineNumber())));
+        }
+    }
+
+    private final class Pass {
+
+        private final XMLStreamReader xml;
+        private final List<DefinitionProblem> unsupported = new ArrayList<>();
+        private final List<DefinitionProblem> invalid = new ArrayList<>();
+        private final Set<String> ids = new HashSet<>();
+        private int depth;
+        private int elements;
+
+        Pass(XMLStreamReader xml) {
+            this.xml = xml;
+        }
+
+        Process document() throws XMLStreamException {
+            nextStart();
+            if (!BPMN.equals(xml.getNamespaceURI()) || !"definitions".equals(xml.getLocalName())) {
+                throw new ValidationFailedException(List.of(new DefinitionProblem("NOT_BPMN",
+                        "The root element must be definitions in namespace " + BPMN, xml.getLocalName(), null, line())));
+            }
+            Process process = null;
+            while (nextChild()) {
+                String ns = xml.getNamespaceURI();
+                String local = xml.getLocalName();
+                if (BPMN.equals(ns) && "process".equals(local)) {
+                    if (process != null) {
+                        unsupported(local, attr("id"), "S1 (more than one process, collaboration)");
+                        skip();
+                    } else {
+                        process = process();
+                    }
+                } else if (BPMN.equals(ns)) {
+                    unsupported(local, attr("id"), "S1 (collaboration and shared root elements)");
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            if (!unsupported.isEmpty()) {
+                throw new BpmnUnsupportedElementException(unsupported);
+            }
+            if (process == null) {
+                invalid.add(DefinitionProblem.of("NO_PROCESS", "The document has no process", null));
+            }
+            if (!invalid.isEmpty()) {
+                throw new ValidationFailedException(invalid);
+            }
+            return process;
+        }
+
+        private Process process() throws XMLStreamException {
+            String key = attr("id");
+            String name = attr("name");
+            int line = line();
+            if (key == null || !KEY.matcher(key).matches()) {
+                invalid.add(new DefinitionProblem("KEY_INVALID", "The process id is the definition key and must be"
+                        + " kebab-case, for example card-fee-review", "process", key, line));
+            }
+            if (!"true".equals(attr("isExecutable"))) {
+                invalid.add(new DefinitionProblem("NOT_EXECUTABLE", "Set isExecutable=\"true\" on the process",
+                        "process", key, line));
+            }
+            List<FlowElement> elements = new ArrayList<>();
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (!BPMN.equals(xml.getNamespaceURI())) {
+                    skip();
+                    continue;
+                }
+                switch (local) {
+                    case "startEvent" -> elements.add(event(true));
+                    case "endEvent" -> elements.add(event(false));
+                    case "serviceTask" -> elements.add(serviceTask());
+                    case "businessRuleTask" -> elements.add(businessRuleTask());
+                    case "userTask" -> elements.add(userTask());
+                    case "exclusiveGateway" -> {
+                        String id = id();
+                        String gwName = attr("name");
+                        String defaultFlow = attr("default");
+                        Node children = children(local, id, false);
+                        elements.add(new ExclusiveGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
+                                defaultFlow, children.info()));
+                    }
+                    case "sequenceFlow" -> elements.add(sequenceFlow());
+                    case "documentation", "extensionElements" -> skip();
+                    default -> {
+                        unsupported(local, attr("id"), LATER.getOrDefault(local, "a later stage"));
+                        skip();
+                    }
+                }
+            }
+            return withRefs(new Process(key, name, ProcessType.NONE, true, false, elements, List.of(), List.of(), null));
+        }
+
+        private FlowElement event(boolean start) throws XMLStreamException {
+            String element = start ? "startEvent" : "endEvent";
+            String id = id();
+            String name = attr("name");
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
+                    unsupported(element + " with " + local, id, "S1 or S2 (event definitions)");
+                    skip();
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
+                        && !"extensionElements".equals(local)) {
+                    unsupported(element + " child " + local, id, "a later stage");
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            return start
+                    ? new StartEvent(id, name, List.of(), List.of(), List.of(), List.of(), null, false, true, null)
+                    : new EndEvent(id, name, List.of(), List.of(), List.of(), List.of(), null, null);
+        }
+
+        private FlowElement serviceTask() throws XMLStreamException {
+            String id = id();
+            int line = line();
+            String handler = horus("handler");
+            String mode = horus("mode");
+            String type = horus("type");
+            String name = attr("name");
+            String result = horus("resultVariable");
+            if (type != null) {
+                unsupported("serviceTask horus:type=\"" + type + "\"", id, "the next sprint (agentTask)");
+            }
+            if (mode != null && !"local".equals(mode)) {
+                unsupported("serviceTask horus:mode=\"" + mode + "\"", id, "the next sprint (Async Wait-State)");
+            }
+            if (handler == null) {
+                invalid.add(new DefinitionProblem("HANDLER_MISSING", "A serviceTask needs horus:handler", "serviceTask",
+                        id, line));
+            }
+            List<HorusExtension> ext = new ArrayList<>();
+            ext.add(new HandlerRef(handler, mode, null));
+            if (result != null) {
+                ext.add(new ResultVariable(result));
+            }
+            Node children = children("serviceTask", id, true);
+            ext.addAll(children.horus());
+            return new ServiceTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, null,
+                    info(ext, children.foreign()));
+        }
+
+        private FlowElement businessRuleTask() throws XMLStreamException {
+            String id = id();
+            int line = line();
+            String ruleSet = horus("ruleSet");
+            String name = attr("name");
+            String result = horus("resultVariable");
+            if (ruleSet == null) {
+                invalid.add(new DefinitionProblem("RULE_SET_MISSING", "A businessRuleTask needs horus:ruleSet",
+                        "businessRuleTask", id, line));
+            }
+            List<HorusExtension> ext = new ArrayList<>();
+            ext.add(new DecisionRef(ruleSet));
+            if (result != null) {
+                ext.add(new ResultVariable(result));
+            }
+            Node children = children("businessRuleTask", id, true);
+            ext.addAll(children.horus());
+            return new BusinessRuleTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null,
+                    info(ext, children.foreign()));
+        }
+
+        private FlowElement userTask() throws XMLStreamException {
+            String id = id();
+            int line = line();
+            String assignee = horus("assignee");
+            boolean fourEyes = "true".equals(horus("fourEyes"));
+            String name = attr("name");
+            String result = horus("resultVariable");
+            if (assignee == null || !ASSIGNEE.matcher(assignee).matches()) {
+                invalid.add(new DefinitionProblem("ASSIGNEE_INVALID",
+                        "A userTask needs horus:assignee as user:<id>, role:<role> or group:<group>", "userTask", id, line));
+            }
+            List<HorusExtension> ext = new ArrayList<>();
+            ext.add(new TaskAssignment(assignee, fourEyes));
+            if (result != null) {
+                ext.add(new ResultVariable(result));
+            }
+            Node children = children("userTask", id, false);
+            return new UserTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null,
+                    info(ext, children.foreign()));
+        }
+
+        private FlowElement sequenceFlow() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            String source = attr("sourceRef");
+            String target = attr("targetRef");
+            Expression condition = null;
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (BPMN.equals(xml.getNamespaceURI()) && "conditionExpression".equals(local)) {
+                    String language = attr("language");
+                    int line = line();
+                    String text = xml.getElementText();
+                    depth--;
+                    if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
+                        unsupported.add(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language "
+                                + language + " is not supported; use " + BpmnNamespaces.EXPR_V1 + " (FEEL follows)",
+                                "conditionExpression", id, line));
+                    }
+                    condition = new Expression(text.strip(), language == null ? BpmnNamespaces.EXPR_V1 : language, null);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !"documentation".equals(local)
+                        && !"extensionElements".equals(local)) {
+                    unsupported("sequenceFlow child " + local, id, "a later stage");
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            return new SequenceFlow(id, name, source, target, condition, null, null);
+        }
+
+        private record Node(List<HorusExtension> horus, List<ForeignFragment> foreign) {
+            ElementInfo info() {
+                return SubsetBpmnReader.info(horus, foreign);
+            }
+        }
+
+        private Node children(String element, String id, boolean inputs) throws XMLStreamException {
+            List<HorusExtension> horus = new ArrayList<>();
+            List<ForeignFragment> foreign = new ArrayList<>();
+            while (nextChild()) {
+                String ns = xml.getNamespaceURI();
+                String local = xml.getLocalName();
+                if (BPMN.equals(ns) && IGNORED_CHILDREN.contains(local)) {
+                    skip();
+                } else if (BPMN.equals(ns) && "extensionElements".equals(local)) {
+                    extensions(element, id, inputs, horus, foreign);
+                } else if (BPMN.equals(ns)) {
+                    unsupported(element + " child " + local, id, LATER.getOrDefault(local, "S1"));
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            return new Node(horus, foreign);
+        }
+
+        private void extensions(String element, String id, boolean inputs, List<HorusExtension> horus,
+                List<ForeignFragment> foreign) throws XMLStreamException {
+            Set<String> names = new HashSet<>();
+            while (nextChild()) {
+                String ns = xml.getNamespaceURI();
+                if (HORUS.equals(ns) && "input".equals(xml.getLocalName()) && inputs) {
+                    String inputName = attr("name");
+                    String value = xml.getAttributeValue(null, "value");
+                    if (inputName == null || value == null || !inputName.matches("^[A-Za-z_][A-Za-z0-9_]{0,63}$")) {
+                        invalid.add(new DefinitionProblem("INPUT_INVALID",
+                                "horus:input needs a name (identifier) and a value", element, id, line()));
+                    } else if (!names.add(inputName)) {
+                        invalid.add(new DefinitionProblem("INPUT_DUPLICATE", "Duplicate horus:input " + inputName,
+                                element, id, line()));
+                    } else {
+                        horus.add(new InputMapping(inputName, value));
+                    }
+                    skip();
+                } else if (HORUS.equals(ns)) {
+                    unsupported("horus:" + xml.getLocalName(), id, "the next sprint");
+                    skip();
+                } else {
+                    // Vendor extensions stay opaque and are never executed; the stored source keeps them.
+                    foreign.add(new ForeignFragment(ns == null ? "" : ns, xml.getLocalName(), ""));
+                    skip();
+                }
+            }
+        }
+
+        // ---- cursor helpers ---------------------------------------------------------------------------------
+
+        private void nextStart() throws XMLStreamException {
+            while (xml.hasNext()) {
+                int event = xml.next();
+                guard(event);
+                if (event == XMLStreamConstants.START_ELEMENT) {
+                    enter();
+                    return;
+                }
+            }
+            throw new ValidationFailedException(List.of(DefinitionProblem.of("XML_EMPTY", "The document is empty", null)));
+        }
+
+        private boolean nextChild() throws XMLStreamException {
+            while (xml.hasNext()) {
+                int event = xml.next();
+                guard(event);
+                if (event == XMLStreamConstants.START_ELEMENT) {
+                    enter();
+                    return true;
+                }
+                if (event == XMLStreamConstants.END_ELEMENT) {
+                    depth--;
+                    return false;
+                }
+            }
+            return false;
+        }
+
+        private void skip() throws XMLStreamException {
+            while (nextChild()) {
+                skip();
+            }
+        }
+
+        private void enter() {
+            depth++;
+            elements++;
+            if (depth > limits.maxDepth()) {
+                throw new BpmnUnsafeXmlException("Element nesting deeper than " + limits.maxDepth() + " at line " + line());
+            }
+            if (elements > limits.maxElements()) {
+                throw new BpmnUnsafeXmlException("More than " + limits.maxElements() + " elements");
+            }
+        }
+
+        private void guard(int event) {
+            if (event == XMLStreamConstants.DTD || event == XMLStreamConstants.ENTITY_REFERENCE
+                    || event == XMLStreamConstants.ENTITY_DECLARATION) {
+                throw new BpmnUnsafeXmlException("DOCTYPE and entity declarations are not accepted (line " + line() + ")");
+            }
+        }
+
+        private String id() {
+            String id = attr("id");
+            if (id != null && !ids.add(id)) {
+                invalid.add(new DefinitionProblem("DUPLICATE_ID", "Duplicate id", xml.getLocalName(), id, line()));
+            }
+            return id == null ? "_missing_" + elements : id;
+        }
+
+        private String attr(String name) {
+            String value = xml.getAttributeValue(null, name);
+            return value == null || value.isBlank() ? null : value.strip();
+        }
+
+        private String horus(String name) {
+            String value = xml.getAttributeValue(HORUS, name);
+            return value == null || value.isBlank() ? null : value.strip();
+        }
+
+        private int line() {
+            return xml.getLocation() == null ? 0 : xml.getLocation().getLineNumber();
+        }
+
+        private void unsupported(String element, String id, String stage) {
+            unsupported.add(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
+                    "is not supported in this release; planned for " + stage, element, id, line()));
+        }
+    }
+
+    private static ElementInfo info(List<HorusExtension> horus, List<ForeignFragment> foreign) {
+        return new ElementInfo(List.of(), new ExtensionBag(horus, foreign), Map.of());
+    }
+
+    /** Fills {@code incoming} and {@code outgoing} of every node from the sequence flows. */
+    private static Process withRefs(Process p) {
+        List<SequenceFlow> flows = p.flowElements().stream().filter(SequenceFlow.class::isInstance)
+                .map(SequenceFlow.class::cast).toList();
+        List<FlowElement> out = new ArrayList<>();
+        for (FlowElement e : p.flowElements()) {
+            List<String> in = flows.stream().filter(f -> f.targetRef() != null && f.targetRef().equals(e.id()))
+                    .map(SequenceFlow::id).toList();
+            List<String> o = flows.stream().filter(f -> f.sourceRef() != null && f.sourceRef().equals(e.id()))
+                    .map(SequenceFlow::id).toList();
+            out.add(switch (e) {
+                case StartEvent s -> new StartEvent(s.id(), s.name(), in, o, s.eventDefinitions(), s.eventDefinitionRefs(),
+                        s.data(), s.parallelMultiple(), s.isInterrupting(), s.info());
+                case EndEvent s -> new EndEvent(s.id(), s.name(), in, o, s.eventDefinitions(), s.eventDefinitionRefs(),
+                        s.data(), s.info());
+                case ServiceTask t -> new ServiceTask(t.id(), t.name(), in, o, t.activity(), t.implementation(),
+                        t.operationRef(), t.info());
+                case BusinessRuleTask t -> new BusinessRuleTask(t.id(), t.name(), in, o, t.activity(), t.implementation(),
+                        t.info());
+                case UserTask t -> new UserTask(t.id(), t.name(), in, o, t.activity(), t.implementation(), t.info());
+                case ExclusiveGateway g -> new ExclusiveGateway(g.id(), g.name(), in, o, g.gatewayDirection(),
+                        g.defaultFlow(), g.info());
+                default -> e;
+            });
+        }
+        return new Process(p.id(), p.name(), p.processType(), p.isExecutable(), p.isClosed(), out, p.artifacts(),
+                p.laneSets(), p.info());
+    }
+}

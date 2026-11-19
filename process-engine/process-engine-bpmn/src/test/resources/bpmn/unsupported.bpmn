@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="d" targetNamespace="urn:t">
+  <bpmn:process id="kyc-onboarding" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:userTask id="review"/>
+    <bpmn:boundaryEvent id="be-timeout" attachedToRef="review"/>
+    <bpmn:inclusiveGateway id="ig-1"/>
+    <bpmn:endEvent id="end"><bpmn:terminateEventDefinition/></bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

@@ -1,0 +1,11 @@
+# Local development only. The demo users sign in with the host's form or HTTP Basic and carry no tenant
+# attribute, so the engines serve them for this fixed tenant. Refused outside the dev profile.
+horus:
+  bpm:
+    tenancy:
+      dev-tenant: bank-a
+    processes:
+      definitions:
+        # Seed the sample process for the demo tenant and activate it without approval (dev profile only).
+        startup-tenants: [bank-a]
+        auto-approve: true
