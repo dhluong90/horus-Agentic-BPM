@@ -52,6 +52,7 @@ public final class Evaluator {
         return switch (expr) {
             case Expr.Literal literal -> literal.value();
             case Expr.Var var -> slots[var.slot()];
+            case Expr.Clock clock -> clockValue(clock, slots);
             case Expr.Unary unary -> unary(unary.op(), evaluate(unary.operand(), slots));
             case Expr.Binary binary -> binary(binary, slots);
             case Expr.InList inList -> {
@@ -69,6 +70,17 @@ public final class Evaluator {
             }
             case Expr.IsNull isNull -> (evaluate(isNull.target(), slots) == null) != isNull.negated();
         };
+    }
+
+    /**
+     * Reads {@code today()} or {@code now()} from its frame slot. A tree parsed without a clock, or a frame bound
+     * without one, fails deterministically instead of reading the system time or another slot.
+     */
+    private static Object clockValue(Expr.Clock clock, Object[] slots) {
+        if (clock.slot() < 0 || clock.slot() >= slots.length || slots[clock.slot()] == null) {
+            throw new EvaluationException(clock.function().text() + "() needs an evaluation clock");
+        }
+        return slots[clock.slot()];
     }
 
     /**
