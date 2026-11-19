@@ -800,11 +800,11 @@ components:
           description: The rejection or retirement reason (`SUPERSEDED` when superseded), or the approval comment
         supersededBy:
           type: [integer, 'null']
-          description: On a `RETIRED` entry of a superseded version, the version that took over; otherwise null
+          description: Present on a `RETIRED` entry only; the version that took over when superseded, null when retired by hand
         approvalMode:
           type: [string, 'null']
           enum: [single, four-eyes, system, null]
-          description: On a `RETIRED` entry, how the retirement was approved (`system` when superseded); otherwise null
+          description: Present on a `RETIRED` entry only; how the retirement was approved (`system` when superseded)
         lockVersion: { type: integer }
         occurredAt: { type: string, format: date-time }
     VersionHistory:
