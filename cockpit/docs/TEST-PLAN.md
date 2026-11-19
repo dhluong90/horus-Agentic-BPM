@@ -14,7 +14,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 ## Specification coverage
 | Spec id | Test | Level | Milestone | Traces to | Status |
 |---|---|---|---|---|---|
-| CKP-001 | `CKP_001_cockpit_boots_embedded_and_standalone_from_registry` | Playwright, embedded and standalone | M1 | `TR-UI-01`, `ADR-0005`, `ADR-0014` | Planned |
+| CKP-001 | `CKP_001_*` (case A: `cockpit/web/e2e/shell.spec.ts`, `cockpit/web/src/shell/CockpitShell.test.tsx`, `CockpitStarterTest`, `CockpitEmbeddedIT`) | Playwright, Vitest, MockMvc, Testcontainers | M1 | `TR-UI-01`, `ADR-0005`, `ADR-0014` | Case A (embedded) automated; case B (standalone) with standalone sign-in; the rule set list step with the rule set list |
 | CKP-002 | `CKP_002_version_diff_highlights_row_changes` | Vitest, Testing Library | M1 | `TR-UI-02` | Planned |
 | CKP-003 | `CKP_003_maker_checker_ui_blocks_requester_self_approval` | Playwright | M1 | `TR-SEC-04`, `TR-UI-02` | Planned |
 | CKP-004 | `CKP_004_simulation_displays_outcome_changes_safely` | Playwright | M1 | `TR-UI-02` | Planned |

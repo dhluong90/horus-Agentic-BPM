@@ -24,13 +24,48 @@ Add the starter next to the engine starter:
 </dependency>
 ```
 
-Open `http://localhost:8080/bpm/cockpit`. Expected: the Rule sets screen lists `loan-eligibility` (from [[Getting Started]]) with its effective version.
+The starter serves the cockpit at `/bpm/cockpit` behind your service's own sign-in. It adds no authentication of its own: protect the path with your Spring Security configuration as you do any other page. As a second line, the starter answers `401` with no file to a request that reaches it without a signed-in user.
+
+Open `http://localhost:8080/bpm/cockpit` and sign in. Expected in Cockpit 0.1 (first build): the header shows your service, your tenant and your name; the page lists the engines the service runs and what you may do. The Rule sets screen follows in the next build.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant H as Your service
+    B->>H: GET /bpm/cockpit/
+    H-->>B: 302 to your sign-in page (no session)
+    B->>H: sign in, then GET /bpm/cockpit/
+    H-->>B: index.html and assets, with Content-Security-Policy script-src 'self'
+    B->>H: GET /bpm/cockpit/cockpit-hosts.json
+    H-->>B: one host, baseUrl "", auth mode host-session
+    B->>H: GET /api/bpm/meta and /api/bpm/me with the session cookie
+    H-->>B: engines and versions; user, tenant and permissions
+    Note over B: Header shows service, tenant and user. A problem answer shows its code and correlationId instead.
+```
 
 | Property | Default | Meaning |
 |---|---|---|
-| `horus.bpm.cockpit.path` | `/bpm/cockpit` | Path under which the host serves the assets |
+| `horus.bpm.cockpit.enabled` | `true` | `false` stops serving the cockpit |
+| `horus.bpm.cockpit.path` | `/bpm/cockpit` | Path under which the host serves the assets; starts with `/`, no trailing slash |
+| `horus.bpm.cockpit.auth-mode` | `host-session` | How the cockpit authenticates to this service. `host-session`: your session cookie, same origin. Sign-in through an identity provider arrives with standalone mode |
+| `horus.bpm.cockpit.host-label` | the host id | Name of this service in the cockpit header, up to 80 characters |
+| `horus.bpm.cockpit.environment` | none | Short label next to the service name, for example `UAT` |
+| `horus.bpm.cockpit.default-locale` | `en` | `en` or `vi`; the language until the user picks one with the EN / VI switch |
+| `horus.bpm.host-id` | `self` | Id of this service in the cockpit, kebab-case, up to 40 characters |
 
-Theming is through CSS variables. Labels exist in English and Vietnamese and can be extended (TR-UI-04).
+What the starter sends with every cockpit file:
+
+| Header | Value |
+|---|---|
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `no-referrer` |
+| `Cache-Control` | `no-store` for the page and `cockpit-hosts.json`; `private, max-age=31536000, immutable` for the hashed files under `assets/` |
+
+If the service answers `/api/bpm/me` or `/api/bpm/meta` with an error, the cockpit shows the error `code` and `correlationId` (give the `correlationId` to the service's operators) and does not show a partial header. A `404` there means the service does not serve the host metadata endpoints yet.
+
+Theming is through CSS variables, in a light and a dark theme. Labels exist in English and Vietnamese; one language is shown at a time (TR-UI-04).
 
 An embedded cockpit shows only the service that serves it. To see several services in one cockpit, host it standalone.
 

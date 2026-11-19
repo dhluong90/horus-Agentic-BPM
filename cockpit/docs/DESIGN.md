@@ -118,7 +118,7 @@ Rules:
 - An invalid file shows a configuration error screen naming the JSON Pointer of the first error, and the cockpit calls no host (`CKP-012`).
 - Duplicate `id` or duplicate `baseUrl` is an error. More hosts than the supported envelope (proposed 15, pending PD-046) shows a warning on the host list, not an error.
 - The file is security-relevant: whoever can change it can direct the browser to another origin. It is deployed with the bundle under the same change control, and the web server's `Content-Security-Policy` `connect-src` lists exactly the host origins and the issuer, so a changed file without a changed policy cannot reach a new origin.
-- Embedded mode: the starter generates `{horus.bpm.cockpit.path}/cockpit-hosts.json` with one host (`id` from `horus.bpm.host-id`, default `self`; `baseUrl` empty) and `auth.mode` from `horus.bpm.cockpit.auth-mode` (default `host-session`).
+- Embedded mode: the starter generates `{horus.bpm.cockpit.path}/cockpit-hosts.json` with one host (`id` from `horus.bpm.host-id`, default `self`; `label` from `horus.bpm.cockpit.host-label`, default the id; `environment` from `horus.bpm.cockpit.environment`; `baseUrl` empty), `auth.mode` from `horus.bpm.cockpit.auth-mode` (default `host-session`; `oidc` is refused at start-up until standalone sign-in ships, CK-F-23) and `ui.defaultLocale` from `horus.bpm.cockpit.default-locale`. The starter serves the bundle only to a request with an authenticated user (the host's security redirects first; the starter answers `401` as a second line) and adds the headers of section 13 to every cockpit file. The web application lives in `cockpit/web`; the starter packages its `dist/` as `META-INF/horus-cockpit/`.
 
 ## 5. Sign-in and host sessions
 
