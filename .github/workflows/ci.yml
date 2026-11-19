@@ -21,6 +21,7 @@ env:
   POSTGRES_14_IMAGE: postgres@sha256:e7d9e6aac7fe3232f7661da103aebc0ce38b04105b46af5e9edd5ef6bc343f20 # 14-alpine, 14.25
   POSTGRES_16_IMAGE: postgres@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857 # 16-alpine, 16.16
   POSTGRES_18_IMAGE: postgres@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff # 18-alpine, 18.7
+  POSTGRES_17_IMAGE: postgres:17-alpine # temporary, to show the pin check red (#288)
 
 concurrency:
   group: ci-${{ github.ref }}
