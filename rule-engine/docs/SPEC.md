@@ -482,6 +482,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Rule set `style-check` v1 (`hitPolicy: first`) with inputs `x` (integer), `y` (integer), `country` (string), `at` (datetime) and `amount` (money, USD), and output `rate` (decimal), written twice. Document A uses author style: `x >= 3`, `x between 1 and 5`, `x is not null`, `country != 'VN'`, `country in ['VN','SG']`, `at == datetime('2026-12-01T00:00:00+07:00')`, `amount == 12.5 USD`. Document B uses the normal form: `>= 3`, `between 1 and 5`, `is not null`, `!= 'VN'`, `in ['VN', 'SG']`, `== datetime('2026-11-30T17:00:00Z')`, `== 12.50 USD`. Both have `rate: "0.10"`.
 - **When:** A and B are imported as YAML in two tenants. A is exported as DMN and imported again, then exported and imported once more. Separately, the DMN cells `money(12.5, "USD")`, `money(10000.00, "VND")` and `money(-5, "USD")` go through import, export and import. Then each negative case below is imported as its own version of `style-check`.
+- **Scope in schema v1 (ADR-0026 decision 2):** "one hash per behaviour" covers simple cells (a single comparison, range, list or literal). A compound cell (arithmetic, `and`/`or`, a function call) keeps its written spacing, so two spellings of the same compound cell hash differently in v1; different behaviour still never shares a hash.
 - **Then (same behaviour, one hash):**
   - A and B have the same `canonical_hash` and different `source_hash` values.
   - Every DMN round trip keeps that `canonical_hash`.

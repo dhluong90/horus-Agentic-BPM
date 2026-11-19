@@ -116,6 +116,11 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-092](#pd-092-the-cockpit-opens-on-home-for-every-role) | The cockpit opens on Home for every role | Decided (product manager, delegated, PD-073) |
 | [PD-093](#pd-093-cockpit-menu-for-authors-and-two-changes-to-the-approved-prototype) | Cockpit menu for authors and two changes to the approved prototype | Decided (product manager, delegated, PD-073) |
 | [PD-094](#pd-094-cockpit-draft-editing-is-off-by-default-in-010) | Cockpit draft editing is off by default in 0.1.0 | Decided (product manager, delegated, PD-073) |
+| [PD-096](#pd-096-the-approver-differs-from-everyone-who-made-the-change) | The approver differs from everyone who made the change | Decided (product manager, delegated, PD-073) |
+| [PD-097](#pd-097-process-definitions-follow-the-rule-engine-withdraw-not-self-reject) | Process definitions follow the Rule Engine: withdraw, not self-reject | Decided (product manager, delegated, PD-073) |
+| [PD-098](#pd-098-reference-feel-engine-as-a-test-only-oracle) | Reference FEEL engine as a test-only oracle | Decided (product manager, delegated, PD-073) |
+| [PD-099](#pd-099-inputs-are-not-masked-unless-declared-or-set-by-the-host) | Inputs are not masked unless declared or set by the host | Decided (product manager, delegated, PD-073) |
+| [PD-100](#pd-100-container-images-are-not-on-the-licence-allow-list) | Container images are not on the licence allow-list | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2857,3 +2862,142 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - **Import button:** the cockpit's "Import rule set" action depends on `rules:author` only, not on this setting.
 
 **Follow-ups.** Maintainers (engineering): the cockpit default, the example host setting and the import action. Architect: DESIGN section 4.4. Documentation: the release notes and the wiki Rule Engine Configuration page.
+
+### PD-096 The approver differs from everyone who made the change
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Under four-eyes, must the approver of a process definition differ only from the requester (process SPEC `PRE-019`, ADR-0012), or from every identity that made the version: the importer, every editor of the draft and the requester (open question 11.2 of #47)? |
+| Raised by | Maintainers (engineering), pull request #264 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1, with a host setting whose relaxed value is off by default |
+
+**Context.** In the Rule Engine the approver already differs from the importer and the requester, and only the author may replace a draft. The case of "a second author edits, then approves" therefore cannot arise there. Process definitions will be editable by several people once draft editing and the modeller arrive, so the hole would open there unless the rule names every maker.
+
+**Options considered**
+
+1. The approver differs from every maker of the version: the identity that imported or created it, every identity that edited the draft, and the requester (chosen). Consequence: no one approves a change they shaped, whatever path they used. The engine keeps the set of makers on the version from its history rows, so the check is one lookup. A small team with few approvers may need a second approver more often.
+2. The approver differs only from the requester. Consequence: simplest, as written today. Someone who edited a draft and then let a colleague request publication could approve their own work.
+
+**Configuration (PD-074).** Setting `lifecycle.approver-must-differ-from`, shared by both engines:
+- `makers` (the default): the approver differs from the importer or creator, every editor and the requester.
+- `requester`: the approver differs from the requester only. This relaxes a control, so it is never the default. It is reported in `/api/bpm/meta`, logged at WARN at start-up, and recorded on every approval history row.
+
+The requester can never approve under either value. The refusal is `403 SELF_APPROVAL_FORBIDDEN`, with a detail that names why the caller may not approve.
+
+**Consequences.**
+- **Process Engine:** `PRE-019` changes from "the requester cannot approve" to "no maker of the version can approve", with a case for an editor who did not request. Until draft editing exists, the makers are the importer and the requester. #264 adds the importer to the check, which is a small change.
+- **Rule Engine:** the behaviour is unchanged. Its makers are the importer, the author and the requester, which `RLE-009` already covers. The setting applies to it too, with the same default.
+
+**Follow-ups.** Architect: `PRE-019`, ADR-0012 (the answer to 11.2), both engines' DESIGN configuration tables and the `/meta` setting.
+
+**Narrowed by the architect, 2026-11-20 (pull request #272), accepted.** The setting affects the Process Engine only. The Rule Engine always applies `makers`. Its database constraint (migration V2) refuses approval by the author. In the Rule Engine the value `requester` would let an author approve their own content, which is a guarantee there, not a business choice (PD-074). The Rule Engine reports `makers` in `/api/bpm/meta` and ignores the setting. Maintainers (engineering): #264, including the importer in the check. QA: the editor case once draft editing lands.
+
+### PD-097 Process definitions follow the Rule Engine: withdraw, not self-reject
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | In #47 a requester may reject their own request for a process definition. The Rule Engine refuses that and offers withdraw instead (PD-089, `RLE-025`, `RLE-046`). Should the engines behave the same? |
+| Raised by | Maintainers (engineering), pull request #264 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Align with the Rule Engine (chosen). A requester's reject of their own request is refused with `403 SELF_APPROVAL_FORBIDDEN`, with a detail pointing to withdraw. Withdraw (`processes:author`, the requester only) returns the version to draft, publishes nothing, and writes its own history row and event. Consequence: one governance model across both engines, one approvals screen in the cockpit, and an audit trail that keeps "the author took it back" apart from "an approver refused it".
+2. Keep self-reject for processes. Consequence: no new action, but the two engines answer the same request differently, and a bank's auditor reads a rejection that was really a withdrawal.
+
+**Configuration.** None. Withdraw gives the requester the same outcome as a self-reject, so there is no business choice to configure. Under PD-074, one action has one meaning in both engines.
+
+**Timing.** #264 refuses self-reject now. Process withdraw is a separate issue for 0.3.0, the release in which process definition approval ships to adopters. Until then a requester asks an approver to reject, as in the Rule Engine of 0.1.0.
+
+**Follow-ups.** Architect: process DESIGN 3.2 (the reject guard and the withdraw transition) and a `PRE` statement for withdraw. Maintainers (engineering): #264 (reject guard) and the withdraw issue. Documentation: the wiki Process Engine API page.
+
+### PD-098 Reference FEEL engine as a test-only oracle
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Pull request #252 checks the project's own FEEL semantics against a reference implementation, `org.camunda.feel:feel-engine` 1.22.1, in test scope only (ADR-0019 decision 5, `RLE-021`). May it and its runtime be named on the `TR-LIC-01` allow-list? |
+| Raised by | Architect, pull request #252 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Facts.** `feel-engine` 1.22.1 is Apache 2.0. Its runtime dependencies, from its published POM, are:
+- `scala-library` (Apache 2.0);
+- `fastparse` 3.1.1 and its `sourcecode` and `geny` dependencies (MIT);
+- `jackson-module-scala` and `java-uuid-generator` (Apache 2.0);
+- `slf4j-api` (MIT);
+- the Jackson 2 libraries that `jackson-module-scala` brings in: `jackson-databind` and `jackson-core` (Apache 2.0), test scope only;
+- `com.thoughtworks.paranamer:paranamer` 2.8.3 (BSD-3-Clause), also brought in by `jackson-module-scala`, test scope only.
+
+`jackson-annotations` is not a test-only entry. It is already a compile dependency of `rule-engine-core` through Jackson 3 (`tools.jackson` databind 3.1.7 uses `com.fasterxml.jackson.core:jackson-annotations` 2.21), and the oracle's copy resolves to that same artifact.
+
+The versions are the ones resolved in the build, recorded in the build's allow-list file, so an unannounced version change fails the licence check. Some of them come from the Spring Boot BOM rather than the `feel-engine` POM, for example `slf4j-api` 2.0.20 and `jackson-module-scala` 2.21.7. Corrected on 2026-11-20 from the resolved dependency tree of #252. The enforcer bans every `org.camunda.feel` and `org.scala-lang` artifact outside test scope, and ArchUnit keeps the oracle out of engine code.
+
+**Options considered**
+
+1. Allow it by name, in test scope only (chosen). Consequence: FEEL behaviour is checked against an independent implementation on generated cases, which catches mistakes our own tests share with our own code. Nothing reaches adopters.
+2. Do without an oracle. Consequence: the FEEL semantics rest on our own tests and the TCK cases only.
+
+**Recommendation and decision.** Option 1, on the PD-053 pattern: every licence is permissive, and naming the entries keeps the list reviewable. This concerns third-party test material, not the project's own licence.
+
+**Kill criterion.** If the licence check finds any of these artifacts in a shipped module, or a non-permissive licence appears in their dependency tree on an upgrade, the entry is withdrawn until it is reviewed again.
+
+**Consequences.** `TR-LIC-01` names the oracle and its runtime, in test scope only (applied in this change). The architect notes in #252 that the test classpath now carries a second Jackson major, through `jackson-module-scala`. The Jackson 3 coexistence test (PD-071) covers the engine cores, not this test-only path.
+
+**Follow-ups.** Maintainers (engineering): the allow-list file in the build, and a test that the release bill of materials lists none of these artifacts. Architect: confirm the dependency tree in #252 matches the list.
+
+### PD-099 Inputs are not masked unless declared or set by the host
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Masking (#24, pull request #255) stores an input marked `mask: true` as a keyed fingerprint. Should inputs that are not declared `mask` be masked by default too? |
+| Raised by | Architect, pull request #255 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Not masked by default; the host or a tenant can mask every undeclared input with `decision-log.mask-default: true` (chosen). An input declared `mask: true` is always masked, and `mask: false` always opts out. Consequence: auditors and support staff read amounts, tiers and dates in plain form, which the explanations and replays need. A bank that treats every input as sensitive turns one setting on per host or tenant, without a fork.
+2. Mask every input by default. Consequence: the safest default for personal data, but most decision inputs (amounts, product codes, tiers) are not personal data. Explanations, decision search by value and the cockpit's decision page would show fingerprints everywhere, and authors would mark most inputs `mask: false` to undo it.
+
+**Recommendation and decision.** Option 1, as the architect recommends. Masking a declared field is a guarantee and is never a setting: a rule set that masks an input in a tenant without a key fails closed (`MASKING_KEY_MISSING`), and start-up stops (`RLE-035`). What to treat as sensitive is a business choice per bank, so it is a setting (PD-074).
+
+**Guidance.** The authoring guide tells authors to mark every input that holds personal data, such as national ids, names, account numbers and contact details, with `mask: true`. The example rule sets do the same. The `/api/bpm/meta` settings show the masking default in force for the tenant.
+
+**Residual risk (security review 5979268169).** The default complies with PD-074. The decision log is append-only, though, so one input holding personal data that an author forgot to mark leaves data that can never be erased. That conflicts with erasure duties under GDPR and Vietnam's Decree 13. A kill criterion that waits for a pilot review acts too late.
+
+**Required mitigations, before the first pilot on real data or 0.2.0, whichever comes first.**
+1. **Publish-time warning.** An undeclared input whose name matches a configurable list of personal-data patterns (by default, names such as national id, passport, phone, email, address, date of birth and account number, in English and Vietnamese) gets a warning on the import and on the publication request. The approver sees the warning in the change.
+2. **Strict mode.** With the setting `decision-log.require-explicit-mask: true`, per host and tenant, every input must declare `mask: true` or `mask: false`. An undeclared input is a publish error that names the input. It is off by default, because it adds a control rather than relaxing one, and a bank turns it on for production.
+3. **Masking in the diff.** The version diff shows each input's masking status and marks any change to it, so an approver sees "national id: masked to not masked" before approving.
+4. **Masking default changes are visible.** A change of `decision-log.mask-default` for a host or a tenant is logged at start-up with the old and new value, and the value in force is shown in `/api/bpm/meta`.
+
+**Kill criterion.** If, even with these, a pilot bank finds unmasked personal data in the decision log, strict mode becomes the default outside `dev`, by a new entry.
+
+**Follow-ups.** Maintainers (engineering): #255 as built, and the four mitigations in one issue ("Rule Engine: Guard Against Unmasked Personal Data"). Documentation: the authoring guide and the wiki Rule Engine Configuration page (the setting and its per-tenant override). Architect: the setting in DESIGN section 4.4.
+
+### PD-100 Container images are not on the licence allow-list
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | `TR-LIC-01` names the test-scope libraries, but not the container images that only tests use (PostgreSQL, PgBouncer and the Playwright image). Do test images belong on that list? |
+| Raised by | Architect, review of pull request #265 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 2 |
+
+**Facts.** The main software in each test image is under a permissive licence: PostgreSQL under the PostgreSQL License, PgBouncer under ISC, and Playwright under Apache 2.0. Each image also carries an operating system userland with many packages under mixed licences, including GPL. Tests run these images as separate processes; nothing from them is linked into or shipped with an artifact.
+
+**Options considered**
+
+1. List each test image with its licence. Consequence: the list looks complete, but one licence per image misstates what an image contains. Keeping it right would need a per-image package licence scan for something that never ships.
+2. Keep images outside the allow-list, which covers libraries on a classpath or in a bundle (chosen). Consequence: one sentence in `TR-LIC-01` says where images are covered:
+   - test-only images are never shipped and are to be pinned by digest (#288);
+   - the example host image is covered by the image-scan gate and its bill of materials;
+   - third-party images that a deployment file references, such as PostgreSQL in the Compose file, are named in the release notes with their licence.
+
+**Recommendation and decision.** Option 2. `TR-LIC-01` protects what reaches an adopter's service. A test image never does, and a deployment image is the adopter's own choice, which the release notes make visible. This concerns third-party material, not the project's own licence.
+
+**Status, 2026-11-20.** Not every test image is pinned yet. On `main` the PostgreSQL test containers use a tag, and so does PgBouncer in #265. The Playwright image of CI and the PostgreSQL image of the Compose file are already pinned by digest. #288 pins the rest.
+
+**Follow-ups.** Documentation: the release notes name the PostgreSQL image of the Compose file and its licence. Maintainers (engineering): pin every test image by digest (#288), and keep new ones pinned.
