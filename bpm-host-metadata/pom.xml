@@ -30,9 +30,14 @@
       <artifactId>spring-webmvc</artifactId>
       <optional>true</optional>
     </dependency>
+    <!--
+      The Servlet API to compile against, from the host's container at run time. Tomcat's copy is used
+      because it is Apache 2.0; jakarta.servlet-api is EPL 2.0 and GPL 2 with the classpath exception,
+      which the licence gate (TR-LIC-01) refuses even in provided scope.
+    -->
     <dependency>
-      <groupId>jakarta.servlet</groupId>
-      <artifactId>jakarta.servlet-api</artifactId>
+      <groupId>org.apache.tomcat.embed</groupId>
+      <artifactId>tomcat-embed-core</artifactId>
       <scope>provided</scope>
     </dependency>
     <dependency>
