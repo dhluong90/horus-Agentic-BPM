@@ -294,6 +294,7 @@ public final class DmnReader {
             requireFeel(entry, "expressionLanguage", feel);
             String input = inputNames.get(i);
             String text = text(entry);
+            refuseBidi(text, "Rule " + id + ", input " + input, entry);
             Feel.UnaryTests tests;
             try {
                 tests = Feel.parseUnaryTests(text.isBlank() ? "-" : text);
@@ -310,6 +311,7 @@ public final class DmnReader {
             requireFeel(entry, "expressionLanguage", feel);
             String output = outputNames.get(i);
             String text = text(entry).strip();
+            refuseBidi(text, "Rule " + id + ", output " + output, entry);
             if (text.isEmpty()) {
                 throw invalid("Rule " + id + ", output " + output + ": the output entry is empty; write null"
                         + " for no value", entry);
@@ -324,7 +326,8 @@ public final class DmnReader {
             switch (value) {
                 case Feel.Value.Null() -> then.putNull(output);
                 case Feel.Value.Bool(boolean b) -> then.put(output, b);
-                case Feel.Value.Num(BigDecimal n) -> then.put(output, n);
+                case Feel.Value.Num(BigDecimal n) when CanonicalCells.isJsonInteger(n) -> then.put(output, n.setScale(0));
+                case Feel.Value.Num(BigDecimal n) -> then.put(output, n.toPlainString());
                 default -> then.put(output, V1Forms.v1(value));
             }
         }
@@ -394,6 +397,14 @@ public final class DmnReader {
                         + " only FEEL is supported", element);
             }
         });
+    }
+
+    private static void refuseBidi(String text, String where, XmlTree element) {
+        try {
+            CanonicalCells.refuseBidi(text, where);
+        } catch (ValidationFailedException e) {
+            throw invalid(e.getMessage(), element);
+        }
     }
 
     private static ValidationFailedException refused(XmlTree element) {

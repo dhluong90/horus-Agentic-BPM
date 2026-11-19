@@ -138,7 +138,7 @@ final class V1Forms {
      */
     static String v1(Value value) {
         return switch (value) {
-            case Value.Str(String s) -> "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'";
+            case Value.Str(String s) -> "'" + escape(s) + "'";
             case Value.Num(BigDecimal n) -> n.toPlainString();
             case Value.Bool(boolean b) -> Boolean.toString(b);
             case Value.Date(LocalDate d) -> "date('" + d + "')";
@@ -279,5 +279,30 @@ final class V1Forms {
                     input + (lc ? " >= " : " > ") + v1(low) + " and " + input + (hc ? " <= " : " < ") + v1(high);
             case Test.IsNull ignored -> input + " is null";
         };
+    }
+
+    /**
+     * Escapes a v1 string body: {@code '} and {@code \}, and every C0 or C1 control or Unicode format character
+     * (category Cf, such as U+200B) as {@code \}{@code uXXXX}, so an invisible character is visible in the
+     * canonical document. No Unicode normalisation (ADR-0026 decision 2).
+     */
+    static String escape(String s) {
+        StringBuilder out = new StringBuilder(s.length() + 2);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' || c == '\'') {
+                out.append('\\').append(c);
+            } else if (needsUnicodeEscape(c)) {
+                out.append(String.format("\\u%04X", (int) c));
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    /** C0 and C1 controls, DEL and Unicode format characters (category Cf). */
+    static boolean needsUnicodeEscape(char c) {
+        return c < 0x20 || (c >= 0x7F && c <= 0x9F) || Character.getType(c) == Character.FORMAT;
     }
 }

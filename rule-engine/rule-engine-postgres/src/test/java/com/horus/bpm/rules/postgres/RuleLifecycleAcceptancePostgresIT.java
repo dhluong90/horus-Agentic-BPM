@@ -150,9 +150,9 @@ class RuleLifecycleAcceptancePostgresIT {
 
     @Test
     void RLE_020_source_with_bom_crlf_and_vietnamese_comments_round_trips_through_postgresql_byte_for_byte() {
-        // Given the card-fee file as a Windows editor saves it
+        // Given the card-fee file as a Windows editor saves it, without a BOM (a BOM is refused, ADR-0026 decision 5)
         String unix = new String(RuleEnginePostgresIT.cardFee(), StandardCharsets.UTF_8);
-        byte[] windows = ("﻿# Phí thẻ hằng tháng – áp dụng từ 01/12\r\n" + unix.replace("\n", "\r\n"))
+        byte[] windows = ("# Phí thẻ hằng tháng – áp dụng từ 01/12\r\n" + unix.replace("\n", "\r\n"))
                 .getBytes(StandardCharsets.UTF_8);
 
         // When

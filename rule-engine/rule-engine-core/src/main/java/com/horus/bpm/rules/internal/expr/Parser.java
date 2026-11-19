@@ -350,6 +350,15 @@ public final class Parser {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
     }
 
+    private static boolean isHex(String source, int from) {
+        for (int k = from; k < from + 4; k++) {
+            if (Character.digit(source.charAt(k), 16) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static boolean isAsciiDigit(char c) {
         return c >= '0' && c <= '9';
     }
@@ -385,6 +394,15 @@ public final class Parser {
                     char s = source.charAt(i++);
                     if (s == '\\' && i < n) {
                         char escaped = source.charAt(i++);
+                        if (escaped == 'u') {
+                            // \\uXXXX: how the canonical printer writes control and format characters (ADR-0026)
+                            if (i + 4 > n || !isHex(source, i)) {
+                                throw new ExpressionException("Invalid \\u escape, expected four hexadecimal digits", i - 2);
+                            }
+                            text.append((char) Integer.parseInt(source.substring(i, i + 4), 16));
+                            i += 4;
+                            continue;
+                        }
                         if (escaped != '\'' && escaped != '\\') {
                             throw new ExpressionException("Unknown escape '\\" + escaped + "'", i - 2);
                         }
