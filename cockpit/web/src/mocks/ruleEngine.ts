@@ -2,7 +2,7 @@
  * An in-memory stand-in for the Rule Engine REST API (rule-engine/api/openapi.yaml), for the dev server,
  * Vitest (through MSW) and Playwright (through page.route). It answers like the real engine on the paths the
  * cockpit uses: paged lists of rule sets and versions with a cursor, allowedActions computed for the caller,
- * history, reject with a reason, and the problems the screens must show: 422 VALIDATION_FAILED with
+ * history, the row-level diff of two versions, reject with a reason, and the problems the screens must show: 422 VALIDATION_FAILED with
  * violations, 403 SELF_APPROVAL_FORBIDDEN, 409 VERSION_CONFLICT, 400 QUERY_INVALID, 413 PAYLOAD_TOO_LARGE.
  * It accepts JSON text only (JSON is YAML), which is what the cockpit's editor sends.
  */
@@ -36,7 +36,12 @@ export interface FakeResponse { status: number; headers: Record<string, string>;
 const TYPE = 'https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#';
 let sequence = 0;
 const correlation = () => `01JFAKE${String((sequence += 1)).padStart(19, '0')}`;
-const hash = (text: string) => Array.from({ length: 64 }, (_, i) => ((text.charCodeAt(i % Math.max(text.length, 1)) || 7) + i) % 16).map((n) => n.toString(16)).join('');
+/** A stand-in for SHA-256: 64 hex digits from eight FNV-1a passes over the whole text, so any change shows. */
+const hash = (text: string) => Array.from({ length: 8 }, (_, seed) => {
+  let h = (0x811c9dc5 ^ seed) >>> 0;
+  for (let i = 0; i < text.length; i += 1) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0');
+}).join('');
 
 interface Violation { ruleId: string | null; column: string | null; message: string }
 
@@ -69,6 +74,9 @@ function lifecycle(v: StoredVersion, request: FakeRequest) {
     createdBy: v.createdBy, createdAt: v.createdAt, allowedActions: actionsFor(v, request),
   };
 }
+
+/** lifecycle.acknowledge-warnings at its default (PD-104). */
+const ACKNOWLEDGE_WARNINGS: readonly string[] = ['UNMASKED_PERSONAL_DATA'];
 
 /** A part of the engine's built-in personal-data names (RLE-049), as words. */
 const PERSONAL_DATA_NAMES = ['national id', 'passport', 'phone', 'phone number', 'email', 'address', 'date of birth', 'account number', 'cccd', 'cmnd'];
@@ -214,6 +222,113 @@ function matches(condition: string, value: Json | undefined): boolean {
   return false;
 }
 
+/** Printable ASCII only (U+0020 to U+007E) and no escape such as \u200B, as the engine's nonAscii rule (RLE-048). */
+const flagged = (value: Json | undefined): boolean => {
+  const text = typeof value === 'string' ? value : JSON.stringify(value ?? null);
+  return /[^\x20-\x7e]/.test(text) || /\\u[0-9a-fA-F]{4}/.test(text);
+};
+
+/** A canonical diff value: a money literal in a `then` cell is Money in minor units (VND has none), other cells their text. */
+function canonicalValue(part: 'when' | 'then', value: Json | undefined): Json {
+  if (value === undefined) return null;
+  if (part === 'then' && typeof value === 'string') return moneyMinor(value) ?? value;
+  return value;
+}
+
+const pointer = (name: string) => name.replaceAll('~', '~0').replaceAll('/', '~1');
+
+/** Ids of `next` kept in place: the longest common subsequence of the two orders, earliest rows of `next` on a tie. */
+function keptInOrder(base: readonly string[], next: readonly string[]): Set<string> {
+  const rows = base.length + 1;
+  const table = Array.from({ length: rows }, () => new Array<number>(next.length + 1).fill(0));
+  for (let i = base.length - 1; i >= 0; i -= 1) {
+    for (let j = next.length - 1; j >= 0; j -= 1) {
+      const row = table[i] as number[];
+      row[j] = base[i] === next[j] ? ((table[i + 1] as number[])[j + 1] ?? 0) + 1 : Math.max((table[i + 1] as number[])[j] ?? 0, row[j + 1] ?? 0);
+    }
+  }
+  const kept = new Set<string>();
+  let i = 0;
+  let j = 0;
+  while (i < base.length && j < next.length) {
+    if (base[i] === next[j]) { kept.add(next[j] ?? ''); i += 1; j += 1; }
+    else if (((table[i + 1] as number[])[j] ?? 0) >= ((table[i] as number[])[j + 1] ?? 0)) i += 1;
+    else j += 1;
+  }
+  return kept;
+}
+
+type Clause = { name: string } & Record<string, unknown>;
+
+function columnChanges(base: readonly Clause[], next: readonly Clause[]) {
+  const baseNames = base.map((c) => c.name);
+  const nextNames = next.map((c) => c.name);
+  const changed = next.flatMap((clause) => {
+    const old = base.find((c) => c.name === clause.name);
+    if (!old) return [];
+    const members = [...new Set([...Object.keys(old), ...Object.keys(clause)])].filter((m) => m !== 'name').sort();
+    const fields = members.filter((m) => JSON.stringify(old[m] ?? null) !== JSON.stringify(clause[m] ?? null))
+      .map((m) => ({ path: `/${m}`, from: (old[m] ?? null) as Json, to: (clause[m] ?? null) as Json, nonAscii: flagged(old[m] as Json) || flagged(clause[m] as Json) }));
+    return fields.length > 0 ? [{ name: clause.name, fields }] : [];
+  });
+  const common = nextNames.filter((n) => baseNames.includes(n));
+  return {
+    added: nextNames.filter((n) => !baseNames.includes(n)),
+    removed: baseNames.filter((n) => !nextNames.includes(n)),
+    changed,
+    reordered: common.join('\u0000') !== baseNames.filter((n) => nextNames.includes(n)).join('\u0000'),
+  };
+}
+
+/** The engine's version diff (rule-engine DESIGN section 4.5) over the stored definitions. */
+export function diffDefinitions(next: StoredVersion, base: StoredVersion) {
+  const nextRules = next.definition.rules;
+  const baseRules = base.definition.rules;
+  const baseIndex = new Map(baseRules.map((rule, index) => [rule.id, index]));
+  const nextIds = new Set(nextRules.map((rule) => rule.id));
+  const kept = keptInOrder(baseRules.map((r) => r.id).filter((id) => nextIds.has(id)), nextRules.map((r) => r.id).filter((id) => baseIndex.has(id)));
+  const rows: Record<string, Json>[] = [];
+  let unchanged = 0;
+  nextRules.forEach((rule, index) => {
+    const at = baseIndex.get(rule.id);
+    if (at === undefined) { rows.push({ ruleId: rule.id, change: 'ADDED', position: index + 1 }); return; }
+    const old = baseRules[at] as Rule;
+    const fields: Json[] = [];
+    for (const part of ['when', 'then'] as const) {
+      const names = [...new Set([...Object.keys(old[part]), ...Object.keys(rule[part])])].sort();
+      for (const name of names) {
+        const from = canonicalValue(part, old[part][name]);
+        const to = canonicalValue(part, rule[part][name]);
+        if (JSON.stringify(from) !== JSON.stringify(to)) fields.push({ path: `/${part}/${pointer(name)}`, from, to, nonAscii: flagged(old[part][name]) || flagged(rule[part][name]) });
+      }
+    }
+    const moved = !kept.has(rule.id);
+    const place = { position: index + 1, basePosition: at + 1 };
+    if (fields.length > 0) rows.push({ ruleId: rule.id, change: 'CHANGED', ...place, moved, fields });
+    else if (moved) rows.push({ ruleId: rule.id, change: 'MOVED', ...place });
+    else unchanged += 1;
+  });
+  baseRules.forEach((rule, index) => { if (!nextIds.has(rule.id)) rows.push({ ruleId: rule.id, change: 'REMOVED', basePosition: index + 1 }); });
+  const header: Json[] = [];
+  const skip = new Set(['inputs', 'outputs', 'rules', 'ruleSet', 'effectiveFrom']);
+  const a = base.definition as unknown as Record<string, Json>;
+  const b = next.definition as unknown as Record<string, Json>;
+  for (const member of [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((m) => !skip.has(m)).sort()) {
+    if (JSON.stringify(a[member] ?? null) !== JSON.stringify(b[member] ?? null)) header.push({ path: `/${member}`, from: a[member] ?? null, to: b[member] ?? null, nonAscii: flagged(a[member]) || flagged(b[member]) });
+  }
+  return {
+    ruleSet: next.ruleSet, version: next.version, base: base.version,
+    canonicalHash: hash(JSON.stringify(next.definition)), baseCanonicalHash: hash(JSON.stringify(base.definition)), sourceHashChanged: next.source !== base.source,
+    effectiveFrom: { from: base.effectiveFrom, to: next.effectiveFrom },
+    header,
+    inputs: columnChanges(base.definition.inputs, next.definition.inputs),
+    outputs: columnChanges(base.definition.outputs, next.definition.outputs),
+    rows,
+    unchangedCount: unchanged,
+    masking: maskingDiff(next.definition, base.definition),
+  };
+}
+
 export function createFakeEngine(seed: StoredVersion[]) {
   const store: StoredVersion[] = seed.map((v) => structuredClone(v));
   const now = () => new Date('2026-11-19T03:00:00Z').toISOString();
@@ -276,6 +391,10 @@ export function createFakeEngine(seed: StoredVersion[]) {
       return view(v, request);
     }
     if (v.requestedBy === request.user || v.createdBy === request.user) return problem(403, 'SELF_APPROVAL_FORBIDDEN', `The requester or author of ${v.ruleSet} v${String(v.version)} cannot approve it`);
+    // PD-104: every warning of a listed code must be acknowledged by its code on the approve request.
+    const acknowledged = new Set((body as { acknowledgedWarnings?: string[] }).acknowledgedWarnings ?? []);
+    const open = warningsOf(v.definition).filter((warning) => ACKNOWLEDGE_WARNINGS.includes(warning.code) && !acknowledged.has(warning.code));
+    if (open.length > 0) return problem(409, 'WARNINGS_NOT_ACKNOWLEDGED', `Approval needs an acknowledgement of ${open.map((w) => `${w.code} on ${w.input}`).join(', ')}`);
     for (const other of versionsOf(v.ruleSet)) if (other.status === 'PUBLISHED') other.status = 'RETIRED';
     Object.assign(v, { status: 'PUBLISHED', approvedBy: request.user, approvedAt: now(), effectiveFrom: now(), lockVersion: v.lockVersion + 1 });
     record(v, 'APPROVED', from, request.user, body.comment ?? null);
@@ -337,20 +456,20 @@ export function createFakeEngine(seed: StoredVersion[]) {
       return versionsOf(name).length === 0 ? problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`) : json(summary(name));
     }
     if ((m = /^\/rule-sets\/([^/]+)\/versions$/.exec(path))) return request.method === 'GET' ? listVersions(m[1] ?? '', url, request) : importVersion(m[1], request);
-    if (request.method === 'GET' && (m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)\/diff$/.exec(path))) {
-      const v = find(m[1] ?? '', Number(m[2]));
-      const baseNumber = Number(url.searchParams.get('base'));
-      if (!v) return problem(404, 'VERSION_NOT_FOUND', `Version ${m[2] ?? ''} of rule set ${m[1] ?? ''} not found`);
-      if (!Number.isInteger(baseNumber) || baseNumber < 1 || baseNumber === v.version) return problem(400, 'INPUT_INVALID', 'base must be another version of the rule set');
-      const baseVersion = find(v.ruleSet, baseNumber);
-      if (!baseVersion) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(baseNumber)} of rule set ${v.ruleSet} not found`);
-      // The row diff is computed by the cockpit; this fake answers the members it reads.
-      return json({ ruleSet: v.ruleSet, version: v.version, base: baseNumber, masking: maskingDiff(v.definition, baseVersion.definition) });
-    }
-    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|:request-publish|:approve|:reject)?$/.exec(path))) {
-      const v = find(m[1] ?? '', Number(m[2]));
-      if (!v) return problem(404, 'VERSION_NOT_FOUND', `Version ${m[2] ?? ''} of rule set ${m[1] ?? ''} not found`);
+    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|:request-publish|:approve|:reject)?$/.exec(path))) {
+      const name = m[1] ?? '';
+      if (m[3] === '/diff' && versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
+      const v = find(name, Number(m[2]));
+      if (!v) return problem(404, 'VERSION_NOT_FOUND', `Version ${m[2] ?? ''} of rule set ${name} not found`);
       const tail = m[3];
+      if (request.method === 'GET' && tail === '/diff') {
+        const baseText = url.searchParams.get('base');
+        const baseNumber = baseText === null ? Number.NaN : Number(baseText);
+        if (!Number.isInteger(baseNumber) || baseNumber < 1 || baseNumber === v.version) return problem(400, 'INPUT_INVALID', 'base is required and must name another version');
+        const base = find(name, baseNumber);
+        if (!base) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(baseNumber)} of rule set ${name} not found`);
+        return json(diffDefinitions(v, base));
+      }
       if (request.method === 'GET' && tail === undefined) return view(v, request, url.searchParams.get('include') === 'source');
       if (request.method === 'GET' && tail === '/history') return json({ data: v.history ?? [] });
       if (request.method === 'POST' && tail?.startsWith(':')) return transition(v, request, tail.slice(1) as 'request-publish' | 'approve' | 'reject');
@@ -375,14 +494,14 @@ const CARD_FEE_V1: Definition = {
   ],
 };
 
+/** Against v1: R6 added, R3's fee raised from 30,000 to 35,000 VND, R4 (the transaction-count discount) removed. */
 const CARD_FEE_V2: Definition = {
   ...CARD_FEE_V1,
   rules: [
     CARD_FEE_V1.rules[0] as Rule,
-    { id: 'R2', when: { tier: "in ['GOLD', 'PLATINUM']", balance: '>= 50000000 VND' }, then: { fee: '0 VND', waived: true } },
+    CARD_FEE_V1.rules[1] as Rule,
     { id: 'R6', when: { tier: "== 'GOLD'", balance: '>= 20000000 VND' }, then: { fee: '10000 VND', waived: false } },
     { id: 'R3', when: { tier: "== 'GOLD'" }, then: { fee: '35000 VND', waived: false } },
-    CARD_FEE_V1.rules[3] as Rule,
     CARD_FEE_V1.rules[4] as Rule,
   ],
 };

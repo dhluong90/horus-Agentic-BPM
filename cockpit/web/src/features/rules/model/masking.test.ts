@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ruleSetVersion, versionDiff, type InputMasking } from '../../../api/rules/schemas';
-import { maskingMark, maskRemoved } from './masking';
+import { changeNotes, flagged, maskRemoved } from './masking';
+import { structureNotes } from './versionDiff';
 
 const item = (from: InputMasking['from'], to: InputMasking['to']): InputMasking => ({ input: 'nationalId', from, to, changed: from !== to, personalDataName: null });
 
@@ -15,14 +16,39 @@ describe('masking column of the diff (RLE-051)', () => {
     expect(maskRemoved(item('MASKED', null))).toBe(false);
   });
 
-  it('CKP_037_the_header_marks_a_changed_input_and_nothing_for_an_unchanged_one', () => {
-    expect(maskingMark(item('MASKED', 'NOT_MASKED'))).toEqual({ kind: 'changed', from: 'MASKED', to: 'NOT_MASKED', removed: true });
-    expect(maskingMark(item('NOT_MASKED', 'MASKED'))).toEqual({ kind: 'changed', from: 'NOT_MASKED', to: 'MASKED', removed: false });
-    expect(maskingMark(item('MASKED', 'MASKED'))).toEqual({ kind: 'none' });
-    expect(maskingMark(item(null, 'NOT_MASKED_BY_DEFAULT'))).toEqual({ kind: 'added', to: 'NOT_MASKED_BY_DEFAULT' });
-    expect(maskingMark(undefined)).toEqual({ kind: 'none' });
+  it('CKP_037_the_header_flag_marks_a_change_to_not_masked_and_nothing_else', () => {
+    expect(flagged(item('MASKED', 'NOT_MASKED'))).toBe(true);
+    expect(flagged(item(null, 'NOT_MASKED_BY_DEFAULT'))).toBe(true);
+    expect(flagged(item('NOT_MASKED', 'MASKED'))).toBe(false);
+    expect(flagged(item('MASKED', 'MASKED'))).toBe(false);
+    expect(flagged(undefined)).toBe(false);
+  });
+
+  it('CKP_037_a_mask_only_column_change_reads_as_its_masking_sentence_and_an_added_column_names_its_masking', () => {
+    const none = { added: [], removed: [], changed: [], reordered: false };
+    const diff = versionDiff.parse({
+      ruleSet: 'customer-screening', version: 2, base: 1, canonicalHash: 'a'.repeat(64), baseCanonicalHash: 'b'.repeat(64), sourceHashChanged: true,
+      effectiveFrom: { from: null, to: null }, header: [], outputs: none, rows: [], unchangedCount: 2,
+      inputs: { added: ['email'], removed: [], changed: [{ name: 'nationalId', fields: [{ path: '/mask', from: true, to: null, nonAscii: false }] }], reordered: false },
+      masking: [
+        { input: 'nationalId', from: 'MASKED', to: 'NOT_MASKED_BY_DEFAULT', changed: true, personalDataName: 'national id' },
+        { input: 'phoneNumber', from: 'MASKED', to: 'MASKED', changed: false, personalDataName: null },
+        { input: 'email', from: null, to: 'NOT_MASKED_BY_DEFAULT', changed: true, personalDataName: 'email' },
+      ],
+    });
+    expect(changeNotes(diff, structureNotes(diff))).toEqual([
+      { kind: 'masking', name: 'nationalId', from: 'MASKED', to: 'NOT_MASKED_BY_DEFAULT', removed: true },
+      { kind: 'columnAdded', group: 'when', name: 'email', masking: 'NOT_MASKED_BY_DEFAULT' },
+    ]);
   });
 });
+
+const emptyColumns = { added: [], removed: [], changed: [], reordered: false };
+/** A diff body as the engine sends it, without the masking column. */
+const diffBody = {
+  ruleSet: 'customer-screening', version: 2, base: 1, canonicalHash: 'a'.repeat(64), baseCanonicalHash: 'b'.repeat(64), sourceHashChanged: false,
+  effectiveFrom: { from: null, to: null }, header: [], inputs: emptyColumns, outputs: emptyColumns, rows: [], unchangedCount: 2,
+};
 
 describe('reading warnings and the diff tolerantly', () => {
   const version = {
@@ -45,7 +71,7 @@ describe('reading warnings and the diff tolerantly', () => {
   });
 
   it('CKP_037_a_masking_entry_with_an_unknown_status_is_dropped_and_the_others_kept', () => {
-    const parsed = versionDiff.parse({ ruleSet: 'customer-screening', version: 2, base: 1, masking: [
+    const parsed = versionDiff.parse({ ...diffBody, masking: [
       { input: 'nationalId', from: 'MASKED', to: 'NOT_MASKED_BY_DEFAULT', changed: true, personalDataName: 'national id' },
       { input: 'email', from: 'MASKED', to: 'TOKENISED', changed: true, personalDataName: null },
       { input: 'segment', from: 'NOT_MASKED', to: 'NOT_MASKED' },
@@ -55,6 +81,6 @@ describe('reading warnings and the diff tolerantly', () => {
   });
 
   it('CKP_037_a_diff_without_masking_gives_an_empty_column', () => {
-    expect(versionDiff.parse({ ruleSet: 'card-fee', version: 2, base: 1, rows: [] }).masking).toEqual([]);
+    expect(versionDiff.parse(diffBody).masking).toEqual([]);
   });
 });

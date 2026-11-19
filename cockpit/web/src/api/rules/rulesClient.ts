@@ -5,7 +5,6 @@ import {
   page,
   ruleSetSummary,
   ruleSetVersion,
-  versionDiff,
   versionHistory,
   versionSummary,
   type DecisionResult,
@@ -13,8 +12,9 @@ import {
   type Page,
   type RuleSetSummary,
   type RuleSetVersion,
-  type VersionDiff,
   type VersionSummary,
+  versionDiff,
+  type VersionDiff,
 } from './schemas';
 
 type Fetch = typeof fetch;
@@ -51,16 +51,16 @@ export interface RulesClient {
   withdraw(name: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<RuleSetVersion>;
   /** getVersion */
   getVersion(name: string, version: number, options?: { source?: boolean; signal?: AbortSignal }): Promise<RuleSetVersion>;
-  /** diffVersions: this version against `base`; the cockpit reads its masking column (RLE-051) */
-  getDiff(name: string, version: number, base: number, signal?: AbortSignal): Promise<VersionDiff>;
+  /** diffVersions: the engine's row-level diff of `version` against `base`; writes nothing (RLE-028) */
+  diffVersions(name: string, version: number, base: number, signal?: AbortSignal): Promise<VersionDiff>;
   /** importRuleSet: version 1 of a new rule set */
   importRuleSet(document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** importVersion: the next draft version of an existing rule set */
   importVersion(name: string, document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** requestPublish */
   requestPublish(name: string, version: number, lockVersion: number, idempotencyKey: string): Promise<RuleSetVersion>;
-  /** approve */
-  approve(name: string, version: number, lockVersion: number, comment: string | undefined, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** approve; `acknowledgedWarnings` names the warning codes the approver accepts (PD-104) */
+  approve(name: string, version: number, lockVersion: number, comment: string | undefined, idempotencyKey: string, acknowledgedWarnings?: readonly string[]): Promise<RuleSetVersion>;
   /** evaluate: runs the version in effect at the host clock and logs one decision */
   evaluate(ruleSet: string, inputs: Readonly<Record<string, unknown>>, idempotencyKey: string): Promise<DecisionResult>;
 }
@@ -125,7 +125,7 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
       const answer = await call({ method: 'GET', path: `${versionPath(name, version)}${query}`, ...(options.signal ? { signal: options.signal } : {}) }, ruleSetVersion);
       return answer.data;
     },
-    async getDiff(name, version, base, signal) {
+    async diffVersions(name, version, base, signal) {
       const answer = await call({ method: 'GET', path: `${versionPath(name, version)}/diff?base=${String(base)}`, ...(signal ? { signal } : {}) }, versionDiff);
       return answer.data;
     },
@@ -155,13 +155,18 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
       );
       return answer.data;
     },
-    async approve(name, version, lockVersion, comment, idempotencyKey) {
+    async approve(name, version, lockVersion, comment, idempotencyKey, acknowledgedWarnings = []) {
+      // Members are sent only when they carry something, so an approval without either has no body, as before.
+      const payload = {
+        ...(comment !== undefined && comment !== '' ? { comment } : {}),
+        ...(acknowledgedWarnings.length > 0 ? { acknowledgedWarnings } : {}),
+      };
       const answer = await call(
         {
           method: 'POST',
           path: `${versionPath(name, version)}:approve`,
           headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
-          ...(comment !== undefined && comment !== '' ? { body: { contentType: 'application/json', text: JSON.stringify({ comment }) } } : {}),
+          ...(Object.keys(payload).length > 0 ? { body: { contentType: 'application/json', text: JSON.stringify(payload) } } : {}),
         },
         ruleSetVersion,
       );

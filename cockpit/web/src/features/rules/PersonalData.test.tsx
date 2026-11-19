@@ -1,12 +1,16 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../App';
+import type { RuleSetDefinition, VersionWarning } from '../../api/rules/schemas';
+import { I18nProvider } from '../../i18n/I18nProvider';
 import { personalDataDemo } from '../../mocks/demoCatalogue';
-import type { Scenario } from '../../mocks/fixtures';
+import { metaRulesOnly, type Scenario } from '../../mocks/fixtures';
 import { resetRuleEngine } from '../../mocks/handlers';
 import { mockHost, setScenario } from '../../mocks/node';
 import type { StoredVersion } from '../../mocks/ruleEngine';
+import { PersonalDataWarnings } from './components/PersonalDataWarnings';
 
 function open(hash: string, scenario: Scenario = 'rules-approver', locale?: 'vi', seed: StoredVersion[] = personalDataDemo()) {
   resetRuleEngine(seed);
@@ -15,85 +19,154 @@ function open(hash: string, scenario: Scenario = 'rules-approver', locale?: 'vi'
   render(<App {...(locale ? { initialLocale: locale } : {})} />);
 }
 
-const decisionCard = async () => (await screen.findByRole('heading', { name: 'Your decision' })).closest('section') as HTMLElement;
+/** The bodies of the approve requests the screen sent. */
+function approveBodies(): string[] {
+  const bodies: string[] = [];
+  mockHost.events.on('request:start', ({ request }) => {
+    if (request.method === 'POST' && request.url.includes(':approve')) void request.clone().text().then((text) => { bodies.push(text); });
+  });
+  return bodies;
+}
 
-describe('personal data on the approval screen (PD-099)', () => {
-  it('CKP_037_an_undeclared_personal_data_input_is_named_beside_approve_in_plain_words', async () => {
+const dock = async () => (await screen.findByRole('heading', { name: 'Your decision' })).closest('section') as HTMLElement;
+const ACCEPT = 'I accept that these inputs are logged without masking: National ID, Email';
+
+describe('personal data on the approval screen (PD-099, PD-104)', () => {
+  it('CKP_037_each_undeclared_input_is_one_short_line_in_the_dock_with_no_category_or_code', async () => {
     open('#/rules/customer-screening/2');
-    const card = await decisionCard();
-    const note = within(card).getByRole('note');
-    expect(note).toHaveTextContent('Personal data without a masking rule');
-    expect(within(note).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
-      'National ID looks like personal data (national id) but has no masking rule.',
-      'Email looks like personal data (email) but has no masking rule.',
+    const warning = within(await dock()).getByRole('group', { name: 'Personal data without a masking rule' });
+    expect(within(warning).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['National ID: no masking rule', 'Email: no masking rule']);
+    expect(warning).toHaveTextContent('These values will be kept unmasked in the decision log, which cannot be changed later.');
+    expect(warning).not.toHaveTextContent('national id');
+    expect(warning).not.toHaveTextContent('UNMASKED_PERSONAL_DATA');
+  });
+
+  it('CKP_037_approve_waits_for_the_acceptance_and_sends_the_accepted_code', async () => {
+    const user = userEvent.setup();
+    const bodies = approveBodies();
+    open('#/rules/customer-screening/2');
+    const card = await dock();
+    const approve = within(card).getByRole('button', { name: 'Approve and publish' });
+    await waitFor(() => { expect(approve).toBeDisabled(); });
+    expect(approve).toHaveAccessibleDescription(ACCEPT);
+    await user.click(within(card).getByRole('checkbox', { name: ACCEPT }));
+    await waitFor(() => { expect(approve).toBeEnabled(); });
+    await user.click(approve);
+    expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
+    expect(bodies.map((body) => JSON.parse(body) as unknown)).toEqual([{ acknowledgedWarnings: ['UNMASKED_PERSONAL_DATA'] }]);
+  });
+
+  it('CKP_037_a_refusal_for_a_missing_acceptance_clears_the_box_and_shows_the_warning_again', async () => {
+    const user = userEvent.setup();
+    mockHost.use(http.post('*/api/bpm/rules/v1/rule-sets/customer-screening/versions/2:approve', () => HttpResponse.json(
+      { status: 409, code: 'WARNINGS_NOT_ACKNOWLEDGED', title: 'Conflict', detail: 'Approval needs an acknowledgement of UNMASKED_PERSONAL_DATA on nationalId' },
+      { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
+    )));
+    open('#/rules/customer-screening/2');
+    const card = await dock();
+    const box = within(card).getByRole('checkbox', { name: ACCEPT });
+    await user.click(box);
+    await user.click(within(card).getByRole('button', { name: 'Approve and publish' }));
+    expect(await within(card).findByRole('alert')).toHaveTextContent('Approval needs this acceptance. Tick the box and approve again.');
+    expect(box).not.toBeChecked();
+    expect(within(card).getByRole('button', { name: 'Approve and publish' })).toBeDisabled();
+    expect(within(card).getByRole('group', { name: 'Personal data without a masking rule' })).toBeInTheDocument();
+  });
+
+  it('CKP_037_masking_changes_read_as_sentences_above_the_table_with_a_marker_on_the_header', async () => {
+    open('#/rules/customer-screening/2');
+    const notes = await screen.findByRole('list', { name: 'Changes outside the rows' });
+    expect(within(notes).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'National ID: mask removed (masked → not masked by default)',
+      'Condition column added: Email, not masked by default',
     ]);
-    expect(note).toHaveTextContent('kept unmasked in the decision log');
-    // Plain words only: no engine code on screen.
-    expect(card).not.toHaveTextContent('UNMASKED_PERSONAL_DATA');
-    expect(within(card).getByRole('button', { name: 'Approve and publish' })).toBeEnabled();
-  });
-
-  it('CKP_037_the_diff_shows_masked_to_not_masked_and_flags_the_removed_mask', async () => {
-    open('#/rules/customer-screening/2');
-    const table = await screen.findByRole('table');
-    const header = (name: string) => within(table).getByRole('columnheader', { name: new RegExp(`^${name}`) });
-    expect(await within(table).findByText('Mask removed')).toBeInTheDocument();
-    expect(header('National ID')).toHaveTextContent('Mask removed');
-    expect(header('National ID')).toHaveTextContent(/Masked\s*→.*Not masked by default/);
-    expect(header('Email')).toHaveTextContent('New column: Not masked by default');
-    // Unchanged masking carries no mark.
-    expect(header('Phone number').textContent).toBe('Phone number');
-    expect(header('Segment').textContent).toBe('Segment');
     expect(screen.getByText('Mask removed on 1 column')).toBeInTheDocument();
+    const table = screen.getByRole('table');
+    const headers = within(table).getAllByRole('columnheader');
+    const named = (label: string) => headers.filter((th) => th.textContent.startsWith(label));
+    // The proposed side's National ID header carries the marker and its sentence; the base side's does not.
+    expect(named('National ID').map((th) => th.querySelector('.masking-flag')?.getAttribute('title') ?? null))
+      .toEqual([null, 'National ID: mask removed (masked → not masked by default)']);
+    expect(named('Email').map((th) => th.querySelector('.masking-flag') !== null)).toEqual([true]);
+    expect(named('Phone number').every((th) => th.querySelector('.masking-flag') === null)).toBe(true);
+    expect(screen.queryByText(/Condition column National ID changed/)).not.toBeInTheDocument();
+    expect(screen.queryByText('No row changes.')).not.toBeInTheDocument();
   });
 
-  it('CKP_037_a_version_with_no_warnings_shows_no_warning_area_and_no_masking_marks', async () => {
+  it('CKP_037_a_version_with_no_warnings_shows_no_warning_and_approves_without_an_acceptance', async () => {
+    const user = userEvent.setup();
+    const bodies = approveBodies();
     open('#/rules/card-fee/2');
-    await decisionCard();
-    expect(await screen.findByText('1 added, 2 changed, 0 removed, 3 unchanged')).toBeInTheDocument();
-    expect(screen.queryByRole('note')).not.toBeInTheDocument();
-    expect(screen.queryByText('Personal data without a masking rule')).not.toBeInTheDocument();
+    const card = await dock();
+    expect(within(card).queryByRole('group')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.queryByText(/Mask removed/)).not.toBeInTheDocument();
-    expect(screen.queryByText('Masking changes are not available from this service.')).not.toBeInTheDocument();
+    await user.click(within(card).getByRole('button', { name: 'Approve and publish' }));
+    expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
+    expect(bodies).toEqual(['']);
+  });
+
+  it('CKP_037_a_host_that_needs_no_acceptance_shows_the_warning_without_the_box', async () => {
+    mockHost.use(http.get('*/api/bpm/meta', () => HttpResponse.json({
+      ...metaRulesOnly, modules: [{ ...metaRulesOnly.modules[0], settings: { 'lifecycle.acknowledge-warnings': '' } }],
+    })));
+    open('#/rules/customer-screening/2');
+    const card = await dock();
+    expect(within(card).getByRole('group', { name: 'Personal data without a masking rule' })).toBeInTheDocument();
+    expect(within(card).queryByRole('checkbox')).not.toBeInTheDocument();
+    await waitFor(() => { expect(within(card).getByRole('button', { name: 'Approve and publish' })).toBeEnabled(); });
   });
 
   it('CKP_037_the_author_sees_the_same_warning_on_a_draft_before_requesting_publication', async () => {
     const draft = personalDataDemo().map((v) => (v.ruleSet === 'customer-screening' && v.version === 2 ? { ...v, status: 'DRAFT' as const, requestedBy: null, requestedAt: null, createdBy: 'lan' } : v));
     open('#/rules/customer-screening/2', 'rules-author', undefined, draft);
-    const note = await screen.findByRole('note');
-    expect(note).toHaveTextContent('National ID looks like personal data (national id) but has no masking rule.');
+    const warning = await screen.findByRole('group', { name: 'Personal data without a masking rule' });
+    expect(warning).toHaveTextContent('National ID: no masking rule');
+    expect(within(warning).queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Request publish' })).toBeInTheDocument();
   });
 
-  it('CKP_037_a_host_without_the_diff_endpoint_says_so_quietly_and_keeps_the_rows', async () => {
-    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/customer-screening/versions/2/diff', () =>
-      HttpResponse.json({ status: 404, code: 'VERSION_NOT_FOUND', title: 'Not Found' }, { status: 404, headers: { 'Content-Type': 'application/problem+json' } })));
-    open('#/rules/customer-screening/2');
-    expect(await screen.findByText('Masking changes are not available from this service.')).toBeInTheDocument();
-    expect(screen.getByRole('table')).toBeInTheDocument();
-    expect(screen.queryByText('Mask removed')).not.toBeInTheDocument();
-  });
-
   it('CKP_037_a_newer_masking_status_on_one_column_leaves_the_other_marks_in_place', async () => {
-    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/customer-screening/versions/2/diff', () => HttpResponse.json({
-      ruleSet: 'customer-screening', version: 2, base: 1, masking: [
+    const body = {
+      ruleSet: 'customer-screening', version: 2, base: 1, canonicalHash: 'a'.repeat(64), baseCanonicalHash: 'b'.repeat(64), sourceHashChanged: true,
+      effectiveFrom: { from: null, to: null }, header: [], outputs: { added: [], removed: [], changed: [], reordered: false }, rows: [], unchangedCount: 2,
+      inputs: { added: ['email'], removed: [], changed: [{ name: 'nationalId', fields: [{ path: '/mask', from: true, to: null, nonAscii: false }] }], reordered: false },
+      masking: [
         { input: 'nationalId', from: 'MASKED', to: 'NOT_MASKED_BY_DEFAULT', changed: true, personalDataName: 'national id' },
         { input: 'email', from: null, to: 'TOKENISED', changed: true, personalDataName: null },
       ],
-    })));
+    };
+    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/customer-screening/versions/2/diff', () => HttpResponse.json(body)));
     open('#/rules/customer-screening/2');
-    const table = await screen.findByRole('table');
-    expect(await within(table).findByText('Mask removed')).toBeInTheDocument();
-    expect(within(table).getByRole('columnheader', { name: /^Email/ }).textContent).toBe('Email');
-    expect(screen.queryByText('Masking changes are not available from this service.')).not.toBeInTheDocument();
+    const notes = await screen.findByRole('list', { name: 'Changes outside the rows' });
+    expect(within(notes).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'National ID: mask removed (masked → not masked by default)',
+      'Condition column added: Email',
+    ]);
   });
 
-  it('TR_UI_04_the_warning_and_the_masking_change_read_in_vietnamese', async () => {
+  it('TR_UI_04_the_warning_acceptance_and_sentences_read_in_vietnamese', async () => {
     open('#/rules/customer-screening/2', 'rules-approver', 'vi');
-    const note = await screen.findByRole('note');
-    expect(note).toHaveTextContent('Dữ liệu cá nhân chưa có quy tắc che');
-    expect(note).toHaveTextContent('National ID có vẻ là dữ liệu cá nhân (national id) nhưng chưa có quy tắc che.');
-    expect(await screen.findByText('Bỏ che')).toBeInTheDocument();
+    const warning = await screen.findByRole('group', { name: 'Dữ liệu cá nhân chưa có quy tắc che' });
+    expect(within(warning).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['National ID: chưa có quy tắc che', 'Email: chưa có quy tắc che']);
+    expect(warning).toHaveTextContent('Các giá trị này sẽ được lưu không che trong nhật ký quyết định và không thể sửa về sau.');
+    expect(within(warning).getByRole('checkbox', { name: 'Tôi chấp nhận các trường sau được ghi log không che: National ID, Email' })).toBeInTheDocument();
+    const notes = await screen.findByRole('list', { name: 'Thay đổi ngoài các dòng' });
+    expect(within(notes).getAllByRole('listitem')[0]).toHaveTextContent('National ID: bỏ che (đã che → không che theo mặc định)');
     expect(screen.getByText('Bỏ che ở 1 cột')).toBeInTheDocument();
+  });
+});
+
+describe('the warning text follows the number of inputs', () => {
+  const definition: RuleSetDefinition = { schemaVersion: 1, ruleSet: 'x', hitPolicy: 'first', inputs: [{ name: 'nationalId', type: 'string', description: 'National ID' }], outputs: [], rules: [] };
+  const one: VersionWarning[] = [{ code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId', matchedName: 'national id', message: 'm' }];
+
+  it.each([
+    ['en', 'Its values will be kept unmasked in the decision log, which cannot be changed later.', 'I accept that this input is logged without masking: National ID'],
+    ['vi', 'Giá trị của trường này sẽ được lưu không che trong nhật ký quyết định và không thể sửa về sau.', 'Tôi chấp nhận trường sau được ghi log không che: National ID'],
+  ] as const)('TR_UI_04_one_input_reads_in_the_singular_%s', (locale, why, accept) => {
+    render(<I18nProvider initialLocale={locale}><PersonalDataWarnings warnings={one} definition={definition} acceptance={{ checked: false, onChange: () => undefined, needed: false, id: 'a' }} /></I18nProvider>);
+    expect(screen.getByText(why)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: accept })).toBeInTheDocument();
   });
 });

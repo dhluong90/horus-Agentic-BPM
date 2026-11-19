@@ -3,6 +3,7 @@ import type { RuleSetVersion } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { useRulesSession } from '../api/rulesContext';
 import { formatDateTime } from '../model/dates';
+import { toHostError } from '../../../api/hostError';
 import { PersonalDataWarnings } from './PersonalDataWarnings';
 import { ProblemNotice } from './ProblemNotice';
 
@@ -45,61 +46,112 @@ export function DraftsOffNote() {
 }
 
 /**
+ * Whether what is on screen is what Approve would publish: `ok`; `checking` while the diff of the current content
+ * loads; `changed` when the version moved on since the user opened it, or the diff on screen is of other content.
+ */
+export type Review = 'ok' | 'checking' | 'changed';
+
+/** A scheduled date, when the version has one in the future; otherwise nothing (the header already says when). */
+function TakesEffect({ effectiveFrom }: { effectiveFrom: string | null | undefined }) {
+  const { t, locale } = useI18n();
+  // Read once when the card opens: the hint must not flip while the approver is reading it.
+  const [now] = useState(() => Date.now());
+  const future = effectiveFrom !== null && effectiveFrom !== undefined && Date.parse(effectiveFrom) > now;
+  const when = future ? formatDateTime(effectiveFrom, locale) : undefined;
+  return when === undefined ? null : <p className="dock__hint">{t('decision.takesEffectOn', { when })}</p>;
+}
+
+/**
  * The four-eyes decision for a version waiting for approval. What the user may do comes from the engine's
  * allowedActions for this caller, and a disabled Approve always says why. A stale click still gets the
- * engine's answer, shown with its code behind Details.
+ * engine's answer, shown with its code behind Details. Docked, it sits at the bottom of the screen under the
+ * side-by-side diff, so Approve stays in view while the approver reads what changed.
  */
-export function DecisionCard({ version, approve, reject, onReload }: { version: RuleSetVersion; approve: Action<string>; reject: Action<string>; onReload: () => void }) {
+/** What Approve sends: the comment, and the warning codes the approver accepted (PD-104). */
+export interface ApproveArgs { comment: string; acknowledgedWarnings: string[] }
+
+/** The engine refused the approval because a warning was not accepted (PD-104). */
+function notAcknowledged(error: unknown): boolean {
+  if (error === undefined || error === null) return false;
+  const hostError = toHostError(error);
+  return hostError.kind === 'problem' && hostError.code === 'WARNINGS_NOT_ACKNOWLEDGED';
+}
+
+export function DecisionCard({ version, approve, reject, onReload, docked = false, review = 'ok', onReviewAgain }: {
+  version: RuleSetVersion; approve: Action<ApproveArgs>; reject: Action<string>; onReload: () => void; docked?: boolean; review?: Review; onReviewAgain?: () => void;
+}) {
   const { t } = useI18n();
-  const { userId } = useRulesSession();
+  const { userId, acknowledgeWarnings } = useRulesSession();
   const [text, setText] = useState('');
+  // The tick remembers the refusal on screen when it was given: a new refusal clears it, so the approver reads the
+  // warnings again (the version is read again with them) and ticks again.
+  const [tick, setTick] = useState<{ on: boolean; refusal: unknown }>({ on: false, refusal: undefined });
+  const acceptId = useId();
+  // The warnings this host wants accepted before approval (lifecycle.acknowledge-warnings, PD-104).
+  const toAccept = [...new Set(version.warnings.map((w) => w.code).filter((code) => acknowledgeWarnings.includes(code)))];
+  const refused = notAcknowledged(approve.error);
+  const accepted = tick.on && (!refused || tick.refusal === approve.error);
+  const setAccepted = (on: boolean) => { setTick({ on, refusal: refused ? approve.error : undefined }); };
   const textId = useId();
   const reasonId = useId();
   const hintId = useId();
   const allowed = new Set(version.allowedActions);
   const self = version.requestedBy === userId ? 'dock.selfRequested' : version.createdBy === userId ? 'dock.selfAuthored' : undefined;
-  const canApprove = allowed.has('approve') && self === undefined;
+  const mayApprove = allowed.has('approve') && self === undefined;
+  const needsAcceptance = mayApprove && toAccept.length > 0 && !accepted;
+  const canApprove = mayApprove && review === 'ok' && !needsAcceptance;
   // PD-089: a requester never rejects their own request; withdrawing is its own action (:withdraw).
   const canReject = allowed.has('reject') && self === undefined;
   const error: unknown = approve.error ?? reject.error;
-  const unavailable = canApprove ? undefined : self ?? 'dock.approveUnavailable';
+  // A disabled Approve says why; while the current diff loads it is only busy for a moment.
+  const unavailable = canApprove || needsAcceptance || (mayApprove && review === 'checking') ? undefined : self ?? (mayApprove ? 'decision.changed' : 'dock.approveUnavailable');
   const busy = approve.isPending || reject.isPending;
   return (
-    <section className="card decision" aria-labelledby="decision-title">
+    <section className={docked ? 'card decision decision--dock' : 'card decision'} aria-labelledby="decision-title">
       <h2 id="decision-title" className="rules-card-title">{t('decision.title')}</h2>
-      <PersonalDataWarnings warnings={version.warnings} definition={version.definition} />
-      {!canApprove && !canReject && self === undefined ? (
+      {!mayApprove && !canReject && self === undefined ? (
         <p className="dock__note">{t('dock.waiting')}</p>
       ) : (
         <>
-          {unavailable !== undefined ? (
-            <p id={reasonId} className="gate__reason">
-              <span aria-hidden="true">⊘</span> {t(unavailable)}
-            </p>
-          ) : null}
-          {canApprove || canReject ? (
-            <label className="field" htmlFor={textId}>
-              <span className="field__label">{t('decision.comment')}</span>
-              <textarea id={textId} className="field__input" rows={2} value={text} placeholder={t('decision.commentHint')}
-                aria-describedby={canReject ? hintId : undefined} onChange={(e) => { setText(e.target.value); }} />
-            </label>
-          ) : null}
-          <div className="gate__buttons">
-            <button type="button" className="btn btn--primary btn--ok" disabled={!canApprove || busy} aria-busy={approve.isPending}
-              {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : {})} onClick={() => { approve.start(text.trim()); }}>
-              <span aria-hidden="true">✓</span> {approve.isPending ? t('dock.approving') : t('dock.approve')}
-            </button>
-            {canReject ? (
-              <button type="button" className="btn btn--danger-quiet" disabled={text.trim() === '' || busy} aria-describedby={hintId} onClick={() => { reject.start(text.trim()); }}>
-                {reject.isPending ? t('dock.rejecting') : t('dock.reject')}
-              </button>
+          <div className="decision__body">
+            <PersonalDataWarnings warnings={version.warnings} definition={version.definition}
+              acceptance={mayApprove && toAccept.length > 0 ? { checked: accepted, onChange: setAccepted, needed: refused && !accepted, id: acceptId } : undefined} />
+            {unavailable !== undefined ? (
+              <p className="gate__reason">
+                <span aria-hidden="true">⊘</span> <span id={reasonId}>{t(unavailable, { version: String(version.version) })}</span>
+                {unavailable === 'decision.changed' && onReviewAgain ? (
+                  <> <button type="button" className="linkbtn hit" onClick={onReviewAgain}>{t('decision.reviewAgain')}</button></>
+                ) : null}
+              </p>
+            ) : null}
+            {mayApprove || canReject ? (
+              <label className="field" htmlFor={textId}>
+                <span className="field__label">{t('decision.comment')}</span>
+                <textarea id={textId} className="field__input" rows={docked ? 1 : 2} value={text} placeholder={t('decision.commentHint')}
+                  aria-describedby={canReject ? hintId : undefined} onChange={(e) => { setText(e.target.value); }} />
+              </label>
             ) : null}
           </div>
-          {canReject ? <p id={hintId} className="dock__hint">{t('dock.reasonHint')}</p> : null}
-          {canApprove ? <p className="dock__hint">{t('decision.takesEffect')}</p> : null}
+          <div className="decision__actions">
+            <div className="gate__buttons">
+              <button type="button" className="btn btn--primary btn--ok" disabled={!canApprove || busy} aria-busy={approve.isPending || review === 'checking'}
+                {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : needsAcceptance ? { 'aria-describedby': acceptId } : {})}
+                onClick={() => { approve.start({ comment: text.trim(), acknowledgedWarnings: accepted ? toAccept : [] }); }}>
+                <span aria-hidden="true">✓</span> {approve.isPending ? t('dock.approving') : t('dock.approve')}
+              </button>
+              {canReject ? (
+                <button type="button" className="btn btn--danger-quiet" disabled={text.trim() === '' || busy} aria-describedby={hintId} onClick={() => { reject.start(text.trim()); }}>
+                  {reject.isPending ? t('dock.rejecting') : t('dock.reject')}
+                </button>
+              ) : null}
+            </div>
+            {/* The placeholder already says Reject needs a reason; the hint stays as Reject's spoken description. */}
+            {canReject ? <p id={hintId} className="sr-only">{t('dock.reasonHint')}</p> : null}
+            {mayApprove ? <TakesEffect effectiveFrom={version.effectiveFrom} /> : null}
+          </div>
         </>
       )}
-      {error !== undefined && error !== null ? <ProblemNotice error={error} onReload={onReload} /> : null}
+      {error !== undefined && error !== null && !(refused && error === approve.error) ? <ProblemNotice error={error} onReload={onReload} /> : null}
     </section>
   );
 }

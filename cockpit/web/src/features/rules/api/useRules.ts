@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
+import { toHostError } from '../../../api/hostError';
 import { allVersions } from '../../../api/rules/catalogue';
 import type { RuleDocument } from '../../../api/rules/rulesClient';
 import type { DecisionResult, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
@@ -24,7 +25,8 @@ function useKeys() {
     version: (name: string, version: number) => [...rules, name, 'version', version] as const,
     history: (name: string, version: number) => [...rules, name, 'history', version] as const,
     source: (name: string, version: number) => [...rules, name, 'source', version] as const,
-    diff: (name: string, version: number, base: number) => [...rules, name, 'diff', version, base] as const,
+    // The content hash and lock version of the version read are part of the key: a diff is never reused for other content.
+    diff: (name: string, version: number, hash: string, lockVersion: number, base: number) => [...rules, name, 'diff', version, hash, lockVersion, base] as const,
   };
 }
 
@@ -47,16 +49,18 @@ export function useVersion(name: string, version: number | undefined) {
   });
 }
 
-/** The engine's diff of a version against `base`, read for its masking column; off when there is no base. */
-export function useVersionDiff(name: string, version: number, base: number | undefined) {
+/**
+ * The engine's row-level diff of a version against a base version (RLE-028); off while there is no base. Keyed by
+ * the content hash and lock version of the version on screen, so a version that changes gets a new diff.
+ */
+export function useVersionDiff(version: Pick<RuleSetVersion, 'ruleSet' | 'version' | 'canonicalHash' | 'lockVersion'>, base: number | undefined) {
   const { client } = useRulesSession();
   const keys = useKeys();
   return useQuery({
-    queryKey: keys.diff(name, version, base ?? 0),
-    queryFn: ({ signal }) => client.getDiff(name, version, base ?? 0, signal),
+    queryKey: keys.diff(version.ruleSet, version.version, version.canonicalHash, version.lockVersion, base ?? 0),
+    queryFn: ({ signal }) => client.diffVersions(version.ruleSet, version.version, base ?? 0, signal),
     enabled: base !== undefined,
     staleTime: 10_000,
-    retry: false,
   });
 }
 
@@ -154,7 +158,16 @@ export function useApprove(onDone: (version: RuleSetVersion) => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
-    ({ version, comment }: { version: VersionSummary; comment: string }, key) => client.approve(version.ruleSet, version.version, version.lockVersion, comment, key),
+    async ({ version, comment, acknowledgedWarnings = [] }: { version: VersionSummary; comment: string; acknowledgedWarnings?: readonly string[] }, key) => {
+      try {
+        return await client.approve(version.ruleSet, version.version, version.lockVersion, comment, key, acknowledgedWarnings);
+      } catch (error) {
+        // PD-104: refused for an unaccepted warning; read the version again so the warnings on screen are the engine's.
+        const hostError = toHostError(error);
+        if (hostError.kind === 'problem' && hostError.code === 'WARNINGS_NOT_ACKNOWLEDGED') await refresh();
+        throw error;
+      }
+    },
     async (version) => {
       await refresh();
       onDone(version);
