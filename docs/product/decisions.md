@@ -2909,6 +2909,14 @@ Their versions are the ones `feel-engine` 1.22.1 pulls in. They are recorded in 
 
 **Guidance.** The authoring guide tells authors to mark every input that holds personal data, such as national ids, names, account numbers and contact details, with `mask: true`. The example rule sets do the same. The `/api/bpm/meta` settings show the masking default in force for the tenant.
 
-**Kill criterion.** If a pilot bank's review finds unmasked personal data in the decision log because an author did not mark an input, the default is revisited, and a publish-time warning for likely personal-data input names is the first candidate.
+**Residual risk (security review 5979268169).** The default complies with PD-074. The decision log is append-only, though, so one input holding personal data that an author forgot to mark leaves data that can never be erased. That conflicts with erasure duties under GDPR and Vietnam's Decree 13. A kill criterion that waits for a pilot review acts too late.
 
-**Follow-ups.** Maintainers (engineering): #255 as built. Documentation: the authoring guide and the wiki Rule Engine Configuration page (the setting and its per-tenant override). Architect: the setting in DESIGN section 4.4.
+**Required mitigations, before the first pilot on real data or 0.2.0, whichever comes first.**
+1. **Publish-time warning.** An undeclared input whose name matches a configurable list of personal-data patterns (by default, names such as national id, passport, phone, email, address, date of birth and account number, in English and Vietnamese) gets a warning on the import and on the publication request. The approver sees the warning in the change.
+2. **Strict mode.** With the setting `decision-log.require-explicit-mask: true`, per host and tenant, every input must declare `mask: true` or `mask: false`. An undeclared input is a publish error that names the input. It is off by default, because it adds a control rather than relaxing one, and a bank turns it on for production.
+3. **Masking in the diff.** The version diff shows each input's masking status and marks any change to it, so an approver sees "national id: masked to not masked" before approving.
+4. **Masking default changes are visible.** A change of `decision-log.mask-default` for a host or a tenant is logged at start-up with the old and new value, and the value in force is shown in `/api/bpm/meta`.
+
+**Kill criterion.** If, even with these, a pilot bank finds unmasked personal data in the decision log, strict mode becomes the default outside `dev`, by a new entry.
+
+**Follow-ups.** Maintainers (engineering): #255 as built, and the four mitigations in one issue ("Rule Engine: Guard Against Unmasked Personal Data"). Documentation: the authoring guide and the wiki Rule Engine Configuration page (the setting and its per-tenant override). Architect: the setting in DESIGN section 4.4.
