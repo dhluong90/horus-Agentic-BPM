@@ -444,6 +444,93 @@ class EditorApiTest {
                 Map.of("fee", Money.ofMinor("VND", 30000))));
     }
 
+    // ---------------------------------------------------------------- security review follow-ups
+
+    @Test
+    void RLE_041_a_document_with_more_than_100_problems_lists_the_first_100_and_says_so() {
+        caller.become("bank-a", "lan", AUTHOR_APPROVER);
+        StringBuilder yaml = new StringBuilder("""
+                schemaVersion: 1
+                ruleSet: many-mistakes
+                hitPolicy: first
+                inputs:
+                  - { name: tier, type: string }
+                outputs:
+                  - { name: fee, type: money }
+                rules:
+                """);
+        for (int i = 1; i <= 150; i++) {
+            yaml.append("  - { id: R").append(i).append(", when: {}, then: { fee: \"30000\" } }\n");
+        }
+
+        assertThatThrownBy(() -> versions.importRuleSet(ImportRequest.yaml(yaml.toString().getBytes(StandardCharsets.UTF_8))))
+                .isInstanceOfSatisfying(ValidationFailedException.class, e -> {
+                    assertThat(e.violations()).hasSize(100);
+                    assertThat(e.violations().getFirst().ruleId()).isEqualTo("R1");
+                    assertThat(e.violations().getLast().ruleId()).isEqualTo("R100");
+                    assertThat(e.truncated()).isTrue();
+                    assertThat(e.getMessage()).endsWith("(and more; the first 100 problems are listed)");
+                });
+    }
+
+    @Test
+    void RLE_041_a_document_with_few_problems_is_not_marked_truncated() {
+        caller.become("bank-a", "lan", AUTHOR_APPROVER);
+        byte[] bad = cardFee("30000", "card-fee");
+
+        assertThatThrownBy(() -> versions.importRuleSet(ImportRequest.yaml(bad)))
+                .isInstanceOfSatisfying(ValidationFailedException.class, e -> assertThat(e.truncated()).isFalse());
+    }
+
+    @Test
+    void RLE_039_a_cursor_key_that_is_not_a_rule_set_name_is_query_invalid() {
+        publishedCardFee();
+        caller.become("bank-a", "dan", READER);
+
+        for (String key : new String[] {"\u0000", "card-fee\u0000", "Card-Fee", "a".repeat(101), "card fee"}) {
+            assertThatThrownBy(() -> versions.listRuleSets(new PageRequest(null, Cursors.encode("rule-sets", key))))
+                    .as(key).isInstanceOf(QueryInvalidException.class);
+        }
+    }
+
+    @Test
+    void RLE_039_a_cursor_replayed_in_another_tenant_returns_only_that_tenants_rule_sets() {
+        // Given bank-a has card-fee and fx-margin, bank-b has aml-score and zz-limits
+        publishedCardFee();
+        caller.become("bank-a", "lan", AUTHOR_APPROVER);
+        versions.importRuleSet(ImportRequest.yaml(cardFee("10000 VND", "fx-margin")));
+        caller.become("bank-b", "lan", AUTHOR_APPROVER);
+        versions.importRuleSet(ImportRequest.yaml(cardFee("10000 VND", "aml-score")));
+        versions.importRuleSet(ImportRequest.yaml(cardFee("10000 VND", "zz-limits")));
+        caller.become("bank-a", "dan", READER);
+        String cursor = versions.listRuleSets(new PageRequest(1, null)).nextCursor();
+
+        // When a bank-b reader replays bank-a's cursor (key card-fee)
+        caller.become("bank-b", "dan", READER);
+        Page<RuleSetSummary> replayed = versions.listRuleSets(new PageRequest(10, cursor));
+
+        // Then only bank-b rows after the key, never bank-a's fx-margin
+        assertThat(replayed.items()).extracting(RuleSetSummary::ruleSet).containsExactly("zz-limits");
+    }
+
+    @Test
+    void RLE_009_an_approval_comment_longer_than_the_reason_limit_is_refused_and_changes_nothing() {
+        caller.become("bank-a", "lan", AUTHOR_APPROVER);
+        versions.importRuleSet(ImportRequest.yaml(CardFee.yaml()));
+        versions.requestPublish("card-fee", 1, WriteOptions.none());
+        caller.become("bank-a", "minh", APPROVER);
+        int history = stores.history.size();
+
+        assertThatThrownBy(() -> versions.approve("card-fee", 1, new WriteOptions(null, null, "x".repeat(2001))))
+                .isInstanceOf(InputInvalidException.class).hasMessageContaining("comment").hasMessageContaining("2000");
+        assertThat(stores.history).hasSize(history);
+        assertThat(versions.find("card-fee", 1, false).orElseThrow().status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
+
+        assertThat(versions.approve("card-fee", 1, new WriteOptions(null, null, "y".repeat(2000))).status())
+                .isEqualTo(VersionStatus.PUBLISHED);
+        assertThat(versions.history("card-fee", 1).getLast().reason()).hasSize(2000);
+    }
+
     // ---------------------------------------------------------------- RLE-043 allowed actions
 
     @Test

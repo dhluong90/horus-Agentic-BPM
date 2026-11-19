@@ -314,6 +314,58 @@ class EditorApiIT {
                 "application/json", null, null).status()).isEqualTo(200);
     }
 
+    @Test
+    void RLE_044_an_oversized_import_is_413_and_the_permission_is_checked_before_the_body_is_read() throws Exception {
+        String t = "bank-import-limits";
+        String padding = "# " + "x".repeat(1_048_576) + "\n";
+        byte[] big = (padding + new String(cardFee("card-fee"), StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8);
+        publish(t, "fx-margin");
+
+        // Declared length over the limit, on both import endpoints
+        assertProblem(send(t, "lan", "POST", "/rule-sets", big, "application/yaml", null, null), 413, "PAYLOAD_TOO_LARGE");
+        assertProblem(send(t, "lan", "POST", "/rule-sets/fx-margin/versions", big, "application/yaml", null, null),
+                413, "PAYLOAD_TOO_LARGE");
+        // A chunked body without Content-Length is cut off one byte past the limit
+        HttpResponse<String> chunked = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets"))
+                .header("Authorization", TestTokens.bearerFor("lan", t, AUTHOR_APPROVER))
+                .header("Content-Type", "application/yaml")
+                .POST(HttpRequest.BodyPublishers.ofInputStream(() -> new java.io.ByteArrayInputStream(big))).build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(chunked.statusCode()).isEqualTo(413);
+        // A caller without rules:author is refused on the permission, not on the size
+        assertProblem(send(t, "dan", "POST", "/rule-sets", big, "application/yaml", null, null), 403, "PERMISSION_DENIED");
+
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_rule_set WHERE tenant_id = :t AND name = 'card-fee'").param("t", t)
+                .query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_version v JOIN rle_rule_set s ON s.tenant_id = v.tenant_id "
+                + "AND s.id = v.rule_set_id WHERE v.tenant_id = :t AND s.name = 'fx-margin'").param("t", t)
+                .query(Long.class).single()).isEqualTo(1L);
+        // and a normal import still works
+        assertThat(send(t, "lan", "POST", "/rule-sets", cardFee("card-fee"), "application/yaml", null, null).status())
+                .isEqualTo(201);
+    }
+
+    @Test
+    void RLE_039_a_cursor_with_a_nul_byte_is_400_not_500() throws Exception {
+        String t = "bank-cursor";
+        publish(t, "card-fee");
+        String nul = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("rule-sets:\u0000".getBytes(StandardCharsets.UTF_8));
+
+        assertProblem(send(t, "dan", "GET", "/rule-sets?cursor=" + nul, null, null, null, null), 400, "QUERY_INVALID");
+    }
+
+    @Test
+    void RLE_041_the_problem_body_says_whether_the_violations_were_truncated() throws Exception {
+        Reply refused = send("bank-truncated", "lan", "POST", "/rule-sets",
+                new String(cardFee("card-fee"), StandardCharsets.UTF_8).replace("then: { fee: \"10000 VND\" }",
+                        "then: { fee: \"30000\" }").getBytes(StandardCharsets.UTF_8), "application/yaml", null, null);
+
+        assertProblem(refused, 422, "VALIDATION_FAILED");
+        assertThat(refused.json().path("violationsTruncated").isBoolean()).isTrue();
+        assertThat(refused.json().path("violationsTruncated").asBoolean()).isFalse();
+    }
+
     // ---------------------------------------------------------------- helpers
 
     String actions(String tenant, String user, int version) throws Exception {

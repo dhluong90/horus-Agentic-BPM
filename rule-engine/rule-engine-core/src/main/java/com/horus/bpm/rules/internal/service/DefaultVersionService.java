@@ -159,6 +159,7 @@ public final class DefaultVersionService implements VersionService {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_APPROVE);
+        requireCommentLength(opts.comment());
         String requestHash = Hashes.sha256Parts("approve", actor, ruleSet, Integer.toString(version),
                 String.valueOf(opts.expectedLockVersion()), opts.comment());
         return context.idempotent(tenant, "approve", opts.idempotencyKey(), requestHash, 200, () -> {
@@ -213,7 +214,7 @@ public final class DefaultVersionService implements VersionService {
         context.callerWith(PERMISSION_READ);
         PageRequest request = page == null ? PageRequest.first() : page;
         int limit = limit(request);
-        String after = Cursors.decode(CURSOR_RULE_SETS, request.cursor());
+        String after = Cursors.ruleSetName(Cursors.decode(CURSOR_RULE_SETS, request.cursor()));
         return context.withoutDooming(() -> {
             List<RuleSetSummary> rows = store.listRuleSets(tenant, after, limit + 1, context.clock().instant());
             return page(rows, limit, last -> Cursors.encode(CURSOR_RULE_SETS, last.ruleSet()));
@@ -283,6 +284,14 @@ public final class DefaultVersionService implements VersionService {
             throw new InputInvalidException("reason must be at most " + max + " characters, was " + reason.length());
         }
         return reason;
+    }
+
+    /** The approval comment is optional, but lands in the immutable history, so it has the reason's bound. */
+    private void requireCommentLength(String comment) {
+        int max = context.settings().reasonMaxLength();
+        if (comment != null && comment.length() > max) {
+            throw new InputInvalidException("comment must be at most " + max + " characters, was " + comment.length());
+        }
     }
 
     private void history(StoredVersion version, LifecycleAction action, VersionStatus from, String actor,

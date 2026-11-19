@@ -1,6 +1,7 @@
 package com.horus.bpm.rules.internal.service;
 
 import com.horus.bpm.rules.api.QueryInvalidException;
+import com.horus.bpm.rules.internal.read.RuleSetReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
@@ -45,6 +46,20 @@ final class Cursors {
             throw invalid();
         }
         return text.substring(prefix.length());
+    }
+
+    /**
+     * Returns the key when it is a rule set name, the only key the rule set list issues, or null for no cursor.
+     * Anything else (a NUL byte, an upper-case or overlong name) is refused here, before it reaches the database.
+     */
+    static String ruleSetName(String key) {
+        if (key == null) {
+            return null;
+        }
+        if (!RuleSetReader.isRuleSetName(key)) {
+            throw invalid();
+        }
+        return key;
     }
 
     static int positiveInt(String key) {

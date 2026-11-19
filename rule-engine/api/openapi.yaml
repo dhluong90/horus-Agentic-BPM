@@ -62,7 +62,8 @@ paths:
       description: |
         Stores the version as `DRAFT`, with the source document byte for byte, its SHA-256
         (`sourceHash`) and the SHA-256 of its RFC 8785 canonical form (`canonicalHash`). Nothing
-        in the document is evaluated. Permission `rules:author`.
+        in the document is evaluated. Permission `rules:author`, checked before the body is read. A
+        body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -90,6 +91,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}:
     get:
@@ -156,7 +158,9 @@ paths:
       tags: [rule-sets]
       operationId: importVersion
       summary: Import a YAML document as the next draft version of an existing rule set
-      description: The document's `ruleSet` must equal `{name}`. Permission `rules:author`.
+      description: |
+        The document's `ruleSet` must equal `{name}`. Permission `rules:author`, checked before the
+        body is read. A body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -172,6 +176,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:
     get:
@@ -291,6 +296,8 @@ paths:
               properties:
                 comment:
                   type: string
+                  maxLength: 2000
+                  description: Optional; stored in the history. Longer than `lifecycle.reason-max-length` (default 2,000 characters) is `400 INPUT_INVALID`
             example:
               comment: Fees checked against the tariff
       responses:
@@ -721,13 +728,18 @@ components:
           type: array
           description: |
             Present on `VALIDATION_FAILED` only, with at least one entry. Every cell problem of the
-            document is listed, in document order, so a screen can mark each cell at once. A
-            problem in the document's structure (a missing key, an unknown property) stops reading
-            and is the only entry.
+            document is listed, in document order, up to 100 entries, so a screen can mark each cell
+            at once; `violationsTruncated` says whether more were found. A problem in the
+            document's structure (a missing key, an unknown property) stops reading and is the only
+            entry.
+          maxItems: 100
           items:
             $ref: '#/components/schemas/Violation'
           example:
             - { ruleId: R3, column: fee, message: 'output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code' }
+        violationsTruncated:
+          type: boolean
+          description: Present on `VALIDATION_FAILED`; true when the document has more than the 100 problems listed
         decisionId:
           type: string
           description: Present on `EVALUATION_ERROR`; the failed decision is logged

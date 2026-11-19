@@ -42,6 +42,12 @@ public final class CompiledRuleSet {
     private static final Set<String> SHORTHAND_PREFIXES = Set.of("==", "!=", "<", ">", "in ", "in[", "not in",
             "is ", "between ");
 
+    /**
+     * Most violations one {@code 422 VALIDATION_FAILED} lists; further problems only set the truncated flag, so a
+     * document of many small mistakes cannot make the answer larger than the request. A safety bound, not a setting.
+     */
+    public static final int MAX_VIOLATIONS = 100;
+
     private final String name;
     private final HitPolicy hitPolicy;
     private final List<InputClause> inputs;
@@ -75,7 +81,7 @@ public final class CompiledRuleSet {
         for (int i = 0; i < table.inputs().size(); i++) {
             slots.put(table.inputs().get(i).name(), i);
         }
-        List<Violation> problems = new ArrayList<>();
+        Problems problems = new Problems(MAX_VIOLATIONS);
         Map<String, Expr> defaults = new LinkedHashMap<>();
         for (OutputClause output : table.outputs()) {
             defaults.put(output.name(), output.defaultValue() == null
@@ -92,8 +98,8 @@ public final class CompiledRuleSet {
             }
             rules.add(new CompiledRule(rule.id(), condition, thens));
         }
-        if (!problems.isEmpty()) {
-            throw new ValidationFailedException(problems);
+        if (!problems.kept.isEmpty()) {
+            throw new ValidationFailedException(problems.kept, problems.truncated);
         }
         return new CompiledRuleSet(model, rules);
     }
@@ -268,7 +274,7 @@ public final class CompiledRuleSet {
     }
 
     private static Expr when(When when, Map<String, Integer> slots, List<InputClause> inputs, String ruleId,
-            List<Violation> problems) {
+            Problems problems) {
         List<Expr> parts = new ArrayList<>();
         for (Map.Entry<String, String> cell : when.cells().entrySet()) {
             parts.add(condition(cell.getKey(), cell.getValue(), slots, inputs, ruleId, problems));
@@ -293,7 +299,7 @@ public final class CompiledRuleSet {
 
     /** Parses and type-checks one condition cell; a problem is recorded on its cell and a placeholder returned. */
     private static Expr condition(String input, String text, Map<String, Integer> slots, List<InputClause> inputs,
-            String ruleId, List<Violation> problems) {
+            String ruleId, Problems problems) {
         String trimmed = text.strip();
         boolean shorthand = SHORTHAND_PREFIXES.stream().anyMatch(trimmed::startsWith);
         String source = shorthand ? input + " " + trimmed : trimmed;
@@ -313,7 +319,7 @@ public final class CompiledRuleSet {
 
     /** Parses one output cell (or an output default, with no rule id) and checks it against the output's type. */
     private static Expr output(Cell cell, OutputClause output, Map<String, Integer> slots, List<InputClause> inputs,
-            String ruleId, List<Violation> problems) {
+            String ruleId, Problems problems) {
         Expr expr = switch (cell) {
             case Cell.Literal literal -> new Expr.Literal(literal.value());
             case Cell.Expression expression -> {
@@ -330,6 +336,25 @@ public final class CompiledRuleSet {
             problems.add(new Violation(ruleId, output.name(), problem));
         }
         return expr;
+    }
+
+    /** Collects violations up to a cap and remembers whether more were found. */
+    private static final class Problems {
+        private final int cap;
+        private final List<Violation> kept = new ArrayList<>();
+        private boolean truncated;
+
+        Problems(int cap) {
+            this.cap = cap;
+        }
+
+        void add(Violation violation) {
+            if (kept.size() < cap) {
+                kept.add(violation);
+            } else {
+                truncated = true;
+            }
+        }
     }
 
     private record CompiledRule(String id, Expr condition, List<Expr> thens) {

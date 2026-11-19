@@ -51,7 +51,20 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  1       | V1__rle_baseline.sql
 #  2       | V2__rle_version_created_by.sql
 #  3       | V3__rle_version_history.sql
+#  4       | V4__rle_version_history_append_only.sql
 ```
+
+### Protect the audit tables
+
+`rle_version_history` is append-only: migration `V4` adds triggers that refuse `UPDATE`, `DELETE` and `TRUNCATE`. A role that owns the table can still drop a trigger, so if you run migrations with one role and the application with another, also take the rights away from the application role:
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON rle_version_history FROM horus_app;   -- your runtime role
+```
+
+### Upgrading to the release with lifecycle history
+
+Migration `V3` creates the history table and gives every existing version one `CREATED` row. During a rolling upgrade, replicas still on the old release keep serving request-publish and approve but write no history rows, so those transitions are missing from `GET .../history` for good. If that matters, hold lifecycle commands (imports, requests, approvals) until every replica runs the new release; evaluation is unaffected.
 
 ### Host metadata with two demo users
 

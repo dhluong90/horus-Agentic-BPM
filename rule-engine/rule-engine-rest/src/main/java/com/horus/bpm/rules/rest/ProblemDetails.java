@@ -74,6 +74,7 @@ public class ProblemDetails {
                 item.set("column", EngineValues.value(v.column()));
                 item.put("message", v.message());
             }
+            body.put("violationsTruncated", failed.truncated());
         }
         ResponseEntity<byte[]> response = response(status, body);
         if (status == HttpStatus.CONFLICT && "IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {

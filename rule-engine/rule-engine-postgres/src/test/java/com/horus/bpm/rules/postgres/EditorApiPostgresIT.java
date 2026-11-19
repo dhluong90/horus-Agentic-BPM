@@ -187,6 +187,52 @@ class EditorApiPostgresIT {
                 .isEqualTo(approved.canonicalHash());
     }
 
+    /** V4: the history is append-only in the database, not only by convention (security review, M2). */
+    @Test
+    void RLE_025_history_rows_cannot_be_updated_deleted_or_truncated() {
+        // Given card-fee v2 rejected by minh: a REJECTED row exists
+        publish("card-fee", null);
+        caller.as("bank-a", "lan");
+        versions.importVersion("card-fee", ImportRequest.yaml(renamed("card-fee", null)));
+        versions.requestPublish("card-fee", 2, WriteOptions.none());
+        caller.as("bank-a", "minh");
+        versions.reject("card-fee", 2, new WriteOptions(null, null, "R2 waiver needs pricing committee minutes"));
+        long rows = count("rle_version_history");
+
+        // Then the application role can neither rewrite, remove nor truncate it
+        for (String sql : new String[] {
+                "UPDATE rle_version_history SET reason = 'approved after all', actor = 'lan' WHERE action = 'REJECTED'",
+                "DELETE FROM rle_version_history WHERE action = 'REJECTED'",
+                "TRUNCATE rle_version_history"}) {
+            assertThatThrownBy(() -> jdbc.sql(sql).update()).as(sql)
+                    .hasRootCauseInstanceOf(org.postgresql.util.PSQLException.class)
+                    .rootCause().hasMessageContaining("rle_version_history is append-only")
+                    .satisfies(e -> assertThat(((org.postgresql.util.PSQLException) e).getSQLState()).isEqualTo("55000"));
+        }
+        assertThat(count("rle_version_history")).isEqualTo(rows);
+        assertThat(jdbc.sql("SELECT actor || ' ' || reason FROM rle_version_history WHERE action = 'REJECTED'")
+                .query(String.class).single()).isEqualTo("minh R2 waiver needs pricing committee minutes");
+        // and inserting still works: the next transition appends
+        caller.as("bank-a", "lan");
+        versions.requestPublish("card-fee", 2, WriteOptions.none());
+        assertThat(count("rle_version_history")).isEqualTo(rows + 1);
+    }
+
+    @Test
+    void RLE_039_a_cursor_replayed_in_another_tenant_returns_only_that_tenants_rule_sets() {
+        publish("card-fee", null);
+        imported("fx-margin");
+        caller.as("bank-b", "lan");
+        versions.importRuleSet(ImportRequest.yaml(renamed("aml-score", null)));
+        versions.importRuleSet(ImportRequest.yaml(renamed("zz-limits", null)));
+        caller.as("bank-a", "dan");
+        String cursor = versions.listRuleSets(new PageRequest(1, null)).nextCursor();
+
+        caller.as("bank-b", "dan");
+        assertThat(versions.listRuleSets(new PageRequest(10, cursor)).items()).extracting(RuleSetSummary::ruleSet)
+                .containsExactly("zz-limits");
+    }
+
     /** V3 backfills one CREATED row per version that existed before it, so their history starts at creation. */
     @Test
     void RLE_025_versions_created_before_the_history_table_get_their_created_row() {

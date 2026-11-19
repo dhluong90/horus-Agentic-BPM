@@ -69,6 +69,16 @@ public final class RuleSetReader {
     }
 
     /**
+     * Tells whether a text is a valid rule set name: kebab-case, at most 100 characters.
+     *
+     * @param name the text
+     * @return whether it is a rule set name
+     */
+    public static boolean isRuleSetName(String name) {
+        return name != null && name.length() <= 100 && RULE_SET_NAME.matcher(name).matches();
+    }
+
+    /**
      * Reads a source document.
      *
      * @param format {@link SourceFormat#YAML} or {@link SourceFormat#JSON}
