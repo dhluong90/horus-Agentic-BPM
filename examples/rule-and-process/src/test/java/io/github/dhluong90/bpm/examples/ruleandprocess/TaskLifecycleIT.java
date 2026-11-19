@@ -118,7 +118,7 @@ class TaskLifecycleIT {
     // ---- read ---------------------------------------------------------------------------------------------
 
     @Test
-    void a_task_reads_with_its_lock_version_as_etag_and_the_actions_each_caller_may_take() throws Exception {
+    void PRE_051_a_task_reads_with_its_lock_version_as_etag_and_the_actions_each_caller_may_take() throws Exception {
         String task = openTask("hoa", "IT-T-READ");
 
         HttpResponse<String> forAn = send("an", "GET", TASKS + task, null, Map.of());
@@ -141,7 +141,7 @@ class TaskLifecycleIT {
     // ---- claim, unclaim -----------------------------------------------------------------------------------
 
     @Test
-    void claim_and_unclaim_are_idempotent_and_each_writes_one_history_entry_and_one_event() throws Exception {
+    void PRE_051_claim_and_unclaim_are_idempotent_and_each_writes_one_history_entry_and_one_event() throws Exception {
         String task = openTask("tuan", "IT-T-CLAIM");
 
         HttpResponse<String> claimed = claim("an", task, "\"0\"", "claim-1");
@@ -174,7 +174,7 @@ class TaskLifecycleIT {
     }
 
     @Test
-    void TR_IDEM_03_two_officers_claiming_at_once_with_one_lock_version_claim_once() throws Exception {
+    void PRE_051_two_officers_claiming_at_once_with_one_lock_version_claim_once() throws Exception {
         String task = openTask("tuan", "IT-T-RACE");
 
         List<HttpResponse<String>> answers = concurrently(List.of(
@@ -248,7 +248,7 @@ class TaskLifecycleIT {
     // ---- tenant isolation and permissions -----------------------------------------------------------------
 
     @Test
-    void TR_TEN_01_another_tenant_cannot_read_claim_unclaim_or_complete_a_task_and_nothing_is_written() throws Exception {
+    void PRE_051_another_tenant_cannot_read_claim_unclaim_or_complete_a_task_and_nothing_is_written() throws Exception {
         String task = openTask("tuan", "IT-T-TENANT");
 
         assertThat(problem(send("zoe", "GET", TASKS + task, null, Map.of()))).isEqualTo("404 TASK_NOT_FOUND");
@@ -265,7 +265,7 @@ class TaskLifecycleIT {
     }
 
     @Test
-    void a_caller_without_processes_task_work_cannot_claim_and_preconditions_are_required() throws Exception {
+    void PRE_051_a_caller_without_processes_task_work_cannot_claim_and_preconditions_are_required() throws Exception {
         String task = openTask("tuan", "IT-T-PERM");
 
         assertThat(problem(claim("tuan", task, "\"0\"", "tuan-claim"))).isEqualTo("403 PERMISSION_DENIED");

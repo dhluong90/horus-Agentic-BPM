@@ -137,23 +137,35 @@ curl -s -u an:$P localhost:8080/api/bpm/processes/v1/instances/01M7S2PPTM395C88Y
 #  "tasks":[{"id":"01M7S2PPTM395C88YQ14000005","nodeId":"officer-review","assignee":"role:CARD_OFFICER","status":"OPEN","lockVersion":0,...}],...}
 ```
 
-Only a card officer may complete it, and never the person who submitted it: the review is a four-eyes task (`horus:fourEyes="true"`). `If-Match` carries the task's `lockVersion` (from the task in the instance view, not the instance `ETag`) and `Idempotency-Key` makes a retry safe; both are required (`428 PRECONDITION_REQUIRED` without them):
+Only a card officer may work it, and never the person who submitted it: the review is a four-eyes task (`horus:fourEyes="true"`). The officer claims the task, then completes it. Each call sends the task's `lockVersion` as `If-Match` (the `ETag` of `GET /tasks/{id}`, not the instance `ETag`) and an `Idempotency-Key` that makes a retry safe; both are required (`428 PRECONDITION_REQUIRED` without them):
 
 ```bash
 T=01M7S2PPTM395C88YQ14000005
-curl -s -u tuan:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' \
-  -d '{"result":{"approved":true}}' "localhost:8080/api/bpm/processes/v1/tasks/${T}:complete"
+curl -s -u an:$P "localhost:8080/api/bpm/processes/v1/tasks/${T}"
+# {"id":"01M7S2PPTM395C88YQ14000005",...,"assignee":"role:CARD_OFFICER","fourEyes":true,"status":"OPEN","lockVersion":0,
+#  "claimedBy":null,...,"allowedActions":["claim"]}
+
+curl -s -u tuan:$P -X POST -H 'If-Match: "0"' -H 'Idempotency-Key: claim-tuan' \
+  "localhost:8080/api/bpm/processes/v1/tasks/${T}:claim"
 # {"status":403,"code":"PERMISSION_DENIED","detail":"Needs processes:task:work",...}
 
-curl -s -u an:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Idempotency-Key: review-1002' \
+curl -s -u an:$P -X POST -H 'If-Match: "0"' -H 'Idempotency-Key: claim-1002' \
+  "localhost:8080/api/bpm/processes/v1/tasks/${T}:claim"
+# {...,"status":"CLAIMED","lockVersion":1,"claimedBy":"an",...,"allowedActions":["unclaim","complete"]}
+
+curl -s -u an:$P -H 'Content-Type: application/json' -H 'If-Match: "1"' -H 'Idempotency-Key: review-1002' \
   -d '{"result":{"approved":true}}' "localhost:8080/api/bpm/processes/v1/tasks/${T}:complete"
 # {...,"status":"COMPLETED","tokens":[{"kind":"SCOPE",...,"status":"COMPLETED"},{"kind":"FLOW","nodeId":"end-approved","status":"COMPLETED"}],
-#  "tasks":[{...,"status":"COMPLETED","lockVersion":1,"completedBy":"an"}],...}
+#  "tasks":[{...,"status":"COMPLETED","lockVersion":2,"claimedBy":"an","completedBy":"an"}],...}
 
-curl -s -u an:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Idempotency-Key: review-1002b' \
+curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "1"' -H 'Idempotency-Key: review-1002b' \
   -d '{"result":{"approved":true}}' "localhost:8080/api/bpm/processes/v1/tasks/${T}:complete"
-# {"status":409,"code":"VERSION_CONFLICT","detail":"Task 01M7S2PPTM395C88YQ14000005 is at lock version 1",...}
+# {"status":409,"code":"VERSION_CONFLICT","detail":"Task 01M7S2PPTM395C88YQ14000005 is at lock version 2",...}
+```
 
+A claimed task goes back to the queue with `:unclaim` (claimant only, same headers). Completing a task nobody claimed is `409 INVALID_STATE`; completing one another officer claimed is `403 TASK_NOT_ASSIGNED`.
+
+```bash
 curl -s -u tuan:$P localhost:8080/api/cards/applications/APP-1002
 # {"applicationId":"APP-1002","customerId":"C-002","status":"APPROVED","fee":{"currency":"VND","amount":10000}}
 ```
@@ -230,8 +242,8 @@ The supervisor `hoa` may submit and may review, but not both on one application:
 curl -s -u hoa:$P -H 'Content-Type: application/json' \
   -d '{"applicationId":"APP-3001","customerId":"C-002"}' localhost:8080/api/cards/applications
 # take the task id from GET /api/bpm/processes/v1/instances/<instanceId>, then:
-curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Idempotency-Key: review-3001' \
-  -d '{"result":{"approved":true}}' "localhost:8080/api/bpm/processes/v1/tasks/<taskId>:complete"
+curl -s -u hoa:$P -X POST -H 'If-Match: "0"' -H 'Idempotency-Key: claim-3001' \
+  "localhost:8080/api/bpm/processes/v1/tasks/<taskId>:claim"
 # {"status":403,"code":"SELF_APPROVAL_FORBIDDEN",...}
 ```
 

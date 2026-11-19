@@ -18,11 +18,11 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 |---|---|---|---|---|---|
 | PRE-001 | `PRE_001_running_instance_pins_definition_version` | Integration | M2 | `TR-DET-01` | Planned |
 | PRE-002 | `PRE_002_business_key_and_idempotency_prevent_duplicate_starts` | Concurrent integration | M2 | `TR-IDEM-01`, `TR-IDEM-02` | Planned |
-| PRE-003 | `PRE_003_stale_task_completion_returns_conflict` | Concurrency | M2 | `TR-IDEM-03` | Planned |
+| PRE-003 | `PRE_003_stale_task_completion_returns_conflict` (`RuleAndProcessIT`), `PRE_003_*` in `TaskLifecycleIT` | Testcontainers host over HTTP, two concurrent completions | M2 | `TR-IDEM-03` | Done |
 | PRE-004 | `PRE_004_exclusive_gateway_routes_single_matching_branch` | Unit | M2 | `TR-DET-01` | Planned |
 | PRE-005 | `PRE_005_parallel_gateway_join_prevents_concurrent_lost_wakeup` | Two-replica Testcontainers, 1,000 iterations | M2 | `TR-PERF-05` | Planned |
 | PRE-006 | `PRE_006_timer_lease_recovers_after_worker_crash` | Two-replica fault injection | M2 | `TR-PERF-05` | Planned |
-| PRE-007 | `PRE_007_four_eyes_blocks_same_actor_approval` | Service, WebMvc | M2 | `TR-SEC-04` | Planned |
+| PRE-007 | `PRE_007_four_eyes_blocks_same_actor_approval` (`RuleAndProcessIT`, REST and Java API), `PRE_007_*` in `TaskLifecycleIT` | Testcontainers host over HTTP, Java API | M2 | `TR-SEC-04` | Done for claim and completion; delegate and reassign follow with their slice |
 | PRE-008 | `PRE_008_business_calendar_skips_holidays_and_weekends` | Unit across holidays and DST | M2 | `TR-CAL-01`, `TR-CAL-02` | Planned |
 | PRE-009 | `PRE_009_agent_task_executes_outside_db_transaction` | Testcontainers, 2-connection pool | M2 | `TR-AGT-03`, `TR-EMB-04` | Planned |
 | PRE-010 | `PRE_010_agent_task_guardrail_violation_routes_to_human` | Integration, stub adapter | M2 | `TR-AGT-01` | Planned |
@@ -66,6 +66,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-048 | `PRE_048_kernel_runs_only_the_approved_source` | Testcontainers with a tampered row, event and audit capture | M2 | `TR-DEF-04`, `TR-STD-01` | Planned |
 | PRE-049 | `PRE_049_*` in `ProcessRestApiIT` | Testcontainers host over HTTP, two tenants | M2 | `TR-TEN-01`, `TR-PERF-07` | Done (the query-plan check of `TR-PERF-07` is still planned) |
 | PRE-050 | `PRE_050_*` in `ProcessRestApiIT` | Testcontainers host over HTTP, concurrent requests, event capture after commit | M2 | `TR-IDEM-01`, `TR-IDEM-03`, `TR-OBS-04` | Done |
+| PRE-051 | `PRE_051_*` in `TaskLifecycleIT` | Testcontainers host over HTTP, concurrent claims, event capture after commit, two tenants | M2 | `TR-IDEM-01`, `TR-IDEM-03`, `TR-SEC-04`, `TR-TEN-01` | Done |
 
 The error matrix of the REST layer (`TR-SEC-08`) is `ProcessRestErrorMatrixTest` in `process-engine-rest`: MockMvc over the controller with in-memory services, every code of `ProcessProblemDetails.STATUS` answered as `application/problem+json` with `code`, `correlationId` and `type`, and an injected failure answered `500 INTERNAL` with no message, class name or SQL. Tenant isolation over HTTP (`TR-TEN-01`) is `ProcessRestApiIT.TR_TEN_01_*`: another tenant's read, list and cancel are not found and write nothing, and a tenant header for another tenant is `403 TENANT_NOT_ALLOWED`.
 
