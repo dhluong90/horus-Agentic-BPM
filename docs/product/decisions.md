@@ -109,6 +109,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-085](#pd-085-target-full-bpmn-20-and-dmn-by-sun-22-nov-2026) | Target: full BPMN 2.0 and DMN by Sun 22 Nov 2026 | Decided |
 | [PD-086](#pd-086-dmn-tck-test-cases-as-build-time-test-data) | DMN TCK test cases as build-time test data | Decided (product manager, delegated, PD-073) |
 | [PD-087](#pd-087-release-labels-after-010) | Release labels after 0.1.0 | Decided (product manager, delegated, PD-073) |
+| [PD-088](#pd-088-unique-and-collect-follow-dmn-15) | `unique` and `collect` follow DMN 1.5 | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -265,6 +266,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 **Follow-ups.** Architect: fix the Jackson major in both DESIGN files before M1 code; update `TR-EMB-02`. Product manager: vision and PRD platform lines updated (done 2026-11-18).
 
 ### PD-008 `UNIQUE_HIT_VIOLATION` returns 422
+
+Superseded in part by [PD-088](#pd-088-unique-and-collect-follow-dmn-15): zero matches under `unique` is no longer an error; several matches still return `422 UNIQUE_HIT_VIOLATION`.
 
 | Field | Value |
 |---|---|
@@ -2664,3 +2667,23 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Consequences.** The roadmap and feature map name the releases `0.2.0`, `0.3.0` and `1.0.0` next to M1, M2 and M3. The project board's Release options are renamed: "Rule Engine 0.1 / Cockpit 0.1 (Jan)" to "0.2.0 (15 Jan)" and "Process Engine 0.1 / Cockpit 0.2 (Mar)" to "0.3.0 (26 Mar)"; renaming an option keeps every value already set. The GitHub milestones keep their titles until the maintainers rename them.
 
 **Follow-ups.** Maintainers (engineering): rename the two board options and, if wanted, the milestone titles. Documentation: the wiki Roadmap page uses the new labels.
+
+### PD-088 `unique` and `collect` follow DMN 1.5
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | The v1 hit policies differ from DMN 1.5 in two places. Under `unique`, zero matches is an error (`RLE-002`), while DMN `U` returns null. Under `collect`, null outputs are dropped, while DMN `C` keeps them, so the output lists fall out of step with `matchedRuleIds`. Adopt DMN behaviour now, or keep v1 and record deviations? |
+| Raised by | Architect and QA, review of pull request #132 (the `collect` point is a blocking QA finding) |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1. Supersedes PD-008 in part |
+
+**Options considered**
+
+1. Adopt DMN 1.5 behaviour now, before 0.1.0 writes v1 behaviour into logged decisions (chosen). `unique` with zero matches returns the outcome `NO_MATCH` with null outputs, exactly as `first` does; `unique` with several matches stays `UNIQUE_HIT_VIOLATION` (`422`, no partial outputs). `collect` keeps a null output as a null entry, so every output list has one entry per matched rule, in the order of `matchedRuleIds`; aggregations follow the DMN 1.5 rules for nulls, as the architect specifies them in `RLE-003`. Consequence: one behaviour for YAML and DMN tables; exported tables mean the same thing in other DMN engines; no logged decision ever carries the v1 behaviour.
+2. Keep the v1 behaviour, record both differences in the deviation register and map them on export (`TR-STD-25`). Consequence: two behaviours to explain and test forever; replaying a 0.1.0 decision under a DMN table could differ; the `collect` lists stay out of step with the matched rules, which QA found misleading for auditors.
+
+**Recommendation and decision.** Option 1, under PD-074 and PD-085: the product targets the standard, nothing is logged yet with either behaviour, and later the change would break replay of logged decisions. Not a setting: a hit policy has one meaning. A host that wants "no match is an error" adds a catch-all row or checks for `NO_MATCH`.
+
+**Consequences.** RE-F-01 is reworded. `RLE-002` changes: zero matches gives `NO_MATCH` with null outputs and a decision log row with outcome `NO_MATCH`; several matches are unchanged. `RLE-003` adds the null case: a matched rule with a null output adds a null entry, and lists stay aligned with `matchedRuleIds`. Pull request #132 implements both before it merges. The deviation register gets no entry for either point.
+
+**Follow-ups.** Architect: `RLE-002` and `RLE-003` in the rule engine SPEC, the error matrix (ADR-0010), and the null rules for `collect` aggregations. Maintainers (engineering): pull request #132 and its tests. Documentation: the wiki hit policy page.

@@ -29,7 +29,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 
 | Id | Feature | Persona | Milestone | PRD | SPEC | TR | Status | Depends on | Decisions |
 |---|---|---|---|---|---|---|---|---|---|
-| RE-F-01 | Choose how matching rows combine: `first`, `unique` (error, never partial outputs, on zero or several matches), `collect` with aggregation | S1, S2 | M1 | RE 7.2 Logic | RLE-001, RLE-002, RLE-003 | TR-DET-01, TR-DET-04 | specified | RE-F-02 | PD-008 |
+| RE-F-01 | Choose how matching rows combine, with DMN 1.5 behaviour: `first`; `unique` (no match gives `NO_MATCH` with null outputs, several matches an error with no partial outputs); `collect` with aggregation, keeping null outputs in step with the matched rows | S1, S2 | M1 | RE 7.2 Logic | RLE-001, RLE-002 (changes, PD-088), RLE-003 (changes, PD-088) | TR-DET-01, TR-DET-04 | specified | RE-F-02 | PD-008, PD-088 |
 | RE-F-02 | An unparsable or ill-typed expression cannot be published; the error names the row and the fix | S2 | M1 | RE 7.2 Logic | RLE-004 | TR-DET-02, TR-SEC-01 | specified | | PD-005 |
 | RE-F-03 | Money, dates and nulls behave predictably: cross-currency comparison fails; nulls follow FEEL logic, so an ordering comparison with a null does not match and `!=` against a missing value is true (RE-F-41) | S2 | M1 | RE 7.2 Logic | RLE-005, RLE-006 (null cases change, PD-058) | TR-DET-01, TR-DET-03 | specified | RE-F-02 | PD-058 |
 | RE-F-04 | An adversarial regex cannot hang an evaluation | S1 | M1 | RE 7.2 Logic | RLE-007 | TR-SEC-02 | specified | | |
@@ -309,8 +309,8 @@ The first release ships part of M1, and a first BPMN and DMN subset, early ([PD-
 | Group | Count | Features |
 |---|---|---|
 | Committed, whole | 12 | RE-F-06, RE-F-11, RE-F-14, RE-F-38, X-F-01, X-F-02, X-F-03, X-F-06 (rules), X-F-09, X-F-12, X-F-13, X-F-22 |
-| Committed, in part | 5 | RE-F-01 (`first` only), RE-F-20 (lifecycle endpoints and Java API), RE-F-25 (YAML import only), CK-F-01 (embedded only), X-F-14 (Docker Compose example, without the Cockpit 0.1 journey) |
-| BPMN and DMN subset, if it passes the checklist | 10 | RE-F-30 (DMN 1.5 table import and export, FEEL subset), RE-F-04 (time limit on regular expressions), PE-F-41 (BPMN 2.0 XML subset import), PE-F-01, PE-F-02, PE-F-04, PE-F-07, PE-F-08 (local only), PE-F-09, CK-F-43 |
+| Committed, in part | 5 | RE-F-01 (`first`; `unique` and `collect` in 0.1.0 if #132 meets the readiness bar), RE-F-20 (lifecycle endpoints and Java API), RE-F-25 (YAML import only), CK-F-01 (embedded only), X-F-14 (Docker Compose example, without the Cockpit 0.1 journey) |
+| BPMN and DMN subset, if it passes the checklist | 10 | RE-F-30 (DMN 1.5 table import and export, FEEL subset), RE-F-04 (time limit on regular expressions), PE-F-41 (BPMN 2.0 XML subset import), PE-F-01, PE-F-02, PE-F-04, PE-F-07, PE-F-08 (local only), PE-F-09, CK-F-43. Process execution (PE-F-01 to PE-F-09) and its persistence in the host database are in 0.1.0 only if they meet the readiness bar; otherwise BPMN import ships alone |
 | **Total** | **27** | 17 committed and 10 conditional, out of 190 |
 
 The full BPMN 2.0 and DMN target for 22 Nov 2026 ([PD-085](decisions.md#pd-085-target-full-bpmn-20-and-dmn-by-sun-22-nov-2026)) is measured by conformance pass rates; standards-track features move into a release only when their suites pass, so the 1.1 to 1.3 columns above are unchanged.

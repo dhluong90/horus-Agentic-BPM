@@ -95,7 +95,7 @@ Say: diagrams for every process, operations on the diagram, one inbox across ser
 
 | Area | Issues | Features |
 |---|---|---|
-| Rules: import, four-eyes, evaluate, log | #1 | RE-F-25 (YAML import only), RE-F-38, RE-F-01 (`first` only), RE-F-06, RE-F-11, RE-F-14, RE-F-20 (lifecycle endpoints and Java API) |
+| Rules: import, four-eyes, evaluate, log | #1 (`unique` and `collect` through #132 only if it meets the readiness bar) | RE-F-25 (YAML import only), RE-F-38, RE-F-01 (`first`; `unique` and `collect` conditional), RE-F-06, RE-F-11, RE-F-14, RE-F-20 (lifecycle endpoints and Java API) |
 | Host contract and permissions | #4, #133, #27, #131 | X-F-22, X-F-06 (rules) |
 | Embedded cockpit shell | #5 | CK-F-01 (embedded only) |
 | Build, gates and packaging | #6, #7, #8, #9, #116, #127, #21, #26 | X-F-01, X-F-02, X-F-03, X-F-12, X-F-13 |
@@ -106,7 +106,7 @@ Say: diagrams for every process, operations on the diagram, one inbox across ser
 | Area | Issues | Features |
 |---|---|---|
 | DMN 1.5 decision table import and export, FEEL subset, with the time limit on regular expressions | #121, #20 | RE-F-30 (subset, with export), RE-F-04 |
-| BPMN 2.0 XML import of start, service, business rule, user task, exclusive gateway and end, and a process that runs them | #111, #46, #48, #63, #49 | PE-F-41 (subset), PE-F-01, PE-F-02, PE-F-04, PE-F-07, PE-F-08 (local only), PE-F-09 |
+| BPMN 2.0 XML import of start, service, business rule, user task, exclusive gateway and end, and a process that runs them; execution and persistence only if they meet the readiness bar, otherwise import ships alone | #111, #46, #48, #63, #49 | PE-F-41 (subset), PE-F-01, PE-F-02, PE-F-04, PE-F-07, PE-F-08 (local only), PE-F-09 |
 | Cockpit editing of a draft rule table | #42 | CK-F-43 |
 
 **Exit criteria.** The readiness checklist in [PD-082](decisions.md#pd-082-first-release-reviewed-by-fri-20-nov-shipped-by-sun-22-nov-2026), met with linked evidence before the go or no-go review on Fri 20 Nov 2026. In short: every issue merged through a reviewed pull request with a linked green CI run (PD-081); no open BLOCKING finding; every matrix leg green; a clean-checkout release build with checksums and a bill of materials; a fresh-clone Docker Compose run by someone other than the author; documents that claim only what ships, with no conformance claim (`TR-STD-05`). The label is `0.1.0` (PD-083).
