@@ -24,7 +24,7 @@ class QueryLimitsTest {
     }
 
     @Test
-    void PRE_050_the_cancellation_reason_limit_may_be_lowered_but_never_raised_above_2000() {
+    void PRE_054_the_cancellation_reason_limit_may_be_lowered_but_never_raised_above_2000() {
         assertThat(new ProcessEngineProperties.Lifecycle(500).reasonMaxLength()).isEqualTo(500);
 
         assertThatThrownBy(() -> new ProcessEngineProperties.Lifecycle(2_001))
@@ -33,7 +33,7 @@ class QueryLimitsTest {
     }
 
     @Test
-    void PRE_050_processes_cancel_is_its_own_permission_in_the_module_catalogue() {
+    void PRE_054_processes_cancel_is_its_own_permission_in_the_module_catalogue() {
         assertThat(ProcessEngineAutoConfiguration.PERMISSIONS).contains("processes:cancel", "processes:start");
     }
 }

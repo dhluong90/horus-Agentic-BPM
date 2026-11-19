@@ -98,7 +98,13 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         Token root = ctx.tree().root().orElseThrow(() -> new ExecutionException("INVALID_STATE", null, "Not started"));
         ctx.cancelSubtree(root);
         ctx.status(InstanceStatus.CANCELLED);
-        ctx.history("INSTANCE_ENDED", null, Map.of("status", "CANCELLED", "reason", String.valueOf(cancel.reason())));
+        Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("status", "CANCELLED");
+        details.put("reason", String.valueOf(cancel.reason()));
+        if (cancel.actor() != null) {
+            details.put("actor", cancel.actor());
+        }
+        ctx.history("INSTANCE_ENDED", null, details);
         Map<String, Object> payload = new java.util.LinkedHashMap<>();
         payload.put("instanceId", ctx.snapshot().instanceId());
         if (cancel.actor() != null) {
