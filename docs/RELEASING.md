@@ -76,7 +76,9 @@ A tag build (`BPM_RELEASE_TAG`, set by the workflow on tag pushes) runs `tools/r
 - the tag is `vX.Y.Z`. A per-module tag such as `rule-engine/v0.1.0` is refused with the form to push instead;
 - the root and **every** module of the reactor (read from the effective POM) are at exactly `X.Y.Z`, so a `-SNAPSHOT` is never tagged as a release and no module is left behind;
 - every module has the group id `io.github.dhluong90.bpm` (ADR-0022), so no release ships under the old `com.horus.bpm` coordinates; the rename is #21;
-- the tagged commit is on `main` (`git merge-base --is-ancestor`).
+- the tagged commit is on `main`: an ancestor of `refs/remotes/origin/main` (`git merge-base --is-ancestor`). The guard reads that full ref name, so a tag or branch named `origin/main` cannot stand in for it, and it assumes the remote `origin` is this repository, as `actions/checkout` sets it.
+
+**The guard catches mistakes; it is not access control.** Anyone who can push a tag can run the workflow. Who may create `v*` tags, and whether a published Release can be changed afterwards, are repository settings (a tag ruleset and immutable releases). They are decided outside this file.
 
 Every check runs and reports before the guard refuses, so one run names every problem. Maven resolves the imported BOMs to write the effective POM; a failed attempt is tried twice more with `-U`. If Maven still cannot write it, the guard refuses and still checks the tag form. The guard builds nothing, so it can be run on its own before pushing a tag:
 
@@ -98,7 +100,7 @@ A per-module tag is refused like this:
 ERROR: tag rule-engine/v0.1.0 is a per-module tag; a release is one project tag of the form vX.Y.Z, here v0.1.0 (PD-087). Delete rule-engine/v0.1.0 and push v0.1.0.
 ```
 
-The workflow's job "Release tag guard tests" proves each refusal on every pull request that changes the release files. It runs `tools/release/test_release_sbom.py` (unit tests of the check) and `tools/release/test-release-tag.sh`. The second builds a scratch copy of the tree at the release version and group id, commits it as `main`, and runs the guard for six cases: `v0.1.0` on `main` passes; a per-module tag, a module at another version and a commit off `main` are refused; a per-module tag on a commit off `main` names both problems; and a POM that Maven cannot read is refused, with a per-module tag still named.
+The workflow's job "Release tag guard tests" proves each refusal on every pull request that changes the release files. It runs `tools/release/test_release_sbom.py` (unit tests of the check) and `tools/release/test-release-tag.sh`. The second builds a scratch copy of the tree at the release version and group id, commits it as `main`, and runs the guard for seven cases: `v0.1.0` on `main` passes; a per-module tag, a module at another version and a commit off `main` are refused; a per-module tag on a commit off `main` names both problems; a POM that Maven cannot read is refused, with a per-module tag still named; and a tag named `origin/main` on a commit off `main` does not fake the main check.
 
 ## GitHub Release
 

@@ -4,11 +4,14 @@
 #
 # Usage:   tools/release/check-release-tag.sh TAG
 # Needs:   Maven 3.9, Python 3.9 and git, from the root of a checkout with origin/main fetched.
+#          Assumes the remote "origin" is this repository (as in actions/checkout). Main is read as the
+#          remote-tracking ref refs/remotes/origin/main, never a name a tag or branch could shadow.
+#          The guard catches mistakes; who may push a release tag is a repository setting.
 # Checks:  1. TAG is vX.Y.Z: one project tag per release. A per-module tag (<module>/vX.Y.Z) is refused
 #             with the vX.Y.Z form to push instead.
 #          2. The root and every module of the reactor (effective POM) are at exactly X.Y.Z, never a
 #             -SNAPSHOT, and under the group id io.github.dhluong90.bpm.
-#          3. The commit (HEAD) is on origin/main.
+#          3. The commit (HEAD) is on main: an ancestor of refs/remotes/origin/main.
 #          Every check runs and reports before the guard refuses, so one run names every problem.
 # Exit:    0 when every check passed, 1 when any failed, 2 on a usage error.
 
@@ -58,10 +61,11 @@ else
 fi
 
 # 3: the commit is on main.
-if ! git rev-parse --verify -q origin/main >/dev/null; then
-  echo "ERROR: origin/main is not available; a tag build needs the full history (actions/checkout fetch-depth: 0)."
+MAIN_REF="refs/remotes/origin/main"
+if ! git rev-parse --verify -q "$MAIN_REF^{commit}" >/dev/null; then
+  echo "ERROR: $MAIN_REF is not available; a tag build needs the full history (actions/checkout fetch-depth: 0)."
   ok=false
-elif git merge-base --is-ancestor HEAD origin/main; then
+elif git merge-base --is-ancestor HEAD "$MAIN_REF"; then
   echo "Tag $tag: commit $(git rev-parse --short HEAD) is on main."
 else
   echo "ERROR: tag $tag points at commit $(git rev-parse --short HEAD), which is not on main."
