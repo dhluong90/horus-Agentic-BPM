@@ -178,6 +178,33 @@ class NormalFormTest {
     }
 
     @Test
+    void RLE_039_invisible_characters_are_escaped_in_cells_kept_as_written() {
+        // n6, kept-as-written cells: a cross-column test, a compound cell and a calculated output
+        String cross = withCell("x", "y != 'V\u200BN'").replace("- { name: y, type: integer }", "- { name: y, type: string }");
+        String compound = StyleCheck.B.replace("\"!= 'VN'\"", "\"country != 'V\u200BN' and country != 'a'\"");
+        String calcExpr = StyleCheck.B.replace("rate: \"0.10\"", "rate: \"x * 0.10\"").replace("o: \"'R2'\"", "o: \"'a\u200Bb'\"");
+
+        for (String doc : java.util.List.of(cross, compound, calcExpr)) {
+            ParsedRuleSet parsed = RuleSetReader.read(SourceFormat.YAML, doc.getBytes(StandardCharsets.UTF_8));
+            assertThat(parsed.canonicalJson()).doesNotContain("\u200B").contains("\\\\u200B");
+            CompiledRuleSet.compile(RuleSetReader.readCanonical(parsed.canonicalJson()));
+        }
+        assertThat(RuleSetReader.read(SourceFormat.YAML, cross.getBytes(StandardCharsets.UTF_8)).canonicalJson())
+                .contains("\"y != 'V\\\\u200BN'\"");
+        assertThat(RuleSetReader.read(SourceFormat.YAML, compound.getBytes(StandardCharsets.UTF_8)).canonicalJson())
+                .contains("\"country != 'V\\\\u200BN' and country != 'a'\"");
+        assertThat(CanonicalCells.escapeLiterals("x * 2 + 'a\\'\u200B'")).isEqualTo("x * 2 + 'a\\'\\u200B'");
+    }
+
+    @Test
+    void RLE_039_bidirectional_controls_are_refused_in_descriptions() {
+        String doc = StyleCheck.B.replace("ruleSet: style-check", "ruleSet: style-check\ndescription: \"ok \u202E evil\"");
+
+        assertThatThrownBy(() -> hashOf(doc)).isInstanceOf(ValidationFailedException.class)
+                .hasMessageContaining("Description, description").hasMessageContaining("U+202E");
+    }
+
+    @Test
     void RLE_039_a_bidirectional_control_in_a_dmn_cell_is_refused_with_its_line() {
         String xml = DmnRuleSetTest.table("<input><inputExpression typeRef=\"string\"><text>c</text></inputExpression></input>",
                 "\n<rule id=\"R1\"><inputEntry><text>\"V\u202EN\"</text></inputEntry><outputEntry><text>true</text></outputEntry></rule>");

@@ -48,6 +48,11 @@ public final class CanonicalCells {
         List<String> inputs = new ArrayList<>();
         document.get("inputs").forEach(input -> inputs.add(input.get("name").stringValue()));
         ToIntFunction<String> slots = inputs::indexOf;
+        // Descriptions do not change behaviour, but approvers read them: no bidirectional controls there either.
+        refuseBidiIn(document, "description", "Description");
+        document.get("inputs").forEach(n -> refuseBidiIn(n, "description", "Input " + n.get("name").stringValue()));
+        document.get("outputs").forEach(n -> refuseBidiIn(n, "description", "Output " + n.get("name").stringValue()));
+        document.get("rules").forEach(n -> refuseBidiIn(n, "description", "Rule " + n.get("id").stringValue()));
         for (JsonNode input : document.get("inputs")) {
             JsonNode allowed = input.get("allowed");
             if (allowed != null) {
@@ -92,8 +97,36 @@ public final class CanonicalCells {
         try {
             return V1Forms.condition(input, V1Forms.fromCondition(input, text, slots));
         } catch (Feel.UnsupportedException e) {
-            return text.strip();
+            return escapeLiterals(text.strip());
         }
+    }
+
+    /**
+     * Escapes control and format characters inside every single-quoted string literal of a cell kept as written
+     * (a cross-column test, a compound cell, a calculated output), so an invisible character is visible in the
+     * canonical document wherever it is (ADR-0026 decision 2). Text outside literals is untouched; the v1 lexer
+     * refuses such characters there anyway.
+     *
+     * @param text the cell text
+     * @return the text with escaped literals
+     */
+    static String escapeLiterals(String text) {
+        StringBuilder out = new StringBuilder(text.length());
+        boolean inString = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (inString && c == '\\' && i + 1 < text.length()) {
+                out.append(c).append(text.charAt(++i));
+            } else if (c == '\'') {
+                inString = !inString;
+                out.append(c);
+            } else if (inString && V1Forms.needsUnicodeEscape(c)) {
+                out.append(String.format("\\u%04X", (int) c));
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     /**
@@ -110,6 +143,13 @@ public final class CanonicalCells {
                 throw new ValidationFailedException(where + ": the text contains the bidirectional control "
                         + String.format("U+%04X", (int) text.charAt(i)) + ", which is not allowed in rules");
             }
+        }
+    }
+
+    private static void refuseBidiIn(JsonNode node, String key, String where) {
+        JsonNode value = node.get(key);
+        if (value != null && value.isString()) {
+            refuseBidi(value.stringValue(), where + ", " + key);
         }
     }
 
@@ -154,7 +194,7 @@ public final class CanonicalCells {
         try {
             value = V1Forms.literal(cell.stringValue());
         } catch (Feel.UnsupportedException e) {
-            holder.put(key, cell.stringValue().strip());
+            holder.put(key, escapeLiterals(cell.stringValue().strip()));
             return;
         }
         switch (value) {
