@@ -10,13 +10,12 @@ import java.time.temporal.ChronoUnit;
 
 /**
  * Evaluates an {@link Expr} over input slots with FEEL semantics (rule-engine/docs/DESIGN.md section
- * 3.2, PD-058): numbers are {@code BigDecimal} in {@link MathContext#DECIMAL128}; comparisons,
- * and arithmetic with a null operand give null; {@code between} is the conjunction of its two
- * comparisons, as DMN 1.5; {@code ==} and {@code !=} are
- * two-valued; {@code in} is true when an element equals the target, so a null target is in a list only
- * when the list holds null; {@code and}, {@code or} and {@code not} follow the FEEL truth tables; a
- * function with a null argument gives null; {@code round} is half-even. Mixed currencies and division
- * by zero raise {@link EvaluationException}.
+ * 3.2, PD-058): numbers are {@code BigDecimal} in {@link MathContext#DECIMAL128}; comparisons
+ * and arithmetic with a null operand give null; {@code between} is {@code x >= a and x <= b}, as
+ * DMN 1.5; {@code ==} and {@code !=} are two-valued; {@code in} is true when an element equals the
+ * target, so a null target is in a list only when the list holds null; {@code and}, {@code or} and
+ * {@code not} follow the FEEL truth tables; a function with a null argument gives null; {@code round}
+ * is half-even. Mixed currencies and division by zero raise {@link EvaluationException}.
  * Stateless and thread-safe.
  */
 public final class Evaluator {
@@ -87,6 +86,7 @@ public final class Evaluator {
         return Boolean.TRUE.equals(evaluate(expr, slots));
     }
 
+    /** True when an element equals the target (FEEL list contains), so a null target only when the list holds null. */
     private boolean in(Object target, Expr.InList inList, Object[] slots) {
         for (Expr element : inList.elements()) {
             if (Boolean.TRUE.equals(equal(target, evaluate(element, slots)))) {
