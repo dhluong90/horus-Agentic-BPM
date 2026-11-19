@@ -14,6 +14,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.List;
 import java.util.HexFormat;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -270,6 +271,33 @@ class RuleLifecycleIT {
 
         String correlationId = JSON.readTree(response.body()).path("correlationId").asString();
         assertThat(correlationId).hasSize(26).doesNotContain("xxx");
+    }
+
+    @Test
+    void RLE_009_engine_permissions_follow_the_same_role_mapping_as_api_bpm_me() throws Exception {
+        // Given minh holds only the host role PRICING_APPROVER, mapped in application.yml
+        String minh = TestTokens.bearerWithRoles("minh", "bank-a", List.of("PRICING_APPROVER"));
+        send("alice", "POST", "/rule-sets", renamed("card-fee-roles"), "application/yaml", null);
+        send("alice", "POST", "/rule-sets/card-fee-roles/versions/1:request-publish", null, null, null);
+
+        // When
+        HttpResponse<String> me = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:"
+                + environment.getProperty("local.server.port") + "/api/bpm/me")).header("Authorization", minh).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> approve = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets/card-fee-roles/versions/1:approve"))
+                .header("Authorization", minh).POST(HttpRequest.BodyPublishers.noBody()).build(),
+                HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> importAttempt = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets"))
+                .header("Authorization", minh).header("Content-Type", "application/yaml")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(renamed("card-fee-roles-2"))).build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        // Then /me lists read and approve, and the engine allows exactly those
+        assertThat(JSON.readTree(me.body()).path("permissions").toString()).isEqualTo("[\"rules:read\",\"rules:approve\"]");
+        assertThat(approve.statusCode()).isEqualTo(200);
+        assertThat(JSON.readTree(approve.body()).path("approvedBy").asString()).isEqualTo("minh");
+        assertThat(importAttempt.statusCode()).isEqualTo(403);
+        assertThat(JSON.readTree(importAttempt.body()).path("code").asString()).isEqualTo("PERMISSION_DENIED");
     }
 
     @Test
