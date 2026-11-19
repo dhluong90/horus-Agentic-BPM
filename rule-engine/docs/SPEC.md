@@ -200,10 +200,10 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-020 Import keeps the source document beside the canonical version
 - **Traces to:** `TR-STD-01`, `TR-STD-03`
 - **Milestone:** M1
-- **Given:** The YAML file `card-fee.yaml` (1,834 bytes, with comments and keys in author order) in Git, and its RFC 8785 hash computed by the pipeline.
+- **Given:** The YAML file `card-fee.yaml` (1,834 bytes, with comments and keys in author order) in Git, and its SHA-256 computed by the pipeline (`sha256sum card-fee.yaml`).
 - **When:** It is imported with `POST /api/bpm/rules/v1/rule-sets`, then read with `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1?include=source` and without the parameter.
-- **Then:** `rle_version` stores `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` the SHA-256 of those bytes, and `canonical_hash` equal to the pipeline's hash; with `include=source` the response carries the original text including comments and its hash; without it, the canonical document only. Nothing in the source document is evaluated.
-- **Example:** `import card-fee.yaml -> source_format YAML, source bytes equal, canonical_hash = pipeline hash`.
+- **Then:** `rle_version` stores `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` the SHA-256 of those bytes, equal to the pipeline's `sha256sum`, and `canonical_hash` the SHA-256 of the RFC 8785 form of the canonical document written from the model, with cells in their normal form (ADR-0026); with `include=source` the response carries the original text including comments and its hash; without it, the canonical document only. Nothing in the source document is evaluated.
+- **Example:** `import card-fee.yaml -> source_format YAML, source bytes equal, source_hash = sha256sum, canonical_hash = hash of the printed model`.
 - **Test ID:** `RLE_020_import_keeps_source_document_and_canonical_hash`
 
 ### RLE-021 Every expression has a FEEL translation that gives the same result
@@ -236,9 +236,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-024 A v1 rule set reads into the DMN model and writes back to the same canonical JSON
 - **Traces to:** `TR-STD-28`, `TR-STD-03`
 - **Milestone:** M1
-- **Given:** `card-fee.yaml` (v1, `hitPolicy: first`, inputs `tier` and `txCount`, output `fee`, rules `R1` to `R3`) and the RFC 8785 hash the pipeline computed from it.
+- **Given:** `card-fee.yaml` (v1, `hitPolicy: first`, inputs `tier` and `txCount`, output `fee`, rules `R1` to `R3`, every cell already in normal form) and the RFC 8785 hash of that document.
 - **When:** The v1 reader builds the in-memory model and the canonical writer prints it back.
-- **Then:** The model is one `Definitions` named `card-fee` holding one `Decision` `card-fee` whose `DecisionTable` has hit policy `FIRST`, input clauses `tier` and `txCount`, output clause `fee` and rules with ids `R1`, `R2`, `R3` in document order; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document and its SHA-256 equals the pipeline hash and the stored `canonical_hash`.
+- **Then:** The model is one `Definitions` named `card-fee` holding one `Decision` `card-fee` whose `DecisionTable` has hit policy `FIRST`, input clauses `tier` and `txCount`, output clause `fee` and rules with ids `R1`, `R2`, `R3` in document order; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document (it is already in normal form) and its SHA-256 equals that hash and the stored `canonical_hash`.
 - **Example:** `card-fee.yaml -> Definitions(card-fee) / Decision(card-fee) / DecisionTable(FIRST, 2 inputs, 1 output, 3 rules) -> same hash`.
 - **Test ID:** `RLE_024_v1_rule_set_round_trips_through_dmn_model`
 
@@ -387,3 +387,18 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The request returns `200` with v1 still `PUBLISHED` and a pending retirement (`retireRequestedBy: bob`), one history row `RETIRE_REQUESTED` and one `rules.version.retire-requested.v1` event; the evaluation still selects v1. `bob`'s confirmation returns `403 SELF_APPROVAL_FORBIDDEN` and changes nothing. `carol`'s confirmation returns `200`: v1 is `RETIRED` with the same effects as `RLE-026` (retired event, cache epoch, `404 NO_EFFECTIVE_VERSION` on every replica within 5 s), and the event and the history row record `approvalMode: four-eyes`, requester `bob`, confirmer `carol` and the reason. The empty reason returns `400 INPUT_INVALID`; the second request and the confirmation without a request return `409 INVALID_STATE`; none changes anything.
 - **Example:** `bob requests -> still serving; bob confirms -> 403 SELF_APPROVAL_FORBIDDEN; carol confirms -> RETIRED, approvalMode four-eyes`.
 - **Test ID:** `RLE_038_four_eyes_retirement_needs_second_approver`
+
+### RLE-039 The same table in any authoring style and in DMN has one behaviour hash
+- **Traces to:** `TR-STD-03`, `TR-STD-25`, `TR-STD-28`, ADR-0026
+- **Milestone:** M1
+- **Given:** Rule set `style-check` v1 (`hitPolicy: first`) with inputs `x` (integer), `country` (string), `at` (datetime) and `amount` (money, USD), written twice. Document A uses author style: `x >= 3`, `x between 1 and 5`, `x is not null`, `country != 'VN'`, `country in ['VN','SG']`, `at == datetime('2026-12-01T00:00:00+07:00')` and `amount == 12.5 USD`. Document B uses the normal form: `>= 3`, `between 1 and 5`, `is not null`, `!= 'VN'`, `in ['VN', 'SG']`, `== datetime('2026-11-30T17:00:00Z')` and `== 12.50 USD`.
+- **When:** A and B are imported as YAML into two rule sets with the same name in two tenants. Then A is exported as DMN and imported again, and the result is exported and imported once more. Separately, DMN cells `money(12.5, "USD")`, `money(10000.00, "VND")` and `money(-5, "USD")` are imported, exported and imported again.
+- **Then:**
+  - A and B have the same `canonical_hash`, and different `source_hash` values.
+  - Every DMN round trip keeps that `canonical_hash`.
+  - A's canonical document and its row-level diff against B show the normal form, with no change reported.
+  - `?include=source` on A returns A's bytes unchanged.
+  - Money is printed at the currency scale (`12.50 USD`, `10000 VND`, `-5.00 USD`), and the money cells keep their hash through the round trip.
+  - A money amount with more fraction digits than its currency allows (`money(12.505, "USD")`) is refused at import with `422 VALIDATION_FAILED` naming its line.
+- **Example:** `x >= 3 (YAML) == >= 3 (YAML) == >= 3 (DMN) -> one canonical_hash; 12.5 USD -> 12.50 USD`.
+- **Test ID:** `RLE_039_authoring_style_and_dmn_round_trip_keep_one_behaviour_hash`
