@@ -101,7 +101,7 @@ export function DraftEditor({ definition, draft, dispatch, errors }: {
   const { t } = useI18n();
   const cellMessage = useCellMessage();
   return (
-    <div className="dt-scroll">
+    <div className="dt-scroll" role="region" tabIndex={0} aria-label={t('editor.tableLabel')}>
       <table className="dt dt--edit">
         <TableHead definition={definition} extra={t('editor.actions')} />
         <tbody onKeyDown={moveFocus}>

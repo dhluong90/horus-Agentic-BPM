@@ -40,7 +40,8 @@ export function DecisionTable({
 }) {
   const { t, locale } = useI18n();
   return (
-    <div className="dt-scroll">
+    // A focusable, labelled region: a wide table scrolls sideways and stays reachable from the keyboard.
+    <div className="dt-scroll" role="region" tabIndex={0} aria-label={t('table.caption', { name: definition.ruleSet, version: String(version) })}>
       <table className="dt">
         <caption className="sr-only">{t('table.caption', { name: definition.ruleSet, version: String(version) })}</caption>
         <TableHead definition={definition} />

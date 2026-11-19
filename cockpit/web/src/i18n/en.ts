@@ -223,6 +223,8 @@ export const en = {
   'ruleSet.import': 'Import new version',
   'ruleSet.imported': 'Draft version {version} created',
   'problem.locatedTitle': 'Problems found',
+  'changes.tableLabel': 'Row changes',
+  'editor.tableLabel': 'Draft rows',
   'problem.engineDetail': 'Engine message',
 } as const;
 

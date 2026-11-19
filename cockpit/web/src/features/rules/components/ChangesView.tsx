@@ -67,7 +67,7 @@ export function ChangesView({ definition, base, baseVersion, record }: {
         <span>{base && baseVersion !== undefined ? t('changes.base', { base: String(baseVersion) }) : t('changes.first')}</span>
         <span className="tnum">{t('changes.summary', { added: count('ADDED'), changed: count('CHANGED'), moved: count('MOVED'), removed: count('REMOVED') })}</span>
       </p>
-      <div className="dt-scroll">
+      <div className="dt-scroll" role="region" tabIndex={0} aria-label={t('changes.tableLabel')}>
         <table className="dt dt--diff">
           <TableHead definition={definition} />
           <tbody>

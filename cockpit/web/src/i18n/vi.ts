@@ -225,5 +225,7 @@ export const vi: Record<MessageKey, string> = {
   'ruleSet.import': 'Nhập phiên bản mới',
   'ruleSet.imported': 'Đã tạo bản nháp phiên bản {version}',
   'problem.locatedTitle': 'Các lỗi tìm thấy',
+  'changes.tableLabel': 'Các dòng thay đổi',
+  'editor.tableLabel': 'Các dòng của bản nháp',
   'problem.engineDetail': 'Thông báo gốc của hệ thống (tiếng Anh)',
 };
