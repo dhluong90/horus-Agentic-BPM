@@ -76,7 +76,7 @@ class CoreArchitectureTest {
     }
 
     @Test
-    void TR_EMB_07_jackson_3_only_inside_internal_and_never_jackson_2_databind() {
+    void TR_API_06_jackson_3_only_inside_internal_and_never_jackson_2_databind() {
         noClasses()
                 .that().resideInAnyPackage("com.horus.bpm.rules.api..", "com.horus.bpm.rules.spi..")
                 .should().dependOnClassesThat().resideInAnyPackage("tools.jackson..", "com.fasterxml.jackson..")

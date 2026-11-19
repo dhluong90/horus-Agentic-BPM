@@ -120,7 +120,7 @@ To validate without saving: `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/
 | Method | When to use it | How |
 |---|---|---|
 | Files at start-up | Rule sets live in Git next to the service | Set `horus.bpm.rules.definitions: classpath:rules/**/*.yaml`. Files load as drafts; publish them as in [[Rule Engine Versioning and Publishing]] |
-| Import by API | A business user or a pipeline proposes a change | `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/import` with the YAML as the body creates a new draft |
+| Import by API | A business user or a pipeline proposes a change | `POST /api/bpm/rules/v1/rule-sets` (first version) or `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` (next version) with the YAML as the body and `Content-Type: application/yaml` creates a new draft. Available now; see [[Rule Engine Decision API]] |
 | Export | Review or back up a version | `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/2/export` returns this document |
 | Cockpit grid editor | Interactive editing | Cockpit 0.2 target; see [[Cockpit]] |
 

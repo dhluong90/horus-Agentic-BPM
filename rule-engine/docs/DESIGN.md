@@ -75,7 +75,7 @@ Source: [`diagrams/version-lifecycle.mmd`](diagrams/version-lifecycle.mmd).
 
 | From State | Command / Trigger | Guard | To State | Side Effect / Event |
 |---|---|---|---|---|
-| *(none)* | `createDraft` / `importYaml` | Valid schema & tenant | `DRAFT` | Assign sequential `version`, store canonical JSON + hash |
+| *(none)* | `createDraft` / `importYaml` | Valid schema & tenant | `DRAFT` | Assign sequential `version`, store canonical JSON + hash; emit `rules.version.created.v1` |
 | `DRAFT` | `updateDraft` | `lockVersion` matches (`If-Match`) | `DRAFT` | Re-validate AST; reject if parse/type errors on publish prep |
 | `DRAFT` | `requestPublish(effectiveFrom)` | Zero validation errors; valid `Idempotency-Key` | `PENDING_APPROVAL` | Freeze snapshot; record `requested_by`; emit `rules.version.publish-requested.v1` |
 | `PENDING_APPROVAL` | `approve(comment)` | `approverId != requestedBy` (`TR-SEC-04`); `rules:approve`; `lockVersion` matches | `PUBLISHED` | Set `published_at`, `approved_by`; emit `rules.version.published.v1` + `pg_notify` + increment `cache_epoch` |
@@ -83,7 +83,7 @@ Source: [`diagrams/version-lifecycle.mmd`](diagrams/version-lifecycle.mmd).
 | `PUBLISHED` | Newer version becomes effective | `new.effectiveFrom <= now` | `RETIRED` | Emit `rules.version.retired.v1`; keep readable forever for explain/replay |
 | `PUBLISHED` | `retire` | `rules:approve` | `RETIRED` | Emit `rules.version.retired.v1`; increment `cache_epoch`; `pg_notify` after commit |
 
-Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` for this engine and `processes` for the Process Engine. The Rule Engine emits exactly these types: `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`, `rules.version.retired.v1`, and `rules.decision.evaluated.v1` (off by default, `events.decision-evaluated`). A breaking payload change publishes a `.v2` type alongside `.v1`; additive fields stay in `.v1`.
+Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` for this engine and `processes` for the Process Engine. The Rule Engine emits exactly these types: `rules.version.created.v1` (a draft was imported or created; added with the first lifecycle slice, #1, so every state change has an event), `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`, `rules.version.retired.v1`, and `rules.decision.evaluated.v1` (off by default, `events.decision-evaluated`). A breaking payload change publishes a `.v2` type alongside `.v1`; additive fields stay in `.v1`.
 
 Optimistic locking uses `lockVersion` (column `lock_version`), sent as `If-Match: "<lockVersion>"` or a `lockVersion` body field and returned as `ETag: "<lockVersion>"`. It is unrelated to `version`, the rule set version number.
 
@@ -165,7 +165,7 @@ Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `ru
 | `POST /rule-sets/{name}/versions/{v}:approve`, `:reject`, `:retire` | `rules:approve` | `Idempotency-Key`; `If-Match`; approver is not the requester | `403 SELF_APPROVAL_FORBIDDEN`, `409 INVALID_STATE`, `409 VERSION_CONFLICT` |
 | `GET /decisions/{id}`, `GET /decisions/{id}/explain`, `GET /decisions` | `rules:log:read` | Cursor; `GET /decisions` requires a rule set and a time range of at most 31 days (ADR-0015); masked inputs stay hashed | `400 QUERY_INVALID`, `404 DECISION_NOT_FOUND` |
 
-All errors are RFC 9457 `application/problem+json` with `code`, `detail` and `correlationId`; `type` is `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#<code in lower case>` (ADR-0010). `409` is used only for state conflicts a client resolves by reloading; `UNIQUE_HIT_VIOLATION` is `422` because it is an authoring defect in the published rule set (ADR-0010, PD-008). Every endpoint that accepts `Idempotency-Key` also returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` for a key reused with a different request hash and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` while the first request runs (ADR-0006, `RLE-014`). Every endpoint returns `403 TENANT_NOT_ALLOWED` when `X-Tenant-Id` names a tenant outside the token's allowed list (ADR-0014, `RLE-018`).
+A caller without the endpoint's permission gets `403 PERMISSION_DENIED`; an unauthenticated call, or one whose tenant cannot be resolved, gets `401 UNAUTHENTICATED`. The REST module checks the permission against the caller's `rules:*` authorities itself, so it does not depend on the host enabling method security. All errors are RFC 9457 `application/problem+json` with `code`, `detail` and `correlationId`; `type` is `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#<code in lower case>` (ADR-0010). `409` is used only for state conflicts a client resolves by reloading; `UNIQUE_HIT_VIOLATION` is `422` because it is an authoring defect in the published rule set (ADR-0010, PD-008). Every endpoint that accepts `Idempotency-Key` also returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` for a key reused with a different request hash and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` while the first request runs (ADR-0006, `RLE-014`). Every endpoint returns `403 TENANT_NOT_ALLOWED` when `X-Tenant-Id` names a tenant outside the token's allowed list (ADR-0014, `RLE-018`).
 
 ### 4.3 Host metadata
 

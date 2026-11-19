@@ -4,6 +4,7 @@ A minimal Spring Boot 4 service with its own table (`loan_application`) and its 
 
 1. One dependency, `com.horus.bpm:rule-engine-spring-boot-starter`.
 2. One configuration block, `horus.bpm.rules` in [`application.yml`](src/main/resources/application.yml).
+3. A `TenantResolver` bean that reads the tenant from the authenticated user ([`ExampleSecurity.java`](src/main/java/com/horus/bpm/examples/ruleengineonly/ExampleSecurity.java)). The caller and its `rules:*` permissions come from Spring Security.
 
 On start-up the host's Flyway applies `db/migration` to `flyway_schema_history`. Then the engine applies its own `rle_*` migrations to `rle_schema_history`, on the host's `DataSource` and transaction manager, with no pool of its own. The decision log `rle_decision` is partitioned by month: the migration creates the parent and a default partition. A start-up step then creates the partitions for the current and the next month, read from the host's `Clock` (UTC months).
 
@@ -51,6 +52,100 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 
 To see the `ruleEngine` component locally, start with `--management.endpoint.health.show-components=always`. It reports the schema version, `pendingMigrations`, and whether next month's partition exists.
 
+## Demo: import, approve as a second person, evaluate
+
+The host has five demo users for this walkthrough, all with the password in `HORUS_DEMO_PASSWORD`:
+
+| User | Tenant | Permissions |
+|---|---|---|
+| `alice` | `bank-a` | `rules:author`, `rules:approve`, `rules:read`, `rules:evaluate` |
+| `bob` | `bank-a` | `rules:approve`, `rules:read`, `rules:evaluate` |
+| `teller` | `bank-a` | `rules:evaluate` |
+| `carol`, `dave` | `tenant-b` | as `alice` and `bob` |
+
+Start PostgreSQL as above, then start the host with demo users:
+
+```bash
+HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+H=localhost:8080/api/bpm/rules/v1
+```
+
+1. Alice imports the card fee table from [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml). It is stored as a draft with the file kept byte for byte:
+
+   ```bash
+   curl -s -u alice:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+     -H 'Idempotency-Key: demo-import-1' --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee.yaml
+   # 201 {"ruleSet":"card-fee","version":1,"status":"DRAFT","sourceFormat":"YAML",
+   #      "canonicalHash":"596414cd75b2ef85719562ae8014a3f26bad0527ee2d6ef191377aec572f9142",...}
+   ```
+
+   Sending the same request again with the same `Idempotency-Key` returns the same `201` and creates nothing. The same key with a changed file returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+
+2. Alice requests publication:
+
+   ```bash
+   curl -s -u alice:demo-only -X POST $H/rule-sets/card-fee/versions/1:request-publish
+   # 200 {"status":"PENDING_APPROVAL","requestedBy":"alice",...}
+   ```
+
+3. Alice tries to approve her own request and is refused:
+
+   ```bash
+   curl -s -u alice:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
+   # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
+   ```
+
+4. Bob approves; the version is published and takes effect now:
+
+   ```bash
+   curl -s -u bob:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve \
+     -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
+   # 200 {"status":"PUBLISHED","requestedBy":"alice","approvedBy":"bob",...}
+   ```
+
+5. A teller prices a Gold customer's card. Rule `R1` matches and the fee is 0 VND:
+
+   ```bash
+   curl -s -u teller:demo-only -X POST $H/decisions/card-fee:evaluate \
+     -H 'Content-Type: application/json' -d '{"inputs":{"tier":"GOLD","txCount":5}}'
+   # 200 {"decisionId":"01M7RVDNER5T0V2T4QH6SE2C25","ruleSet":"card-fee","version":1,"outcome":"MATCHED",
+   #      "matchedRuleIds":["R1"],"outputs":{"fee":{"currency":"VND","amount":0}},...}
+   ```
+
+6. The decision is in the log, written in the same transaction as the request:
+
+   ```bash
+   docker exec horus-pg psql -U horus -d horus -c \
+     'SELECT rule_set_name, version_num, outcome, matched_rule_ids, outputs, caller_id FROM rle_decision'
+   #  card-fee | 1 | OK | ["R1"] | {"fee": {"amount": 0, "currency": "VND"}} | teller
+   ```
+
+7. A user of another tenant cannot reach the rule set, even when the body names the tenant:
+
+   ```bash
+   curl -s -u carol:demo-only -X POST $H/decisions/card-fee:evaluate \
+     -H 'Content-Type: application/json' -d '{"tenantId":"bank-a","inputs":{"tier":"GOLD"}}'
+   # 404 {"code":"RULE_SET_NOT_FOUND",...}
+   ```
+
+8. The original file, comments included, is returned with `?include=source`:
+
+   ```bash
+   curl -s -u alice:demo-only "$H/rule-sets/card-fee/versions/1?include=source"
+   # {..., "sourceDocument":"# Monthly card fee, the rule set of the Rule Engine walking skeleton (RLE-001).\n...", ...}
+   ```
+
+The same path in Java, inside the host's own transaction:
+
+```java
+@Transactional
+public Money cardFee(String tier, int txCount) {
+    DecisionResult result = ruleEngine.evaluate("card-fee", DecisionInput.of(Map.of("tier", tier, "txCount", txCount)));
+    return (Money) result.outputs().get("fee");   // rolls back with the host's work; one rle_decision row on commit
+}
+```
+
 ## Environment variables
 
 | Variable | Default | Meaning |
@@ -59,6 +154,7 @@ To see the `ruleEngine` component locally, start with `--management.endpoint.hea
 | `HORUS_DB_USERNAME` | `horus` | Database user |
 | `HORUS_DB_PASSWORD` | none | Database password. Never put it in a file in the repository |
 | `PORT` | `8080` | HTTP port |
+| `HORUS_DEMO_PASSWORD` | none | Password of the demo users. Without it there are no demo users and every API call returns `401` |
 
 ## Rule Engine properties
 
@@ -71,7 +167,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 
 ## Run in CI
 
-`.github/workflows/ci.yml` runs `mvn -B verify` on every pull request on Java 21 and Spring Boot 4.x. In this module, Failsafe runs two Testcontainers suites on `postgres:16-alpine`. The host's clock is fixed at 26 January 2027.
+`.github/workflows/ci.yml` runs `mvn -B verify` on every pull request on Java 21 and Spring Boot 4.x. In this module, Failsafe runs three Testcontainers suites on `postgres:16-alpine`. The host's clock is fixed: 26 January 2027 in the start-up suites, 15 December 2026 in the lifecycle suite.
 
 | Test | Proves |
 |---|---|
@@ -80,6 +176,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `RuleEngineOnlyHostIT.TR_EMB_06_*` | Engine migrations are recorded only in `rle_schema_history`; the host's history holds only its own migration |
 | `RuleEngineOnlyHostIT.TR_EMB_04_*` | The engine uses the host's only `DataSource` and the transaction manager that manages it, and the host's Flyway bean is still the Spring Boot one |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
+| `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.
 

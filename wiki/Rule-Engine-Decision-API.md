@@ -1,6 +1,21 @@
 # Decision API
 
-Reference for the two Rule Engine surfaces: the in-process Java API and the optional REST API under `/api/bpm/rules/v1` that the cockpit and remote callers use. _Design preview: the contract is reviewed here before the code exists._
+Reference for the two Rule Engine surfaces: the in-process Java API and the optional REST API under `/api/bpm/rules/v1` that the cockpit and remote callers use. _Design preview: the contract is reviewed here before the code exists, except for the operations listed under "Available in 0.1.0-SNAPSHOT"._
+
+## Available in 0.1.0-SNAPSHOT
+
+These operations are built and tested; their contract file is [`rule-engine/api/openapi.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/rule-engine/api/openapi.yaml). Everything else on this page is still a design preview.
+
+| Method and path | Java | Permission | Notes |
+|---|---|---|---|
+| `POST /rule-sets` | `VersionService.importRuleSet(ImportRequest)` | `rules:author` | Body is the YAML document (`Content-Type: application/yaml`); creates the rule set named in the document and its version 1 as `DRAFT`. `201`, `ETag`, `Location` |
+| `POST /rule-sets/{name}/versions` | `VersionService.importVersion(name, ImportRequest)` | `rules:author` | The next draft version; the document's `ruleSet` must equal `{name}` |
+| `GET /rule-sets/{name}/versions/{v}` | `VersionService.find(name, v, includeSource)` | `rules:read` | `?include=source` adds `sourceDocument`, the file as imported, comments included |
+| `POST /rule-sets/{name}/versions/{v}:request-publish` | `VersionService.requestPublish(...)` | `rules:author` | `If-Match` optional |
+| `POST /rule-sets/{name}/versions/{v}:approve` | `VersionService.approve(...)` | `rules:approve` | Optional body `{ "comment": "..." }`; the requester gets `403 SELF_APPROVAL_FORBIDDEN` |
+| `POST /decisions/{ruleSet}:evaluate` | `RuleEngine.evaluate(...)` | `rules:evaluate` | Body `{ "inputs": { ... } }`; `first` hit policy only; one `rle_decision` row in the request's transaction |
+
+All of them accept `Idempotency-Key` with the semantics below, and every state change writes an outbox row (`rules.version.created.v1`, `rules.version.publish-requested.v1`, `rules.version.published.v1`). A caller without the permission gets `403 PERMISSION_DENIED`. In this build: YAML import only, no `clock` or version-pinned evaluation, no validation report in the response, and the `unique` and `collect` hit policies are refused at import.
 
 ![Rule evaluation flow](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/rule-evaluation-flow.svg)
 
@@ -60,8 +75,8 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `GET /rule-sets/{name}` | Rule set with its versions and states | `rules:read` | |
 | `GET /rule-sets/{name}/versions/{v}` | One version, canonical JSON, validation report | `rules:read` | `ETag` |
 | `GET /rule-sets/{name}/versions/{a}/diff/{b}` | Added, removed and changed rows and columns | `rules:read` | |
-| `POST /rule-sets` | Create a rule set with an initial draft | `rules:author` | `Idempotency-Key` |
-| `POST /rule-sets/{name}/versions` | New draft, empty or copied from a version | `rules:author` | `Idempotency-Key` |
+| `POST /rule-sets` | Create a rule set with an initial draft from a YAML or JSON document | `rules:author` | `Idempotency-Key` |
+| `POST /rule-sets/{name}/versions` | New draft from a YAML or JSON document | `rules:author` | `Idempotency-Key` |
 | `PUT /rule-sets/{name}/versions/{v}` | Replace a draft's content | `rules:author` | `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:validate` | Parse and type-check without saving | `rules:author` | |
 | `POST /rule-sets/{name}/versions/{v}:simulate` | Evaluate a draft over sample inputs or logged decisions; writes no decision rows | `rules:simulate` | `Idempotency-Key` |
@@ -70,7 +85,6 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions/{v}:reject` | Back to draft with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `GET /rule-sets/{name}/versions/{v}/export` | YAML export | `rules:read` | |
-| `POST /rule-sets/{name}/versions:import` | Create a draft from YAML or JSON | `rules:author` | `Idempotency-Key` |
 | `GET /decisions/{id}` | One decision; masked inputs stay hashed | `rules:log:read` | |
 | `GET /decisions/{id}/explain` | Plain-language explanation | `rules:log:read` | |
 | `GET /decisions?ruleSet=&from=&to=&outcome=&matchedRuleId=&cursor=&limit=` | Decision log, newest first. `ruleSet`, `from` and `to` are required; the range is at most 31 days | `rules:log:read` | cursor pagination |
@@ -99,7 +113,7 @@ Batch request and response wrap items in `{ "items": [ { "inputs": {}, "correlat
 | Call | Request | Response |
 |---|---|---|
 | `GET /rule-sets/{name}/versions/{v}/export` | `Accept: application/yaml` (default) or `application/json` | `200` with the canonical definition document, `ETag: "<version>"`, `Content-Disposition: attachment; filename="card-fee-v2.yaml"` |
-| `POST /rule-sets/{name}/versions:import` | `Content-Type: application/yaml` or `application/json`; body is a definition document; `Idempotency-Key` | `201` with the new draft `{ "ruleSet": "card-fee", "version": 3, "status": "DRAFT", "lockVersion": 0, "validation": { "errors": [], "warnings": [] } }`; `422 VALIDATION_FAILED` when the document does not parse; the rule set is created when `{name}` does not exist and the caller has `rules:author` |
+| `POST /rule-sets` (new rule set) or `POST /rule-sets/{name}/versions` (next version) | `Content-Type: application/yaml` (JSON from a later release); body is a definition document; `Idempotency-Key` | `201` with the new draft `{ "ruleSet": "card-fee", "version": 3, "status": "DRAFT", "lockVersion": 0, "sourceFormat": "YAML", "sourceHash": "...", "canonicalHash": "...", "definition": { ... } }`; `422 VALIDATION_FAILED` when the document does not parse; `409 RULE_SET_EXISTS` on `POST /rule-sets` for a name already used |
 | `GET /rule-sets/{name}/versions/{a}/diff/{b}` | none | `200` `{ "from": 1, "to": 2, "hitPolicyChanged": false, "columns": { "added": [], "removed": [], "changed": [] }, "rows": { "added": ["R5"], "removed": [], "changed": [ { "ruleId": "R2", "cells": [ { "column": "fee", "from": {"currency":"VND","amount":10000}, "to": {"currency":"VND","amount":0} } ] } ] } }` |
 
 Definition documents carry `schemaVersion`; old schema versions import forever. Simulation of a draft (`:simulate`) uses the same evaluator as `:evaluate` and writes no decision rows:
