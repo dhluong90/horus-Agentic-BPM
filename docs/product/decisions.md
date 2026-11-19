@@ -2520,6 +2520,11 @@ Committed: the release does not ship without these.
 
 **Added to the committed scope, 2026-11-19 (product manager, delegated, on the product owner's feedback).** The product owner found the cockpit empty, with no menu, and the sign-in page unattractive. The release review is visual, so the cockpit navigation shell, a non-empty Home and a branded sign-in page for the example host are committed for the Fri 20 Nov review (#180). The shell follows the approved prototype (PD-056): Home, Rules, Approvals, and Decisions and Processes labelled Preview. Home shows only pending approvals and recent rule sets (PD-078). Decisions has no read API in 0.1.0, and logged decisions may hold personal data until masking arrives, so the Decisions area shows a one-line "comes in 0.2.0" empty state and no decision data. Sign-in stays the host's page; the cockpit library has no login of its own.
 
+**Scope notes, 2026-11-19 (product manager, delegated).**
+- The rule set and version lists, reject and field errors (#147, pull request #152, merged) are in 0.1.0. The cockpit's Home and Rules pages need them.
+- Withdraw (#162) is not in 0.1.0 and ships in 0.2.0. The cockpit hides the action, and a requester asks an approver to reject instead.
+- Display names on the version API (`createdByName`, `requestedByName`, `approvedByName`) are not in 0.1.0. Rows show the identity recorded in the audit trail. Display names come in 0.2.0 from a host extension point that resolves names when they are read, rather than from names copied into engine tables.
+
 Pulled in by PD-084: in the release only if each meets the same readiness bar at the Fri 20 Nov review; otherwise cut in the order below.
 
 | Issue | What ships | Feature map |
