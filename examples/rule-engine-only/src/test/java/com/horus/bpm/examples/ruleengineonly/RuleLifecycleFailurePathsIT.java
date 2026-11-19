@@ -13,6 +13,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -254,20 +255,36 @@ class RuleLifecycleFailurePathsIT {
         // Given a rule set only in tenant-b
         publishAs("carol", "dave", "only-in-b", cardFee("only-in-b"));
 
-        // When a bank-a caller names tenant-b in a header and in the body
-        Reply read = send("alice", "GET", "/rule-sets/only-in-b/versions/1", null, null, null, Map.of("X-Tenant-Id", "tenant-b"));
+        // When a bank-a caller names tenant-b in the body
+        Reply read = send("alice", "GET", "/rule-sets/only-in-b/versions/1", null, null, null, Map.of());
         Reply eval = send("teller", "POST", "/decisions/only-in-b:evaluate",
                 "{\"tenantId\":\"tenant-b\",\"tenant\":\"tenant-b\",\"inputs\":{\"tier\":\"GOLD\"}}".getBytes(StandardCharsets.UTF_8),
-                "application/json", null, Map.of("X-Tenant-Id", "tenant-b"));
+                "application/json", null, Map.of());
         Reply approve = send("bob", "POST", "/rule-sets/only-in-b/versions/1:approve",
-                "{\"tenantId\":\"tenant-b\"}".getBytes(StandardCharsets.UTF_8), "application/json", null,
-                Map.of("X-Tenant-Id", "tenant-b"));
+                "{\"tenantId\":\"tenant-b\"}".getBytes(StandardCharsets.UTF_8), "application/json", null, Map.of());
 
         // Then every call is answered in bank-a, where the rule set does not exist
         assertThat(read.status()).isEqualTo(404);
         assertThat(eval.status()).isEqualTo(404);
         assertThat(eval.json().path("code").asString()).isEqualTo("RULE_SET_NOT_FOUND");
         assertThat(approve.status()).isEqualTo(404);
+
+        // And a tenant-b switch header is refused on read, evaluate and approve while switching is off
+        // (RLE-018, RLE-037), as /api/bpm/me does, and no decision is logged in either tenant
+        String tenantBDecisions = "SELECT count(*) FROM rle_decision WHERE rule_set_name = 'only-in-b' AND tenant_id = 'tenant-b'";
+        long tenantBBefore = jdbc.sql(tenantBDecisions).query(Long.class).single();
+        Map<String, String> switchHeader = Map.of("X-Tenant-Id", "tenant-b");
+        List<Reply> withHeader = List.of(
+                send("alice", "GET", "/rule-sets/only-in-b/versions/1", null, null, null, switchHeader),
+                send("teller", "POST", "/decisions/only-in-b:evaluate",
+                        "{\"inputs\":{\"tier\":\"GOLD\"}}".getBytes(StandardCharsets.UTF_8), "application/json", null,
+                        switchHeader),
+                send("bob", "POST", "/rule-sets/only-in-b/versions/1:approve", null, null, null, switchHeader));
+        for (Reply refused : withHeader) {
+            assertThat(refused.status()).isEqualTo(403);
+            assertThat(refused.json().path("code").asString()).isEqualTo("TENANT_NOT_ALLOWED");
+        }
+        assertThat(jdbc.sql(tenantBDecisions).query(Long.class).single()).isEqualTo(tenantBBefore);
         assertThat(jdbc.sql("SELECT count(*) FROM rle_decision WHERE rule_set_name = 'only-in-b' AND tenant_id = 'bank-a'")
                 .query(Long.class).single()).isZero();
     }
