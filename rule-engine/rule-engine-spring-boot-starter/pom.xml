@@ -29,11 +29,15 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-autoconfigure</artifactId>
     </dependency>
-    <!-- Spring Boot 4 splits JDBC auto-configuration into its own module (ADR-0011). It brings no pool. -->
+    <!--
+      Spring Framework artifact present on both Spring Boot lines. No Boot 4-only module is a required
+      dependency: auto-configuration ordering uses class names as strings (ADR-0011).
+    -->
     <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-jdbc</artifactId>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-jdbc</artifactId>
     </dependency>
+    <!-- Optional: the ruleEngine health contributor is added only when the host has Spring Boot 4 health. -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-health</artifactId>

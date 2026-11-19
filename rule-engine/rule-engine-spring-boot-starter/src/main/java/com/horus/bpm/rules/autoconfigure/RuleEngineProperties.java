@@ -4,20 +4,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Configuration of the Rule Engine under {@code horus.bpm.rules}.
+ * Configuration of the Rule Engine under {@code horus.bpm.rules}. Names follow the wiki page
+ * "Configuration"; properties are added with the features that use them.
  *
  * @param enabled whether the Rule Engine is auto-configured at all
- * @param schema how the engine's {@code rle_*} schema is managed
+ * @param migrateOnStart whether the engine applies its own {@code rle_*} migrations at start-up on the
+ *     host {@code DataSource}; {@code false} for hosts that run migrations in a separate job
  */
 @ConfigurationProperties("horus.bpm.rules")
-public record RuleEngineProperties(@DefaultValue("true") boolean enabled, @DefaultValue Schema schema) {
-
-    /**
-     * Schema management.
-     *
-     * @param migrate whether the engine applies its own migrations at start-up; set to false when the
-     *     {@code rle_*} migrations are applied by a separate deployment step
-     */
-    public record Schema(@DefaultValue("true") boolean migrate) {
-    }
+public record RuleEngineProperties(
+        @DefaultValue("true") boolean enabled,
+        @DefaultValue("true") boolean migrateOnStart) {
 }

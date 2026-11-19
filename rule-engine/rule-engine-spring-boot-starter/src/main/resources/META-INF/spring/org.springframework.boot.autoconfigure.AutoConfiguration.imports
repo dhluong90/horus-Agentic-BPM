@@ -1,1 +1,2 @@
 com.horus.bpm.rules.autoconfigure.RuleEngineAutoConfiguration
+com.horus.bpm.rules.autoconfigure.RuleEngineInactiveAutoConfiguration
