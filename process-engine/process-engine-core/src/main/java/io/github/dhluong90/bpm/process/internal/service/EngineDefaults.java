@@ -39,8 +39,8 @@ public final class EngineDefaults {
     /** {@code query.max-range}: longest start-time range of a list (ADR-0015); may be lowered, never raised. */
     public static final Duration MAX_RANGE = Duration.ofDays(31);
 
-    /** Longest cancellation reason. */
-    public static final int MAX_REASON_LENGTH = 1_000;
+    /** {@code lifecycle.reason-max-length}: longest cancellation reason (PD-103); may be lowered, never raised. */
+    public static final int MAX_REASON_LENGTH = 2_000;
 
     /** Longest business key. */
     public static final int MAX_BUSINESS_KEY_LENGTH = 200;

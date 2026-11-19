@@ -114,7 +114,8 @@ class ProcessRestApiIT {
     void bankBUser() {
         if (!users.userExists("zoe")) {
             users.createUser(User.withUsername("zoe").password("{noop}" + PASSWORD)
-                    .authorities("ROLE_TELLER", "ROLE_CARD_OFFICER", "ROLE_PROCESS_DEPLOYER", "TENANT_bank-b").build());
+                    .authorities("ROLE_TELLER", "ROLE_CARD_OFFICER", "ROLE_PROCESS_DEPLOYER", "ROLE_BRANCH_SUPERVISOR",
+                            "TENANT_bank-b").build());
         }
     }
 
@@ -230,21 +231,18 @@ class ProcessRestApiIT {
         assertThat(ids(json(send("an", "GET", API + "/instances?startedTo=" + to, null, Map.of())))).doesNotContain(id);
     }
 
-    // ---- cancel -----------------------------------------------------------------------------------------------
+    // ---- cancel (PRE-050, PD-103) ------------------------------------------------------------------------------
+
+    static final String REASON = "Customer withdrew the card application";
 
     @Test
     void PRE_050_cancel_ends_the_instance_cancels_its_task_and_a_replay_returns_the_first_answer() throws Exception {
         String id = submit("IT-CANCEL-1", "C-002");
-        HttpResponse<String> before = send("tuan", "GET", API + "/instances/" + id, null, Map.of());
-        String etag = before.headers().firstValue("ETag").orElseThrow();
-        Map<String, String> headers = Map.of("If-Match", etag, "Idempotency-Key", "cancel-it-1",
-                "Content-Type", "application/json");
-        String body = "{\"reason\":\"Customer withdrew the card application\"}";
+        String etag = etag(id);
 
-        HttpResponse<String> cancelled = send("tuan", "POST", API + "/instances/" + id + ":cancel", body, headers);
-        HttpResponse<String> replay = send("tuan", "POST", API + "/instances/" + id + ":cancel", body, headers);
-        HttpResponse<String> otherReason = send("tuan", "POST", API + "/instances/" + id + ":cancel",
-                "{\"reason\":\"Duplicate application\"}", headers);
+        HttpResponse<String> cancelled = cancel("hoa", id, etag, "cancel-it-1", REASON);
+        HttpResponse<String> replay = cancel("hoa", id, etag, "cancel-it-1", REASON);
+        HttpResponse<String> otherReason = cancel("hoa", id, etag, "cancel-it-1", "Duplicate application");
 
         assertThat(cancelled.statusCode()).as(cancelled.body()).isEqualTo(200);
         JsonNode instance = JSON.readTree(cancelled.body());
@@ -255,31 +253,61 @@ class ProcessRestApiIT {
         assertThat(replay.body()).isEqualTo(cancelled.body());
         assertThat(problem(otherReason)).isEqualTo("422 IDEMPOTENCY_KEY_REUSE_MISMATCH");
         assertThat(ended(id)).as("one INSTANCE_ENDED entry, none from the replay").isEqualTo(1);
-        assertThat(jdbc.sql("SELECT details->>'reason' FROM pre_history WHERE tenant_id = 'bank-a' AND instance_id = ? "
-                + "AND event_type = 'INSTANCE_ENDED'").param(id).query(String.class).single())
-                .isEqualTo("Customer withdrew the card application");
-        assertThat(EventRecorder.EVENTS.stream().filter(e -> e.type().equals("processes.instance.cancelled.v1")
-                && id.equals(e.payload().get("instanceId"))).count()).isEqualTo(1);
-
-        String now = send("tuan", "GET", API + "/instances/" + id, null, Map.of()).headers().firstValue("ETag").orElseThrow();
-        assertThat(problem(send("tuan", "POST", API + "/instances/" + id + ":cancel", null,
-                Map.of("If-Match", now, "Idempotency-Key", "cancel-it-1b")))).isEqualTo("409 INVALID_STATE");
+        assertThat(jdbc.sql("SELECT actor_id || ' | ' || (details->>'reason') FROM pre_history WHERE tenant_id = 'bank-a' "
+                + "AND instance_id = ? AND event_type = 'INSTANCE_ENDED'").param(id).query(String.class).single())
+                .isEqualTo("hoa | " + REASON);
+        List<ProcessEventPublisher.Event> events = EventRecorder.EVENTS.stream()
+                .filter(e -> e.type().equals("processes.instance.cancelled.v1") && id.equals(e.payload().get("instanceId")))
+                .toList();
+        assertThat(events).singleElement().satisfies(e -> {
+            assertThat(e.payload().get("cancelledBy")).isEqualTo("hoa");
+            assertThat(e.payload().get("reason")).isEqualTo(REASON);
+        });
+        assertThat(problem(cancel("hoa", id, etag(id), "cancel-it-1b", "Again"))).isEqualTo("409 INVALID_STATE");
     }
 
     @Test
-    void PRE_050_a_stale_if_match_is_409_VERSION_CONFLICT_and_a_caller_without_start_permission_is_403() throws Exception {
+    void PRE_050_cancel_needs_processes_cancel_which_processes_start_does_not_grant() throws Exception {
         String id = submit("IT-CANCEL-2", "C-002");
+        String etag = etag(id);
 
-        HttpResponse<String> stale = send("tuan", "POST", API + "/instances/" + id + ":cancel", null,
-                Map.of("If-Match", "\"0\"", "Idempotency-Key", "cancel-it-2"));
-        HttpResponse<String> officer = send("an", "POST", API + "/instances/" + id + ":cancel", null,
-                Map.of("If-Match", "\"1\"", "Idempotency-Key", "cancel-it-3"));
-        HttpResponse<String> missing = send("tuan", "POST", API + "/instances/01JD0000000000000000000000:cancel", null,
-                Map.of("If-Match", "\"1\"", "Idempotency-Key", "cancel-it-4"));
+        HttpResponse<String> teller = cancel("tuan", id, etag, "cancel-it-2", REASON);
+        HttpResponse<String> officer = cancel("an", id, etag, "cancel-it-3", REASON);
 
-        assertThat(problem(stale)).isEqualTo("409 VERSION_CONFLICT");
+        assertThat(problem(teller)).as("tuan may start but not cancel").isEqualTo("403 PERMISSION_DENIED");
+        assertThat(JSON.readTree(teller.body()).get("detail").stringValue()).contains("processes:cancel");
         assertThat(problem(officer)).isEqualTo("403 PERMISSION_DENIED");
-        assertThat(problem(missing)).isEqualTo("404 INSTANCE_NOT_FOUND");
+        assertThat(meLists("hoa")).contains("processes:cancel", "processes:start");
+        assertThat(meLists("tuan")).contains("processes:start").doesNotContain("processes:cancel");
+        assertThat(status(id)).isEqualTo("RUNNING");
+        assertThat(ended(id)).isZero();
+    }
+
+    @Test
+    void PRE_050_a_missing_blank_or_too_long_reason_is_400_and_nothing_is_written() throws Exception {
+        String id = submit("IT-CANCEL-R", "C-002");
+        String etag = etag(id);
+
+        HttpResponse<String> none = send("hoa", "POST", API + "/instances/" + id + ":cancel", null,
+                Map.of("If-Match", etag, "Idempotency-Key", "reason-1"));
+        HttpResponse<String> blank = cancel("hoa", id, etag, "reason-2", "   ");
+        HttpResponse<String> tooLong = cancel("hoa", id, etag, "reason-3", "x".repeat(2_001));
+        HttpResponse<String> longest = cancel("hoa", id, etag, "reason-4", "x".repeat(2_000));
+
+        assertThat(problem(none)).isEqualTo("400 INPUT_INVALID");
+        assertThat(problem(blank)).isEqualTo("400 INPUT_INVALID");
+        assertThat(problem(tooLong)).isEqualTo("400 INPUT_INVALID");
+        assertThat(longest.statusCode()).as("2,000 characters is the limit, inclusive").isEqualTo(200);
+        assertThat(ended(id)).isEqualTo(1);
+    }
+
+    @Test
+    void PRE_050_a_stale_if_match_is_409_and_an_unknown_instance_is_404() throws Exception {
+        String id = submit("IT-CANCEL-S", "C-002");
+
+        assertThat(problem(cancel("hoa", id, "\"0\"", "cancel-it-5", REASON))).isEqualTo("409 VERSION_CONFLICT");
+        assertThat(problem(cancel("hoa", "01JD0000000000000000000000", "\"1\"", "cancel-it-6", REASON)))
+                .isEqualTo("404 INSTANCE_NOT_FOUND");
         assertThat(status(id)).isEqualTo("RUNNING");
         assertThat(ended(id)).isZero();
     }
@@ -287,10 +315,10 @@ class ProcessRestApiIT {
     @Test
     void PRE_050_two_concurrent_cancels_with_one_lock_version_cancel_once() throws Exception {
         String id = submit("IT-CANCEL-3", "C-002");
-        String etag = send("tuan", "GET", API + "/instances/" + id, null, Map.of()).headers().firstValue("ETag").orElseThrow();
+        String etag = etag(id);
 
-        List<HttpResponse<String>> answers = concurrently(2, () -> send("tuan", "POST", API + "/instances/" + id + ":cancel",
-                null, Map.of("If-Match", etag, "Idempotency-Key", "cancel-race-" + UUID.randomUUID())));
+        List<HttpResponse<String>> answers = concurrently(2,
+                () -> cancel("hoa", id, etag, "cancel-race-" + UUID.randomUUID(), REASON));
 
         assertThat(answers.stream().map(ProcessRestApiIT::problemOrOk).sorted().toList())
                 .containsExactly("200", "409 VERSION_CONFLICT");
@@ -300,10 +328,9 @@ class ProcessRestApiIT {
     @Test
     void PRE_050_concurrent_cancels_with_one_idempotency_key_cancel_once_and_answer_alike() throws Exception {
         String id = submit("IT-CANCEL-4", "C-002");
-        String etag = send("tuan", "GET", API + "/instances/" + id, null, Map.of()).headers().firstValue("ETag").orElseThrow();
+        String etag = etag(id);
 
-        List<HttpResponse<String>> answers = concurrently(4, () -> send("tuan", "POST", API + "/instances/" + id + ":cancel",
-                null, Map.of("If-Match", etag, "Idempotency-Key", "cancel-same-key")));
+        List<HttpResponse<String>> answers = concurrently(4, () -> cancel("hoa", id, etag, "cancel-same-key", REASON));
 
         assertThat(answers).extracting(HttpResponse::statusCode).containsOnly(200);
         assertThat(answers.stream().map(HttpResponse::body).distinct()).hasSize(1);
@@ -318,8 +345,7 @@ class ProcessRestApiIT {
         long history = history(id);
 
         HttpResponse<String> read = send("zoe", "GET", API + "/instances/" + id, null, Map.of());
-        HttpResponse<String> cancel = send("zoe", "POST", API + "/instances/" + id + ":cancel", null,
-                Map.of("If-Match", "\"1\"", "Idempotency-Key", "zoe-cancel-1"));
+        HttpResponse<String> cancel = cancel("zoe", id, "\"1\"", "zoe-cancel-1", REASON);
         JsonNode list = json(send("zoe", "GET", API + "/instances?status=RUNNING,COMPLETED,CANCELLED", null, Map.of()));
         JsonNode definitions = json(send("zoe", "GET", API + "/definitions", null, Map.of()));
         HttpResponse<String> version = send("zoe", "GET", API + "/definitions/card-fee-review/versions/1", null, Map.of());
@@ -338,10 +364,11 @@ class ProcessRestApiIT {
     @Test
     void TR_TEN_01_a_tenant_header_for_another_tenant_is_403_and_nothing_is_written() throws Exception {
         String id = submit("IT-TENANT-2", "C-002");
-        String etag = send("tuan", "GET", API + "/instances/" + id, null, Map.of()).headers().firstValue("ETag").orElseThrow();
+        String etag = etag(id);
 
-        HttpResponse<String> switched = send("tuan", "POST", API + "/instances/" + id + ":cancel", null,
-                Map.of("If-Match", etag, "Idempotency-Key", "switch-1", "X-Tenant-Id", "bank-b"));
+        HttpResponse<String> switched = send("hoa", "POST", API + "/instances/" + id + ":cancel",
+                "{\"reason\":\"" + REASON + "\"}", Map.of("If-Match", etag, "Idempotency-Key", "switch-1",
+                        "X-Tenant-Id", "bank-b", "Content-Type", "application/json"));
 
         assertThat(problem(switched)).isEqualTo("403 TENANT_NOT_ALLOWED");
         assertThat(status(id)).isEqualTo("RUNNING");
@@ -373,6 +400,25 @@ class ProcessRestApiIT {
                 Map.of("Content-Type", "application/json"));
         assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
         return JSON.readTree(response.body()).get("instanceId").stringValue();
+    }
+
+    private HttpResponse<String> cancel(String user, String id, String ifMatch, String key, String reason)
+            throws Exception {
+        // Written with a JSON writer, so any reason is escaped.
+        String body = JSON.writeValueAsString(Map.of("reason", reason));
+        return send(user, "POST", API + "/instances/" + id + ":cancel", body, Map.of("If-Match", ifMatch,
+                "Idempotency-Key", key, "Content-Type", "application/json"));
+    }
+
+    private String etag(String id) throws Exception {
+        return send("tuan", "GET", API + "/instances/" + id, null, Map.of()).headers().firstValue("ETag").orElseThrow();
+    }
+
+    private List<String> meLists(String user) throws Exception {
+        JsonNode me = JSON.readTree(send(user, "GET", "/api/bpm/me", null, Map.of()).body());
+        List<String> out = new ArrayList<>();
+        me.get("permissions").forEach(p -> out.add(p.stringValue()));
+        return out;
     }
 
     private String status(String id) {

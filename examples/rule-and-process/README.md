@@ -104,7 +104,7 @@ Demo users on the `dev` profile, all with the password from `HORUS_DEMO_PASSWORD
 | `an` | `CARD_OFFICER` | `processes:read`, `processes:task:work`, `rules:evaluate` |
 | `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:read`; `rules:evaluate` on `dev` only |
 | `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve`; `rules:evaluate` on `dev` only |
-| `hoa` | `TELLER`, `CARD_OFFICER` (a branch supervisor) | both of the above sets; the four-eyes review refuses her on applications she submitted |
+| `hoa` | `TELLER`, `CARD_OFFICER`, `BRANCH_SUPERVISOR` | both of the above sets plus `processes:cancel`; the four-eyes review refuses her on applications she submitted |
 
 On the `dev` profile the author and the approver may also evaluate, so the cockpit's Try it works for them ([`application-dev.yml`](src/main/resources/application-dev.yml)).
 
@@ -175,17 +175,21 @@ curl -s -u an:$P "localhost:8080/api/bpm/processes/v1/instances?limit=500"
 # {"status":400,"code":"QUERY_INVALID","detail":"limit must be 1 to 200 (query.max-page-size)",...}
 ```
 
-A teller may cancel a running application. `If-Match` carries the instance `ETag` (its `lockVersion`), and `Idempotency-Key` makes a retry safe:
+A branch supervisor may cancel a running application: cancelling needs `processes:cancel`, which starting (`processes:start`) does not grant. The reason is required, at most 2,000 characters, and is recorded on the history entry and the `processes.instance.cancelled.v1` event with the actor. `If-Match` carries the instance `ETag` (its `lockVersion`), and `Idempotency-Key` makes a retry safe:
 
 ```bash
 curl -s -u tuan:$P -H 'Content-Type: application/json' \
   -d '{"applicationId":"APP-1003","customerId":"C-002"}' localhost:8080/api/cards/applications
 # {"instanceStatus":"RUNNING","instanceId":"01M7S2Q4B1XWJ3T7N9D2E5K8H0",...}
 I=01M7S2Q4B1XWJ3T7N9D2E5K8H0
-curl -s -u tuan:$P -H 'Content-Type: application/json' -H 'If-Match: "1"' -H 'Idempotency-Key: cancel-1003' \
+curl -s -u tuan:$P -H 'Content-Type: application/json' -H 'If-Match: "1"' -H 'Idempotency-Key: cancel-1003t' \
+  -d '{"reason":"Customer withdrew the card application"}' "localhost:8080/api/bpm/processes/v1/instances/${I}:cancel"
+# {"status":403,"code":"PERMISSION_DENIED","detail":"Needs processes:cancel",...}
+curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "1"' -H 'Idempotency-Key: cancel-1003' \
   -d '{"reason":"Customer withdrew the card application"}' "localhost:8080/api/bpm/processes/v1/instances/${I}:cancel"
 # {"id":"01M7S2Q4B1XWJ3T7N9D2E5K8H0",...,"status":"CANCELLED","tasks":[{...,"status":"CANCELLED"}],"lockVersion":2,...}
-curl -s -u tuan:$P -H 'If-Match: "2"' -H 'Idempotency-Key: cancel-1003b' "localhost:8080/api/bpm/processes/v1/instances/${I}:cancel" -X POST
+curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "2"' -H 'Idempotency-Key: cancel-1003b' \
+  -d '{"reason":"Duplicate"}' "localhost:8080/api/bpm/processes/v1/instances/${I}:cancel"
 # {"status":409,"code":"INVALID_STATE","detail":"Instance 01M7S2Q4B1XWJ3T7N9D2E5K8H0 is CANCELLED",...}
 ```
 

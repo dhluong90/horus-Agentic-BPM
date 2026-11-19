@@ -19,6 +19,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param security mapping of the host's roles to engine permissions
  * @param handlers local step settings
  * @param query read limits of the list endpoints
+ * @param lifecycle instance lifecycle settings
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -28,7 +29,8 @@ public record ProcessEngineProperties(
         @DefaultValue("PT24H") Duration idempotencyRetention,
         @DefaultValue Security security,
         @DefaultValue Handlers handlers,
-        @DefaultValue Query query) {
+        @DefaultValue Query query,
+        @DefaultValue Lifecycle lifecycle) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -95,6 +97,18 @@ public record ProcessEngineProperties(
     }
 
     /**
+     * @param reasonMaxLength longest reason a cancellation accepts (PD-103); may be lowered, never raised
+     */
+    public record Lifecycle(@DefaultValue("2000") int reasonMaxLength) {
+        public Lifecycle {
+            if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.MAX_REASON_LENGTH) {
+                throw new IllegalArgumentException("horus.bpm.processes.lifecycle.reason-max-length must be 1 to "
+                        + EngineDefaults.MAX_REASON_LENGTH + " (it may be lowered, never raised)");
+            }
+        }
+    }
+
+    /**
      * @param rolePermissions host authority (for example {@code ROLE_CARD_OFFICER}) to engine permissions
      */
     public record Security(@DefaultValue Map<String, List<String>> rolePermissions) {
@@ -102,6 +116,7 @@ public record ProcessEngineProperties(
 
     EngineSettings toSettings() {
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
-                idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange());
+                idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange(),
+                lifecycle.reasonMaxLength());
     }
 }

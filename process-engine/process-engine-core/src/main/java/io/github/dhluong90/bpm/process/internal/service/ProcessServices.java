@@ -105,6 +105,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     static final String PERMISSION_DEPLOY = "processes:deploy";
     static final String PERMISSION_START = "processes:start";
+    static final String PERMISSION_CANCEL = "processes:cancel";
     static final String PERMISSION_READ = "processes:read";
     static final String PERMISSION_TASK_WORK = "processes:task:work";
     static final String DEV_APPROVER = "system:dev-auto-approve";
@@ -450,12 +451,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     @Override
     public ProcessInstance cancel(String instanceId, long expectedLockVersion, String reason, String idempotencyKey) {
         String tenant = tenant();
-        String caller = callerWith(PERMISSION_START);
+        // PD-103: cancelling has its own permission; processes:start does not grant it.
+        String caller = callerWith(PERMISSION_CANCEL);
         if (idempotencyKey == null) {
             throw new PreconditionRequiredException("Cancelling an instance needs an Idempotency-Key");
         }
-        if (reason != null && (reason.isBlank() || reason.length() > EngineDefaults.MAX_REASON_LENGTH)) {
-            throw new InputInvalidException("reason must be 1 to " + EngineDefaults.MAX_REASON_LENGTH + " characters");
+        if (reason == null || reason.isBlank() || reason.length() > settings.reasonMaxLength()) {
+            throw new InputInvalidException("reason is required, 1 to " + settings.reasonMaxLength()
+                    + " characters (lifecycle.reason-max-length)");
         }
         String requestHash = Hashes.sha256Parts("cancel", caller, instanceId, reason, String.valueOf(expectedLockVersion));
         return transactions.inTransaction(() -> idempotent(tenant, "cancel", idempotencyKey, requestHash, () -> {
