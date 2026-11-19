@@ -12,6 +12,7 @@
 #            4. a commit off main                      refused
 #            5. a per-module tag on a commit off main  both problems named in one run
 #            6. a POM Maven cannot read                refused, and a per-module tag is still named
+#            7. a tag named origin/main on the commit  refused: main is refs/remotes/origin/main only
 #          The checkout itself is never changed.
 # Exit:    0 when every case behaves as expected, 1 otherwise.
 
@@ -99,6 +100,13 @@ expect "a commit off main is refused" "v$release" 1 "which is not on main"
 expect "every problem is named in one run" "rule-engine/v$release" 1 \
   "is a per-module tag" "which is not on main"
 
+# A tag (or branch) named origin/main must not stand in for main.
+git_ tag origin/main HEAD
+git_ branch -q origin/main HEAD 2>/dev/null || true
+expect "a tag named origin/main does not fake main" "v$release" 1 "which is not on main"
+git_ tag -d origin/main > /dev/null
+git_ branch -q -D origin/main 2>/dev/null || true
+
 # A POM Maven cannot read: the guard retries, then still names the wrong tag form.
 git_ checkout -q main
 printf '<project>\n' > "$repo/bpm-bom/pom.xml"
@@ -111,4 +119,4 @@ if (( failures > 0 )); then
   echo "Release tag guard tests: $failures case(s) failed."
   exit 1
 fi
-echo "Release tag guard tests: all 6 cases behaved as expected."
+echo "Release tag guard tests: all 7 cases behaved as expected."
