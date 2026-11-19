@@ -2,11 +2,17 @@
 -- replacing a draft in place appends one DRAFT_UPDATED history row with the actor, the lock version after the
 -- change and the canonical hash before and after it.
 --
--- Additive and forward-only: two nullable columns and a wider CHECK on the action. V3 is never edited. The CHECK is
--- swapped in one transaction under a bounded lock_timeout; ADD CONSTRAINT ... NOT VALID takes the ACCESS EXCLUSIVE
--- lock only for the catalogue change, and VALIDATE CONSTRAINT then scans the existing rows under SHARE UPDATE
--- EXCLUSIVE, which does not block inserts. Every existing row already satisfies the wider list. The append-only
--- triggers of V4 fire on row UPDATE, DELETE and TRUNCATE only, so this DDL is unaffected and they stay in force.
+-- Additive and forward-only: two nullable columns and a wider CHECK on the action. V3 is never edited.
+--
+-- Locks: Flyway runs this script in one transaction. The first ALTER TABLE (ADD COLUMN, metadata only, no rewrite)
+-- takes an ACCESS EXCLUSIVE lock on rle_version_history, and that lock is held until the transaction commits. Every
+-- later statement, including the two VALIDATE CONSTRAINT scans, therefore runs under ACCESS EXCLUSIVE too: reads and
+-- writes of the history table wait for the whole migration, not only for the catalogue changes. NOT VALID followed by
+-- VALIDATE does not shorten that window here; it would only if VALIDATE ran in its own, later transaction. The table
+-- holds a few rows per rule set version, so the scans take milliseconds, and lock_timeout makes the migration fail
+-- fast instead of queueing behind a long transaction that holds a lock on the table. Every existing row already
+-- satisfies both new checks. The append-only triggers of V4 fire on row UPDATE, DELETE and TRUNCATE only, so this DDL
+-- is unaffected and they stay in force.
 --
 -- A replica still on the release before this one has no PUT of a draft, so it never needs the new action, and it
 -- does not read the new columns. Rollback, if ever needed, is a new forward migration; it must first decide what to

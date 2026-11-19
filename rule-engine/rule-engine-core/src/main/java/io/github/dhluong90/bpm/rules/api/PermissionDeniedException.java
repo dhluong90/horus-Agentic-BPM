@@ -28,7 +28,7 @@ public final class PermissionDeniedException extends HorusBpmException {
      */
     public static PermissionDeniedException notAuthor(String ruleSet, int version) {
         return new PermissionDeniedException("Only the author of " + ruleSet + " v" + version
-                + " may replace it; start your own draft with POST .../rule-sets/" + ruleSet + "/versions?copyOf="
-                + version, true);
+                + " may replace it; import your own document as a new version with POST .../rule-sets/" + ruleSet
+                + "/versions", true);
     }
 }
