@@ -162,7 +162,7 @@ final class RestSupport {
     static long requiredIfMatch(String header, String operation) {
         Long lock = ifMatch(header);
         if (lock == null) {
-            throw new com.horus.bpm.rules.api.PreconditionRequiredException(operation);
+            throw new io.github.dhluong90.bpm.rules.api.PreconditionRequiredException(operation);
         }
         return lock;
     }
@@ -176,7 +176,7 @@ final class RestSupport {
      */
     static String requiredIdempotencyKey(String key, String operation) {
         if (key == null || key.isBlank()) {
-            throw new com.horus.bpm.rules.api.InputInvalidException(operation + " requires an Idempotency-Key header");
+            throw new io.github.dhluong90.bpm.rules.api.InputInvalidException(operation + " requires an Idempotency-Key header");
         }
         return key;
     }

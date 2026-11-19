@@ -270,14 +270,14 @@ class EditorApiPostgresIT {
         try {
             command.run();
             return "OK";
-        } catch (com.horus.bpm.rules.api.HorusBpmException e) {
+        } catch (io.github.dhluong90.bpm.rules.api.HorusBpmException e) {
             return e.code();
         }
     }
 
     /** A caller per thread, so two identities can act at the same moment. */
-    static final class PerThreadCaller implements com.horus.bpm.rules.spi.TenantResolver,
-            com.horus.bpm.rules.spi.CallerResolver {
+    static final class PerThreadCaller implements io.github.dhluong90.bpm.rules.spi.TenantResolver,
+            io.github.dhluong90.bpm.rules.spi.CallerResolver {
         private final ThreadLocal<String[]> current = ThreadLocal.withInitial(() -> new String[] {"bank-a", "alice"});
 
         void set(String tenant, String user) {
