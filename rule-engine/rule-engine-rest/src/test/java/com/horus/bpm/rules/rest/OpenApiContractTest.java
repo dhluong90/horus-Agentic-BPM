@@ -80,7 +80,9 @@ class OpenApiContractTest {
 
         // When
         spec.get("paths").properties().forEach(path -> path.getValue().properties().forEach(operation -> {
-            if (!"post".equals(operation.getKey())) {
+            // A POST that writes nothing (a simulation, RLE-016) takes no key; its description says so.
+            if (!"post".equals(operation.getKey())
+                    || operation.getValue().path("description").asString().contains("Writes nothing")) {
                 return;
             }
             String name = "POST " + path.getKey();
