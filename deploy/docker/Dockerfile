@@ -1,10 +1,11 @@
 # Container image of an example host (a Spring Boot service that embeds the engines).
 # Build context: the repository root.
 #
-#   docker build --platform linux/amd64 -f deploy/docker/Dockerfile -t horus-bpm/rule-engine-only:local .
-#   docker build --platform linux/amd64 -f deploy/docker/Dockerfile --build-arg EXAMPLE=rule-and-process -t horus-bpm/rule-and-process:local .
+#   docker build -f deploy/docker/Dockerfile -t horus-bpm/rule-engine-only:local .
+#   docker build -f deploy/docker/Dockerfile --build-arg EXAMPLE=rule-and-process -t horus-bpm/rule-and-process:local .
 #
-# The runtime image is linux/amd64 (see stage 3). EXAMPLE names a folder under examples/. Base images are pinned by digest; the comment names the
+# The runtime image is linux/amd64 or linux/arm64, the architecture of the machine that builds it unless
+# --platform says otherwise (see stage 3). EXAMPLE names a folder under examples/. Base images are pinned by digest; the comment names the
 # version the digest resolved to. Update tag, digest and comment together (docs/DEPLOYING.md).
 # Nothing secret is read at build time: credentials reach the container as environment variables at run time.
 
@@ -55,8 +56,8 @@ RUN --mount=type=cache,id=horus-bpm-m2,target=/root/.m2/repository \
 #   2. the SHA-256 pinned below (the bytes are the ones reviewed when the version was bumped).
 # This stage is thrown away: gnupg never reaches the runtime image.
 # 21.0.13.1 fixes CVE-2026-114938 (high); the official eclipse-temurin images still carry 21.0.13+9.
-# Adoptium publishes this JRE for x64 only so far, so the image is linux/amd64 (docker-compose.yml sets
-# the platform). Add the aarch64 checksum here when Adoptium publishes that build.
+# One pinned SHA-256 per architecture, both from the .sha256.txt beside each archive on the release page;
+# the GPG check applies to both. Update both together.
 FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS jre
 ARG TARGETARCH
 ARG JRE_RELEASE=jdk-21.0.13.1+2
@@ -66,7 +67,8 @@ COPY deploy/docker/adoptium.asc /tmp/adoptium.asc
 RUN set -eu; \
     case "${TARGETARCH}" in \
       amd64) arch=x64; sha256=72835f41a468ae949fc058f8ec6a73d303ca3e5ea165621e08aacb36bb537bba ;; \
-      *) echo "No patched Temurin JRE for ${TARGETARCH} yet; build with --platform linux/amd64" >&2; exit 1 ;; \
+      arm64) arch=aarch64; sha256=0236751150c82f1ef91be8cc32a36091a95e97650285fea848f2bb82311e5da7 ;; \
+      *) echo "No pinned Temurin JRE for ${TARGETARCH}; build for linux/amd64 or linux/arm64" >&2; exit 1 ;; \
     esac; \
     apk add --no-cache gnupg; \
     url="https://github.com/adoptium/temurin21-binaries/releases/download/$(echo "${JRE_RELEASE}" | sed 's/+/%2B/')/OpenJDK21U-jre_${arch}_alpine-linux_hotspot_${JRE_FILE_VERSION}.tar.gz"; \

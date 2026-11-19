@@ -54,10 +54,7 @@ services:
       dockerfile: deploy/docker/Dockerfile
       args:
         EXAMPLE: ${HORUS_EXAMPLE:-rule-engine-only}
-      # The patched JRE in the image is published for x64 only so far (deploy/docker/Dockerfile).
-      platforms:
-        - linux/amd64
-    platform: linux/amd64
+      # Built for the architecture of this machine: linux/amd64 or linux/arm64 (deploy/docker/Dockerfile).
     image: horus-bpm/${HORUS_EXAMPLE:-rule-engine-only}:local
     depends_on:
       postgres:

@@ -37,7 +37,7 @@ flowchart LR
 | Free port 8080 on 127.0.0.1, or another port set in `.env` | `lsof -nP -iTCP:8080 -sTCP:LISTEN` prints nothing |
 | Network access on the first build | Maven Central, the npm registry and GitHub (the JRE download) |
 
-The image is `linux/amd64`. Its JRE, Temurin 21.0.13.1, carries the fix for a high-severity Java vulnerability (CVE-2026-114938) and is published for x64 only so far. On Apple silicon, Docker Desktop runs the image under emulation; the host still starts in about 5 seconds.
+The image is built for the architecture of your machine, `linux/amd64` or `linux/arm64`, so it runs natively on Apple silicon and ARM servers. Its JRE, Temurin 21.0.13.1, carries the fix for a high-severity Java vulnerability (CVE-2026-114938). Other architectures are not supported.
 
 ## 1. Start it
 
@@ -260,7 +260,8 @@ PASS  no high or critical vulnerability in horus-bpm/rule-engine-only:local (rep
 | Property | Value |
 |---|---|
 | Stages | Cockpit bundle (Node 22, skipped when the checkout has no `cockpit/web`), Maven build (JDK 21), runtime file system, runtime image |
-| Runtime | Alpine 3.24 reduced to musl and busybox (no package manager, no OpenSSL), Temurin JRE 21.0.13.1 checked against the Adoptium GPG signature and a pinned SHA-256 |
+| Runtime | Alpine 3.24 reduced to musl and busybox (no package manager, no OpenSSL), Temurin JRE 21.0.13.1 checked against the Adoptium GPG signature and a pinned SHA-256 per architecture |
+| Architectures | `linux/amd64` and `linux/arm64`, built natively; the Deploy workflow builds, smoke-tests and scans both |
 | User | `horus`, uid and gid 10001; the container runs with a read-only root file system, `/tmp` in memory (64 MB, `noexec`, `nosuid`, `nodev`), all capabilities dropped, at most 512 processes |
 | Health check | `wget` on `http://127.0.0.1:$PORT/actuator/health` every 10 seconds, after a 60-second start period |
 | Layers | one base layer, then the Spring Boot layers: dependencies, loader, snapshot dependencies, application |
@@ -278,7 +279,7 @@ The build checks the JRE archive twice in a throwaway stage, so `gnupg` never re
 
 To move to a new JRE release:
 
-1. Set `JRE_RELEASE`, `JRE_FILE_VERSION` and the SHA-256 from the `.sha256.txt` beside the new archive on the [Adoptium release page](https://github.com/adoptium/temurin21-binaries/releases).
+1. Set `JRE_RELEASE`, `JRE_FILE_VERSION` and both SHA-256 values, x64 and aarch64, from the `.sha256.txt` beside each new archive on the [Adoptium release page](https://github.com/adoptium/temurin21-binaries/releases).
 2. Build. The log must show both checks:
 
    ```
@@ -343,5 +344,5 @@ The host refuses to start with an issuer and no audience, and refuses the `dev` 
 | `Bind for 127.0.0.1:8080 failed: port is already allocated` | Another process uses 8080 | Set `HORUS_HTTP_PORT=18080` in `.env` and use that port in the commands |
 | Host restarts; log shows `password authentication failed for user "horus"` | A database password changed after the database was created, or the volume is from a version of this guide before the `horus` role existed | `docker compose down -v`, then start again |
 | Sign-in redirects to `/login?error` | Wrong demo password, or the host is not on the `dev` profile | `grep -E 'SPRING_PROFILES_ACTIVE|HORUS_DEMO_PASSWORD' .env` |
-| `No patched Temurin JRE for arm64 yet` during the build | The build was asked for `linux/arm64` | Build through compose, or add `--platform linux/amd64` to `docker build` |
+| `No pinned Temurin JRE for <arch>` during the build | The build was asked for an architecture other than `linux/amd64` or `linux/arm64` | Build on an x64 or ARM64 machine, or add `--platform linux/amd64` to `docker build` |
 | `docker compose up --wait` reports `host` unhealthy | The host did not start | `docker compose logs host` shows the reason, usually the database or a configuration check |
