@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.horus.bpm</groupId>
+    <artifactId>bpm-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>examples-parent</artifactId>
+  <packaging>pom</packaging>
+  <name>Example hosts</name>
+  <description>Parent of the example host services. Examples are built and tested, never published.</description>
+
+  <properties>
+    <!--
+      Examples never ship. This is the only POM allowed to set maven.deploy.skip
+      (tools/check-dependency-policy.py): it also leaves the examples out of the licence gate and
+      the shipped SBOM. They stay in the build SBOM and its vulnerability scan.
+    -->
+    <maven.deploy.skip>true</maven.deploy.skip>
+  </properties>
+
+  <modules>
+    <module>rule-engine-only</module>
+  </modules>
+</project>

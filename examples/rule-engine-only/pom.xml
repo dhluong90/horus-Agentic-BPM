@@ -6,19 +6,13 @@
 
   <parent>
     <groupId>com.horus.bpm</groupId>
-    <artifactId>bpm-parent</artifactId>
+    <artifactId>examples-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
-    <relativePath>../../pom.xml</relativePath>
   </parent>
 
   <artifactId>example-rule-engine-only</artifactId>
   <name>Example host: Rule Engine only</name>
   <description>A minimal Spring Boot service that embeds the Rule Engine on its own PostgreSQL database.</description>
-
-  <properties>
-    <!-- An example, never published. -->
-    <maven.deploy.skip>true</maven.deploy.skip>
-  </properties>
 
   <dependencies>
     <!-- The host's own stack. -->

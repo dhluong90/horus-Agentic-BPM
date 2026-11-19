@@ -1,6 +1,6 @@
 # Rule Engine: Test Plan
 
-Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose name starts with the statement's test id (`TR-QA-01`). A CI script lists the statement ids in `SPEC.md` and fails when a test with that id prefix is missing for a statement whose milestone has been reached.
+Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose name starts with the statement's test id (`TR-QA-01`). A CI script lists the statement ids in `SPEC.md` and fails when a test with that id prefix is missing for a statement whose milestone has been reached. The script is `tools/spec-coverage.py`, run by the CI job "Spec-to-test coverage"; it reads the statement ids in `SPEC.md` and the requirement ids in the "Requirement-level tests" table below. Statements not delivered yet are listed with their milestone in [`spec-pending.txt`](spec-pending.txt). The gate fails on any entry whose milestone is at or before the current milestone in `tools/spec-coverage.ini`, and warns when an entry already has a test; the pull request that adds the test removes the line. Only running tests count: disabled, skipped, `todo` and commented-out tests do not.
 
 **Naming rule.** A test name starts with the id it proves, in upper case with hyphens written as underscores: `RLE_013_...` for a `SPEC.md` statement, `TR_EMB_01_...` for a requirement in [`requirements.md`](../../docs/product/requirements.md). The spec-to-test gate matches this prefix. A test that proves no id (a helper check, a value-type check) carries no id prefix, so it never counts as coverage.
 
@@ -41,6 +41,18 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-022 | `RLE_022_today_uses_rule_set_time_zone` | Unit, replay | M1 | `TR-DET-01`, `TR-DET-05` | Planned |
 | RLE-023 | `RLE_023_engine_json_ignores_host_jackson_settings` | WebMvc in the Spring Boot 4.x and 3.5 legs, dependency-tree check | M1 | `TR-EMB-07`, `TR-API-06` | Planned |
 | RLE-024 | `RLE_024_v1_rule_set_round_trips_through_dmn_model` | Unit over every example rule set, RFC 8785 vectors | M1 | `TR-STD-28`, `TR-STD-03` | Planned |
+| RLE-025 | `RLE_025_reject_returns_pending_version_to_draft_with_reason` | Service, WebMvc, event capture | M1 | `TR-OBS-04`, `TR-IDEM-01` | Planned |
+| RLE-026 | `RLE_026_manual_retire_stops_every_replica_serving_the_version` | Two-replica Testcontainers, event capture, replay | M1 | `TR-OBS-04`, `TR-ASY-04`, `TR-DET-05` | Planned |
+| RLE-027 | `RLE_027_previous_version_retires_once_when_newer_becomes_effective` | Two-replica Testcontainers with `TestClock`, PgBouncer leg, event capture | M1 | `TR-OBS-04`, `TR-DET-01`, `TR-OPS-05` | Planned |
+| RLE-028 | `RLE_028_version_diff_lists_added_changed_removed_and_moved_rows` | Unit (diff of models), WebMvc, two-tenant integration | M1 | `TR-UI-02`, `TR-STD-28`, `TR-STD-03` | Planned |
+| RLE-029 | `RLE_029_decision_search_by_rule_set_and_period_is_bounded` | Testcontainers, query-plan check, two-tenant integration | M1 | `TR-OBS-01`, `TR-SEC-05`, `TR-TEN-01` | Planned |
+| RLE-030 | `RLE_030_explanation_is_generated_from_log_entry_and_version` | Unit, WebMvc, SQL capture | M1 | `TR-OBS-05`, `TR-DET-05`; depends on PD-027 | Planned |
+| RLE-031 | `RLE_031_explanation_masks_inputs_and_covers_no_match_null_and_failure` | Unit, integration, log capture | M1 | `TR-OBS-05`, `TR-SEC-05`, `TR-STD-02`; depends on PD-027 | Planned |
+| RLE-032 | `RLE_032_export_round_trips_to_same_canonical_hash` | Integration, WebMvc, RFC 8785 vectors | M1 | `TR-STD-03`, `TR-STD-28`, `TR-UI-02` | Planned |
+| RLE-033 | `RLE_033_import_as_new_version_creates_next_draft_or_refuses_whole` | WebMvc, integration | M1 | `TR-STD-01`, `TR-IDEM-01`, `TR-UI-02` | Planned |
+| RLE-034 | `RLE_034_compiled_cache_is_bounded_and_heap_stays_flat` | Integration with heap measurement (median of three after full GC), metrics check | M1 | `TR-PERF-06` | Planned |
+| RLE-035 | `RLE_035_masking_key_required_at_startup_and_never_leaked` | Context runner, example host start-up, log capture | M1 | `TR-SEC-10` | Planned |
+| RLE-036 | `RLE_036_every_rest_error_is_problem_details_with_stable_code` | WebMvc over the error matrix, injected failure | M1 | `TR-SEC-08` | Planned |
 
 ## Requirement-level tests
 Tests that prove a platform requirement directly, before any `SPEC.md` statement covers it. "Partial" means the test proves a precondition or part of the requirement; the named statement completes it.
@@ -61,4 +73,4 @@ Tests that prove a platform requirement directly, before any `SPEC.md` statement
 | Gap | Plan |
 |---|---|
 | Jackson 3 inside the core is conditional on the Spring Boot 3.5 coexistence test (ADR-0021) | The first parsing pull request (#1) runs on Spring Boot 4.x only; the 3.5 leg and `RLE-023` arrive with the platform compatibility slice, which must pass before 3.5 support is claimed. `RuleLifecycleIT` already runs the host with `SNAKE_CASE` and checks camelCase engine responses on Spring Boot 4 |
-| The licence scope for JUnit, jqwik and JMH is pending PD-053 | Tests are written now; the CI licence check is configured after the decision |
+| The licence scope for JUnit, jqwik and JMH is pending PD-053 | Tests are written now. The CI licence check (`TR-LIC-01`) covers compile, runtime and provided scopes of the shipped modules; test scope joins it after the decision. Test-scope dependencies are already scanned for critical vulnerabilities |

@@ -1,0 +1,51 @@
+flowchart LR
+  subgraph T1 ["Tier 1: shell, on every screen"]
+    SH["Cockpit shell<br/>host bar, one sign-in 0.1<br/>tenant switcher 0.2<br/>EN or VI, light or dark 0.1"]
+  end
+  subgraph T2 ["Tier 2: lenses, each opens on a list or a queue"]
+    L1["Canvas home<br/>rule set list in 0.1,<br/>process canvas from 0.2"]
+    L2["Matrix editor<br/>dense table and impact"]
+    L3["Changes waiting<br/>dossier queue 0.1"]
+    L4["Control tower<br/>inbox and incidents 0.2"]
+    L5["Decisions 0.1"]
+  end
+  subgraph T3 ["Tier 3: detail and action"]
+    S11["Docked decision table<br/>Formula lens 0.1"]
+    S12["Policy readings lens 0.1"]
+    S13["And/Or builder lens<br/>1.0, cut candidate"]
+    S14["Trace of one decision 0.1"]
+    S21["Spreadsheet round-trip 0.1"]
+    S22["In-cockpit cell and row editing<br/>0.1, proposed"]
+    S23["Typed matrix editing 0.2"]
+    S24["Fee income impact, replay 1.0"]
+    S31["Change dossier: matrix diff,<br/>policy redline 0.1"]
+    S32["Four-eyes gate and audit trail 0.1"]
+    S33["Process graph diff 1.0"]
+    S41["Guardrail inspector<br/>with action dock 0.2"]
+    S42["Autonomy and eval telemetry<br/>0.2, eval panel 1.0"]
+    S51["Decision page with reading 0.1"]
+  end
+  SH --> L1 & L2 & L3 & L4 & L5
+  L1 --> S11 & S12 & S14
+  L1 -.-> S13
+  L2 --> S21 & S23
+  L2 -.-> S22
+  L2 -.-> S24
+  L3 --> S31 & S32
+  L3 -.-> S33
+  L4 --> S41 & S42
+  L5 --> S51
+  S41 -. "Edit guardrail row" .-> S13
+  NOTE["Solid: Cockpit 0.1 or 0.2. Dotted: 1.0, cut candidate or proposed.<br/>Synthesis by release is a planning view in the prototype; it does not ship"]
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F;
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F;
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F;
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F;
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F;
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F;
+  class SH,L1,L2,L3,L4,L5 client;
+  class S11,S12,S13,S14,S21,S22,S23,S24,S31,S32,S33,S41,S42,S51 client;
+  class NOTE obs;
+  style T1 fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style T2 fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style T3 fill:none,stroke:#1565C0,stroke-dasharray:5 5

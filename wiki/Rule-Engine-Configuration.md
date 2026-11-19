@@ -34,13 +34,20 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `masking.hmac-key` | unset | 0.1 (M1) | Base64 key, 32 bytes or more, for HMAC-SHA256 of masked inputs. Supply from an environment variable or secret store. Start-up fails if any loaded rule set masks an input and no key is set |
 | `evaluation.max-rows` | `5000` | 0.1 (M1) | Largest table a version may contain |
 | `evaluation.max-batch` | `1000` | 0.1 (M1), may move to M2 | Largest `:evaluate-batch` request |
+| `simulation.max-inputs` | `1000` | 0.1 (M1) | Largest set of sample inputs per `:simulate`; may be lowered, never raised |
 | `evaluation.regex-timeout-ms` | `50` | 0.1 (M1) | Bounded matcher timeout; a hit fails the decision with `EVALUATION_ERROR` |
 | `evaluation.regex-max-input-length` | `4096` | 0.1 (M1) | Longer inputs fail `matches()` deterministically |
 | `cache.max-entries` | `1000` | 0.1 (M1) | Compiled versions kept per replica, LRU eviction |
 | `cache.listen-notify` | `true` | 0.1 (M1) | Open one session-mode connection for `LISTEN horus_rle_cache`; set `false` behind a transaction-mode pooler |
 | `cache.epoch-check-interval` | `PT5S` | 0.1 (M1) | Interval of the `cache_epoch` sweep; this is the staleness bound when NOTIFY is unavailable |
 | `idempotency.retention` | `PT24H` | 0.1 (M1) | Lifetime of `rle_idempotency` rows |
+| `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | 0.1 (M1) | Bounds of `GET /decisions` and list reads; range and page size may be lowered, never raised |
+| `lifecycle.sweep-interval` | `PT1M` | 0.1 (M1) | How often superseded versions are marked retired; evaluation already switches at `effectiveFrom` |
+| `lifecycle.reason-required`, `lifecycle.reason-max-length` | `true`, `2000` | 0.1 (M1) | Reason on reject and retire; may be made optional for reject only |
+| `lifecycle.system-actor` | `system` | 0.1 (M1) | Actor recorded when the engine retires a superseded version |
+| `decision-log.retention-floor` | engine floor, pending PD-050 | 0.1 (M1) | Shortest `decision-log.retention` accepted; you may raise it, not lower it below the engine floor |
 | `maker-checker.enabled` | `true` | 0.1 (M1) | `false` is refused unless the `dev` profile is active |
+| `tenancy.claim` | `tenant_id` | 0.1 (M1) | JWT claim read by the default `TenantResolver` |
 | `tenancy.resolver` | `security-context` | 0.1 (M1) | `security-context`, `header:X-Tenant-Id` (behind a gateway only), or the name of a `TenantResolver` bean |
 | `events.decision-evaluated` | `false` | 0.1 (M1) | Publish `rules.decision.evaluated.v1` for every decision |
 | `scheduler.enabled` | `true` | 0.1 (M1) | Run the engine's scheduler thread (outbox relay, partition creation, partition drop, idempotency cleanup) on this replica |
@@ -96,9 +103,12 @@ The `ruleEngine` health contributor also reports whether next month's partition 
 | `CallerResolver` | Principal name | Audit needs a different identity |
 | `RuleFunctionRegistry` | Built-in pure functions | Host registers extra pure functions, listed in the cockpit |
 | `RuleEventPublisher` | Spring `ApplicationEventPublisher` | Events go to an outbox or a bus |
+| `CurrencyRegistry` | ISO 4217 scales from the JDK | A currency has no ISO scale (for example `XAU`) or needs another scale |
+| `DecisionExplainer` | English explanation text | Another language or house wording in `text`; the structured reasons stay the same |
+| `LifecycleGuard` | Allows every transition | An extra veto, such as a change ticket on retire; it cannot let through what the engine refuses |
 | `Clock` | System UTC | Tests and replays. The engine's only source of time: the default for `DecisionRequest.clock`, partition creation and the health check. The engine uses the host's bean when there is exactly one and never registers a `Clock` bean of its own |
 
-The engine's default `TenantResolver`, `CallerResolver`, `RuleFunctionRegistry` and `RuleEventPublisher` beans are `@ConditionalOnMissingBean`, so a host bean replaces them. `Clock` is read from the host and has no engine bean. The starter never component-scans the host. In the first build only `Clock` is read; the others arrive with 0.1.
+The engine's default beans are `@ConditionalOnMissingBean`, so a host bean replaces them (see [[Configuration and Extension Points]]). `Clock` is read from the host and has no engine bean. The starter never component-scans the host. In the first build only `Clock` is read; the others arrive with 0.1.
 
 ## Permissions
 

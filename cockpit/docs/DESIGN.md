@@ -2,6 +2,8 @@
 
 Status: architecture baseline (M0), updated 2026-11-18 for the cockpit direction (PD-032 to PD-042). Conforms to ADR-0005 as amended by ADR-0014 (multi-host federation), ADR-0013 (diagram notation and library), ADR-0017 (full BPMN 2.0 and DMN on the roadmap; do-now item DN-11 applied in section 10), ADR-0015 (read models and query limits), ADR-0010 (permissions), and [`docs/product/requirements.md`](../../docs/product/requirements.md). Release scope follows [`docs/product/roadmap.md`](../../docs/product/roadmap.md); every `CKP-*` statement carries its milestone.
 
+UX source of truth: [`docs/product/ux-design.md`](../../docs/product/ux-design.md), the approved hybrid direction ([PD-056](../../docs/product/decisions.md#pd-056-rule-management-ux-direction), decided 2026-11-19), with the approved prototype, the screens and the persona each serves, the anti-clutter rules, the light and dark colour tokens with contrast ratios, the chart palette, accessibility, viewport checks and languages. This document covers how the cockpit is built; where it touches layout, colour, copy style or accessibility, ux-design.md wins and this document is corrected.
+
 Contents: 1 Context and deployment options. 2 Modules and dependencies. 3 Screen hierarchy. 4 Host registry (`cockpit-hosts.json`). 5 Sign-in and host sessions. 6 Host metadata: `/api/bpm/meta` and `/api/bpm/me`. 7 Tenant switching. 8 Federated inbox and incidents. 9 Capacity math. 10 Diagrams. 11 Governed change from the cockpit. 12 State, validation, i18n and accessibility. 13 Security controls. 14 Delivery scope. 15 Open questions.
 
 ## 1. Context and deployment options
@@ -63,6 +65,8 @@ Runtime dependencies and their justification (licences re-checked at adoption; t
 ![Screen hierarchy](images/screen-hierarchy.svg)
 
 Source: [`diagrams/screen-hierarchy.mmd`](diagrams/screen-hierarchy.mmd). Numbered edges follow the operator's path from a workspace to a list to the screen where the action happens.
+
+The lenses that fill these tiers (canvas home with the docked decision table, matrix editor, policy readings, change dossier, control tower with the guardrail inspector, And/Or builder) and the release each lands in are specified in [ux-design.md sections 2, 3 and 10](../../docs/product/ux-design.md#2-screen-hierarchy).
 
 | Tier | Purpose | Screens | Rule |
 |---|---|---|---|
@@ -284,6 +288,7 @@ Source: [`diagrams/diagram-render.mmd`](diagrams/diagram-render.mmd).
 - RFC 9457 bodies map to field errors (by JSON Pointer) and to banners with `code` and `correlationId`.
 - Every mutating request carries an `Idempotency-Key` generated per user action and reused on retry, and `If-Match` where the API uses it.
 - English and Vietnamese dictionaries with key parity checked in CI (`TR-UI-04`); keyboard navigation, visible focus and `axe-core` checks in Playwright in light and dark themes (`TR-UI-03`).
+- Visual rules come from [ux-design.md](../../docs/product/ux-design.md): one token stylesheet in `cockpit/web` holds every colour, light and dark, with the values and contrast ratios of ux-design.md section 6; feature styles use the variables only. Money colours follow the bank's fee-income view (section 5); one language at a time and readings from the engine (section 9); 44 px targets and the 1440x900 above-the-fold and 1440x1200 checks in both themes (section 8).
 
 ## 13. Security controls
 
