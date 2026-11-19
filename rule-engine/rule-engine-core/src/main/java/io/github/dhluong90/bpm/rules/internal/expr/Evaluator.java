@@ -9,11 +9,12 @@ import java.time.LocalDate;
 
 /**
  * Evaluates an {@link Expr} over input slots with FEEL semantics (rule-engine/docs/DESIGN.md section
- * 3.2, PD-058): numbers are {@code BigDecimal} in {@link MathContext#DECIMAL128}; comparisons,
- * arithmetic and {@code between} with a null operand give null; {@code ==} and {@code !=} are
- * two-valued; {@code in} is false for a null target; {@code and}, {@code or} and {@code not} follow
- * the FEEL truth tables. Mixed currencies and division by zero raise {@link EvaluationException}, as does a
- * {@code matches} past its length, read or time bound ({@link BoundedRegex}).
+ * 3.2, PD-058): numbers are {@code BigDecimal} in {@link MathContext#DECIMAL128}; comparisons
+ * and arithmetic with a null operand give null; {@code between} is {@code x >= a and x <= b}, as
+ * DMN 1.5; {@code ==} and {@code !=} are two-valued; {@code in} is true when an element equals the
+ * target, so a null target is in a list only when the list holds null; {@code and}, {@code or} and
+ * {@code not} follow the FEEL truth tables. Mixed currencies and division by zero raise {@link EvaluationException}, as does
+ * a {@code matches} past one of its bounds ({@link BoundedRegex}).
  * An evaluator made by a constructor is stateless and thread-safe, and gives each {@code matches} a decision budget
  * of its own. An evaluator made by {@link #forDecision()} charges every {@code matches} it runs to one budget of
  * {@code evaluation.regex-max-reads-per-decision} and belongs to the thread evaluating that decision.
@@ -95,13 +96,13 @@ public final class Evaluator {
                 yield inList.negated() != found;
             }
             case Expr.Between between -> {
+                // DMN 1.5: x between a and b is x >= a and x <= b, evaluated as and is: false and anything is false
                 Object value = evaluate(between.target(), slots);
-                Object low = evaluate(between.low(), slots);
-                Object high = evaluate(between.high(), slots);
-                if (value == null || low == null || high == null) {
-                    yield null;
+                Boolean low = compare(Expr.BinaryOp.GE, value, evaluate(between.low(), slots));
+                if (Boolean.FALSE.equals(low)) {
+                    yield false;
                 }
-                yield and(compare(Expr.BinaryOp.GE, value, low), compare(Expr.BinaryOp.LE, value, high));
+                yield and(low, compare(Expr.BinaryOp.LE, value, evaluate(between.high(), slots)));
             }
             case Expr.IsNull isNull -> (evaluate(isNull.target(), slots) == null) != isNull.negated();
             case Expr.Matches matches -> {
@@ -124,10 +125,8 @@ public final class Evaluator {
         return Boolean.TRUE.equals(evaluate(expr, slots));
     }
 
+    /** True when an element equals the target (FEEL list contains), so a null target only when the list holds null. */
     private boolean in(Object target, Expr.InList inList, Object[] slots) {
-        if (target == null) {
-            return false;
-        }
         for (Expr element : inList.elements()) {
             if (Boolean.TRUE.equals(equal(target, evaluate(element, slots)))) {
                 return true;

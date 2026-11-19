@@ -192,14 +192,14 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `import kyc-onboarding -> 201 {version: 2, status: DRAFT}; start -> pinned to v1`.
 - **Test ID:** `PRE_018_import_creates_draft_not_active_version`
 
-### PRE-019 The requester of a definition version can never approve it
-- **Traces to:** `TR-SEC-04`, `TR-DEF-03`
+### PRE-019 No maker of a definition version can approve it
+- **Traces to:** `TR-SEC-04`, `TR-DEF-03`, PD-096
 - **Milestone:** M2
-- **Given:** `kyc-onboarding` v2 is `PENDING_APPROVAL`, requested by `alice`; `alice` and `bob` both hold `processes:approve`.
-- **When:** `alice` calls `:approve` through REST, and separately through `DefinitionService.approve`; then `bob` calls `:approve` with `If-Match: "<lockVersion>"`.
-- **Then:** Both of `alice`'s calls fail with `403 SELF_APPROVAL_FORBIDDEN` (Java: `SelfApprovalForbiddenException`, `code()` the same) and write nothing; `bob`'s call returns `200`, `status: ACTIVE`, `approvedBy: bob`.
-- **Example:** `request=alice, approve=alice -> 403 SELF_APPROVAL_FORBIDDEN; approve=bob -> 200 ACTIVE`.
-- **Test ID:** `PRE_019_definition_requester_cannot_approve`
+- **Given:** `kyc-onboarding` v2 was imported by `carol` and is `PENDING_APPROVAL`, requested by `alice`. `alice`, `bob` and `carol` hold `processes:approve`. Setting `lifecycle.approver-must-differ-from` is unset (default `makers`). Second case: the host sets `requester`. Once draft editing exists, a third case: `dave` edited the draft and holds `processes:approve`.
+- **When:** `alice` and `carol` each call `:approve`, through REST and through `DefinitionService.approve`; then `bob` calls `:approve` with `If-Match: "<lockVersion>"`. In the second case, `carol` calls `:approve`. In the third case, `dave` calls `:approve`.
+- **Then:** Under `makers`, `alice` (the requester) and `carol` (the importer) each get `403 SELF_APPROVAL_FORBIDDEN` (Java: `SelfApprovalForbiddenException`), with a detail naming why, and nothing is written. `bob` gets `200`, `status: ACTIVE`, `approvedBy: bob`. Under `requester`, `carol` may approve, `alice` still gets `403`, the start-up log has one WARN naming the relaxed setting, and the approval history row records `approverMustDifferFrom: requester`. In the third case `dave` gets `403` under `makers`. `/api/bpm/meta` lists `lifecycle.approver-must-differ-from` with the active value.
+- **Example:** `makers: requester alice -> 403, importer carol -> 403, bob -> 200 ACTIVE; requester mode: carol -> 200, alice -> 403`.
+- **Test ID:** `PRE_019_no_maker_of_a_definition_version_can_approve`
 
 ### PRE-020 An approved version takes effect on its effective date and retires the previous one
 - **Traces to:** `TR-DEF-03`, `TR-DET-01`
@@ -488,3 +488,80 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `source swapped with a matching row hash -> refused, incident, audit, alert; reader upgraded -> runs, WARN`.
 - **Test ID:** `PRE_048_kernel_runs_only_the_approved_source`
 
+### PRE-052 The requester withdraws their own pending definition, and it returns to draft without a rejection
+- **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-097
+- **Milestone:** M2
+- **Given:** `kyc-onboarding` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`, who holds `processes:author`; v1 is `ACTIVE`; `bob` holds `processes:approve`.
+- **When:** `alice` sends `POST /api/bpm/processes/v1/definitions/kyc-onboarding/versions/2:withdraw` with `Idempotency-Key`, `If-Match: "3"` and an optional reason. Failure cases: `bob` withdraws v2; `alice` rejects v2 with `:reject`; `alice` withdraws with a stale `If-Match`; `alice` withdraws v1.
+- **Then:** `200`. v2 is `DRAFT` with the request cleared, one history row `WITHDRAWN` (actor `alice`, the reason or null) and one `processes.definition.withdrawn.v1`. No rejection is recorded, v1 stays in effect and nothing is published. A replay returns the same answer and writes nothing. `bob` gets `403 PERMISSION_DENIED`; `alice`'s `:reject` gets `403 SELF_APPROVAL_FORBIDDEN` with a detail pointing to `:withdraw`; the stale `If-Match` gets `409 VERSION_CONFLICT`; v1 gets `409 INVALID_STATE`. No failure case changes anything.
+- **Example:** `alice withdraws her pending v2 -> DRAFT, WITHDRAWN, v1 still active; alice rejects her own -> 403, use withdraw`.
+- **Test ID:** `PRE_052_requester_withdraws_own_pending_definition_to_draft`
+
+### PRE-053 Retiring a definition version stops new starts, never running instances, and the last version needs a confirmation
+- **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-101, PD-102
+- **Milestone:** M2
+- **Given:**
+  - Tenant `bank-a`, at `2027-04-20T09:00:00Z`.
+  - `loan-review` v1 is `ACTIVE`, effective since `2027-01-10`, and three instances run on it, one waiting at the user task `credit-check`.
+  - v2 is `ACTIVE`, with `effective_from = 2027-05-01T00:00:00Z` and a `DEFINITION_EFFECTIVE` job due then.
+  - `bob` holds `processes:approve`; `lan` holds `processes:author` and `processes:start`.
+  - `lifecycle.retire-approval` is `single` and `lifecycle.retire-last-version` is `confirm`, the defaults.
+- **When:**
+  1. `bob` sends `POST /api/bpm/processes/v1/definitions/loan-review/versions/2:retire` with `Idempotency-Key`, `If-Match` and `{ "reason": "pricing step points at the wrong rule set" }`.
+  2. He then retires v1 with `{ "reason": "flawed credit routing" }`.
+  3. He retires v1 again with `"confirmNoVersionInEffect": true` added.
+  4. The task at `credit-check` is completed.
+  5. `lan` starts `loan-review`.
+  6. The clock passes `2027-05-01T00:00:00Z`.
+  - **Failure cases:**
+    - `lan` retires v1;
+    - `bob` retires v1 with a blank reason;
+    - on a host with `lifecycle.retire-last-version: refuse`, the confirmed retire.
+- **Then:**
+  - **Step 1** returns `200`. v2 is `RETIRED`, and its job is `CANCELLED` in the same transaction. The history row `RETIRED` and `processes.definition.retired.v1` carry the reason, `approvalMode: single` and `noVersionInEffect: false`, because v1 is still in effect.
+  - **Step 2** returns `409 LAST_VERSION_IN_EFFECT` with `definitionKey: loan-review`, `version: 1`, `setting: confirm` and `nextEffectiveFrom: null`. Nothing changes.
+  - **Step 3** returns `200`. v1 is `RETIRED`, and the history row and the event carry `noVersionInEffect: true`.
+  - **Steps 4 and 5.** The three running instances stay on v1, and the task completion advances its instance. The start returns `404 NO_EFFECTIVE_VERSION`.
+  - **Step 6.** On `2027-05-01` nothing is retired or started by the cancelled job.
+  - **Replay.** A replay of any of the calls returns the same answer and writes nothing.
+  - **Failure cases:**
+    - `lan` gets `403 PERMISSION_DENIED`;
+    - the blank reason gets `400 INPUT_INVALID`;
+    - under `refuse`, the confirmed retire gets `409 LAST_VERSION_IN_EFFECT` with `setting: refuse`.
+    - None of them changes anything.
+- **Example:** `retire v2 (future) -> RETIRED, job cancelled; retire v1 -> 409 LAST_VERSION_IN_EFFECT; with confirmation -> RETIRED, noVersionInEffect true; running instances continue; new start -> 404`.
+- **Test ID:** `PRE_053_retire_stops_new_starts_keeps_running_instances_and_confirms_last_version`
+
+### PRE-054 Cancelling an instance needs processes:cancel and a reason
+- **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-103
+- **Milestone:** M2
+- **Given:**
+  - Tenant `bank-a`. Instance `I7` of `loan-review` is `RUNNING`, with `lockVersion 4` and an open task at `credit-check`.
+  - `lan` holds `processes:start` and `processes:read`.
+  - `minh` holds `processes:cancel` and `processes:read`.
+- **When:**
+  1. `lan` sends `POST /api/bpm/processes/v1/instances/I7:cancel` with `Idempotency-Key`, `If-Match: "4"` and `{ "reason": "duplicate application" }`.
+  2. `minh` sends the same request.
+  3. Both call `GET /api/bpm/me`.
+  - **Failure cases** for `minh`:
+    - a blank reason;
+    - a reason of 2,001 characters;
+    - a stale `If-Match`;
+    - a cancel of a `COMPLETED` instance.
+- **Then:**
+  - **Step 1.** `lan` gets `403 PERMISSION_DENIED`, and `I7` is unchanged.
+  - **Step 2.** `minh` gets `200`:
+    - `I7` is `CANCELLED`;
+    - its token and its task are `CANCELLED` in the same transaction;
+    - one history row `INSTANCE_ENDED` records actor `minh`, the reason and `CANCELLED`;
+    - one `processes.instance.cancelled.v1` carries `cancelledBy: minh` and the reason;
+    - no compensation handler is called.
+  - **Replay.** A replay returns the same answer and writes nothing.
+  - **Step 3.** `/api/bpm/me` lists `processes:cancel` for `minh` and not for `lan`.
+  - **Failure cases:**
+    - the two bad reasons get `400 INPUT_INVALID`;
+    - the stale `If-Match` gets `409 VERSION_CONFLICT`;
+    - the completed instance gets `409 INVALID_STATE`.
+    - None of them changes anything.
+- **Example:** `lan (processes:start) cancels I7 -> 403; minh (processes:cancel) cancels with reason -> CANCELLED, task CANCELLED, cancelled event with reason`.
+- **Test ID:** `PRE_054_cancel_needs_processes_cancel_and_a_reason`

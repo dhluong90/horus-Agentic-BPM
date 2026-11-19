@@ -40,10 +40,26 @@ class ExpressionSemanticsTest {
         "false and income > 0 VND                | false",
         "true or income > 0 VND                  | true",
         "income + 1 VND is null                  | true",
-        "income between 1 VND and 2 VND          | NULL"
+        "income between 1 VND and 2 VND          | NULL",
+        "tier in ['GOLD', null]                  | true",
+        "tier not in ['GOLD', null]              | false"
     })
     void null_follows_feel_three_valued_logic(String condition, Boolean expected) {
         assertThat(eval(condition.strip(), null, null)).isEqualTo(expected);
+    }
+
+    @Test
+    void RLE_006_in_and_between_follow_dmn_1_5_with_a_null_operand() {
+        // in: true when an element equals the target, so a missing tier is in a list only when the list holds null
+        assertThat(eval("tier in ['GOLD', null]", null, null)).isEqualTo(true);
+        assertThat(eval("tier not in ['GOLD', null]", null, null)).isEqualTo(false);
+        assertThat(eval("tier in ['GOLD', 'PLATINUM']", null, null)).isEqualTo(false);
+
+        // between: x >= a and x <= b, here with an unknown upper limit (balance used as the limit)
+        assertThat(eval("txCount between 1 and balance", null, null, new BigDecimal(5), null)).isNull();
+        assertThat(eval("txCount between 1 and balance", null, null, BigDecimal.ZERO, null)).isEqualTo(false);
+        assertThat(eval("txCount between balance and 3", null, null, new BigDecimal(5), null)).isEqualTo(false);
+        assertThat(eval("txCount between 1 and 3", null, null, null, null)).isNull();
     }
 
     @Test
