@@ -27,19 +27,20 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `1 match [R1] -> rate 0.08; 0 matches -> NoMatch, rate null; 2 matches [R1, R2] -> UNIQUE_HIT_VIOLATION, outputs empty`.
 - **Test ID:** `RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several`
 
-### RLE-003 `collect` hit policy returns aligned lists or aggregated scalars, with defined null rules
-- **Traces to:** `TR-DET-01`, `TR-STD-22`, PD-088
+### RLE-003 `collect` hit policy returns aligned lists or aggregated scalars, with the DMN 1.5 null rules
+- **Traces to:** `TR-DET-01`, `TR-STD-22`, PD-066, PD-088
 - **Milestone:** M1
-- **Given:** Rule set `risk-flags` v1 with `hitPolicy: collect` and outputs `flags` (`list<string>`, no aggregate), `penalty` (`integer`, `collect: sum`), `worst` (`integer`, `collect: max`) and `hits` (`integer`, `collect: count`); rules `R1` (`flags: "HIGH_VELOCITY", penalty: 10, worst: 10, hits: 1`), `R2` (`flags: null, penalty: null, worst: null, hits: null`) and `R3` (`flags: "NEW_DEVICE", penalty: 5, worst: 5, hits: 1`).
-- **When:** Evaluate (a) inputs matching `R1`, `R2` and `R3`; (b) inputs matching only `R2`; (c) inputs matching no rule.
+- **Given:** Rule set `risk-flags` v1 with `hitPolicy: collect` and outputs `flags` (`list<string>`, no aggregate), `penalty` (`integer`, `collect: sum`), `worst` (`integer`, `collect: max`) and `hits` (`integer`, `collect: count`); rules `R1` (`flags: "HIGH_VELOCITY", penalty: 10, worst: 10, hits: 1`), `R2` (`flags: null, penalty: 0, worst: 0, hits: null`) and `R3` (`flags: "NEW_DEVICE", penalty: 5, worst: 5, hits: 1`). Rule set `risk-flags-null` is the same except that `R2` has `penalty: null`.
+- **When:** Evaluate `risk-flags` with (a) inputs matching `R1`, `R2` and `R3`, (b) inputs matching only `R2`, (c) inputs matching no rule; and (d) `risk-flags-null` with inputs matching `R1` and `R2`.
 - **Then:**
   - **Lists (no aggregate).** One entry per matched rule, in rule order, aligned with `matchedRuleIds`; a `null` output is a `null` entry and is never dropped. (a) `matchedRuleIds = ["R1", "R2", "R3"]`, `flags = ["HIGH_VELOCITY", null, "NEW_DEVICE"]`. (b) `flags = [null]`.
-  - **`sum`, `min`, `max`.** Computed over the non-null values of the matched rules, in rule order; nulls are skipped; when every value is `null` the result is `null`. (a) `penalty = 15`, `worst = 10`. (b) `penalty = null`, `worst = null`. Money sums are exact in minor units; mixed currencies are `EVALUATION_ERROR`; a sum beyond plus or minus 2^53 - 1 minor units is `EVALUATION_ERROR` (rule engine DESIGN 3.4). `min` and `max` compare numbers, money of one currency, strings by code point, dates and date-times; `boolean` is refused at publish time.
-  - **`count`.** The number of matched rules whose value is not `null` (not distinct values). (a) `hits = 2`; (b) `hits = 0`.
-  - **No match (c).** Outcome `NoMatch`, every output `null` (lists included, aggregates included, `count` included), `matchedRuleIds = []`; logged as `outcome = OK` with `matched_rule_ids = []`.
+  - **`count`.** The number of matched rules, `null` values included, as FEEL `count` (DMN 1.5 10.3.4.4); not a count of distinct values. (a) `hits = 3`. (b) `hits = 1`.
+  - **`sum`, `min`, `max`.** Over the values of all matched rules, not distinct values (DMN 1.5 8.2.11). (a) `penalty = 15`, `worst = 10`. (b) `penalty = 0`, `worst = 0`. Money sums are exact in minor units; mixed currencies, and a sum beyond plus or minus 2^53 - 1 minor units, are `EVALUATION_ERROR` (rule engine DESIGN 3.4). `min` and `max` compare numbers, money of one currency, strings by code point, dates and date-times; `boolean` is refused at publish time.
+  - **A `null` value under `sum`, `min` or `max` (d).** `null` is outside the domain of FEEL `sum`, `min` and `max`. A v1 rule set evaluates in `errorMode: strict` (PD-066), so the outcome is `Failed` with `EVALUATION_ERROR` naming the output (`penalty`) and the rule (`R2`), with no partial outputs, and the decision log row has `outcome = EVALUATION_ERROR` and `matched_rule_ids = ["R1", "R2"]`. A model in `errorMode: spec` (imported DMN from S1) gives `penalty = null` with a warning in the decision trace.
+  - **No match (c).** Outcome `NoMatch`, every output `null`, lists, aggregates and `count` included (DMN 1.5 10.3.2.10: no rule matched, the result is `null`), `matchedRuleIds = []`; logged as `outcome = OK` with `matched_rule_ids = []`.
   - **Publish time.** An aggregate on a non-`collect` table, a list output on a non-`collect` table, `sum` on a non-numeric type and `count` on a non-`integer` output are `422 VALIDATION_FAILED` naming the output.
-- **Example:** `R1 (+10), R2 (null), R3 (+5) -> penalty 15, worst 10, flags [HIGH_VELOCITY, null, NEW_DEVICE]; only R2 -> penalty null, flags [null], hits 0; no match -> NoMatch`.
-- **Test ID:** `RLE_003_collect_hit_policy_keeps_null_entries_and_aggregates_non_null_values`
+- **Example:** `R1 (+10), R2 (+0), R3 (+5) -> penalty 15, worst 10, hits 3, flags [HIGH_VELOCITY, null, NEW_DEVICE]; only R2 -> hits 1, flags [null]; null penalty under sum -> EVALUATION_ERROR (strict); no match -> NoMatch, all null`.
+- **Test ID:** `RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules`
 
 ---
 

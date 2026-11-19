@@ -19,7 +19,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 |---|---|---|---|---|---|
 | RLE-001 | `RLE_001_first_hit_policy_returns_top_matching_rule` | Unit, Testcontainers, REST | M1 | `TR-DET-01` | Implemented (#1): `RuleEngineServiceTest`, `RuleEnginePostgresIT`, `RuleLifecycleIT`; boundaries, input types and money exactness in `RuleLifecycleAcceptanceTest`, `MoneyPropertiesTest` (jqwik), `ExpressionPropertiesTest` (determinism, jqwik) and `RuleLifecycleFailurePathsIT` |
 | RLE-002 | `RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several` | Unit, WebMvc | M1 | `TR-DET-04` | Planned |
-| RLE-003 | `RLE_003_collect_hit_policy_keeps_null_entries_and_aggregates_non_null_values` | Unit | M1 | `TR-DET-01` | Planned |
+| RLE-003 | `RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules` | Unit | M1 | `TR-DET-01` | Planned |
 | RLE-004 | `RLE_004_publish_rejects_unparsable_or_ill_typed_expressions` | Unit, property | M1 | `TR-DET-02`, `TR-SEC-01` | Planned |
 | RLE-005 | `RLE_005_money_currency_mismatch_is_rejected` | Unit, REST | M1 | `TR-DET-03` | Implemented (#1): `RuleLifecycleFailurePathsIT` (422 `EVALUATION_ERROR`, no outputs, logged outcome); `MoneyPropertiesTest` for the evaluator |
 | RLE-006 | `RLE_006_null_follows_feel_three_valued_logic` | Unit, replay | M1 | `TR-DET-01`, `TR-STD-02` | Partial (#1): truth tables and null operands in `ExpressionPropertiesTest` (jqwik). Stays in `spec-pending.txt` until the `collect` hit policy lands: the statement needs `collect`, the decision log and replay |

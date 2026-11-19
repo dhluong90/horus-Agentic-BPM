@@ -29,7 +29,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 
 | Id | Feature | Persona | Milestone | PRD | SPEC | TR | Status | Depends on | Decisions |
 |---|---|---|---|---|---|---|---|---|---|
-| RE-F-01 | Choose how matching rows combine, with DMN 1.5 behaviour: `first`; `unique` (no match gives null outputs, as with `first`; several matches an error with no partial outputs); `collect` with aggregation, keeping null outputs in step with the matched rows | S1, S2 | M1 | RE 7.2 Logic | RLE-001, RLE-002 (changes, PD-088), RLE-003 (changes, PD-088) | TR-DET-01, TR-DET-04 | specified | RE-F-02 | PD-008, PD-088 |
+| RE-F-01 | Choose how matching rows combine, with DMN 1.5 behaviour: `first`; `unique` (no match gives null outputs, as with `first`; several matches an error with no partial outputs); `collect` with aggregation over all matched rows (DMN 1.5), keeping null outputs in step with the matched rows | S1, S2 | M1 | RE 7.2 Logic | RLE-001, RLE-002 (changes, PD-088), RLE-003 (changes, PD-088) | TR-DET-01, TR-DET-04 | specified | RE-F-02 | PD-008, PD-088 |
 | RE-F-02 | An unparsable or ill-typed expression cannot be published; the error names the row and the fix | S2 | M1 | RE 7.2 Logic | RLE-004 | TR-DET-02, TR-SEC-01 | specified | | PD-005 |
 | RE-F-03 | Money, dates and nulls behave predictably: cross-currency comparison fails; nulls follow FEEL logic, so an ordering comparison with a null does not match and `!=` against a missing value is true (RE-F-41) | S2 | M1 | RE 7.2 Logic | RLE-005, RLE-006 (null cases change, PD-058) | TR-DET-01, TR-DET-03 | specified | RE-F-02 | PD-058 |
 | RE-F-04 | An adversarial regex cannot hang an evaluation | S1 | M1 | RE 7.2 Logic | RLE-007 | TR-SEC-02 | specified | | |
