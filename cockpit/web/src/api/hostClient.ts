@@ -1,7 +1,7 @@
 import type { BpmMeV1 } from './generated/bpm-me.v1';
 import { bpmMetaV1, type BpmMetaV1 } from './generated/bpm-meta.v1';
 import { HostCallError, readProblem } from './hostError';
-import { droppedPermissionsNote, readMe } from './meReader';
+import { createDroppedPermissionsWarner, readMe } from './meReader';
 
 export interface HostClient {
   readonly baseUrl: string;
@@ -19,11 +19,14 @@ const readMeta: Reader<BpmMetaV1> = (body) => {
   return parsed.success ? parsed.data : undefined;
 };
 
+/** One warner for the page: the same dropped names are noted once, however often /me is read. */
+const warnDroppedPermissions = createDroppedPermissionsWarner();
+
 /** /me is read tolerantly: a permission name outside the known pattern is dropped with one console note. */
 const readMeTolerantly: Reader<BpmMeV1> = (body) => {
   const reading = readMe(body);
   if (!reading.ok) return undefined;
-  if (reading.dropped.length > 0) console.warn(droppedPermissionsNote(reading.dropped));
+  warnDroppedPermissions(reading.dropped);
   return reading.me;
 };
 

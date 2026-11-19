@@ -151,7 +151,7 @@ Within that range a host can still be newer than the cockpit, so the cockpit rea
 
 | Field | What the cockpit does with a name it does not know |
 |---|---|
-| `/me` `permissions[]` | A well-formed name the cockpit has no screen for is kept and never checked. A string outside the pattern `^(rules\|processes)(:[a-z]+){1,2}$` is dropped before validation, with one browser console warning that lists the dropped names. The user signs in and the cockpit offers nothing for that name |
+| `/me` `permissions[]` | A well-formed name the cockpit has no screen for is kept and never checked. A string outside the pattern `^(rules\|processes)(:[a-z]+){1,2}$` is dropped before validation, with one browser console warning per page load for each distinct set of dropped names. The warning prints at most 10 names, each cut to 64 characters and quoted with control and bidi characters escaped, so a host cannot flood the console or disguise a name. The user signs in and the cockpit offers nothing for that name |
 | `/meta` `features[]` | A well-formed flag the cockpit does not know is ignored; screens turn on only for flags the cockpit knows |
 | `/meta` `settings` | An unknown key is ignored |
 | Extra properties on either object | Kept and ignored |

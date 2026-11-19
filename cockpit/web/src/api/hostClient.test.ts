@@ -59,10 +59,13 @@ describe('host client', () => {
     });
   });
 
-  it('CKP_001_me_with_an_unreadable_permission_resolves_without_it_and_warns_once', async () => {
+  it('CKP_001_me_with_an_unreadable_permission_resolves_without_it_and_warns_once_across_reads', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const body = JSON.stringify({ ...meLan, permissions: [...meLan.permissions, UNREADABLE_PERMISSION] });
-    const me = await createHostClient('', respond(new Response(body, { status: 200 }))).getMe();
+    const client = createHostClient('', async () => new Response(body, { status: 200 }));
+    const me = await client.getMe();
+    await client.getMe();
+    await createHostClient('', async () => new Response(body, { status: 200 })).getMe();
     expect(me.permissions).toEqual(meLan.permissions);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toContain(UNREADABLE_PERMISSION);
