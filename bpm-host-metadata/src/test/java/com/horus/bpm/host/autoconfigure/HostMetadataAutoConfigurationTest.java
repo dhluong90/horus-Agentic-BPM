@@ -55,11 +55,15 @@ class HostMetadataAutoConfigurationTest {
     }
 
     @Test
-    void unknown_tenancy_resolver_stops_the_start_up() {
-        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class)
-                .withPropertyValues("horus.bpm.tenancy.resolver=query:tenant")
-                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
-                        .hasMessageContaining("horus.bpm.tenancy.resolver must be 'security-context' or 'header:"));
+    void the_removed_header_mode_stops_the_start_up_instead_of_being_ignored() {
+        for (String removed : new String[] {"horus.bpm.tenancy.resolver=header:X-Tenant-Id",
+                "horus.bpm.tenancy.trusted-gateway=true"}) {
+            TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class)
+                    .withPropertyValues(removed, "spring.profiles.active=dev")
+                    .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                            .hasMessageContaining("is no longer supported: the engines take the tenant only from the "
+                                    + "authenticated principal (PD-079)"));
+        }
     }
 
     @Test

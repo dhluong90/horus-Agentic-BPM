@@ -57,6 +57,8 @@ The engine reads definitions and REST bodies with its own JSON library (Jackson 
 
 ```yaml
 spring:
+  profiles:
+    active: dev                             # development only: allows the two settings marked below
   datasource:
     url: jdbc:postgresql://localhost:5432/loans
     username: postgres
@@ -67,11 +69,11 @@ horus:
     rules:
       definitions: classpath:rules/**/*.yaml
       definitions-auto-publish: true        # development only; see the note below
-      tenancy:
-        resolver: header:X-Tenant-Id        # development only; the default reads the security context
+    tenancy:
+      dev-tenant: demo                      # development only; the default reads the signed-in principal
 ```
 
-`definitions-auto-publish: true` publishes the files you load at start-up without the maker-checker approval. Use it only on a developer machine. In every other environment a version becomes effective only through the steps in [[Rule Engine Versioning and Publishing]]. All properties are listed in [[Rule Engine Configuration]].
+`definitions-auto-publish: true` publishes the files you load at start-up without the maker-checker approval, and `tenancy.dev-tenant: demo` serves every caller that carries no tenant for the tenant `demo`. The engines accept both on the `dev` profile only. Use them only on a developer machine; elsewhere the tenant comes from the signed-in principal ([[Multi-Tenancy and Security]]). In every other environment a version becomes effective only through the steps in [[Rule Engine Versioning and Publishing]]. All properties are listed in [[Rule Engine Configuration]].
 
 ## 4. Write the decision table
 
@@ -167,7 +169,6 @@ Evaluate the effective version:
 ```bash
 curl -s -X POST http://localhost:8080/api/bpm/rules/v1/decisions/loan-eligibility:evaluate \
   -H 'Content-Type: application/json' \
-  -H 'X-Tenant-Id: demo' \
   -d '{ "inputs": { "age": 25, "income": { "currency": "VND", "amount": 8000000 }, "country": "VN" } }'
 ```
 
@@ -207,7 +208,7 @@ The decision is written to the decision log in your transaction. Both the HTTP c
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `404 NO_EFFECTIVE_VERSION` | The file was loaded as a draft but not published, or the tenant in `X-Tenant-Id` has no published version | Check `definitions-auto-publish: true` and the tenant header; or publish through [[Rule Engine Versioning and Publishing]] |
+| `404 NO_EFFECTIVE_VERSION` | The file was loaded as a draft but not published, or the tenant `demo` has no published version | Check `definitions-auto-publish: true` and `tenancy.dev-tenant`; or publish through [[Rule Engine Versioning and Publishing]] |
 | `400 INPUT_INVALID` | An input is missing or has the wrong type, for example `income` sent as a number instead of `{ "currency", "amount" }` | Match the `inputs` declared in the table |
 | `401` or `403` on the curl call | No principal, or the principal lacks `rules:evaluate` | Pass credentials of a user with the permission; see [[Rule Engine Configuration]] |
 | Flyway fails at start-up | The database user cannot create tables | Grant `CREATE` on the schema, or set `migrate-on-start: false` and run the migrations yourself |

@@ -39,14 +39,14 @@ sequenceDiagram
     else authenticated
         S->>M: request with the caller
         M->>R: tenant of this caller
-        R-->>M: tenant from the token claim or the signed-in principal
+        R-->>M: tenant attribute of the principal, session or token
         M->>E: engine entries (version, features, permissions)
         M-->>C: 200 meta, Cache-Control private, max-age=60, ETag
     end
     C->>M: GET /api/bpm/me
     alt no tenant for the caller
         M-->>C: 401 problem, WWW-Authenticate Bearer error="invalid_token"
-    else a header names another tenant than the token or session
+    else X-Tenant-Id names another tenant than the principal's
         M-->>C: 403 problem, code TENANT_NOT_ALLOWED, security log entry
     else
         M-->>C: 200 me, Cache-Control private, no-cache, ETag
@@ -129,33 +129,34 @@ The mapping is read today for `/me`. The Rule Engine's own endpoints use the sam
 
 ## Tenant
 
-A `TenantResolver` finds the tenant of each request. The host picks one of three modes:
+A `TenantResolver` finds the tenant of each request (PD-079). The engines' default reads the `horus.bpm.tenancy.claim` attribute (default `tenant_id`) of the authenticated principal, so a validated bearer token and a server-side session principal from an OIDC or OAuth2 login are handled alike. That covers the cockpit embedded in a bank's own web application as well as a standalone cockpit with tokens.
 
-| Mode | How | Use when |
-|---|---|---|
-| Token (default) | `horus.bpm.tenancy.resolver: security-context`. The token claim `horus.bpm.tenancy.claim` (default `tenant_id`) | OIDC hosts with bearer tokens |
-| Host session | The host declares its own `TenantResolver` bean that reads the tenant from the signed-in principal, `CallerContext.principal()`. It never reads a header, because in a browser any header can be set by script | Hosts with their own sign-in (form, SAML, LDAP), and the embedded cockpit, which uses that session |
-| Gateway | `horus.bpm.tenancy.resolver: header:<name>`. A gateway sets the header after it has authenticated the caller. Outside the `dev` profile the host does not start unless `horus.bpm.tenancy.trusted-gateway=true` confirms that the gateway overwrites the header on every request | Behind such a gateway only |
-
-A host bean replaces the built-in modes. A host that accepts both sessions and bearer tokens returns the claim for token callers and the principal's tenant for session callers:
+| Principal | Tenant |
+|---|---|
+| Carries the `tenancy.claim` attribute (token claim or session attribute) | That attribute |
+| Carries none, for example after a form, SAML or LDAP sign-in | The host declares its own `TenantResolver` bean, which replaces the default and reads the host's user type or directory, `CallerContext.principal()` |
+| Carries none, on a developer machine | `horus.bpm.tenancy.dev-tenant`, accepted on the `dev` profile only; start-up is refused when it is set elsewhere |
 
 ```java
 @Bean
-TenantResolver hostTenantResolver() {
-    return caller -> caller.stringClaim("tenant_id")
-            .or(() -> caller.principal() instanceof BankUser user ? Optional.of(user.tenant()) : Optional.empty());
+TenantResolver hostTenantResolver(BankUserDirectory directory) {
+    return caller -> caller.principal() instanceof BankUser user
+            ? Optional.of(user.tenant())
+            : directory.tenantOf(caller.principalName());
 }
 ```
 
-Whatever the mode, these rules hold:
+The engines ship no resolver that reads a request header, and `CallerContext` offers no headers: in a browser any header can be set by script, and a header set by a misconfigured gateway would expose one tenant's data to another tenant's operator. A host that writes such a resolver owns that risk. The former settings `horus.bpm.tenancy.resolver` and `horus.bpm.tenancy.trusted-gateway` stop the start-up with a message, so a host that used them notices.
+
+Whatever the resolver, these rules hold:
 
 | Rule | Answer |
 |---|---|
-| No tenant for the caller | `401 UNAUTHENTICATED` with `WWW-Authenticate: Bearer error="invalid_token"` and a security log entry `tenant.unresolved` |
-| The caller's token carries the tenant claim and the resolved tenant differs from it, for example a gateway header of `bank-b` on a `bank-a` token | `403 TENANT_NOT_ALLOWED` |
-| An `X-Tenant-Id` header differs from the resolved tenant (tenant switching is off) | `403 TENANT_NOT_ALLOWED` |
+| No tenant for the principal | `401 UNAUTHENTICATED` with `WWW-Authenticate: Bearer error="invalid_token"` and a security log entry `tenant.unresolved`; nothing is read |
+| The principal carries the tenant attribute and a host resolver returns another tenant | `403 TENANT_NOT_ALLOWED` |
+| An `X-Tenant-Id` header, the tenant switch request, differs from the resolved tenant (switching is off until M2) | `403 TENANT_NOT_ALLOWED` |
 | The tenant is not 1 to 64 letters, digits, `.`, `_` or `-`, starting with a letter or digit | `403 TENANT_NOT_ALLOWED` |
-| A tenant in a query parameter or a body | Ignored |
+| A tenant in a query parameter, a body or any other header | Ignored |
 
 Every refusal writes one entry on the logger `com.horus.bpm.security`:
 
@@ -171,7 +172,7 @@ tenant.switch.refused reason=switching-off user=lan%40bank-a.vn tokenTenant=bank
 |---|---|
 | `Cache-Control` | `/meta`: `private, max-age=60`. `/me`: `private, no-cache`, so the browser asks again every time (cheaply, with `If-None-Match`) and a revoked role or a sign-out is never shown from cache. Errors: `no-store` |
 | `ETag` | A weak validator of the body; send it back as `If-None-Match` to get `304` |
-| `Vary` | On `/me`: `Authorization, Cookie, X-Tenant-Id`, plus the gateway tenant header when it has another name |
+| `Vary` | On `/me`: `Authorization, Cookie, X-Tenant-Id` |
 | `X-Correlation-Id` | A ULID issued by the host for every request, also in every problem body. A caller's own `X-Correlation-Id` is never adopted; it is logged as `clientCorrelationId` |
 | `WWW-Authenticate` | On every `401`. `Bearer` by default (`horus.bpm.security.challenge`); for a caller without a tenant a bearer challenge adds `error="invalid_token"` |
 
@@ -180,7 +181,7 @@ Engine API responses under `/api/bpm/rules/**` and `/api/bpm/processes/**` get `
 | Status | `code` | When |
 |---|---|---|
 | `401` | [UNAUTHENTICATED](Common-Error-Codes#unauthenticated) | No principal, a rejected token (another audience, a bad signature), or no tenant for the caller |
-| `403` | [TENANT_NOT_ALLOWED](Common-Error-Codes#tenant_not_allowed) | A header names another tenant than the token or session, or a tenant outside the allowed format |
+| `403` | [TENANT_NOT_ALLOWED](Common-Error-Codes#tenant_not_allowed) | `X-Tenant-Id` names another tenant than the principal's, or the tenant is outside the allowed format |
 | `403` | [PERMISSION_DENIED](Common-Error-Codes#permission_denied) | The host's chain refuses the request, for example a session call without its CSRF token (`BpmProblemAccessDeniedHandler`) |
 
 A client must not repeat the sign-in more than once on `UNAUTHENTICATED` with `error="invalid_token"`: the same account gets the same token and the same answer. The cockpit treats a `401` on `/me` as "no access to this service" and does not sign in again.
@@ -203,15 +204,14 @@ A client must not repeat the sign-in more than once on `UNAUTHENTICATED` with `e
 |---|---|---|
 | `horus.bpm.host-id` | unset | Id clients show for this host, 1 to 40 characters |
 | `horus.bpm.host-metadata.enabled` | `true` | `false` turns both endpoints off, for hosts that already serve them another way |
-| `horus.bpm.tenancy.resolver` | `security-context` | `security-context` or `header:<name>`; ignored when the host declares a `TenantResolver` bean |
-| `horus.bpm.tenancy.claim` | `tenant_id` | Token claim that carries the tenant; always compared with the resolved tenant |
-| `horus.bpm.tenancy.trusted-gateway` | `false` | Required outside the `dev` profile before `header:<name>` starts |
+| `horus.bpm.tenancy.claim` | `tenant_id` | Attribute of the authenticated principal, token claim or session attribute, that carries the tenant; always compared with the resolved tenant |
+| `horus.bpm.tenancy.dev-tenant` | unset | Fixed tenant for principals that carry none; `dev` profile only |
 | `horus.bpm.security.challenge` | `Bearer` | `WWW-Authenticate` value of a `401` the endpoints raise themselves |
 | `horus.bpm.rules.security.role-permissions` | empty | Host authority to `rules:*` permissions |
 
 ## Try it
 
-The example host [`examples/rule-engine-only`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/rule-engine-only) has two demo users on the `dev` profile, Lan (pricing author) and Minh (pricing approver), both at `bank-a`, with the password from `HORUS_DEMO_PASSWORD`. They sign in with the host's form and then call the endpoints with the session, as the embedded cockpit does:
+The example host [`examples/rule-engine-only`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/rule-engine-only) has two demo users on the `dev` profile, Lan (pricing author) and Minh (pricing approver), with the password from `HORUS_DEMO_PASSWORD`. They carry no tenant attribute, so the example sets `horus.bpm.tenancy.dev-tenant: bank-a` for the `dev` profile. They sign in with the host's form and then call the endpoints with the session, as the embedded cockpit does:
 
 ```bash
 P=choose-one   # the HORUS_DEMO_PASSWORD the host was started with

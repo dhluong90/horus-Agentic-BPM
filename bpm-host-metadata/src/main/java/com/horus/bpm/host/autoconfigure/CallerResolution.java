@@ -25,10 +25,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
  * Resolves the caller and tenant of a request from the authenticated principal, never from a request body
  * or query parameter (TR-SEC-03).
  *
- * <p>The {@link TenantResolver} finds the tenant. Two checks then apply to every resolver, the host's own
- * included: when the token carries the tenant claim, the resolved tenant must equal it, so a gateway
- * header cannot move a caller into another tenant; and while tenant switching is off, an
- * {@code X-Tenant-Id} header must equal the resolved tenant. A mismatch, or a tenant outside the allowed
+ * <p>The {@link TenantResolver} finds the tenant (PD-079). Two checks then apply to every resolver, the
+ * host's own included: when the principal carries the tenant attribute, the resolved tenant must equal it;
+ * and while tenant switching is off, an {@code X-Tenant-Id} header, the switch request of ADR-0014
+ * decision 5, must equal the resolved tenant. A mismatch, or a tenant outside the allowed
  * format, is {@code 403 TENANT_NOT_ALLOWED} with a {@code tenant.switch.refused} security log entry
  * (ADR-0014).
  */
@@ -66,9 +66,8 @@ final class CallerResolution {
         }
         Map<String, Object> tokenClaims = claims.apply(authentication);
         Set<String> authorities = authorities(authentication.getAuthorities());
-        Context context = new Context(authentication.getName(), authentication.getPrincipal(), authorities, tokenClaims,
-                request);
-        String tokenTenant = context.stringClaim(tenantClaim).orElse(null);
+        Context context = new Context(authentication.getName(), authentication.getPrincipal(), authorities, tokenClaims);
+        String tokenTenant = context.stringAttribute(tenantClaim).orElse(null);
 
         Optional<String> resolved = resolver.resolve(context);
         if (resolved.isEmpty()) {
@@ -117,7 +116,7 @@ final class CallerResolution {
     }
 
     private static @Nullable String displayName(CallerContext context) {
-        return context.stringClaim("name").or(() -> context.stringClaim("preferred_username")).orElse(null);
+        return context.stringAttribute("name").or(() -> context.stringAttribute("preferred_username")).orElse(null);
     }
 
     private static List<String> stringList(@Nullable Object claim) {
@@ -134,11 +133,6 @@ final class CallerResolution {
     }
 
     private record Context(String principalName, Object principal, Set<String> authorities,
-            Map<String, Object> claims, HttpServletRequest request) implements CallerContext {
-
-        @Override
-        public Optional<String> header(String name) {
-            return Optional.ofNullable(request.getHeader(name));
-        }
+            Map<String, Object> attributes) implements CallerContext {
     }
 }

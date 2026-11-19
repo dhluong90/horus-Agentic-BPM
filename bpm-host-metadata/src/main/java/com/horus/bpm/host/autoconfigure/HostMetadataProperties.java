@@ -1,6 +1,5 @@
 package com.horus.bpm.host.autoconfigure;
 
-import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -29,41 +28,25 @@ public record HostMetadataProperties(
     }
 
     /**
-     * Tenant resolution. Ignored when the host declares its own {@code TenantResolver} bean, except
-     * {@code claim}, which the engines always compare with the resolved tenant.
+     * Tenant resolution (PD-079, ADR-0014 decision 6).
      *
-     * @param resolver {@code security-context} (the tenant is a claim of the caller's token) or
-     *     {@code header:<name>} (a trusted gateway sets the header after authentication)
-     * @param claim the token claim that carries the tenant
-     * @param trustedGateway required outside the {@code dev} profile before {@code header:<name>} starts:
-     *     the operator confirms that a gateway authenticates every request and overwrites the header
+     * @param claim the attribute of the authenticated principal, a token claim or a session principal
+     *     attribute, that the default resolver reads and that the engines compare with the tenant any
+     *     resolver returns
+     * @param devTenant a fixed tenant for local work without an identity provider, used for principals
+     *     that carry no tenant; accepted on the {@code dev} profile only
      */
-    public record Tenancy(
-            @DefaultValue(SECURITY_CONTEXT) String resolver,
-            @DefaultValue("tenant_id") String claim,
-            @DefaultValue("false") boolean trustedGateway) {
+    public record Tenancy(@DefaultValue("tenant_id") String claim, @Nullable String devTenant) {
 
-        static final String SECURITY_CONTEXT = "security-context";
-        static final String HEADER_PREFIX = "header:";
-        private static final Pattern HEADER_NAME = Pattern.compile("^[A-Za-z0-9-]{1,64}$");
-
-        /** Checks the resolver and claim names. */
+        /** Checks the claim name and the format of the development tenant. */
         public Tenancy {
-            if (!SECURITY_CONTEXT.equals(resolver)
-                    && !(resolver.startsWith(HEADER_PREFIX)
-                            && HEADER_NAME.matcher(resolver.substring(HEADER_PREFIX.length())).matches())) {
-                throw new IllegalArgumentException("horus.bpm.tenancy.resolver must be 'security-context' or "
-                        + "'header:<header name>', was '" + resolver + "'.");
-            }
             if (claim.isBlank()) {
                 throw new IllegalArgumentException("horus.bpm.tenancy.claim must not be blank.");
             }
-        }
-
-        /** The header that carries the tenant in gateway mode, or {@code null} in token mode. */
-        @Nullable
-        String tenantHeader() {
-            return resolver.startsWith(HEADER_PREFIX) ? resolver.substring(HEADER_PREFIX.length()) : null;
+            if (devTenant != null && !CallerResolution.TENANT.matcher(devTenant).matches()) {
+                throw new IllegalArgumentException("horus.bpm.tenancy.dev-tenant must be 1 to 64 letters, digits, "
+                        + "'.', '_' or '-', starting with a letter or digit, was '" + devTenant + "'.");
+            }
         }
     }
 

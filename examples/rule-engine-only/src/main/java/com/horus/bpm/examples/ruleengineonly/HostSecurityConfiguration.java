@@ -2,14 +2,11 @@ package com.horus.bpm.examples.ruleengineonly;
 
 import com.horus.bpm.host.autoconfigure.BpmProblemAccessDeniedHandler;
 import com.horus.bpm.host.autoconfigure.BpmProblemAuthenticationEntryPoint;
-import com.horus.bpm.host.spi.TenantResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -50,19 +47,18 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
  * <p>Engine endpoints under {@code /api/bpm/**} answer {@code 401} and {@code 403} as RFC 9457 problem
  * details; every other path keeps the browser behaviour of a redirect to the sign-in page.
  *
+ * <p>The tenant comes from the engines' default resolver: the {@code tenant_id} claim of a token. The demo
+ * users carry no tenant, so {@code application-dev.yml} sets {@code horus.bpm.tenancy.dev-tenant: bank-a},
+ * which the engines accept on the {@code dev} profile only (PD-079).
+ *
  * <p>Demo users exist on the {@code dev} profile only: {@code lan} (role PRICING_AUTHOR) and {@code minh}
- * (role PRICING_APPROVER), both of tenant {@code bank-a}, with the password from {@code HORUS_DEMO_PASSWORD}.
- * Their roles map to engine permissions in {@code application.yml}. A real host signs users in through its
- * identity provider instead.
+ * (role PRICING_APPROVER), with the password from {@code HORUS_DEMO_PASSWORD}. Their roles map to engine
+ * permissions in {@code application.yml}. A real host signs users in through its identity provider instead.
  */
 @Configuration(proxyBeanMethods = false)
 class HostSecurityConfiguration {
 
     static final String DEV_PROFILE = "dev";
-    /** The tenant of the demo users, read from the signed-in principal, never from a header. */
-    static final String DEMO_TENANT = "bank-a";
-    static final Set<String> DEMO_USERS = Set.of("lan", "minh");
-    static final String TENANT_CLAIM = "tenant_id";
 
     private static final Log LOG = LogFactory.getLog(HostSecurityConfiguration.class);
     private static final String JWT = "spring.security.oauth2.resourceserver.jwt.";
@@ -101,18 +97,6 @@ class HostSecurityConfiguration {
     static boolean bearerRequest(HttpServletRequest request) {
         String authorization = request.getHeader("Authorization");
         return authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7);
-    }
-
-    /**
-     * The tenant of a request. Token callers: the {@code tenant_id} claim. Session callers: the tenant of the
-     * signed-in demo user. Anyone else has no tenant and gets {@code 401}. No header is read.
-     */
-    @Bean
-    TenantResolver hostTenantResolver() {
-        return caller -> caller.stringClaim(TENANT_CLAIM).or(() ->
-                caller.principal() instanceof UserDetails user && DEMO_USERS.contains(user.getUsername())
-                        ? Optional.of(DEMO_TENANT)
-                        : Optional.empty());
     }
 
     /**

@@ -3,21 +3,23 @@ package com.horus.bpm.host.spi;
 import java.util.Optional;
 
 /**
- * Finds the tenant of a request. A host declares a bean of this type to take the tenant from somewhere the
- * built-in modes do not cover; the bean replaces the resolver chosen by {@code horus.bpm.tenancy.resolver}.
- *
- * <p><b>Host-session mode.</b> When callers sign in to the host itself (form, SAML or LDAP sign-in, and the
- * embedded cockpit, which uses that session), the resolver reads the tenant from the signed-in principal,
- * {@link CallerContext#principal()}, for example the host's own user type. It must not read a header: in a
- * browser any header can be set by script. Hosts that accept both sessions and bearer tokens return the
- * token claim for token callers and the principal's tenant for session callers:
+ * Finds the tenant of a request (PD-079, ADR-0014 decision 6). The engines' default reads the
+ * {@code horus.bpm.tenancy.claim} attribute (default {@code tenant_id}) of the authenticated principal, so
+ * a validated token and a server-side session principal from an OIDC or OAuth2 login are handled alike.
+ * A host whose principal carries no such attribute, for example after a form, SAML or LDAP sign-in,
+ * declares its own bean of this type, which replaces the default:
  * <pre>{@code
  * @Bean
- * TenantResolver hostTenantResolver() {
- *     return caller -> caller.stringClaim("tenant_id")
- *             .or(() -> caller.principal() instanceof BankUser user ? Optional.of(user.tenant()) : Optional.empty());
+ * TenantResolver hostTenantResolver(BankUserDirectory directory) {
+ *     return caller -> caller.principal() instanceof BankUser user
+ *             ? Optional.of(user.tenant())
+ *             : directory.tenantOf(caller.principalName());
  * }
  * }</pre>
+ *
+ * <p>The engines ship no resolver that reads a request header, and {@link CallerContext} offers none: in
+ * a browser any header can be set by script, and a header set by a misconfigured gateway would expose one
+ * tenant's data to another tenant's operator. A host that writes such a resolver owns that risk.
  *
  * <p>Whatever the resolver returns, the engines then apply two checks of their own, so a resolver cannot
  * widen access: when the caller's token carries the tenant claim ({@code horus.bpm.tenancy.claim}), the

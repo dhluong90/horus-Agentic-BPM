@@ -49,29 +49,37 @@ import org.springframework.util.ClassUtils;
 public class HostMetadataAutoConfiguration {
 
     static final String DEV_PROFILE = "dev";
+    static final List<String> REMOVED_TENANCY_PROPERTIES =
+            List.of("horus.bpm.tenancy.resolver", "horus.bpm.tenancy.trusted-gateway");
     private static final Log LOG = LogFactory.getLog(HostMetadataAutoConfiguration.class);
 
     /**
-     * The tenant resolver chosen by {@code horus.bpm.tenancy.resolver}, unless the host declares its own.
-     * Header mode outside the {@code dev} profile needs {@code horus.bpm.tenancy.trusted-gateway=true}.
-     * The profile check matches profiles the way {@code @Profile} does, default profiles included.
+     * The default tenant resolver, unless the host declares its own: the {@code tenancy.claim} attribute of
+     * the authenticated principal, session or token (PD-079). {@code tenancy.dev-tenant} is refused outside
+     * the {@code dev} profile, and the removed header mode is refused rather than ignored, so a host that
+     * relied on it fails at start-up instead of silently changing behaviour. The profile check matches
+     * profiles the way {@code @Profile} does, default profiles included.
      */
     @Bean
     @ConditionalOnMissingBean
     TenantResolver horusBpmTenantResolver(HostMetadataProperties properties, Environment environment) {
+        for (String removed : REMOVED_TENANCY_PROPERTIES) {
+            if (environment.containsProperty(removed)) {
+                throw new IllegalStateException(removed + " is no longer supported: the engines take the tenant "
+                        + "only from the authenticated principal (PD-079). Remove it; for local work without an "
+                        + "identity provider use horus.bpm.tenancy.dev-tenant on the dev profile.");
+            }
+        }
         HostMetadataProperties.Tenancy tenancy = properties.tenancy();
-        String header = tenancy.tenantHeader();
-        if (header == null) {
-            return new ClaimTenantResolver(tenancy.claim());
+        if (tenancy.devTenant() != null) {
+            if (!environment.matchesProfiles(DEV_PROFILE)) {
+                throw new IllegalStateException("horus.bpm.tenancy.dev-tenant fixes the tenant for local work and is "
+                        + "accepted on the dev profile only. Remove it outside local development.");
+            }
+            LOG.warn("Principals without a " + tenancy.claim() + " attribute get the fixed development tenant '"
+                    + tenancy.devTenant() + "' (horus.bpm.tenancy.dev-tenant, dev profile).");
         }
-        if (!tenancy.trustedGateway() && !environment.matchesProfiles(DEV_PROFILE)) {
-            throw new IllegalStateException("horus.bpm.tenancy.resolver takes the tenant from the " + header
-                    + " header, which any caller can send. Outside the dev profile, set "
-                    + "horus.bpm.tenancy.trusted-gateway=true only when a gateway authenticates every request and "
-                    + "overwrites that header, or use resolver security-context.");
-        }
-        LOG.info("The tenant comes from the " + header + " header; a token tenant claim, when present, must match it.");
-        return new HeaderTenantResolver(header);
+        return new PrincipalTenantResolver(tenancy.claim(), tenancy.devTenant());
     }
 
     @Bean

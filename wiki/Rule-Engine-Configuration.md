@@ -47,8 +47,8 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `lifecycle.system-actor` | `system` | 0.1 (M1) | Actor recorded when the engine retires a superseded version |
 | `decision-log.retention-floor` | engine floor, pending PD-050 | 0.1 (M1) | Shortest `decision-log.retention` accepted; you may raise it, not lower it below the engine floor |
 | `maker-checker.enabled` | `true` | 0.1 (M1) | `false` is refused unless the `dev` profile is active |
-| `tenancy.claim` | `tenant_id` | Built as the host-wide `horus.bpm.tenancy.claim` | Token claim that carries the tenant. Whatever the resolver, a token with this claim must match the resolved tenant |
-| `tenancy.resolver` | `security-context` | Built as the host-wide `horus.bpm.tenancy.resolver` | `security-context` or `header:<name>` (behind a trusted gateway only). A host `TenantResolver` bean replaces both; see [Host-wide properties](#host-wide-properties) |
+| `tenancy.claim` | `tenant_id` | Built as the host-wide `horus.bpm.tenancy.claim` | Attribute of the authenticated principal, session or token, that carries the tenant; see [Host-wide properties](#host-wide-properties) |
+| `tenancy.dev-tenant` | unset | Built as the host-wide `horus.bpm.tenancy.dev-tenant` | Fixed tenant for local work, `dev` profile only |
 | `events.decision-evaluated` | `false` | 0.1 (M1) | Publish `rules.decision.evaluated.v1` for every decision |
 | `scheduler.enabled` | `true` | 0.1 (M1) | Run the engine's scheduler thread (outbox relay, partition creation, partition drop, idempotency cleanup) on this replica |
 | `security.role-permissions` | empty | Built | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities). Read by `/api/bpm/me` today; the engine endpoints use it from 0.1. A permission outside the six below stops the start-up |
@@ -61,9 +61,10 @@ These are under `horus.bpm.` and apply to every engine in the host. They are rea
 |---|---|---|---|
 | `host-id` | unset | Built | Id clients show for this host, 1 to 40 characters; returned as `hostId` by `/api/bpm/meta` |
 | `host-metadata.enabled` | `true` | Built | `false` turns `/api/bpm/meta` and `/api/bpm/me` off |
-| `tenancy.resolver` | `security-context` | Built | `security-context`: the tenant is a claim of the caller's token. `header:<name>`: a gateway sets the header after authentication. Any other value stops the start-up. Ignored when the host declares a `TenantResolver` bean (host-session mode) |
-| `tenancy.claim` | `tenant_id` | Built | Token claim that carries the tenant. Whatever the resolver, a token with this claim must match the resolved tenant |
-| `tenancy.trusted-gateway` | `false` | Built | Outside the `dev` profile, `header:<name>` does not start without it. Set it only when a gateway authenticates every request and overwrites the header |
+| `tenancy.claim` | `tenant_id` | Built | Attribute of the authenticated principal that the default `TenantResolver` reads: the claim of a validated token, or the attribute of a session principal from an OIDC or OAuth2 login (PD-079). Whatever the resolver, a principal with this attribute must match the resolved tenant |
+| `tenancy.dev-tenant` | unset | Built | Fixed tenant for principals that carry none, for local work without an identity provider. Accepted on the `dev` profile only; start-up is refused when it is set elsewhere |
+
+There is no header-based tenant mode: the engines never take the tenant from what the browser sends, and `tenancy.resolver` and `tenancy.trusted-gateway` stop the start-up with a message (PD-079). A host whose principal has no tenant attribute declares its own `TenantResolver` bean.
 | `security.challenge` | `Bearer` | Built | `WWW-Authenticate` value of a `401` the engine endpoints raise themselves |
 
 Properties with a prefix of `tenancy`, `masking` and `rest.cors` are shared with the Process Engine starter under `horus.bpm.processes.*`; when both engines run in one host, set them once under `horus.bpm.*`.
@@ -117,7 +118,7 @@ The `ruleEngine` health contributor also reports whether next month's partition 
 
 | Bean | Default | Override when |
 |---|---|---|
-| `TenantResolver` | Reads `tenant_id` claim from the JWT, or the configured header | Tenant comes from somewhere else: the signed-in session principal (host-session mode), a realm, a subdomain. Built in `com.horus.bpm.host.spi`; see [[Host Metadata and Permissions]] |
+| `TenantResolver` | Reads the `tenancy.claim` attribute of the authenticated principal, session or token | The principal has no such attribute, for example after a form, SAML or LDAP sign-in: read the host's own user type or directory. Built in `com.horus.bpm.host.spi`; see [[Host Metadata and Permissions]] |
 | `CallerResolver` | Principal name | Audit needs a different identity |
 | `RuleFunctionRegistry` | Built-in pure functions | Host registers extra pure functions, listed in the cockpit |
 | `RuleEventPublisher` | Spring `ApplicationEventPublisher` | Events go to an outbox or a bus |
@@ -167,7 +168,7 @@ horus.bpm.rules:
   definitions: classpath:rules/*.yaml
   definitions-tenant: dev
   definitions-auto-publish: true          # dev profile only
-  tenancy.resolver: header:X-Tenant-Id    # send X-Tenant-Id: dev with every request
+horus.bpm.tenancy.dev-tenant: dev         # dev profile only: the tenant of users without a tenant attribute
 ```
 ```java
 @Bean @Profile("dev")
@@ -178,4 +179,4 @@ UserDetailsService devUsers(PasswordEncoder enc) {
     User.withUsername("checker").password(enc.encode("checker")).authorities("rules:read", "rules:approve").build());
 }
 ```
-With HTTP basic enabled, `curl -u dev:dev -H 'X-Tenant-Id: dev' ...` holds `rules:evaluate`. Maker-checker still applies: `dev` requests publication and `checker` approves. Outside the `dev` profile the starter refuses `definitions-auto-publish: true` and `maker-checker.enabled: false`, and logs a warning when `tenancy.resolver` is a header.
+With HTTP basic enabled, `curl -u dev:dev ...` holds `rules:evaluate` in tenant `dev`. Maker-checker still applies: `dev` requests publication and `checker` approves. Outside the `dev` profile the starter refuses `definitions-auto-publish: true`, `maker-checker.enabled: false` and `tenancy.dev-tenant`.

@@ -194,19 +194,6 @@ class HostMetadataEndpointsTest {
     }
 
     @Test
-    void RLE_019_me_varies_on_the_configured_tenant_header_too() {
-        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class)
-                .withPropertyValues("horus.bpm.tenancy.resolver=header:X-Bank-Tenant", "horus.bpm.tenancy.trusted-gateway=true")
-                .run(context -> {
-                    MvcResult me = call(TestHosts.mockMvc(context), get("/api/bpm/me").with(lan()).header("X-Bank-Tenant", "bank-a"));
-
-                    assertThat(me.getResponse().getStatus()).isEqualTo(200);
-                    assertThat(String.join(", ", me.getResponse().getHeaders("Vary")))
-                            .isEqualTo("Authorization, Cookie, X-Tenant-Id, X-Bank-Tenant");
-                });
-    }
-
-    @Test
     void responses_carry_a_host_issued_correlation_id_whatever_the_caller_sends() {
         TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).run(context -> {
             MockMvc mvc = TestHosts.mockMvc(context);

@@ -8,13 +8,15 @@ Each numbered step is a control the request passes. Steps 1 to 3 run in your gat
 
 ## Tenant resolution
 
-| Source (`tenancy.resolver`) | How | Use when |
+| Source | How | Use when |
 |---|---|---|
-| `security-context` (default) | `TenantResolver` reads the `tenant_id` claim of the `JwtAuthenticationToken`, or the issuer realm when configured | OIDC hosts |
-| `header:X-Tenant-Id` | Trusted header set by a gateway after authentication | The gateway terminates authentication and the host network is private |
-| Host bean | A `TenantResolver` bean (`com.horus.bpm.host.spi`), which replaces both modes above | Host session (form, SAML, LDAP sign-in and the embedded cockpit): the tenant comes from the signed-in principal, never from a header. Also path or subdomain |
+| Default `TenantResolver` | Reads the `tenancy.claim` attribute (default `tenant_id`) of the authenticated principal: the claim of a validated token, or the attribute of a server-side session principal from an OIDC or OAuth2 login. Both are handled alike | OIDC hosts, with bearer tokens or with the cockpit embedded in the host's own web application |
+| Host `TenantResolver` bean (`com.horus.bpm.host.spi`) | Replaces the default; reads the host's own principal type or user directory | The principal carries no tenant attribute, for example after a form, SAML or LDAP sign-in |
+| `tenancy.dev-tenant` | A fixed tenant for principals that carry none | Local work without an identity provider; `dev` profile only, start-up refused elsewhere |
 
-Rules that hold in every mode: every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant. Whatever the resolver, a token that carries the tenant claim must match the resolved tenant, so a gateway header cannot move a caller into another tenant; header mode outside the `dev` profile also needs `tenancy.trusted-gateway=true`. Until tenant switching arrives (M2), an `X-Tenant-Id` header that differs from the resolved tenant is refused with `403 TENANT_NOT_ALLOWED` and the security log entry `tenant.switch.refused`. Both are built for `/api/bpm/meta` and `/api/bpm/me` ([[Host Metadata and Permissions]]).
+No resolver that trusts a header is shipped (PD-079, ADR-0014 decision 6): in a browser any header can be set by script, and a header set by a misconfigured gateway would expose one tenant's data to another tenant's operator. A host that writes such a resolver owns that risk. A principal whose tenant cannot be resolved gets `401 UNAUTHENTICATED` and reads nothing.
+
+Rules that hold in every mode: every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant. Whatever the resolver, a principal that carries the tenant attribute must match the resolved tenant, so a host resolver cannot move a caller into another tenant. Until tenant switching arrives (M2), an `X-Tenant-Id` header, the switch request, that differs from the resolved tenant is refused with `403 TENANT_NOT_ALLOWED` and the security log entry `tenant.switch.refused`. Both are built for `/api/bpm/meta` and `/api/bpm/me` ([[Host Metadata and Permissions]]).
 
 ## Permissions
 

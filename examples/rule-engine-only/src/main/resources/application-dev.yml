@@ -1,0 +1,7 @@
+# Local development only. The demo users lan and minh (HostSecurityConfiguration) sign in with the host's
+# form and carry no tenant attribute, so the engines serve them for this fixed tenant. The engines refuse
+# to start with this property outside the dev profile.
+horus:
+  bpm:
+    tenancy:
+      dev-tenant: bank-a

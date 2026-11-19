@@ -11,7 +11,6 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -44,23 +43,13 @@ final class HostMetadataController {
     private final List<ModuleDescriptor> modules;
     private final HostMetadataProperties properties;
     private final CallerResolution callers;
-    private final String[] meVary;
+    /** {@code /me} depends on the caller's credentials and on the switch request header. */
+    static final String[] ME_VARY = {HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE, CallerResolution.TENANT_SWITCH_HEADER};
 
     HostMetadataController(List<ModuleDescriptor> modules, HostMetadataProperties properties, CallerResolution callers) {
         this.modules = List.copyOf(modules);
         this.properties = properties;
         this.callers = callers;
-        this.meVary = vary(properties.tenancy().tenantHeader());
-    }
-
-    /** The headers {@code /me} depends on: the credentials, the switch header and the configured tenant header. */
-    static String[] vary(@Nullable String tenantHeader) {
-        List<String> vary = new ArrayList<>(List.of(
-                HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE, CallerResolution.TENANT_SWITCH_HEADER));
-        if (tenantHeader != null && !tenantHeader.equalsIgnoreCase(CallerResolution.TENANT_SWITCH_HEADER)) {
-            vary.add(tenantHeader);
-        }
-        return vary.toArray(String[]::new);
     }
 
     @GetMapping("/meta")
@@ -107,7 +96,7 @@ final class HostMetadataController {
         body.put("permissions", permissions(caller));
         body.put("roles", roles(caller));
         body.put("groups", caller.groups());
-        return cacheable(request, body, ME_CACHE_CONTROL, meVary);
+        return cacheable(request, body, ME_CACHE_CONTROL, ME_VARY);
     }
 
     @ExceptionHandler(ProblemException.class)

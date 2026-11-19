@@ -11,7 +11,7 @@ Design preview: describes the 0.1 target for the Rule Engine and the 0.2 target 
 | Tool | Use it for | Example |
 |---|---|---|
 | 1. Properties under `horus.bpm.*` | Limits, schedules, retention, tenant source, wording options | `horus.bpm.rules.lifecycle.sweep-interval: PT5M` |
-| 2. Host beans that replace an engine default | Where tenants, callers, currencies, calendars, explanations or extra checks come from | A `TenantResolver` that reads the tenant from the request path |
+| 2. Host beans that replace an engine default | Where tenants, callers, currencies, calendars, explanations or extra checks come from | A `TenantResolver` that reads the tenant from the host's user directory |
 | 3. Rule sets and process definitions | Business logic: fees, limits, eligibility, approvals, SLAs, escalations | A decision table versioned under four-eyes |
 | 4. Event listeners | Reacting to changes: outbox, notifications, reporting | Write `rules.version.published.v1` to your outbox |
 
@@ -32,7 +32,7 @@ Each is an interface with an engine default. Declare a bean of the same type and
 
 | Extension point | Engine | Default | Replace it when |
 |---|---|---|---|
-| `TenantResolver` | both | The `tenancy.claim` claim of the token (`tenant_id`), or the gateway header in `header:<name>` mode | The tenant comes from the signed-in session principal (host-session mode, form or SAML sign-in), a realm, a path or a subdomain. Built: `com.horus.bpm.host.spi.TenantResolver`; a token tenant claim must still match what it returns ([[Host Metadata and Permissions]]) |
+| `TenantResolver` | both | The `tenancy.claim` attribute (`tenant_id`) of the authenticated principal, session or token | The principal carries no tenant attribute (form, SAML or LDAP sign-in): read the host's user type or directory. Built: `com.horus.bpm.host.spi.TenantResolver`; a principal's tenant attribute must still match what it returns, and no header resolver is shipped ([[Host Metadata and Permissions]]) |
 | `CallerResolver` | both | Principal name | Audit needs another identity |
 | `RuleFunctionRegistry` | rules | Built-in pure functions | You add pure functions for authors |
 | `CurrencyRegistry` | rules | ISO 4217 scales | You trade a currency without an ISO scale, such as gold |

@@ -5,9 +5,10 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * What a {@link TenantResolver} may read about the authenticated caller of one request. JDK types only, so
- * a resolver does not depend on the servlet or Spring Security API; {@link #principal()} is the host's own
- * object.
+ * What a {@link TenantResolver} may read about the authenticated caller of one request: the principal and
+ * what the host's security signed into it. JDK types only, so a resolver does not depend on the servlet or
+ * Spring Security API. Request headers are deliberately not offered: the tenant never comes from what the
+ * browser sends (PD-079).
  */
 public interface CallerContext {
 
@@ -15,33 +16,28 @@ public interface CallerContext {
     String principalName();
 
     /**
-     * The principal object as the host's security signed it in, for example the host's own user type
-     * after a form or SAML sign-in. A host-session resolver reads the tenant from here: the tenant of a
-     * session caller is part of the session, never a header the browser sets.
+     * The principal object as the host's security signed it in, for example the host's own user type after
+     * a form or SAML sign-in, so a resolver can read the tenant from it or look the user up in the host's
+     * directory.
      */
     Object principal();
 
     /** Every granted authority of the principal. */
     Set<String> authorities();
 
-    /** The claims of the caller's token, or an empty map when the principal has no token. */
-    Map<String, Object> claims();
+    /**
+     * The attributes of the principal: the claims of a validated token, or the attributes of a session
+     * principal from an OIDC or OAuth2 login. Empty when the principal has none.
+     */
+    Map<String, Object> attributes();
 
     /**
-     * One request header.
+     * One string attribute.
      *
-     * @param name the header name, case-insensitive
-     * @return the first value, or empty when the request does not carry the header
+     * @param name the attribute or claim name
+     * @return the value when it is a non-blank string, otherwise empty
      */
-    Optional<String> header(String name);
-
-    /**
-     * One string claim.
-     *
-     * @param name the claim name
-     * @return the value when the claim is a non-blank string, otherwise empty
-     */
-    default Optional<String> stringClaim(String name) {
-        return claims().get(name) instanceof String value && !value.isBlank() ? Optional.of(value) : Optional.empty();
+    default Optional<String> stringAttribute(String name) {
+        return attributes().get(name) instanceof String value && !value.isBlank() ? Optional.of(value) : Optional.empty();
     }
 }
