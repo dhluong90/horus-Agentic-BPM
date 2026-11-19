@@ -80,7 +80,7 @@ public final class CanonicalJson {
      * @param value the number
      * @return the canonical number text
      */
-    static String number(BigDecimal value) {
+    public static String number(BigDecimal value) {
         double d = value.doubleValue();
         if (Double.isNaN(d) || Double.isInfinite(d)) {
             throw new IllegalArgumentException("Number out of the IEEE 754 double range: " + value);

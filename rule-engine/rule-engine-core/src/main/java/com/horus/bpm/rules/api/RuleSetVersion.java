@@ -21,6 +21,7 @@ import java.util.Objects;
  * @param requestedAt when publication was requested, or null
  * @param approvedBy who approved, or null
  * @param approvedAt when it was approved, or null
+ * @param createdBy who imported the version, or null when not recorded
  * @param createdAt when the version was created
  */
 public record RuleSetVersion(
@@ -39,6 +40,7 @@ public record RuleSetVersion(
         Instant requestedAt,
         String approvedBy,
         Instant approvedAt,
+        String createdBy,
         Instant createdAt) {
 
     public RuleSetVersion {
@@ -60,6 +62,6 @@ public record RuleSetVersion(
     public RuleSetVersion withoutSource() {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument,
                 canonicalHash, sourceFormat, sourceHash, null, requestedBy, requestedAt, approvedBy, approvedAt,
-                createdAt);
+                createdBy, createdAt);
     }
 }

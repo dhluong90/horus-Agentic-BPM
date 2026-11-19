@@ -18,7 +18,7 @@ sequenceDiagram
     Host->>HF: migrate db/migration
     HF->>DB: V1 loan_application, recorded in flyway_schema_history
     Host->>RE: all singletons created
-    RE->>DB: baseline 0 and V1 rle_* tables, recorded in rle_schema_history
+    RE->>DB: baseline 0, V1 rle_* tables and V2, recorded in rle_schema_history
     RE->>DB: partitions for the Clock month and the next, in one transaction
     Host->>DB: GET /actuator/health checks db and ruleEngine
 ```
@@ -48,6 +48,7 @@ docker exec horus-pg psql -U horus -d horus -c '\dt'
 docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_schema_history ORDER BY installed_rank'
 #  0       | Rule Engine baseline
 #  1       | V1__rle_baseline.sql
+#  2       | V2__rle_version_created_by.sql
 ```
 
 To see the `ruleEngine` component locally, start with `--management.endpoint.health.show-components=always`. It reports the schema version, `pendingMigrations`, and whether next month's partition exists.

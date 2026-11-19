@@ -7,6 +7,7 @@ import com.horus.bpm.rules.api.Money;
 import com.horus.bpm.rules.api.RuleSetVersion;
 import com.horus.bpm.rules.api.SourceFormat;
 import com.horus.bpm.rules.api.VersionStatus;
+import com.horus.bpm.rules.internal.model.InputClause;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.Instant;
@@ -15,7 +16,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
@@ -85,16 +85,21 @@ public final class EngineValues {
     }
 
     /**
-     * Converts inputs to a JSON object, replacing masked inputs.
+     * Converts the declared inputs to the JSON object written to the decision log. Undeclared keys are
+     * dropped, never logged (data minimisation); declared inputs with {@code mask: true} are replaced.
      *
-     * @param input the inputs
-     * @param masked names of inputs never stored in plain text
+     * @param input the inputs as supplied
+     * @param declared the rule set's input clauses
      * @return the object
      */
-    public static ObjectNode inputs(DecisionInput input, Set<String> masked) {
+    public static ObjectNode loggedInputs(DecisionInput input, List<InputClause> declared) {
         ObjectNode node = EngineJson.NODES.objectNode();
-        input.values().forEach((name, v) -> node.set(name, masked.contains(name) && v != null
-                ? EngineJson.NODES.stringNode("masked") : value(v)));
+        for (InputClause clause : declared) {
+            if (input.values().containsKey(clause.name())) {
+                Object v = input.get(clause.name());
+                node.set(clause.name(), clause.masked() && v != null ? EngineJson.NODES.stringNode("masked") : value(v));
+            }
+        }
         return node;
     }
 
@@ -188,6 +193,7 @@ public final class EngineValues {
         node.set("requestedAt", value(version.requestedAt()));
         node.set("approvedBy", value(version.approvedBy()));
         node.set("approvedAt", value(version.approvedAt()));
+        node.set("createdBy", value(version.createdBy()));
         node.put("createdAt", version.createdAt().toString());
         node.set("definition", read(version.canonicalDocument()));
         return node;
@@ -217,6 +223,7 @@ public final class EngineValues {
                 instant(node.get("requestedAt")),
                 text(node.get("approvedBy")),
                 instant(node.get("approvedAt")),
+                text(node.get("createdBy")),
                 Instant.parse(node.get("createdAt").stringValue()));
     }
 

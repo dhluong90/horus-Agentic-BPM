@@ -27,6 +27,7 @@ import java.time.Instant;
  * @param approvedBy approver, or null
  * @param approvedAt approval time, or null
  * @param approvalComment approval comment, or null
+ * @param createdBy who imported the version (the author), or null for rows written before it was recorded
  * @param createdAt creation time
  */
 public record StoredVersion(
@@ -34,7 +35,7 @@ public record StoredVersion(
         String hitPolicy, Instant effectiveFrom, String canonicalJson, String canonicalHash,
         SourceFormat sourceFormat, String sourceDocument, String sourceHash, long lockVersion,
         String requestedBy, Instant requestedAt, String approvedBy, Instant approvedAt, String approvalComment,
-        Instant createdAt) {
+        String createdBy, Instant createdAt) {
 
     /**
      * Returns the caller's view.
@@ -45,7 +46,7 @@ public record StoredVersion(
     public RuleSetVersion toView(boolean includeSource) {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalJson,
                 canonicalHash, sourceFormat, sourceHash, includeSource ? sourceDocument : null, requestedBy,
-                requestedAt, approvedBy, approvedAt, createdAt);
+                requestedAt, approvedBy, approvedAt, createdBy, createdAt);
     }
 
     /**
@@ -58,7 +59,7 @@ public record StoredVersion(
     public StoredVersion requested(String requester, Instant at) {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.PENDING_APPROVAL, hitPolicy,
                 effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
-                requester, at, null, null, null, createdAt);
+                requester, at, null, null, null, createdBy, createdAt);
     }
 
     /**
@@ -72,6 +73,6 @@ public record StoredVersion(
     public StoredVersion approved(String approver, Instant at, String comment) {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.PUBLISHED, hitPolicy,
                 effectiveFrom == null ? at : effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument,
-                sourceHash, lockVersion + 1, requestedBy, requestedAt, approver, at, comment, createdAt);
+                sourceHash, lockVersion + 1, requestedBy, requestedAt, approver, at, comment, createdBy, createdAt);
     }
 }

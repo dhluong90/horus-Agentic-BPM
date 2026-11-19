@@ -124,8 +124,9 @@ class RuleEngineOnlyHostIT {
                 .query(String.class).list();
 
         assertThat(hostHistory).containsExactly("1 V1__create_loan_application.sql");
-        // The host's tables existed first, so the engine baselines at 0 and still applies V1.
-        assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__rle_baseline.sql");
+        // The host's tables existed first, so the engine baselines at 0 and still applies V1 and V2.
+        assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__rle_baseline.sql",
+                "2 V2__rle_version_created_by.sql");
     }
 
     @Test

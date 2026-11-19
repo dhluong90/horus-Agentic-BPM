@@ -48,18 +48,19 @@ public class DecisionController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) {
         RestSupport.require(callers, "rules:evaluate");
+        String correlation = ProblemDetails.correlationId(correlationId);
         JsonNode request = EngineValues.readRequest(body);
         if (!request.isObject()) {
             throw new InputInvalidException("Request body must be a JSON object");
         }
         DecisionRequest decision = DecisionRequest.of(ruleSet, EngineValues.inputsFromJson(request.get("inputs")))
                 .withIdempotencyKey(idempotencyKey)
-                .withCorrelationId(correlationId);
+                .withCorrelationId(correlation);
         DecisionResult result = engine.evaluate(decision);
         ObjectNode json = EngineValues.decision(result);
         if (result.outcome() instanceof DecisionResult.Failed failed) {
             ObjectNode problem = ProblemDetails.body(failed.code(), HttpStatus.UNPROCESSABLE_CONTENT, failed.detail(),
-                    correlationId);
+                    correlation);
             problem.put("decisionId", result.decisionId());
             return ProblemDetails.response(HttpStatus.UNPROCESSABLE_CONTENT, problem);
         }

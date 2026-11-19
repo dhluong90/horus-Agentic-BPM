@@ -1,6 +1,7 @@
 package com.horus.bpm.rules.rest;
 
 import com.horus.bpm.rules.api.HorusBpmException;
+import com.horus.bpm.rules.internal.json.CorrelationIds;
 import com.horus.bpm.rules.internal.json.EngineJson;
 import com.horus.bpm.rules.internal.json.EngineValues;
 import com.horus.bpm.rules.internal.json.Ulid;
@@ -71,7 +72,18 @@ public class ProblemDetails {
                 .put("status", status.value())
                 .put("code", code)
                 .put("detail", detail)
-                .put("correlationId", correlationId != null ? correlationId : Ulid.next(Instant.now()));
+                .put("correlationId", correlationId(correlationId));
+    }
+
+    /**
+     * Returns the caller's correlation id when it is well-formed, otherwise a generated one, so a header is never
+     * echoed or stored unbounded.
+     *
+     * @param header the {@code X-Correlation-Id} header, possibly null
+     * @return a safe correlation id
+     */
+    static String correlationId(String header) {
+        return CorrelationIds.isValid(header) ? header : Ulid.next(Instant.now());
     }
 
     static ResponseEntity<byte[]> response(HttpStatus status, ObjectNode body) {

@@ -20,7 +20,6 @@ import com.horus.bpm.rules.api.WriteOptions;
 import com.horus.bpm.rules.internal.json.Hashes;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
@@ -32,7 +31,7 @@ class VersionServiceTest {
     final InMemoryStores stores = new InMemoryStores();
     final TestCaller caller = new TestCaller("bank-a", "alice");
     final VersionService versions = RuleEngines.create(
-            new EngineContext(caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), stores, stores, Duration.ofHours(24)),
+            new EngineContext(caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), stores, stores, EngineSettings.defaults()),
             stores, stores, stores).versionService();
 
     @Test

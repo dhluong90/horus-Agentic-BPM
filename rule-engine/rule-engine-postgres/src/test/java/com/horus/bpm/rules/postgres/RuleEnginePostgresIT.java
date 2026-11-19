@@ -14,6 +14,7 @@ import com.horus.bpm.rules.api.RuleSetVersion;
 import com.horus.bpm.rules.api.SelfApprovalForbiddenException;
 import com.horus.bpm.rules.api.VersionStatus;
 import com.horus.bpm.rules.api.WriteOptions;
+import com.horus.bpm.rules.internal.service.EngineSettings;
 import com.horus.bpm.rules.internal.service.RuleEngines;
 import com.horus.bpm.rules.spi.CallerResolver;
 import com.horus.bpm.rules.spi.TenantResolver;
@@ -76,7 +77,8 @@ class RuleEnginePostgresIT {
         RuleEngineTransactions transactions = new RuleEngineTransactions(transactionManager);
         new DecisionLogPartitions(db, transactions).ensureCurrentAndNextMonth(NOW);
         host = new TransactionTemplate(transactionManager);
-        engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC));
+        engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
+                EngineSettings.defaults());
     }
 
     @Test
@@ -198,6 +200,35 @@ class RuleEnginePostgresIT {
     }
 
     @Test
+    void RLE_009_the_database_refuses_approval_by_the_author_written_around_the_service() {
+        engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()));
+        caller.as("bank-a", "bob");
+        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+
+        assertThat(JdbcClient.create(db).sql("SELECT created_by || ' ' || requested_by FROM rle_version WHERE tenant_id = 'bank-a'")
+                .query(String.class).single()).isEqualTo("alice bob");
+        assertThatThrownBy(() -> JdbcClient.create(db)
+                .sql("UPDATE rle_version SET status = 'PUBLISHED', approved_by = 'alice' WHERE tenant_id = 'bank-a'")
+                .update()).isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("rle_version_four_eyes");
+        assertThat(JdbcClient.create(db)
+                .sql("UPDATE rle_version SET status = 'PUBLISHED', approved_by = 'carol' WHERE tenant_id = 'bank-a'")
+                .update()).isEqualTo(1);
+    }
+
+    @Test
+    void TR_SEC_05_undeclared_inputs_never_reach_rle_decision() {
+        publishCardFee();
+        caller.as("bank-a", "teller-01");
+
+        engines.ruleEngine().evaluate("card-fee",
+                DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5, "nationalId", "079090001234")));
+
+        assertThat(JdbcClient.create(db).sql("SELECT masked_inputs::text FROM rle_decision WHERE tenant_id = 'bank-a'")
+                .query(String.class).single()).isEqualTo("{\"tier\": \"GOLD\", \"txCount\": 5}");
+    }
+
+    @Test
     void RLE_020_import_keeps_source_document_and_canonical_hash() {
         byte[] file = cardFee();
 
@@ -220,6 +251,14 @@ class RuleEnginePostgresIT {
         assertThatThrownBy(() -> engines.ruleEngine().evaluate("card-fee", DecisionInput.of(Map.of("tier", "GOLD"))))
                 .isInstanceOf(RuleSetNotFoundException.class);
         assertThat(decisionRows()).isZero();
+    }
+
+    private void publish(String resource, String name) {
+        caller.as("bank-a", "alice");
+        engines.versionService().importRuleSet(ImportRequest.yaml(resource(resource)));
+        engines.versionService().requestPublish(name, 1, WriteOptions.none());
+        caller.as("bank-a", "bob");
+        engines.versionService().approve(name, 1, WriteOptions.none());
     }
 
     private void publishCardFee() {
@@ -247,7 +286,11 @@ class RuleEnginePostgresIT {
     }
 
     static byte[] cardFee() {
-        try (InputStream in = RuleEnginePostgresIT.class.getResourceAsStream("/rules/card-fee.yaml")) {
+        return resource("/rules/card-fee.yaml");
+    }
+
+    static byte[] resource(String path) {
+        try (InputStream in = RuleEnginePostgresIT.class.getResourceAsStream(path)) {
             return in.readAllBytes();
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -292,7 +335,7 @@ class RuleEnginePostgresIT {
 
         @Override
         public Set<String> currentPermissions() {
-            return Set.of();
+            return Set.of("rules:author", "rules:approve", "rules:evaluate", "rules:read");
         }
     }
 

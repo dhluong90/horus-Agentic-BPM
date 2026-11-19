@@ -81,7 +81,7 @@ public final class CompiledRuleSet {
         }
         List<CompiledRule> rules = new ArrayList<>();
         for (Rule rule : table.rules()) {
-            Expr condition = when(rule.when(), slots, rule.id());
+            Expr condition = when(rule.when(), slots, table.inputs(), rule.id());
             List<Expr> thens = new ArrayList<>();
             for (OutputClause output : table.outputs()) {
                 Cell cell = rule.then().get(output.name());
@@ -142,6 +142,9 @@ public final class CompiledRuleSet {
             return new DecisionResult.NoMatch();
         } catch (EvaluationException e) {
             return new DecisionResult.Failed("EVALUATION_ERROR", e.getMessage());
+        } catch (ArithmeticException e) {
+            // Exponent overflow or underflow in DECIMAL128 arithmetic: a deterministic failure, never a 500.
+            return new DecisionResult.Failed("EVALUATION_ERROR", "Arithmetic out of range");
         }
     }
 
@@ -243,21 +246,21 @@ public final class CompiledRuleSet {
         }
     }
 
-    private static Expr when(When when, Map<String, Integer> slots, String ruleId) {
+    private static Expr when(When when, Map<String, Integer> slots, List<InputClause> inputs, String ruleId) {
         List<Expr> parts = new ArrayList<>();
         for (Map.Entry<String, String> cell : when.cells().entrySet()) {
-            parts.add(condition(cell.getKey(), cell.getValue(), slots, ruleId));
+            parts.add(condition(cell.getKey(), cell.getValue(), slots, inputs, ruleId));
         }
         if (!when.any().isEmpty()) {
             Expr any = null;
             for (When nested : when.any()) {
-                Expr next = when(nested, slots, ruleId);
+                Expr next = when(nested, slots, inputs, ruleId);
                 any = any == null ? next : new Expr.Binary(Expr.BinaryOp.OR, any, next);
             }
             parts.add(any);
         }
         for (When nested : when.all()) {
-            parts.add(when(nested, slots, ruleId));
+            parts.add(when(nested, slots, inputs, ruleId));
         }
         Expr result = new Expr.Literal(Boolean.TRUE);
         for (Expr part : parts) {
@@ -266,15 +269,19 @@ public final class CompiledRuleSet {
         return result;
     }
 
-    private static Expr condition(String input, String text, Map<String, Integer> slots, String ruleId) {
+    private static Expr condition(String input, String text, Map<String, Integer> slots, List<InputClause> inputs,
+            String ruleId) {
         String trimmed = text.strip();
         boolean shorthand = SHORTHAND_PREFIXES.stream().anyMatch(trimmed::startsWith);
         String source = shorthand ? input + " " + trimmed : trimmed;
+        Expr expr;
         try {
-            return Parser.parse(source, name -> slots.getOrDefault(name, -1));
+            expr = Parser.parse(source, name -> slots.getOrDefault(name, -1));
         } catch (ExpressionException e) {
             throw new ValidationFailedException("Rule " + ruleId + ", input " + input + ": " + e.getMessage());
         }
+        ConditionTypes.requireBoolean(expr, inputs, "Rule " + ruleId + ", input " + input);
+        return expr;
     }
 
     private static Expr cell(Cell cell, Map<String, Integer> slots, String where) {

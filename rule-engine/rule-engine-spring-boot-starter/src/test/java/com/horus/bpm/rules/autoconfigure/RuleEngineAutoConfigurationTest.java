@@ -63,6 +63,39 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    void TR_EXT_02_host_beans_replace_the_engine_defaults_of_every_spi() {
+        com.horus.bpm.rules.spi.TenantResolver tenants = () -> "bank-a";
+        com.horus.bpm.rules.spi.CallerResolver callers = new com.horus.bpm.rules.spi.CallerResolver() {
+            @Override
+            public String currentCallerId() {
+                return "alice";
+            }
+
+            @Override
+            public java.util.Set<String> currentPermissions() {
+                return java.util.Set.of();
+            }
+        };
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withBean(com.horus.bpm.rules.spi.TenantResolver.class, () -> tenants)
+                .withBean(com.horus.bpm.rules.spi.CallerResolver.class, () -> callers)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(com.horus.bpm.rules.spi.TenantResolver.class)).isSameAs(tenants);
+                    assertThat(context.getBean(com.horus.bpm.rules.spi.CallerResolver.class)).isSameAs(callers);
+                    assertThat(context).hasSingleBean(com.horus.bpm.rules.api.RuleEngine.class);
+                });
+    }
+
+    @Test
+    void TR_EXT_03_an_out_of_range_setting_stops_start_up() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("horus.bpm.rules.cache.max-entries=0")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.cache.max-entries"));
+    }
+
+    @Test
     void TR_EMB_04_engine_registers_no_bean_types_the_host_owns() {
         runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
             assertThat(context).doesNotHaveBean(Flyway.class);

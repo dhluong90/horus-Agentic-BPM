@@ -3,13 +3,13 @@ package com.horus.bpm.rules.internal.service;
 import com.horus.bpm.rules.api.IdempotencyInFlightException;
 import com.horus.bpm.rules.api.IdempotencyKeyReuseException;
 import com.horus.bpm.rules.api.InputInvalidException;
+import com.horus.bpm.rules.api.PermissionDeniedException;
 import com.horus.bpm.rules.api.UnauthenticatedException;
 import com.horus.bpm.rules.internal.store.IdempotencyStore;
 import com.horus.bpm.rules.internal.store.TransactionRunner;
 import com.horus.bpm.rules.spi.CallerResolver;
 import com.horus.bpm.rules.spi.TenantResolver;
 import java.time.Clock;
-import java.time.Duration;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -22,11 +22,11 @@ import java.util.function.Supplier;
  * @param clock the host clock
  * @param transactions joins or opens a transaction
  * @param idempotency idempotency records
- * @param idempotencyTtl how long a key is remembered
+ * @param settings validated engine settings
  */
 public record EngineContext(
         TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
-        IdempotencyStore idempotency, Duration idempotencyTtl) {
+        IdempotencyStore idempotency, EngineSettings settings) {
 
     /** Longest idempotency key accepted. */
     static final int MAX_KEY_LENGTH = 200;
@@ -37,7 +37,7 @@ public record EngineContext(
         Objects.requireNonNull(clock, "clock must not be null");
         Objects.requireNonNull(transactions, "transactions must not be null");
         Objects.requireNonNull(idempotency, "idempotency must not be null");
-        Objects.requireNonNull(idempotencyTtl, "idempotencyTtl must not be null");
+        Objects.requireNonNull(settings, "settings must not be null");
     }
 
     String tenant() {
@@ -46,6 +46,18 @@ public record EngineContext(
             throw new UnauthenticatedException("No tenant in the security context");
         }
         return tenant;
+    }
+
+    /**
+     * Refuses the call unless the caller holds a permission (ADR-0010). Checked in the services, so a host that
+     * calls the Java API directly gets the same guard as the REST endpoints.
+     */
+    String callerWith(String permission) {
+        String caller = caller();
+        if (!callers.currentPermissions().contains(permission)) {
+            throw new PermissionDeniedException(permission);
+        }
+        return caller;
     }
 
     String caller() {
@@ -76,7 +88,7 @@ public record EngineContext(
                 case IdempotencyStore.Fresh ignored -> {
                     T result = action.get();
                     idempotency.record(tenant, operation, key, requestHash, statusCode, toJson.apply(result),
-                            now.plus(idempotencyTtl));
+                            now.plus(settings.idempotencyRetention()));
                     yield result;
                 }
             };

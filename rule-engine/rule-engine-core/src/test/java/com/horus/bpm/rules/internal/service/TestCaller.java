@@ -9,6 +9,9 @@ final class TestCaller implements TenantResolver, CallerResolver {
 
     private volatile String tenant;
     private volatile String user;
+    static final Set<String> ALL = Set.of("rules:author", "rules:approve", "rules:evaluate", "rules:read");
+
+    private volatile Set<String> permissions = ALL;
 
     TestCaller(String tenant, String user) {
         this.tenant = tenant;
@@ -16,8 +19,13 @@ final class TestCaller implements TenantResolver, CallerResolver {
     }
 
     void become(String tenant, String user) {
+        become(tenant, user, ALL);
+    }
+
+    void become(String tenant, String user, Set<String> permissions) {
         this.tenant = tenant;
         this.user = user;
+        this.permissions = Set.copyOf(permissions);
     }
 
     @Override
@@ -32,6 +40,6 @@ final class TestCaller implements TenantResolver, CallerResolver {
 
     @Override
     public Set<String> currentPermissions() {
-        return Set.of("rules:author", "rules:approve", "rules:evaluate", "rules:read");
+        return permissions;
     }
 }

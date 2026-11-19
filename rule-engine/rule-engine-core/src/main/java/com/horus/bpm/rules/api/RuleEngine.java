@@ -6,6 +6,11 @@ package com.horus.bpm.rules.api;
  * <p>Transactions: every method joins the caller's transaction when there is one, or runs in its own
  * otherwise. It reads the effective version and writes exactly one {@code rle_decision} row, which
  * commits or rolls back with the caller's work (RLE-013). It never calls the network.
+ *
+ * <p>Every evaluation needs a caller with {@code rules:evaluate}, resolved by the host's
+ * {@code CallerResolver}; the caller is written to the decision log. Host code that evaluates on its own
+ * behalf, such as a batch job, resolves to a service identity holding that permission. Otherwise the call
+ * fails with {@link UnauthenticatedException} or {@link PermissionDeniedException}.
  */
 public interface RuleEngine {
 
