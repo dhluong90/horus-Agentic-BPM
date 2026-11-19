@@ -7,7 +7,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 ## Strategy
 | Layer | Tool | Scope | Gate |
 |---|---|---|---|
-| Unit and property | JUnit 5, AssertJ, jqwik | Parser, type checker, evaluator, money, hit policies, determinism (1,000 tries per property in CI, 100,000 nightly) | Every pull request |
+| Unit and property | JUnit 5, AssertJ, the project's seeded generator (PD-090) | Parser, type checker, evaluator, money, hit policies, determinism (1,000 tries per property in CI, 100,000 nightly) | Every pull request |
 | Storage contract | Shared suite | In-memory and PostgreSQL adapters give the same results | Every pull request |
 | Integration and fault | Testcontainers, Toxiproxy | PostgreSQL 14, 16, 17; PgBouncer in transaction mode; two replicas; partition maintenance | Every pull request (PostgreSQL 16), nightly (full matrix) |
 | Contract | WebMvc tests, OpenAPI diff, JSON Schema | Every error code in the DESIGN error table; `/api/bpm/meta` and `/me` schemas | Every pull request |
@@ -18,8 +18,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | Spec id | Test | Level | Milestone | Traces to | Status |
 |---|---|---|---|---|---|
 | RLE-001 | `RLE_001_first_hit_policy_returns_top_matching_rule` | Unit, Testcontainers, REST | M1 | `TR-DET-01` | Implemented (#1): `RuleEngineServiceTest`, `RuleEnginePostgresIT`, `RuleLifecycleIT`; boundaries, input types and money exactness in `RuleLifecycleAcceptanceTest`, `MoneyPropertiesTest` (jqwik), `ExpressionPropertiesTest` (determinism, jqwik) and `RuleLifecycleFailurePathsIT` |
-| RLE-002 | `RLE_002_unique_hit_policy_rejects_zero_or_multiple_matches` | Unit, WebMvc | M1 | `TR-DET-04` | Planned |
-| RLE-003 | `RLE_003_collect_hit_policy_aggregates_matched_rules` | Unit | M1 | `TR-DET-01` | Planned |
+| RLE-002 | `RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several` | Unit, WebMvc | M1 | `TR-DET-04` | Planned |
+| RLE-003 | `RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules` | Unit | M1 | `TR-DET-01` | Planned |
 | RLE-004 | `RLE_004_publish_rejects_unparsable_or_ill_typed_expressions` | Unit, property | M1 | `TR-DET-02`, `TR-SEC-01` | Planned |
 | RLE-005 | `RLE_005_money_currency_mismatch_is_rejected` | Unit, REST | M1 | `TR-DET-03` | Implemented (#1): `RuleLifecycleFailurePathsIT` (422 `EVALUATION_ERROR`, no outputs, logged outcome); `MoneyPropertiesTest` for the evaluator |
 | RLE-006 | `RLE_006_null_follows_feel_three_valued_logic` | Unit, replay | M1 | `TR-DET-01`, `TR-STD-02` | Partial (#1): truth tables and null operands in `ExpressionPropertiesTest` (jqwik). Stays in `spec-pending.txt` until the `collect` hit policy lands: the statement needs `collect`, the decision log and replay |
@@ -55,6 +55,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-036 | `RLE_036_every_rest_error_is_problem_details_with_stable_code` | WebMvc over the error matrix, injected failure | M1 | `TR-SEC-08` | Planned |
 | RLE-037 | `RLE_037_tenant_from_principal_session_or_token_never_from_browser` | Starter context runner with session and token principals, WebMvc | M1 | `TR-SEC-03`, `TR-TEN-01`, `TR-EXT-02` | Implemented for `/api/bpm/meta` and `/api/bpm/me` (`TenantResolutionTest.RLE_037_*`) and for engine paths through `EngineAccess` (`EngineAccessTest.RLE_037_*`: the same `403 TENANT_NOT_ALLOWED` and log entry as `/me`, with the metadata endpoints on and off); the rule-set read, `:evaluate` and decision-row cases run again when those endpoints arrive |
 | RLE-038 | `RLE_038_four_eyes_retirement_needs_second_approver` | Service, WebMvc, two-replica Testcontainers, event capture | M3 | `TR-SEC-04`, `TR-OBS-04`, `TR-EXT-05` | Planned |
+| RLE-045 | `RLE_045_one_hash_per_behaviour_in_any_style_and_never_for_different_behaviour` | Core golden files (both directions, pinned hash), grammar coverage gate, seeded-generator round-trip and evaluation-equivalence properties, DMN round trip, Testcontainers import in two tenants with a tampered `canonical_json` | M1 | `TR-STD-03`, `TR-STD-25`, `TR-STD-28` | Planned |
+| RLE-046 | `RLE_046_requester_withdraws_own_pending_request_to_draft` | Service, WebMvc, Testcontainers history and event capture | M1 | `TR-OBS-04`, `TR-IDEM-01`, `TR-SEC-04` | Planned |
 
 ## Compatibility matrix
 Every pull request runs the unit, ArchUnit and Testcontainers tests on four legs (`TR-EMB-02`, ADR-0011): Java 21 and 25, each with Spring Boot 4.x and 3.5.x (3.5.16 or later), and each Spring Boot line on PostgreSQL 14 and the newest release (18). The legs cover every two-way pair of Java, Spring Boot line and PostgreSQL version; the JDBC driver follows the Spring Boot BOM, so a three-way failure has no plausible mechanism. A fifth leg runs Spring Boot 4.0.x (Java 21, PostgreSQL 16) until 4.0 leaves open-source support on 31 Dec 2026.
@@ -89,4 +91,4 @@ Tests that prove a platform requirement directly, before any `SPEC.md` statement
 | `RLE-014` in flight over REST: `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` is proved at the service on PostgreSQL only; no HTTP test holds a first request open | A REST test with a host hook that blocks the first request, with the decision log query slice |
 | Conditions that are not boolean (`tier: "'GOLD'"`) and output cells of the wrong type import and then never match or fail at evaluation | Publish-time type checking, `RLE-004` |
 | Jackson 3 inside the core is conditional on the Spring Boot 3.5 coexistence test (ADR-0021) | The first parsing pull request (#1) runs on Spring Boot 4.x only; the 3.5 leg and `RLE-023` arrive with the platform compatibility slice, which must pass before 3.5 support is claimed. `RuleLifecycleIT` already runs the host with `SNAKE_CASE` and checks camelCase engine responses on Spring Boot 4 |
-| Licence scope of JUnit, jqwik and JMH: decided as PD-053 option 2 (2026-11-19) | jqwik (EPL-2.0) is allowed in test scope only and never ships. The CI licence check (`TR-LIC-01`) covers compile, runtime and provided scopes of the shipped modules; test-scope dependencies are scanned for critical vulnerabilities |
+| Licence scope of JUnit and JMH: decided as PD-053 option 2 (2026-11-19); jqwik removed by PD-090 | Property tests move to the project's seeded generator; the existing jqwik classes (`ExpressionPropertiesTest`, `MoneyPropertiesTest`) are rewritten by the engineering follow-up of PD-090. The CI licence check (`TR-LIC-01`) covers compile, runtime and provided scopes of the shipped modules; test-scope dependencies are scanned for critical vulnerabilities |

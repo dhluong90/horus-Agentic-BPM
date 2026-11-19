@@ -148,7 +148,7 @@
                   <files>
                     <file>${project.parent.basedir}/web/dist/index.html</file>
                   </files>
-                  <message>The cockpit bundle is missing. Run "npm ci &amp;&amp; npm run build" in cockpit/web first, or build without the cockpit with -Dcockpit.bundle.skip=true.</message>
+                  <message>The cockpit bundle is missing. Build it with "tools/release/build-cockpit.sh target/cockpit" from the repository root (lockfile checks, no install scripts, the pinned Node), or build without the cockpit with -Dcockpit.bundle.skip=true.</message>
                 </requireFilesExist>
               </rules>
             </configuration>
