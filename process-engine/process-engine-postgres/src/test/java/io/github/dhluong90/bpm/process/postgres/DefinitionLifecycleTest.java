@@ -518,38 +518,43 @@ class DefinitionLifecycleTest {
     }
 
     @Test
-    void PRE_053_a_version_that_just_took_effect_is_the_last_in_effect_and_its_superseded_versions_are_retired_first() {
+    void PRE_053_a_version_that_just_took_effect_is_the_last_in_effect_and_its_superseded_versions_retire_with_it() {
         // Given v1 active, and v2 approved for 1 May; on 1 May v2 is effective but its job has not fired, so v1 is
         // still ACTIVE
         clock.set(Instant.parse("2027-04-20T09:00:00Z"));
         activate(1);
         DefinitionVersion v2 = approveByBob(request(importAs(2), Instant.parse("2027-05-01T00:00:00Z")));
         clock.set(Instant.parse("2027-05-01T00:00:30Z"));
-        assertThat(stored(1).status()).isEqualTo("ACTIVE");
+        int history = count("SELECT count(*) FROM pre_definition_history");
 
         // When bob retires v2 without the confirmation
         engine.identity.as("bank-a", "bob", APPROVER);
         assertThatThrownBy(() -> engine.services.retire(v2.ref(), v2.lockVersion(), "wrong rule set", false, null))
-                // Then it is the last version in effect: 409, v2 stays active
+                // Then it is the last version in effect: 409, and the refusal writes nothing
                 .isInstanceOf(io.github.dhluong90.bpm.process.api.LastVersionInEffectException.class);
+        assertThat(stored(1).status()).isEqualTo("ACTIVE");
         assertThat(stored(2).status()).isEqualTo("ACTIVE");
+        assertThat(count("SELECT count(*) FROM pre_definition_history")).isEqualTo(history);
+        assertThat(start("LN-0500").definitionVersion()).isEqualTo(2);
 
-        // And v1 was retired as superseded by v2, so it can never take new cases again
+        // When bob confirms
+        engine.identity.as("bank-a", "bob", APPROVER);
+        DefinitionVersion retired = engine.services.retire(v2.ref(), v2.lockVersion(), "wrong rule set", true, null);
+
+        // Then v2 is retired by bob and v1 as superseded by v2, in the same transaction; a new start gets 404
+        assertThat(retired.status()).isEqualTo("RETIRED");
+        assertThat(retired.retiredBy()).isEqualTo("bob");
         DefinitionVersion v1 = stored(1);
         assertThat(v1.status()).isEqualTo("RETIRED");
         assertThat(v1.retiredBy()).isEqualTo("system:effective-date");
         assertThat(v1.supersededBy()).isEqualTo(2);
-        assertThat(start("LN-0500").definitionVersion()).isEqualTo(2);
-
-        // When bob confirms, the key has no version in effect, and v2's job later changes nothing
-        long v2Lock = stored(2).lockVersion();
-        engine.identity.as("bank-a", "bob", APPROVER);
-        DefinitionVersion retired = engine.services.retire(v2.ref(), v2Lock, "wrong rule set", true, null);
-        assertThat(retired.status()).isEqualTo("RETIRED");
         assertThatThrownBy(() -> start("LN-0501"))
                 .isInstanceOf(io.github.dhluong90.bpm.process.api.NoEffectiveVersionException.class);
+
+        // And v2's job later changes nothing
         assertThat(engine.jobs.pollOnce()).isZero();
         assertThat(stored(1).status()).isEqualTo("RETIRED");
+        assertThat(stored(2).status()).isEqualTo("RETIRED");
     }
 
     @Test

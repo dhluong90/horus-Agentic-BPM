@@ -401,17 +401,6 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String why = boundedComment(reason, false);
         String requestHash = Hashes.sha256Parts("retire", caller, ref.key(), Integer.toString(ref.version()),
                 Long.toString(expectedLockVersion), why, Boolean.toString(confirmNoVersionInEffect));
-        // PRE-053, as the Rule Engine (#269): first, in its own transaction under the key lock, retire the versions the
-        // selected one supersedes, as the effective-date job would. It commits even when the retire below is refused,
-        // so a superseded version never takes new cases again.
-        transactions.inTransaction(() -> {
-            List<StoredDefinition> versions = store.lockDefinitions(tenant, ref.key());
-            StoredDefinition selected = selected(versions, clock.instant());
-            if (selected != null) {
-                retireSuperseded(versions, selected, clock.instant());
-            }
-            return null;
-        });
         return transactions.inTransaction(() -> idempotent(tenant, "retire", idempotencyKey, requestHash, () -> {
             Locked locked = lockVersion(tenant, ref);
             StoredDefinition current = locked.version();
@@ -428,8 +417,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             requireLock(current, expectedLockVersion);
             Instant now = clock.instant();
             // PD-101: a key left with no version in effect makes every new start fail until a new version is approved.
-            // "In effect" is the selected version (DESIGN 3.2): retiring it leaves the key with none, because the
-            // versions it superseded were retired above and do not count.
+            // "In effect" is the selected version (DESIGN 3.2): retiring it leaves the key with none; older versions
+            // it supersedes do not count.
             StoredDefinition selected = selected(locked.all(), now);
             boolean last = active && selected != null && selected.id().equals(current.id());
             if (last) {
@@ -447,6 +436,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             + "instances continue. Send confirmNoVersionInEffect: true to retire it.", ref.key(),
                             ref.version(), "confirm", next);
                 }
+            }
+            // PRE-053, as the Rule Engine (#269): only after every check, in this transaction, retire the versions the
+            // selected one supersedes (as its effective-date job would), then this one, so a refusal writes nothing and
+            // a superseded version never takes new cases again.
+            if (active && selected != null) {
+                // This version itself is retired below, by the caller with the reason, never as superseded.
+                retireSuperseded(locked.all().stream().filter(d -> !d.id().equals(current.id())).toList(), selected,
+                        now);
             }
             StoredDefinition updated = current.retired(caller, now, null);
             write(updated);
