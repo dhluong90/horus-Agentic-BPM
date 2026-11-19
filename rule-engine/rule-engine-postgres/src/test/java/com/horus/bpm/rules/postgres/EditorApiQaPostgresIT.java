@@ -61,6 +61,7 @@ class EditorApiQaPostgresIT {
         RuleEngineTransactions transactions = new RuleEngineTransactions(new DataSourceTransactionManager(db));
         jdbc = JdbcClient.create(db);
         RuleEngines engines = PostgresRuleEngines.create(db, transactions, caller, caller, clock, EngineSettings.defaults());
+        engines.cursorKeys().load();   // as the starter does at start-up, after the migrations
         versions = engines.versionService();
     }
 

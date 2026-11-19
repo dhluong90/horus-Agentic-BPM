@@ -136,4 +136,12 @@ public interface RuleStore {
      * @return the stored key
      */
     byte[] engineKey(String name, byte[] candidate, Instant now);
+
+    /**
+     * Reads the engine key of a purpose without creating it.
+     *
+     * @param name the purpose
+     * @return the key, or empty
+     */
+    Optional<byte[]> findEngineKey(String name);
 }

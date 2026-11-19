@@ -460,6 +460,12 @@ class RuleEngineAutoConfigurationTest {
         DecisionLogPartitions customPartitions() {
             return mock(DecisionLogPartitions.class);
         }
+
+        /** No database here: the cursor key load runs against PostgreSQL in the storage module and example host. */
+        @Bean
+        RuleEngineCursorKeyInitializer customCursorKeys() {
+            return new RuleEngineCursorKeyInitializer(() -> { }, () -> { });
+        }
     }
 
     @Configuration(proxyBeanMethods = false)

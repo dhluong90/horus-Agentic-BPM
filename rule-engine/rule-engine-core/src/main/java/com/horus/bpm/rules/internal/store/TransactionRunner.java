@@ -15,15 +15,14 @@ public interface TransactionRunner {
     <T> T inTransaction(Supplier<T> work);
 
     /**
-     * Runs engine-internal work in a transaction of its own, committed before this method returns, whatever the
-     * caller's transaction does afterwards (rolled back, read-only). Used for state every replica must agree on,
-     * such as the cursor key. The default runs in the caller's transaction, for stores without transactions.
+     * Runs a read in a read-only transaction. Used off the request path, by the cursor key refresh. The default
+     * runs in an ordinary transaction, for stores without transactions.
      *
      * @param work the work
      * @param <T> the result type
      * @return the result
      */
-    default <T> T inOwnTransaction(Supplier<T> work) {
+    default <T> T inReadOnlyTransaction(Supplier<T> work) {
         return inTransaction(work);
     }
 }

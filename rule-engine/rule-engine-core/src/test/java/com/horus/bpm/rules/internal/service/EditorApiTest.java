@@ -60,6 +60,10 @@ class EditorApiTest {
             new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults()), stores, stores, stores);
     final VersionService versions = engines.versionService();
 
+    {
+        engines.cursorKeys().load();   // as the starter does at start-up
+    }
+
     // ---------------------------------------------------------------- RLE-025 reject
 
     @Test
@@ -282,6 +286,7 @@ class EditorApiTest {
     void RLE_039_the_maximum_page_size_is_a_setting() {
         RuleEngines small = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
                 new EngineSettings(1000, java.time.Duration.ofHours(24), 34, true, 1, 2000)), stores, stores, stores);
+        small.cursorKeys().load();
         publishedCardFee();
         caller.become("bank-a", "lan", AUTHOR_APPROVER);
         versions.importRuleSet(ImportRequest.yaml(cardFee("10000 VND", "fx-margin")));

@@ -27,12 +27,12 @@ import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import net.jqwik.api.Arbitraries;
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.ForAll;
-import net.jqwik.api.Property;
-import net.jqwik.api.Provide;
+import com.horus.bpm.testing.property.Gen;
+import com.horus.bpm.testing.property.Property;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestFactory;
 
 /** QA review of #147: properties and edge cases on top of EditorApiTest, on the in-memory stores. */
 class EditorApiQaTest {
@@ -47,9 +47,14 @@ class EditorApiQaTest {
         final EditorApiTest.MovableClock clock = new EditorApiTest.MovableClock(DEC_01);
         final InMemoryStores stores = new InMemoryStores();
         final TestCaller caller = new TestCaller("bank-a", "lan");
-        final VersionService versions = RuleEngines.create(
+        final RuleEngines engines = RuleEngines.create(
                 new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults()),
-                stores, stores, stores).versionService();
+                stores, stores, stores);
+        final VersionService versions = engines.versionService();
+
+        {
+            engines.cursorKeys().load();   // as the starter does at start-up
+        }
 
         RuleSetVersion build(VersionStatus status, String author, String requester) {
             caller.become("bank-a", author, Set.of(READ, AUTHOR));
@@ -67,33 +72,41 @@ class EditorApiQaTest {
         }
     }
 
-    @Provide
-    Arbitrary<VersionStatus> status() {
-        return Arbitraries.of(VersionStatus.DRAFT, VersionStatus.PENDING_APPROVAL, VersionStatus.PUBLISHED);
+    /** Author, requester and caller of one try. */
+    record Actors(String author, String requester, String caller) {
     }
 
-    @Provide
-    Arbitrary<String> user() {
-        return Arbitraries.of("lan", "minh", "dan");
+    static final Gen<VersionStatus> STATUS =
+            Gen.of(VersionStatus.DRAFT, VersionStatus.PENDING_APPROVAL, VersionStatus.PUBLISHED);
+
+    /** Every author, requester and caller among lan, minh and dan: 27 triples. */
+    static final Gen<Actors> ACTORS = actors();
+
+    /** Every subset of rules:author and rules:approve, each with rules:read. */
+    static final Gen<Set<String>> PERMISSIONS =
+            Gen.of(Set.of(READ), Set.of(READ, AUTHOR), Set.of(READ, APPROVE), Set.of(READ, AUTHOR, APPROVE));
+
+    static Gen<Actors> actors() {
+        List<Actors> all = new ArrayList<>();
+        for (String author : List.of("lan", "minh", "dan")) {
+            for (String requester : List.of("lan", "minh", "dan")) {
+                for (String caller : List.of("lan", "minh", "dan")) {
+                    all.add(new Actors(author, requester, caller));
+                }
+            }
+        }
+        return Gen.of(all.toArray(Actors[]::new));
     }
 
-    @Provide
-    Arbitrary<Set<String>> permissions() {
-        return Arbitraries.subsetOf(AUTHOR, APPROVE).map(s -> {
-            Set<String> all = new HashSet<>(s);
-            all.add(READ);
-            return Set.copyOf(all);
-        });
+    /** 3 statuses x 27 actor triples x 4 permission sets = 324 combinations, all walked within 400 tries. */
+    @TestFactory
+    Stream<DynamicTest> RLE_043_allowed_actions_match_what_each_command_accepts() {
+        return Property.tries(400).forAll(STATUS, ACTORS, PERMISSIONS, (status, actors, permissions) ->
+                allowedActionsMatchCommands(status, actors.author(), actors.requester(), actors.caller(), permissions));
     }
 
-    /**
-     * For every status, author, requester, caller and permission set: an action is in allowedActions exactly when
-     * the command succeeds for that caller.
-     */
-    @Property(tries = 400)
-    void RLE_043_allowed_actions_match_what_each_command_accepts(
-            @ForAll("status") VersionStatus status, @ForAll("user") String author, @ForAll("user") String requester,
-            @ForAll("user") String caller, @ForAll("permissions") Set<String> permissions) {
+    static void allowedActionsMatchCommands(VersionStatus status, String author, String requester, String caller,
+            Set<String> permissions) {
         // Given the version in that state, read by the caller
         World probe = new World();
         RuleSetVersion v = probe.build(status, author, requester);

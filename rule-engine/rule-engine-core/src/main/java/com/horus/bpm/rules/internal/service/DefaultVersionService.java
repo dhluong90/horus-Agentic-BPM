@@ -58,20 +58,11 @@ public final class DefaultVersionService implements VersionService {
     private static final String CURSOR_RULE_SETS = "rule-sets";
     private static final String CURSOR_VERSIONS = "versions";
 
-    private static final String CURSOR_KEY = "cursor-hmac";
-    private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
-
     private final EngineContext context;
     private final RuleStore store;
     private final EventOutbox outbox;
-    /**
-     * The cursor codec with the key from rle_engine_key, loaded in a transaction of its own and cached until
-     * {@code refreshAt}; the same key on every replica.
-     */
-    private volatile CachedCursors cursors;
-
-    private record CachedCursors(Cursors codec, java.time.Instant refreshAt) {
-    }
+    /** The cursor key in memory, loaded at start-up (RLE-039). */
+    private final CursorKeys cursorKeys;
 
     /**
      * Creates the service.
@@ -81,9 +72,14 @@ public final class DefaultVersionService implements VersionService {
      * @param outbox event outbox
      */
     public DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox) {
+        this(context, store, outbox, new CursorKeys(store, context.transactions(), context.clock()));
+    }
+
+    DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox, CursorKeys cursorKeys) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.outbox = Objects.requireNonNull(outbox, "outbox must not be null");
+        this.cursorKeys = Objects.requireNonNull(cursorKeys, "cursorKeys must not be null");
     }
 
     @Override
@@ -228,11 +224,11 @@ public final class DefaultVersionService implements VersionService {
         context.callerWith(PERMISSION_READ);
         PageRequest request = page == null ? PageRequest.first() : page;
         int limit = limit(request);
+        // Verified in memory before any transaction: a forged cursor never reaches the database (RLE-039).
+        String after = Cursors.ruleSetName(cursorKeys.verify(tenant, "", CURSOR_RULE_SETS, request.cursor()));
         return context.withoutDooming(() -> {
-            String after = Cursors.ruleSetName(verify(tenant, "", CURSOR_RULE_SETS, request.cursor()));
-            Cursors codec = cursors(false);
             List<RuleSetSummary> rows = store.listRuleSets(tenant, after, limit + 1, context.clock().instant());
-            return page(rows, limit, last -> codec.sign(tenant, "", CURSOR_RULE_SETS, last.ruleSet()));
+            return page(rows, limit, last -> cursorKeys.sign(tenant, "", CURSOR_RULE_SETS, last.ruleSet()));
         });
     }
 
@@ -253,13 +249,13 @@ public final class DefaultVersionService implements VersionService {
         PageRequest request = page == null ? PageRequest.first() : page;
         int limit = limit(request);
         requireRuleSetName(ruleSet);
+        String before = cursorKeys.verify(tenant, ruleSet, CURSOR_VERSIONS, request.cursor());
+        Integer beforeVersion = before == null ? null : Cursors.positiveInt(before);
         return context.withoutDooming(() -> {
-            String before = verify(tenant, ruleSet, CURSOR_VERSIONS, request.cursor());
-            Cursors codec = cursors(false);
-            Integer beforeVersion = before == null ? null : Cursors.positiveInt(before);
             String ruleSetId = store.findRuleSetId(tenant, ruleSet).orElseThrow(() -> new RuleSetNotFoundException(ruleSet));
             List<VersionSummary> rows = store.listVersions(tenant, ruleSetId, beforeVersion, limit + 1);
-            return page(rows, limit, last -> codec.sign(tenant, ruleSet, CURSOR_VERSIONS, Integer.toString(last.version())));
+            return page(rows, limit, last -> cursorKeys.sign(tenant, ruleSet, CURSOR_VERSIONS,
+                    Integer.toString(last.version())));
         });
     }
 
@@ -330,40 +326,6 @@ public final class DefaultVersionService implements VersionService {
         }
         return context.withoutDooming(() ->
                 store.findVersion(tenant, ruleSet, version, false).map(v -> v.toView(includeSource)));
-    }
-
-    /**
-     * Returns the cursor codec. The key is read, or created on first use, in a transaction of its own, so it is
-     * committed before it is cached: a caller's rollback cannot leave this replica with a key no other replica has,
-     * and a read-only caller transaction does not refuse the insert. The cache is refreshed every
-     * {@link EngineDefaults#CURSOR_KEY_REFRESH}, so deleting the row (rotation) reaches every replica within it.
-     */
-    private Cursors cursors(boolean reload) {
-        java.time.Instant now = context.clock().instant();
-        CachedCursors cached = cursors;
-        if (reload || cached == null || !now.isBefore(cached.refreshAt())) {
-            byte[] candidate = new byte[32];
-            RANDOM.nextBytes(candidate);
-            byte[] key = context.transactions().inOwnTransaction(() -> store.engineKey(CURSOR_KEY, candidate, now));
-            cached = new CachedCursors(new Cursors(key), now.plus(EngineDefaults.CURSOR_KEY_REFRESH));
-            cursors = cached;
-        }
-        return cached.codec();
-    }
-
-    /**
-     * Verifies a cursor; when it fails, re-reads the key once and tries again, so a replica that still holds a
-     * rotated key accepts cursors signed with the new one. A cursor that still fails is {@code QUERY_INVALID}.
-     */
-    private String verify(String tenant, String scope, String list, String cursor) {
-        try {
-            return cursors(false).verify(tenant, scope, list, cursor);
-        } catch (QueryInvalidException first) {
-            if (cursor == null) {
-                throw first;
-            }
-            return cursors(true).verify(tenant, scope, list, cursor);
-        }
     }
 
     /**

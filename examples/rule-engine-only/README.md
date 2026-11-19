@@ -55,6 +55,10 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  5       | V5__rle_engine_key.sql
 ```
 
+### The cursor key
+
+At start-up, after the migrations, the engine creates its list-cursor key in `rle_engine_key` if it is missing and reads it, so the runtime database user needs `SELECT` and `INSERT` on that table; without them start-up stops with a message naming the table. Requests only use the key in memory.
+
 ### Protect the audit tables
 
 `rle_version_history` is append-only: migration `V4` adds triggers that refuse `UPDATE`, `DELETE` and `TRUNCATE`. A role that owns the table can still drop a trigger, so if you run migrations with one role and the application with another, also take the rights away from the application role:
