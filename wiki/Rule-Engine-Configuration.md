@@ -7,6 +7,7 @@ Reference for every `horus.bpm.rules.*` property of the Rule Engine starter and 
 | Status | Meaning |
 |---|---|
 | Built | Read by the starter on `main`. Not yet released |
+| 0.1.0 | In the first release, 0.1.0 (22 Nov 2026, planned); the row says what 0.1.0 does |
 | 0.1 (M1) | Planned for Rule Engine 0.1, milestone M1, 15 Jan 2027. Setting it today has no effect |
 | 0.1 (M1), may move | Planned for 0.1; the [[Roadmap]] names the milestone it moves to if M1 runs late |
 | M2, M3 | Planned for that milestone (M2 26 Mar 2027, M3 21 May 2027). Setting it today has no effect |
@@ -47,7 +48,7 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `idempotency.retention` | `PT24H` | Built | Lifetime of `rle_idempotency` rows, `PT1M` to `P30D`. An invalid value stops start-up |
 | `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | 0.1 (M1) | Bounds of `GET /decisions` and list reads; range and page size may be lowered, never raised |
 | `lifecycle.sweep-interval` | `PT1M` | 0.1 (M1) | How often superseded versions are marked retired; evaluation already switches at `effectiveFrom` |
-| `authoring.cockpit-drafts` | `true` | 0.1 (M1) | `false`: authors (`rules:author`) get `403 DRAFT_AUTHORING_DISABLED` when they create or edit a draft from the cockpit, and the cockpit hides the edit actions. Import of a document, approvals and simulation still work. Set it per environment when production rule changes come from Git. Shown in `/api/bpm/meta` as `rules.authoring.cockpit-drafts` |
+| `authoring.cockpit-drafts` | `false` in 0.1.0 | 0.1.0 | Turns on draft editing in the cockpit. With `false` or unset, the cockpit hides the edit actions, and authors (`rules:author`) still import rule set documents, request publication and try drafts; approvals work either way. With `true`, authors edit cells and rows of a draft in the cockpit, and the saved draft still needs a second person to approve it. In 0.1.0 each save creates a new draft version; saving a draft in place comes in 0.2.0, and the default returns to `true` then (PD-094). Leave it `false` in environments where production rule changes come from Git. Shown in `/api/bpm/meta` as `rules.authoring.cockpit-drafts` |
 | `readings.style` | `sentence` | 0.1 (M1) | Style of the plain-language readings of rules and of explanation `text`: `sentence` (patterns from the message catalogue) or `shorthand` (for example `tier: GOLD, PLATINUM`). If sentences miss the 8 Jan 2027 checkpoint, 0.1 accepts only `shorthand` until sentences ship. Shown in `/api/bpm/meta` as `rules.readings.style` |
 | `lifecycle.reason-required`, `lifecycle.reason-max-length` | `true`, `2000` | 0.1 (M1) | Reason on reject and retire; may be made optional for reject only |
 | `lifecycle.system-actor` | `system` | 0.1 (M1) | Actor recorded when the engine retires a superseded version |
