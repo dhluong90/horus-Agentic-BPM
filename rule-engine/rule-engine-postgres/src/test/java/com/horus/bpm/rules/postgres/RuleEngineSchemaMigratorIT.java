@@ -23,7 +23,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class RuleEngineSchemaMigratorIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES =
+            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
 
     private static final AtomicInteger DATABASES = new AtomicInteger();
 

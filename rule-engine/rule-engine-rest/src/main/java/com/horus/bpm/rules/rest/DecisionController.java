@@ -59,10 +59,10 @@ public class DecisionController {
         DecisionResult result = engine.evaluate(decision);
         ObjectNode json = EngineValues.decision(result);
         if (result.outcome() instanceof DecisionResult.Failed failed) {
-            ObjectNode problem = ProblemDetails.body(failed.code(), HttpStatus.UNPROCESSABLE_CONTENT, failed.detail(),
+            ObjectNode problem = ProblemDetails.body(failed.code(), ProblemDetails.UNPROCESSABLE, failed.detail(),
                     correlation);
             problem.put("decisionId", result.decisionId());
-            return ProblemDetails.response(HttpStatus.UNPROCESSABLE_CONTENT, problem);
+            return ProblemDetails.response(ProblemDetails.UNPROCESSABLE, problem);
         }
         return RestSupport.json(HttpStatus.OK, json);
     }

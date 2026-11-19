@@ -61,6 +61,11 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
         <executions>
+          <!-- TR-EMB-05, TR-AGT-03: the shared list in the root POM's pluginManagement. -->
+          <execution>
+            <id>enforce-no-network-client</id>
+            <phase>validate</phase>
+          </execution>
           <execution>
             <id>enforce-framework-free-core</id>
             <goals>
@@ -82,8 +87,17 @@
                     <exclude>com.microsoft.sqlserver:*</exclude>
                     <exclude>com.h2database:*</exclude>
                     <exclude>org.hsqldb:*</exclude>
+                    <!-- TR-EMB-07, ADR-0021: one JSON major in the core, Jackson 3; never Jackson 2 or another JSON library. -->
+                    <exclude>com.fasterxml.jackson.core:jackson-databind</exclude>
+                    <exclude>com.fasterxml.jackson.core:jackson-core</exclude>
+                    <exclude>com.fasterxml.jackson.dataformat:*</exclude>
+                    <exclude>com.google.code.gson:*</exclude>
+                    <exclude>org.json:*</exclude>
+                    <exclude>jakarta.json*:*</exclude>
+                    <exclude>javax.json*:*</exclude>
+                    <exclude>com.alibaba*:fastjson*</exclude>
                   </excludes>
-                  <message>rule-engine-core depends on the JDK and Jackson 3 only (TR-EMB-03, ADR-0021): no framework, Jakarta, pool or JDBC driver artifact.</message>
+                  <message>rule-engine-core depends on the JDK and Jackson 3 only: no framework, Jakarta, pool, JDBC driver or second JSON library (TR-EMB-03, ADR-0021).</message>
                 </bannedDependencies>
               </rules>
             </configuration>
