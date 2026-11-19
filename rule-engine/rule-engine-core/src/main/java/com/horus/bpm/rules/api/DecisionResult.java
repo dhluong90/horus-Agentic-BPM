@@ -13,16 +13,33 @@ import java.util.Objects;
  * @param decisionId id of the decision row in {@code rle_decision}
  * @param ruleSet the rule set name
  * @param version the version number that was evaluated
- * @param evaluatedAt the evaluation clock instant
+ * @param clock the instant the decision reasoned about: it selected the version and fed {@code today()} and
+ *     {@code now()}; logged, so a replay uses it again (TR-DET-05)
+ * @param evaluatedAt when the evaluation ran; equals {@code clock} unless the caller chose a clock
  * @param outcome what happened; switch over it exhaustively
  */
-public record DecisionResult(String decisionId, String ruleSet, int version, Instant evaluatedAt, Outcome outcome) {
+public record DecisionResult(String decisionId, String ruleSet, int version, Instant clock, Instant evaluatedAt,
+        Outcome outcome) {
 
     public DecisionResult {
         Objects.requireNonNull(decisionId, "decisionId must not be null");
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
+        Objects.requireNonNull(clock, "clock must not be null");
         Objects.requireNonNull(evaluatedAt, "evaluatedAt must not be null");
         Objects.requireNonNull(outcome, "outcome must not be null");
+    }
+
+    /**
+     * Creates a result whose clock is the instant it ran at.
+     *
+     * @param decisionId the decision id
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param evaluatedAt the clock and run instant
+     * @param outcome the outcome
+     */
+    public DecisionResult(String decisionId, String ruleSet, int version, Instant evaluatedAt, Outcome outcome) {
+        this(decisionId, ruleSet, version, evaluatedAt, evaluatedAt, outcome);
     }
 
     /**

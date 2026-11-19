@@ -251,6 +251,7 @@ public final class EngineValues {
         node.put("decisionId", result.decisionId());
         node.put("ruleSet", result.ruleSet());
         node.put("version", result.version());
+        node.put("clock", result.clock().toString());
         node.put("evaluatedAt", result.evaluatedAt().toString());
         switch (result.outcome()) {
             case DecisionResult.Matched matched -> {
@@ -305,8 +306,11 @@ public final class EngineValues {
                         node.get("error").get("detail").stringValue(), ids);
             }
         };
+        Instant evaluatedAt = Instant.parse(node.get("evaluatedAt").stringValue());
+        // Records stored before the clock was a field of its own carry only evaluatedAt, which was the clock then.
+        Instant clock = node.has("clock") ? Instant.parse(node.get("clock").stringValue()) : evaluatedAt;
         return new DecisionResult(node.get("decisionId").stringValue(), node.get("ruleSet").stringValue(),
-                node.get("version").asInt(), Instant.parse(node.get("evaluatedAt").stringValue()), outcome);
+                node.get("version").asInt(), clock, evaluatedAt, outcome);
     }
 
     /**

@@ -1,12 +1,18 @@
 package com.horus.bpm.rules.internal.service;
 
+import com.horus.bpm.rules.api.ClockNotAllowedException;
 import com.horus.bpm.rules.api.DecisionInput;
+import com.horus.bpm.rules.api.DecisionNotFoundException;
 import com.horus.bpm.rules.api.DecisionRequest;
 import com.horus.bpm.rules.api.DecisionResult;
 import com.horus.bpm.rules.api.InputInvalidException;
+import com.horus.bpm.rules.api.InvalidStateException;
 import com.horus.bpm.rules.api.NoEffectiveVersionException;
+import com.horus.bpm.rules.api.ReplayNotPossibleException;
 import com.horus.bpm.rules.api.RuleEngine;
 import com.horus.bpm.rules.api.RuleSetNotFoundException;
+import com.horus.bpm.rules.api.VersionNotFoundException;
+import com.horus.bpm.rules.internal.model.InputClause;
 import com.horus.bpm.rules.internal.eval.CompiledRuleSet;
 import com.horus.bpm.rules.internal.json.CanonicalJson;
 import com.horus.bpm.rules.internal.json.CorrelationIds;
@@ -22,17 +28,26 @@ import com.horus.bpm.rules.internal.store.DecisionRecord;
 import com.horus.bpm.rules.internal.store.RuleStore;
 import com.horus.bpm.rules.internal.store.StoredVersion;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 
 /**
- * Evaluates the effective version and logs one decision row in the caller's transaction (RLE-013).
- * Compiled versions are cached by version id: a stored version never changes, so the cache needs no
- * invalidation. Its size is bounded by {@code cache.max-entries}; a full cache is cleared. Thread-safe.
+ * Evaluates the version in force at the decision's clock, or a pinned approved version, and logs one decision row in
+ * the caller's transaction (RLE-013); replays a logged decision without writing. Compiled versions are cached by
+ * version id: a stored version never changes, so the cache needs no invalidation. Selection is not cached: every
+ * evaluation selects in the database, so a newly effective or retired version is seen by every replica at once. The
+ * cache size is bounded by {@code cache.max-entries}; a full cache is cleared. Thread-safe.
  */
 public final class DefaultRuleEngine implements RuleEngine {
+
+    static final String PERMISSION_EVALUATE = "rules:evaluate";
+    static final String PERMISSION_SIMULATE = "rules:simulate";
+    static final String PERMISSION_LOG_READ = "rules:log:read";
 
     private final EngineContext context;
     private final RuleStore store;
@@ -61,52 +76,180 @@ public final class DefaultRuleEngine implements RuleEngine {
     public DecisionResult evaluate(DecisionRequest request) {
         Objects.requireNonNull(request, "request must not be null");
         String tenant = context.tenant();
-        String caller = context.callerWith("rules:evaluate");
+        String caller = context.callerWith(PERMISSION_EVALUATE);
+        if (request.clock() != null && !context.holds(PERMISSION_SIMULATE)) {
+            // A chosen instant reaches versions and dates the caller would not get at the host clock (DESIGN 4.2).
+            throw new ClockNotAllowedException();
+        }
         if (request.correlationId() != null && !CorrelationIds.isValid(request.correlationId())) {
             throw new InputInvalidException("correlationId must be 1 to " + EngineDefaults.CORRELATION_ID_MAX_LENGTH
                     + " characters of A-Z, a-z, 0-9, '.', '_', ':' or '-'");
         }
         InputLimits.check(request.input(), EngineDefaults.DECIMAL_PRECISION, context.settings().maxInputScale(),
                 context.settings().maxStringLength());
-        String requestHash = Hashes.sha256Parts("evaluate", caller, request.ruleSet(), ExactForm.of(request.input()));
+        // The clock and the pin are part of the request only when set, so a key used before they existed still replays.
+        String requestHash = request.clock() == null && request.version() == null
+                ? Hashes.sha256Parts("evaluate", caller, request.ruleSet(), ExactForm.of(request.input()))
+                : Hashes.sha256Parts("evaluate", caller, request.ruleSet(), ExactForm.of(request.input()),
+                        String.valueOf(request.version()), String.valueOf(request.clock()));
         return context.idempotent(tenant, "evaluate", request.idempotencyKey(), requestHash, 200,
                 () -> doEvaluate(tenant, caller, request),
                 result -> EngineValues.write(EngineValues.decision(result)),
-                EngineValues::decisionFromJson);
+                json -> typed(tenant, EngineValues.decisionFromJson(json)));
     }
 
-    private DecisionResult doEvaluate(String tenant, String caller, DecisionRequest request) {
-        Instant now = context.clock().instant();
-        if (!com.horus.bpm.rules.internal.read.RuleSetReader.isRuleSetName(request.ruleSet())) {
-            // Not a possible name (a NUL byte, upper case): not found, without a query the driver would refuse.
-            throw new RuleSetNotFoundException("(invalid name)");
+    /**
+     * Gives an idempotent replay the output types of a fresh evaluation. The stored JSON writes a {@code date} or
+     * {@code datetime} output as text, as the REST body does, so the declared types of the logged version turn it
+     * back into a {@code LocalDate} or an {@code Instant}; every other value reads back as it was.
+     */
+    private DecisionResult typed(String tenant, DecisionResult stored) {
+        Map<String, Object> outputs = stored.outputs();
+        boolean text = outputs.values().stream().anyMatch(v -> v instanceof String || v instanceof List<?>);
+        if (!text || stored.outcome() instanceof DecisionResult.Failed) {
+            return stored;
         }
-        StoredVersion version = store.findEffective(tenant, request.ruleSet(), now).orElseThrow(() ->
-                store.findRuleSetId(tenant, request.ruleSet()).isPresent()
-                        ? new NoEffectiveVersionException(request.ruleSet())
-                        : new RuleSetNotFoundException(request.ruleSet()));
+        StoredVersion version = store.findVersion(tenant, stored.ruleSet(), stored.version(), false).orElse(null);
+        if (version == null) {
+            return stored;
+        }
         CompiledRuleSet rules;
         try {
             rules = compiled(version);
         } catch (IntegrityFailure failure) {
-            return refuseTampered(tenant, caller, request, version, now, failure.getMessage());
+            return stored;
+        }
+        Map<String, Object> typed = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, Object> output : outputs.entrySet()) {
+            com.horus.bpm.rules.internal.model.ValueType.Kind kind = rules.outputs().stream()
+                    .filter(clause -> clause.name().equals(output.getKey())).findFirst()
+                    .map(clause -> clause.type().kind()).orElse(null);
+            typed.put(output.getKey(), typedValue(output.getValue(), kind));
+        }
+        DecisionResult.Outcome outcome = stored.outcome() instanceof DecisionResult.Matched matched
+                ? new DecisionResult.Matched(matched.ruleIds(), typed)
+                : new DecisionResult.NoMatch(typed);
+        return new DecisionResult(stored.decisionId(), stored.ruleSet(), stored.version(), stored.clock(),
+                stored.evaluatedAt(), outcome);
+    }
+
+    private static Object typedValue(Object value, com.horus.bpm.rules.internal.model.ValueType.Kind kind) {
+        if (value instanceof List<?> list) {
+            List<Object> elements = new ArrayList<>(list.size());
+            list.forEach(element -> elements.add(typedValue(element, kind)));
+            return java.util.Collections.unmodifiableList(elements);
+        }
+        if (value instanceof String text && kind == com.horus.bpm.rules.internal.model.ValueType.Kind.DATE) {
+            return java.time.LocalDate.parse(text);
+        }
+        if (value instanceof String text && kind == com.horus.bpm.rules.internal.model.ValueType.Kind.DATETIME) {
+            return Instant.parse(text);
+        }
+        return value;
+    }
+
+    private DecisionResult doEvaluate(String tenant, String caller, DecisionRequest request) {
+        Instant now = context.clock().instant();
+        Instant at = request.clock() == null ? now : request.clock();
+        if (!com.horus.bpm.rules.internal.read.RuleSetReader.isRuleSetName(request.ruleSet())) {
+            // Not a possible name (a NUL byte, upper case): not found, without a query the driver would refuse.
+            throw new RuleSetNotFoundException("(invalid name)");
+        }
+        StoredVersion version = request.version() == null ? effective(tenant, request.ruleSet(), at)
+                : pinned(tenant, request.ruleSet(), request.version());
+        CompiledRuleSet rules;
+        try {
+            rules = compiled(version);
+        } catch (IntegrityFailure failure) {
+            return refuseTampered(tenant, caller, request, version, now, at, failure.getMessage());
         }
         if (context.settings().rejectUndeclaredInputs()) {
             rules.requireOnlyDeclared(request.input());
         }
         long started = System.nanoTime();
-        DecisionResult.Outcome outcome = rules.evaluate(request.input());
+        DecisionResult.Outcome outcome = rules.evaluate(request.input(), at);
         long micros = (System.nanoTime() - started) / 1_000;
-        DecisionResult result = new DecisionResult(Ulid.next(now), version.ruleSet(), version.version(), now, outcome);
+        DecisionResult result = new DecisionResult(Ulid.next(now), version.ruleSet(), version.version(), at, now,
+                outcome);
         ArrayNode matched = EngineJson.NODES.arrayNode();
         result.matchedRuleIds().forEach(matched::add);
         String errorCode = outcome instanceof DecisionResult.Failed failed ? failed.code() : null;
+        // created_at is when it ran (the partition key); eval_clock is the instant it reasoned about, used by replay.
         log.append(new DecisionRecord(tenant, result.decisionId(), now, version.ruleSet(), version.version(),
                 version.hitPolicy(), errorCode == null ? "OK" : errorCode, errorCode,
                 EngineValues.write(EngineValues.loggedInputs(request.input(), rules.inputs())),
                 errorCode == null ? EngineValues.write(EngineValues.decision(result).get("outputs")) : null,
-                EngineValues.write(matched), caller, request.correlationId(), now, micros));
+                EngineValues.write(matched), caller, request.correlationId(), at, micros));
         return result;
+    }
+
+    /** The version in force at an instant (DESIGN 3.3.1); not found or no effective version otherwise. */
+    private StoredVersion effective(String tenant, String ruleSet, Instant at) {
+        return store.findEffective(tenant, ruleSet, at).orElseThrow(() ->
+                store.findRuleSetId(tenant, ruleSet).isPresent()
+                        ? new NoEffectiveVersionException(ruleSet)
+                        : new RuleSetNotFoundException(ruleSet));
+    }
+
+    /**
+     * A pinned version, which must have been approved: an unapproved rule never enters the decision log; a draft is
+     * simulated instead, which writes no row (RLE-015, RLE-016).
+     */
+    private StoredVersion pinned(String tenant, String ruleSet, int number) {
+        StoredVersion version = store.findVersion(tenant, ruleSet, number, false).orElseThrow(() ->
+                store.findRuleSetId(tenant, ruleSet).isPresent()
+                        ? new VersionNotFoundException(ruleSet, number)
+                        : new RuleSetNotFoundException(ruleSet));
+        if (version.approvedAt() == null) {
+            throw new InvalidStateException(ruleSet, number, version.status(), "evaluate (simulate a draft instead)");
+        }
+        return version;
+    }
+
+    @Override
+    public DecisionResult replay(String decisionId) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_LOG_READ);
+        if (!Ulid.isValid(decisionId)) {
+            // Not a possible id: not found, before any query.
+            throw new DecisionNotFoundException(String.valueOf(decisionId));
+        }
+        return context.withoutDooming(() -> {
+            DecisionRecord logged = log.find(tenant, decisionId)
+                    .orElseThrow(() -> new DecisionNotFoundException(decisionId));
+            // By number, never selected: a version superseded or retired since still replays (DESIGN 3.3.1).
+            StoredVersion version = store.findVersion(tenant, logged.ruleSet(), logged.version(), false)
+                    .orElseThrow(() -> new VersionNotFoundException(logged.ruleSet(), logged.version()));
+            DecisionResult.Outcome outcome;
+            try {
+                CompiledRuleSet rules = compiled(version);
+                DecisionInput input = loggedInput(decisionId, logged, rules.inputs());
+                outcome = rules.evaluate(input, logged.evalClock());
+            } catch (IntegrityFailure failure) {
+                outcome = new DecisionResult.Failed("EVALUATION_ERROR", failure.getMessage());
+            }
+            return new DecisionResult(logged.id(), version.ruleSet(), version.version(), logged.evalClock(),
+                    logged.createdAt(), outcome);
+        });
+    }
+
+    /**
+     * Reads the inputs a decision logged. A masked input with a value was stored only as {@code masked}, so the
+     * decision cannot be evaluated again; a masked null was stored as null and replays.
+     */
+    private static DecisionInput loggedInput(String decisionId, DecisionRecord logged, List<InputClause> declared) {
+        JsonNode inputs = EngineValues.read(logged.maskedInputsJson());
+        List<String> masked = new ArrayList<>();
+        for (InputClause clause : declared) {
+            JsonNode value = inputs.get(clause.name());
+            if (clause.masked() && value != null && !value.isNull()) {
+                masked.add(clause.name());
+            }
+        }
+        if (!masked.isEmpty()) {
+            throw new ReplayNotPossibleException(decisionId, masked);
+        }
+        return EngineValues.inputsFromJson(inputs);
     }
 
     private CompiledRuleSet compiled(StoredVersion version) {
@@ -135,14 +278,14 @@ public final class DefaultRuleEngine implements RuleEngine {
      * entry) and raises an alert in the log. The inputs are not logged: the version's masking cannot be trusted.
      */
     private DecisionResult refuseTampered(String tenant, String caller, DecisionRequest request, StoredVersion version,
-            Instant now, String detail) {
+            Instant now, Instant at, String detail) {
         System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
                 "ALERT rule set integrity: tenant " + tenant + ", " + detail);
-        DecisionResult result = new DecisionResult(Ulid.next(now), version.ruleSet(), version.version(), now,
+        DecisionResult result = new DecisionResult(Ulid.next(now), version.ruleSet(), version.version(), at, now,
                 new DecisionResult.Failed("EVALUATION_ERROR", detail));
         log.append(new DecisionRecord(tenant, result.decisionId(), now, version.ruleSet(), version.version(),
                 version.hitPolicy(), "EVALUATION_ERROR", "EVALUATION_ERROR", "{}", null, "[]", caller,
-                request.correlationId(), now, 0));
+                request.correlationId(), at, 0));
         return result;
     }
 
