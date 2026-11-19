@@ -11,12 +11,17 @@ import java.time.Duration;
  * @param maxInputScale {@code horus.bpm.rules.evaluation.max-input-scale}, 0 to {@value EngineDefaults#INPUT_MAX_SCALE}
  * @param rejectUndeclaredInputs {@code horus.bpm.rules.evaluation.reject-undeclared-inputs}: refuse an input name the
  *     rule set does not declare ({@code INPUT_INVALID}); when false, such inputs are ignored and never logged
+ * @param queryMaxPageSize {@code horus.bpm.rules.query.max-page-size}, 1 to {@value EngineDefaults#QUERY_MAX_PAGE_SIZE}:
+ *     the largest {@code limit} a list read accepts
+ * @param reasonMaxLength {@code horus.bpm.rules.lifecycle.reason-max-length}, 1 to
+ *     {@value EngineDefaults#REASON_MAX_LENGTH}: the longest reject reason, in characters
  * @param maxOutputBytes {@code horus.bpm.rules.evaluation.max-output-bytes}, 1 to {@value EngineDefaults#OUTPUT_MAX_BYTES}
  * @param maxStringLength {@code horus.bpm.rules.evaluation.max-string-length}, 1 to {@value EngineDefaults#STRING_MAX_LENGTH}
  * @param maxRows {@code horus.bpm.rules.evaluation.max-rows}, 1 to {@value EngineDefaults#RULES_MAX}
  */
 public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
-        boolean rejectUndeclaredInputs, int maxOutputBytes, int maxStringLength, int maxRows) {
+        boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
+        int maxStringLength, int maxRows) {
 
     public EngineSettings {
         if (cacheMaxEntries < 1 || cacheMaxEntries > EngineDefaults.CACHE_MAX_ENTRIES_LIMIT) {
@@ -33,6 +38,8 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
             throw new IllegalArgumentException("horus.bpm.rules.evaluation.max-input-scale must be 0 to "
                     + EngineDefaults.INPUT_MAX_SCALE + " (it may be lowered, never raised), was " + maxInputScale);
         }
+        requireLowerOnly("horus.bpm.rules.query.max-page-size", queryMaxPageSize, EngineDefaults.QUERY_MAX_PAGE_SIZE);
+        requireLowerOnly("horus.bpm.rules.lifecycle.reason-max-length", reasonMaxLength, EngineDefaults.REASON_MAX_LENGTH);
         requireLowerOnly("horus.bpm.rules.evaluation.max-output-bytes", maxOutputBytes, EngineDefaults.OUTPUT_MAX_BYTES);
         requireLowerOnly("horus.bpm.rules.evaluation.max-string-length", maxStringLength, EngineDefaults.STRING_MAX_LENGTH);
         requireLowerOnly("horus.bpm.rules.evaluation.max-rows", maxRows, EngineDefaults.RULES_MAX);
@@ -46,14 +53,28 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
     }
 
     /**
+     * Creates settings with the default page size, reason length and evaluation size limits.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                EngineDefaults.QUERY_MAX_PAGE_SIZE, EngineDefaults.REASON_MAX_LENGTH, EngineDefaults.OUTPUT_MAX_BYTES,
+                EngineDefaults.STRING_MAX_LENGTH, EngineDefaults.RULES_MAX);
+    }
+
+    /**
      * Returns the defaults.
      *
      * @return settings with every default of {@link EngineDefaults}
      */
     public static EngineSettings defaults() {
         return new EngineSettings(EngineDefaults.CACHE_MAX_ENTRIES, EngineDefaults.IDEMPOTENCY_RETENTION,
-                EngineDefaults.INPUT_MAX_SCALE, EngineDefaults.REJECT_UNDECLARED_INPUTS, EngineDefaults.OUTPUT_MAX_BYTES,
-                EngineDefaults.STRING_MAX_LENGTH, EngineDefaults.RULES_MAX);
+                EngineDefaults.INPUT_MAX_SCALE, EngineDefaults.REJECT_UNDECLARED_INPUTS);
     }
 
     /**
@@ -63,8 +84,8 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      * @return the settings
      */
     public EngineSettings withRejectUndeclaredInputs(boolean reject) {
-        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, reject, maxOutputBytes,
-                maxStringLength, maxRows);
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, reject, queryMaxPageSize,
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows);
     }
 
     /**
@@ -77,6 +98,6 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withSizeLimits(int outputBytes, int stringLength, int rows) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                outputBytes, stringLength, rows);
+                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows);
     }
 }

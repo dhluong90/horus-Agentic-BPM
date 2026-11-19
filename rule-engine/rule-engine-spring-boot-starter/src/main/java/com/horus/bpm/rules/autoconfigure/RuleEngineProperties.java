@@ -19,6 +19,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param cache the compiled-version cache
  * @param idempotency idempotency records
  * @param evaluation limits on evaluation inputs
+ * @param query bounds of list reads
+ * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
  */
 @ConfigurationProperties("horus.bpm.rules")
@@ -28,6 +30,8 @@ public record RuleEngineProperties(
         @DefaultValue Cache cache,
         @DefaultValue Idempotency idempotency,
         @DefaultValue Evaluation evaluation,
+        @DefaultValue Query query,
+        @DefaultValue Lifecycle lifecycle,
         @DefaultValue Security security) {
 
     /**
@@ -62,6 +66,24 @@ public record RuleEngineProperties(
     }
 
     /**
+     * Bounds of list reads (ADR-0015).
+     *
+     * @param maxPageSize the largest {@code limit} of {@code GET /rule-sets} and {@code GET .../versions}, 1 to 200;
+     *     default 200. May be lowered, never raised
+     */
+    public record Query(Integer maxPageSize) {
+    }
+
+    /**
+     * Version lifecycle commands.
+     *
+     * @param reasonMaxLength the longest reason of {@code :reject}, in characters, 1 to 2000; default 2000. May be
+     *     lowered, never raised
+     */
+    public record Lifecycle(Integer reasonMaxLength) {
+    }
+
+    /**
      * Returns the validated settings; an out-of-range value fails start-up naming the property.
      *
      * @return the engine settings
@@ -73,6 +95,8 @@ public record RuleEngineProperties(
                 evaluation.maxInputScale() == null ? EngineDefaults.INPUT_MAX_SCALE : evaluation.maxInputScale(),
                 evaluation.rejectUndeclaredInputs() == null
                         ? EngineDefaults.REJECT_UNDECLARED_INPUTS : evaluation.rejectUndeclaredInputs(),
+                query.maxPageSize() == null ? EngineDefaults.QUERY_MAX_PAGE_SIZE : query.maxPageSize(),
+                lifecycle.reasonMaxLength() == null ? EngineDefaults.REASON_MAX_LENGTH : lifecycle.reasonMaxLength(),
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
                 evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows());

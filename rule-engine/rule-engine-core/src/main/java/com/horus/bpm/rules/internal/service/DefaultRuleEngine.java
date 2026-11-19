@@ -76,6 +76,10 @@ public final class DefaultRuleEngine implements RuleEngine {
 
     private DecisionResult doEvaluate(String tenant, String caller, DecisionRequest request) {
         Instant now = context.clock().instant();
+        if (!com.horus.bpm.rules.internal.read.RuleSetReader.isRuleSetName(request.ruleSet())) {
+            // Not a possible name (a NUL byte, upper case): not found, without a query the driver would refuse.
+            throw new RuleSetNotFoundException("(invalid name)");
+        }
         StoredVersion version = store.findEffective(tenant, request.ruleSet(), now).orElseThrow(() ->
                 store.findRuleSetId(tenant, request.ruleSet()).isPresent()
                         ? new NoEffectiveVersionException(request.ruleSet())

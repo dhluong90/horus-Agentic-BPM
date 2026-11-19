@@ -301,10 +301,11 @@ class SpecCoverageGateTest(unittest.TestCase):
     def TR_QA_01_ts_file_outside_test_patterns_is_ignored(self):
         self.assertNotCovered(self.ts("test('RLE_001_not_a_test_file', () => {})\n", file="m/web/helper.ts"))
 
-    # S5: jqwik and dynamic tests ------------------------------------------------
+    # S5: property and dynamic tests ---------------------------------------------
 
-    def TR_QA_01_jqwik_boolean_property_covers(self):
-        self.assertCovered(self.java("@Property boolean RLE_001_property(@ForAll int x) { return true; }"))
+    def TR_QA_01_property_annotation_outside_junit_does_not_cover(self):
+        # PD-090: property tests are JUnit 5 @TestFactory methods; @Property is no test annotation here
+        self.assertNotCovered(self.java("@Property boolean RLE_001_property(@ForAll int x) { return true; }"))
 
     def TR_QA_01_test_factory_covers(self):
         self.assertCovered(self.java("@TestFactory Stream<DynamicTest> RLE_001_dynamic() { return null; }"))
