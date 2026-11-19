@@ -96,7 +96,9 @@ public final class DefaultVersionService implements VersionService {
         }
         String sourceText = utf8(source);
         ParsedRuleSet parsed = RuleSetReader.read(format, source);
-        CompiledRuleSet.compile(RuleSetReader.readCanonical(parsed.canonicalJson())); // compiled from what is stored (ADR-0026)
+        // The import model equals the parsed canonical form (checked by the reader, ADR-0026 decision 4); it is compiled
+        // here so violations follow the order cells are written in (RLE-041). Evaluation compiles only from the stored form.
+        CompiledRuleSet.compile(parsed.model());
         String name = parsed.model().name();
         Instant now = context.clock().instant();
         String ruleSetId;

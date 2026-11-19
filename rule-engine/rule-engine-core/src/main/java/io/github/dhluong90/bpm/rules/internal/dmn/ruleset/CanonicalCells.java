@@ -167,7 +167,7 @@ public final class CanonicalCells {
             String key = cell.getKey();
             if (key.equals("any") || key.equals("all")) {
                 cell.getValue().forEach(nested -> normalizeWhen((ObjectNode) nested, slots, ruleId));
-            } else {
+            } else if (cell.getValue().isString()) {
                 String text = cell.getValue().stringValue();
                 refuseBidi(text, "Rule " + ruleId + ", input " + key);
                 when.put(key, condition(key, text, slots));
