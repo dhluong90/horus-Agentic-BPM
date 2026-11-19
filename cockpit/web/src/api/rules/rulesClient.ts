@@ -1,6 +1,19 @@
 import type { z } from 'zod';
 import { callHost, type HostRequest } from '../hostCall';
-import { decisionResult, ruleSetVersion, type DecisionResult, type RuleSetVersion } from './schemas';
+import {
+  decisionResult,
+  page,
+  ruleSetSummary,
+  ruleSetVersion,
+  versionHistory,
+  versionSummary,
+  type DecisionResult,
+  type HistoryEntry,
+  type Page,
+  type RuleSetSummary,
+  type RuleSetVersion,
+  type VersionSummary,
+} from './schemas';
 
 type Fetch = typeof fetch;
 
@@ -13,11 +26,25 @@ export interface RuleDocument {
 }
 
 /**
- * Typed client of the Rule Engine REST API (rule-engine/api/openapi.yaml 0.1.0). One method per operation;
+ * Typed client of the Rule Engine REST API (rule-engine/api/openapi.yaml). One method per operation;
  * the operation id is named on each. Every state-changing call carries the caller's Idempotency-Key, and
  * calls on an existing version carry its lockVersion as If-Match.
  */
+export interface PageRequest {
+  cursor?: string | undefined;
+  limit?: number | undefined;
+  signal?: AbortSignal | undefined;
+}
+
 export interface RulesClient {
+  /** listRuleSets: one page, by name */
+  listRuleSets(request?: PageRequest): Promise<Page<RuleSetSummary>>;
+  /** listVersions: one page, newest first, without definitions */
+  listVersions(name: string, request?: PageRequest): Promise<Page<VersionSummary>>;
+  /** getVersionHistory: lifecycle entries, oldest first */
+  getHistory(name: string, version: number, signal?: AbortSignal): Promise<HistoryEntry[]>;
+  /** reject: back to DRAFT with a required reason */
+  reject(name: string, version: number, lockVersion: number, reason: string, idempotencyKey: string): Promise<RuleSetVersion>;
   /** getVersion */
   getVersion(name: string, version: number, options?: { source?: boolean; signal?: AbortSignal }): Promise<RuleSetVersion>;
   /** importRuleSet: version 1 of a new rule set */
@@ -39,7 +66,42 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
   const versionPath = (name: string, version: number) => `${RULES_BASE}/rule-sets/${segment(name)}/versions/${version}`;
   const ifMatch = (lockVersion: number) => `"${lockVersion}"`;
 
+  const pageQuery = ({ cursor, limit }: PageRequest) => {
+    const query = new URLSearchParams();
+    if (limit !== undefined) query.set('limit', String(limit));
+    if (cursor !== undefined) query.set('cursor', cursor);
+    const text = query.toString();
+    return text === '' ? '' : `?${text}`;
+  };
+
   return {
+    async listRuleSets(request = {}) {
+      const answer = await call({ method: 'GET', path: `${RULES_BASE}/rule-sets${pageQuery(request)}`, ...(request.signal ? { signal: request.signal } : {}) }, page(ruleSetSummary));
+      return answer.data;
+    },
+    async listVersions(name, request = {}) {
+      const answer = await call(
+        { method: 'GET', path: `${RULES_BASE}/rule-sets/${segment(name)}/versions${pageQuery(request)}`, ...(request.signal ? { signal: request.signal } : {}) },
+        page(versionSummary),
+      );
+      return answer.data;
+    },
+    async getHistory(name, version, signal) {
+      const answer = await call({ method: 'GET', path: `${versionPath(name, version)}/history`, ...(signal ? { signal } : {}) }, versionHistory);
+      return answer.data.data;
+    },
+    async reject(name, version, lockVersion, reason, idempotencyKey) {
+      const answer = await call(
+        {
+          method: 'POST',
+          path: `${versionPath(name, version)}:reject`,
+          headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
+          body: { contentType: 'application/json', text: JSON.stringify({ reason }) },
+        },
+        ruleSetVersion,
+      );
+      return answer.data;
+    },
     async getVersion(name, version, options = {}) {
       const query = options.source ? '?include=source' : '';
       const answer = await call({ method: 'GET', path: `${versionPath(name, version)}${query}`, ...(options.signal ? { signal: options.signal } : {}) }, ruleSetVersion);

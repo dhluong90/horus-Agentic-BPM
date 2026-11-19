@@ -35,7 +35,7 @@ Test names start with the specification id they prove, for example `CKP_001_...`
 | `src/app/config` | Loading and validating `cockpit-hosts.json` |
 | `src/app/session` | The session state: registry, `/meta` and `/me` as one state |
 | `src/api` | The host client, problem-details parsing and the generated schemas |
-| `src/api/rules` | The Rule Engine client written from `rule-engine/api/openapi.yaml`, its response schemas, and the interim rule set list |
+| `src/api/rules` | The Rule Engine client written from `rule-engine/api/openapi.yaml`, its response schemas, and paging over the list endpoints |
 | `src/features/rules` | Rule screens: list, decision table, minimal draft editor, changes, approval dock, Try it; `model/` holds the pure parts (money, readings, diff, draft state) |
 | `src/components` | Design tokens, the header and the state panels |
 | `src/i18n` | English and Vietnamese dictionaries |

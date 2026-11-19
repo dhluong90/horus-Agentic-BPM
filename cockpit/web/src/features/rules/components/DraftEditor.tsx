@@ -22,8 +22,14 @@ function moveFocus(event: KeyboardEvent<HTMLTableSectionElement>) {
   }
 }
 
-function cellError(error: ErrorPlace | undefined, row: EditableRow, column: string): string | undefined {
-  return error?.kind === 'cell' && error.ruleId === row.id && error.column === column ? error.message : undefined;
+function cellError(errors: readonly ErrorPlace[], row: EditableRow, column: string): string | undefined {
+  const messages = errors.flatMap((e) => (e.kind === 'cell' && e.ruleId === row.id && e.column === column ? [e.message] : []));
+  return messages.length > 0 ? messages.join(' · ') : undefined;
+}
+
+function rowErrorOf(errors: readonly ErrorPlace[], row: EditableRow): string | undefined {
+  const messages = errors.flatMap((e) => (e.kind === 'row' && e.ruleId === row.id ? [e.message] : []));
+  return messages.length > 0 ? messages.join(' · ') : undefined;
 }
 
 /**
@@ -86,11 +92,11 @@ function RowActions({ row, index, count, dispatch }: { row: EditableRow; index: 
 }
 
 /** The minimal draft editor: cells as plain text, row actions, and the engine's errors on their cells. */
-export function DraftEditor({ definition, draft, dispatch, error }: {
+export function DraftEditor({ definition, draft, dispatch, errors }: {
   definition: RuleSetDefinition;
   draft: DraftState;
   dispatch: Dispatch<DraftAction>;
-  error: ErrorPlace | undefined;
+  errors: readonly ErrorPlace[];
 }) {
   const { t } = useI18n();
   const cellMessage = useCellMessage();
@@ -100,7 +106,7 @@ export function DraftEditor({ definition, draft, dispatch, error }: {
         <TableHead definition={definition} extra={t('editor.actions')} />
         <tbody onKeyDown={moveFocus}>
           {draft.rows.map((row, index) => {
-            const rowError = cellMessage(error?.kind === 'row' && error.ruleId === row.id ? error.message : undefined);
+            const rowError = cellMessage(rowErrorOf(errors, row));
             return (
               <tr key={row.key} className={rowError !== undefined ? 'dt__row--bad' : undefined}>
                 <th scope="row" className="dt__rowhead">
@@ -120,13 +126,13 @@ export function DraftEditor({ definition, draft, dispatch, error }: {
                     {row.groups[input.name] !== undefined ? (
                       <span className="cell-raw">{t('table.group')}</span>
                     ) : (
-                      <CellInput row={row} index={index} part="when" column={input.name} label={columnLabel(input.name, input.description)} error={cellMessage(cellError(error, row, input.name))} dispatch={dispatch} />
+                      <CellInput row={row} index={index} part="when" column={input.name} label={columnLabel(input.name, input.description)} error={cellMessage(cellError(errors, row, input.name))} dispatch={dispatch} />
                     )}
                   </td>
                 ))}
                 {definition.outputs.map((output, outputIndex) => (
                   <td key={output.name} className={outputIndex === 0 ? 'dt__first-then' : undefined}>
-                    <CellInput row={row} index={index} part="then" column={output.name} label={columnLabel(output.name, output.description)} error={undefined} dispatch={dispatch} />
+                    <CellInput row={row} index={index} part="then" column={output.name} label={columnLabel(output.name, output.description)} error={cellMessage(cellError(errors, row, output.name))} dispatch={dispatch} />
                   </td>
                 ))}
                 <td className="dt__actions">

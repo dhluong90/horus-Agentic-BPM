@@ -3,6 +3,7 @@ import type { RuleSetVersion } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { useRulesSession } from '../api/rulesContext';
 import { formatDateTime } from '../model/dates';
+import { HistoryList } from './HistoryList';
 import { ProblemNotice } from './ProblemNotice';
 import { StatusBadge } from './StatusBadge';
 
@@ -30,6 +31,7 @@ interface DockProps {
   onReload: () => void;
   requestPublish: Action;
   approve: Action<string>;
+  reject: Action<string>;
 }
 
 function Fact({ label, value }: { label: string; value: string | null | undefined }) {
@@ -43,52 +45,58 @@ function Fact({ label, value }: { label: string; value: string | null | undefine
 }
 
 /**
- * Who may do what next is decided by the engine. This release returns no allowed actions, so the dock reads
- * the version's author and requester, which the engine itself names as unable to approve, and the user's
- * permissions from /me. A stale click still gets the engine's 403, shown with its code.
+ * The four-eyes gate. What the user may do comes from the engine's allowedActions for this caller; the dock
+ * only explains a missing Approve to the person who wrote or requested the change. A stale click still gets
+ * the engine's answer, shown with its code.
  */
-function FourEyesGate({ version, approve }: { version: RuleSetVersion; approve: Action<string> }) {
+function FourEyesGate({ version, approve, reject }: Pick<DockProps, 'version' | 'approve' | 'reject'>) {
   const { t } = useI18n();
-  const { userId, can } = useRulesSession();
-  const [comment, setComment] = useState('');
-  const commentId = useId();
+  const { userId } = useRulesSession();
+  const [text, setText] = useState('');
+  const textId = useId();
   const reasonId = useId();
-  const self = version.requestedBy === userId ? 'dock.selfRequested' : version.createdBy === userId ? 'dock.selfAuthored' : undefined;
-  if (!can('rules:approve') && self === undefined) return <p className="dock__note">{t('dock.waiting')}</p>;
+  const hintId = useId();
+  const allowed = new Set(version.allowedActions);
+  const canApprove = allowed.has('approve');
+  const canReject = allowed.has('reject');
+  const self = canApprove ? undefined : version.requestedBy === userId ? 'dock.selfRequested' : version.createdBy === userId ? 'dock.selfAuthored' : undefined;
+  if (!canApprove && !canReject && self === undefined) return <p className="dock__note">{t('dock.waiting')}</p>;
+  const busy = approve.isPending || reject.isPending;
   return (
     <div className="gate">
-      {self === undefined ? (
-        <label className="field" htmlFor={commentId}>
-          <span className="field__label">{t('dock.comment')}</span>
-          <textarea id={commentId} className="field__input" rows={2} value={comment} onChange={(e) => { setComment(e.target.value); }} />
-        </label>
-      ) : (
+      {self !== undefined ? (
         <p id={reasonId} className="gate__reason">
           <span aria-hidden="true">⊘</span> {t(self)}
         </p>
-      )}
+      ) : null}
+      {canApprove || canReject ? (
+        <label className="field" htmlFor={textId}>
+          <span className="field__label">{t('dock.reason')}</span>
+          <textarea id={textId} className="field__input" rows={2} value={text} aria-describedby={canReject ? hintId : undefined} onChange={(e) => { setText(e.target.value); }} />
+        </label>
+      ) : null}
       <div className="gate__buttons">
         <button
           type="button"
           className="btn btn--primary btn--ok"
-          disabled={self !== undefined || approve.isPending}
+          disabled={!canApprove || busy}
           {...(self !== undefined ? { 'aria-describedby': reasonId } : {})}
-          onClick={() => { approve.start(comment.trim()); }}
+          onClick={() => { approve.start(text.trim()); }}
         >
           {approve.isPending ? t('dock.approving') : t('dock.approve')}
         </button>
-        {can('rules:approve') ? (
-          <button type="button" className="btn btn--danger-quiet" disabled title={t('dock.rejectUnavailable')} aria-describedby={`${reasonId}-reject`}>
-            {t('dock.reject')}
+        {canReject ? (
+          <button type="button" className="btn btn--danger-quiet" disabled={text.trim() === '' || busy} aria-describedby={hintId} onClick={() => { reject.start(text.trim()); }}>
+            {reject.isPending ? t('dock.rejecting') : t('dock.reject')}
           </button>
         ) : null}
       </div>
-      {can('rules:approve') ? <p id={`${reasonId}-reject`} className="dock__hint">{t('dock.rejectUnavailable')}</p> : null}
+      {canReject ? <p id={hintId} className="dock__hint">{self !== undefined ? t('dock.selfReject') : t('dock.reasonHint')}</p> : null}
     </div>
   );
 }
 
-function Actions({ version, editing, onEdit, requestPublish, approve }: Pick<DockProps, 'version' | 'editing' | 'onEdit' | 'requestPublish' | 'approve'>): ReactNode {
+function Actions({ version, editing, onEdit, requestPublish, approve, reject }: Pick<DockProps, 'version' | 'editing' | 'onEdit' | 'requestPublish' | 'approve' | 'reject'>): ReactNode {
   const { t } = useI18n();
   const { can } = useRulesSession();
   if (editing) {
@@ -104,18 +112,24 @@ function Actions({ version, editing, onEdit, requestPublish, approve }: Pick<Doc
     );
   }
   switch (version.status) {
-    case 'DRAFT':
-      if (!can('rules:author')) return <p className="dock__note">{t('dock.readOnly')}</p>;
+    case 'DRAFT': {
+      const canRequest = version.allowedActions.includes('request-publish');
+      // Editing imports a new draft, which needs rules:author; there is no lifecycle action for it.
+      const canEdit = can('rules:author');
+      if (!canRequest && !canEdit) return <p className="dock__note">{t('dock.readOnly')}</p>;
       return (
         <div className="dock__buttons">
-          <button type="button" className="btn btn--primary" disabled={requestPublish.isPending} onClick={() => { requestPublish.start(); }}>
-            {requestPublish.isPending ? t('dock.requesting') : t('dock.requestPublish')}
-          </button>
-          <button type="button" className="btn" onClick={onEdit}>{t('editor.edit')}</button>
+          {canRequest ? (
+            <button type="button" className="btn btn--primary" disabled={requestPublish.isPending} onClick={() => { requestPublish.start(); }}>
+              {requestPublish.isPending ? t('dock.requesting') : t('dock.requestPublish')}
+            </button>
+          ) : null}
+          {canEdit ? <button type="button" className="btn" onClick={onEdit}>{t('editor.edit')}</button> : null}
         </div>
       );
+    }
     case 'PENDING_APPROVAL':
-      return <FourEyesGate version={version} approve={approve} />;
+      return <FourEyesGate version={version} approve={approve} reject={reject} />;
     case 'PUBLISHED':
       return (
         <div className="dock__buttons">
@@ -130,8 +144,8 @@ function Actions({ version, editing, onEdit, requestPublish, approve }: Pick<Doc
 
 export function ActionDock(props: DockProps) {
   const { t, locale } = useI18n();
-  const { version, latestVersion, notice, onOpen, onReload, editing, requestPublish, approve } = props;
-  const error: unknown = editing ? undefined : requestPublish.error ?? approve.error;
+  const { version, latestVersion, notice, onOpen, onReload, editing, requestPublish, approve, reject } = props;
+  const error: unknown = editing ? undefined : requestPublish.error ?? approve.error ?? reject.error;
   return (
     <section className="card dock" aria-labelledby="dock-title">
       <div className="dock__head">
@@ -156,6 +170,7 @@ export function ActionDock(props: DockProps) {
           </button>
         </p>
       ) : null}
+      {!editing ? <HistoryList ruleSet={version.ruleSet} version={version.version} /> : null}
     </section>
   );
 }

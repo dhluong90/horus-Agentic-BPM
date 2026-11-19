@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { HostCallError } from '../hostError';
 import { csrfToken } from '../hostCall';
-import { knownRuleSets, listVersions, rememberRuleSet } from './catalogue';
+import { allVersions } from './catalogue';
 import { createRulesClient } from './rulesClient';
 import { createFakeEngine, demoSeed } from '../../mocks/ruleEngine';
 
@@ -21,10 +21,12 @@ function recordingFetch(answer: (sent: Sent) => Response) {
   return { sent, fetchImpl };
 }
 
-function engineFetch(user = 'minh') {
+const PERMISSIONS: Record<string, string[]> = { lan: ['rules:read', 'rules:author'], minh: ['rules:read', 'rules:approve'] };
+
+function engineFetch(user = 'minh', permissions: string[] = PERMISSIONS[user] ?? []) {
   const engine = createFakeEngine(demoSeed());
   return recordingFetch((sent) => {
-    const answer = engine.handle({ method: sent.method, path: sent.url, headers: sent.headers, body: sent.body ?? '', user });
+    const answer = engine.handle({ method: sent.method, path: sent.url, headers: sent.headers, body: sent.body ?? '', user, permissions });
     return new Response(answer.body, { status: answer.status, headers: answer.headers });
   });
 }
@@ -46,35 +48,62 @@ describe('rules client', () => {
   });
 
   it('TR_UI_02_refusals_arrive_as_typed_problems_with_code_and_correlation_id', async () => {
-    const { fetchImpl } = engineFetch('lan');
+    // Lan wrote and requested card-fee v2; even holding rules:approve she cannot approve it.
+    const { fetchImpl } = engineFetch('lan', ['rules:read', 'rules:author', 'rules:approve']);
     const client = createRulesClient('', fetchImpl);
     const error: unknown = await client.approve('card-fee', 2, 1, undefined, 'key-2').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(HostCallError);
     expect(error instanceof HostCallError ? error.hostError : undefined).toMatchObject({ kind: 'problem', status: 403, code: 'SELF_APPROVAL_FORBIDDEN' });
   });
 
-  it('CKP_030_versions_are_found_by_reading_until_not_found', async () => {
+  it('RLE_039_rule_sets_page_with_a_cursor_until_the_last_page', async () => {
     const { sent, fetchImpl } = engineFetch();
-    const versions = await listVersions(createRulesClient('', fetchImpl), 'card-fee');
-    expect(versions.map((v) => [v.version, v.status])).toEqual([[1, 'PUBLISHED'], [2, 'PENDING_APPROVAL']]);
-    expect(sent.map((s) => s.url.split('/').pop())).toEqual(['1', '2', '3']);
-    expect(await listVersions(createRulesClient('', fetchImpl), 'nothing-here')).toEqual([]);
+    const client = createRulesClient('', fetchImpl);
+    const first = await client.listRuleSets({ limit: 1 });
+    expect(first.data.map((r) => [r.ruleSet, r.latestVersion, r.latestStatus, r.publishedVersion])).toEqual([['card-fee', 2, 'PENDING_APPROVAL', 1]]);
+    expect(first.hasNext).toBe(true);
+    const second = await client.listRuleSets({ limit: 1, cursor: first.nextCursor ?? '' });
+    expect(second.data.map((r) => r.ruleSet)).toEqual(['kyc-risk']);
+    expect(second).toMatchObject({ hasNext: false, nextCursor: null });
+    expect(sent[1]?.url).toBe(`/api/bpm/rules/v1/rule-sets?limit=1&cursor=${encodeURIComponent(first.nextCursor ?? '')}`);
+    const bad: unknown = await client.listRuleSets({ cursor: 'not-ours' }).catch((e: unknown) => e);
+    expect(bad instanceof HostCallError ? bad.hostError : undefined).toMatchObject({ status: 400, code: 'QUERY_INVALID' });
   });
 
-  it('CKP_030_probing_stops_at_the_first_not_found', async () => {
-    const { sent, fetchImpl } = engineFetch();
-    await listVersions(createRulesClient('', fetchImpl), 'kyc-risk');
-    expect(sent).toHaveLength(2);
+  it('RLE_040_versions_arrive_newest_first_with_allowed_actions_for_the_caller', async () => {
+    const asMinh = await allVersions(createRulesClient('', engineFetch('minh').fetchImpl), 'card-fee');
+    expect(asMinh.map((v) => [v.version, v.status, v.allowedActions])).toEqual([[2, 'PENDING_APPROVAL', ['approve', 'reject']], [1, 'PUBLISHED', []]]);
+    const asLan = await allVersions(createRulesClient('', engineFetch('lan').fetchImpl), 'card-fee');
+    expect(asLan[0]?.allowedActions).toEqual([]);
+    const missing: unknown = await allVersions(createRulesClient('', engineFetch().fetchImpl), 'nothing-here').catch((e: unknown) => e);
+    expect(missing instanceof HostCallError ? missing.hostError : undefined).toMatchObject({ status: 404, code: 'RULE_SET_NOT_FOUND' });
   });
 
-  it('CKP_030_remembered_rule_sets_are_kept_per_user', () => {
-    const lan = { hostId: 'loans', tenant: 'bank-a', userId: 'lan' };
-    const minh = { ...lan, userId: 'minh' };
-    rememberRuleSet(lan, 'card-fee');
-    rememberRuleSet(lan, 'Not A Name');
-    expect(knownRuleSets(lan)).toEqual(['card-fee']);
-    expect(knownRuleSets(minh)).toEqual([]);
-    expect(knownRuleSets({ ...lan, tenant: 'bank-b' })).toEqual([]);
+  it('RLE_025_reject_sends_the_reason_with_if_match_and_a_key_and_is_recorded_in_history', async () => {
+    const { sent, fetchImpl } = engineFetch('minh');
+    const client = createRulesClient('', fetchImpl);
+    const rejected = await client.reject('card-fee', 2, 1, 'Needs committee minutes', 'key-r');
+    expect(rejected).toMatchObject({ status: 'DRAFT', requestedBy: null });
+    expect(sent[0]?.headers).toMatchObject({ 'idempotency-key': 'key-r', 'if-match': '"1"' });
+    expect(JSON.parse(sent[0]?.body ?? '{}')).toEqual({ reason: 'Needs committee minutes' });
+    const history = await client.getHistory('card-fee', 2);
+    expect(history.map((h) => [h.action, h.actor, h.reason ?? null])).toEqual([['CREATED', 'lan', null], ['REQUESTED', 'lan', null], ['REJECTED', 'minh', 'Needs committee minutes']]);
+  });
+
+  it('RLE_041_violations_of_a_refused_document_arrive_located', async () => {
+    const { fetchImpl } = engineFetch('lan');
+    const client = createRulesClient('', fetchImpl);
+    const document = { schemaVersion: 1, ruleSet: 'card-fee', hitPolicy: 'first', inputs: [{ name: 'balance', type: 'money' }], outputs: [{ name: 'fee', type: 'money' }],
+      rules: [{ id: 'R1', when: { balance: '>= 5' }, then: { fee: '30000' } }] };
+    const error: unknown = await client.importVersion('card-fee', { contentType: 'application/yaml', text: JSON.stringify(document) }, 'k').catch((e: unknown) => e);
+    expect(error instanceof HostCallError ? error.hostError : undefined).toMatchObject({
+      status: 422,
+      code: 'VALIDATION_FAILED',
+      violations: [
+        { ruleId: 'R1', column: 'balance', message: 'compares a money with a number' },
+        { ruleId: 'R1', column: 'fee', message: expect.stringContaining('needs a currency') as unknown },
+      ],
+    });
   });
 
   it('TR_UI_02_csrf_token_is_read_from_the_host_cookie', () => {
@@ -85,7 +114,7 @@ describe('rules client', () => {
   it('TR_UI_02_every_client_path_is_an_operation_of_the_engine_contract', () => {
     // The contract the client is written from: rule-engine/api/openapi.yaml in this repository.
     const contract = readFileSync(resolve(process.cwd(), '../../rule-engine/api/openapi.yaml'), 'utf8');
-    for (const path of ['/rule-sets:', '/rule-sets/{name}/versions:', '/rule-sets/{name}/versions/{version}:', '/rule-sets/{name}/versions/{version}:request-publish:', '/rule-sets/{name}/versions/{version}:approve:', '/decisions/{ruleSet}:evaluate:']) {
+    for (const path of ['/rule-sets:', '/rule-sets/{name}/versions:', '/rule-sets/{name}/versions/{version}:', '/rule-sets/{name}/versions/{version}/history:', '/rule-sets/{name}/versions/{version}:request-publish:', '/rule-sets/{name}/versions/{version}:approve:', '/rule-sets/{name}/versions/{version}:reject:', '/decisions/{ruleSet}:evaluate:']) {
       expect(contract, path).toContain(`  ${path}\n`);
     }
   });

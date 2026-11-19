@@ -1,8 +1,8 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
-import { listVersions, rememberRuleSet, summarise } from '../../../api/rules/catalogue';
+import { allVersions, PAGE_SIZE } from '../../../api/rules/catalogue';
 import type { RuleDocument } from '../../../api/rules/rulesClient';
-import type { DecisionResult, RuleSetVersion } from '../../../api/rules/schemas';
+import type { DecisionResult, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
 
 /*
@@ -16,29 +16,53 @@ export function newIdempotencyKey(): string {
 
 function useKeys() {
   const { hostId, tenant } = useRulesSession();
+  const rules = [hostId, tenant, 'rules'] as const;
   return {
-    versions: (name: string) => [hostId, tenant, 'rules', name, 'versions'] as const,
-    source: (name: string, version: number) => [hostId, tenant, 'rules', name, 'source', version] as const,
+    all: rules,
+    list: [...rules, 'list'] as const,
+    versions: (name: string) => [...rules, name, 'versions'] as const,
+    version: (name: string, version: number) => [...rules, name, 'version', version] as const,
+    history: (name: string, version: number) => [...rules, name, 'history', version] as const,
+    source: (name: string, version: number) => [...rules, name, 'source', version] as const,
   };
 }
 
+/** The rule sets of the tenant, one page at a time, following the engine's cursor. */
+export function useRuleSets() {
+  const { client } = useRulesSession();
+  const keys = useKeys();
+  return useInfiniteQuery({
+    queryKey: keys.list,
+    queryFn: ({ pageParam, signal }) => client.listRuleSets({ cursor: pageParam, limit: PAGE_SIZE, signal }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => (last.hasNext && last.nextCursor !== null ? last.nextCursor : undefined),
+    staleTime: 10_000,
+  });
+}
+
+/** Every version of a rule set, newest first, without definitions. */
 export function useVersions(name: string) {
   const { client } = useRulesSession();
   const keys = useKeys();
-  return useQuery({ queryKey: keys.versions(name), queryFn: ({ signal }) => listVersions(client, name, signal), staleTime: 10_000 });
+  return useQuery({ queryKey: keys.versions(name), queryFn: ({ signal }) => allVersions(client, name, signal), staleTime: 10_000 });
 }
 
-export function useSummaries(names: readonly string[]) {
+/** One version with its definition. */
+export function useVersion(name: string, version: number | undefined) {
   const { client } = useRulesSession();
   const keys = useKeys();
-  return useQueries({
-    queries: names.map((name) => ({
-      queryKey: keys.versions(name),
-      queryFn: ({ signal }: { signal: AbortSignal }) => listVersions(client, name, signal),
-      staleTime: 10_000,
-      select: (versions: RuleSetVersion[]) => summarise(name, versions),
-    })),
+  return useQuery({
+    queryKey: keys.version(name, version ?? 0),
+    queryFn: ({ signal }) => client.getVersion(name, version ?? 0, { signal }),
+    enabled: version !== undefined,
+    staleTime: 10_000,
   });
+}
+
+export function useHistory(name: string, version: number) {
+  const { client } = useRulesSession();
+  const keys = useKeys();
+  return useQuery({ queryKey: keys.history(name, version), queryFn: ({ signal }) => client.getHistory(name, version, signal), staleTime: 10_000 });
 }
 
 export function useSource(name: string, version: number, enabled: boolean) {
@@ -79,13 +103,12 @@ function useSingleFlight<TArgs, TResult>(run: (args: TArgs, key: string) => Prom
   return { ...mutation, start };
 }
 
+/** After a change the engine confirmed, every list, version and history of this tenant is read again. */
 function useRefreshVersions() {
   const queryClient = useQueryClient();
   const keys = useKeys();
-  const { hostId, tenant, userId } = useRulesSession();
-  return async (version: RuleSetVersion) => {
-    rememberRuleSet({ hostId, tenant, userId }, version.ruleSet);
-    await queryClient.invalidateQueries({ queryKey: keys.versions(version.ruleSet) });
+  return async () => {
+    await queryClient.invalidateQueries({ queryKey: keys.all });
   };
 }
 
@@ -95,7 +118,7 @@ export function useImportRuleSet(onDone: (version: RuleSetVersion) => void) {
   return useSingleFlight(
     (document: RuleDocument, key) => client.importRuleSet(document, key),
     async (version) => {
-      await refresh(version);
+      await refresh();
       onDone(version);
     },
   );
@@ -108,7 +131,7 @@ export function useSaveDraft(name: string, onDone: (version: RuleSetVersion) => 
   return useSingleFlight(
     (document: RuleDocument, key) => client.importVersion(name, document, key),
     async (version) => {
-      await refresh(version);
+      await refresh();
       onDone(version);
     },
   );
@@ -118,9 +141,9 @@ export function useRequestPublish(onDone: (version: RuleSetVersion) => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
-    (version: RuleSetVersion, key) => client.requestPublish(version.ruleSet, version.version, version.lockVersion, key),
+    (version: VersionSummary, key) => client.requestPublish(version.ruleSet, version.version, version.lockVersion, key),
     async (version) => {
-      await refresh(version);
+      await refresh();
       onDone(version);
     },
   );
@@ -130,9 +153,21 @@ export function useApprove(onDone: (version: RuleSetVersion) => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
-    ({ version, comment }: { version: RuleSetVersion; comment: string }, key) => client.approve(version.ruleSet, version.version, version.lockVersion, comment, key),
+    ({ version, comment }: { version: VersionSummary; comment: string }, key) => client.approve(version.ruleSet, version.version, version.lockVersion, comment, key),
     async (version) => {
-      await refresh(version);
+      await refresh();
+      onDone(version);
+    },
+  );
+}
+
+export function useReject(onDone: (version: RuleSetVersion) => void) {
+  const { client } = useRulesSession();
+  const refresh = useRefreshVersions();
+  return useSingleFlight(
+    ({ version, reason }: { version: VersionSummary; reason: string }, key) => client.reject(version.ruleSet, version.version, version.lockVersion, reason, key),
+    async (version) => {
+      await refresh();
       onDone(version);
     },
   );

@@ -59,24 +59,76 @@ export type VersionStatus = (typeof VERSION_STATUSES)[number];
 
 const nullableString = z.string().nullable().optional();
 
-export const ruleSetVersion = z
+/** Lifecycle actions the engine says the caller may take now. A hint for screens; the engine checks again. */
+export const ALLOWED_ACTIONS = ['request-publish', 'approve', 'reject'] as const;
+export type AllowedAction = (typeof ALLOWED_ACTIONS)[number];
+/** Unknown actions from a newer engine are dropped, never rejected. */
+const allowedActions = z.array(z.string()).transform((items) => items.filter((item): item is AllowedAction => (ALLOWED_ACTIONS as readonly string[]).includes(item)));
+
+const lifecycle = {
+  ruleSet: z.string(),
+  version: z.number().int().min(1),
+  status: z.enum(VERSION_STATUSES),
+  hitPolicy: z.string(),
+  effectiveFrom: nullableString,
+  lockVersion: z.number().int(),
+  canonicalHash: z.string(),
+  requestedBy: nullableString,
+  requestedAt: nullableString,
+  approvedBy: nullableString,
+  approvedAt: nullableString,
+  createdBy: nullableString,
+  createdAt: z.string(),
+  allowedActions: allowedActions.default([]),
+};
+
+/** An item of GET /rule-sets/{name}/versions: the lifecycle fields without the definition. */
+export const versionSummary = z.object(lifecycle).loose();
+export type VersionSummary = z.infer<typeof versionSummary>;
+
+/** An item of GET /rule-sets. */
+export const ruleSetSummary = z
   .object({
     ruleSet: z.string(),
-    version: z.number().int().min(1),
-    status: z.enum(VERSION_STATUSES),
-    hitPolicy: z.string(),
-    effectiveFrom: nullableString,
+    latestVersion: z.number().int().min(1),
+    latestStatus: z.enum(VERSION_STATUSES),
+    publishedVersion: z.number().int().nullable(),
+    lastChangedAt: z.string(),
+  })
+  .loose();
+export type RuleSetSummary = z.infer<typeof ruleSetSummary>;
+
+/** The page shape of every list endpoint: { data, nextCursor, hasNext }. */
+export function page<T extends z.ZodType>(item: T) {
+  return z.object({ data: z.array(item), nextCursor: z.string().nullable(), hasNext: z.boolean() }).loose();
+}
+export interface Page<T> {
+  data: T[];
+  nextCursor: string | null;
+  hasNext: boolean;
+}
+
+export const HISTORY_ACTIONS = ['CREATED', 'REQUESTED', 'APPROVED', 'REJECTED'] as const;
+export const historyEntry = z
+  .object({
+    action: z.string(),
+    fromStatus: z.string().nullable().optional(),
+    toStatus: z.string(),
+    actor: z.string(),
+    reason: nullableString,
     lockVersion: z.number().int(),
-    canonicalHash: z.string(),
+    occurredAt: z.string(),
+  })
+  .loose();
+export type HistoryEntry = z.infer<typeof historyEntry>;
+export const versionHistory = z.object({ data: z.array(historyEntry) }).loose();
+
+export const ruleSetVersion = z
+  .object({
+    ...lifecycle,
     sourceFormat: z.string(),
     sourceHash: z.string(),
     sourceDocument: z.string().optional(),
-    requestedBy: nullableString,
-    requestedAt: nullableString,
-    approvedBy: nullableString,
-    approvedAt: nullableString,
-    createdBy: nullableString,
-    createdAt: z.string(),
     definition: ruleSetDefinition,
   })
   .loose();

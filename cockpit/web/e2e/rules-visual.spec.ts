@@ -69,6 +69,14 @@ const SCREENS: readonly Screen[] = [
     ready: async (page) => { await expect(page.locator('.change-mark').first()).toBeVisible(); },
   },
   {
+    name: 'history',
+    scenario: 'rules-author',
+    hash: '#/rule-sets/card-fee/1',
+    primary: { en: 'New draft', vi: 'Tạo bản nháp' },
+    prepare: async (page, locale) => { await page.getByText(locale === 'en' ? 'History (3)' : 'Lịch sử (3)').click(); },
+    ready: async (page) => { await expect(page.locator('.history__entry').nth(2)).toBeVisible(); },
+  },
+  {
     name: 'source',
     scenario: 'rules-author',
     hash: '#/rule-sets/card-fee/1/source',
