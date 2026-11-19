@@ -70,8 +70,8 @@ horus:
       definitions: classpath:rules/**/*.yaml
       definitions-tenant: demo
       definitions-auto-publish: true        # dev profile only; see the note below
-      tenancy:
-        dev-tenant: demo                    # dev profile only; every call runs as tenant demo
+    tenancy:                                # shared by both engines, so under horus.bpm
+      dev-tenant: demo                      # dev profile only; every call without a tenant runs as tenant demo
 ```
 
 `definitions-auto-publish: true` publishes the files you load at start-up without the maker-checker approval, and `tenancy.dev-tenant: demo` runs every call as tenant `demo` without an identity provider. The starter accepts both only in the `dev` profile and refuses to start with them anywhere else. Outside `dev` the tenant comes from the signed-in user ([[Multi-Tenancy and Security]]). In every other environment a version becomes effective only through the steps in [[Rule Engine Versioning and Publishing]]. All properties are listed in [[Rule Engine Configuration]].

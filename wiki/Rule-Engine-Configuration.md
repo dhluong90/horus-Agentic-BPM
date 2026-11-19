@@ -1,12 +1,12 @@
 # Configuration
 
-Reference for every `horus.bpm.rules.*` property of the Rule Engine starter and the permission strings its REST layer checks. _Design preview: two properties are built; the rest are planned for the milestone named in their row._
+Reference for every `horus.bpm.rules.*` property of the Rule Engine starter and the permission strings its REST layer checks. _Design preview: the properties marked Built are read today; the rest are planned for the milestone named in their row._
 
 ## Status of each property
 
 | Status | Meaning |
 |---|---|
-| Built | Read by the starter in the first engine build ([pull request #12](https://github.com/dhluong90/horus-Agentic-BPM/pull/12)) or the lifecycle slice ([pull request #87](https://github.com/dhluong90/horus-Agentic-BPM/pull/87)). Not yet released |
+| Built | Read by the starter on `main`. Not yet released |
 | 0.1 (M1) | Planned for Rule Engine 0.1, milestone M1, 15 Jan 2027. Setting it today has no effect |
 | 0.1 (M1), may move | Planned for 0.1; the [[Roadmap]] names the milestone it moves to if M1 runs late |
 | M2, M3 | Planned for that milestone (M2 26 Mar 2027, M3 21 May 2027). Setting it today has no effect |
@@ -54,11 +54,25 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `publication.require-simulation-report` | `false` | M3 (May 2027) | `true`: `:request-publish` is refused with `422 VALIDATION_FAILED` unless a stored simulation report of the draft is attached. Applies to the whole host, or only to the rule sets listed in `publication.require-simulation-report.rule-sets`. Until M3 the approver runs the simulation herself |
 | `decision-log.retention-floor` | `P12M` | M3 | Shortest `decision-log.retention` accepted. You may raise it to your own policy, never set it below `P12M` |
 | `maker-checker.enabled` | `true` | 0.1 (M1) | `false` is refused unless the `dev` profile is active |
-| `tenancy.claim` | `tenant_id` | 0.1 (M1) | Claim or principal attribute read by the default `TenantResolver`, for a token or a server-side session login alike |
-| `tenancy.dev-tenant` | unset | 0.1 (M1) | Fixed tenant for local work without an identity provider. `dev` profile only: start-up is refused when it is set outside `dev` |
+| `tenancy.claim` | `tenant_id` | Built as the host-wide `horus.bpm.tenancy.claim` | Claim or principal attribute read by the default `TenantResolver`, for a token or a server-side session login alike |
+| `tenancy.dev-tenant` | unset | Built as the host-wide `horus.bpm.tenancy.dev-tenant` | Fixed tenant for local work without an identity provider. `dev` profile only: start-up is refused when it is set outside `dev` |
 | `events.decision-evaluated` | `false` | 0.1 (M1) | Publish `rules.decision.evaluated.v1` for every decision |
 | `scheduler.enabled` | `true` | 0.1 (M1) | Run the engine's scheduler thread (outbox relay, partition creation, partition drop, idempotency cleanup) on this replica |
-| `security.role-permissions` | empty | 0.1 (M1) | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities) |
+| `security.role-permissions` | empty | Built | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities). Read by `/api/bpm/me` today; the engine endpoints use it from 0.1. A permission outside the six below stops the start-up |
+
+### Host-wide properties
+
+These are under `horus.bpm.` and apply to every engine in the host. They are read by the host metadata endpoints, `/api/bpm/meta` and `/api/bpm/me` ([[Host Metadata and Permissions]]).
+
+| Property | Default | Status | Meaning |
+|---|---|---|---|
+| `host-id` | unset | Built | Id clients show for this host, 1 to 40 characters; returned as `hostId` by `/api/bpm/meta` |
+| `host-metadata.enabled` | `true` | Built | `false` turns `/api/bpm/meta` and `/api/bpm/me` off |
+| `tenancy.claim` | `tenant_id` | Built | Attribute of the authenticated principal that the default `TenantResolver` reads: the claim of a validated token, or the attribute of a session principal from an OIDC or OAuth2 login (PD-079). Whatever the resolver, a principal with this attribute must match the resolved tenant |
+| `tenancy.dev-tenant` | unset | Built | Fixed tenant for principals that carry none, for local work without an identity provider. Accepted on the `dev` profile only; start-up is refused when it is set elsewhere |
+
+There is no header-based tenant mode: the engines never take the tenant from what the browser sends, and `tenancy.resolver` and `tenancy.trusted-gateway` stop the start-up with a message (PD-079). A host whose principal has no tenant attribute declares its own `TenantResolver` bean.
+| `security.challenge` | `Bearer` | Built | `WWW-Authenticate` value of a `401` the engine endpoints raise themselves |
 
 ### Decided settings without a property name yet
 
@@ -90,9 +104,14 @@ There is no `clock` property either. The engine's time comes from the host's `Cl
 ```yaml
 horus:
   bpm:
+    host-id: loans                 # optional
     rules:
-      enabled: true            # default
-      migrate-on-start: true   # default
+      enabled: true                # default
+      migrate-on-start: true       # default
+      security:
+        role-permissions:
+          ROLE_PRICING_AUTHOR:   [rules:read, rules:author]
+          ROLE_PRICING_APPROVER: [rules:read, rules:approve]
 ```
 
 On a clean database on 19 Nov 2026, start-up logs two lines from the engine:
@@ -125,7 +144,7 @@ The `ruleEngine` health contributor also reports whether next month's partition 
 
 | Bean | Default | Override when |
 |---|---|---|
-| `TenantResolver` | Reads the `tenancy.claim` attribute of the authenticated principal in the security context: a validated token or a server-side session login. A call with no resolvable tenant gets `401 UNAUTHENTICATED` | Tenant comes from somewhere else, such as your user directory, realm, path or subdomain. No header-based resolver ships; a resolver you write that trusts a request header is your risk |
+| `TenantResolver` | Reads the `tenancy.claim` attribute of the authenticated principal in the security context: a validated token or a server-side session login. A call with no resolvable tenant gets `401 UNAUTHENTICATED` | Tenant comes from somewhere else, such as your user directory, realm, path or subdomain. No header-based resolver ships; a resolver you write that trusts a request header is your risk Built in `com.horus.bpm.host.spi`; see [[Host Metadata and Permissions]] |
 | `CallerResolver` | Principal name | Audit needs a different identity |
 | `RuleFunctionRegistry` | Built-in pure functions | Host registers extra pure functions, listed in the cockpit |
 | `RuleEventPublisher` | Spring `ApplicationEventPublisher` | Events go to an outbox or a bus |
@@ -134,7 +153,7 @@ The `ruleEngine` health contributor also reports whether next month's partition 
 | `LifecycleGuard` | Allows every transition | An extra veto, such as a change ticket on retire; it cannot let through what the engine refuses |
 | `Clock` | System UTC | Tests and replays. The engine's only source of time: the default for `DecisionRequest.clock`, partition creation and the health check. The engine uses the host's bean when there is exactly one and never registers a `Clock` bean of its own |
 
-The engine's default beans are `@ConditionalOnMissingBean`, so a host bean replaces them (see [[Configuration and Extension Points]]). `Clock` is read from the host and has no engine bean. The starter never component-scans the host. In the first build only `Clock` is read; the others arrive with 0.1.
+The engine's default beans are `@ConditionalOnMissingBean`, so a host bean replaces them (see [[Configuration and Extension Points]]). `Clock` is read from the host and has no engine bean. The starter never component-scans the host. Today `Clock` and `TenantResolver` are read; the others arrive with 0.1.
 
 ## Permissions
 
@@ -154,7 +173,7 @@ The REST layer checks `hasAuthority('<permission>')` on the authenticated princi
 | Way | How |
 |---|---|
 | Authorities from the token | A `JwtAuthenticationConverter` (or your OIDC mapper) emits the permission strings directly, for example from a `permissions` claim |
-| Roles to permissions | `security.role-permissions` maps the host's role authorities to engine permissions; the starter adds the mapped permissions to the principal for engine endpoints only |
+| Roles to permissions | `security.role-permissions` maps the host's role authorities to engine permissions; the starter adds the mapped permissions to the principal for engine endpoints only. `/api/bpm/me` lists them already |
 
 ```yaml
 horus.bpm.rules.security.role-permissions:
@@ -163,7 +182,7 @@ horus.bpm.rules.security.role-permissions:
   ROLE_SERVICE:      [rules:evaluate]
 ```
 
-The endpoint-to-permission table is in [[Rule Engine Decision API]].
+The endpoint-to-permission table is in [[Rule Engine Decision API]]. To see what a caller holds, call `GET /api/bpm/me` ([[Host Metadata and Permissions]]).
 
 ## Local development
 
@@ -175,7 +194,7 @@ horus.bpm.rules:
   definitions: classpath:rules/*.yaml
   definitions-tenant: dev
   definitions-auto-publish: true          # dev profile only
-  tenancy.dev-tenant: dev                 # dev profile only; every call runs as tenant dev
+horus.bpm.tenancy.dev-tenant: dev         # dev profile only; every call without a tenant runs as tenant dev
 ```
 ```java
 @Bean @Profile("dev")

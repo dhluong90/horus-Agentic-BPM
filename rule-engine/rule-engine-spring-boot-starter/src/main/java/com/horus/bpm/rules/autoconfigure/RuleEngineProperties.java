@@ -3,6 +3,8 @@ package com.horus.bpm.rules.autoconfigure;
 import com.horus.bpm.rules.internal.service.EngineDefaults;
 import com.horus.bpm.rules.internal.service.EngineSettings;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -17,6 +19,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param cache the compiled-version cache
  * @param idempotency idempotency records
  * @param evaluation limits on evaluation inputs
+ * @param security how host authorities map to engine permissions
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -24,7 +27,8 @@ public record RuleEngineProperties(
         @DefaultValue("true") boolean migrateOnStart,
         @DefaultValue Cache cache,
         @DefaultValue Idempotency idempotency,
-        @DefaultValue Evaluation evaluation) {
+        @DefaultValue Evaluation evaluation,
+        @DefaultValue Security security) {
 
     /**
      * The compiled-version cache.
@@ -65,5 +69,19 @@ public record RuleEngineProperties(
                 evaluation.maxInputScale() == null ? EngineDefaults.INPUT_MAX_SCALE : evaluation.maxInputScale(),
                 evaluation.rejectUndeclaredInputs() == null
                         ? EngineDefaults.REJECT_UNDECLARED_INPUTS : evaluation.rejectUndeclaredInputs());
+    }
+
+    /**
+     * Security settings.
+     *
+     * @param rolePermissions host authority, for example {@code ROLE_PRICING_APPROVER}, to the
+     *     {@code rules:*} permissions it grants; empty when the host issues permission strings directly
+     */
+    public record Security(Map<String, List<String>> rolePermissions) {
+
+        /** Copies the mapping; an unset mapping is empty. */
+        public Security {
+            rolePermissions = rolePermissions == null ? Map.of() : Map.copyOf(rolePermissions);
+        }
     }
 }
