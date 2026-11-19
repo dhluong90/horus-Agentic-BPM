@@ -70,6 +70,7 @@ public final class DmnReader {
             throw invalid("The root element must be a DMN 1.2 to 1.5 <definitions>; found <" + Quote.text(root.name())
                     + "> in namespace " + Quote.of(ns), root);
         }
+        refuseDevelopmentNamespace(root);
         String feel = Dmn.feelNamespaceOf(ns);
         requireFeel(root, "expressionLanguage", feel);
         requireFeel(root, "typeLanguage", feel);
@@ -391,9 +392,23 @@ public final class DmnReader {
         return column.attribute("label").map(String::strip).filter(l -> !l.isEmpty() && !l.equals(name));
     }
 
-    /** A {@code horus:} extension attribute, under the current namespace or the development spelling (#186). */
+    /** A {@code horus:} extension attribute in {@code urn:horus-bpm:dmn:extensions:v1}. */
     private static Optional<String> horus(XmlTree element, String local) {
-        return element.attribute(Dmn.HORUS_NAMESPACE, local).or(() -> element.attribute(Dmn.HORUS_NAMESPACE_DEV, local));
+        return element.attribute(Dmn.HORUS_NAMESPACE, local);
+    }
+
+    /**
+     * Refuses the development spelling of the extension namespace instead of ignoring its attributes, which would
+     * silently drop horus:type, horus:mask and the rest (TR-STD-04).
+     */
+    private static void refuseDevelopmentNamespace(XmlTree element) {
+        boolean used = element.namespace().equals(Dmn.HORUS_NAMESPACE_DEV)
+                || element.attributes().keySet().stream().anyMatch(k -> k.startsWith("{" + Dmn.HORUS_NAMESPACE_DEV + "}"));
+        if (used) {
+            throw invalid("The extension namespace " + Dmn.HORUS_NAMESPACE_DEV + " is not supported; use "
+                    + Dmn.HORUS_NAMESPACE, element);
+        }
+        element.children().forEach(DmnReader::refuseDevelopmentNamespace);
     }
 
     private static Optional<String> description(XmlTree element) {

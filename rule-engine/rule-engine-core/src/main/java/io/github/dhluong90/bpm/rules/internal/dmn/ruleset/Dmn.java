@@ -16,10 +16,7 @@ final class Dmn {
      */
     static final String HORUS_NAMESPACE = "urn:horus-bpm:dmn:extensions:v1";
 
-    /**
-     * The development spelling, read but never written, so files exported before the fix still import. Remove at
-     * the {@code v0.1.0} tag (#186).
-     */
+    /** The development spelling, refused at import with the replacement URI (#186, TR-STD-04). */
     static final String HORUS_NAMESPACE_DEV = "urn:horus-bpm:dmn:extensions:1";
 
     /** Model namespace to FEEL namespace, DMN 1.2 to 1.5. */

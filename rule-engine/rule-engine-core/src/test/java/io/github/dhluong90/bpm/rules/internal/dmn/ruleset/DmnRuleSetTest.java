@@ -143,19 +143,33 @@ class DmnRuleSetTest {
     }
 
     @Test
-    void TR_STD_25_export_writes_the_v1_extension_namespace_and_import_reads_both_spellings() {
+    void TR_STD_25_export_writes_the_v1_extension_namespace() {
         // Given card-fee.yaml, whose money and integer columns need horus:type
         ParsedRuleSet yaml = RuleSetReader.read(SourceFormat.YAML, resource("/rules/card-fee.yaml"));
 
         // When
         String dmn = DmnWriter.write(yaml.canonicalJson());
-        String development = dmn.replace("urn:horus-bpm:dmn:extensions:v1", "urn:horus-bpm:dmn:extensions:1");
 
-        // Then: process engine DESIGN 5.8 spelling on export; the development spelling still imports until v0.1.0
+        // Then: the spelling of process engine DESIGN 5.8, and the file imports back with the same hash
         assertThat(dmn).contains("xmlns:horus=\"urn:horus-bpm:dmn:extensions:v1\"")
                 .doesNotContain("urn:horus-bpm:dmn:extensions:1\"");
         assertThat(RuleSetReader.read(SourceFormat.DMN_XML, utf8(dmn)).canonicalHash()).isEqualTo(yaml.canonicalHash());
-        assertThat(RuleSetReader.read(SourceFormat.DMN_XML, utf8(development)).canonicalHash()).isEqualTo(yaml.canonicalHash());
+    }
+
+    @Test
+    void TR_STD_04_the_development_extension_namespace_is_refused_with_its_line_and_the_v1_uri() {
+        // Given the card-fee export with the development spelling of the extension namespace
+        String dmn = DmnWriter.write(RuleSetReader.read(SourceFormat.YAML, resource("/rules/card-fee.yaml")).canonicalJson())
+                .replace("urn:horus-bpm:dmn:extensions:v1", "urn:horus-bpm:dmn:extensions:1");
+        int line = java.util.Arrays.asList(dmn.split("\n")).indexOf(java.util.Arrays.stream(dmn.split("\n"))
+                .filter(l -> l.contains("horus:type")).findFirst().orElseThrow()) + 1;
+
+        // Then: refused, never read as if the horus attributes were absent
+        assertThatThrownBy(() -> RuleSetReader.read(SourceFormat.DMN_XML, utf8(dmn)))
+                .isInstanceOf(ValidationFailedException.class)
+                .hasMessageContaining("The extension namespace urn:horus-bpm:dmn:extensions:1 is not supported;"
+                        + " use urn:horus-bpm:dmn:extensions:v1")
+                .hasMessageContaining("(line " + line + ")");
     }
 
     // ------------------------------------------------------------------ the FEEL subset and null semantics
