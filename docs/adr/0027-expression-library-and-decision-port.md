@@ -33,7 +33,7 @@ As built, a host that wants processes and no decision tables still pulls in the 
    - **The adapter.** The process starter provides it when a `RuleEngine` bean is present (`@ConditionalOnBean`). It calls a tenant-scoped Rule Engine entry point. When a request context exists, it asserts that the `EngineAccess` tenant equals the instance tenant, and refuses with `403 TENANT_NOT_ALLOWED` otherwise.
    - **No Rule Engine.** Activating a definition that contains a `businessRuleTask` is refused with `422 BPMN_NOT_EXECUTABLE`, naming the step and the reason, and nothing fails at run time. The starter declares `rule-engine-core` as an optional dependency.
    - **Tests.** A decision step evaluated with no principal uses the instance tenant (`PRE-046`). A tenant mismatch between the request and the instance is refused (`PRE-047`).
-4. **Timing.** The extraction ships in the same change as the package rename (#21), before the `0.1.0` tag, so 0.1.0 publishes the final coordinates and packages once. If #21 lands without it, the extraction is the first change of 0.2.0, documented as a breaking change of a 0.x release.
+4. **Timing.** The extraction is the first change of 0.2.0, documented in the 0.2.0 release notes as a breaking change of a 0.x release (moved packages for `Money` and the expression types). The package rename (#21, pull request #155) lands at the 0.1.0 freeze without it, so that a structural move is not on the release's critical path (decided 19 Nov in the review of #155). 0.1.0 publishes these types under `io.github.dhluong90.bpm.rules`.
 5. **Until then.** Pull request #149 may keep its `rule-engine-core` dependency and its internal `ExpressionEvaluator` port. That port's condition subset must follow the `horus-expr-v1` semantics already decided: FEEL null logic (PD-058), `DECIMAL128` numbers, and money compared only within one currency. Tests named by the rule engine ids prove it (`RLE-006` cases for conditions). Once this library exists, the port is replaced by the `ExpressionLanguage` SPI.
 
 ## Options considered
@@ -51,5 +51,5 @@ As built, a host that wants processes and no decision tables still pulls in the 
 - ADR-0019 decision 1: "in `rule-engine-core`" reads "in `bpm-expression`"; nothing else in ADR-0019 changes.
 - Rule engine DESIGN sections 2 and 3.5 and process engine DESIGN section 2 list the new module. The BOM lists it. The licence and dependency gates cover it.
 - The `ExpressionLanguage` SPI contract (conformance plan, contract C-R) is written in `bpm-expression` from the start.
-- #21 gains the extraction in its scope.
+- The extraction gets its own issue for 0.2.0. #21 (pull request #155) does not carry it.
 - `businessRuleTask` behaviour is unchanged for a host that has both engines. A host with processes only can now deploy definitions without decisions.
