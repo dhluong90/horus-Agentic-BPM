@@ -50,9 +50,10 @@ jobs:
 
       - name: Throwaway secrets in .env, masked in the log
         run: |
-          db="$(openssl rand -hex 16)"; demo="$(openssl rand -hex 12)"
-          echo "::add-mask::$db"; echo "::add-mask::$demo"
-          sed -e "s/^HORUS_DB_PASSWORD=.*/HORUS_DB_PASSWORD=$db/" \
+          admin="$(openssl rand -hex 16)"; db="$(openssl rand -hex 16)"; demo="$(openssl rand -hex 12)"
+          echo "::add-mask::$admin"; echo "::add-mask::$db"; echo "::add-mask::$demo"
+          sed -e "s/^HORUS_DB_ADMIN_PASSWORD=.*/HORUS_DB_ADMIN_PASSWORD=$admin/" \
+              -e "s/^HORUS_DB_PASSWORD=.*/HORUS_DB_PASSWORD=$db/" \
               -e "s/^HORUS_DEMO_PASSWORD=.*/HORUS_DEMO_PASSWORD=$demo/" .env.example > .env
           git check-ignore -q .env
 
@@ -62,8 +63,14 @@ jobs:
       - name: Start PostgreSQL and the host, wait for healthy
         run: docker compose up --wait --wait-timeout 180
 
-      - name: Smoke test (health, sign-in, metadata; rule lifecycle when the host serves it)
+      - name: Smoke test (health, sign-in, metadata, rule lifecycle, cockpit)
         run: deploy/smoke-test.sh
+
+      - name: Local-evaluation warning in the start-up log, application role without superuser rights
+        run: |
+          docker compose logs host | grep -F 'Demo users are on (dev profile): [lan, minh, hoa, tuan]'
+          test "$(docker compose exec -T postgres psql -U postgres -d horus -tAc \
+            "SELECT rolsuper OR rolcreaterole OR rolcreatedb FROM pg_roles WHERE rolname = 'horus'")" = f
 
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
 
