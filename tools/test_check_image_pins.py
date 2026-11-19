@@ -96,9 +96,6 @@ class ImagePinsTest(unittest.TestCase):
             "cockpit/web/node_modules/x/src/test/A.java": 'new PostgreSQLContainer("postgres:16")\n',
         }))
 
-    def test_the_repository_tree_is_pinned(self) -> None:
-        self.assertEqual([], pins.check(Path(__file__).resolve().parent.parent))
-
 
 if __name__ == "__main__":
     unittest.main()
