@@ -32,6 +32,7 @@ horus:
         role-permissions:
           ROLE_PRICING_AUTHOR: [rules:read, rules:author]
           ROLE_PRICING_APPROVER: [rules:read, rules:approve]
+          ROLE_TELLER: [rules:evaluate]
     cockpit:
       # How the cockpit header names this service.
       host-label: Loan origination
