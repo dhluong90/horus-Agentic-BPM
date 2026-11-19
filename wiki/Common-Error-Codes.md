@@ -52,6 +52,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [LAYOUT_INVALID](#layout_invalid) | processes | M3 |
 | 422 | [BPMN_UNSUPPORTED_ELEMENT](#bpmn_unsupported_element) | processes | M3 |
 | 422 | [BPMN_UNSAFE_XML](#bpmn_unsafe_xml) | processes | M3 |
+| 428 | [PRECONDITION_REQUIRED](#precondition_required) | rules | M1 |
 | 429 | [RATE_LIMITED](#rate_limited) | both | M1 |
 | 500 | [INTERNAL_ERROR](#internal_error) | both | M1 |
 | 503 | [SCHEMA_NOT_READY](#schema_not_ready) | rules | M1 |
@@ -94,7 +95,10 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 ## Versions and approvals
 
 ### SELF_APPROVAL_FORBIDDEN
-`403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve.
+`403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve. A requester who rejects their own rule set request gets this code too, with a detail pointing to `:withdraw`: take the request back with `POST .../versions/{v}:withdraw` instead (PD-089).
+
+### PRECONDITION_REQUIRED
+`428`. A command that must be conditional was sent without `If-Match`, for example `:withdraw`. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
 
 ### NO_EFFECTIVE_VERSION
 `404`. No approved version is effective at the clock: nothing is published or active yet, the effective date is in the future, the last version was retired, or the request names a tenant with no version. Publish or approve a version, or check the tenant.
@@ -108,7 +112,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is the rule (row), `column` the input or output name, and either is `null` when the problem is outside them; `message` carries no location prefix. Every cell problem of the document is listed at once, in document order, up to 100 entries (`violationsTruncated: true` when there were more), so an editor can mark each cell; a structural problem (an unknown property, a missing key) stops reading and is the only entry. Example: `[{ "ruleId": "R3", "column": "fee", "message": "output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code" }]`.
 
 ### PAYLOAD_TOO_LARGE
-`413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve` and `:reject`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
+`413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve`, `:reject` and `:withdraw`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
 
 ### VERSION_SUPERSEDED
 `409`. Processes only. An older pending version cannot be approved because a version with a higher number is already `ACTIVE` (ADR-0012). Create a new draft from the effective version and request approval again.

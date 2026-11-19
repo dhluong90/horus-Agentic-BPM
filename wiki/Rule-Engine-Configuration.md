@@ -163,7 +163,7 @@ The engine's default beans are `@ConditionalOnMissingBean`, so a host bean repla
 |---|---|
 | `rules:evaluate` | `:evaluate`, `:evaluate-batch` on published versions |
 | `rules:read` | Read rule sets, versions, diffs, exports |
-| `rules:author` | Create and edit drafts, validate, import, `:request-publish` |
+| `rules:author` | Create and edit drafts, validate, import, `:request-publish`, `:withdraw` of one's own request |
 | `rules:approve` | `:approve`, `:reject`, `:retire`. Approval by the requester is refused regardless |
 | `rules:simulate` | `:simulate`, evaluate drafts, set `clock` on `:evaluate` |
 | `rules:log:read` | Read the decision log and explanations |
