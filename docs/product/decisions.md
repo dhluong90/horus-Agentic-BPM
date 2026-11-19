@@ -74,7 +74,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-050](#pd-050-retention-default-for-the-decision-log-and-history) | Retention default for the decision log and history | Decided |
 | [PD-051](#pd-051-tenant-exit-export-and-purge) | Tenant exit: export and purge | Decided (product manager, delegated, PD-073) |
 | [PD-052](#pd-052-tamper-evidence-beyond-append-only) | Tamper evidence beyond append-only | Decided (product manager, delegated, PD-073) |
-| [PD-053](#pd-053-licence-rule-for-test-and-build-tools) | Licence rule for test and build tools | Decided (product manager, delegated, PD-073) |
+| [PD-053](#pd-053-licence-rule-for-test-and-build-tools) | Licence rule for test and build tools | Decided (product manager, delegated, PD-073; jqwik allowance superseded by PD-090) |
 | [PD-054](#pd-054-deprecation-length) | Deprecation length | Decided (product manager, delegated, PD-073) |
 | [PD-055](#pd-055-postgresql-version-range) | PostgreSQL version range | Decided (product manager, delegated, PD-073) |
 | [PD-056](#pd-056-rule-management-ux-direction) | Rule management UX direction | Decided |
@@ -111,6 +111,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-087](#pd-087-release-labels-after-010) | Release labels after 0.1.0 | Decided (product manager, delegated, PD-073) |
 | [PD-088](#pd-088-unique-and-collect-follow-dmn-15) | `unique` and `collect` follow DMN 1.5 | Decided (product manager, delegated, PD-073) |
 | [PD-089](#pd-089-a-requester-withdraws-their-own-pending-request) | A requester withdraws their own pending request | Decided (product manager, delegated, PD-073) |
+| [PD-090](#pd-090-property-tests-without-jqwik) | Property tests without jqwik | Decided |
 
 ---
 
@@ -1615,6 +1616,8 @@ The architect reviewed the technical, non-functional and developer requirements 
 
 ### PD-053 Licence rule for test and build tools
 
+The jqwik allowance in this entry is superseded by [PD-090](#pd-090-property-tests-without-jqwik). The rest of the entry stands.
+
 | Field | Value |
 |---|---|
 | Date | 2026-11-18 |
@@ -2720,3 +2723,22 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Follow-ups.** Architect: a new SPEC statement for withdraw, the state transition `PENDING_APPROVAL` to `DRAFT` in DESIGN 3.3, the endpoint `:withdraw` in `openapi.yaml`, and the event and history row. Maintainers (engineering): an issue for the withdraw action, separate from reject in pull request #152. Documentation: the wiki approval how-to.
 
 **Applied, 2026-11-19 (pull request #161).** `RLE-046` specifies withdraw as decided above. The same change also refuses a requester's reject of their own request with `403 SELF_APPROVAL_FORBIDDEN`, with a detail pointing to `:withdraw` (`RLE-025`). This reverses the earlier design answer (rule engine DESIGN Q5), which allowed self-reject. The product manager accepts the reversal under this entry. With withdraw available, a self-reject would record an author taking a request back as an approver's refusal, which is the audit confusion this decision removes. Reject therefore stays the action of a second person, like approve. A requester who holds `rules:approve` but not `rules:author` cannot take their own request back and asks another approver to reject it, an accepted edge case.
+
+### PD-090 Property tests without jqwik
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | jqwik is the property-testing library on the PD-053 allow-list. Version 1.10.2 ships a notice that restricts how the library may be used. Does the project keep it? |
+| Raised by | Maintainers (engineering) |
+| Decision | Decided by the product owner, 2026-11-19, option 1. Supersedes the jqwik allowance of PD-053 |
+
+**Options considered**
+
+1. Remove jqwik and add no other property-testing library (chosen). Property tests are written in plain JUnit 5 with a small seeded generator kept in the project's test sources. Consequence: the notice is respected, and one test-scope dependency fewer is on the allow-list. The project now maintains its own generators, shrinking and seed reporting, so a failure must print its seed and be reproducible from it.
+2. Replace jqwik with another property-testing library. Consequence: less code to maintain; a new dependency to review under `TR-LIC-01`, and test changes all the same.
+3. Keep jqwik at a version before the notice. Consequence: no test changes now; the project stays pinned to an old release.
+
+**Consequences.** Every property test keeps its specification id in its name and its coverage (`TR-QA-01`); only the generator changes. Each run uses a recorded seed, and a failing case prints it. The PD-053 allow-list keeps the JUnit Jupiter API and JMH. Nothing that ships changes.
+
+**Follow-ups.** Maintainers (engineering): the removal and the in-house generator. Architect: remove jqwik from `TR-LIC-01` in [requirements](requirements.md), the allow-list in the build and the test plans that name it. Documentation: wiki pages that mention jqwik.
