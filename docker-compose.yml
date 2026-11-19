@@ -1,0 +1,92 @@
+# LOCAL EVALUATION ONLY, NOT A PRODUCTION DEPLOYMENT: demo users, plain HTTP, one instance, no backups.
+# One-command local deployment: PostgreSQL 16 and one example host. Guide: docs/DEPLOYING.md.
+#
+#   cp .env.example .env      # then set the three passwords
+#   docker compose up --build --wait
+#
+# Every secret comes from .env, which git ignores; compose stops with a message when one is missing.
+# PostgreSQL publishes no port: only the example host reaches it, on the compose network.
+# The host connects as "horus", a role without superuser rights that owns the database horus and runs
+# the migrations; the superuser "postgres" is used only by the init script (deploy/postgres/initdb).
+
+name: horus-bpm
+
+services:
+  postgres:
+    # PostgreSQL 16.16 on Alpine; tag and digest are updated together.
+    image: postgres:16-alpine@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857
+    environment:
+      POSTGRES_DB: horus
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${HORUS_DB_ADMIN_PASSWORD:?set HORUS_DB_ADMIN_PASSWORD in .env (see .env.example)}
+      # Read by deploy/postgres/initdb/10-application-role.sh on the first start only.
+      HORUS_DB_PASSWORD: ${HORUS_DB_PASSWORD:?set HORUS_DB_PASSWORD in .env (see .env.example)}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U horus -d horus"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    # The entrypoint switches to the postgres user and fixes ownership of the data directory; nothing more.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 256
+
+  host:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        EXAMPLE: ${HORUS_EXAMPLE:-rule-engine-only}
+      # The patched JRE in the image is published for x64 only so far (deploy/docker/Dockerfile).
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
+    image: horus-bpm/${HORUS_EXAMPLE:-rule-engine-only}:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HORUS_DB_URL: jdbc:postgresql://postgres:5432/horus
+      HORUS_DB_USERNAME: horus
+      HORUS_DB_PASSWORD: ${HORUS_DB_PASSWORD:?set HORUS_DB_PASSWORD in .env (see .env.example)}
+      # "dev" turns on the demo users for a local walkthrough; leave it empty anywhere shared.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
+      HORUS_DEMO_PASSWORD: ${HORUS_DEMO_PASSWORD:-}
+      # Bearer tokens: set the issuer and audience in docker-compose.override.yml (docs/DEPLOYING.md).
+    ports:
+      # Bound to this machine only. Change the left side in .env when 8080 is taken.
+      - "127.0.0.1:${HORUS_HTTP_PORT:-8080}:8080"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+          pids: 512
+
+volumes:
+  pgdata:

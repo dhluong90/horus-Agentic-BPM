@@ -149,6 +149,9 @@ class HostSecurityConfiguration {
             // The walkthrough of the README: hoa may author and approve, so four eyes is visible; tuan prices.
             users.add(User.withUsername("hoa").password(encoded).roles("PRICING_AUTHOR", "PRICING_APPROVER").build());
             users.add(User.withUsername("tuan").password(encoded).roles("TELLER").build());
+            LOG.warn("Demo users are on (dev profile): " + users.stream().map(UserDetails::getUsername).toList()
+                    + " share one password and may sign in with HTTP Basic. "
+                    + "Local evaluation only, never a shared or production environment.");
         }
         return new InMemoryUserDetailsManager(users);
     }
