@@ -3,8 +3,14 @@ package com.horus.bpm.examples.ruleengineonly;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 
 /** The example host's start-up guards for the demo users and for bearer tokens. */
 class HostSecurityConfigurationTest {
@@ -44,5 +50,29 @@ class HostSecurityConfigurationTest {
                 .hasMessageContaining("names no audience");
         assertThatCode(() -> HostSecurityConfiguration.requireAudience(withAudience)).doesNotThrowAnyException();
         assertThatCode(() -> HostSecurityConfiguration.requireAudience(new MockEnvironment())).doesNotThrowAnyException();
+    }
+
+    @Test
+    void CKP_001_sign_in_returns_to_the_page_asked_for_never_to_a_favicon_or_a_background_call() {
+        assertThat(remembered(get("/bpm/cockpit/"))).isTrue();
+        assertThat(remembered(get("/favicon.ico"))).isFalse();
+        assertThat(remembered(get("/api/bpm/me"))).isFalse();
+        MockHttpServletRequest background = get("/bpm/cockpit/cockpit-hosts.json");
+        background.addHeader("X-Requested-With", "XMLHttpRequest");
+        assertThat(remembered(background)).isFalse();
+    }
+
+    private static MockHttpServletRequest get(String path) {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+        request.setRequestURI(path);
+        return request;
+    }
+
+    private static boolean remembered(MockHttpServletRequest request) {
+        HttpSessionRequestCache cache = HostSecurityConfiguration.pagesOnly(
+                PathPatternRequestMatcher.withDefaults().matcher("/api/bpm/**"));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        cache.saveRequest(request, response);
+        return cache.getRequest(request, response) != null;
     }
 }

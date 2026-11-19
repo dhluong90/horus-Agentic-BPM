@@ -29,6 +29,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.AndRequestMatcher;
 import org.springframework.security.web.util.matcher.NegatedRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
@@ -91,9 +92,20 @@ class HostSecurityConfiguration {
         return http.build();
     }
 
+    /**
+     * The page to return to after sign-in. Engine calls, background calls (X-Requested-With) and the
+     * browser's automatic favicon request are never remembered: otherwise the sign-in page's own
+     * {@code /favicon.ico} request replaces the page the user asked for, such as {@code /bpm/cockpit/}.
+     * Spring Security's default matcher skips the last two; a custom matcher must keep doing so.
+     */
     static HttpSessionRequestCache pagesOnly(RequestMatcher engineApi) {
+        RequestMatcher favicon = PathPatternRequestMatcher.withDefaults().matcher("/favicon.*");
+        RequestMatcher backgroundCall = request -> "XMLHttpRequest".equals(request.getHeader("X-Requested-With"));
         HttpSessionRequestCache requestCache = new HttpSessionRequestCache();
-        requestCache.setRequestMatcher(new NegatedRequestMatcher(engineApi));
+        requestCache.setRequestMatcher(new AndRequestMatcher(
+                new NegatedRequestMatcher(engineApi),
+                new NegatedRequestMatcher(favicon),
+                new NegatedRequestMatcher(backgroundCall)));
         return requestCache;
     }
 
