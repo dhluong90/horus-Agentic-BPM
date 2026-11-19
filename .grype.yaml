@@ -1,11 +1,25 @@
 # Vulnerability gate (TR-SEC-06), read by tools/scan-dependencies.sh.
-# A dependency with a known vulnerability of high or critical severity fails the build.
-fail-on-severity: high
-output: table
-# Report every finding, fixed upstream or not; "won't fix" findings still fail the gate.
-only-fixed: false
-
-# Reviewed exceptions. Each entry needs the advisory id, the package, a reason a maintainer
-# has accepted (for example "the vulnerable code path is not reachable from the engine"),
-# and a review date. Keep the list empty unless a fix is impossible; see wiki/Contributing.md.
-ignore: []
+# Written as JSON, which is valid YAML, so tools/check-dependency-policy.py grype-config can lint it
+# without a YAML library. Only '#' comment lines are allowed besides the JSON.
+#
+# fail-on-severity  high: a dependency with a known high or critical vulnerability fails the build.
+# only-fixed        false: findings without an upstream fix still fail.
+# show-suppressed   true: suppressed findings stay visible in the log.
+# db                the database must be at most 120 hours old, or the scan fails.
+# ignore            reviewed exceptions. Each names one vulnerability, one package name and one
+#                   version, and a reason ending with "expires YYYY-MM-DD"; the lint fails once
+#                   the date has passed. Keep the list empty unless no fix exists; see wiki/Contributing.md.
+#                   Example: {"vulnerability": "GHSA-xxxx-xxxx-xxxx",
+#                             "package": {"name": "some-lib", "version": "1.2.3"},
+#                             "reason": "Not reachable from the engine: <why>. Reviewed by <maintainer>, expires 2027-03-31"}
+{
+  "fail-on-severity": "high",
+  "only-fixed": false,
+  "show-suppressed": true,
+  "output": "table",
+  "db": {
+    "validate-age": true,
+    "max-allowed-built-age": "120h"
+  },
+  "ignore": []
+}
