@@ -31,17 +31,20 @@ Use the template. It asks for the linked issue, what changed, the commands you r
 
 ## Spec-to-test check
 
-The CI job "Spec-to-test coverage" runs `python3 tools/spec-coverage.py` (Python 3.9 or later, no build needed) and fails when an id in scope has no test whose name starts with it (`TR-QA-01`).
+The CI job "Spec-to-test coverage" runs `python3 tools/spec-coverage.py` (Python 3.9 or later, no build needed) and fails when an id in scope has no running test whose name starts with it (`TR-QA-01`). Its own tests run with `python3 tools/test_spec_coverage.py`.
 
 | Item | Rule |
 |---|---|
-| Ids in scope | Every `### RLE-*`, `PRE-*` or `CKP-*` statement in a module `docs/SPEC.md`, and every `TR-*` id in the "Requirement-level tests" table of the module `docs/TEST-PLAN.md` |
-| Test name | The id in upper case with hyphens as underscores, then `_` and a description: `RLE_003_collect_hit_policy_aggregates_matched_rules`, `TR_EMB_01_host_boots_healthy_on_clean_database_and_rle_tables_are_usable`. Java test methods and ArchUnit rule fields count, and so do `it`, `test` and `describe` titles in `*.test.ts` and `*.spec.ts` files |
-| Allow-list | `<module>/docs/spec-pending.txt` lists the statements not delivered yet, one `<ID> <milestone>` per line, the milestone as in `SPEC.md` |
-| Fails on | An id with neither a test nor an allow-list line; an allow-list line for an id the module does not define; a milestone that differs from `SPEC.md` |
+| Ids in scope | Every `RLE-*`, `PRE-*` or `CKP-*` statement heading (`##` or deeper, three or more digits) in a module `docs/SPEC.md`, and every `TR-*` id in the "Requirement-level tests" table of the module `docs/TEST-PLAN.md` |
+| Test name | The id in upper case with hyphens as underscores, then `_` and a description: `RLE_003_collect_hit_policy_aggregates_matched_rules`, `TR_EMB_01_host_boots_healthy_on_clean_database_and_rle_tables_are_usable` |
+| What counts | Java under `src/test/java`: a method or ArchUnit field annotated `@Test`, `@ParameterizedTest`, `@RepeatedTest`, `@TestFactory`, `@TestTemplate`, `@Property`, `@Example` or `@ArchTest`, without `@Disabled...` on it or its class. TypeScript and JavaScript in `*.test.*` and `*.spec.*` files (`ts`, `tsx`, `js`, `jsx`, `mjs`, `cjs`, `mts`, `cts`) or a Playwright `testMatch`: `it` and `test` titles, `.each` included, and a `describe` title whose block holds a counted test. Comments, strings, `skip`, `fixme`, `todo`, `fail` and `x`-prefixed forms never count |
+| Where tests are searched | The module folder, plus the folders listed for it under `[test-roots]` in `tools/spec-coverage.ini` (`examples/rule-engine-only` for the Rule Engine) |
+| Allow-list | `<module>/docs/spec-pending.txt` lists the statements not delivered yet, one `<ID> <milestone>` per line, the milestone as in `SPEC.md`. Changes need a code-owner review (`.github/CODEOWNERS`) |
+| Current milestone | `current-milestone` in `tools/spec-coverage.ini`. An allow-list entry at or before it fails, so closing a milestone means raising this one value |
+| Fails on | An id with neither a test nor an allow-list line; an allow-list line that is unreadable, repeated, unknown, at or before the current milestone, or with a milestone that differs from `SPEC.md`; a duplicate statement, a statement without a `Milestone` line or a malformed id heading; a TEST-PLAN "Specification coverage" table whose ids differ from `SPEC.md` |
 | Warns on | An allow-listed id that has a test. Remove its line in the same pull request |
 
-To deliver a statement: add the test named by its id and delete the id's line from `spec-pending.txt`. To add a statement: add it to `SPEC.md` with its milestone and either its test or an allow-list line.
+To deliver a statement: add the test named by its id and delete the id's line from `spec-pending.txt`. To add a statement: add it to `SPEC.md` and the TEST-PLAN table with its milestone, and either its test or an allow-list line.
 
 ## Documentation standard
 

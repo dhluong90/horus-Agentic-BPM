@@ -1,0 +1,12 @@
+# Changes to these paths need a review from a code owner once the main branch requires
+# code-owner reviews (a repository setting). They hold the build gates and their policies.
+/.github/                       @dhluong90
+/.grype.yaml                    @dhluong90
+/tools/scan-dependencies.sh     @dhluong90
+/tools/spec-coverage.py         @dhluong90
+/tools/spec-coverage.ini        @dhluong90
+/tools/test_spec_coverage.py    @dhluong90
+/tools/licence-policy/          @dhluong90
+/pom.xml                        @dhluong90
+/.mvn/                          @dhluong90
+**/docs/spec-pending.txt        @dhluong90
