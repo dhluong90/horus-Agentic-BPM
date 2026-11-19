@@ -1,16 +1,18 @@
 name: Release (dry run)
 
-# Builds a release from a clean checkout: the cockpit bundle from these sources with the pinned Node,
+# Runs on every vX.Y.Z tag (one project tag per release, PD-087). Builds a release from a clean checkout: the cockpit bundle from these sources with the pinned Node,
 # then every Java artifact, staged into target/release/maven-repo, with one bill of materials covering
 # the Maven packages and the npm packages in the cockpit bundle (TR-LIC-01, TR-SEC-06, TR-UI-06).
-# Nothing is published: the Maven Central namespace is not registered yet, and real publishing will be
-# a separate workflow with no pull_request trigger (docs/RELEASING.md). The staged artifacts, the bills
-# of materials, BUILD-INFO.json and SHA256SUMS are uploaded to the workflow run.
+# The staged artifacts, the bills of materials, BUILD-INFO.json and SHA256SUMS are uploaded to the
+# workflow run. On a tag run only, the github-release job turns that archive into a GitHub Release
+# (TR-SEC-06). Maven Central publishing waits for the namespace and will be a separate workflow with no
+# pull_request trigger (docs/RELEASING.md).
 # Actions are pinned by commit SHA; the comment names the release. Update both together.
 
 on:
   push:
-    tags: ["*/v*"]
+    # One project tag per release, vX.Y.Z (PD-087); tools/release/check-release-tag.sh refuses any other.
+    tags: ["v*"]
   workflow_dispatch:
   pull_request:
     paths:
@@ -27,6 +29,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  tag-guard-tests:
+    # Dry runs of the release tag guard on a scratch copy of the tree: v0.1.0 passes; a per-module tag,
+    # a module at another version and a commit off main are refused. Then the archive check of the
+    # github-release job against fixtures. Nothing is built and nothing is published.
+    name: Release guard tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Unit tests of the tag check
+        run: python3 tools/release/test_release_sbom.py -v
+
+      - name: Dry runs of the tag guard
+        run: tools/release/test-release-tag.sh
+
+      - name: Archive check of the github-release job (tampered, trial, other commit, dirty, duplicate names)
+        run: tools/release/test-release-upload.sh
+
   release-dry-run:
     name: Release dry run (cockpit bundle, artifacts, release SBOM)
     runs-on: ubuntu-latest
@@ -109,4 +137,137 @@ jobs:
             echo "| Name | Artifact id | SHA-256 of the archive |"
             echo "|---|---|---|"
             echo "| \`${ARTIFACT_NAME}\` | ${ARTIFACT_ID} | \`${ARTIFACT_DIGEST}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  github-release:
+    # TR-SEC-06: a passing tag run becomes a GitHub Release, with the exact bytes the release build staged
+    # and checked; nothing is rebuilt. The only job with a write token: no checkout, no Maven, no npm, one
+    # pinned action. The assets go to a draft, which is published only after every upload is verified.
+    name: GitHub Release (tag runs only)
+    needs: release-dry-run
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      COMMIT: ${{ github.sha }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dry-run-success
+          path: ${{ runner.temp }}/archive
+
+      - name: Check the archive (SHA256SUMS, BUILD-INFO.json) and choose the assets
+        env:
+          ARCHIVE: ${{ runner.temp }}/archive/release
+          ASSETS: ${{ runner.temp }}/assets.txt
+        # The text between the markers is run against fixtures by tools/release/test-release-upload.sh.
+        run: |
+          # BEGIN release-archive-check
+          set -euo pipefail
+          cd "$ARCHIVE"
+          [[ -f SHA256SUMS ]] || { echo "ERROR: the archive has no SHA256SUMS; no Release is created."; exit 1; }
+          if ! shasum -a 256 -c SHA256SUMS > "$RUNNER_TEMP/shasum.log" 2>&1; then
+            grep -v ': OK$' "$RUNNER_TEMP/shasum.log" || true
+            echo "ERROR: the archive does not match its SHA256SUMS (above); no Release is created."
+            exit 1
+          fi
+          listed="$(sed -E 's/^[0-9a-f]{64}  //' SHA256SUMS | sort)"
+          present="$(find . -type f ! -name SHA256SUMS | sort)"
+          if [[ "$listed" != "$present" ]]; then
+            diff <(printf '%s\n' "$listed") <(printf '%s\n' "$present") || true
+            echo "ERROR: the archive holds files that SHA256SUMS does not list, or lacks listed ones (above)."
+            exit 1
+          fi
+          echo "SHA256SUMS: $(wc -l < SHA256SUMS | tr -d ' ') file(s) match."
+          python3 - <<'PY'
+          import json, os, sys
+          info = json.load(open("BUILD-INFO.json"))
+          errors = []
+          if info.get("trial") is not False:
+              errors.append(f'BUILD-INFO.json says "trial": {json.dumps(info.get("trial"))}; a trial build is never released')
+          if info.get("workingTree") != "clean":
+              errors.append(f'BUILD-INFO.json says "workingTree": {json.dumps(info.get("workingTree"))}, not "clean"')
+          if info.get("tag") != os.environ["TAG"]:
+              errors.append(f'BUILD-INFO.json names tag {info.get("tag")!r}, this run is {os.environ["TAG"]!r}')
+          if info.get("commit") != os.environ["COMMIT"]:
+              errors.append(f'BUILD-INFO.json names commit {info.get("commit")!r}, this run is {os.environ["COMMIT"]!r}')
+          for error in errors:
+              print(f"ERROR: {error}")
+          if errors:
+              print("ERROR: no Release is created.")
+              sys.exit(1)
+          print(f'BUILD-INFO.json: tag {info["tag"]}, commit {info["commit"][:12]}, clean, not a trial.')
+          PY
+          find "$ARCHIVE/maven-repo" -type f \( -name '*.jar' -o -name '*.pom' \) ! -name 'maven-metadata*' | sort > "$ASSETS"
+          printf '%s\n' "$ARCHIVE/bom-release.json" "$ARCHIVE/SHA256SUMS" "$ARCHIVE/BUILD-INFO.json" >> "$ASSETS"
+          duplicates="$(sed 's#.*/##' "$ASSETS" | sort | uniq -d)"
+          if [[ -n "$duplicates" ]]; then
+            echo "ERROR: two assets would share a file name on the Release: $duplicates"
+            exit 1
+          fi
+          grep -q '\.jar$' "$ASSETS" || { echo "ERROR: no jar under maven-repo; no Release is created."; exit 1; }
+          echo "Assets: $(wc -l < "$ASSETS" | tr -d ' ') file(s)."
+          sed 's#.*/#  #' "$ASSETS"
+          # END release-archive-check
+
+      - name: Upload every asset to a draft Release
+        env:
+          ASSETS: ${{ runner.temp }}/assets.txt
+          NOTES: ${{ runner.temp }}/notes.md
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          cat > "$NOTES" <<EOF
+          HORUS Agentic BPM ${version}: every module at ${version}, pinned by \`bpm-bom\` ${version}.
+
+          The assets are the files the release build of commit ${COMMIT} staged and checked: the jars and
+          POMs, the release bill of materials (\`bom-release.json\`), \`BUILD-INFO.json\` and \`SHA256SUMS\`.
+          How the build works: [docs/RELEASING.md](https://github.com/${GH_REPO}/blob/${TAG}/docs/RELEASING.md).
+
+          Check your downloads against \`SHA256SUMS\`, in the folder that holds them:
+
+          \`\`\`
+          while read -r hash path; do name="\${path##*/}"; [ -f "\$name" ] && printf '%s  %s\n' "\$hash" "\$name"; done < SHA256SUMS | shasum -a 256 -c -
+          \`\`\`
+
+          Every downloaded file prints \`OK\`.
+          EOF
+          mapfile -t files < "$ASSETS"
+          gh release create "$TAG" --verify-tag --draft --title "HORUS Agentic BPM ${version}" \
+            --notes-file "$NOTES" "${files[@]}"
+          echo "Draft Release ${TAG} created with ${#files[@]} asset(s)."
+
+      - name: Verify the uploaded assets against SHA256SUMS, then publish
+        env:
+          ARCHIVE: ${{ runner.temp }}/archive/release
+          ASSETS: ${{ runner.temp }}/assets.txt
+          DOWNLOADED: ${{ runner.temp }}/downloaded
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --dir "$DOWNLOADED"
+          cd "$DOWNLOADED"
+          expected="$(sed 's#.*/##' "$ASSETS" | sort)"
+          actual="$(ls -1 | sort)"
+          [[ "$expected" == "$actual" ]] || { diff <(echo "$expected") <(echo "$actual") || true; \
+            echo "ERROR: the draft's assets differ from the chosen files (above); the draft stays unpublished."; exit 1; }
+          # Checked against the SHA256SUMS of the archive verified before the draft, never the draft's own copy.
+          cmp -s "$ARCHIVE/SHA256SUMS" SHA256SUMS \
+            || { echo "ERROR: the draft's SHA256SUMS differs from the checked archive's; the draft stays unpublished."; exit 1; }
+          # The command the release notes give adopters, on the draft's downloads.
+          while read -r hash path; do name="${path##*/}"; [ -f "$name" ] && printf '%s  %s\n' "$hash" "$name"; done \
+            < "$ARCHIVE/SHA256SUMS" | shasum -a 256 -c - | tee "$RUNNER_TEMP/verify.log"
+          checked="$(grep -c ': OK$' "$RUNNER_TEMP/verify.log")"
+          [[ "$checked" == "$(( $(wc -l < "$ASSETS") - 1 ))" ]] \
+            || { echo "ERROR: $checked asset(s) checked, expected every asset but SHA256SUMS."; exit 1; }
+          gh release edit "$TAG" --draft=false
+          echo "Release ${TAG} published: $(gh release view "$TAG" --json url --jq .url)"
+          {
+            echo "### GitHub Release ${TAG}"
+            echo
+            echo "$checked asset(s) match SHA256SUMS; published."
           } >> "$GITHUB_STEP_SUMMARY"

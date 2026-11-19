@@ -26,21 +26,31 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
     }
 
     /**
-     * Returns the ids of the matched rules, in rule order; empty unless the outcome is {@link Matched}.
+     * Returns the ids of the matched rules, in rule order: those of {@link Matched}, the overlapping rules of a
+     * {@code UNIQUE_HIT_VIOLATION}, and empty otherwise.
      *
      * @return the matched rule ids
      */
     public List<String> matchedRuleIds() {
-        return outcome instanceof Matched matched ? matched.ruleIds() : List.of();
+        return switch (outcome) {
+            case Matched matched -> matched.ruleIds();
+            case Failed failed -> failed.matchedRuleIds();
+            case NoMatch ignored -> List.of();
+        };
     }
 
     /**
-     * Returns the outputs; empty unless the outcome is {@link Matched}.
+     * Returns the outputs: those of {@link Matched}; for {@link NoMatch}, every declared output with the value null;
+     * empty for {@link Failed}.
      *
      * @return the outputs by output name
      */
     public Map<String, Object> outputs() {
-        return outcome instanceof Matched matched ? matched.outputs() : Map.of();
+        return switch (outcome) {
+            case Matched matched -> matched.outputs();
+            case NoMatch noMatch -> noMatch.outputs();
+            case Failed ignored -> Map.of();
+        };
     }
 
     /**
@@ -69,8 +79,20 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
         }
     }
 
-    /** No rule matched. */
-    public record NoMatch() implements Outcome {
+    /**
+     * No rule matched.
+     *
+     * @param outputs every declared output with the value null (DMN 1.5: a decision table with no match gives null)
+     */
+    public record NoMatch(Map<String, Object> outputs) implements Outcome {
+        public NoMatch {
+            outputs = Collections.unmodifiableMap(new LinkedHashMap<>(outputs));
+        }
+
+        /** No rule matched and there are no outputs. */
+        public NoMatch() {
+            this(Map.of());
+        }
     }
 
     /**
@@ -78,11 +100,24 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
      *
      * @param code {@code EVALUATION_ERROR} or {@code UNIQUE_HIT_VIOLATION}
      * @param detail a detail without input values
+     * @param matchedRuleIds for {@code UNIQUE_HIT_VIOLATION} every matched rule (two or more); for an
+     *     {@code EVALUATION_ERROR} from a null under a {@code collect} aggregate, the matched rules; otherwise empty
      */
-    public record Failed(String code, String detail) implements Outcome {
+    public record Failed(String code, String detail, List<String> matchedRuleIds) implements Outcome {
         public Failed {
             Objects.requireNonNull(code, "code must not be null");
             Objects.requireNonNull(detail, "detail must not be null");
+            matchedRuleIds = List.copyOf(matchedRuleIds);
+        }
+
+        /**
+         * Creates a failure without matched rules.
+         *
+         * @param code the error code
+         * @param detail the detail
+         */
+        public Failed(String code, String detail) {
+            this(code, detail, List.of());
         }
     }
 }

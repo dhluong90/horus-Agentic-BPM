@@ -124,7 +124,7 @@ class RuleEngineOnlyHostIT {
 
         assertThat(engine.path("status").asString()).isEqualTo("UP");
         assertThat(engine.path("details").path("historyTable").asString()).isEqualTo("rle_schema_history");
-        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("2");
+        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("5");
         assertThat(engine.path("details").path("pendingMigrations").asInt()).isZero();
         assertThat(engine.path("details").path("nextMonthPartition").asString()).isEqualTo("rle_decision_2027_02");
         assertThat(engine.path("details").path("nextMonthPartitionPresent").asBoolean()).isTrue();
@@ -145,10 +145,15 @@ class RuleEngineOnlyHostIT {
         assertThat(ruleSet.path("ruleSet").asString()).isEqualTo("card-fee");
         assertThat(ruleSet.path("hitPolicy").asString()).isEqualTo("first");
         assertThat(ruleSet.path("rules")).hasSize(3);
-        assertThat(ruleSet.path("rules").path(1).path("then").path("discountRate").decimalValue())
+        // Decimals are strings with their scale (ADR-0026): a JSON number would be hashed through double
+        assertThat(new BigDecimal(ruleSet.path("rules").path(1).path("then").path("discountRate").asString()))
                 .isEqualTo(new BigDecimal("0.015"));
-        assertThat(ruleSet.path("rules").path(2).path("then").path("discountRate").decimalValue())
+        assertThat(new BigDecimal(ruleSet.path("rules").path(2).path("then").path("discountRate").asString()))
                 .isEqualTo(new BigDecimal("0.1000000000000000055511151231257827"));
+        // and the engine stores that value exactly, with its own hash
+        com.horus.bpm.rules.internal.read.ParsedRuleSet parsed = com.horus.bpm.rules.internal.read.RuleSetReader.read(
+                com.horus.bpm.rules.api.SourceFormat.JSON, getClass().getResourceAsStream("/rule-sets/card-fee.rule-set.json").readAllBytes());
+        assertThat(parsed.canonicalJson()).contains("\"discountRate\":\"0.1000000000000000055511151231257827\"");
     }
 
     @Test
@@ -195,9 +200,10 @@ class RuleEngineOnlyHostIT {
                 .query(String.class).list();
 
         assertThat(hostHistory).containsExactly("1 V1__create_loan_application.sql");
-        // The host's tables existed first, so the engine baselines at 0 and still applies V1 and V2.
+        // The host's tables existed first, so the engine baselines at 0 and still applies V1 to V5.
         assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__rle_baseline.sql",
-                "2 V2__rle_version_created_by.sql");
+                "2 V2__rle_version_created_by.sql", "3 V3__rle_version_history.sql",
+                "4 V4__rle_version_history_append_only.sql", "5 V5__rle_engine_key.sql");
     }
 
     @Test

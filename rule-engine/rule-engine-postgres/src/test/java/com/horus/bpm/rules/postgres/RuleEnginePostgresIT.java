@@ -174,6 +174,47 @@ class RuleEnginePostgresIT {
     }
 
     @Test
+    void RLE_002_unique_hit_policy_returns_one_match_no_match_on_zero_and_fails_on_several() {
+        // Given
+        publish("/rules/loan-pricing.yaml", "loan-pricing");
+        caller.as("bank-a", "teller-01");
+
+        // When
+        DecisionResult overlap = engines.ruleEngine().evaluate("loan-pricing",
+                DecisionInput.of(Map.of("score", 750, "income", Money.ofMinor("VND", 25_000_000))));
+        DecisionResult none = engines.ruleEngine().evaluate("loan-pricing",
+                DecisionInput.of(Map.of("score", 500, "income", Money.ofMinor("VND", 5_000_000))));
+
+        // Then
+        assertThat(overlap.outputs()).isEmpty();
+        assertThat(none.outputs()).containsOnlyKeys("rate").containsEntry("rate", null);
+        assertThat(JdbcClient.create(db).sql("""
+                SELECT outcome || ' ' || error_code || ' ' || matched_rule_ids::text || ' ' || COALESCE(outputs::text, 'no-outputs')
+                FROM rle_decision WHERE tenant_id = 'bank-a' AND rule_set_name = 'loan-pricing' AND error_code IS NOT NULL
+                """).query(String.class).list())
+                .containsExactlyInAnyOrder("UNIQUE_HIT_VIOLATION UNIQUE_HIT_VIOLATION [\"R1\", \"R2\"] no-outputs");
+        // Zero matches is a no-match, logged as OK with [] exactly as under first (PD-088)
+        assertThat(JdbcClient.create(db).sql("""
+                SELECT outcome || ' ' || matched_rule_ids::text FROM rle_decision
+                WHERE tenant_id = 'bank-a' AND rule_set_name = 'loan-pricing' AND error_code IS NULL
+                """).query(String.class).single()).isEqualTo("OK []");
+    }
+
+    @Test
+    void RLE_003_collect_hit_policy_keeps_null_entries_and_follows_dmn_aggregation_rules() {
+        publish("/rules/risk-flags.yaml", "risk-flags");
+        caller.as("bank-a", "teller-01");
+
+        DecisionResult result = engines.ruleEngine().evaluate("risk-flags",
+                DecisionInput.of(Map.of("txPerHour", 12, "country", "VN", "newDevice", true)));
+
+        assertThat(result.matchedRuleIds()).containsExactly("R1", "R3");
+        assertThat(JdbcClient.create(db).sql("SELECT outputs::text FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id")
+                .param("id", result.decisionId()).query(String.class).single())
+                .isEqualTo("{\"flags\": [\"HIGH_VELOCITY\", \"NEW_DEVICE\"], \"penalty\": 15}");
+    }
+
+    @Test
     void RLE_009_maker_checker_blocks_self_approval() {
         // Given
         engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()));
@@ -222,7 +263,7 @@ class RuleEnginePostgresIT {
         caller.as("bank-a", "teller-01");
 
         RuleEngines lenient = PostgresRuleEngines.create(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)),
-                caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), new EngineSettings(1000, java.time.Duration.ofHours(24), 34, false));
+                caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), EngineSettings.defaults().withRejectUndeclaredInputs(false));
         assertThatThrownBy(() -> engines.ruleEngine().evaluate("card-fee",
                 DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5, "nationalId", "079090001234"))))
                 .isInstanceOf(com.horus.bpm.rules.api.InputInvalidException.class);

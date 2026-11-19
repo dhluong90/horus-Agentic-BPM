@@ -114,7 +114,10 @@ class RuleSetReaderAcceptanceTest {
         HEADER + "effectiveFrom: 2026-12-01\n" + INPUTS + OUTPUTS + RULES
     })
     void RLE_020_a_value_of_the_wrong_type_or_shape_is_refused_as_validation_failed(String yaml) {
-        assertThatThrownBy(() -> read(yaml)).isInstanceOf(ValidationFailedException.class);
+        // As import does: read, then compile. Cell-level problems (an unknown input or output, a cell of the wrong
+        // JSON type) are reported by the compiler on their cell, so they never hide later cells (RLE-041).
+        assertThatThrownBy(() -> com.horus.bpm.rules.internal.eval.CompiledRuleSet.compile(read(yaml).model()))
+                .isInstanceOf(ValidationFailedException.class);
     }
 
     /**
@@ -147,9 +150,13 @@ class RuleSetReaderAcceptanceTest {
 
     @Test
     void RLE_020_source_with_bom_crlf_and_vietnamese_comments_has_the_card_fee_canonical_hash() {
-        // Given the card-fee file saved by a Windows editor: BOM, CRLF and a Vietnamese comment
+        // Given the card-fee file saved by a Windows editor: CRLF and a Vietnamese comment; a BOM is refused
+        // (ADR-0026 decision 5), so the stored source is exactly the bytes source_hash was taken over
         String unix = new String(resource("/rules/card-fee.yaml"), StandardCharsets.UTF_8);
-        byte[] windows = ("﻿# Phí thẻ hằng tháng\r\n" + unix.replace("\n", "\r\n")).getBytes(StandardCharsets.UTF_8);
+        byte[] windows = ("# Phí thẻ hằng tháng\r\n" + unix.replace("\n", "\r\n")).getBytes(StandardCharsets.UTF_8);
+        byte[] withBom = ("﻿" + unix).getBytes(StandardCharsets.UTF_8);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> RuleSetReader.read(SourceFormat.YAML, withBom))
+                .hasMessageContaining("byte order mark");
 
         // When
         ParsedRuleSet fromWindows = RuleSetReader.read(SourceFormat.YAML, windows);

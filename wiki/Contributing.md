@@ -75,4 +75,4 @@ Grype matches Java packages by GitHub advisory and package URL; NVD CPE matching
 
 ## Releases
 
-Each module is versioned independently and tagged `<module>/vX.Y.Z`; see [[Technical Stack]]. What shipped is recorded in [[Release Notes]].
+Every module shares one project version, released under one tag `vX.Y.Z` (PD-087); see [[Technical Stack]]. What shipped is recorded in [[Release Notes]].

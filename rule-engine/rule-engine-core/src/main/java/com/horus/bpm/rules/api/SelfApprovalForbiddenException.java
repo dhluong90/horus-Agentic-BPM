@@ -14,4 +14,20 @@ public final class SelfApprovalForbiddenException extends HorusBpmException {
     public SelfApprovalForbiddenException(String ruleSet, int version) {
         super("SELF_APPROVAL_FORBIDDEN", "The requester or author of " + ruleSet + " v" + version + " cannot approve it");
     }
+
+    private SelfApprovalForbiddenException(String detail) {
+        super("SELF_APPROVAL_FORBIDDEN", detail);
+    }
+
+    /**
+     * Returns the refusal of a requester rejecting their own request (PD-089): they withdraw it instead.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @return the exception
+     */
+    public static SelfApprovalForbiddenException selfReject(String ruleSet, int version) {
+        return new SelfApprovalForbiddenException("The requester of " + ruleSet + " v" + version
+                + " cannot reject it; take the request back with :withdraw");
+    }
 }

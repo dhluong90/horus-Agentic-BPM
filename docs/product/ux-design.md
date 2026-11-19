@@ -209,6 +209,8 @@ Rules:
 
 ## 6. Design tokens
 
+The build-ready additions (type scale, radius, elevation, shell, component states and the sign-in page) are in the [cockpit styleguide](ux/styleguide.md).
+
 The tokens below are the only colour source. Feature styles use the variables, never raw colours. In the cockpit web application they live in one stylesheet with a light block and a dark block; dark applies with `data-theme="dark"` on the root element, and the same dark values apply to a dark system preference before the theme is set.
 
 Contrast ratios are WCAG 2.x ratios measured by script, with translucent tokens composited onto their real surface. Thresholds: 4.5:1 for text under 24 px, 3:1 for control boundaries, focus indicators and chart marks, 2:1 for the light end of an ordinal ramp. "Decorative" means the token must never be the only boundary of a control.

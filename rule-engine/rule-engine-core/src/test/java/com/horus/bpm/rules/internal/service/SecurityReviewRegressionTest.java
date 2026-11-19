@@ -149,8 +149,7 @@ class SecurityReviewRegressionTest {
     void TR_SEC_05_undeclared_inputs_never_reach_the_decision_log_when_they_are_allowed() {
         RuleEngines lenient = RuleEngines.create(new EngineContext(caller, caller,
                 Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC), stores, stores,
-                new EngineSettings(EngineDefaults.CACHE_MAX_ENTRIES, EngineDefaults.IDEMPOTENCY_RETENTION,
-                        EngineDefaults.INPUT_MAX_SCALE, false)), stores, stores, stores);
+                EngineSettings.defaults().withRejectUndeclaredInputs(false)), stores, stores, stores);
         publish(PRICING, "pricing");
         caller.become("bank-a", "teller", EVALUATE_ONLY);
 
