@@ -16,5 +16,6 @@
 /tools/spec-coverage.ini        @dhluong90
 /tools/test_spec_coverage.py    @dhluong90
 **/docs/spec-pending.txt        @dhluong90
+/tools/release/               @dhluong90
 # The frozen normal form of rule-set.v1: an edit is a new schema version (ADR-0026 decision 3).
 /rule-engine/rule-engine-core/src/test/resources/rules/normal-form.v1.txt @dhluong90

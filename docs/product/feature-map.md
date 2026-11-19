@@ -29,7 +29,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 
 | Id | Feature | Persona | Milestone | PRD | SPEC | TR | Status | Depends on | Decisions |
 |---|---|---|---|---|---|---|---|---|---|
-| RE-F-01 | Choose how matching rows combine: `first`, `unique` (error, never partial outputs, on zero or several matches), `collect` with aggregation | S1, S2 | M1 | RE 7.2 Logic | RLE-001, RLE-002, RLE-003 | TR-DET-01, TR-DET-04 | specified | RE-F-02 | PD-008 |
+| RE-F-01 | Choose how matching rows combine, with DMN 1.5 behaviour: `first`; `unique` (no match gives null outputs, as with `first`; several matches an error with no partial outputs); `collect` with aggregation over all matched rows (DMN 1.5), keeping null outputs in step with the matched rows | S1, S2 | M1 | RE 7.2 Logic | RLE-001, RLE-002 (changes, PD-088), RLE-003 (changes, PD-088) | TR-DET-01, TR-DET-04 | specified | RE-F-02 | PD-008, PD-088 |
 | RE-F-02 | An unparsable or ill-typed expression cannot be published; the error names the row and the fix | S2 | M1 | RE 7.2 Logic | RLE-004 | TR-DET-02, TR-SEC-01 | specified | | PD-005 |
 | RE-F-03 | Money, dates and nulls behave predictably: cross-currency comparison fails; nulls follow FEEL logic, so an ordering comparison with a null does not match and `!=` against a missing value is true (RE-F-41) | S2 | M1 | RE 7.2 Logic | RLE-005, RLE-006 (null cases change, PD-058) | TR-DET-01, TR-DET-03 | specified | RE-F-02 | PD-058 |
 | RE-F-04 | An adversarial regex cannot hang an evaluation | S1 | M1 | RE 7.2 Logic | RLE-007 | TR-SEC-02 | specified | | |
@@ -301,6 +301,19 @@ PD-056 (decided 2026-11-19, option 4, the hybrid cockpit direction) added 2 feat
 Decided by the product manager under delegated authority (PD-073) on 2026-11-19: CK-F-43, minimal editing in the cockpit, is counted in M1 and RE-F-15 (async decision log writing, now a write-mode setting) moves to M2 at the head of the M2 cut list (PD-075); M1 stays at 57 and M2 goes from 65 to 66. PE-F-23 (optional agent labels) moves from design preview to an M2 spec gap (PD-014), and PE-F-43 (shadow mode guide) from design preview to an M3 spec gap (PD-015). X-F-29 (tenant export and purge, PD-051) and X-F-30 (sealed monthly partitions, PD-052) are added as later, targeted 1.1, design previews, until PD-062 sets the 1.1 content and date. Reworded without a milestone change, under the generic-by-design principle (PD-074): RE-F-18, RE-F-23, CK-F-04, CK-F-17, CK-F-24, CK-F-44, CK-F-45, X-F-02, X-F-12, X-F-18 and X-F-22. PD-080 adds RE-F-49, the `four-eyes` mode for manual retirement, in M3 as a spec gap, last on the M3 cut list, and rewords RE-F-07. Net change: M2 from 65 to 66, M3 from 32 to 33, later from 11 to 13, total from 186 to 190; spec gaps from 92 to 96; design previews stay at 31.
 
 Decided on 2026-11-19 and now counted: RE-F-41 (M1, PD-058, specified by RLE-021); PE-F-58 (M2, PD-059, spec gap); X-F-28 (M1 and M2, PD-060, spec gap, counted in M1). The same session moved PE-F-39 (agent-chosen steps) from M3 to later as a design preview (PD-028). Net change: M1 from 52 to 54, M2 from 60 to 61, M3 from 31 to 30, later from 9 to 10; total from 173 to 176. None of the three foundation features is a cut candidate.
+
+### First release 0.1.0 (reviewed 20 Nov, shipped by 22 Nov 2026)
+
+The first release ships part of M1, and a first BPMN and DMN subset, early ([PD-082](decisions.md#pd-082-first-release-reviewed-by-fri-20-nov-shipped-by-sun-22-nov-2026), [PD-084](decisions.md#pd-084-first-bpmn-and-dmn-subset-in-the-first-release)). Features keep their milestone in the tables above: a feature delivered in part keeps its milestone for the rest, and the milestone counts do not change. The label is `0.1.0` ([PD-083](decisions.md#pd-083-version-label-of-the-first-release)); M1 ships as `0.2.0`, M2 as `0.3.0` and M3 as `1.0.0` ([PD-087](decisions.md#pd-087-release-labels-after-010)).
+
+| Group | Count | Features |
+|---|---|---|
+| Committed, whole | 12 | RE-F-06, RE-F-11, RE-F-14, RE-F-38, X-F-01, X-F-02, X-F-03, X-F-06 (rules), X-F-09, X-F-12, X-F-13, X-F-22 |
+| Committed, in part | 5 | RE-F-01 (`first`; `unique` and `collect` in 0.1.0 if #132 meets the readiness bar), RE-F-20 (lifecycle endpoints and Java API), RE-F-25 (YAML import only), CK-F-01 (embedded only), X-F-14 (Docker Compose example, without the Cockpit 0.1 journey) |
+| BPMN and DMN subset, if it passes the checklist | 10 | RE-F-30 (DMN 1.5 table import and export, FEEL subset), RE-F-04 (time limit on regular expressions), PE-F-41 (BPMN 2.0 XML subset import), PE-F-01, PE-F-02, PE-F-04, PE-F-07, PE-F-08 (local only), PE-F-09, CK-F-43. Process execution (PE-F-01 to PE-F-09) and its persistence in the host database are in 0.1.0 only if they meet the readiness bar; otherwise BPMN import ships alone |
+| **Total** | **27** | 17 committed and 10 conditional, out of 190 |
+
+The full BPMN 2.0 and DMN target for 22 Nov 2026 ([PD-085](decisions.md#pd-085-target-full-bpmn-20-and-dmn-by-sun-22-nov-2026)) is measured by conformance pass rates; standards-track features move into a release only when their suites pass, so the 1.1 to 1.3 columns above are unchanged.
 
 Cut candidates: 16 features (0 in M1, 6 in M2, 10 in M3).
 
