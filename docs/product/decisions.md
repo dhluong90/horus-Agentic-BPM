@@ -110,6 +110,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-086](#pd-086-dmn-tck-test-cases-as-build-time-test-data) | DMN TCK test cases as build-time test data | Decided (product manager, delegated, PD-073) |
 | [PD-087](#pd-087-release-labels-after-010) | Release labels after 0.1.0 | Decided (product manager, delegated, PD-073) |
 | [PD-088](#pd-088-unique-and-collect-follow-dmn-15) | `unique` and `collect` follow DMN 1.5 | Decided (product manager, delegated, PD-073) |
+| [PD-089](#pd-089-a-requester-withdraws-their-own-pending-request) | A requester withdraws their own pending request | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2539,7 +2540,8 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] The README, Getting Started and release notes claim only what ships: "first BPMN and DMN subset", no conformance claim (`TR-STD-05`), unsupported features named as later, the forward-only migrations listed (X-F-09), and no compatibility promise before 1.0.
 - [x] The version label is decided: `0.1.0` (PD-083, 2026-11-19).
 - [ ] A recorded walkthrough of the release journey exists for the review.
-- [ ] The GitHub Release upload (#153) is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the `v0.1.0` release.
+- [ ] The GitHub Release upload (#153) is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the 0.1.0 release.
+- [ ] The release notes call the Process Engine a preview (ADR-0027, process DESIGN 5.8): outside `dev`, imports stay drafts, activation is by the development auto-approve setting only, and there is no claim step.
 
 **Assumption to test.** [ASSUMPTION] Pull requests #87, #17 and #126 and issues #133, #131 and #21 can all be reviewed and merged by Fri 20 Nov without a new BLOCKING finding. Cheap test: a merge-order check on Thu 19 Nov evening (#133, then #87, then #21, then #17 and #126) with the count of open findings; if more than two BLOCKING findings are open on Fri 20 Nov 08:00 ICT, the product manager tells the product owner before the review, not at it.
 
@@ -2688,3 +2690,29 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Consequences.** RE-F-01 is reworded. `RLE-002` changes: zero matches is no match with null outputs, logged as outcome `OK` with `matched_rule_ids = []`, so the decision log schema does not change; several matches are unchanged. `RLE-003` states the DMN 1.5 rules: null entries kept and aligned with `matchedRuleIds`; `count` includes nulls; a null under `sum`, `min` or `max` is `EVALUATION_ERROR` in strict mode; no match is `NoMatch` with null outputs, logged as outcome `OK` with `matched_rule_ids = []`, exactly as for `first`. Pull request #132 implements both before it merges. The deviation register gets no entry for either point.
 
 **Follow-ups.** Architect: `RLE-002` and `RLE-003` in the rule engine SPEC (applied in this change), the error matrix (ADR-0010), and the `collect` aggregation rules, checked against DMN 1.5 sections 8.2.11, 10.3.2.10 and 10.3.4.4 and applied to `RLE-003` in this change. Maintainers (engineering): pull request #132 and its tests. Documentation: the wiki hit policy page.
+
+### PD-089 A requester withdraws their own pending request
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Only a holder of `rules:approve` can reject a pending version (rule engine DESIGN 3.3). An author who holds only `rules:author` cannot take back their own publication request, and sees no action on it. Should the requester be able to withdraw it? |
+| Raised by | Maintainers (engineering), review of the reject slice (pull request #152) |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1 |
+
+**Options considered**
+
+1. The requester withdraws their own pending request with `rules:author`, as a separate action named withdraw (chosen). The version returns to `DRAFT`, nothing is published, the effective version is unchanged, and a history row and an event record the withdrawal with who and when; a reason is optional. Only the identity that requested publication may withdraw it. Consequence: an author fixes a mistake without asking an approver to reject it; four-eyes is untouched, because withdrawing publishes nothing; the audit trail keeps "the author took it back" apart from "an approver refused it".
+2. Keep it approver-only: the author asks an approver to reject. Consequence: no new action; approvers spend time on requests the author already knows are wrong, and the log records a rejection that was really a withdrawal.
+
+**Recommendation and decision.** Option 1. It is the common maker-checker pattern and it relaxes no control, so under PD-074 it is not a setting. Reject stays the approver's action, with a mandatory comment.
+
+**Rules for the specification.**
+- Withdraw is allowed only on a `PENDING_APPROVAL` version, only by its requester, and needs `rules:author`. Anyone else, an approver included, gets `403`; an approver uses reject.
+- A withdrawn version is a `DRAFT` again: editable, and it can be requested again, which starts a new approval.
+- Withdraw accepts an idempotency key like every mutation, and a stale `If-Match` gets the usual conflict.
+- The cockpit shows Withdraw to the requester on their own pending version and never shows Approve to them.
+
+**Consequences.** RE-F-35 moves from later to M1 as a spec gap (feature map M1 from 57 to 58, later from 13 to 12). It reaches 0.1.0 only if it meets the readiness bar. Otherwise it ships in 0.2.0. It is not on any cut list.
+
+**Follow-ups.** Architect: a new SPEC statement for withdraw, the state transition `PENDING_APPROVAL` to `DRAFT` in DESIGN 3.3, the endpoint `:withdraw` in `openapi.yaml`, and the event and history row. Maintainers (engineering): an issue for the withdraw action, separate from reject in pull request #152. Documentation: the wiki approval how-to.
