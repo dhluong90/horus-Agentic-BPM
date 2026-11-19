@@ -24,6 +24,9 @@ class SignInPageTest {
     @Test
     void renders_the_product_the_service_and_the_form_with_the_csrf_field_in_english() {
         String html = new SignInPage(TEMPLATE, "Loan origination", "demo", List.of()).render(view("en", false, false));
+        String withDemo = new SignInPage(TEMPLATE, "Loan origination", "demo", DEMO).render(view("en", false, false));
+        // One Demo tag: in the demo list when there is one, never twice.
+        assertThat(withDemo).doesNotContain("tag--env").contains("tag--demo");
 
         assertThat(html).contains("<html lang=\"en\">", "HORUS Cockpit", ">Sign in<", "Loan origination", "<span class=\"tag tag--env\">demo</span>",
                         "Use your Loan origination account.")
@@ -48,7 +51,7 @@ class SignInPageTest {
         String en = new SignInPage(TEMPLATE, "Loans", null, List.of()).render(view("en", true, false));
         String vi = new SignInPage(TEMPLATE, "Loans", null, List.of()).render(view("vi", true, false));
 
-        assertThat(en).contains("role=\"alert\"", "Wrong username or password. Try again.").contains("aria-invalid=\"true\" aria-describedby=\"sign-in-alert\"")
+        assertThat(en).contains("role=\"alert\"", "alert--error", "✕", "Wrong username or password. Try again.").contains("aria-invalid=\"true\" aria-describedby=\"sign-in-alert\"")
                 .contains("/login?lang=vi&amp;error");
         assertThat(vi).contains("Sai tên đăng nhập hoặc mật khẩu. Hãy thử lại.");
     }

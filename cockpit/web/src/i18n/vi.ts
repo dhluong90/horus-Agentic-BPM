@@ -68,7 +68,9 @@ export const vi: Record<MessageKey, string> = {
   'home.pending': 'Đang chờ phê duyệt',
   'home.yourWork': 'Của bạn',
   'home.toReview': 'Cần xem xét',
+  'home.yourDraftsAndRequests': 'Bản nháp và yêu cầu của bạn',
   'home.noOwnWork': 'Bạn chưa có bản nháp hay yêu cầu nào.',
+  'home.noOtherReviews': 'Không còn yêu cầu nào khác chờ bạn xem xét.',
   'home.recentRuleSets': 'Bộ quy tắc gần đây',
   'home.allRuleSets': 'Tất cả bộ quy tắc',
   'home.openRules': 'Mở bộ quy tắc',
@@ -79,7 +81,7 @@ export const vi: Record<MessageKey, string> = {
 
   'approvals.title': 'Phê duyệt',
   'approvals.subtitle': 'Thay đổi người khác đề nghị xuất bản.',
-  'approvals.subtitleAuthor': 'Theo dõi hoặc rút lại yêu cầu xuất bản của bạn.',
+  'approvals.subtitleAuthor': 'Theo dõi yêu cầu xuất bản của bạn.',
   'approvals.reviewNext': 'Xem xét tiếp',
   'approvals.yourRequests': 'Yêu cầu của bạn',
   'approvals.empty': 'Không có yêu cầu nào chờ bạn xem xét.',

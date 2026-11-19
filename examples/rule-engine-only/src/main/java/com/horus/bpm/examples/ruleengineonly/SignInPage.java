@@ -88,7 +88,9 @@ final class SignInPage {
         String service = serviceLabel == null || serviceLabel.isBlank() ? messages.getString("poweredBy") : serviceLabel;
         values.put("service", escape(service));
         values.put("subtitle", escape(messages.getString("subtitle").replace("{service}", service)));
-        values.put("environmentTag", environment == null || environment.isBlank() ? "" : "<span class=\"tag tag--env\">" + escape(environment) + "</span>");
+        // The environment tag shows once: in the demo list when there is one, otherwise beside the service name.
+        boolean tagged = environment != null && !environment.isBlank() && demoUsers.isEmpty();
+        values.put("environmentTag", tagged ? "<span class=\"tag tag--env\">" + escape(environment) + "</span>" : "");
         values.put("alert", alert(view, messages));
         values.put("usernameInvalid", view.error() ? " aria-invalid=\"true\" aria-describedby=\"sign-in-alert\"" : "");
         values.put("passwordInvalid", view.error() ? " aria-invalid=\"true\" aria-describedby=\"sign-in-alert\"" : "");
@@ -122,7 +124,7 @@ final class SignInPage {
 
     private static String alert(View view, ResourceBundle messages) {
         if (view.error()) {
-            return "<p class=\"alert alert--error\" role=\"alert\" id=\"sign-in-alert\"><span class=\"alert__icon\" aria-hidden=\"true\">!</span>"
+            return "<p class=\"alert alert--error\" role=\"alert\" id=\"sign-in-alert\"><span class=\"alert__icon\" aria-hidden=\"true\">✕</span>"
                     + escape(messages.getString("error")) + "</p>";
         }
         if (view.signedOut()) {

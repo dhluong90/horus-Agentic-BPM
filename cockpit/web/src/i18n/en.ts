@@ -66,7 +66,9 @@ export const en = {
   'home.pending': 'Pending approvals',
   'home.yourWork': 'Your requests',
   'home.toReview': 'To review',
+  'home.yourDraftsAndRequests': 'Your drafts and requests',
   'home.noOwnWork': 'You have no drafts or requests.',
+  'home.noOtherReviews': 'Nothing else is waiting for your review.',
   'home.recentRuleSets': 'Recent rule sets',
   'home.allRuleSets': 'All rule sets',
   'home.openRules': 'Open rule sets',
@@ -77,7 +79,7 @@ export const en = {
 
   'approvals.title': 'Approvals',
   'approvals.subtitle': 'Changes others asked to publish.',
-  'approvals.subtitleAuthor': 'Follow or withdraw your publication requests.',
+  'approvals.subtitleAuthor': 'Follow your publication requests.',
   'approvals.reviewNext': 'Review next',
   'approvals.yourRequests': 'Your requests',
   'approvals.empty': 'Nothing is waiting for your review.',

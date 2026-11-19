@@ -29,7 +29,9 @@ async function mockCatalogue(page: Page, user: string, permissions: readonly str
     const request = route.request();
     const answer = engine.handle({ method: request.method(), path: request.url(), headers: request.headers(), body: request.postData() ?? '', user, permissions });
     const json = answer.headers['Content-Type']?.includes('json') === true && answer.body !== '';
-    await route.fulfill({ status: answer.status, headers: answer.headers, body: json ? JSON.stringify(withNames(JSON.parse(answer.body))) : answer.body });
+    // 0.1.0 shows logins for other people; set NAMES=1 to preview the proposed *ByName fields.
+    const named = json && process.env['NAMES'] === '1';
+    await route.fulfill({ status: answer.status, headers: answer.headers, body: named ? JSON.stringify(withNames(JSON.parse(answer.body))) : answer.body });
   });
 }
 

@@ -27,13 +27,13 @@ describe('Home (PD-092: content by role)', () => {
   it('TR_UI_02_the_requester_sees_their_own_request_waiting_and_no_approve', async () => {
     open('');
 
-    const pending = await card(/Pending approvals/);
+    const pending = await card(/Your drafts and requests/);
     expect(await within(pending).findByText('card-fee · Version 2')).toBeInTheDocument();
     expect(within(pending).getByText(/waits for an approver/)).toBeInTheDocument();
     expect(within(pending).queryByRole('link', { name: /^Review/ })).not.toBeInTheDocument();
   });
 
-  it('TR_UI_02_an_approver_gets_one_focal_review_card_and_review_rows_that_open_the_changes', async () => {
+  it('TR_UI_02_an_approver_gets_one_focal_review_card_and_the_list_does_not_repeat_it', async () => {
     setScenario('ready-approver');
     open('');
 
@@ -41,7 +41,25 @@ describe('Home (PD-092: content by role)', () => {
     expect(within(focus).getByText('Waiting for your review')).toBeInTheDocument();
     expect(within(focus).getByRole('link', { name: 'Review' })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
     const pending = await card(/Pending approvals/);
-    expect(within(pending).getByRole('link', { name: 'Review: card-fee · Version 2' })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
+    expect(within(pending).getByText('Nothing else is waiting for your review.')).toBeInTheDocument();
+    expect(within(pending).queryByText('card-fee · Version 2')).not.toBeInTheDocument();
+  });
+
+  it('TR_UI_02_the_focal_request_is_the_oldest_and_the_others_are_rows_that_open_on_click', async () => {
+    setScenario('ready-approver');
+    const version = (ruleSet: string, requestedAt: string) => ({ ...pendingForRequester, ruleSet, requestedAt, requestedBy: 'hoa', createdBy: 'hoa', allowedActions: ['approve', 'reject'] });
+    mockHost.use(
+      http.get('*/api/bpm/rules/v1/rule-sets', () => HttpResponse.json({ data: [{ ...cardFeeSummary('PENDING_APPROVAL') }, { ...cardFeeSummary('PENDING_APPROVAL'), ruleSet: 'fx-margin' }], nextCursor: null, hasNext: false })),
+      http.get('*/api/bpm/rules/v1/rule-sets/card-fee/versions', () => HttpResponse.json({ data: [version('card-fee', '2026-11-18T08:30:00Z')], nextCursor: null, hasNext: false })),
+      http.get('*/api/bpm/rules/v1/rule-sets/fx-margin/versions', () => HttpResponse.json({ data: [version('fx-margin', '2026-11-19T01:40:00Z')], nextCursor: null, hasNext: false })),
+    );
+    open('');
+
+    expect(await card(/card-fee · Version 2/)).toHaveTextContent('Waiting for your review');
+    const pending = await card(/Pending approvals/);
+    const row = within(pending).getByRole('link', { name: 'fx-margin · Version 2' });
+    expect(row).toHaveAttribute('href', '#/rules/fx-margin/2/changes');
+    expect(within(pending).queryByRole('link', { name: /^Review/ })).not.toBeInTheDocument();
   });
 
   it('TR_UI_08_people_show_by_display_name_when_the_engine_sends_one_and_by_login_otherwise', async () => {
@@ -53,9 +71,9 @@ describe('Home (PD-092: content by role)', () => {
     );
     open('');
 
-    const pending = await card(/Pending approvals/);
-    expect(await within(pending).findByText(/by Nguyễn Thị Lan/)).toBeInTheDocument();
-    expect(within(pending).queryByText(/by lan$/)).not.toBeInTheDocument();
+    const focus = await card(/card-fee · Version 2/);
+    expect(within(focus).getByText(/by Nguyễn Thị Lan/)).toBeInTheDocument();
+    expect(within(focus).queryByText(/by lan$/)).not.toBeInTheDocument();
   });
 
   it('TR_UI_08_recent_rule_sets_are_newest_first_and_rows_open_the_rule_set', async () => {
@@ -72,7 +90,7 @@ describe('Home (PD-092: content by role)', () => {
     mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets', () => HttpResponse.json(EMPTY_PAGE)));
     open('');
 
-    const pending = await card(/Pending approvals/);
+    const pending = await card(/Your drafts and requests/);
     expect(await within(pending).findByText('You have no drafts or requests.')).toBeInTheDocument();
     expect(within(pending).getByRole('link', { name: 'Open rule sets' })).toHaveAttribute('href', '#/rules');
     expect(within(await card(/Recent rule sets/)).getByText('No rule sets on this service yet.')).toBeInTheDocument();

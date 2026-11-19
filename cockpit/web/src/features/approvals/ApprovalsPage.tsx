@@ -36,7 +36,7 @@ export function ApprovalsPage({ pageLimit }: { pageLimit: number }) {
   const [notice, setNotice] = useState('');
   const shown = view === 'review' ? toReview : mine;
   const current = shown.status === 'ready' ? (shown.data.find((request) => key(request) === selected) ?? shown.data[0]) : undefined;
-  const next = toReview.status === 'ready' ? toReview.data[toReview.data.length - 1] : undefined;
+  const next = toReview.status === 'ready' ? toReview.data[0] : undefined;
   const count = (value: Loadable<PendingRequest[]>) => (value.status === 'ready' ? String(value.data.length) : '');
   const published = ruleSets.status === 'ready' ? new Map(ruleSets.data.map((item: RuleSetSummary) => [item.ruleSet, item.publishedVersion])) : new Map<string, number | null>();
 

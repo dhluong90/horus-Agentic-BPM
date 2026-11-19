@@ -53,7 +53,7 @@ function PendingRow({ row, compact, onWithdraw }: { row: Row; compact: boolean; 
         <span className="row__meta tnum">{meta}</span>
       </div>
       <StatusPill status={version.status} />
-      {canApprove ? (
+      {canApprove && !compact ? (
         <a className="btn btn--primary btn--small hit row__action" href={href} aria-label={`${t('approvals.review')}: ${title}`}>
           {t('approvals.review')}
         </a>
@@ -63,6 +63,7 @@ function PendingRow({ row, compact, onWithdraw }: { row: Row; compact: boolean; 
           {t('approvals.withdraw')}
         </button>
       ) : null}
+      {compact ? <span className="row__chevron" aria-hidden="true">›</span> : null}
     </li>
   );
 }

@@ -76,7 +76,8 @@ export function relevantRequests(versions: readonly VersionSummary[], userId: st
     .filter((version) => version.status === 'PENDING_APPROVAL')
     .map((version) => toPendingRequest(version, userId))
     .filter((request) => request.canApprove || request.mine)
-    .sort((a, b) => Date.parse(b.version.requestedAt ?? b.version.createdAt) - Date.parse(a.version.requestedAt ?? a.version.createdAt));
+    // One order everywhere: the oldest request first, so "next" means the request that has waited longest.
+    .sort((a, b) => Date.parse(a.version.requestedAt ?? a.version.createdAt) - Date.parse(b.version.requestedAt ?? b.version.createdAt));
 }
 
 /** Latest statuses whose versions Home and Approvals need: requests to review and the author's own work. */
