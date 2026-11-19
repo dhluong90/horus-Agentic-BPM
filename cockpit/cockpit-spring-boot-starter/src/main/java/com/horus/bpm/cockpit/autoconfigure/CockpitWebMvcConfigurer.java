@@ -7,7 +7,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
  * Maps the cockpit into the host's Spring MVC: the bundle from the jar under {@code path/**},
- * {@code path} redirected to {@code path/}, and {@code path/} answered with {@code index.html}.
+ * {@code path} redirected to {@code path/}, {@code path/} answered with {@code index.html}, and any
+ * other route under {@code path/} answered with {@code index.html} too (history routing).
  */
 final class CockpitWebMvcConfigurer implements WebMvcConfigurer {
 
@@ -21,7 +22,10 @@ final class CockpitWebMvcConfigurer implements WebMvcConfigurer {
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        registry.addResourceHandler(path + "/**").addResourceLocations(BUNDLE_LOCATION);
+        registry.addResourceHandler(path + "/**")
+                .addResourceLocations(BUNDLE_LOCATION)
+                .resourceChain(true)
+                .addResolver(new CockpitIndexFallbackResolver());
     }
 
     @Override

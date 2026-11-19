@@ -62,6 +62,8 @@ class CockpitEmbeddedIT {
         assertThat(page.headers().firstValue("Content-Security-Policy")).hasValueSatisfying(csp ->
                 assertThat(csp).contains("script-src 'self'").doesNotContain("unsafe-inline"));
         assertThat(page.headers().firstValue("X-Content-Type-Options")).hasValue("nosniff");
+        // Same-origin framing only, even though the host's Spring Security sends DENY everywhere else.
+        assertThat(page.headers().firstValue("X-Frame-Options")).hasValue("SAMEORIGIN");
 
         HttpResponse<String> registry = client.send(
                 HttpRequest.newBuilder(URI.create(url("/bpm/cockpit/cockpit-hosts.json"))).GET().build(),

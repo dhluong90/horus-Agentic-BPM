@@ -88,8 +88,20 @@ class CockpitStarterTest {
                     .andExpect(header().string("Content-Security-Policy", containsString("connect-src 'self'")))
                     .andExpect(header().string("Content-Security-Policy", containsString("frame-ancestors 'self'")))
                     .andExpect(header().string("X-Content-Type-Options", "nosniff"))
-                    .andExpect(header().string("Referrer-Policy", "no-referrer"));
+                    .andExpect(header().string("Referrer-Policy", "no-referrer"))
+                    .andExpect(header().string("X-Frame-Options", "SAMEORIGIN"));
         }
+    }
+
+    @Test
+    void CKP_001_a_reloaded_cockpit_route_gets_index_html_and_a_missing_file_stays_404() throws Exception {
+        mvc.perform(get("/bpm/cockpit/rules/card-fee").principal(LAN))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(content().string(containsString("cockpit-test-bundle")));
+        mvc.perform(get("/bpm/cockpit/assets/missing.js").principal(LAN)).andExpect(status().isNotFound());
+        mvc.perform(get("/bpm/cockpit/missing.png").principal(LAN)).andExpect(status().isNotFound());
+        mvc.perform(get("/bpm/cockpit/assets/nested/route").principal(LAN)).andExpect(status().isNotFound());
     }
 
     @Test

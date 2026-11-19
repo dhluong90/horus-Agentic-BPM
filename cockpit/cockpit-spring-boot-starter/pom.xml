@@ -14,6 +14,14 @@
   <name>HORUS Cockpit Spring Boot Starter</name>
   <description>Serves the static cockpit inside a Spring MVC host, behind the host's own sign-in.</description>
 
+  <properties>
+    <!--
+      -Dcockpit.bundle.skip=true builds the starter without the cockpit (a Java-only build, by choice).
+      The jar then serves 404 at the cockpit path; examples/rule-engine-only skips its cockpit test too.
+    -->
+    <cockpit.bundle.skip>false</cockpit.bundle.skip>
+  </properties>
+
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -28,6 +36,12 @@
       <groupId>jakarta.servlet</groupId>
       <artifactId>jakarta.servlet-api</artifactId>
       <scope>provided</scope>
+    </dependency>
+    <!-- Optional: loads the host's CSRF token for host-session mode when the host uses Spring Security. -->
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-web</artifactId>
+      <optional>true</optional>
     </dependency>
 
     <dependency>
@@ -70,6 +84,29 @@
       </resource>
     </resources>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>require-cockpit-bundle</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <skip>${cockpit.bundle.skip}</skip>
+              <rules>
+                <requireFilesExist>
+                  <files>
+                    <file>${project.parent.basedir}/web/dist/index.html</file>
+                  </files>
+                  <message>The cockpit bundle is missing. Run "npm ci &amp;&amp; npm run build" in cockpit/web first, or build without the cockpit with -Dcockpit.bundle.skip=true.</message>
+                </requireFilesExist>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>

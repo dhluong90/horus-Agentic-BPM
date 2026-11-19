@@ -9,6 +9,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.web.servlet.DispatcherServlet;
@@ -18,7 +21,8 @@ import org.springframework.web.servlet.DispatcherServlet;
  *
  * <p>The cockpit is static files with no state; the host's own authentication protects it and its
  * REST layer is the only thing it calls. Registered through {@code AutoConfiguration.imports}; nothing
- * is component-scanned. Uses Spring MVC only, so it runs on both supported Spring Boot lines (ADR-0011).
+ * is component-scanned. Main code uses Spring MVC only and optional Spring Security, so it is meant to run
+ * on both supported Spring Boot lines (ADR-0011); until the Spring Boot 3.5.x CI leg runs, only 4.x is tested.
  */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -44,6 +48,12 @@ public class CockpitAutoConfiguration {
         return new CockpitWebMvcConfigurer(properties.path());
     }
 
+    /** A plain servlet Filter bean: Spring Boot registers it in order, on both Spring Boot lines. */
+    @Bean
+    CockpitFrameOptionsFilter cockpitFrameOptionsFilter(CockpitProperties properties) {
+        return new CockpitFrameOptionsFilter(properties.path());
+    }
+
     @Bean
     SmartInitializingSingleton cockpitBundleCheck(ResourceLoader resourceLoader, CockpitProperties properties) {
         return () -> {
@@ -52,5 +62,22 @@ public class CockpitAutoConfiguration {
                         + " answers 404. Build cockpit/web (npm run build) before packaging the starter.");
             }
         };
+    }
+
+    /** Loads the host's CSRF token on cockpit requests, when the host uses Spring Security. */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.security.web.csrf.CsrfToken")
+    static class CsrfTokenConfiguration {
+
+        @Bean
+        WebMvcConfigurer cockpitCsrfTokenLoader(CockpitProperties properties) {
+            String path = properties.path();
+            return new WebMvcConfigurer() {
+                @Override
+                public void addInterceptors(InterceptorRegistry registry) {
+                    registry.addInterceptor(new CockpitCsrfTokenLoader()).addPathPatterns(path, path + "/**");
+                }
+            };
+        }
     }
 }

@@ -28,7 +28,11 @@ class CockpitBehindHostSecurityTest {
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        // As in the servlet container: the starter's frame-options filter runs before Spring Security.
+        mvc = MockMvcBuilders.webAppContextSetup(context)
+                .addFilters(context.getBean(CockpitFrameOptionsFilter.class))
+                .apply(springSecurity())
+                .build();
     }
 
     @Test
@@ -43,12 +47,22 @@ class CockpitBehindHostSecurityTest {
 
     @Test
     @WithMockUser(username = "lan")
+    void TR_SEC_09_cockpit_framing_rule_is_same_origin_even_though_the_host_denies_framing_elsewhere() throws Exception {
+        mvc.perform(get("/bpm/cockpit/index.html"))
+                .andExpect(header().string("X-Frame-Options", "SAMEORIGIN"))
+                .andExpect(header().string("Content-Security-Policy", containsString("frame-ancestors 'self'")));
+        mvc.perform(get("/api/host/ping")).andExpect(header().string("X-Frame-Options", "DENY"));
+    }
+
+    @Test
+    @WithMockUser(username = "lan")
     void CKP_001_signed_in_host_user_gets_the_cockpit_and_its_registry() throws Exception {
         mvc.perform(get("/bpm/cockpit/index.html"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Security-Policy", containsString("script-src 'self'")))
                 .andExpect(content().string(containsString("cockpit-test-bundle")));
         mvc.perform(get("/bpm/cockpit/cockpit-hosts.json"))
+                .andExpect(header().string("X-Frame-Options", "SAMEORIGIN"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("\"id\":\"self\"")));
     }

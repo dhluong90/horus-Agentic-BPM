@@ -93,6 +93,32 @@
     </dependency>
   </dependencies>
 
+  <profiles>
+    <!-- A Java-only build without the cockpit bundle (-Dcockpit.bundle.skip=true) skips the cockpit test. -->
+    <profile>
+      <id>cockpit-bundle-skipped</id>
+      <activation>
+        <property>
+          <name>cockpit.bundle.skip</name>
+          <value>true</value>
+        </property>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <excludes>
+                <exclude>**/CockpitEmbeddedIT.java</exclude>
+              </excludes>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+
   <build>
     <plugins>
       <plugin>
