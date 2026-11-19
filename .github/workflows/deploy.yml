@@ -1,0 +1,111 @@
+name: Deploy
+
+# Builds the example host image and runs the docker compose smoke test (docs/DEPLOYING.md), then the
+# image gates: no secrets in the layers, no high or critical vulnerability. Runs only when the
+# deployment files or the example hosts change; the CI workflow covers the engines.
+on:
+  pull_request:
+    paths:
+      - "deploy/**"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - ".env.example"
+      - "docs/DEPLOYING.md"
+      - "examples/**"
+      - ".github/workflows/deploy.yml"
+  push:
+    branches: [main]
+    paths:
+      - "deploy/**"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - ".env.example"
+      - "docs/DEPLOYING.md"
+      - "examples/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+# Actions are pinned by commit SHA; the comment names the release. Update both together.
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-smoke:
+    name: Image build, compose smoke test and image gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GRYPE_VERSION: "0.122.1"
+      # SHA-256 of grype_0.122.1_linux_amd64.tar.gz, from the signed checksum file of that release.
+      GRYPE_SHA256: "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538"
+      IMAGE: horus-bpm/rule-engine-only:local
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Throwaway secrets in .env, masked in the log
+        run: |
+          admin="$(openssl rand -hex 16)"; db="$(openssl rand -hex 16)"; demo="$(openssl rand -hex 12)"
+          echo "::add-mask::$admin"; echo "::add-mask::$db"; echo "::add-mask::$demo"
+          sed -e "s/^HORUS_DB_ADMIN_PASSWORD=.*/HORUS_DB_ADMIN_PASSWORD=$admin/" \
+              -e "s/^HORUS_DB_PASSWORD=.*/HORUS_DB_PASSWORD=$db/" \
+              -e "s/^HORUS_DEMO_PASSWORD=.*/HORUS_DEMO_PASSWORD=$demo/" .env.example > .env
+          git check-ignore -q .env
+
+      - name: Build the image
+        run: docker compose build
+
+      - name: Start PostgreSQL and the host, wait for healthy
+        run: docker compose up --wait --wait-timeout 180
+
+      - name: Smoke test (health, sign-in, metadata, rule lifecycle, cockpit)
+        run: deploy/smoke-test.sh
+
+      - name: Local-evaluation warning in the start-up log, application role without superuser rights
+        run: |
+          docker compose logs host | grep -F 'Demo users are on (dev profile): [lan, minh, hoa, tuan]'
+          test "$(docker compose exec -T postgres psql -U postgres -d horus -tAc \
+            "SELECT rolsuper OR rolcreaterole OR rolcreatedb FROM pg_roles WHERE rolname = 'horus'")" = f
+
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Install Grype (signature and pinned checksum verified)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          base="https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}"
+          tarball="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          sums="grype_${GRYPE_VERSION}_checksums.txt"
+          curl -sSfL -O "$base/$tarball" -O "$base/$sums" -O "$base/$sums.sigstore.json"
+          cosign verify-blob "$sums" --bundle "$sums.sigstore.json" \
+            --certificate-identity "https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          grep " ${tarball}\$" "$sums" | sha256sum -c -
+          echo "${GRYPE_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" grype
+          echo "GRYPE=$RUNNER_TEMP/grype" >> "$GITHUB_ENV"
+
+      - name: Image gates, no secrets in layers and no high or critical vulnerability
+        run: deploy/scan-image.sh "$IMAGE"
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Upload the image scan report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-scan
+          path: target/grype-image-*.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Stop and remove the stack
+        if: always()
+        run: docker compose down -v

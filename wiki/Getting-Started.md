@@ -4,6 +4,8 @@ In about 30 minutes you add the Rule Engine to a Spring Boot service, load a loa
 
 Design preview: describes the 0.1 target. The artifacts named below are not published yet, so the steps cannot be run today.
 
+To run the example host from a clone of the repository instead, with Docker and one command, see [Deploying with Docker Compose](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/DEPLOYING.md).
+
 ![Getting started flow: add the starter, load the table, evaluate, see the log](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/getting-started-flow.svg)
 
 ## Before you start
