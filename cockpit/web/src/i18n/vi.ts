@@ -13,6 +13,7 @@ export const vi: Record<MessageKey, string> = {
   'header.language': 'Ngôn ngữ',
   'header.accountMenu': 'menu tài khoản',
   'header.signOut': 'Đăng xuất',
+  'header.signOutFailed': 'Chưa đăng xuất được. Bạn vẫn đang đăng nhập; hãy thử lại.',
   'header.breadcrumb': 'Đường dẫn',
   'theme.toDark': 'Chuyển sang giao diện tối',
   'theme.toLight': 'Chuyển sang giao diện sáng',

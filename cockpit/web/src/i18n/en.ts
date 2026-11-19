@@ -11,6 +11,7 @@ export const en = {
   'header.language': 'Language',
   'header.accountMenu': 'account menu',
   'header.signOut': 'Sign out',
+  'header.signOutFailed': 'Could not sign out. You are still signed in; try again.',
   'header.breadcrumb': 'Breadcrumb',
   'theme.toDark': 'Switch to dark theme',
   'theme.toLight': 'Switch to light theme',

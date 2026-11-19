@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.MissingResourceException;
 import java.util.ResourceBundle;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -18,7 +19,8 @@ import org.springframework.core.io.Resource;
  * The host's sign-in page: an HTML template with the product name, the host's form and, on the {@code dev}
  * profile, the demo user names. The template is read once at start-up; a host overrides it with
  * {@code host.sign-in.template}. Text comes from {@code sign-in/messages*.properties} in English and
- * Vietnamese. Every value is HTML-escaped; only the blocks this class builds are inserted as markup.
+ * Vietnamese. {@code {{name}}} always inserts escaped text; {@code {{{name}}}} is allowed only for the
+ * {@link #MARKUP_KEYS}, blocks this class builds from escaped parts. A template that mixes them up fails.
  *
  * <p>Passwords are never shown, and the page carries no inline script or style, so it runs under the
  * strict content security policy {@link #CONTENT_SECURITY_POLICY}.
@@ -40,7 +42,11 @@ final class SignInPage {
 
     static final List<String> LANGUAGES = List.of("en", "vi");
 
-    private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{(\\{?)([A-Za-z][A-Za-z0-9]*)\\}?\\}\\}");
+    /** {{{name}}} inserts markup built here; {{name}} inserts escaped text. */
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{\\{([A-Za-z][A-Za-z0-9]*)\\}\\}\\}|\\{\\{([A-Za-z][A-Za-z0-9]*)\\}\\}");
+
+    /** The only placeholders that insert markup. Each is built by this class from escaped parts. */
+    static final Set<String> MARKUP_KEYS = Set.of("environmentTag", "languageLinks", "alert", "usernameInvalid", "passwordInvalid", "demo");
     private static final ResourceBundle.Control NO_FALLBACK = ResourceBundle.Control.getNoFallbackControl(ResourceBundle.Control.FORMAT_PROPERTIES);
 
     /** A demo user: name and the host roles shown beside it. */
@@ -73,34 +79,56 @@ final class SignInPage {
 
     String render(View view) {
         ResourceBundle messages = messages(view.language());
-        Map<String, String> values = new HashMap<>();
+        // Text values, raw: {{name}} escapes them on the way out, whatever they contain.
+        Map<String, String> text = new HashMap<>();
         for (String key : messages.keySet()) {
             if (!key.contains(".")) {
-                values.put(key, escape(messages.getString(key)));
+                text.put(key, messages.getString(key));
             }
         }
-        values.put("lang", view.language());
-        values.put("assets", "/sign-in");
-        values.put("action", "/login");
-        values.put("csrfParameter", escape(view.csrfParameter()));
-        values.put("csrfToken", escape(view.csrfToken()));
-        values.put("languageLinks", languageLinks(view));
         String service = serviceLabel == null || serviceLabel.isBlank() ? messages.getString("poweredBy") : serviceLabel;
-        values.put("service", escape(service));
-        values.put("subtitle", escape(messages.getString("subtitle").replace("{service}", service)));
+        text.put("lang", view.language());
+        text.put("assets", "/sign-in");
+        text.put("action", "/login");
+        text.put("csrfParameter", view.csrfParameter());
+        text.put("csrfToken", view.csrfToken());
+        text.put("service", service);
+        text.put("subtitle", messages.getString("subtitle").replace("{service}", service));
+        // Markup this class builds from escaped parts; only these keys may appear as {{{name}}}.
+        Map<String, String> markup = new HashMap<>();
         // The environment tag shows once: in the demo list when there is one, otherwise beside the service name.
         boolean tagged = environment != null && !environment.isBlank() && demoUsers.isEmpty();
-        values.put("environmentTag", tagged ? "<span class=\"tag tag--env\">" + escape(environment) + "</span>" : "");
-        values.put("alert", alert(view, messages));
-        values.put("usernameInvalid", view.error() ? " aria-invalid=\"true\" aria-describedby=\"sign-in-alert\"" : "");
-        values.put("passwordInvalid", view.error() ? " aria-invalid=\"true\" aria-describedby=\"sign-in-alert\"" : "");
-        values.put("demo", demo(messages));
+        markup.put("environmentTag", tagged ? "<span class=\"tag tag--env\">" + escape(environment) + "</span>" : "");
+        markup.put("languageLinks", languageLinks(view));
+        markup.put("alert", alert(view, messages));
+        markup.put("usernameInvalid", view.error() ? " aria-invalid=\"true\" aria-describedby=\"sign-in-alert\"" : "");
+        markup.put("passwordInvalid", view.error() ? " aria-invalid=\"true\" aria-describedby=\"sign-in-alert\"" : "");
+        markup.put("demo", demo(messages));
+        if (!markup.keySet().equals(MARKUP_KEYS)) {
+            throw new IllegalStateException("Markup keys out of step with MARKUP_KEYS: " + markup.keySet());
+        }
         Matcher matcher = PLACEHOLDER.matcher(template);
         StringBuilder out = new StringBuilder(template.length() + 1024);
         while (matcher.find()) {
-            String value = values.get(matcher.group(2));
-            if (value == null) {
-                throw new IllegalStateException("The sign-in template uses an unknown placeholder " + matcher.group());
+            String rawName = matcher.group(1);
+            String textName = matcher.group(2);
+            String value;
+            if (rawName != null) {
+                if (!MARKUP_KEYS.contains(rawName)) {
+                    throw new IllegalStateException("The sign-in template inserts " + matcher.group() + " as markup; only "
+                            + MARKUP_KEYS + " may use triple braces");
+                }
+                value = markup.get(rawName);
+            } else {
+                if (MARKUP_KEYS.contains(textName)) {
+                    throw new IllegalStateException("The sign-in template uses " + matcher.group() + " as text; it is markup, use {{{"
+                            + textName + "}}}");
+                }
+                String raw = text.get(textName);
+                if (raw == null) {
+                    throw new IllegalStateException("The sign-in template uses an unknown placeholder " + matcher.group());
+                }
+                value = escape(raw);
             }
             matcher.appendReplacement(out, Matcher.quoteReplacement(value));
         }

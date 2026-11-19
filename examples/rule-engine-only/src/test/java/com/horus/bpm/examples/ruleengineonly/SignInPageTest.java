@@ -120,4 +120,28 @@ class SignInPageTest {
         assertThat(configuration.signInPage(dev, TEMPLATE, "Loans", "", "secret").demoUsers()).extracting(SignInPage.DemoUser::username)
                 .containsExactly("lan", "minh", "hoa", "tuan");
     }
+
+    @Test
+    void TR_SEC_09_a_hostile_service_label_and_environment_are_text_never_markup() {
+        String label = "<script>alert(1)</script>\"><img src=x onerror=alert(2)>";
+        String environment = "uat\" onmouseover=\"alert(3)";
+        for (List<SignInPage.DemoUser> users : List.of(List.<SignInPage.DemoUser>of(), DEMO)) {
+            String html = new SignInPage(TEMPLATE, label, environment, users).render(view("en", true, false));
+            assertThat(html).doesNotContain("<script>alert").doesNotContain("<img src=x").doesNotContain("\" onmouseover=")
+                    .contains("&lt;script&gt;alert(1)&lt;/script&gt;&quot;&gt;&lt;img src=x onerror=alert(2)&gt;");
+        }
+        assertThat(new SignInPage(TEMPLATE, "Loans", environment, List.of()).render(view("en", false, false)))
+                .contains("<span class=\"tag tag--env\">uat&quot; onmouseover=&quot;alert(3)</span>");
+    }
+
+    @Test
+    void TR_SEC_09_double_braces_always_escape_and_only_markup_keys_take_triple_braces() {
+        ByteArrayResource textAsMarkup = new ByteArrayResource("<p>{{{title}}}</p>".getBytes(StandardCharsets.UTF_8));
+        ByteArrayResource markupAsText = new ByteArrayResource("<p>{{demo}}</p>".getBytes(StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> new SignInPage(textAsMarkup, "Loans", null, List.of()).render(view("en", false, false)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("only");
+        assertThatThrownBy(() -> new SignInPage(markupAsText, "Loans", null, List.of()).render(view("en", false, false)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("{{{demo}}}");
+        assertThat(SignInPage.MARKUP_KEYS).containsExactlyInAnyOrder("environmentTag", "languageLinks", "alert", "usernameInvalid", "passwordInvalid", "demo");
+    }
 }

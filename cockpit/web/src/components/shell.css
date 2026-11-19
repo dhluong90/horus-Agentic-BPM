@@ -54,6 +54,7 @@ body { background: var(--bg); background-image: none; }
 .account__name { font: var(--type-h2); color: var(--ink); }
 .account__id, .account__roles { font: var(--type-label); color: var(--muted); }
 .account__signout { margin-top: 10px; width: 100%; }
+.account__error { margin-top: 6px; color: var(--bad); font: var(--type-label); }
 
 .crumbs ol { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0; list-style: none; font: var(--type-label); }
 .crumbs li { display: flex; align-items: center; gap: 8px; min-width: 0; }

@@ -1,7 +1,7 @@
 <!doctype html>
 <!--
   The example host's sign-in page. The host owns sign-in; copy this file and point host.sign-in.template at
-  your copy to change it. Placeholders in double braces are text (escaped); in triple braces, markup built by SignInPage.
+  your copy to change it. Placeholders in double braces are always escaped text; triple braces are allowed only for the markup keys SignInPage builds (MARKUP_KEYS), and any other use fails.
   No inline script or style: the page runs under script-src 'self' and style-src 'self'.
 -->
 <html lang="{{lang}}">

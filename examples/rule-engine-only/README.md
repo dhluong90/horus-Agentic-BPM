@@ -333,7 +333,7 @@ The sign-in page belongs to the host, not to the cockpit library. This example s
 - **Brand panel:** the service name, what it is for and three points, from the host's own messages. A bank replaces this panel.
 - **Demo users:** listed by name and role on the `dev` profile, and only when `HORUS_DEMO_PASSWORD` is set. Choosing one fills the username. The page never shows a password.
 - **Security:** no inline script or style, so the page has its own strict `Content-Security-Policy`, with `frame-ancestors 'none'` and `Cache-Control: no-store`.
-- **Changing it:** copy the template and set `host.sign-in.template` to your copy, for example `file:/etc/loans/sign-in.html`. An unknown placeholder stops the page with an error that names it.
+- **Changing it:** copy the template and set `host.sign-in.template` to your copy, for example `file:/etc/loans/sign-in.html`. Double braces always insert escaped text; triple braces are allowed only for the page's own markup blocks. An unknown or misused placeholder stops the page with an error that names it.
 
 ![Sign-in page](../../cockpit/docs/images/screenshots/example-host-signin-1440x900-light-en.png)
 

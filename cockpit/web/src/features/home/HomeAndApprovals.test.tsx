@@ -257,3 +257,29 @@ describe('menu', () => {
     expect(await screen.findByText('Decision history comes in 0.2.0.')).toBeInTheDocument();
   });
 });
+
+describe('security (review lows)', () => {
+  it('TR_SEC_09_a_refused_sign_out_says_so_and_keeps_the_page', async () => {
+    mockHost.use(http.post('*/logout', () => HttpResponse.json({ status: 403 }, { status: 403 })));
+    open('');
+    await userEvent.click(await screen.findByRole('button', { name: /Nguyễn Thị Lan, account menu/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not sign out. You are still signed in; try again.');
+    expect(screen.getByRole('heading', { level: 1, name: /Nguyễn Thị Lan/ })).toBeInTheDocument();
+  });
+
+  it('TR_SEC_09_decisions_makes_no_request_for_decision_data', async () => {
+    setScenario('ready-approver');
+    const calls: string[] = [];
+    const record = ({ request }: { request: Request }) => { calls.push(new URL(request.url).pathname); };
+    mockHost.events.on('request:start', record);
+    open('#/decisions');
+
+    expect(await screen.findByText('Decision history comes in 0.2.0.')).toBeInTheDocument();
+    // Only the shell's own calls: registry, /meta, /me and the rule lists behind the Approvals count.
+    expect(calls.filter((path) => /decision/i.test(path))).toEqual([]);
+    expect(calls.every((path) => path.endsWith('/cockpit-hosts.json') || path === '/api/bpm/meta' || path === '/api/bpm/me' || path.startsWith('/api/bpm/rules/v1/rule-sets'))).toBe(true);
+    mockHost.events.removeListener('request:start', record);
+  });
+});

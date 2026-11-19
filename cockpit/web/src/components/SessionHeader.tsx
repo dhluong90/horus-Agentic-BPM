@@ -88,6 +88,7 @@ function ServicePill({ session }: { session: SessionSummary }) {
 function AccountMenu({ session }: { session: SessionSummary }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const [signOutFailed, setSignOutFailed] = useState(false);
   const menuId = useId();
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -132,15 +133,18 @@ function AccountMenu({ session }: { session: SessionSummary }) {
         <p className="account__name">{session.userName}</p>
         <p className="account__id">{session.userId}</p>
         {session.capabilities.length > 0 ? <p className="account__roles">{session.capabilities.map((key) => t(key)).join(' · ')}</p> : null}
-        <button type="button" className="btn btn--quiet account__signout" onClick={() => void signOut(session.baseUrl)}>
+        <button type="button" className="btn btn--quiet account__signout" onClick={() => {
+          setSignOutFailed(false);
+          void signOutOfHost(session.baseUrl).then((signedOut) => {
+            // Reload only once the host has ended the session; otherwise the user would still be signed in.
+            if (signedOut) window.location.reload();
+            else setSignOutFailed(true);
+          });
+        }}>
           {t('header.signOut')}
         </button>
+        {signOutFailed ? <p className="account__error" role="alert">{t('header.signOutFailed')}</p> : null}
       </div>
     </div>
   );
-}
-
-async function signOut(baseUrl: string): Promise<void> {
-  await signOutOfHost(baseUrl);
-  window.location.reload();
 }
