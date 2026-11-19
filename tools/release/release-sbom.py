@@ -37,9 +37,13 @@ Subcommands (standard library only, Python 3.9 or later):
                           Fails when any plugin other than maven-deploy-plugin is bound to the deploy phase,
                           any plugin is a build extension (which can replace the deploy goal), or a known
                           publishing plugin is configured: the dry run must never be able to publish.
-  tag-version TAG VERSION...
-                          TAG is <module>/vX.Y.Z. Fails unless every VERSION is exactly X.Y.Z, so a
-                          -SNAPSHOT version always fails.
+  release-tag TAG EFFECTIVE_POM --group-id GROUP
+                          TAG must be vX.Y.Z: one project tag per release (PD-087). Fails, naming every
+                          problem at once, when TAG has another form (a per-module tag <module>/vX.Y.Z is
+                          refused with the vX.Y.Z form to use), or when the root or any module of the
+                          reactor in EFFECTIVE_POM is not at exactly X.Y.Z (so a -SNAPSHOT always fails) or
+                          not under GROUP. tools/release/check-release-tag.sh adds the check that the
+                          commit is on main.
 
 Exit status: 0 when the check passes, 1 when it fails, 2 on a usage error.
 """
@@ -467,17 +471,53 @@ def deploy_plugins(effective_pom: Path) -> int:
     return 0
 
 
-def tag_version(tag: str, versions: Sequence[str]) -> int:
-    match = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9._-]*)/v(\d+\.\d+\.\d+)", tag)
-    if not match:
-        return fail([f"tag {tag!r} is not <module>/vX.Y.Z"])
-    wanted = match.group(2)
-    errors = [f"tag {tag} needs version {wanted}, but the build declares {version}"
-              + (" (a SNAPSHOT is never released)" if version.endswith("-SNAPSHOT") else "")
-              for version in versions if version != wanted]
+TAG_FORM = re.compile(r"v(\d+\.\d+\.\d+)")
+MODULE_TAG_FORM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/v(\d+\.\d+\.\d+)")
+
+
+def release_tag_errors(tag: str, projects: Sequence[Tuple[str, str, str]], group_id: str) -> List[str]:
+    """Every problem of a release tag against the reactor, so one run names them all (PD-087).
+
+    PROJECTS holds (artifactId, groupId, version) of the root and of every module, from the effective POM.
+    """
+    errors: List[str] = []
+    match = TAG_FORM.fullmatch(tag)
+    wanted: Optional[str] = match.group(1) if match else None
+    if wanted is None:
+        module_match = MODULE_TAG_FORM.fullmatch(tag)
+        if module_match:
+            wanted = module_match.group(1)
+            errors.append(f"tag {tag} is a per-module tag; a release is one project tag of the form vX.Y.Z, "
+                          f"here v{wanted} (PD-087). Delete {tag} and push v{wanted}.")
+        else:
+            errors.append(f"tag {tag!r} is not of the form vX.Y.Z, for example v0.1.0 (PD-087).")
+    if not projects:
+        errors.append("the effective POM lists no module")
+    for artifact, group, version in projects:
+        if wanted is not None and version != wanted:
+            errors.append(f"module {artifact} is at version {version}, but the release is {wanted}"
+                          + (" (a SNAPSHOT is never released)" if version.endswith("-SNAPSHOT") else "")
+                          + "; every module is released at the tag's version (PD-087).")
+        if group != group_id:
+            errors.append(f"module {artifact} has group id {group}; releases are published as {group_id} "
+                          "(ADR-0022, rename #21).")
+    return errors
+
+
+def reactor_projects(effective_pom: Path) -> List[Tuple[str, str, str]]:
+    root = ET.parse(effective_pom).getroot()
+    projects = [root] if root.tag == f"{POM_NS}project" else list(root.iter(f"{POM_NS}project"))
+    return [((project.findtext(f"{POM_NS}artifactId") or "?").strip(),
+             (project.findtext(f"{POM_NS}groupId") or "?").strip(),
+             (project.findtext(f"{POM_NS}version") or "?").strip()) for project in projects]
+
+
+def release_tag(tag: str, effective_pom: Path, group_id: str) -> int:
+    projects = reactor_projects(effective_pom)
+    errors = release_tag_errors(tag, projects, group_id)
     if errors:
         return fail(errors)
-    print(f"Tag check passed: {tag} matches version {wanted}.")
+    print(f"Tag check passed: {tag}; all {len(projects)} module(s) are {group_id} at version {tag[1:]}.")
     return 0
 
 
@@ -519,8 +559,10 @@ def main(argv: List[str]) -> int:
             return build_info(Path(args[0]), trial == "true", tag)
     if command == "deploy-plugins" and len(args) == 1:
         return deploy_plugins(Path(args[0]))
-    if command == "tag-version" and len(args) >= 2:
-        return tag_version(args[0], args[1:])
+    if command == "release-tag":
+        group = option(args, "--group-id")
+        if len(args) == 2 and group:
+            return release_tag(args[0], Path(args[1]), group)
     print(__doc__)
     return 2
 
