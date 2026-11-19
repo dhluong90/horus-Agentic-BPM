@@ -409,7 +409,7 @@ What the build closes that the prototype leaves open:
 | Readings from the engine | Policy sentences come back from the engine per language; the cockpit never builds a sentence from parts |
 | Money | `35,000 VND` and `50,000,000 VND` in English; `35.000 VND` and `50.000.000 VND` in Vietnamese. Decimals: `0.85` and `0,85` |
 | Dates and times | `31 Dec 2026 14:30` and `31/12/2026 14:30`, always in the tenant's time zone |
-| Width | Vietnamese labels run 20 to 30 % longer. No fixed-width buttons or headers; nothing truncates at 1440 px |
+| Width | Vietnamese labels run 20 to 30 % longer. No fixed-width buttons or headers. At 1440 px there is no truncation for realistic values; extreme values ellipsize with a tooltip. Example: the top bar stays one 64 px line, and only a service name, environment and banner at their maximum lengths (80, 40 and 40 characters) shrink with an ellipsis, the full text in a tooltip |
 | Diacritics | Line height at least 1.4 on headings, pills and buttons |
 | Review | A native writer from a bank reviews every Vietnamese message and reading template before Cockpit 0.2 |
 | Tests | Every end-to-end check runs in both languages; a missing key fails the build |
