@@ -69,9 +69,10 @@ jobs:
           cache: maven
 
       # A restored cache can hold *.lastUpdated markers of a download that failed in an earlier run; Maven
-      # then reports the artifact "(absent)" without asking Central again (#169). Ask again.
+      # then reports the artifact "(absent)" without asking Central again (#171). Ask again.
       - name: Drop remembered download failures from the Maven cache
         run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
+
 
       # The cockpit starter packages cockpit/web/dist; every leg builds the starter, and the example host's cockpit test needs it.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -123,6 +124,19 @@ jobs:
           python3 tools/check-jackson-coexistence.py examples/rule-engine-only/target/jackson-tree.txt \
             "$(mvn -B -ntp -q help:evaluate -Dexpression=settings.localRepository -DforceStdout)"
 
+      - name: Name Maven Central downloads that failed
+        if: failure()
+        run: |
+          failed="$(find ~/.m2/repository -name '*.lastUpdated' 2>/dev/null | sed -E 's#.*/\.m2/repository/##; s#\.lastUpdated$##' | sort)"
+          if [[ -n "$failed" ]]; then
+            echo "::error title=Maven Central download failed::These artifacts could not be downloaded from Maven Central after retries (#171): $(echo $failed | tr '\n' ' ')"
+            printf '%s\n' "$failed"
+          else
+            echo "No failed Maven Central download recorded; the failure has another cause."
+          fi
+          # Never save a remembered failure into the cache.
+          find ~/.m2/repository -name '*.lastUpdated' -delete 2>/dev/null || true
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -158,9 +172,10 @@ jobs:
           cache: maven
 
       # A restored cache can hold *.lastUpdated markers of a download that failed in an earlier run; Maven
-      # then reports the artifact "(absent)" without asking Central again (#169). Ask again.
+      # then reports the artifact "(absent)" without asking Central again (#171). Ask again.
       - name: Drop remembered download failures from the Maven cache
         run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
+
 
       - name: Gate settings only in the root POM; Grype config lint
         run: |
@@ -224,6 +239,19 @@ jobs:
       - name: Vulnerability gate, build and test classpath, fails on critical (TR-SEC-06)
         if: ${{ !cancelled() && env.GRYPE != '' }}
         run: tools/scan-dependencies.sh --build
+
+      - name: Name Maven Central downloads that failed
+        if: failure()
+        run: |
+          failed="$(find ~/.m2/repository -name '*.lastUpdated' 2>/dev/null | sed -E 's#.*/\.m2/repository/##; s#\.lastUpdated$##' | sort)"
+          if [[ -n "$failed" ]]; then
+            echo "::error title=Maven Central download failed::These artifacts could not be downloaded from Maven Central after retries (#171): $(echo $failed | tr '\n' ' ')"
+            printf '%s\n' "$failed"
+          else
+            echo "No failed Maven Central download recorded; the failure has another cause."
+          fi
+          # Never save a remembered failure into the cache.
+          find ~/.m2/repository -name '*.lastUpdated' -delete 2>/dev/null || true
 
       - name: Upload SBOMs and scan reports
         if: ${{ !cancelled() }}
