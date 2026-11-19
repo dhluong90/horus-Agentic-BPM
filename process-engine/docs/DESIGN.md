@@ -75,6 +75,14 @@ Source: [`diagrams/definition-lifecycle.mmd`](diagrams/definition-lifecycle.mmd)
 
 The effective version of a key is the `ACTIVE` version with the highest `version_num` whose `effective_from <= now()`. `POST /instances` resolves it with one lookup on `idx_pre_definition_effective`.
 
+How the slice of #47 implements the table (0.2.0):
+
+- Every command locks all version rows of its key (`SELECT ... FOR UPDATE` in version order), then checks status, four eyes, lock version and supersession, in that order, so a refused command writes nothing. Imports take the same lock, so a concurrent import and approval of one key serialise.
+- Each transition writes one row in the append-only `pre_definition_history` (action, from and to status, actor, comment, details such as the approved `source_hash` and reader version) and hands its event to the host publisher in the same transaction; the event id derives from the version id and its new lock version. A publisher that throws rolls the transition back (`PRE-037`).
+- An approval whose `effective_from` has come retires the older active versions at once. A later date schedules one `DEFINITION_EFFECTIVE` job in `pre_timer`; the replica-safe job protocol of section 4.4 fires it once, under the key lock, and it retires the versions the approved one supersedes (`retired_by = system:effective-date`, `superseded_by`). The previous version stays effective until then because selection reads `effective_from`, not the job.
+- `maker-checker.enabled: false` (accepted on the `dev` profile only) lets a requester approve their own version; the approval is recorded with approver `system:dev-auto-approve`, so the table's four-eyes `CHECK` still holds, and the history row names the person.
+- A reject clears the request (`requested_by`, `requested_at`, `effective_from`) and keeps the reason in `decision_comment`; the next request records a new requester.
+
 Approval sequence, with the self-approval and supersession refusals:
 
 ![Request approval and approve](images/definition-approval.svg)
@@ -281,7 +289,7 @@ The first Process Engine slice (pull request #149, on the contract of #139) sett
 | HORUS extension namespace | BPMN: `urn:horus-bpm:bpmn:extensions:v1`, prefix `horus`. DMN uses the same pattern: `urn:horus-bpm:dmn:extensions:v1`. A new major version of the extension vocabulary is a new URI; readers keep reading every earlier URI | Permanent |
 | Behaviour registration | `BehaviorRegistry` keys behaviours by node class plus event-definition type: no definition, exactly one definition class, or `MULTIPLE` (S3). Lookup is exact; a node with no registered key is `422 BPMN_NOT_EXECUTABLE` at activation, naming the element, its id and the stage that adds it. This is the only change to the kernel contract of #139 | Permanent |
 | Kernel ids | Child ids derive from the instance id and `pre_instance.seq`, so `apply` is deterministic and a replay gives the same ids. `seq` is incremented only under the instance row lock, in the transaction of the tokens it numbers. Derived ids are predictable within a tenant, so no read or write relies on id secrecy: the assignment and tenant checks are the control | Permanent |
-| Import status | An import creates a `DRAFT`. It becomes `ACTIVE` only through `definitions.auto-approve`, which applies to start-up and `POST /definitions` imports alike and which start-up refuses unless `dev` is the only active profile (besides `test`). Request-publish, approve and reject arrive with the definition lifecycle slice (`PRE-018` to `PRE-021`). Until then a draft cannot be started outside `dev`, so the Process Engine in 0.1.0 is a preview for evaluation, and the release notes say so | Definition lifecycle slice |
+| Import status | An import creates a `DRAFT`. It becomes `ACTIVE` only through `definitions.auto-approve`, which applies to start-up and `POST /definitions` imports alike and which start-up refuses unless `dev` is the only active profile (besides `test`). Request-publish, approve and reject arrive with the definition lifecycle slice (`PRE-018` to `PRE-021`). Until then a draft cannot be started outside `dev`, so the Process Engine in 0.1.0 is a preview for evaluation, and the release notes say so | Definition lifecycle slice (#47, 0.2.0): replaced by section 3.2 |
 | Task completion | `POST /tasks/{id}:complete` needs no prior claim in 0.1.0. Still enforced: the caller must be a candidate (the task's user, role or group), the tenant comes from `EngineAccess`, and both `Idempotency-Key` and `If-Match` are required (`428` without `If-Match`), so two candidates cannot overwrite each other. Four eyes on a task marked `fourEyes` is enforced: the starter and every earlier completer of the instance get `403 SELF_APPROVAL_FORBIDDEN` (`PRE-007`). When the task slice lands, the `OPEN` to `COMPLETED` path is removed and a regression test proves it | Task slice |
 | What is compiled | The kernel is compiled from the stored source document. The approval binds it: `source_hash` and the BPMN reader version are recorded in `processes.definition.approved.v1` (and in the dev auto-approval) and in the history row of the approval transaction. Before compiling, the engine compares the SHA-256 of the stored source with the **approved** `source_hash`; on a mismatch it refuses to start or advance that version, raises an incident on each affected instance, writes an audit entry and alerts. A reader version different from the approved one is logged at WARN with the definition and both versions. This is the interim form of ADR-0026 decision 4 (pull request #150). `definition_hash` is not presented as a behaviour hash until the canonical writer of the v1 profile exists; from then on the kernel compiles only from the stored canonical JSON, as for rule sets | Canonical writer (`PRE-043`) |
 | Events | **Decided for 0.1.0 (19 Nov): handover inside the transaction.** The engine hands each event to the host's `ProcessEventPublisher` inside the transaction of the state change it reports (section 6.4), so a host can write its own outbox row atomically with the change; the engine has no outbox table. The default publisher is Spring `ApplicationEventPublisher` called in that transaction. Listener contract, also stated on the SPI: a listener that needs the event durably writes an outbox row in that transaction; a listener that only notifies (mail, UI refresh) registers with `@TransactionalEventListener(phase = AFTER_COMMIT)`, so rolled-back work never emits and delivery is at most once; a plain `@EventListener` runs in the transaction, an exception it throws rolls the state change back, and it must not do network I/O (the rule of `ServiceTaskHandler`). The audit trail (`pre_history`) is written by the engine itself and never depends on a listener. Release notes: in 0.1.0 events are durable only through a host outbox. A `pre_outbox` relayed by the engine, as the Rule Engine's `rle_decision_outbox`, is a later option and would be additive | Permanent; `pre_outbox` optional later |
@@ -301,10 +309,14 @@ public interface DefinitionService {
   DefinitionVersion createDraft(DraftRequest request);                    // processes:author
   DefinitionVersion updateDraft(DefinitionRef ref, long expectedLockVersion, DefinitionDocument document);
   ValidationReport validate(DefinitionRef ref);
-  DefinitionVersion requestApproval(DefinitionRef ref, long expectedLockVersion, @Nullable Instant effectiveFrom);
-  DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment);
-  DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason);
-  DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion);
+  // 0.2.0 (#47): each lifecycle command takes the idempotency key last; null means none.
+  DefinitionVersion requestApproval(DefinitionRef ref, long expectedLockVersion, @Nullable Instant effectiveFrom,
+      @Nullable String idempotencyKey);
+  DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, @Nullable String comment, @Nullable String idempotencyKey);
+  DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason, @Nullable String idempotencyKey);
+  DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, @Nullable String idempotencyKey);
+  Optional<DefinitionVersion> find(DefinitionRef ref);                    // processes:read
+  List<DefinitionHistoryEntry> history(DefinitionRef ref);                // processes:read, oldest first
   GraphDiff diff(DefinitionRef base, DefinitionRef target);
   LayoutRevision saveLayout(DefinitionRef ref, int expectedRevision, Layout layout);
   Optional<LayoutRevision> latestLayout(DefinitionRef ref);
@@ -344,6 +356,7 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `POST /definitions/{key}/versions/{v}:request-approval` | `processes:author` or `processes:deploy` | To `PENDING_APPROVAL` | `Idempotency-Key`, `If-Match` | `422 VALIDATION_FAILED`, `409 INVALID_STATE` | M2 |
 | `POST /definitions/{key}/versions/{v}:approve` | `processes:approve` | To `ACTIVE` | `Idempotency-Key`, `If-Match` | `403 SELF_APPROVAL_FORBIDDEN`, `409 VERSION_SUPERSEDED`, `409 INVALID_STATE` | M2 |
 | `POST /definitions/{key}/versions/{v}:reject` | `processes:approve` | Back to `DRAFT`, reason required | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
+| `GET /definitions/{key}/versions/{v}/history` | `processes:read` | Lifecycle history, oldest first: action, statuses, actor, comment, time | None | `404 DEFINITION_NOT_FOUND` | M2 |
 | `POST /definitions/{key}/versions/{v}:retire` | `processes:approve` (`ACTIVE`), `processes:author` (`DRAFT`) | To `RETIRED` | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
 | `GET /definitions/{key}/versions/{v}/diff?base=` | `processes:read` | Graph diff; `base` defaults to the effective version | `ETag` | | M2 |
 | `GET /definitions/{key}/versions/{v}/export?format=json\|yaml\|bpmn` | `processes:read` | Export; `bpmn` is M3 | | | M2, M3 |
@@ -396,7 +409,8 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `definitions.locations` | empty | Classpath locations imported at start-up through the `importDefinition` path, as drafts |
 | `definitions.startup-tenants` | empty | Tenants the start-up import runs for; there is no principal at start-up, so the tenant is explicit. Empty means no start-up import |
 | `definitions.auto-approve` | `false` | Approve imported drafts automatically, for start-up imports and for `POST /definitions` imports alike; each auto-approved import is logged at WARN with tenant and definition key. Start-up fails unless `dev` is the only active profile besides `test`, and fails whenever the removed key `definitions-auto-approve` is set at all (`TR-SEC-11`, `PRE-022`) |
-| `maker-checker.enabled` | `true` | `false` is refused outside the `dev` profile (`TR-SEC-11`) |
+| `maker-checker.enabled` | `true` | `false` is refused outside the `dev` profile (`TR-SEC-11`); on `dev` it lets a requester approve their own definition version, recorded as approver `system:dev-auto-approve` (section 3.2) |
+| `lifecycle.reason-max-length` | `1000` | Longest rejection reason or approval comment; both land in the immutable history |
 | `authoring.cockpit-drafts` | `true` | `false` refuses draft creation and draft edits through `processes:author` endpoints with `403 DRAFT_AUTHORING_DISABLED`; imports with `processes:deploy`, approvals and layout writes still work (PD-036) |
 | `definitions.max-nodes`, `definitions.max-bytes` | `500`, `1MB` | May be lowered, never raised (`TR-DEF-05`) |
 | `tasks.form-link-origins` | empty | Origins allowed in form links; relative links are always allowed |
@@ -463,6 +477,25 @@ CREATE INDEX idx_pre_definition_effective
   ON pre_definition (tenant_id, key_name, status, effective_from DESC);
 CREATE INDEX idx_pre_definition_pending
   ON pre_definition (tenant_id, requested_at) WHERE status = 'PENDING_APPROVAL';
+-- 0.2.0 (#47, migration V4) adds requested_by, requested_at, decision_comment, retired_by, retired_at and
+-- superseded_by (INT, the version that took over) as nullable columns; updated_by and updated_at come with draft
+-- editing. The four-eyes CHECK is ck_pre_definition_four_eyes.
+
+CREATE TABLE pre_definition_history (           -- append-only; one row per lifecycle transition
+  tenant_id      TEXT        NOT NULL,
+  id             VARCHAR(26) NOT NULL,
+  definition_id  VARCHAR(26) NOT NULL,
+  action         TEXT        NOT NULL CHECK (action IN ('IMPORTED','REQUESTED','APPROVED','REJECTED','RETIRED')),
+  from_status    TEXT,
+  to_status      TEXT        NOT NULL,
+  actor_id       TEXT        NOT NULL,
+  comment        TEXT,
+  details        JSONB       NOT NULL DEFAULT '{}',   -- approved source_hash and reader version, supersededBy
+  occurred_at    TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, definition_id) REFERENCES pre_definition (tenant_id, id)
+);
+CREATE INDEX idx_pre_definition_history ON pre_definition_history (tenant_id, definition_id, occurred_at, id);
 
 CREATE TABLE pre_definition_layout (
   tenant_id         TEXT        NOT NULL,
