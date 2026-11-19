@@ -318,7 +318,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 throw new SelfApprovalForbiddenException(caller.equals(current.requestedBy())
                         ? "The requester of " + ref.key() + " v" + ref.version() + " cannot approve it"
                         : "A maker of " + ref.key() + " v" + ref.version() + " (its importer) cannot approve it "
-                                + "(lifecycle.approver-must-differ-from: makers)");
+                                + "(horus.bpm.lifecycle.approver-must-differ-from: makers)");
             }
             requireLock(current, expectedLockVersion);
             // An older version never overtakes a newer active one (PRE-021).

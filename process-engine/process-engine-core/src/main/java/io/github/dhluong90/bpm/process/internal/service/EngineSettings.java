@@ -15,7 +15,7 @@ import java.util.Objects;
  * @param makerChecker {@code maker-checker.enabled}: when false (dev profile only, PRE-022) a requester may approve
  *     their own definition version, recorded as approver {@code system:dev-auto-approve}
  * @param reasonMaxLength {@code lifecycle.reason-max-length}: longest rejection reason or approval comment
- * @param approverRule {@code lifecycle.approver-must-differ-from} (PD-096): {@code MAKERS}, the default, or the
+ * @param approverRule {@code horus.bpm.lifecycle.approver-must-differ-from}, the shared host setting (PD-096): {@code MAKERS}, the default, or the
  *     relaxation {@code REQUESTER}
  */
 public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,

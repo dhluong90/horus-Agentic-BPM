@@ -158,7 +158,7 @@ paths:
       operationId: approveDefinition
       summary: Approve a pending version as a second person
       description: |
-        `PENDING_APPROVAL` to `ACTIVE`. The requester, and under the default `lifecycle.approver-must-differ-from:
+        `PENDING_APPROVAL` to `ACTIVE`. The requester, and under the default `horus.bpm.lifecycle.approver-must-differ-from:
         makers` also the importer, is refused with `403 SELF_APPROVAL_FORBIDDEN` and nothing is written. A newer version of the key already active is `409 VERSION_SUPERSEDED`, and the version stays
         pending. The version is the effective one from its `effectiveFrom` (or now); at that time every older active
         version of the key is retired, once, with `processes.definition.retired.v1` and `supersededBy`. Running

@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.autoconfigure;
 
+import io.github.dhluong90.bpm.host.autoconfigure.ApproverMustDifferFrom;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
@@ -12,6 +13,7 @@ import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.internal.exec.BehaviorCatalog;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
+import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
@@ -168,7 +170,8 @@ public class ProcessEngineAutoConfiguration {
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
                 new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
                         properties.handlers().slowCallWarning()), publisher,
-                properties.toSettings(), BehaviorCatalog.registry(),
+                properties.toSettings(EngineSettings.ApproverRule.valueOf(ApproverMustDifferFrom.from(environment).name())),
+                BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings);
     }
 
@@ -188,9 +191,9 @@ public class ProcessEngineAutoConfiguration {
         if (properties.definitions().autoApprove()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");
         }
-        if ("requester".equals(properties.lifecycle().approverMustDifferFrom())) {
-            LOG.warn("horus.bpm.processes.lifecycle.approver-must-differ-from=requester relaxes four eyes for process "
-                    + "definitions: the importer of a version may approve it (PD-096). Every approval records this.");
+        if (ApproverMustDifferFrom.from(environment) == ApproverMustDifferFrom.REQUESTER) {
+            LOG.warn(ApproverMustDifferFrom.PROPERTY + "=requester relaxes four eyes for process definitions: the "
+                    + "importer of a version may approve it (PD-096). Every approval records this.");
         }
         if (!properties.makerChecker().enabled()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.maker-checker.enabled=false");
@@ -243,9 +246,9 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(name = "processEngineModuleDescriptor")
-    ModuleDescriptor processEngineModuleDescriptor(ProcessEngineProperties properties) {
+    ModuleDescriptor processEngineModuleDescriptor(ProcessEngineProperties properties, Environment environment) {
         return new ModuleDescriptor("processes", ProcessEngineModule.engineVersion(), "v1", List.of(),
-                Map.of("lifecycle.approver-must-differ-from", properties.lifecycle().approverMustDifferFrom()),
+                Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value()),
                 PERMISSIONS, properties.security().rolePermissions());
     }
 

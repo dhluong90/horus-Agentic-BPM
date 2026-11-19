@@ -54,25 +54,22 @@ class DevOnlyRelaxationTest {
     }
 
     @Test
-    void PRE_019_approver_rule_defaults_to_makers_is_reported_in_meta_and_refuses_other_values() {
-        MockEnvironment environment = new MockEnvironment();
-        ProcessEngineProperties defaults = org.springframework.boot.context.properties.bind.Binder.get(environment)
+    void PRE_019_shared_approver_setting_is_published_in_meta_for_the_process_module() {
+        MockEnvironment defaults = new MockEnvironment();
+        ProcessEngineProperties properties = org.springframework.boot.context.properties.bind.Binder.get(defaults)
                 .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class);
-        assertThat(defaults.lifecycle().approverMustDifferFrom()).isEqualTo("makers");
-        assertThat(new ProcessEngineAutoConfiguration().processEngineModuleDescriptor(defaults).settings())
+        assertThat(new ProcessEngineAutoConfiguration().processEngineModuleDescriptor(properties, defaults).settings())
                 .containsEntry("lifecycle.approver-must-differ-from", "makers");
 
-        environment.setProperty("horus.bpm.processes.lifecycle.approver-must-differ-from", "requester");
-        ProcessEngineProperties relaxed = org.springframework.boot.context.properties.bind.Binder.get(environment)
-                .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class);
-        assertThat(new ProcessEngineAutoConfiguration().processEngineModuleDescriptor(relaxed).settings())
+        MockEnvironment relaxed = new MockEnvironment()
+                .withProperty("horus.bpm.lifecycle.approver-must-differ-from", "requester");
+        assertThat(new ProcessEngineAutoConfiguration().processEngineModuleDescriptor(properties, relaxed).settings())
                 .containsEntry("lifecycle.approver-must-differ-from", "requester");
 
-        MockEnvironment wrong = new MockEnvironment();
-        wrong.setProperty("horus.bpm.processes.lifecycle.approver-must-differ-from", "nobody");
-        assertThatThrownBy(() -> org.springframework.boot.context.properties.bind.Binder.get(wrong)
-                .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class))
-                .hasStackTraceContaining("approver-must-differ-from");
+        MockEnvironment wrong = new MockEnvironment()
+                .withProperty("horus.bpm.lifecycle.approver-must-differ-from", "nobody");
+        assertThatThrownBy(() -> new ProcessEngineAutoConfiguration().processEngineModuleDescriptor(properties, wrong))
+                .hasMessageContaining("horus.bpm.lifecycle.approver-must-differ-from");
     }
 
     private static void startUp(String[] profiles, String property, String value) {
