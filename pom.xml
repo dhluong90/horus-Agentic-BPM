@@ -434,7 +434,7 @@
       </activation>
       <properties>
         <spring-boot.version>${spring-boot-3.5.version}</spring-boot.version>
-        <!-- The ruleEngine health contributor exists on Spring Boot 4 only until #116 (ADR-0011). -->
+        <!-- Tests of something that exists on Spring Boot 4 only; none today (the health check is on both lines, #116). -->
         <excludedGroups>spring-boot-4-only</excludedGroups>
         <!-- This profile runs compiled tests only; main code is never recompiled against 3.5. -->
         <maven.main.skip>true</maven.main.skip>
