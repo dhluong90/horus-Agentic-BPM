@@ -145,18 +145,28 @@ class EditorApiTest {
     }
 
     @Test
-    void RLE_025_the_requester_may_withdraw_their_own_request() {
+    void RLE_025_the_requester_cannot_reject_their_own_request_and_is_pointed_to_withdraw() {
         // Given fx-margin v1 pending, requested by minh, who also holds rules:approve
         caller.become("bank-a", "minh", AUTHOR_APPROVER);
         versions.importRuleSet(ImportRequest.yaml(cardFee("10000 VND", "fx-margin")));
-        versions.requestPublish("fx-margin", 1, WriteOptions.none());
+        RuleSetVersion pending = versions.requestPublish("fx-margin", 1, WriteOptions.none());
+        int events = stores.outbox.size();
+        int history = stores.history.size();
 
-        // When minh rejects it: a withdrawal publishes nothing, so four eyes does not apply
-        RuleSetVersion withdrawn = versions.reject("fx-margin", 1, new WriteOptions(null, null, "Wrong margin table attached"));
+        // When minh rejects it, then PD-089: 403 SELF_APPROVAL_FORBIDDEN pointing to :withdraw, nothing changes
+        assertThatThrownBy(() -> versions.reject("fx-margin", 1, new WriteOptions(null, null, "Wrong margin table attached")))
+                .isInstanceOfSatisfying(SelfApprovalForbiddenException.class, e -> {
+                    assertThat(e.code()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
+                    assertThat(e.getMessage()).contains(":withdraw");
+                });
+        assertThat(versions.find("fx-margin", 1, false).orElseThrow()).isEqualTo(pending);
+        assertThat(stores.outbox).hasSize(events);
+        assertThat(stores.history).hasSize(history);
 
-        // Then
-        assertThat(withdrawn.status()).isEqualTo(VersionStatus.DRAFT);
-        assertThat(versions.history("fx-margin", 1).getLast().actor()).isEqualTo("minh");
+        // and an approver who did not request it still can
+        caller.become("bank-a", "lan", APPROVER);
+        assertThat(versions.reject("fx-margin", 1, new WriteOptions(null, null, "Wrong margin table attached")).status())
+                .isEqualTo(VersionStatus.DRAFT);
     }
 
     @Test
@@ -571,7 +581,7 @@ class EditorApiTest {
     void RLE_043_allowed_actions_follow_permissions_and_four_eyes() {
         // v2 pending, created and requested by lan
         assertThat(VersionActions.allowed(VersionStatus.PENDING_APPROVAL, "lan", "lan", "lan", AUTHOR_APPROVER))
-                .containsExactly("reject");
+                .isEmpty();
         assertThat(VersionActions.allowed(VersionStatus.PENDING_APPROVAL, "lan", "lan", "minh", APPROVER))
                 .containsExactly("approve", "reject");
         assertThat(VersionActions.allowed(VersionStatus.PENDING_APPROVAL, "lan", "lan", "dan", READER)).isEmpty();

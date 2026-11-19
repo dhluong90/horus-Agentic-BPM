@@ -64,8 +64,14 @@ public final class DefaultVersionService implements VersionService {
     private final EngineContext context;
     private final RuleStore store;
     private final EventOutbox outbox;
-    /** Loaded on first list read from rle_engine_key; the same on every replica. */
-    private volatile Cursors cursors;
+    /**
+     * The cursor codec with the key from rle_engine_key, loaded in a transaction of its own and cached until
+     * {@code refreshAt}; the same key on every replica.
+     */
+    private volatile CachedCursors cursors;
+
+    private record CachedCursors(Cursors codec, java.time.Instant refreshAt) {
+    }
 
     /**
      * Creates the service.
@@ -199,8 +205,11 @@ public final class DefaultVersionService implements VersionService {
             if (current.status() != VersionStatus.PENDING_APPROVAL) {
                 throw new InvalidStateException(ruleSet, version, current.status(), "reject");
             }
-            // No four-eyes check: a rejection publishes nothing, and the requester rejecting their own request
-            // withdraws it (DESIGN section 3.3).
+            // PD-089: the requester takes a request back with :withdraw, so the audit trail keeps "the author took
+            // it back" apart from "an approver refused it" (DESIGN section 3.3).
+            if (actor.equals(current.requestedBy())) {
+                throw SelfApprovalForbiddenException.selfReject(ruleSet, version);
+            }
             checkLock(current, opts);
             Instant now = context.clock().instant();
             StoredVersion updated = current.rejected();
@@ -220,8 +229,8 @@ public final class DefaultVersionService implements VersionService {
         PageRequest request = page == null ? PageRequest.first() : page;
         int limit = limit(request);
         return context.withoutDooming(() -> {
-            Cursors codec = cursors();
-            String after = Cursors.ruleSetName(codec.verify(tenant, "", CURSOR_RULE_SETS, request.cursor()));
+            String after = Cursors.ruleSetName(verify(tenant, "", CURSOR_RULE_SETS, request.cursor()));
+            Cursors codec = cursors(false);
             List<RuleSetSummary> rows = store.listRuleSets(tenant, after, limit + 1, context.clock().instant());
             return page(rows, limit, last -> codec.sign(tenant, "", CURSOR_RULE_SETS, last.ruleSet()));
         });
@@ -245,8 +254,8 @@ public final class DefaultVersionService implements VersionService {
         int limit = limit(request);
         requireRuleSetName(ruleSet);
         return context.withoutDooming(() -> {
-            Cursors codec = cursors();
-            String before = codec.verify(tenant, ruleSet, CURSOR_VERSIONS, request.cursor());
+            String before = verify(tenant, ruleSet, CURSOR_VERSIONS, request.cursor());
+            Cursors codec = cursors(false);
             Integer beforeVersion = before == null ? null : Cursors.positiveInt(before);
             String ruleSetId = store.findRuleSetId(tenant, ruleSet).orElseThrow(() -> new RuleSetNotFoundException(ruleSet));
             List<VersionSummary> rows = store.listVersions(tenant, ruleSetId, beforeVersion, limit + 1);
@@ -323,15 +332,38 @@ public final class DefaultVersionService implements VersionService {
                 store.findVersion(tenant, ruleSet, version, false).map(v -> v.toView(includeSource)));
     }
 
-    private Cursors cursors() {
-        Cursors codec = cursors;
-        if (codec == null) {
+    /**
+     * Returns the cursor codec. The key is read, or created on first use, in a transaction of its own, so it is
+     * committed before it is cached: a caller's rollback cannot leave this replica with a key no other replica has,
+     * and a read-only caller transaction does not refuse the insert. The cache is refreshed every
+     * {@link EngineDefaults#CURSOR_KEY_REFRESH}, so deleting the row (rotation) reaches every replica within it.
+     */
+    private Cursors cursors(boolean reload) {
+        java.time.Instant now = context.clock().instant();
+        CachedCursors cached = cursors;
+        if (reload || cached == null || !now.isBefore(cached.refreshAt())) {
             byte[] candidate = new byte[32];
             RANDOM.nextBytes(candidate);
-            codec = new Cursors(store.engineKey(CURSOR_KEY, candidate, context.clock().instant()));
-            cursors = codec;
+            byte[] key = context.transactions().inOwnTransaction(() -> store.engineKey(CURSOR_KEY, candidate, now));
+            cached = new CachedCursors(new Cursors(key), now.plus(EngineDefaults.CURSOR_KEY_REFRESH));
+            cursors = cached;
         }
-        return codec;
+        return cached.codec();
+    }
+
+    /**
+     * Verifies a cursor; when it fails, re-reads the key once and tries again, so a replica that still holds a
+     * rotated key accepts cursors signed with the new one. A cursor that still fails is {@code QUERY_INVALID}.
+     */
+    private String verify(String tenant, String scope, String list, String cursor) {
+        try {
+            return cursors(false).verify(tenant, scope, list, cursor);
+        } catch (QueryInvalidException first) {
+            if (cursor == null) {
+                throw first;
+            }
+            return cursors(true).verify(tenant, scope, list, cursor);
+        }
     }
 
     /**

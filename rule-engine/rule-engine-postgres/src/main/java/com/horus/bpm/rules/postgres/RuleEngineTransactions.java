@@ -53,6 +53,20 @@ public final class RuleEngineTransactions implements TransactionRunner {
     }
 
     /**
+     * Runs engine-internal work in a new transaction ({@code REQUIRES_NEW}, not read-only), suspending the caller's,
+     * so the work is committed even when the caller's transaction rolls back or is read-only.
+     *
+     * @param work the work to run
+     * @param <T> the result type
+     * @return the work's result
+     */
+    @Override
+    public <T> T inOwnTransaction(Supplier<T> work) {
+        Objects.requireNonNull(work, "work must not be null");
+        return newTransaction.execute(status -> work.get());
+    }
+
+    /**
      * Returns the host transaction manager the engine uses.
      *
      * @return the host's transaction manager

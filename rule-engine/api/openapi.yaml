@@ -318,8 +318,9 @@ paths:
         Permission `rules:approve`. Only a `PENDING_APPROVAL` version can be rejected; any other
         status is `409 INVALID_STATE`. The version returns to `DRAFT` with `requestedBy` and
         `requestedAt` cleared, one history entry `REJECTED` and one `rules.version.rejected.v1`
-        event. The requester may reject their own request: that withdraws it and publishes
-        nothing, so `SELF_APPROVAL_FORBIDDEN` does not apply (DESIGN section 3.3, `RLE-025`).
+        event. The requester of the publication cannot reject it: `403 SELF_APPROVAL_FORBIDDEN`,
+        with a detail pointing to `:withdraw`, and the version stays `PENDING_APPROVAL` (PD-089,
+        DESIGN section 3.3, `RLE-025`).
         A blank reason, or one longer than `lifecycle.reason-max-length` (default 2,000
         characters), is `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
@@ -566,7 +567,8 @@ components:
         caller's permissions and the four-eyes rule: `request-publish` on a `DRAFT` with
         `rules:author`; `approve` on a `PENDING_APPROVAL` with `rules:approve` when the caller is
         neither the requester nor the author; `reject` on a `PENDING_APPROVAL` with
-        `rules:approve`. A hint for screens only: the engine checks again on every command.
+        `rules:approve` when the caller is not the requester. A hint for screens only: the engine
+        checks again on every command.
       items:
         type: string
         enum: [request-publish, approve, reject]

@@ -179,7 +179,7 @@ Process definitions follow the same governed lifecycle as rule sets: draft, pend
 
 | Part | When | What it means for you |
 |---|---|---|
-| Engine | M2, 26 Mar 2027 | Deploying a definition creates a draft. A second identity approves it through the REST API or your own tooling. A definition imported from Git also arrives as a draft, and its content hash shows whether the running version matches Git. A host can turn off draft creation from the cockpit per environment (on by default). Only the `dev` profile may approve automatically |
+| Engine | M2, 26 Mar 2027 | Deploying a definition creates a draft. A second identity approves it through the REST API or your own tooling. A definition imported from Git also arrives as a draft, and its source hash shows which committed file in Git it was imported from; the engine runs only the approved canonical form, checked against its hash. A host can turn off draft creation from the cockpit per environment (on by default). Only the `dev` profile may approve automatically |
 | Approval screens | M3, 21 May 2027 | Review the change as a graph diff (steps and connections added, removed or changed), then approve or reject. Approve is disabled for the requester |
 | Modeller | M3, 21 May 2027 | Change a process on a canvas that offers only the steps your host has registered. The engine validates on save, and the result is a draft that needs approval. If the M3 checkpoint fails, the modeller moves to 1.1 |
 

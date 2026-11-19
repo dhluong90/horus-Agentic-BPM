@@ -71,6 +71,13 @@ public final class EngineDefaults {
      */
     public static final int EVALUATE_BODY_MAX_BYTES = 1_048_576;
 
+    /**
+     * How long a replica keeps the cursor key before reading it again from {@code rle_engine_key}. Deleting the row
+     * rotates the key; every replica uses the new key within this time, and one that meets a cursor it cannot
+     * verify re-reads at once. A bound of the engine, not a setting.
+     */
+    public static final java.time.Duration CURSOR_KEY_REFRESH = java.time.Duration.ofMinutes(5);
+
     /** Longest accepted {@code X-Correlation-Id}; a longer or malformed one is replaced by a generated id. */
     public static final int CORRELATION_ID_MAX_LENGTH = 128;
 

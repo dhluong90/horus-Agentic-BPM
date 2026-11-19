@@ -200,10 +200,10 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-020 Import keeps the source document beside the canonical version
 - **Traces to:** `TR-STD-01`, `TR-STD-03`
 - **Milestone:** M1
-- **Given:** The YAML file `card-fee.yaml` (1,834 bytes, with comments and keys in author order) in Git, and its RFC 8785 hash computed by the pipeline.
+- **Given:** The YAML file `card-fee.yaml` (1,834 bytes, with comments and keys in author order) in Git, and the SHA-256 of its committed blob computed by the pipeline (`git show HEAD:card-fee.yaml | sha256sum`).
 - **When:** It is imported with `POST /api/bpm/rules/v1/rule-sets`, then read with `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1?include=source` and without the parameter.
-- **Then:** `rle_version` stores `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` the SHA-256 of those bytes, and `canonical_hash` equal to the pipeline's hash; with `include=source` the response carries the original text including comments and its hash; without it, the canonical document only. Nothing in the source document is evaluated.
-- **Example:** `import card-fee.yaml -> source_format YAML, source bytes equal, canonical_hash = pipeline hash`.
+- **Then:** `rle_version` stores `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` the SHA-256 of the raw request bytes, equal to the pipeline's hash, and `canonical_hash` the SHA-256 of the RFC 8785 form of the canonical document written from the model, with cells in their normal form (ADR-0026); with `include=source` the response carries the original text including comments and its hash; without it, the canonical document only. Nothing in the source document is evaluated.
+- **Example:** `import card-fee.yaml -> source_format YAML, source bytes equal, source_hash = sha256sum, canonical_hash = hash of the printed model`.
 - **Test ID:** `RLE_020_import_keeps_source_document_and_canonical_hash`
 
 ### RLE-021 Every expression has a FEEL translation that gives the same result
@@ -236,9 +236,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-024 A v1 rule set reads into the DMN model and writes back to the same canonical JSON
 - **Traces to:** `TR-STD-28`, `TR-STD-03`
 - **Milestone:** M1
-- **Given:** `card-fee.yaml` (v1, `hitPolicy: first`, inputs `tier` and `txCount`, output `fee`, rules `R1` to `R3`) and the RFC 8785 hash the pipeline computed from it.
+- **Given:** `card-fee.yaml` (v1, `hitPolicy: first`, inputs `tier` and `txCount`, output `fee`, rules `R1` to `R3`, every cell already in normal form) and the RFC 8785 hash of that document.
 - **When:** The v1 reader builds the in-memory model and the canonical writer prints it back.
-- **Then:** The model is one `Definitions` named `card-fee` holding one `Decision` `card-fee` whose `DecisionTable` has hit policy `FIRST`, input clauses `tier` and `txCount`, output clause `fee` and rules with ids `R1`, `R2`, `R3` in document order; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document and its SHA-256 equals the pipeline hash and the stored `canonical_hash`.
+- **Then:** The model is one `Definitions` named `card-fee` holding one `Decision` `card-fee` whose `DecisionTable` has hit policy `FIRST`, input clauses `tier` and `txCount`, output clause `fee` and rules with ids `R1`, `R2`, `R3` in document order; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document (it is already in normal form) and its SHA-256 equals that hash and the stored `canonical_hash`.
 - **Example:** `card-fee.yaml -> Definitions(card-fee) / Decision(card-fee) / DecisionTable(FIRST, 2 inputs, 1 output, 3 rules) -> same hash`.
 - **Test ID:** `RLE_024_v1_rule_set_round_trips_through_dmn_model`
 
@@ -250,8 +250,8 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Traces to:** `TR-OBS-04`, `TR-IDEM-01`
 - **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`; `bob` holds `rules:approve`.
-- **When:** `bob` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:reject` with `Idempotency-Key: k-201`, `If-Match: "3"` and body `{ "reason": "R2 waiver needs pricing committee minutes" }`. Failure cases: the same call with body `{ "reason": "" }`; with `If-Match: "2"`; and a reject of `card-fee` v1, which is `PUBLISHED`. Withdrawal case: `fx-margin` v4 is `PENDING_APPROVAL`, requested by `bob`, and `bob` rejects it with reason `"Wrong margin table attached"`.
-- **Then:** `200`; v2 is `DRAFT` with `lockVersion 4`, `requested_by` and `requested_at` cleared, and one `rle_version_history` row `REJECTED` with actor `bob`, the reason, statuses `PENDING_APPROVAL` to `DRAFT` and `lockVersion 4` (`GET .../versions/2/history` returns it after the `CREATED` and `REQUESTED` rows); one `rules.version.rejected.v1` event carries rule set, version, tenant, actor `bob`, reason and timestamp; `alice` can edit v2 again and request publication again. A replay with `k-201` and the same body returns the same `200` and writes no second event. The empty reason returns `400 INPUT_INVALID` naming `reason`; the stale `If-Match` returns `409 VERSION_CONFLICT`; the reject of v1 returns `409 INVALID_STATE`. In each failure case the version, its history and the event count are unchanged. The withdrawal succeeds (`200`, `fx-margin` v4 `DRAFT`, actor `bob`): rejecting one's own request publishes nothing, so `SELF_APPROVAL_FORBIDDEN` does not apply.
+- **When:** `bob` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:reject` with `Idempotency-Key: k-201`, `If-Match: "3"` and body `{ "reason": "R2 waiver needs pricing committee minutes" }`. Failure cases: the same call with body `{ "reason": "" }`; with `If-Match: "2"`; and a reject of `card-fee` v1, which is `PUBLISHED`. Self-reject case: `fx-margin` v4 is `PENDING_APPROVAL`, requested by `bob`, and `bob` rejects it with reason `"Wrong margin table attached"`.
+- **Then:** `200`; v2 is `DRAFT` with `lockVersion 4`, `requested_by` and `requested_at` cleared, and one `rle_version_history` row `REJECTED` with actor `bob`, the reason, statuses `PENDING_APPROVAL` to `DRAFT` and `lockVersion 4` (`GET .../versions/2/history` returns it after the `CREATED` and `REQUESTED` rows); one `rules.version.rejected.v1` event carries rule set, version, tenant, actor `bob`, reason and timestamp; `alice` can edit v2 again and request publication again. A replay with `k-201` and the same body returns the same `200` and writes no second event. The empty reason returns `400 INPUT_INVALID` naming `reason`; the stale `If-Match` returns `409 VERSION_CONFLICT`; the reject of v1 returns `409 INVALID_STATE`. In each failure case the version, its history and the event count are unchanged. The self-reject returns `403 SELF_APPROVAL_FORBIDDEN` with a detail pointing to `:withdraw`, and `fx-margin` v4 stays `PENDING_APPROVAL` (PD-089; the requester withdraws instead, `RLE-046`).
 - **Example:** `bob rejects card-fee v2 with a reason -> DRAFT, lockVersion 4, 1 rejected event; reason "" -> 400 INPUT_INVALID; v1 PUBLISHED -> 409 INVALID_STATE`.
 - **Test ID:** `RLE_025_reject_returns_pending_version_to_draft_with_reason`
 
@@ -433,8 +433,8 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v2 `PENDING_APPROVAL`, created and requested by `lan`; v3 `DRAFT` created by `lan`; v1 `PUBLISHED`. `lan` holds `rules:read`, `rules:author` and `rules:approve`; `minh` holds `rules:read` and `rules:approve`; `dan` holds `rules:read` only.
 - **When:** Each of them reads v1, v2 and v3 with `GET .../versions/{v}` and lists the versions.
-- **Then:** On v2 `lan` gets `allowedActions: ["reject"]` (withdrawal; `approve` is absent because `lan` requested it), `minh` gets `["approve", "reject"]`, `dan` gets `[]`. On v3 `lan` gets `["request-publish"]` and `minh` gets `[]`. On v1 everyone gets `[]`. The list items carry the same values. `lan`'s `approve` of v2 is still refused with `403 SELF_APPROVAL_FORBIDDEN`, because `allowedActions` is a hint and the command checks again. An idempotent replay of a command returns the actions computed for the caller at replay time, not the stored ones.
-- **Example:** `v2 requested by lan -> lan: [reject], minh: [approve, reject], dan: []`.
+- **Then:** On v2 `lan` gets `allowedActions: []` (`approve` and `reject` are absent because `lan` requested it; `withdraw` arrives with `RLE-046`), `minh` gets `["approve", "reject"]`, `dan` gets `[]`. On v3 `lan` gets `["request-publish"]` and `minh` gets `[]`. On v1 everyone gets `[]`. The list items carry the same values. `lan`'s `approve` of v2 is still refused with `403 SELF_APPROVAL_FORBIDDEN`, because `allowedActions` is a hint and the command checks again. An idempotent replay of a command returns the actions computed for the caller at replay time, not the stored ones.
+- **Example:** `v2 requested by lan -> lan: [], minh: [approve, reject], dan: []`.
 - **Test ID:** `RLE_043_allowed_actions_follow_permissions_and_four_eyes`
 
 ### RLE-044 Command and evaluation bodies are read up to their limit; a larger body is `413 PAYLOAD_TOO_LARGE`
@@ -445,3 +445,32 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The oversized and endless bodies return `413 PAYLOAD_TOO_LARGE` as problem details; a declared `Content-Length` above the limit is refused before the body is read, and an undeclared one is read at most one byte past the limit. The caller with only `rules:read` gets `403 PERMISSION_DENIED`, because every endpoint checks its permission before it reads the body. None of them changes v2, creates a rule set, writes an event, a history row, a decision row or an idempotency record. The normal reject returns `200`.
 - **Example:** `:reject with 16,385 bytes -> 413 PAYLOAD_TOO_LARGE, v2 still PENDING_APPROVAL; :evaluate with 1 MiB + 1 byte -> 413, 0 rle_decision rows`.
 - **Test ID:** `RLE_044_oversized_command_and_evaluation_bodies_are_refused_with_413`
+
+---
+
+## Canonical Form and Behaviour Hash (ADR-0026)
+
+### RLE-045 The same behaviour has one hash in any style and serialisation, and different behaviour never shares one
+- **Traces to:** `TR-STD-03`, `TR-STD-25`, `TR-STD-28`, `TR-DEF-04`, ADR-0026
+- **Milestone:** M1
+- **Given:** Rule set `style-check` v1 (`hitPolicy: first`) with inputs `x` (integer), `y` (integer), `country` (string), `at` (datetime) and `amount` (money, USD), and output `rate` (decimal), written twice. Document A uses author style: `x >= 3`, `x between 1 and 5`, `x is not null`, `country != 'VN'`, `country in ['VN','SG']`, `at == datetime('2026-12-01T00:00:00+07:00')`, `amount == 12.5 USD`. Document B uses the normal form: `>= 3`, `between 1 and 5`, `is not null`, `!= 'VN'`, `in ['VN', 'SG']`, `== datetime('2026-11-30T17:00:00Z')`, `== 12.50 USD`. Both have `rate: "0.10"`.
+- **When:** A and B are imported as YAML in two tenants. A is exported as DMN and imported again, then exported and imported once more. Separately, the DMN cells `money(12.5, "USD")`, `money(10000.00, "VND")` and `money(-5, "USD")` go through import, export and import. Then each negative case below is imported as its own version of `style-check`.
+- **Then (same behaviour, one hash):**
+  - A and B have the same `canonical_hash` and different `source_hash` values.
+  - Every DMN round trip keeps that `canonical_hash`.
+  - The row-level diff of A against B reports no change.
+  - `?include=source` on A returns A's bytes unchanged.
+  - Money is printed at the currency scale (`12.50 USD`, `10000 VND`, `-5.00 USD`) and keeps its hash through the round trip.
+- **Then (different behaviour, different hash):** each case below gets a `canonical_hash` different from the base version, and the diff reports the change.
+  - **(n1)** `rate` written as the JSON number `0.1` against the JSON number `0.1000000000000000055511151231257827`, which is refused at import with `422 VALIDATION_FAILED` naming the line, because it does not survive an exact RFC 8785 round trip. The same value as the string `"0.1000000000000000055511151231257827"` is accepted and gets its own hash.
+  - **(n2)** `rate: "0.10"` against `rate: "0.1"`, because the scale is kept.
+  - **(n3)** The integer `9007199254740993` as a JSON number is refused with `422`. As a string it is accepted, with a hash different from `"9007199254740992"`.
+  - **(n4)** In column `x`, `y >= 3` against `>= 3`, and `x > y` against `> y`: each keeps its operands.
+  - **(n5)** `country != 'VN'` against the same text with a Cyrillic `В` in place of `V`. The canonical document shows it unchanged, because no normalisation is applied, and the diff marks the changed literal as containing non-ASCII characters.
+  - **(n6)** `country != 'V\u200BN'` (a zero-width space) is printed with the `\u200B` escape and has its own hash. `country != 'V\u202EN'` (a bidirectional override) is refused at import with `422` naming the line.
+  - **(n7)** A source that is not valid UTF-8, contains NUL, or starts with a byte order mark is refused at import with `422`, and nothing is stored.
+- **Then (integrity):**
+  - A model whose printed form does not parse back to an equal tree is refused at import with `422` and nothing stored. This is tested with a deliberately broken printer in the test harness.
+  - A stored version whose `canonical_json` is altered in the database so that it no longer hashes to `canonical_hash` is not served. Evaluation returns `EVALUATION_ERROR` with a detail naming the integrity check, and one audit entry and one alert are written.
+- **Example:** `x >= 3 (YAML) == >= 3 (YAML) == >= 3 (DMN) -> one canonical_hash; 0.1 vs 0.1000000000000000055511151231257827 -> 422 as numbers, two hashes as strings; y >= 3 stays y >= 3; Cyrillic V -> different hash, marked in the diff`.
+- **Test ID:** `RLE_045_one_hash_per_behaviour_in_any_style_and_never_for_different_behaviour`

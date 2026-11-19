@@ -8,8 +8,8 @@
 -- forward migration that drops the table; that loses the recorded history, so export it first:
 --   DROP TABLE rle_version_history;
 --
--- The action and approval_mode lists already hold the values of the retirement features (DESIGN section 3.3),
--- so those features need no constraint change.
+-- The action and approval_mode lists already hold the values of the withdraw (PD-089, RLE-046) and retirement
+-- features (DESIGN section 3.3), so those features need no constraint change.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -17,7 +17,7 @@ CREATE TABLE rle_version_history (
   tenant_id         TEXT        NOT NULL,
   id                VARCHAR(26) NOT NULL,
   version_id        VARCHAR(26) NOT NULL,
-  action            TEXT        NOT NULL CHECK (action IN ('CREATED','REQUESTED','APPROVED','REJECTED',
+  action            TEXT        NOT NULL CHECK (action IN ('CREATED','REQUESTED','APPROVED','REJECTED','WITHDRAWN',
                                                            'RETIRE_REQUESTED','RETIRE_CANCELLED','RETIRED')),
   from_status       TEXT        CHECK (from_status IN ('DRAFT','PENDING_APPROVAL','PUBLISHED','RETIRED')),
   to_status         TEXT        NOT NULL CHECK (to_status IN ('DRAFT','PENDING_APPROVAL','PUBLISHED','RETIRED')),
