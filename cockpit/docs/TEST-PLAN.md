@@ -1,6 +1,6 @@
 # Cockpit: Test Plan
 
-Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose name starts with the statement's test id (`TR-QA-01`). A CI script lists the statement ids in `SPEC.md` and fails when a test with that id prefix is missing for a statement whose milestone has been reached.
+Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose name starts with the statement's test id (`TR-QA-01`). The spec-to-test gate, `tools/spec-coverage.py`, reads the statement ids in `SPEC.md` and fails the CI job "Spec-to-test coverage" when an id has no test with that prefix. Statements not delivered yet are listed with their milestone in [`spec-pending.txt`](spec-pending.txt); the gate skips them and warns when one gains a test, and the pull request that adds the test removes the line.
 
 ## Strategy
 | Layer | Tool | Scope | Gate |

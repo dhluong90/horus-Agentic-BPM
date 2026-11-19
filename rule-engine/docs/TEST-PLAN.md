@@ -1,6 +1,6 @@
 # Rule Engine: Test Plan
 
-Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose name starts with the statement's test id (`TR-QA-01`). A CI script lists the statement ids in `SPEC.md` and fails when a test with that id prefix is missing for a statement whose milestone has been reached.
+Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose name starts with the statement's test id (`TR-QA-01`). The spec-to-test gate, `tools/spec-coverage.py`, reads the statement ids in `SPEC.md` and the requirement ids in the "Requirement-level tests" table below and fails the CI job "Spec-to-test coverage" when an id has no test with that prefix. Statements not delivered yet are listed with their milestone in [`spec-pending.txt`](spec-pending.txt); the gate skips them and warns when one gains a test, and the pull request that adds the test removes the line.
 
 **Naming rule.** A test name starts with the id it proves, in upper case with hyphens written as underscores: `RLE_013_...` for a `SPEC.md` statement, `TR_EMB_01_...` for a requirement in [`requirements.md`](../../docs/product/requirements.md). The spec-to-test gate matches this prefix. A test that proves no id (a helper check, a value-type check) carries no id prefix, so it never counts as coverage.
 
