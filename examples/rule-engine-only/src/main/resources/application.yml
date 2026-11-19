@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: rule-engine-only
+  datasource:
+    # Credentials come from the environment only; see README.md.
+    url: ${HORUS_DB_URL:jdbc:postgresql://localhost:5432/horus}
+    username: ${HORUS_DB_USERNAME:horus}
+    password: ${HORUS_DB_PASSWORD:}
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-components: always
+
+# The one configuration block a host adds for the Rule Engine.
+horus:
+  bpm:
+    rules:
+      enabled: true
