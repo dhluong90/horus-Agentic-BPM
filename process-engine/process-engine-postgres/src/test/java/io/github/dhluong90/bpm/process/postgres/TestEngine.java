@@ -88,7 +88,7 @@ final class TestEngine {
                 jobSettings.maxAttempts(), b.retryBackoff);
         EngineSettings settings = new EngineSettings(b.autoApprove, EngineDefaults.MAX_NODES, EngineDefaults.MAX_BYTES,
                 EngineDefaults.IDEMPOTENCY_RETENTION, EngineDefaults.SLOW_CALL_WARNING, b.makerChecker,
-                EngineSettings.DEFAULT_REASON_MAX_LENGTH);
+                EngineSettings.DEFAULT_REASON_MAX_LENGTH, b.approverRule);
         Identity id = identity;
         ProcessEventPublisher publisher = b.publisher != null ? b.publisher : events::add;
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, new JdbcProcessStore(ds),
@@ -111,6 +111,7 @@ final class TestEngine {
         private Duration retryBackoff = Duration.ofSeconds(10);
         private boolean autoApprove = true;
         private boolean makerChecker = true;
+        private EngineSettings.ApproverRule approverRule = EngineSettings.ApproverRule.MAKERS;
         private List<ServiceTaskHandler> handlers = List.of();
         private ProcessEventPublisher publisher;
 
@@ -136,6 +137,11 @@ final class TestEngine {
 
         Builder autoApprove(boolean value) {
             autoApprove = value;
+            return this;
+        }
+
+        Builder approverRule(EngineSettings.ApproverRule value) {
+            approverRule = value;
             return this;
         }
 

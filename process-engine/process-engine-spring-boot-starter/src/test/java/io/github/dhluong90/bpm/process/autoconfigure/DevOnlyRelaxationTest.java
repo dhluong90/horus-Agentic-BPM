@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.autoconfigure;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -50,6 +51,28 @@ class DevOnlyRelaxationTest {
                 .doesNotThrowAnyException();
         assertThatCode(() -> startUp(new String[] {"prod"}, "horus.bpm.processes.maker-checker.enabled", "true"))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void PRE_019_approver_rule_defaults_to_makers_is_reported_in_meta_and_refuses_other_values() {
+        MockEnvironment environment = new MockEnvironment();
+        ProcessEngineProperties defaults = org.springframework.boot.context.properties.bind.Binder.get(environment)
+                .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class);
+        assertThat(defaults.lifecycle().approverMustDifferFrom()).isEqualTo("makers");
+        assertThat(new ProcessEngineAutoConfiguration().processEngineModuleDescriptor(defaults).settings())
+                .containsEntry("lifecycle.approver-must-differ-from", "makers");
+
+        environment.setProperty("horus.bpm.processes.lifecycle.approver-must-differ-from", "requester");
+        ProcessEngineProperties relaxed = org.springframework.boot.context.properties.bind.Binder.get(environment)
+                .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class);
+        assertThat(new ProcessEngineAutoConfiguration().processEngineModuleDescriptor(relaxed).settings())
+                .containsEntry("lifecycle.approver-must-differ-from", "requester");
+
+        MockEnvironment wrong = new MockEnvironment();
+        wrong.setProperty("horus.bpm.processes.lifecycle.approver-must-differ-from", "nobody");
+        assertThatThrownBy(() -> org.springframework.boot.context.properties.bind.Binder.get(wrong)
+                .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class))
+                .hasStackTraceContaining("approver-must-differ-from");
     }
 
     private static void startUp(String[] profiles, String property, String value) {

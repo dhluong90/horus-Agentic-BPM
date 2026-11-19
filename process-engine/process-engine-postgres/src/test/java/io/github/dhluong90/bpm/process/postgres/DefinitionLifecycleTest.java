@@ -146,6 +146,61 @@ class DefinitionLifecycleTest {
     }
 
     @Test
+    void PRE_019_the_importer_cannot_approve_under_the_default_rule() {
+        // Given the pipeline imported v1 and alice requested it; the pipeline identity also holds processes:approve
+        DefinitionVersion pending = request(importAs(1), null);
+
+        // When the importer approves
+        engine.identity.as("bank-a", "pipeline", "processes:deploy", "processes:approve", "processes:read");
+        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), null, null))
+                // Then it is refused as a maker (PD-096) and nothing is written
+                .isInstanceOf(SelfApprovalForbiddenException.class)
+                .hasMessageContaining("approver-must-differ-from");
+        assertThat(stored(1).status()).isEqualTo("PENDING_APPROVAL");
+        assertThat(count("SELECT count(*) FROM pre_definition_history WHERE action = 'APPROVED'")).isZero();
+    }
+
+    @Test
+    void PRE_019_the_requester_rule_lets_the_importer_approve_records_it_and_still_refuses_the_requester() {
+        // Given the relaxation approver-must-differ-from: requester
+        TestEngine relaxed = TestEngine.replica("pod-1", clock).autoApprove(false)
+                .approverRule(io.github.dhluong90.bpm.process.internal.service.EngineSettings.ApproverRule.REQUESTER)
+                .build();
+        relaxed.identity.as("bank-a", "pipeline", PIPELINE);
+        DefinitionVersion v1 = relaxed.services.importDefinition(new ImportRequest(SourceFormat.BPMN_XML, kyc(1), null));
+        relaxed.identity.as("bank-a", "alice", AUTHOR);
+        DefinitionVersion pending = relaxed.services.requestApproval(v1.ref(), v1.lockVersion(), null, null);
+
+        // When the requester approves, then the importer
+        assertThatThrownBy(() -> relaxed.services.approve(pending.ref(), pending.lockVersion(), null, null))
+                .isInstanceOf(SelfApprovalForbiddenException.class);
+        relaxed.identity.as("bank-a", "pipeline", "processes:deploy", "processes:approve", "processes:read");
+        DefinitionVersion approved = relaxed.services.approve(pending.ref(), pending.lockVersion(), null, null);
+
+        // Then the importer's approval stands, and the approval row records the relaxation
+        assertThat(approved.status()).isEqualTo("ACTIVE");
+        assertThat(approved.approvedBy()).isEqualTo("pipeline");
+        assertThat(TestEngine.jdbc().sql("SELECT details->>'approverMustDifferFrom' FROM pre_definition_history "
+                + "WHERE action = 'APPROVED'").query(String.class).single()).isEqualTo("requester");
+    }
+
+    @Test
+    void PRE_021_a_requester_cannot_reject_their_own_request() {
+        // Given v1 pending, requested by alice, who also holds processes:approve
+        DefinitionVersion pending = request(importAs(1), null);
+        int history = count("SELECT count(*) FROM pre_definition_history");
+
+        // When alice rejects her own request
+        engine.identity.as("bank-a", "alice", AUTHOR);
+        assertThatThrownBy(() -> engine.services.reject(pending.ref(), pending.lockVersion(), "changed my mind", null))
+                // Then it is refused, pointing to withdraw, and nothing is written (PD-097)
+                .isInstanceOf(SelfApprovalForbiddenException.class)
+                .hasMessageContaining("withdraw");
+        assertThat(stored(1).status()).isEqualTo("PENDING_APPROVAL");
+        assertThat(count("SELECT count(*) FROM pre_definition_history")).isEqualTo(history);
+    }
+
+    @Test
     void PRE_019_the_table_refuses_an_approver_equal_to_the_requester() {
         DefinitionVersion pending = request(importAs(1), null);
 

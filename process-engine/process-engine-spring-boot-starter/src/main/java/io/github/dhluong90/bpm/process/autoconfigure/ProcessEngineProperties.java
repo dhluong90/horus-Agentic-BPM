@@ -92,10 +92,19 @@ public record ProcessEngineProperties(
 
     /**
      * @param reasonMaxLength longest rejection reason or approval comment, which land in the immutable history
+     * @param approverMustDifferFrom whom the approver of a definition version must differ from (PD-096):
+     *     {@code makers} (default: the importer or creator, every editor and the requester) or {@code requester}, a
+     *     relaxation reported in {@code /api/bpm/meta}, logged at WARN at start-up and recorded on every approval. The
+     *     requester can never approve under either value
      */
-    public record Lifecycle(@DefaultValue("1000") int reasonMaxLength) {
+    public record Lifecycle(@DefaultValue("1000") int reasonMaxLength,
+            @DefaultValue("makers") String approverMustDifferFrom) {
 
         public Lifecycle {
+            if (!"makers".equals(approverMustDifferFrom) && !"requester".equals(approverMustDifferFrom)) {
+                throw new IllegalArgumentException("horus.bpm.processes.lifecycle.approver-must-differ-from must be "
+                        + "makers or requester, was '" + approverMustDifferFrom + "'");
+            }
             if (reasonMaxLength < 1 || reasonMaxLength > 10_000) {
                 throw new IllegalArgumentException("horus.bpm.processes.lifecycle.reason-max-length must be 1 to 10000");
             }
@@ -161,6 +170,7 @@ public record ProcessEngineProperties(
 
     EngineSettings toSettings() {
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
-                idempotencyRetention, handlers.slowCallWarning(), makerChecker.enabled(), lifecycle.reasonMaxLength());
+                idempotencyRetention, handlers.slowCallWarning(), makerChecker.enabled(), lifecycle.reasonMaxLength(),
+                EngineSettings.ApproverRule.valueOf(lifecycle.approverMustDifferFrom().toUpperCase(java.util.Locale.ROOT)));
     }
 }

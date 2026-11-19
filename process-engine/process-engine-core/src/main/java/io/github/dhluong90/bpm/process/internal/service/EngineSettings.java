@@ -15,9 +15,41 @@ import java.util.Objects;
  * @param makerChecker {@code maker-checker.enabled}: when false (dev profile only, PRE-022) a requester may approve
  *     their own definition version, recorded as approver {@code system:dev-auto-approve}
  * @param reasonMaxLength {@code lifecycle.reason-max-length}: longest rejection reason or approval comment
+ * @param approverRule {@code lifecycle.approver-must-differ-from} (PD-096): {@code MAKERS}, the default, or the
+ *     relaxation {@code REQUESTER}
  */
 public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
-        Duration slowCallWarning, boolean makerChecker, int reasonMaxLength) {
+        Duration slowCallWarning, boolean makerChecker, int reasonMaxLength, ApproverRule approverRule) {
+
+    /** Whom the approver of a definition version must differ from (PD-096). */
+    public enum ApproverRule {
+        /** Every maker: the importer or creator, every editor, and the requester. The default. */
+        MAKERS,
+        /** The requester only. A relaxation, never the default; recorded on every approval. */
+        REQUESTER;
+
+        /** @return the setting value, {@code makers} or {@code requester} */
+        public String value() {
+            return name().toLowerCase(java.util.Locale.ROOT);
+        }
+    }
+
+    /**
+     * Settings with the strict approver rule.
+     *
+     * @param definitionsAutoApprove dev auto-approval
+     * @param maxNodes most nodes
+     * @param maxBytes largest document
+     * @param idempotencyRetention idempotency retention
+     * @param slowCallWarning slow call threshold
+     * @param makerChecker maker-checker on
+     * @param reasonMaxLength longest reason
+     */
+    public EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
+            Duration slowCallWarning, boolean makerChecker, int reasonMaxLength) {
+        this(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning, makerChecker,
+                reasonMaxLength, ApproverRule.MAKERS);
+    }
 
     /** Default longest rejection reason or approval comment. */
     public static final int DEFAULT_REASON_MAX_LENGTH = 1_000;
@@ -50,6 +82,9 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
         }
         if (slowCallWarning == null) {
             slowCallWarning = EngineDefaults.SLOW_CALL_WARNING;
+        }
+        if (approverRule == null) {
+            approverRule = ApproverRule.MAKERS;
         }
         if (reasonMaxLength < 1 || reasonMaxLength > 10_000) {
             throw new IllegalArgumentException("lifecycle.reason-max-length must be 1 to 10000");

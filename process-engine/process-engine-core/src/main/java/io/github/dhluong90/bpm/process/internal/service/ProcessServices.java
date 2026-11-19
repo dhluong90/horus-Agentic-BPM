@@ -309,11 +309,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             Locked locked = lockVersion(tenant, ref);
             StoredDefinition current = locked.version();
             requireStatus(current, "PENDING_APPROVAL", "approve");
-            // Four eyes (PRE-019): checked here, so the Java API and REST refuse alike, before anything is written.
-            boolean self = caller.equals(current.requestedBy());
+            // Four eyes (PRE-019, PD-096): checked here, so the Java API and REST refuse alike, before anything is
+            // written. The requester never approves; under the default rule neither does any other maker (the
+            // importer or creator; editors join when draft editing exists).
+            boolean self = caller.equals(current.requestedBy())
+                    || (settings.approverRule() == EngineSettings.ApproverRule.MAKERS && caller.equals(current.createdBy()));
             if (self && settings.makerChecker()) {
-                throw new SelfApprovalForbiddenException("The requester of " + ref.key() + " v" + ref.version()
-                        + " cannot approve it");
+                throw new SelfApprovalForbiddenException(caller.equals(current.requestedBy())
+                        ? "The requester of " + ref.key() + " v" + ref.version() + " cannot approve it"
+                        : "A maker of " + ref.key() + " v" + ref.version() + " (its importer) cannot approve it "
+                                + "(lifecycle.approver-must-differ-from: makers)");
             }
             requireLock(current, expectedLockVersion);
             // An older version never overtakes a newer active one (PRE-021).
@@ -333,7 +338,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             write(updated);
             lifecycleHistory(updated, "APPROVED", current.status(), caller, note,
                     Map.of("sourceHash", updated.sourceHash(), "readerVersion", READER_VERSION,
-                            "effectiveFrom", effective.toString()), now);
+                            "effectiveFrom", effective.toString(),
+                            "approverMustDifferFrom", settings.approverRule().value()), now);
             Map<String, Object> payload = definitionPayload(updated);
             payload.put("requestedBy", updated.requestedBy());
             payload.put("effectiveFrom", effective.toString());
@@ -365,6 +371,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return transactions.inTransaction(() -> idempotent(tenant, "reject", idempotencyKey, requestHash, () -> {
             StoredDefinition current = lockVersion(tenant, ref).version();
             requireStatus(current, "PENDING_APPROVAL", "reject");
+            // PD-097: as in the Rule Engine, "an approver refused it" is never the requester taking it back.
+            if (caller.equals(current.requestedBy())) {
+                throw new SelfApprovalForbiddenException("The requester of " + ref.key() + " v" + ref.version()
+                        + " cannot reject their own request; withdraw it instead (withdraw is planned; until then "
+                        + "ask an approver to reject it)");
+            }
             requireLock(current, expectedLockVersion);
             Instant now = clock.instant();
             StoredDefinition updated = current.rejected(why);

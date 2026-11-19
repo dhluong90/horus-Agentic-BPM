@@ -158,8 +158,8 @@ paths:
       operationId: approveDefinition
       summary: Approve a pending version as a second person
       description: |
-        `PENDING_APPROVAL` to `ACTIVE`. The requester is refused with `403 SELF_APPROVAL_FORBIDDEN` and nothing is
-        written. A newer version of the key already active is `409 VERSION_SUPERSEDED`, and the version stays
+        `PENDING_APPROVAL` to `ACTIVE`. The requester, and under the default `lifecycle.approver-must-differ-from:
+        makers` also the importer, is refused with `403 SELF_APPROVAL_FORBIDDEN` and nothing is written. A newer version of the key already active is `409 VERSION_SUPERSEDED`, and the version stays
         pending. The version is the effective one from its `effectiveFrom` (or now); at that time every older active
         version of the key is retired, once, with `processes.definition.retired.v1` and `supersededBy`. Running
         instances keep their version. Publishes `processes.definition.approved.v1`. Permission `processes:approve`.
@@ -193,7 +193,8 @@ paths:
       summary: Send a pending version back to draft with a reason
       description: |
         `PENDING_APPROVAL` to `DRAFT`; the reason is stored as `decisionComment` and in the history. A missing or
-        blank reason is `400 INPUT_INVALID`. Publishes `processes.definition.rejected.v1`. Permission
+        blank reason is `400 INPUT_INVALID`. The requester cannot reject their own request
+        (`403 SELF_APPROVAL_FORBIDDEN`; withdraw follows). Publishes `processes.definition.rejected.v1`. Permission
         `processes:approve`.
       parameters:
         - $ref: '#/components/parameters/DefinitionKey'

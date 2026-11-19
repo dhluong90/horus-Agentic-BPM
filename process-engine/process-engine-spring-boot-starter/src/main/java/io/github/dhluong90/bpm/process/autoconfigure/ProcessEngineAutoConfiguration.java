@@ -188,6 +188,10 @@ public class ProcessEngineAutoConfiguration {
         if (properties.definitions().autoApprove()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");
         }
+        if ("requester".equals(properties.lifecycle().approverMustDifferFrom())) {
+            LOG.warn("horus.bpm.processes.lifecycle.approver-must-differ-from=requester relaxes four eyes for process "
+                    + "definitions: the importer of a version may approve it (PD-096). Every approval records this.");
+        }
         if (!properties.makerChecker().enabled()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.maker-checker.enabled=false");
             LOG.warn("Maker-checker for process definitions is off (horus.bpm.processes.maker-checker.enabled, dev "
@@ -240,7 +244,8 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "processEngineModuleDescriptor")
     ModuleDescriptor processEngineModuleDescriptor(ProcessEngineProperties properties) {
-        return new ModuleDescriptor("processes", ProcessEngineModule.engineVersion(), "v1", List.of(), Map.of(),
+        return new ModuleDescriptor("processes", ProcessEngineModule.engineVersion(), "v1", List.of(),
+                Map.of("lifecycle.approver-must-differ-from", properties.lifecycle().approverMustDifferFrom()),
                 PERMISSIONS, properties.security().rolePermissions());
     }
 
