@@ -51,7 +51,7 @@ Nothing has been released or logged in production yet. 0.1.0 is the first releas
    - Against: a valid YAML table and its DMN export would have different hashes for the same meaning. Hash, diff and approval would then depend on formatting, and the deviation would be permanent once 0.1.0 logs decisions.
 3. **Hash the printed canonical model (chosen).**
    - For: one hash per meaning across every serialisation, as ADR-0018 intends (the canonical JSON *is* the model's serialisation). It is formatting-insensitive, so whitespace or style edits do not create a "changed" version. The DMN round trip holds through any tool. It is cheap now, because no version is stored outside development databases.
-   - Against: a pipeline cannot compute `canonical_hash` with a generic JSON canonicaliser, which is why Git comparison moves to `source_hash` (decision 4). The printer becomes part of the hash contract, which is why it is frozen (decision 3).
+   - Against: a pipeline cannot compute `canonical_hash` with a generic JSON canonicaliser, which is why Git comparison moves to `source_hash` (decision 5). The printer and the parser become part of the hash contract, which is why both are frozen together per schema version (decision 3).
 
 ## Consequences
 - **Updated in this change:**
