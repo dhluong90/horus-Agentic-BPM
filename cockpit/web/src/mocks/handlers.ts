@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import { scenarioResponses, scenarioUser, type MockResponse, type Scenario } from './fixtures';
+import { scenarioPermissions, scenarioResponses, scenarioUser, type MockResponse, type Scenario } from './fixtures';
 import { createFakeEngine, demoSeed } from './ruleEngine';
 
 function reply(response: MockResponse) {
@@ -24,7 +24,7 @@ export function handlers(scenario: Scenario | (() => Scenario)) {
     request.headers.forEach((value, key) => {
       headers[key] = value;
     });
-    const answer = engine.handle({ method: request.method, path: request.url, headers, body: await request.text(), user: scenarioUser(currentScenario()) });
+    const answer = engine.handle({ method: request.method, path: request.url, headers, body: await request.text(), user: scenarioUser(currentScenario()), permissions: scenarioPermissions(currentScenario()) });
     return new HttpResponse(answer.body, { status: answer.status, headers: answer.headers });
   };
   return [

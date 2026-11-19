@@ -158,11 +158,13 @@ export function scenarioUser(scenario: Scenario): string {
   return scenario === 'ready-approver' || scenario === 'rules-approver' ? meMinh.user.id : meLan.user.id;
 }
 
-/** Rule sets the demo users have opened, as the cockpit stores them per user (interim list, see api/rules/catalogue.ts). */
-export const KNOWN_RULE_SETS: readonly { key: string; value: string }[] = [meLan, meMinh].map((me) => ({
-  key: `horus.cockpit.ruleSets.loans.bank-a.${me.user.id}`,
-  value: JSON.stringify(['card-fee', 'kyc-risk']),
-}));
+/** The permissions /me lists in a scenario, which the mock Rule Engine uses for allowedActions and checks. */
+export function scenarioPermissions(scenario: Scenario): string[] {
+  const me = scenarioResponses(scenario).me.body;
+  if (typeof me !== 'object' || me === null || !('permissions' in me) || !Array.isArray(me.permissions)) return [];
+  return me.permissions.filter((p): p is string => typeof p === 'string');
+}
+
 
 export function isScenario(value: string | null | undefined): value is Scenario {
   return SCENARIOS.some((scenario) => scenario === value);

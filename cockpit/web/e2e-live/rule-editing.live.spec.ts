@@ -3,8 +3,8 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 /*
  * The whole rule editing journey against the real Rule Engine in the example host, two people, four eyes:
  * Lan (author) imports a rule set and requests publication; Minh (approver) approves it; Lan edits a new
- * draft in the cockpit, sees the engine's error on its cell, fixes it, saves and requests publication; Minh
- * reads the changes and approves; Lan tries the published rules when the host grants her rules:evaluate.
+ * draft in the cockpit, sees the engine's errors on their cells, fixes them, saves and requests publication; Minh
+ * rejects with a reason, Lan reads it in the history and asks again, Minh reads the changes and approves; Lan tries the published rules when the host grants her rules:evaluate.
  * Screenshots go to e2e/screenshots/live/.
  */
 
@@ -92,7 +92,7 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
   const minh = await signIn(browser, 'minh');
   await openCockpit(minh, `#/rule-sets/${NAME}/1`);
   await expect(minh.getByText('First version: every row is new.')).toBeVisible();
-  await minh.getByLabel('Comment for the record').fill('Fees match the tariff');
+  await minh.getByLabel('Comment or reason').fill('Fees match the tariff');
   await aboveFold(minh, 'Approve and publish');
   await minh.getByRole('button', { name: 'Approve and publish' }).click();
   await expect(minh.getByText('Version 1 is published.')).toBeVisible();
@@ -106,7 +106,7 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
   for (let i = 0; i < 3; i += 1) await lan.getByRole('button', { name: 'Move row R6 up' }).click();
   await lan.getByLabel('Row R6, Tier').fill("== 'GOLD'");
   await lan.getByLabel('Row R6, Balance').fill('>= 20000000');
-  await lan.getByLabel('Row R6, Fee').fill('10000 VND');
+  await lan.getByLabel('Row R6, Fee').fill('10000');
   await lan.getByLabel('Row R6, Waived').fill('false');
   await aboveFold(lan, 'Save draft');
   await lan.getByRole('button', { name: 'Save draft' }).click();
@@ -115,11 +115,14 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
   const balance = lan.getByLabel('Row R6, Balance');
   await expect(balance).toHaveAttribute('aria-invalid', 'true');
   await expect(lan.getByText('compares a money with a number')).toBeVisible();
+  // Every violation at once, output cells included.
+  await expect(lan.getByLabel('Row R6, Fee')).toHaveAttribute('aria-invalid', 'true');
   await expect(lan.getByLabel('Row R2, Tier')).toHaveValue("in ['GOLD', 'PLATINUM']");
   await expect(lan.getByTestId('problem-code')).toHaveText('VALIDATION_FAILED');
   await lan.screenshot({ path: `${SHOTS}/03-editor-error-on-cell-1440x900-light-en.png` });
 
   await balance.fill('>= 20000000 VND');
+  await lan.getByLabel('Row R6, Fee').fill('10000 VND');
   await lan.getByRole('button', { name: 'Save draft' }).click();
   await expect(lan.getByRole('heading', { level: 1 })).toContainText(`${NAME} Version 2`);
   await expect(lan.getByText('Saved as draft version 2')).toBeVisible();
@@ -127,8 +130,22 @@ test('CKP_032_live_author_edits_a_draft_and_an_approver_publishes_it', async ({ 
   await lan.getByRole('button', { name: 'Request publish' }).click();
   await expect(lan.getByText('Version 2 is waiting for approval.')).toBeVisible();
 
-  // The approver reads the changes with the editor's labels and formats, then approves.
+  // The approver sends it back with a reason; the author sees it in the history and asks again.
   await openCockpit(minh, `#/rule-sets/${NAME}/2`);
+  await minh.getByLabel('Comment or reason').fill('R6 needs the pricing committee minutes');
+  await minh.getByRole('button', { name: 'Reject' }).click();
+  await expect(minh.getByText('Version 2 is back with its author.')).toBeVisible();
+  await lan.reload();
+  await expect(lan.locator('.dock .badge')).toHaveText(/Draft/);
+  await lan.getByText(/^History \(\d+\)$/).click();
+  await expect(lan.getByText('Rejected by minh')).toBeVisible();
+  await expect(lan.getByText('R6 needs the pricing committee minutes')).toBeVisible();
+  await lan.screenshot({ path: `${SHOTS}/04a-author-sees-rejection-1440x900-light-en.png` });
+  await lan.getByRole('button', { name: 'Request publish' }).click();
+  await expect(lan.getByText('Version 2 is waiting for approval.')).toBeVisible();
+
+  // The approver reads the changes with the editor's labels and formats, then approves.
+  await minh.reload();
   await expect(minh.getByText('Compared with version 1')).toBeVisible();
   await expect(minh.getByText('1 added, 1 changed, 0 moved, 0 removed')).toBeVisible();
   await minh.screenshot({ path: `${SHOTS}/04-approver-changes-1440x900-light-en.png` });

@@ -13,6 +13,8 @@ const KNOWN_CODES = [
   'NO_EFFECTIVE_VERSION',
   'INPUT_INVALID',
   'EVALUATION_ERROR',
+  'QUERY_INVALID',
+  'PAYLOAD_TOO_LARGE',
 ] as const;
 
 function messageKey(error: HostError): MessageKey {
@@ -35,7 +37,7 @@ function messageKey(error: HostError): MessageKey {
  * error code and the correlation id with Copy. The engine's own sentence is in English in this release, so it
  * shows directly in English and behind a disclosure in Vietnamese, keeping one language on screen.
  */
-export function ProblemNotice({ error, onReload, showDetail = true }: { error: unknown; onReload?: () => void; showDetail?: boolean }) {
+export function ProblemNotice({ error, onReload, onRestart, showDetail = true }: { error: unknown; onReload?: () => void; onRestart?: () => void; showDetail?: boolean }) {
   const { t, locale } = useI18n();
   const hostError = toHostError(error);
   const problem = hostError.kind === 'problem' ? hostError : undefined;
@@ -74,6 +76,11 @@ export function ProblemNotice({ error, onReload, showDetail = true }: { error: u
       {onReload && problem?.code === 'VERSION_CONFLICT' ? (
         <button type="button" className="btn btn--small hit" onClick={onReload}>
           {t('problem.reload')}
+        </button>
+      ) : null}
+      {onRestart ? (
+        <button type="button" className="btn btn--small hit" onClick={onRestart}>
+          {t('problem.restart')}
         </button>
       ) : null}
     </div>

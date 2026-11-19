@@ -229,7 +229,7 @@ Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUT
 
 ### Edit rules in the cockpit
 
-The cockpit lists rule sets, shows a version as a decision table, edits a draft, sends it for approval and lets a second person approve it. "Try it" runs sample inputs; it needs `rules:evaluate`, which the demo roles do not hold, so add it on the command line for this walkthrough:
+The cockpit lists rule sets, shows a version as a decision table, edits a draft, sends it for approval and lets a second person approve or reject it. "Try it" runs sample inputs; it needs `rules:evaluate`, which the demo roles do not hold, so add it on the command line for this walkthrough:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
@@ -241,10 +241,10 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choos
 1. As `lan`, open Rule sets, choose **Import file** and pick [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml). Version 1 opens as a draft table. Choose **Request publish**: the dock shows "Approve is unavailable. You requested this change. Another approver must decide."
 2. In a private window, sign in as `minh` and open the same address (the link in the address bar works as is). Version 1 opens on Changes. Add a comment and choose **Approve and publish**.
 3. Back as `lan`, reload, choose **New draft**. Type `== GOLD` (without quotes) in row R1's tier cell, then **Save draft**: the engine's error appears on that cell and the other edits stay. Put the quotes back (`== 'GOLD'`), change R2 to `>= 5`, add a row, move it with the arrows, and save again. Version 2 opens as a draft. **Request publish**.
-4. As `minh`, open version 2: Changes lists the added and changed rows with the same labels and amounts as the table. Approve it.
+4. As `minh`, open version 2: Changes lists the added and changed rows with the same labels and amounts as the table. Write a reason and choose **Reject**: version 2 goes back to `lan` as a draft, and **History** under the approval dock shows who rejected it and why. As `lan`, **Request publish** again; as `minh`, approve it.
 5. As either user, use **Try it**: tier `GOLD` matches R1 and the table marks the row.
 
-A save creates a new draft version each time, because this engine release has no endpoint to replace a draft. Rule sets appear in the list once you have imported or opened them by name in this browser, because the engine has no list endpoint yet; the list is kept per user.
+A save creates a new draft version each time, because the engine has no endpoint to replace a draft yet.
 
 The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=http://localhost:8080 LIVE_PASSWORD=choose-one npm --prefix cockpit/web run e2e:live`. Started without the two properties, as the Docker Compose deployment is, the host gives the demo roles no `rules:evaluate`: Try it then says "You cannot run rules on this service", and the test checks that and skips the Try it step with a note.
 

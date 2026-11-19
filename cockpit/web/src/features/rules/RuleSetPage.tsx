@@ -1,9 +1,9 @@
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { toHostError } from '../../api/hostError';
-import type { RuleSetVersion } from '../../api/rules/schemas';
+import type { RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
 import { LENSES, type Lens, type Route } from '../../app/route';
 import { useI18n } from '../../i18n/I18nProvider';
-import { useApprove, useRequestPublish, useSaveDraft, useVersions } from './api/useRules';
+import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersions } from './api/useRules';
 import { ActionDock } from './components/ActionDock';
 import { ChangesView } from './components/ChangesView';
 import { DecisionTable } from './components/DecisionTable';
@@ -13,7 +13,7 @@ import { SourceView } from './components/SourceView';
 import { StatusBadge } from './components/StatusBadge';
 import { TryItPanel } from './components/TryItPanel';
 import { draftReducer, initialDraft } from './model/draft';
-import { placeError } from './model/engineErrors';
+import { placeErrors } from './model/engineErrors';
 import { sameRows, toDocument, toRows } from './model/table';
 
 type Navigate = (route: Route) => void;
@@ -24,15 +24,16 @@ interface Notice {
   text: string;
 }
 
-/** The version the diff compares with: the newest earlier version that was published, else the one before. */
-function baseOf(versions: readonly RuleSetVersion[], current: RuleSetVersion): RuleSetVersion | undefined {
-  const earlier = versions.filter((v) => v.version < current.version);
-  return [...earlier].reverse().find((v) => v.status === 'PUBLISHED' || v.status === 'RETIRED') ?? earlier.at(-1);
+/** The version the diff compares with: the newest earlier version that was published, else the one before. Versions arrive newest first. */
+function baseOf(versions: readonly VersionSummary[], current: number): VersionSummary | undefined {
+  const earlier = versions.filter((v) => v.version < current);
+  return earlier.find((v) => v.status === 'PUBLISHED' || v.status === 'RETIRED') ?? earlier[0];
 }
 
-function Workbench({ versions, version, lens, navigate, notice, setNotice }: {
-  versions: RuleSetVersion[];
+function Workbench({ version, latestVersion, base, lens, navigate, notice, setNotice }: {
   version: RuleSetVersion;
+  latestVersion: number;
+  base: VersionSummary | undefined;
   lens: Lens;
   navigate: Navigate;
   notice: Notice | undefined;
@@ -42,30 +43,22 @@ function Workbench({ versions, version, lens, navigate, notice, setNotice }: {
   const [editing, setEditing] = useState(false);
   const [draft, dispatch] = useReducer(draftReducer, version.definition, (definition) => initialDraft(toRows(definition)));
   const [matched, setMatched] = useState<ReadonlySet<string>>(new Set());
-  const open = (target: RuleSetVersion, nextLens?: Lens) => {
-    navigate({ name: 'rule-set', ruleSet: target.ruleSet, version: target.version, lens: nextLens });
-  };
+  const say = (updated: RuleSetVersion, text: string) => { setNotice({ version: updated.version, text }); };
   const save = useSaveDraft(version.ruleSet, (saved) => {
-    setNotice({ version: saved.version, text: t('editor.saved', { version: String(saved.version) }) });
-    open(saved, 'table');
+    say(saved, t('editor.saved', { version: String(saved.version) }));
+    navigate({ name: 'rule-set', ruleSet: saved.ruleSet, version: saved.version, lens: 'table' });
   });
-  const requestPublish = useRequestPublish((updated) => { setNotice({ version: updated.version, text: t('dock.requested', { version: String(updated.version) }) }); });
-  const approve = useApprove((updated) => { setNotice({ version: updated.version, text: t('dock.approved', { version: String(updated.version) }) }); });
-  const latest = versions.at(-1) ?? version;
-  const base = baseOf(versions, version);
+  const requestPublish = useRequestPublish((updated) => { say(updated, t('dock.requested', { version: String(updated.version) })); });
+  const approve = useApprove((updated) => { say(updated, t('dock.approved', { version: String(updated.version) })); });
+  const reject = useReject((updated) => { say(updated, t('dock.rejected', { version: String(updated.version) })); });
   const dirty = !sameRows(draft.rows, toRows(version.definition));
-  const saveError = save.error ? toHostError(save.error) : undefined;
-  const errorPlace = saveError?.kind === 'problem' && saveError.code === 'VALIDATION_FAILED' ? placeError(saveError.detail) : undefined;
+  const errors = placeErrors(save.error ? toHostError(save.error) : undefined);
+  const onlyLocated = errors.length > 0 && errors.every((e) => e.kind !== 'table');
 
-  const startEdit = () => {
+  const reset = (next: boolean) => {
     dispatch({ type: 'reset', rows: toRows(version.definition) });
     save.reset();
-    setEditing(true);
-  };
-  const cancelEdit = () => {
-    dispatch({ type: 'reset', rows: toRows(version.definition) });
-    save.reset();
-    setEditing(false);
+    setEditing(next);
   };
   const saveDraft = () => {
     // JSON text is valid YAML 1.2; this engine release imports YAML only, so the document is sent as YAML.
@@ -78,8 +71,8 @@ function Workbench({ versions, version, lens, navigate, notice, setNotice }: {
         {editing ? (
           <>
             <p className="editor-title">{t('editor.title', { version: String(version.version) })}</p>
-            {save.error ? <ProblemNotice error={save.error} showDetail={locale !== 'en' || errorPlace === undefined || errorPlace.kind === 'table'} /> : null}
-            <DraftEditor definition={version.definition} draft={draft} dispatch={dispatch} error={errorPlace} />
+            {save.error ? <ProblemNotice error={save.error} showDetail={locale !== 'en' || !onlyLocated} /> : null}
+            <DraftEditor definition={version.definition} draft={draft} dispatch={dispatch} errors={errors} />
           </>
         ) : (
           <LensContent lens={lens} version={version} base={base} matched={matched} />
@@ -88,14 +81,15 @@ function Workbench({ versions, version, lens, navigate, notice, setNotice }: {
       <aside className="workbench__side">
         <ActionDock
           version={version}
-          latestVersion={latest.version}
-          editing={editing ? { dirty, saving: save.isPending, error: save.error, onSave: saveDraft, onCancel: cancelEdit } : undefined}
+          latestVersion={latestVersion}
+          editing={editing ? { dirty, saving: save.isPending, error: save.error, onSave: saveDraft, onCancel: () => { reset(false); } } : undefined}
           notice={notice?.version === version.version ? notice.text : undefined}
-          onEdit={startEdit}
+          onEdit={() => { reset(true); }}
           onOpen={(number) => { navigate({ name: 'rule-set', ruleSet: version.ruleSet, version: number, lens: undefined }); }}
           onReload={() => { window.location.reload(); }}
           requestPublish={{ start: () => { requestPublish.start(version); }, isPending: requestPublish.isPending, error: requestPublish.error }}
           approve={{ start: (comment) => { approve.start({ version, comment }); }, isPending: approve.isPending, error: approve.error }}
+          reject={{ start: (reason) => { reject.start({ version, reason }); }, isPending: reject.isPending, error: reject.error }}
         />
         {!editing ? <TryItPanel version={version} onMatched={(ids) => { setMatched(new Set(ids)); }} /> : null}
       </aside>
@@ -103,12 +97,21 @@ function Workbench({ versions, version, lens, navigate, notice, setNotice }: {
   );
 }
 
-function LensContent({ lens, version, base, matched }: { lens: Lens; version: RuleSetVersion; base: RuleSetVersion | undefined; matched: ReadonlySet<string> }) {
+/** The diff reads the base version in full only when the Changes view is open. */
+function ChangesLens({ version, base }: { version: RuleSetVersion; base: VersionSummary | undefined }) {
+  const { t } = useI18n();
+  const baseVersion = useVersion(version.ruleSet, base?.version);
+  if (base && baseVersion.isPending) return <p className="empty" role="status">{t('ruleSets.loading')}</p>;
+  if (baseVersion.isError) return <ProblemNotice error={baseVersion.error} />;
+  return <ChangesView definition={version.definition} base={baseVersion.data?.definition} baseVersion={base?.version} />;
+}
+
+function LensContent({ lens, version, base, matched }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string> }) {
   switch (lens) {
     case 'table':
       return <DecisionTable definition={version.definition} version={version.version} matched={matched} />;
     case 'changes':
-      return <ChangesView definition={version.definition} base={base?.definition} baseVersion={base?.version} />;
+      return <ChangesLens version={version} base={base} />;
     case 'source':
       return <SourceView version={version} />;
   }
@@ -116,34 +119,40 @@ function LensContent({ lens, version, base, matched }: { lens: Lens; version: Ru
 
 export function RuleSetPage({ name, versionNumber, lens, navigate }: { name: string; versionNumber: number | undefined; lens: Lens | undefined; navigate: Navigate }) {
   const { t } = useI18n();
-  const query = useVersions(name);
+  const versions = useVersions(name);
   const [notice, setNotice] = useState<Notice | undefined>(undefined);
+  const latest = versions.data?.[0];
+  const selected = versionNumber ?? latest?.version;
+  const known = selected !== undefined && versions.data?.some((v) => v.version === selected) === true;
+  const version = useVersion(name, known ? selected : undefined);
   // A link to a version newer than the cached list (someone else just saved it): read the list again, once.
   const refetchedFor = useRef<string | undefined>(undefined);
-  const missing = versionNumber !== undefined && query.data !== undefined && !query.data.some((v) => v.version === versionNumber);
-  const { refetch } = query;
+  const missing = versions.data !== undefined && selected !== undefined && !known;
+  const { refetch } = versions;
   useEffect(() => {
-    const wanted = `${name}/${String(versionNumber)}`;
+    const wanted = `${name}/${String(selected)}`;
     if (missing && refetchedFor.current !== wanted) {
       refetchedFor.current = wanted;
       void refetch();
     }
-  }, [missing, name, versionNumber, refetch]);
+  }, [missing, name, selected, refetch]);
+
   const back = (
     <a className="back-link hit" href="#/rule-sets">
       <span aria-hidden="true">←</span> {t('ruleSet.back')}
     </a>
   );
-  if (query.isPending || (missing && query.isFetching)) return <section className="workspace">{back}<p className="empty" role="status">{t('ruleSets.loading')}</p></section>;
-  if (query.isError) return <section className="workspace">{back}<ProblemNotice error={query.error} /></section>;
-  const versions = query.data;
-  const latest = versions.at(-1);
-  if (!latest) return <section className="workspace">{back}<p className="empty" role="alert">{t('ruleSets.notFound', { name })}</p></section>;
-  const version = versionNumber === undefined ? latest : versions.find((v) => v.version === versionNumber);
-  if (!version) return <section className="workspace">{back}<p className="empty" role="alert">{t('ruleSet.versionMissing', { version: String(versionNumber) })}</p></section>;
-  const activeLens = lens ?? (version.status === 'PENDING_APPROVAL' ? 'changes' : 'table');
+  const frame = (content: ReactNode) => <section className="workspace">{back}{content}</section>;
+  if (versions.isPending || (missing && versions.isFetching)) return frame(<p className="empty" role="status">{t('ruleSets.loading')}</p>);
+  if (versions.isError) return frame(<ProblemNotice error={versions.error} />);
+  if (!latest || selected === undefined) return frame(<p className="empty" role="alert">{t('ruleSets.empty')}</p>);
+  if (!known) return frame(<p className="empty" role="alert">{t('ruleSet.versionMissing', { version: String(selected) })}</p>);
+  if (version.isPending) return frame(<p className="empty" role="status">{t('ruleSets.loading')}</p>);
+  if (version.isError) return frame(<ProblemNotice error={version.error} />);
+  const current = version.data;
+  const activeLens = lens ?? (current.status === 'PENDING_APPROVAL' ? 'changes' : 'table');
   const go = (next: Partial<{ version: number; lens: Lens }>) => {
-    navigate({ name: 'rule-set', ruleSet: name, version: next.version ?? version.version, lens: next.lens ?? (next.version !== undefined ? undefined : activeLens) });
+    navigate({ name: 'rule-set', ruleSet: name, version: next.version ?? current.version, lens: next.lens ?? (next.version !== undefined ? undefined : activeLens) });
   };
 
   return (
@@ -152,16 +161,16 @@ export function RuleSetPage({ name, versionNumber, lens, navigate }: { name: str
         {back}
         <div className="rs-head__line">
           <h1 id="rule-set-title" className="rs-head__title">
-            {name} <span className="rs-head__version tnum">{t('ruleSet.versionLabel', { version: String(version.version) })}</span>
+            {name} <span className="rs-head__version tnum">{t('ruleSet.versionLabel', { version: String(current.version) })}</span>
           </h1>
-          <StatusBadge status={version.status} />
-          <span className="rs-head__policy">{t('ruleSet.hitPolicy')}: {t(hitPolicyKey(version.hitPolicy))}</span>
+          <StatusBadge status={current.status} />
+          <span className="rs-head__policy">{t('ruleSet.hitPolicy')}: {t(hitPolicyKey(current.hitPolicy))}</span>
         </div>
         <div className="rs-head__controls">
           <label className="inline-field">
             <span>{t('ruleSet.versions')}</span>
-            <select className="field__input field__input--compact" value={version.version} onChange={(e) => { go({ version: Number(e.target.value) }); }}>
-              {[...versions].reverse().map((v) => (
+            <select className="field__input field__input--compact" value={current.version} onChange={(e) => { go({ version: Number(e.target.value) }); }}>
+              {versions.data.map((v) => (
                 <option key={v.version} value={v.version}>{`${t('ruleSets.versionShort', { version: String(v.version) })} · ${t(`status.${v.status}`)}`}</option>
               ))}
             </select>
@@ -173,7 +182,16 @@ export function RuleSetPage({ name, versionNumber, lens, navigate }: { name: str
           </div>
         </div>
       </div>
-      <Workbench key={`${name}-${version.version}`} versions={versions} version={version} lens={activeLens} navigate={navigate} notice={notice} setNotice={setNotice} />
+      <Workbench
+        key={`${name}-${String(current.version)}-${String(current.lockVersion)}`}
+        version={current}
+        latestVersion={latest.version}
+        base={baseOf(versions.data, current.version)}
+        lens={activeLens}
+        navigate={navigate}
+        notice={notice}
+        setNotice={setNotice}
+      />
     </section>
   );
 }

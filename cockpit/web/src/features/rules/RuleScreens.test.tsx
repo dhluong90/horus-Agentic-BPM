@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../../App';
-import { KNOWN_RULE_SETS, type Scenario } from '../../mocks/fixtures';
+import type { Scenario } from '../../mocks/fixtures';
 import { mockHost, setScenario } from '../../mocks/node';
 
 /** Engine calls the screens made, in order: method and path. */
@@ -11,7 +11,6 @@ let calls: { method: string; path: string; key: string | null }[] = [];
 
 beforeEach(() => {
   calls = [];
-  for (const { key, value } of KNOWN_RULE_SETS) window.localStorage.setItem(key, value);
   mockHost.events.on('request:start', ({ request }) => {
     const path = decodeURIComponent(new URL(request.url).pathname);
     if (path.startsWith('/api/bpm/rules')) calls.push({ method: request.method, path: path.replace('/api/bpm/rules/v1', ''), key: request.headers.get('Idempotency-Key') });
@@ -38,6 +37,18 @@ describe('rule set list and version view', () => {
     expect(rows[0]).toHaveTextContent('v1');
     expect(rows[1]).toHaveTextContent('kyc-risk');
     expect(screen.getByRole('button', { name: 'Import file' })).toBeInTheDocument();
+  });
+
+  it('RLE_039_a_cursor_the_engine_refuses_offers_to_start_the_list_again', async () => {
+    const user = userEvent.setup();
+    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets', () => HttpResponse.json(
+      { type: 'x', title: 'Bad Request', status: 400, code: 'QUERY_INVALID', detail: 'The cursor was not issued by this endpoint', correlationId: '01JQUERY000000000000000000' },
+      { status: 400, headers: { 'Content-Type': 'application/problem+json' } },
+    ), { once: true }));
+    open('#/rule-sets');
+    expect(await screen.findByText('The list changed while you were reading it.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Start the list again' }));
+    expect(await screen.findByRole('table')).toHaveTextContent('kyc-risk');
   });
 
   it('CKP_030_reader_without_author_permission_sees_no_import', async () => {
@@ -81,16 +92,23 @@ describe('minimal draft editing', () => {
     await user.click(screen.getByRole('button', { name: 'Move row R6 up' }));
     await user.clear(screen.getByLabelText('Row R6, Balance'));
     await user.type(screen.getByLabelText('Row R6, Balance'), '>= 50000000');
+    await user.clear(screen.getByLabelText('Row R6, Fee'));
+    await user.type(screen.getByLabelText('Row R6, Fee'), '5000');
     await user.dblClick(screen.getByRole('button', { name: 'Save draft' }));
 
     const cell = await screen.findByLabelText('Row R6, Balance');
     await waitFor(() => { expect(cell).toHaveAttribute('aria-invalid', 'true'); });
     expect(screen.getByText('compares a money with a number')).toBeInTheDocument();
+    // Every violation lands at once, output cells included.
+    expect(screen.getByLabelText('Row R6, Fee')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText(/output fee is money and needs a currency/)).toBeInTheDocument();
     expect(screen.getByLabelText('Row R1, Tier')).toHaveValue("in ['GOLD', 'PLATINUM']");
     expect(new Set(writes().map((c) => c.key)).size).toBe(1);
 
     await user.clear(cell);
     await user.type(cell, '>= 50000000 VND');
+    await user.clear(screen.getByLabelText('Row R6, Fee'));
+    await user.type(screen.getByLabelText('Row R6, Fee'), '5000 VND');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee Version 3');
     expect(screen.getByText('Saved as draft version 3')).toBeInTheDocument();
@@ -128,9 +146,34 @@ describe('four eyes', () => {
     expect(await screen.findByText('Compared with version 1')).toBeInTheDocument();
     expect(screen.getByText('1 added, 2 changed, 0 moved, 0 removed')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled();
-    await user.type(screen.getByLabelText('Comment for the record'), 'Matches the tariff');
+    await user.type(screen.getByLabelText('Comment or reason'), 'Matches the tariff');
     await user.click(screen.getByRole('button', { name: 'Approve and publish' }));
     expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
+  });
+
+  it('RLE_025_approver_rejects_with_a_reason_and_the_history_shows_it', async () => {
+    const user = userEvent.setup();
+    open('#/rule-sets/card-fee/2', 'rules-approver');
+    const reject = await screen.findByRole('button', { name: 'Reject' });
+    expect(reject).toBeDisabled();
+    expect(reject).toHaveAccessibleDescription('Reject needs a reason; it is kept in the history.');
+    await user.type(screen.getByLabelText('Comment or reason'), 'R2 waiver needs pricing committee minutes');
+    await user.click(reject);
+    expect(await screen.findByText('Version 2 is back with its author.')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Approval' })).getByText('Draft')).toBeInTheDocument();
+    await user.click(screen.getByText('History (3)'));
+    expect(screen.getByText('Rejected by minh')).toBeInTheDocument();
+    expect(screen.getByText('R2 waiver needs pricing committee minutes')).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.path)).toEqual(['/rule-sets/card-fee/versions/2:reject']);
+  });
+
+  it('RLE_043_buttons_follow_allowed_actions_for_the_caller', async () => {
+    open('#/rule-sets/card-fee/2', 'rules-author-approver');
+    // Lan holds rules:approve here but wrote and requested v2: the engine allows reject (withdraw), not approve.
+    expect(await screen.findByRole('button', { name: 'Approve and publish' })).toBeDisabled();
+    expect(screen.getByText(/Approve is unavailable\. You requested this change/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
+    expect(screen.getByText('You may withdraw your own request with Reject.')).toBeInTheDocument();
   });
 
   it('TR_UI_02_a_stale_click_gets_the_engine_403_with_code_and_reference', async () => {
