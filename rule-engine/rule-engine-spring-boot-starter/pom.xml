@@ -67,6 +67,15 @@
       <artifactId>spring-jdbc</artifactId>
     </dependency>
     <!--
+      Optional: the horus.rle.* gauges (DESIGN section 4.8) are bound to the host's meter registry through a
+      MeterBinder only when the host has Micrometer, for example through Actuator. Version from the Spring Boot BOM.
+    -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <!--
       The ruleEngine health contributor, one per Spring Boot line (RuleEngineHealthCheck plus an adapter).
       Spring Boot 4: the optional spring-boot-health module. The 3.5 test leg excludes it from the test
       classpath (root POM, profile spring-boot-3.5).

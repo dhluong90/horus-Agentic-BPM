@@ -1,5 +1,6 @@
 package com.horus.bpm.rules.autoconfigure;
 
+import com.horus.bpm.rules.internal.service.DecisionQuerySettings;
 import com.horus.bpm.rules.internal.service.EngineDefaults;
 import com.horus.bpm.rules.internal.service.EngineSettings;
 import java.time.Duration;
@@ -19,7 +20,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param cache the compiled-version cache
  * @param idempotency idempotency records
  * @param evaluation limits on evaluation inputs
- * @param query bounds of list reads
+ * @param query bounds of list reads and decision log searches
+ * @param decisionLog maintenance of the decision log
  * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
  * @param authoring how rule changes may be made on this host
@@ -34,7 +36,35 @@ public record RuleEngineProperties(
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle,
         @DefaultValue Security security,
-        @DefaultValue Authoring authoring) {
+        @DefaultValue Authoring authoring,
+        @DefaultValue DecisionLog decisionLog) {
+
+    /**
+     * Maintenance of the decision log {@code rle_decision} (RLE-017).
+     *
+     * @param partitionsAhead how far ahead of the host clock monthly partitions are created, at start-up and daily;
+     *     {@code PT0S} to {@code P366D}, default {@code P7D}. The current and the next month always exist
+     */
+    public record DecisionLog(Duration partitionsAhead) {
+
+        /** Validates the period; an out-of-range value fails start-up naming the property. */
+        public DecisionLog {
+            if (partitionsAhead != null && (partitionsAhead.isNegative()
+                    || partitionsAhead.compareTo(EngineDefaults.PARTITIONS_AHEAD_MAX) > 0)) {
+                throw new IllegalArgumentException("horus.bpm.rules.decision-log.partitions-ahead must be PT0S to "
+                        + "P366D, was " + partitionsAhead);
+            }
+        }
+
+        /**
+         * Returns the period in force.
+         *
+         * @return the configured period, or {@code P7D}
+         */
+        public Duration partitionsAheadOrDefault() {
+            return partitionsAhead == null ? EngineDefaults.PARTITIONS_AHEAD : partitionsAhead;
+        }
+    }
 
     /**
      * How rule changes may be made on this host (PD-075, PD-094).
@@ -80,10 +110,14 @@ public record RuleEngineProperties(
     /**
      * Bounds of list reads (ADR-0015).
      *
-     * @param maxPageSize the largest {@code limit} of {@code GET /rule-sets} and {@code GET .../versions}, 1 to 200;
-     *     default 200. May be lowered, never raised
+     * @param maxPageSize the largest {@code limit} of {@code GET /rule-sets}, {@code GET .../versions} and
+     *     {@code GET /decisions}, 1 to 200; default 200. May be lowered, never raised
+     * @param maxRange the longest period of {@code GET /decisions}, {@code PT1H} to {@code P31D}; default {@code P31D}.
+     *     May be lowered, never raised
+     * @param statementTimeout the longest one {@code GET /decisions} page may run in the database, {@code PT0.1S} to
+     *     {@code PT30S}; default {@code PT2S}
      */
-    public record Query(Integer maxPageSize) {
+    public record Query(Integer maxPageSize, Duration maxRange, Duration statementTimeout) {
     }
 
     /**
@@ -112,6 +146,17 @@ public record RuleEngineProperties(
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
                 evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows());
+    }
+
+    /**
+     * Returns the validated bounds of decision log searches; an out-of-range value fails start-up naming the property.
+     *
+     * @return the search settings
+     */
+    public DecisionQuerySettings toQuerySettings() {
+        return new DecisionQuerySettings(
+                query.maxRange() == null ? EngineDefaults.QUERY_MAX_RANGE : query.maxRange(),
+                query.statementTimeout() == null ? EngineDefaults.QUERY_STATEMENT_TIMEOUT : query.statementTimeout());
     }
 
     /**

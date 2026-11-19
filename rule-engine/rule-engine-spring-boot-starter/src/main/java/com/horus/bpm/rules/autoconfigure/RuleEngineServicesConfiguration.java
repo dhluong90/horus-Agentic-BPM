@@ -1,6 +1,7 @@
 package com.horus.bpm.rules.autoconfigure;
 
 import com.horus.bpm.host.spi.EngineAccess;
+import com.horus.bpm.rules.api.DecisionLogQuery;
 import com.horus.bpm.rules.api.RuleEngine;
 import com.horus.bpm.rules.api.VersionService;
 import com.horus.bpm.rules.internal.service.RuleEngines;
@@ -49,7 +50,7 @@ class RuleEngineServicesConfiguration {
     RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties) {
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings());
+                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(), properties.toQuerySettings());
     }
 
     @Bean
@@ -68,6 +69,12 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     VersionService ruleEngineVersionService(RuleEngines engines) {
         return engines.versionService();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    DecisionLogQuery ruleEngineDecisionLogQuery(RuleEngines engines) {
+        return engines.decisionLogQuery();
     }
 
     @Configuration(proxyBeanMethods = false)
@@ -117,8 +124,9 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        DecisionController ruleEngineDecisionController(RuleEngine engine, CallerResolver callers) {
-            return new DecisionController(engine, callers);
+        DecisionController ruleEngineDecisionController(RuleEngine engine, DecisionLogQuery log,
+                CallerResolver callers) {
+            return new DecisionController(engine, log, callers);
         }
 
         @Bean

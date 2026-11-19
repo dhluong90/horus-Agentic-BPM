@@ -98,6 +98,35 @@ final class Cursors {
         return key;
     }
 
+    /** The key of a decision log position: {@code <createdAt>|<id>}. */
+    static String decisionKey(java.time.Instant createdAt, String id) {
+        return createdAt + "|" + id;
+    }
+
+    /**
+     * Returns the decision log position a key names, or null for no cursor. A signed cursor always passes; the
+     * check keeps anything but an instant and a ULID away from the database even if the signature were bypassed.
+     */
+    static com.horus.bpm.rules.internal.store.DecisionLog.Position decisionPosition(String key) {
+        if (key == null) {
+            return null;
+        }
+        int bar = key.indexOf('|');
+        if (bar <= 0 || bar != key.lastIndexOf('|')) {
+            throw invalid();
+        }
+        String id = key.substring(bar + 1);
+        if (!id.matches("[0-9A-HJKMNP-TV-Z]{26}")) {
+            throw invalid();
+        }
+        try {
+            return new com.horus.bpm.rules.internal.store.DecisionLog.Position(
+                    java.time.Instant.parse(key.substring(0, bar)), id);
+        } catch (java.time.format.DateTimeParseException e) {
+            throw invalid();
+        }
+    }
+
     static int positiveInt(String key) {
         try {
             int value = Integer.parseInt(key);

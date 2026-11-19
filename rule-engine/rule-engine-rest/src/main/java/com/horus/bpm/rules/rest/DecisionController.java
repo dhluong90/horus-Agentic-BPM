@@ -1,22 +1,32 @@
 package com.horus.bpm.rules.rest;
 
+import com.horus.bpm.rules.api.DecisionLogEntry;
+import com.horus.bpm.rules.api.DecisionLogQuery;
 import com.horus.bpm.rules.api.DecisionRequest;
 import com.horus.bpm.rules.api.DecisionResult;
+import com.horus.bpm.rules.api.DecisionSearch;
 import com.horus.bpm.rules.api.InputInvalidException;
+import com.horus.bpm.rules.api.Page;
+import com.horus.bpm.rules.api.PageRequest;
+import com.horus.bpm.rules.api.QueryInvalidException;
 import com.horus.bpm.rules.api.RuleEngine;
 import com.horus.bpm.rules.internal.json.EngineValues;
 import com.horus.bpm.rules.internal.service.EngineDefaults;
 import com.horus.bpm.rules.spi.CallerResolver;
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Objects;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -30,17 +40,49 @@ import tools.jackson.databind.node.ObjectNode;
 public class DecisionController {
 
     private final RuleEngine engine;
+    private final DecisionLogQuery log;
     private final CallerResolver callers;
 
     /**
      * Creates the controller.
      *
      * @param engine the rule engine
+     * @param log the decision log search
      * @param callers resolves the caller and its permissions
      */
-    public DecisionController(RuleEngine engine, CallerResolver callers) {
+    public DecisionController(RuleEngine engine, DecisionLogQuery log, CallerResolver callers) {
         this.engine = Objects.requireNonNull(engine, "engine must not be null");
+        this.log = Objects.requireNonNull(log, "log must not be null");
         this.callers = Objects.requireNonNull(callers, "callers must not be null");
+    }
+
+    /**
+     * {@code GET /decisions?ruleSet=&from=&to=}: one rule set's decisions in a period of at most
+     * {@code query.max-range}, newest first, keyset-paged (RLE-029). Writes nothing.
+     */
+    @GetMapping
+    public ResponseEntity<byte[]> search(
+            @RequestParam(value = "ruleSet", required = false) String ruleSet,
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to", required = false) String to,
+            @RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor) {
+        RestSupport.require(callers, "rules:log:read");
+        DecisionSearch search = DecisionSearch.of(ruleSet, instant("from", from), instant("to", to));
+        Page<DecisionLogEntry> page = log.search(search, new PageRequest(RestSupport.limit(limit), cursor));
+        return RestSupport.json(HttpStatus.OK, RestSupport.page(page, EngineValues::decisionLogEntry));
+    }
+
+    private static Instant instant(String name, String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Instant.parse(value.strip());
+        } catch (DateTimeParseException e) {
+            throw new QueryInvalidException(name + " must be an ISO 8601 instant in UTC, for example "
+                    + "2027-01-01T00:00:00Z");
+        }
     }
 
     /**

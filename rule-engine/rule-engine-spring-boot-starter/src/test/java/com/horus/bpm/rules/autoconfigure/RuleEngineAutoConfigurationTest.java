@@ -172,7 +172,7 @@ class RuleEngineAutoConfigurationTest {
             DecisionLogPartitions partitions = context.getBean(DecisionLogPartitions.class);
             InOrder order = inOrder(migrator, partitions);
             order.verify(migrator).migrate();
-            order.verify(partitions).ensureCurrentAndNextMonth(JAN_26_2027);
+            order.verify(partitions).ensureAhead(JAN_26_2027, java.time.Duration.ofDays(7));
         });
     }
 
@@ -182,7 +182,7 @@ class RuleEngineAutoConfigurationTest {
                 .withPropertyValues("horus.bpm.rules.migrate-on-start=false")
                 .run(context -> {
                     verify(context.getBean(RuleEngineSchemaMigrator.class), never()).migrate();
-                    verify(context.getBean(DecisionLogPartitions.class)).ensureCurrentAndNextMonth(JAN_26_2027);
+                    verify(context.getBean(DecisionLogPartitions.class)).ensureAhead(JAN_26_2027, java.time.Duration.ofDays(7));
                 });
     }
 
@@ -192,8 +192,8 @@ class RuleEngineAutoConfigurationTest {
                 .withPropertyValues("horus.bpm.rules.migrate-on-start=false")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
-                    verify(context.getBean(DecisionLogPartitions.class), never()).ensureCurrentAndNextMonth(
-                            org.mockito.ArgumentMatchers.any());
+                    verify(context.getBean(DecisionLogPartitions.class), never()).ensureAhead(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
                 });
         assertThat(output).contains("Rule Engine schema is not current");
     }

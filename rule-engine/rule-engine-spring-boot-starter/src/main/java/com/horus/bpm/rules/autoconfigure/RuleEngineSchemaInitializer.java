@@ -19,7 +19,8 @@ import org.springframework.beans.factory.SmartInitializingSingleton;
  * baselines below its first migration (TR-EMB-06).
  *
  * <p>Steps: apply the engine's migrations (unless {@code horus.bpm.rules.migrate-on-start=false}),
- * then create the decision log partitions of the current and next month from the {@link Clock}. When
+ * then create the decision log partitions from the {@link Clock} up to {@code decision-log.partitions-ahead} and
+ * start their daily maintenance ({@link RuleEnginePartitionMaintenance}). When
  * migration is switched off and the schema is not current, partitions are skipped with a warning and
  * the {@code ruleEngine} health contributor reports down. The {@code rle_*} tables are ready when the
  * application context is refreshed.
@@ -38,6 +39,7 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
     private final boolean migrate;
     private final Clock clock;
     private final RuleEngineCursorKeyInitializer cursorKeys;
+    private final RuleEnginePartitionMaintenance maintenance;
 
     RuleEngineSchemaInitializer(
             RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate, Clock clock) {
@@ -46,11 +48,17 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
 
     RuleEngineSchemaInitializer(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate,
             Clock clock, RuleEngineCursorKeyInitializer cursorKeys) {
+        this(migrator, partitions, migrate, clock, cursorKeys, null);
+    }
+
+    RuleEngineSchemaInitializer(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate,
+            Clock clock, RuleEngineCursorKeyInitializer cursorKeys, RuleEnginePartitionMaintenance maintenance) {
         this.migrator = Objects.requireNonNull(migrator, "migrator must not be null");
         this.partitions = Objects.requireNonNull(partitions, "partitions must not be null");
         this.migrate = migrate;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.cursorKeys = cursorKeys;
+        this.maintenance = maintenance;
     }
 
     @Override
@@ -72,9 +80,14 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
                 return;
             }
         }
-        List<String> created = partitions.ensureCurrentAndNextMonth(clock.instant());
-        if (!created.isEmpty()) {
-            LOG.info("Rule Engine created decision log partitions " + created);
+        if (maintenance != null) {
+            maintenance.runOnce();
+            maintenance.start();
+        } else {
+            List<String> created = partitions.ensureCurrentAndNextMonth(clock.instant());
+            if (!created.isEmpty()) {
+                LOG.info("Rule Engine created decision log partitions " + created);
+            }
         }
         if (cursorKeys != null) {
             cursorKeys.start();

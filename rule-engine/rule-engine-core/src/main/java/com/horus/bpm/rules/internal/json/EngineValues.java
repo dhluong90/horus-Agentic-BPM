@@ -104,6 +104,24 @@ public final class EngineValues {
     }
 
     /**
+     * Reads logged inputs or outputs back into engine values, as {@link #inputsFromJson} reads a request; a JSON
+     * null becomes a null value.
+     *
+     * @param json the logged JSON object, or null for none
+     * @return the values by name, in logged order
+     */
+    public static Map<String, Object> loggedValues(String json) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        if (json == null) {
+            return values;
+        }
+        for (Map.Entry<String, JsonNode> entry : read(json).properties()) {
+            values.put(entry.getKey(), fromJson(entry.getValue(), entry.getKey()));
+        }
+        return values;
+    }
+
+    /**
      * Reads the {@code inputs} object of a REST request into engine values: {@code {currency, amount}}
      * becomes {@link Money}; integers become {@code Long} or {@code BigInteger}; decimals become
      * {@code BigDecimal}.
@@ -274,6 +292,32 @@ public final class EngineValues {
                 node.putObject("error").put("code", failed.code()).put("detail", failed.detail());
             }
         }
+        return node;
+    }
+
+    /**
+     * Writes a decision log entry as the {@code DecisionLogEntry} schema of the REST contract.
+     *
+     * @param entry the entry
+     * @return the object
+     */
+    public static ObjectNode decisionLogEntry(com.horus.bpm.rules.api.DecisionLogEntry entry) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("decisionId", entry.decisionId());
+        node.put("ruleSet", entry.ruleSet());
+        node.put("version", entry.version());
+        node.put("hitPolicy", entry.hitPolicy());
+        node.put("outcome", entry.outcome().name());
+        node.set("matchedRuleIds", value(entry.matchedRuleIds()));
+        ObjectNode inputs = node.putObject("inputs");
+        entry.inputs().forEach((name, v) -> inputs.set(name, value(v)));
+        ObjectNode outputs = node.putObject("outputs");
+        entry.outputs().forEach((name, v) -> outputs.set(name, value(v)));
+        node.set("callerId", value(entry.callerId()));
+        node.set("correlationId", value(entry.correlationId()));
+        node.put("evaluatedAt", entry.evaluatedAt().toString());
+        node.put("loggedAt", entry.loggedAt().toString());
+        node.put("durationMicros", entry.durationMicros());
         return node;
     }
 
