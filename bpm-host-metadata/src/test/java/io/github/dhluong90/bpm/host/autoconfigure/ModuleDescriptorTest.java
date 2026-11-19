@@ -26,15 +26,6 @@ class ModuleDescriptorTest {
     }
 
     @Test
-    void a_permission_segment_may_join_words_with_hyphens() {
-        ModuleDescriptor descriptor = new ModuleDescriptor("rules", "0.1.0", "v1", List.of(), Map.of(),
-                List.of("rules:log:read", "rules:log:search-masked"),
-                Map.of("ROLE_PRIVACY_OPS", List.of("rules:log:search-masked")));
-
-        assertThat(descriptor.permissions()).contains("rules:log:search-masked");
-    }
-
-    @Test
     void a_role_mapping_to_an_unknown_permission_is_refused() {
         assertThatThrownBy(() -> TestHosts.rules(Map.of("ROLE_PRICING_APPROVER", List.of("rules:aprove"))))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -51,8 +42,6 @@ class ModuleDescriptorTest {
         assertRefused("rules", "0.1.0", "v1", List.of("rules.a", "rules.a"), PERMISSIONS, "Duplicate entry in features");
         assertRefused("rules", "0.1.0", "v1", List.of(), List.of("processes:read"), "must start with 'rules:'");
         assertRefused("rules", "0.1.0", "v1", List.of(), List.of("rules:Read"), "Invalid permission 'rules:Read'");
-        assertRefused("rules", "0.1.0", "v1", List.of(), List.of("rules:log:-masked"), "Invalid permission");
-        assertRefused("rules", "0.1.0", "v1", List.of(), List.of("rules:log:search-"), "Invalid permission");
         assertThatThrownBy(() -> new ModuleDescriptor("rules", "0.1.0", "v1", List.of(), Map.of("ratio", 0.5),
                 PERMISSIONS, Map.of())).hasMessageContaining("Setting 'ratio' must be a boolean, an integer or a string");
     }

@@ -40,7 +40,7 @@ public final class DefaultDecisionLogService implements DecisionLogService {
      * Permission of the masked-input search, separate from {@link #PERMISSION_LOG_READ} and held by no role unless
      * the host grants it: the search tests whether a person was decided on (architect condition (a) on #255).
      */
-    static final String PERMISSION_SEARCH_MASKED = "rules:log:search-masked";
+    static final String PERMISSION_MASKED_SEARCH = "rules:masked:search";
 
     /** The window of {@code masking.search.max-per-minute}. */
     private static final java.time.Duration SEARCH_WINDOW = java.time.Duration.ofMinutes(1);
@@ -91,7 +91,7 @@ public final class DefaultDecisionLogService implements DecisionLogService {
     public DecisionSearchResult findByMaskedInput(MaskedInputQuery query) {
         Objects.requireNonNull(query, "query must not be null");
         String tenant = context.tenant();
-        String caller = context.callerWith(PERMISSION_SEARCH_MASKED);
+        String caller = context.callerWith(PERMISSION_MASKED_SEARCH);
         if (!RuleSetReader.isRuleSetName(query.ruleSet())) {
             throw new QueryInvalidException("ruleSet must be a rule set name");
         }

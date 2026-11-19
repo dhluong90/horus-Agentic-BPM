@@ -112,7 +112,7 @@ This walkthrough uses the demo users of the `dev` profile, in tenant `bank-a` (t
 | `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
 | `tuan` | `TELLER` | `rules:evaluate` |
 
-One more role is mapped and given to no demo user: `PRIVACY_OPS`, with `rules:log:read` and `rules:log:search-masked`. It is the only role that may look decisions up by a masked value such as a national id (`POST /decisions:find-by-masked-input`), at most 30 times a minute per person (`masking.search.max-per-minute`).
+One more role is mapped and given to no demo user: `PRIVACY_OPS`, with `rules:log:read` and `rules:masked:search`. It is the only role that may look decisions up by a masked value such as a national id (`POST /decisions:find-by-masked-input`), at most 30 times a minute per person (`masking.search.max-per-minute`).
 
 Start PostgreSQL as above, then start the host on the `dev` profile:
 

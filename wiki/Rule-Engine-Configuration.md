@@ -192,7 +192,7 @@ The engine's default beans are `@ConditionalOnMissingBean`, so a host bean repla
 | `rules:approve` | `:approve`, `:reject`, `:retire`. Approval by the requester is refused regardless |
 | `rules:simulate` | `:simulate`, evaluate drafts, set `clock` on `:evaluate` |
 | `rules:log:read` | Read the decision log and explanations |
-| `rules:log:search-masked` | Find decisions by the plain value of a masked input. Not implied by `rules:log:read`; grant it to as few people as possible |
+| `rules:masked:search` | Find decisions by the plain value of a masked input. Not implied by `rules:log:read`; grant it to as few people as possible |
 
 ### Mapping permissions to the host's authorities
 

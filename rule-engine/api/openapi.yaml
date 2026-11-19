@@ -517,7 +517,7 @@ paths:
       operationId: findDecisionsByMaskedInput
       summary: Find the decisions whose masked input had a given plain value
       description: |
-        Permission `rules:log:search-masked`, which `rules:log:read` does not imply. At most
+        Permission `rules:masked:search`, which `rules:log:read` does not imply. At most
         `masking.search.max-per-minute` searches per caller per minute on one replica (default 30,
         at least 1); past it `429 RATE_LIMITED` with `Retry-After`, and the refusal is audited. The engine fingerprints `value` with the caller's tenant key
         and returns the decisions of `ruleSet` between `from` (inclusive) and `to` (exclusive)

@@ -31,9 +31,20 @@ class RuleEngineModuleDescriptorTest {
             assertThat(rules.features()).isEmpty();
             assertThat(rules.permissions()).containsExactly(
                     "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read",
-                    "rules:log:search-masked");
+                    "rules:masked:search");
             assertThat(rules.rolePermissions()).isEmpty();
         });
+    }
+
+    @Test
+    void RLE_019_every_permission_fits_the_published_me_pattern_so_older_cockpits_accept_it() throws Exception {
+        // The pattern of cockpit/api/schema/bpm-me.v1.schema.json, unchanged since 0.1.0: a cockpit of that release
+        // rejects the whole /api/bpm/me response when one permission does not match.
+        String schema = java.nio.file.Files.readString(
+                java.nio.file.Path.of("../../cockpit/api/schema/bpm-me.v1.schema.json"));
+        assertThat(schema).contains("\"^(rules|processes)(:[a-z]+){1,2}$\"");
+        assertThat(RuleEngineModule.PERMISSIONS).contains("rules:masked:search")
+                .allMatch(permission -> permission.matches("^(rules|processes)(:[a-z]+){1,2}$"));
     }
 
     @Test

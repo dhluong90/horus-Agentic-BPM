@@ -29,7 +29,7 @@
     },
     "permissions": {
       "type": "array", "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^(rules|processes)(:[a-z]+(-[a-z]+)*){1,2}$" }
+      "items": { "type": "string", "pattern": "^(rules|processes)(:[a-z]+){1,2}$" }
     },
     "roles": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
     "groups": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }

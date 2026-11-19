@@ -41,7 +41,7 @@ class MaskedInputsTest {
     static final byte[] KEY_B = seeded(32, 20261120L);
     static final Set<String> EVALUATE = Set.of("rules:evaluate");
     /** An auditor who may read decisions and search by a masked value; the search needs its own permission. */
-    static final Set<String> AUDIT = Set.of("rules:log:read", "rules:log:search-masked");
+    static final Set<String> AUDIT = Set.of("rules:log:read", "rules:masked:search");
     static final Set<String> READ_ONLY = Set.of("rules:log:read");
 
     /** The minor-review table of RLE-031: a national id (masked) and an age route a customer to a review. */
@@ -440,9 +440,9 @@ class MaskedInputsTest {
         caller.become("bank-a", "auditor", READ_ONLY);
         assertThat(engines.decisionLog().get(id).decisionId()).isEqualTo(id);
         assertThatThrownBy(() -> engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)))
-                .isInstanceOf(PermissionDeniedException.class).hasMessageContaining("rules:log:search-masked");
+                .isInstanceOf(PermissionDeniedException.class).hasMessageContaining("rules:masked:search");
 
-        caller.become("bank-a", "privacy-ops", Set.of("rules:log:search-masked"));
+        caller.become("bank-a", "privacy-ops", Set.of("rules:masked:search"));
         assertThat(engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)).items()).hasSize(1);
         assertThatThrownBy(() -> engines.decisionLog().get(id)).isInstanceOf(PermissionDeniedException.class);
     }

@@ -70,9 +70,9 @@ class MaskedInputsHostIT {
     @Test
     void RLE_035_masking_key_required_at_startup_and_never_leaked(CapturedOutput output) throws Exception {
         String db = freshDatabase();
-        String auditor = TestTokens.bearerFor("audrey", "bank-a", List.of("rules:log:read", "rules:log:search-masked"));
+        String auditor = TestTokens.bearerFor("audrey", "bank-a", List.of("rules:log:read", "rules:masked:search"));
         String otherTenantAuditor = TestTokens.bearerFor("oscar", "tenant-b",
-                List.of("rules:log:read", "rules:log:search-masked"));
+                List.of("rules:log:read", "rules:masked:search"));
         String readOnly = TestTokens.bearerFor("rhea", "bank-a", List.of("rules:log:read"));
         List<String> bodies = new ArrayList<>();
         String decisionId;

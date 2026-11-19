@@ -65,7 +65,7 @@ inputs:
 
 The log stores a keyed HMAC of the value instead of the value, `hmac:` followed by 64 hex digits. The same national id always produces the same token under one key, so an auditor can still find every decision about one person without the id being stored. The REST API returns it masked (TR-SEC-05); the key setting and the start-up check are described in [[Rule Engine Configuration]].
 
-To find the decisions about one person, a holder of `rules:log:search-masked` (a separate permission that `rules:log:read` does not imply) posts the plain value, at most 30 times a minute by default (`masking.search.max-per-minute`); the engine fingerprints it with your tenant's key before it searches:
+To find the decisions about one person, a holder of `rules:masked:search` (a separate permission that `rules:log:read` does not imply) posts the plain value, at most 30 times a minute by default (`masking.search.max-per-minute`); the engine fingerprints it with your tenant's key before it searches:
 
 ```bash
 curl -s -X POST "$HOST/api/bpm/rules/v1/decisions:find-by-masked-input" \

@@ -2,7 +2,7 @@ package io.github.dhluong90.bpm.rules.api;
 
 /**
  * Reads the decision log of the caller's tenant. Reads need {@code rules:log:read}; the masked-input search needs
- * {@code rules:log:search-masked} instead, which no role holds by default. The tenant comes from the
+ * {@code rules:masked:search} instead, which no role holds by default. The tenant comes from the
  * host's {@code TenantResolver} only (TR-SEC-03). Nothing is written to the decision log; each masked-input search
  * writes one audit entry.
  */
