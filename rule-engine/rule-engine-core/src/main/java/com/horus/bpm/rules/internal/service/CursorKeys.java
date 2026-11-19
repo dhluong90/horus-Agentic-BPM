@@ -1,6 +1,7 @@
 package com.horus.bpm.rules.internal.service;
 
 import com.horus.bpm.rules.api.QueryInvalidException;
+import com.horus.bpm.rules.api.SchemaNotReadyException;
 import com.horus.bpm.rules.internal.store.RuleStore;
 import com.horus.bpm.rules.internal.store.TransactionRunner;
 import java.security.SecureRandom;
@@ -28,6 +29,7 @@ public final class CursorKeys {
     private final TransactionRunner transactions;
     private final Clock clock;
     private volatile Pair keys;
+    private volatile String notReady;
 
     private record Pair(Cursors current, byte[] currentKey, Cursors previous) {
     }
@@ -75,6 +77,16 @@ public final class CursorKeys {
         return keys != null;
     }
 
+    /**
+     * Records why the key was not loaded at start-up (the schema state), so list calls answer
+     * {@code 503 SCHEMA_NOT_READY} naming it instead of an internal error.
+     *
+     * @param schemaState for example "schema at version 4, 1 migration pending, migrate-on-start=false"
+     */
+    public void notReady(String schemaState) {
+        this.notReady = schemaState;
+    }
+
     synchronized void install(byte[] key) {
         Pair now = keys;
         if (now != null && Arrays.equals(now.currentKey(), key)) {
@@ -102,8 +114,10 @@ public final class CursorKeys {
     private Pair held() {
         Pair pair = keys;
         if (pair == null) {
-            throw new IllegalStateException("The Rule Engine cursor key is not loaded; CursorKeys.load() runs at "
-                    + "start-up after the migrations");
+            String state = notReady;
+            throw new SchemaNotReadyException("List cursors are not available: the Rule Engine cursor key was not "
+                    + "loaded at start-up" + (state == null ? "" : " (" + state + ")")
+                    + ". Run the engine migrations and restart.");
         }
         return pair;
     }

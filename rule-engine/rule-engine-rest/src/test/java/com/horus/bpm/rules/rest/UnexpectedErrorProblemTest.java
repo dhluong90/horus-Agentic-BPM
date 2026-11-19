@@ -33,4 +33,9 @@ class UnexpectedErrorProblemTest {
         assertThat(new String(response.getBody(), StandardCharsets.UTF_8)).contains("\"code\":\"INPUT_INVALID\"")
                 .doesNotContain("text/csv");
     }
+
+    @Test
+    void RLE_039_schema_not_ready_is_503() {
+        assertThat(ProblemDetails.STATUS.get("SCHEMA_NOT_READY").value()).isEqualTo(503);
+    }
 }

@@ -70,11 +70,9 @@ public final class DefaultVersionService implements VersionService {
      * @param context shared engine context
      * @param store rule set storage
      * @param outbox event outbox
+     * @param cursorKeys the cursor key, loaded at start-up; the only constructor, so a hand-wired engine always
+     *     shares the holder that {@link RuleEngines#cursorKeys()} exposes for loading
      */
-    public DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox) {
-        this(context, store, outbox, new CursorKeys(store, context.transactions(), context.clock()));
-    }
-
     DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox, CursorKeys cursorKeys) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");

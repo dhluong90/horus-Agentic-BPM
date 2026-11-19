@@ -65,6 +65,10 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
                 LOG.warn("Rule Engine schema is not current (version " + status.currentVersion() + ", "
                         + status.pendingMigrations() + " pending) and horus.bpm.rules.migrate-on-start=false; "
                         + "decision log partitions were not created");
+                if (cursorKeys != null) {
+                    cursorKeys.notReady("schema at version " + status.currentVersion() + ", "
+                            + status.pendingMigrations() + " migration(s) pending, migrate-on-start=false");
+                }
                 return;
             }
         }
