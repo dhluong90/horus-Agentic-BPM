@@ -401,6 +401,17 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String why = boundedComment(reason, false);
         String requestHash = Hashes.sha256Parts("retire", caller, ref.key(), Integer.toString(ref.version()),
                 Long.toString(expectedLockVersion), why, Boolean.toString(confirmNoVersionInEffect));
+        // PRE-053, as the Rule Engine (#269): first, in its own transaction under the key lock, retire the versions the
+        // selected one supersedes, as the effective-date job would. It commits even when the retire below is refused,
+        // so a superseded version never takes new cases again.
+        transactions.inTransaction(() -> {
+            List<StoredDefinition> versions = store.lockDefinitions(tenant, ref.key());
+            StoredDefinition selected = selected(versions, clock.instant());
+            if (selected != null) {
+                retireSuperseded(versions, selected, clock.instant());
+            }
+            return null;
+        });
         return transactions.inTransaction(() -> idempotent(tenant, "retire", idempotencyKey, requestHash, () -> {
             Locked locked = lockVersion(tenant, ref);
             StoredDefinition current = locked.version();
@@ -417,10 +428,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             requireLock(current, expectedLockVersion);
             Instant now = clock.instant();
             // PD-101: a key left with no version in effect makes every new start fail until a new version is approved.
-            boolean inEffect = active && current.effectiveFrom() != null && !current.effectiveFrom().isAfter(now);
-            boolean othersInEffect = locked.all().stream().anyMatch(d -> !d.id().equals(current.id())
-                    && "ACTIVE".equals(d.status()) && d.effectiveFrom() != null && !d.effectiveFrom().isAfter(now));
-            boolean last = inEffect && !othersInEffect;
+            // "In effect" is the selected version (DESIGN 3.2): retiring it leaves the key with none, because the
+            // versions it superseded were retired above and do not count.
+            StoredDefinition selected = selected(locked.all(), now);
+            boolean last = active && selected != null && selected.id().equals(current.id());
             if (last) {
                 Instant next = locked.all().stream().filter(d -> !d.id().equals(current.id())
                         && "ACTIVE".equals(d.status()) && d.effectiveFrom() != null && d.effectiveFrom().isAfter(now))
@@ -490,6 +501,18 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     private java.util.Optional<StoredDefinition> versionOf(String tenant, DefinitionRef ref) {
         return store.definitionByVersion(tenant, ref.key(), ref.version());
+    }
+
+    /** The version new starts use: the highest-numbered ACTIVE version with {@code effective_from <= now}, or null. */
+    private static StoredDefinition selected(List<StoredDefinition> versions, Instant now) {
+        StoredDefinition best = null;
+        for (StoredDefinition d : versions) {
+            if ("ACTIVE".equals(d.status()) && d.effectiveFrom() != null && !d.effectiveFrom().isAfter(now)
+                    && (best == null || d.version() > best.version())) {
+                best = d;
+            }
+        }
+        return best;
     }
 
     private static DefinitionNotFoundException notFound(DefinitionRef ref) {

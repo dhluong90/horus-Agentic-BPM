@@ -518,6 +518,41 @@ class DefinitionLifecycleTest {
     }
 
     @Test
+    void PRE_053_a_version_that_just_took_effect_is_the_last_in_effect_and_its_superseded_versions_are_retired_first() {
+        // Given v1 active, and v2 approved for 1 May; on 1 May v2 is effective but its job has not fired, so v1 is
+        // still ACTIVE
+        clock.set(Instant.parse("2027-04-20T09:00:00Z"));
+        activate(1);
+        DefinitionVersion v2 = approveByBob(request(importAs(2), Instant.parse("2027-05-01T00:00:00Z")));
+        clock.set(Instant.parse("2027-05-01T00:00:30Z"));
+        assertThat(stored(1).status()).isEqualTo("ACTIVE");
+
+        // When bob retires v2 without the confirmation
+        engine.identity.as("bank-a", "bob", APPROVER);
+        assertThatThrownBy(() -> engine.services.retire(v2.ref(), v2.lockVersion(), "wrong rule set", false, null))
+                // Then it is the last version in effect: 409, v2 stays active
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.LastVersionInEffectException.class);
+        assertThat(stored(2).status()).isEqualTo("ACTIVE");
+
+        // And v1 was retired as superseded by v2, so it can never take new cases again
+        DefinitionVersion v1 = stored(1);
+        assertThat(v1.status()).isEqualTo("RETIRED");
+        assertThat(v1.retiredBy()).isEqualTo("system:effective-date");
+        assertThat(v1.supersededBy()).isEqualTo(2);
+        assertThat(start("LN-0500").definitionVersion()).isEqualTo(2);
+
+        // When bob confirms, the key has no version in effect, and v2's job later changes nothing
+        long v2Lock = stored(2).lockVersion();
+        engine.identity.as("bank-a", "bob", APPROVER);
+        DefinitionVersion retired = engine.services.retire(v2.ref(), v2Lock, "wrong rule set", true, null);
+        assertThat(retired.status()).isEqualTo("RETIRED");
+        assertThatThrownBy(() -> start("LN-0501"))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.NoEffectiveVersionException.class);
+        assertThat(engine.jobs.pollOnce()).isZero();
+        assertThat(stored(1).status()).isEqualTo("RETIRED");
+    }
+
+    @Test
     void PRE_053_with_retire_last_version_refuse_the_last_version_cannot_be_retired_even_when_confirmed() {
         TestEngine strict = TestEngine.replica("pod-1", clock).autoApprove(false)
                 .retireLastVersion(io.github.dhluong90.bpm.process.internal.service.EngineSettings.RetireLastVersionRule
