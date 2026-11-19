@@ -99,7 +99,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-075](#pd-075-minimal-cockpit-editing-in-m1-async-decision-log-to-m2) | Minimal cockpit editing in M1, async decision log to M2 | Decided (product manager, delegated, PD-073) |
 | [PD-076](#pd-076-placement-of-the-condition-builder-lens) | Placement of the condition builder lens | Decided (product manager, delegated, PD-073) |
 | [PD-077](#pd-077-fallback-for-plain-language-readings-in-m1) | Fallback for plain-language readings in M1 | Decided (product manager, delegated, PD-073) |
-| [PD-078](#pd-078-cockpit-home-screen-in-cockpit-01) | Cockpit home screen in Cockpit 0.1 | Decided (product manager, delegated, PD-073) |
+| [PD-078](#pd-078-cockpit-home-screen-in-cockpit-01) | Cockpit home screen in Cockpit 0.1 | Decided (product manager, delegated, PD-073; default landing superseded by PD-092) |
 | [PD-079](#pd-079-tenant-resolution-when-the-cockpit-runs-inside-a-host-web-app) | Tenant resolution when the cockpit runs inside a host web app | Decided (product manager, delegated, PD-073) |
 | [PD-080](#pd-080-second-approver-for-retiring-a-live-rule-version-by-hand) | Second approver for retiring a live rule version by hand | Decided (product manager, delegated, PD-073) |
 | [PD-081](#pd-081-no-branch-protection-on-main-gates-are-advisory) | No branch protection on main; gates are advisory | Decided |
@@ -113,6 +113,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-089](#pd-089-a-requester-withdraws-their-own-pending-request) | A requester withdraws their own pending request | Decided (product manager, delegated, PD-073) |
 | [PD-090](#pd-090-property-tests-without-jqwik) | Property tests without jqwik | Decided |
 | [PD-091](#pd-091-no-tag-ruleset-or-immutable-releases-for-now) | No tag ruleset or immutable releases for now | Decided (revisitable) |
+| [PD-092](#pd-092-the-cockpit-opens-on-home-for-every-role) | The cockpit opens on Home for every role | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2362,6 +2363,8 @@ On 2026-11-19 the product owner delegated business and use-case decisions for th
 
 ### PD-078 Cockpit home screen in Cockpit 0.1
 
+The role-based default landing area is superseded by [PD-092](#pd-092-the-cockpit-opens-on-home-for-every-role): the cockpit opens on Home, whose content depends on the role. The host setting and the rule that a link always wins stand.
+
 | Field | Value |
 |---|---|
 | Date | 2026-11-19 |
@@ -2772,3 +2775,23 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Revisit when** any of these happens: an outside contributor gets write access; a tag or Release asset is created or changed outside the release workflow; or an adopter or bank review asks for tamper-evident releases. The product manager then brings option 1 back to the product owner. Same pattern as PD-081 for branch protection.
 
 **Follow-ups.** Maintainers (engineering): the "never re-tag, release a patch" rule in `CONTRIBUTING.md` and the release runbook. Security: confirm the guard and the verification cover the risk above at the Fri 20 Nov review.
+
+### PD-092 The cockpit opens on Home for every role
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | PD-078 and `CKP-031` open the cockpit on a different area per role (approvers on Changes, authors on their own requests, auditors on Decisions). The cockpit shell of 0.1.0 (#180) adds a Home page, and Decisions is a preview without data in 0.1.0. Which area does the cockpit open on by default? |
+| Raised by | Architect, review of the cockpit shell (pull request #183) |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1. Supersedes the default of PD-078 |
+
+**Options considered**
+
+1. Home for every role, with Home's content depending on the role (chosen). An approver sees the requests waiting for them first, an author their own drafts and requests, and anyone else the recently changed rule sets. A user whose permissions show nothing sees one line saying so, never a blank page. The host setting stays: `cockpit.landing` is `home` by default, or `rules` or `approvals`; `decisions` becomes a value from 0.2.0, when Decisions has data. A link into a screen always wins. Consequence: one start page to explain and demo; each role still sees its own work first; no one lands on an empty Decisions preview in 0.1.0.
+2. Keep the role-based landing of PD-078 and add Home to the menu only. Consequence: no specification change; an auditor would land on the Decisions preview, which has no data in 0.1.0, which is the "empty cockpit" the product owner rejected.
+
+**Recommendation and decision.** Option 1. It answers the product owner's feedback that the cockpit looked empty, keeps "each person opens on the work that needs them" through Home's content, and stays within PD-016, because counts appear only in card headers.
+
+**Consequences.** `CKP-031` changes: the default is `home`, the `by-role` value is retired, and the cases test Home's content per role, including a user with no rule permission. The cockpit DESIGN menu list in section 3 is Home, Rules, Approvals, Decisions (Preview) and Processes (Preview, shown only when a Process Engine host is registered). CK-F-04 is reworded.
+
+**Follow-ups.** Architect: `CKP-031`, the `cockpit.landing` values in `/api/bpm/meta`, and the DESIGN section 3 menu list. Maintainers (engineering): pull request #183. Documentation: the wiki cockpit page.
