@@ -487,7 +487,9 @@ paths:
         without it the answer is `428 PRECONDITION_REQUIRED`, and a stale value is
         `409 VERSION_CONFLICT`, with nothing published. A version can be sent back, replaced in place
         and requested again under the same number, so the lock version is what ties an approval to
-        the content reviewed (#275).
+        the content reviewed (#275). A client that receives `409 VERSION_CONFLICT` here must show the
+        approver the current version (its content and diff) again and let them decide; it must never
+        retry automatically with the new `ETag`, because that would approve content nobody reviewed.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -531,7 +533,8 @@ paths:
         A blank reason, or one longer than `lifecycle.reason-max-length` (default 2,000
         characters), is `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
         `If-Match` is required, as for `:approve`: `428 PRECONDITION_REQUIRED` without it,
-        `409 VERSION_CONFLICT` when stale.
+        `409 VERSION_CONFLICT` when stale. On `409 VERSION_CONFLICT` a client shows the current
+        version again and never retries automatically with the new `ETag`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
