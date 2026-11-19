@@ -35,6 +35,9 @@ jobs:
       - name: Spec-to-test gate
         run: python3 tools/spec-coverage.py
 
+      - name: Tests of the Maven retry script (stub mvn, no network)
+        run: tools/test-mvn-retry.sh
+
   verify:
     # TR-EMB-02: the supported matrix (ADR-0011). Each Java version runs on both Spring Boot lines and
     # each Spring Boot line on both PostgreSQL versions (14 and the newest release), pairwise; Spring
