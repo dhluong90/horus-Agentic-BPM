@@ -35,4 +35,46 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <!--
+        TR-EMB-03 by dependency analysis: ArchUnit sees only referenced bytecode, so this rule also
+        refuses framework, Jakarta, pool and JDBC driver artifacts that no class references yet.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-framework-free-core</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <searchTransitive>true</searchTransitive>
+                  <excludes>
+                    <exclude>org.springframework*:*</exclude>
+                    <exclude>jakarta.*:*</exclude>
+                    <exclude>javax.*:*</exclude>
+                    <exclude>com.zaxxer:*</exclude>
+                    <exclude>org.postgresql:*</exclude>
+                    <exclude>com.mysql:*</exclude>
+                    <exclude>org.mariadb.jdbc:*</exclude>
+                    <exclude>com.oracle.database.jdbc:*</exclude>
+                    <exclude>com.microsoft.sqlserver:*</exclude>
+                    <exclude>com.h2database:*</exclude>
+                    <exclude>org.hsqldb:*</exclude>
+                  </excludes>
+                  <message>rule-engine-core depends on the JDK only (TR-EMB-03): no framework, Jakarta, pool or JDBC driver artifact.</message>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>
