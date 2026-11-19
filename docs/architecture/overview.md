@@ -34,14 +34,20 @@ Contents: 1 Goals and constraints. 2 Context and boundaries. 3 Building blocks. 
 | Spring Boot 4.x starters as the primary baseline; Spring Boot 3.5.x also tested until 1.0 | [ADR-0011](../adr/0011-spring-boot-4-baseline.md) |
 | Contract conventions: permission names, `rle_decision` partitioned from the first migration, quoted string outputs, error `type` URIs, `422` for `UNIQUE_HIT_VIOLATION` | [ADR-0010](../adr/0010-engine-contract-conventions.md) |
 | Engine state lives in the host database under prefixed tables, on the host `DataSource` and transactions; the engines never open connections | [ADR-0002](../adr/0002-state-in-host-database.md) |
-| Closed expression grammar, hand-written parser, no scripting or reflection; from M1 its semantics are a subset of FEEL | [ADR-0003](../adr/0003-own-expression-language.md), superseded in part by [ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md); FEEL strategy [ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md) (proposed) |
+| Table names are fixed: `rle_*` and `pre_*`, no prefix property | [ADR-0023](../adr/0023-fixed-rule-engine-table-names.md) |
+| Closed expression grammar, hand-written parser, no scripting or reflection; from M1 its semantics are a subset of FEEL | [ADR-0003](../adr/0003-own-expression-language.md), superseded in part by [ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md); FEEL strategy [ADR-0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md); FEEL null semantics from M1 (PD-058) |
 | Full BPMN 2.0 and DMN 1.5 on the roadmap after 1.0, no CMMN; the M1 and M2 designs carry the foundations | [ADR-0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md), [`standards-compliance.md`](standards-compliance.md) |
+| The BPMN 2.0 and DMN semantic models are the canonical model in `*-core`; our JSON is their stored, hashed and approved serialisation | [ADR-0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md) |
+| Every scope is a token row: a root scope token per instance and one per `saga` from M2; joins and compensation keyed by scope token | [ADR-0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md) |
 | Libraries only, no standalone server | [ADR-0004](../adr/0004-no-standalone-server.md) |
 | Cockpit is static assets with no state of its own | [ADR-0005](../adr/0005-cockpit-as-static-assets.md) |
 | Idempotency keys, business keys and optimistic locking are enforced in the engine | [ADR-0006](../adr/0006-idempotency-and-business-keys.md) |
 | Saga-style compensation; no two-phase commit | [ADR-0007](../adr/0007-compensation-instead-of-distributed-transactions.md) |
-| External steps run as Async Wait-State with a lease of step timeout plus margin (proposed) | [ADR-0008](../adr/0008-async-wait-state-for-external-steps.md) |
-| Compiled caches stay coherent through `LISTEN/NOTIFY` plus a `cache_epoch` sweep (proposed) | [ADR-0009](../adr/0009-cache-coherence-listen-notify-and-epoch.md) |
+| External steps run as Async Wait-State with a lease of step timeout plus margin | [ADR-0008](../adr/0008-async-wait-state-for-external-steps.md) |
+| Compiled caches stay coherent through `LISTEN/NOTIFY` plus a `cache_epoch` sweep | [ADR-0009](../adr/0009-cache-coherence-listen-notify-and-epoch.md) |
+| Java API conventions: one interface per job, records, JSpecify nullness, unchecked exceptions with codes, no library types in `api` and `spi`, japicmp from 1.0 | [ADR-0016](../adr/0016-java-api-conventions.md) |
+| The cores parse with Jackson 3 as a private dependency; engine REST bodies use the engine's mapper (conditional on the Spring Boot 3.5 coexistence test) | [ADR-0021](../adr/0021-jackson-3-inside-engine-cores.md) |
+| Maven `groupId` and Java package root `io.github.dhluong90.bpm` | [ADR-0022](../adr/0022-maven-coordinates-and-package-root.md) |
 | Runtime dependencies carry Apache 2.0, MIT or BSD licences only | `TR-LIC-01` |
 
 ### 1.3 Non-goals
@@ -78,7 +84,7 @@ Rules that follow from the table:
 
 | Artifact | Role | Allowed dependencies | Verified by |
 |---|---|---|---|
-| `*-core` | Model, parser and compiler, evaluator, token runtime, lifecycles, inbound and outbound ports | Java 21, Jackson; Process Engine core also sees the `RuleEngine` interface | ArchUnit: no `org.springframework..`, `java.sql..`, `java.net..`, `javax.script..`, `java.lang.reflect.Method` (`TR-EMB-03`, `TR-SEC-01`) |
+| `*-core` | Model, parser and compiler, evaluator, token runtime, lifecycles, inbound and outbound ports | Java 21, Jackson 3 in `internal` only (ADR-0021); Process Engine core also sees the `RuleEngine` interface | ArchUnit: no `org.springframework..`, `java.sql..`, `java.net..`, `javax.script..`, `java.lang.reflect.Method` (`TR-EMB-03`, `TR-SEC-01`) |
 | `*-postgres` | Storage adapters on `JdbcClient`, Flyway migrations, `SKIP LOCKED` poller, `LISTEN/NOTIFY` listener | `*-core`, Spring JDBC, Flyway | ArchUnit: no HTTP clients, no `java.net.http..` (`TR-EMB-05`) |
 | `*-rest` | Controllers, RFC 9457 problem responses, OpenAPI 3.1 document | `*-core`, Spring WebMvc | WebMvc contract tests |
 | `*-spring-boot-starter` | Composition root: `@AutoConfiguration`, host `DataSource` binding, isolated Flyway run, scheduler thread lifecycle, Micrometer | `*-core`, `*-postgres`, optional `*-rest` | Starter boot test on a clean database (`TR-EMB-01`) |
@@ -103,7 +109,7 @@ Each engine is a functional core with an imperative shell. Domain code takes the
 | `TenantResolver`, `CallerResolver` | Outbound | Both | JWT claim or trusted header; principal name | Yes |
 | Event publisher (`RuleEventPublisher` and the process equivalent) | Outbound | Both | Spring `ApplicationEventPublisher` | Yes, for an outbox |
 | `RuleFunctionRegistry` | Outbound | Rule | Built-in pure functions | Yes, pure functions only |
-| `ExpressionLanguage` | Inbound to the Rule Engine core, used by the Process Engine | Rule (API), Process (caller) | `horus-expr-v1` (M1); FEEL from S1 (ADR-0019, proposed) | No; the Process Engine evaluates gateway conditions and, later, mappings and script tasks only through it |
+| `ExpressionLanguage` | Inbound to the Rule Engine core, used by the Process Engine | Rule (API), Process (caller) | `horus-expr-v1` (M1); FEEL from S1 (ADR-0019) | No; the Process Engine evaluates gateway conditions and, later, mappings and script tasks only through it |
 | `MessageAdapter` | Outbound | Process | Hands message throws to the host event publisher, so the host writes its own outbox in the same transaction | Yes; S2 ([`standards-compliance.md`](standards-compliance.md) section 5.4) |
 | `AgentAdapter`, `ServiceAdapter` | Outbound | Process | Stubs in `*-test` | Required for `agentTask` and remote `serviceTask` |
 | `BusinessCalendar` | Outbound | Process | Reads `pre_calendar`, `pre_holiday`; 24x7 built in | Yes |
@@ -131,7 +137,7 @@ Identifiers are ULIDs. Two numbers are never confused: `version` is the rule set
 
 | From (instance / token) | Event | Guard | To | Emitted event |
 |---|---|---|---|---|
-| none | `start(definition, businessKey, idempotencyKey)` | Unique `(tenant_id, definition_key, business_key)`; idempotency key new or same request hash | `RUNNING`; token `ACTIVE` at `start` | `processes.instance.started.v1` |
+| none | `start(definition, businessKey, idempotencyKey)` | Unique `(tenant_id, definition_key, business_key)`; idempotency key new or same request hash | `RUNNING`; root scope token `WAITING_SCOPE` and flow token `ACTIVE` at `start` (ADR-0020) | `processes.instance.started.v1` |
 | token `ACTIVE` | Sync step done (`decision`, `exclusiveGateway`, local `serviceTask`) | Runs in the current transaction | Token `ACTIVE` at the next node | `processes.step.completed.v1` |
 | token `ACTIVE` | Reaches `userTask` | Assignee resolved; SLA `due_at` computed through `BusinessCalendar` | Token `WAITING_USER`; `pre_task OPEN` | `processes.task.created.v1` |
 | token `WAITING_USER` | `complete(taskId, lockVersion)` | `lock_version` matches; actor not in `forbidden_users` | Token `ACTIVE` | `processes.task.completed.v1` |
@@ -141,7 +147,7 @@ Identifiers are ULIDs. Two numbers are never confused: `version` is the rule set
 | token `WAITING_ASYNC` | Failure, retries left | Fewer than `1 + retry.max` attempts made | Token `WAITING_ASYNC`; job `DUE` at `now() + backoff` | none |
 | token `WAITING_ASYNC` or `ACTIVE` | Failure, attempts exhausted, `onFailure: incident` | | Token paused; `pre_incident OPEN`; instance stays `RUNNING` | `processes.incident.raised.v1` |
 | paused token | `incidents/{id}:retry` or `:resolve` | `lock_version` matches | Token `ACTIVE` (retry) or as resolved | `processes.incident.resolved.v1` |
-| token `ACTIVE` | Reaches a `parallelGateway` join | `pre_instance` row locked `FOR UPDATE`; all sibling tokens in the scope `JOINED` | One new `ACTIVE` token; siblings `COMPLETED` | none |
+| token `ACTIVE` | Reaches a `parallelGateway` join | `pre_instance` row locked `FOR UPDATE`; all sibling tokens under the same scope token `JOINED` | One new `ACTIVE` token; siblings `COMPLETED` | none |
 | token `ACTIVE` | Reaches `timer` | Timer job `DUE` | Token `WAITING_TIMER` | none |
 | `RUNNING` | Failure with `onFailure: compensate`, or `throwCompensation` | | `COMPENSATING` | `processes.compensation.started.v1` |
 | `COMPENSATING` | Stack walked, or the manual compensation incident resolved | | `FAILED` (terminal, compensated) | `processes.instance.failed.v1` |
@@ -230,16 +236,16 @@ Because the call is cancelled at the timeout and TX2 needs about 5 ms, a live at
 ![Parallel join](images/parallel-join.svg)
 
 1. Each arriving branch locks the parent `pre_instance` row `FOR UPDATE`.
-2. It marks its token `JOINED` and counts tokens in the join scope that are not yet `JOINED`.
+2. It marks its token `JOINED` and counts the tokens of the same scope token (`scope_token_id`, ADR-0020) that are not yet `JOINED`.
 3. The transaction that counts zero creates the single outgoing token and marks the siblings `COMPLETED`. The lock serialises the counts, so there is exactly one outgoing token, never zero and never two (`PRE-005`, `TR-ASY-03`).
 
 ### 4.7 Compensation
 
 ![Compensation](images/compensation.svg)
 
-1. When a `serviceTask` or `agentTask` with a `compensate` handler completes, its TX2 pushes `(step_id, attempt_id, handler, input_snapshot)` onto `pre_compensation_stack` for the process or `saga` scope.
+1. When a `serviceTask` or `agentTask` with a `compensate` handler completes, its TX2 pushes `(step_id, attempt_id, handler, input_snapshot)` onto `pre_compensation_stack` under the scope token of the enclosing `saga`, or the root scope token when there is none (ADR-0020).
 2. When a step with `onFailure: compensate` exhausts its retries, or a `throwCompensation` step runs, the instance moves to `COMPENSATING` and emits `processes.compensation.started.v1`.
-3. The engine walks the stack newest first. Each handler runs as its own Async Wait-State job with lease, retry and incident handling, and receives `instanceId`, `stepId` and `attemptId` so it can be idempotent (`PRE-013`, `TR-IDEM-04`).
+3. The engine walks the stack of the failing step's scope token newest first; entries of other scope tokens are not touched (`PRE-044`). Each handler runs as its own Async Wait-State job with lease, retry and incident handling, and receives `instanceId`, `stepId` and `attemptId` so it can be idempotent (`PRE-013`, `TR-IDEM-04`).
 4. A handler that fails after its retries opens an incident and pauses the walk until the incident is retried or resolved. `compensate: manual` opens `COMPENSATION_MANUAL_REQUIRED` instead of skipping (`TR-COMP-03`).
 5. Every compensation writes a history row. When the stack is empty the instance is `FAILED` (compensated) and `processes.instance.failed.v1` is emitted (ADR-0007).
 
@@ -289,7 +295,7 @@ Because the call is cancelled at the timeout and TX2 needs about 5 ms, a live at
 | Rule set | [`rule-engine/api/schema/rule-set.v1.schema.json`](../../rule-engine/api/schema/rule-set.v1.schema.json) | `urn:horus-bpm:schema:rule-set:v1` |
 | Process definition | [`process-engine/api/schema/process-definition.v1.schema.json`](../../process-engine/api/schema/process-definition.v1.schema.json) | `urn:horus-bpm:schema:process-definition:v1` |
 
-Both are JSON Schema 2020-12, carry a `schemaVersion` field, and are the single owner of the definition format. Old schema versions import forever. Both carry an `expressionLanguage` member (only `urn:horus-bpm:expr:v1` before S1). From S1 they are serialisations of the BPMN and DMN semantic models, if ADR-0018 is accepted; BPMN XML and DMN XML are the other serialisations ([`standards-compliance.md`](standards-compliance.md) section 3).
+Both are JSON Schema 2020-12, carry a `schemaVersion` field, and are the single owner of the definition format. Old schema versions import forever. Both carry an `expressionLanguage` member (only `urn:horus-bpm:expr:v1` before S1). From M1 (rule sets) and M2 (processes) they are serialisations of the DMN and BPMN semantic models (ADR-0018); BPMN XML and DMN XML are the other serialisations ([`standards-compliance.md`](standards-compliance.md) section 3).
 
 ## 6. Cross-cutting concerns
 
@@ -454,26 +460,24 @@ Items the maintainers settle before the milestone named; each change lands in th
 | Which `attemptId` a compensate handler receives: the forward step's (from the stack) or a new one per compensation attempt; and the job kind for compensation jobs (`job_kind` lists no compensation value) | `TR-IDEM-04` keys idempotency on it | M2 |
 | `pre_compensation_stack` has no DDL yet, and the migration plan has no table (`pre_migration` was listed earlier) | Section 5.1 lists only tables with DDL | M2 |
 | Incident code for a guardrail violation with `onViolation: fail` | Operators filter incidents by code | M2 |
-| Which Jackson major `*-core` uses, and how the starters bridge the other one: Spring Boot 4 defaults to Jackson 3, Spring Boot 3.5 uses Jackson 2 (ADR-0011). Pending product decision [PD-071](../product/decisions.md#pd-071-jackson-major-used-inside-the-engine-cores) | `*-core` depends on Jackson; Jackson types must stay out of the public API | M1 start |
 | Nested `callProcess` compensation propagation | Open in the process engine design; for subprocesses answered in [`standards-compliance.md`](standards-compliance.md) section 5.8 | M2 start |
-| FEEL null semantics for the expression language (P1), execution tree with scope tokens (P2), canonical BPMN and DMN model (P3) | Cheap before the first release, a rewrite or a replay break afterwards ([`standards-compliance.md`](standards-compliance.md) section 9.2). **Decision needed** by the product owner | P1 and P3 before M1 code, P2 before M2 code |
 
 ## 13. Where to go next
 
 | Topic | Document |
 |---|---|
 | Rule Engine internals, money contract, DDL, REST table | [`rule-engine/docs/DESIGN.md`](../../rule-engine/docs/DESIGN.md) |
-| Rule Engine behaviour (`RLE-001` to `RLE-022`) | [`rule-engine/docs/SPEC.md`](../../rule-engine/docs/SPEC.md) |
+| Rule Engine behaviour (`RLE-001` to `RLE-024`) | [`rule-engine/docs/SPEC.md`](../../rule-engine/docs/SPEC.md) |
 | Rule set definition format | [`rule-engine/api/schema/rule-set.v1.schema.json`](../../rule-engine/api/schema/rule-set.v1.schema.json) |
 | Process Engine internals, guardrail contract, DDL, REST table | [`process-engine/docs/DESIGN.md`](../../process-engine/docs/DESIGN.md) |
-| Process Engine behaviour (`PRE-001` to `PRE-042`) | [`process-engine/docs/SPEC.md`](../../process-engine/docs/SPEC.md) |
+| Process Engine behaviour (`PRE-001` to `PRE-045`) | [`process-engine/docs/SPEC.md`](../../process-engine/docs/SPEC.md) |
 | Process definition format | [`process-engine/api/schema/process-definition.v1.schema.json`](../../process-engine/api/schema/process-definition.v1.schema.json) |
 | Full BPMN 2.0 and DMN: canonical model, FEEL, execution model, staging, conformance proof, do-now list | [`standards-compliance.md`](standards-compliance.md) |
 | Diagram layout and task form formats | [`definition-layout.v1.schema.json`](../../process-engine/api/schema/definition-layout.v1.schema.json), [`task-form.v1.schema.json`](../../process-engine/api/schema/task-form.v1.schema.json) |
 | Cockpit structure and release scope | [`cockpit/docs/DESIGN.md`](../../cockpit/docs/DESIGN.md) |
 | Cockpit behaviour (`CKP-001` to `CKP-029`) | [`cockpit/docs/SPEC.md`](../../cockpit/docs/SPEC.md) |
 | Cockpit host registry and host metadata formats | [`cockpit-hosts.v1.schema.json`](../../cockpit/api/schema/cockpit-hosts.v1.schema.json), [`bpm-meta.v1.schema.json`](../../cockpit/api/schema/bpm-meta.v1.schema.json), [`bpm-me.v1.schema.json`](../../cockpit/api/schema/bpm-me.v1.schema.json) |
-| Decisions | [`docs/adr/`](../adr/): [0001](../adr/0001-java-spring-boot-postgresql.md), [0002](../adr/0002-state-in-host-database.md), [0003](../adr/0003-own-expression-language.md), [0004](../adr/0004-no-standalone-server.md), [0005](../adr/0005-cockpit-as-static-assets.md), [0006](../adr/0006-idempotency-and-business-keys.md), [0007](../adr/0007-compensation-instead-of-distributed-transactions.md), [0008](../adr/0008-async-wait-state-for-external-steps.md), [0009](../adr/0009-cache-coherence-listen-notify-and-epoch.md), [0010](../adr/0010-engine-contract-conventions.md), [0011](../adr/0011-spring-boot-4-baseline.md), [0012](../adr/0012-process-definition-lifecycle-and-maker-checker.md), [0013](../adr/0013-diagram-notation-layout-and-library.md), [0014](../adr/0014-multi-host-cockpit-federation.md), [0015](../adr/0015-operational-read-models-and-query-limits.md), [0016](../adr/0016-java-api-conventions.md), [0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md), [0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md), [0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md), [0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md) |
+| Decisions | [`docs/adr/`](../adr/): [0001](../adr/0001-java-spring-boot-postgresql.md), [0002](../adr/0002-state-in-host-database.md), [0003](../adr/0003-own-expression-language.md), [0004](../adr/0004-no-standalone-server.md), [0005](../adr/0005-cockpit-as-static-assets.md), [0006](../adr/0006-idempotency-and-business-keys.md), [0007](../adr/0007-compensation-instead-of-distributed-transactions.md), [0008](../adr/0008-async-wait-state-for-external-steps.md), [0009](../adr/0009-cache-coherence-listen-notify-and-epoch.md), [0010](../adr/0010-engine-contract-conventions.md), [0011](../adr/0011-spring-boot-4-baseline.md), [0012](../adr/0012-process-definition-lifecycle-and-maker-checker.md), [0013](../adr/0013-diagram-notation-layout-and-library.md), [0014](../adr/0014-multi-host-cockpit-federation.md), [0015](../adr/0015-operational-read-models-and-query-limits.md), [0016](../adr/0016-java-api-conventions.md), [0017](../adr/0017-full-bpmn-and-dmn-support-no-cmmn.md), [0018](../adr/0018-canonical-model-bpmn-and-dmn-semantic-models.md), [0019](../adr/0019-feel-strategy-horus-built-deterministic-feel.md), [0020](../adr/0020-execution-tree-scopes-and-event-subscriptions.md), [0021](../adr/0021-jackson-3-inside-engine-cores.md), [0022](../adr/0022-maven-coordinates-and-package-root.md), [0023](../adr/0023-fixed-rule-engine-table-names.md) |
 | Requirements (`TR-*`) | [`docs/product/requirements.md`](../product/requirements.md) |
 | Proposing a new feature | [`docs/proposals/README.md`](../proposals/README.md) |
 | Diagram sources | [`diagrams/`](diagrams/), rendered to [`images/`](images/) with `wiki/diagrams/theme.json` |

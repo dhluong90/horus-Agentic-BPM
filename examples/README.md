@@ -1,6 +1,6 @@
 # Examples
 
-Minimal Spring Boot host services that embed the engines. Each one is built and tested by `mvn -B verify` at the repository root.
+Minimal Spring Boot host services that embed the engines. Each one is built and tested by `mvn -B verify` at the repository root. Every example's parent is `examples/pom.xml`, which marks it as never published.
 
 | Example | Shows | Status |
 |---|---|---|

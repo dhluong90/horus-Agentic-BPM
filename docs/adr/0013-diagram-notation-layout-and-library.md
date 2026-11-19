@@ -4,7 +4,7 @@
 - Date: 2026-11-18
 - Deciders: product owner (PD-032, PD-034, PD-039, PD-041), maintainers
 - Module: process-engine, cockpit
-- Superseded in part by: [ADR-0017](0017-full-bpmn-and-dmn-support-no-cmmn.md) (decision 3 is the M3 scope, no longer the end state of BPMN interchange) and, when accepted, [ADR-0018](0018-canonical-model-bpmn-and-dmn-semantic-models.md) (decision 1, notation). Layout storage, the hardened StAX reader and the diagram library stay.
+- Superseded in part by: [ADR-0017](0017-full-bpmn-and-dmn-support-no-cmmn.md) (decision 3 is the M3 scope, no longer the end state of BPMN interchange) and, since 2026-11-19, [ADR-0018](0018-canonical-model-bpmn-and-dmn-semantic-models.md) (decision 1, notation: the BPMN semantic model is canonical and our JSON is its serialisation). Layout storage, the hardened StAX reader and the diagram library stay.
 
 ## Context
 The product owner put read-only diagrams in M2 and a modeller in M3 (PD-032) and kept our own JSON as the canonical notation with a BPMN subset for import and export (PD-034). Definitions carry no layout today. Three questions follow: what the source notation is, where layout lives so that moving a box does not change behaviour or need approval, and which diagram library passes the licence rule (`TR-LIC-01`: Apache 2.0, MIT and BSD only).

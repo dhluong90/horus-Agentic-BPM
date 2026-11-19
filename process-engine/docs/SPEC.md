@@ -428,3 +428,29 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `step id Activity_0x1y2z3 -> stored and shown unchanged; 1-bad -> 422`.
 - **Test ID:** `PRE_042_bpmn_style_step_ids_kept`
 
+### PRE-043 A v1 definition reads into the BPMN model and writes back to the same canonical JSON
+- **Traces to:** `TR-STD-28`, `TR-STD-03`, `TR-DEF-04`
+- **Milestone:** M2
+- **Given:** `kyc-onboarding.yaml` (v1) with steps `start`, `collect-documents` (`userTask`), `check-risk` (`exclusiveGateway` with branches `high` and `low` and a default), a `saga` block `open-accounts` holding `reserve-funds` and `open-account`, `notify` (`serviceTask`) and `end`, and the RFC 8785 hash computed by the pipeline from the file.
+- **When:** The v1 reader builds the in-memory model, and the canonical writer prints it back.
+- **Then:** The model holds one BPMN `process` with a `startEvent`, a `userTask`, an `exclusiveGateway` with one default flow, a `transaction` subprocess `open-accounts` containing two `serviceTask` nodes, a `serviceTask` and an `endEvent`, every node with its step id; sequence flows carry the derived ids `start__collect-documents`, `check-risk__b0`, `check-risk__b1`, `check-risk__default` and so on; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document, contains no sequence flow ids, and its SHA-256 equals the pipeline hash.
+- **Example:** `kyc-onboarding.yaml -> model -> canonical JSON; hash before = hash after`.
+- **Test ID:** `PRE_043_v1_definition_round_trips_through_bpmn_model`
+
+### PRE-044 Joins and compensation are keyed by scope token
+- **Traces to:** `TR-STD-29`, `TR-ASY-03`, `TR-COMP-01`
+- **Milestone:** M2
+- **Given:** Definition `loan-booking` v1: `register-loan` (`serviceTask`, compensate `cancelLoan`), then a `saga` block `disburse` holding a `parallelGateway` that forks into `reserve-funds` (compensate `releaseFunds`) and `open-account` (compensate `closeAccount`), joins, then `notify-partner` (`onFailure: compensate`, `retry.max: 0`), all handlers stubbed to succeed and `notify-partner` stubbed to fail.
+- **When:** An instance starts and runs until `notify-partner` fails.
+- **Then:** At start `pre_token` holds one root `SCOPE` token (`scope_token_id` null, `current_node_id = loan-booking`, `WAITING_SCOPE`) and one `FLOW` token under it; entering `disburse` creates a second `SCOPE` token whose `scope_token_id` is the root; the join counts only the two `FLOW` tokens of the `disburse` scope token and creates exactly one outgoing token; `pre_compensation_stack` holds `cancelLoan` under the root scope token and `releaseFunds` and `closeAccount` under the `disburse` scope token; after the failure the engine runs the two `disburse` handlers newest first, never `cancelLoan`, and the `disburse` scope token ends `COMPENSATED` while the root `cancelLoan` entry stays `PENDING`; a second instance started at the same time shares no token or stack row with the first.
+- **Example:** `notify-partner fails in saga disburse -> the two disburse handlers run newest first; cancelLoan is not run`.
+- **Test ID:** `PRE_044_joins_and_compensation_keyed_by_scope_token`
+
+### PRE-045 Engine REST bodies ignore the host's JSON settings
+- **Traces to:** `TR-EMB-07`, `TR-API-06`
+- **Milestone:** M2
+- **Given:** A host with the Process Engine starter and REST module, and host properties `spring.jackson.property-naming-strategy=SNAKE_CASE` and `spring.jackson.serialization.write-dates-as-timestamps=true`; the same test runs in the Spring Boot 4.x leg and in the Spring Boot 3.5 leg, where the host's own Jackson 2 stays at the version its dependency management pins.
+- **When:** `POST /api/bpm/processes/v1/instances` with `Idempotency-Key: 01JD2X5K9T1Q4N8V2M7B3C6D0E` and body `{ "definition": "kyc-onboarding", "businessKey": "APP-1001", "variables": { "applicantName": "Tran Thi B" } }`, then `GET /api/bpm/processes/v1/instances/{id}`.
+- **Then:** The start is accepted (`201`) because the engine reads the camelCase body with its own Jackson 3 mapper; the response keys are camelCase (`businessKey`, `startedAt`), `startedAt` is an ISO 8601 string, and the host's own controllers still answer in snake case; the dependency tree of the 3.5 leg shows Jackson 3 from the engine next to the host's Jackson 2, with no host version override.
+- **Example:** `host SNAKE_CASE -> engine response {"businessKey":"APP-1001","startedAt":"2027-02-01T09:00:00Z"}`.
+- **Test ID:** `PRE_045_engine_rest_bodies_ignore_host_json_settings`

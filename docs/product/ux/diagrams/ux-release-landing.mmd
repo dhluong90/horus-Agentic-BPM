@@ -1,0 +1,54 @@
+flowchart LR
+  subgraph R01 ["Cockpit 0.1, M1, 15 Jan 2027"]
+    A1["Host bar, one sign-in"]
+    A2["Rule set table, docked layout,<br/>read only"]
+    A3["Policy readings everywhere<br/>a row appears"]
+    A4["Change dossier: matrix diff,<br/>policy redline, simulation,<br/>four-eyes gate"]
+    A5["Spreadsheet round-trip"]
+    A6["Cell and row editing<br/>proposed, awaiting confirmation"]
+    A7["Trace and decision page"]
+  end
+  subgraph R02 ["Cockpit 0.2, M2, 26 Mar 2027"]
+    B1["Process canvas home,<br/>tokens and path"]
+    B2["Typed matrix editor,<br/>templates, live readings"]
+    B3["Control tower: one inbox,<br/>one incident list"]
+    B4["Guardrail inspector,<br/>approve or override"]
+    B5["Override rate on the<br/>autonomy ladder"]
+    B6["Tenant switcher"]
+  end
+  subgraph R10 ["Cockpit 1.0, M3, 21 May 2027"]
+    C1["Process graph diff lens"]
+    C2["Replay impact, stored report"]
+    C3["Eval panel beside the ladder"]
+    C4["And/Or builder lens<br/>cut candidate"]
+    C5["Latency heat, modeller link<br/>cut candidates"]
+  end
+  subgraph RL ["After 1.0 or proposed"]
+    D1["KPI pulse strip"]
+    D2["Row hit sparkbars"]
+    D3["Override reason tags"]
+  end
+  A2 --> B1
+  A5 --> B2
+  A6 -. "if confirmed" .-> B2
+  A3 --> B2
+  A4 --> C1
+  A4 --> C2
+  B2 --> C4
+  B4 --> B5 --> C3
+  B3 --> D1
+  B1 --> C5
+  B4 -.-> D3
+  A2 -.-> D2
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F;
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F;
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F;
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F;
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F;
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F;
+  class A1,A2,A3,A4,A5,A7,B1,B2,B3,B4,B5,B6,C1,C2,C3 client;
+  class A6,C4,C5,D1,D2,D3 obs;
+  style R01 fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style R02 fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style R10 fill:none,stroke:#1565C0,stroke-dasharray:5 5
+  style RL fill:none,stroke:#546E7A,stroke-dasharray:5 5

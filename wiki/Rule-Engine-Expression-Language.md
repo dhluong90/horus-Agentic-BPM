@@ -31,14 +31,40 @@ Design preview: describes the 0.1 target.
 | Group | Operators | Rules |
 |---|---|---|
 | Comparison | `==` `!=` `<` `<=` `>` `>=` | Both sides must have the same type. Money compares only within one currency; a currency mismatch is an evaluation error (TR-DET-03) |
-| Logic | `and` `or` `not` | |
+| Logic | `and` `or` `not` | Three-valued with `null`, as in FEEL; see [Null values](#null-values) |
 | Membership | `in [..]`, `not in [..]` | List element type must match |
 | Range | `between a and b` | Inclusive on both ends |
 | Arithmetic | `+` `-` `*` `/` | Number with number; money with money of the same currency for `+` and `-`; `money * number` and `money / number`; `money / money` is not allowed |
 | String | `startsWith(s, 'x')`, `endsWith(s, 'x')`, `contains(s, 'x')`, `matches(s, 'regex')` | Plain function form only; there is no method-call syntax. `matches` is bounded by `evaluation.regex-timeout-ms` and `evaluation.regex-max-input-length` |
-| Null | `is null`, `is not null` | Any comparison with `null` yields `false`; test for null explicitly |
+| Null | `is null`, `is not null` | Always `true` or `false`. Other operators follow [Null values](#null-values) |
 
 Precedence from lowest to highest: `or`, `and`, `not`, comparison, `+ -`, `* /`, unary minus. Parentheses override.
+
+## Null values
+
+A missing input or a `null` value follows FEEL, the DMN expression language, so every expression gives the same result when it is exported to DMN (ADR-0019). A condition matches only when it evaluates to `true`; a `null` result never matches.
+
+| Expression with `tier = null` and `income = null` | Result | Matches |
+|---|---|---|
+| `income < 5000000 VND`, `income between 1 VND and 9 VND` | `null` | No |
+| `tier == 'GOLD'` | `false` | No |
+| `tier != 'GOLD'` | `true` | Yes |
+| `tier in ['GOLD', 'PLATINUM']` | `false` | No |
+| `tier not in ['GOLD', 'PLATINUM']` | `true` | Yes |
+| `tier is null` | `true` | Yes |
+| `not(income < 5000000 VND)` | `null` | No |
+| `income + 1 VND > 0 VND`, `len(tier) > 3` (arithmetic and functions give `null`) | `null` | No |
+| `coalesce(tier, 'STANDARD') == 'STANDARD'` | `true` | Yes |
+
+`and` and `or` with `null`:
+
+| Left | Right | `and` | `or` |
+|---|---|---|---|
+| `true` | `null` | `null` | `true` |
+| `false` | `null` | `false` | `null` |
+| `null` | `null` | `null` | `null` |
+
+`!=` and `not in` match a missing value. If a rule must not match when the input is missing, write it out: `tier is not null and tier != 'GOLD'`. Publication reports a warning when an input that may be missing is used with `!=` or `not in`.
 
 ## Shorthand in `when`
 

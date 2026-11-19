@@ -8,7 +8,7 @@ flowchart TB
     CockpitStarter["cockpit-spring-boot-starter<br/>static assets at /bpm/cockpit"]
     RESTc["*-rest<br/>Spring WebMvc, RFC 9457, OpenAPI 3.1"]
     Starter["*-spring-boot-starter<br/>@AutoConfiguration, TenantResolver,<br/>scheduler thread, Micrometer"]
-    Core["*-core<br/>parser, evaluator, token runtime<br/>Java 21 + Jackson only"]
+    Core["*-core<br/>parser, evaluator, token runtime<br/>Java 21 + Jackson 3 only"]
     PG["*-postgres<br/>JdbcClient, Flyway per engine,<br/>SKIP LOCKED poller, LISTEN/NOTIFY"]
     Adapters["Host adapters<br/>AgentAdapter, ServiceAdapter beans"]
   end

@@ -13,12 +13,11 @@ Reference for every `horus.bpm.rules.*` property of the Rule Engine starter and 
 
 ## Properties
 
-All names are under `horus.bpm.rules.`.
+All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway history `rle_schema_history`) and have no property.
 
 | Property | Default | Status | Meaning |
 |---|---|---|---|
 | `enabled` | `true` | Built | Register the engine beans. The engine needs exactly one `DataSource` in the host (or one marked `@Primary`); without it the starter stays inactive and logs a warning |
-| `schema-prefix` | `rle_` | Pending PD-072 | Table prefix in the host database. The Flyway history table is `<prefix>schema_history`, separate from the host's. The first build fixes the prefix at `rle_` and the history table at `rle_schema_history` |
 | `migrate-on-start` | `true` | Built | Run the engine's Flyway migrations at start-up with the host `DataSource`; `false` for hosts that run migrations in a separate job |
 | `definitions` | unset | 0.1 (M1) | Resource pattern of YAML rule sets to load as drafts at start-up |
 | `definitions-tenant` | `default` | 0.1 (M1) | Tenant that owns rule sets loaded from `definitions`. A document may override it with a top-level `tenant:` field; multi-tenant hosts load per-tenant files or use the import endpoint |
