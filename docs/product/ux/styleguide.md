@@ -5,7 +5,7 @@
 | Type | Design specification |
 | Owner area | Product |
 | Last reviewed | 2026-11-19 |
-| Status | Proposed, for review |
+| Status | Proposed; menu visibility, the page ground and card titles decided in PD-093 |
 
 This is the build-ready styleguide for the cockpit and for the sign-in page of the example host. It turns the approved hybrid direction ([UX design](../ux-design.md), [PD-056](../decisions.md#pd-056-rule-management-ux-direction)) into CSS variables, a type scale, spacing, radius, elevation, the shell layout and the state of every core component.
 
@@ -57,20 +57,22 @@ Meaning of each hue (from UX design section 6.1, repeated here because the build
 | Violet | `--violet*` | Agent steps and route-to-human only | Anything in the rule screens |
 | Contrast slate | `--surface-contrast` | The single focal card of a screen (Home's next step; the sign-in brand panel) | More than one card per screen |
 
-## 3. New colour tokens
+## 3. Colour tokens for the shell
 
-These are added to `tokens.css`. Ratios are WCAG 2.x, measured by script on the real surface.
+The shell's colour tokens in one table. `--primary-fill` and `--on-primary` already exist in `tokens.css`; the others are added. Ratios are WCAG 2.x, measured by script on the real surface.
 
 | Token | Role | Light | Dark | Ratio, light | Ratio, dark | Measured against |
 |---|---|---|---|---|---|---|
+| `--primary-fill` | Primary button fill | `#0369A1` | `#0C9AD9` | 5.93 with `--on-primary`; 5.93 against `--surface` | 5.95 with `--on-primary`; 5.51 against `--surface` | `--on-primary`, `--surface` |
+| `--on-primary` | Text and icon on the primary fill | `#FFFFFF` | `#04131D` | 5.93 | 5.95 | `--primary-fill` |
 | `--surface-contrast` | The one focal card, sign-in brand panel | `#0F172A` | `#1B2840` | 16.49 | 1.30, separated by `--contrast-line` | `--bg` |
 | `--contrast-line` | Hairline of the contrast card | `transparent` | `#3B5A86` | | 2.73, decorative | `--bg` |
 | `--on-contrast` | Text on the contrast card | `#F8FAFC` | `#F1F5F9` | 17.06 | 13.46 | `--surface-contrast` |
 | `--on-contrast-muted` | Secondary text on it | `#A9B4C6` | `#A9B4C6` | 8.53 | 7.04 | `--surface-contrast` |
 | `--on-contrast-accent` | Link or count on it | `#7DD3FC` | `#7DD3FC` | 10.71 | 8.84 | `--surface-contrast` |
 | `--contrast-action` | Button fill on the contrast card | `#F8FAFC` | `#F1F5F9` | 17.06 with `--surface-contrast` text | 13.46 | text `#0F172A` / `#0B0F17` |
-| `--primary-hover` | Primary button, hover | `#075985` | `#38BDF8` | 7.56 with `--on-primary` | 8.78 | |
-| `--primary-active` | Primary button, pressed | `#0C4A6E` | `#0284C7` | 9.46 | 4.59 | |
+| `--primary-hover` | Primary button, hover | `#075985` | `#38BDF8` | 7.56 with `--on-primary` | 8.78 with `--on-primary` | |
+| `--primary-active` | Primary button, pressed | `#0C4A6E` | `#0284C7` | 9.46 with `--on-primary` | 4.59 | |
 | `--rail` | Menu background | `#FFFFFF` | `#0E141F` | | | |
 | `--rail-line` | Menu edge | `var(--line)` | `var(--line)` | decorative | decorative | |
 
@@ -180,10 +182,15 @@ The avatar opens a menu (level 4): full name, roles in words (`Author`, `Approve
 | Group | Items |
 |---|---|
 | (no heading) | Home · Rules · Approvals, with a count badge of the requests the user can review |
-| Preview | Decisions · Processes, each with a neutral `Preview` tag |
+| Preview | Decisions · Processes |
 
 - Each item is an icon (20 px) and one label. No subtitle under the label: the page header carries it.
-- Items are always shown in this order. An item the user's role cannot use is hidden, never disabled.
+- Items are always shown in this order. Every user with a rule permission sees all five, authors included (PD-093).
+- An area is hidden only when it holds data the user may not read, and never shown disabled:
+  - Decisions, from 0.2.0, shows only to users with permission to read the decision log;
+  - Processes shows only when a Process Engine host is registered;
+  - a user with no rule permission sees Home only.
+- "Preview" is said once in the menu: as the group heading. The items under it carry no tag of their own. In the collapsed menu the group keeps a divider, and the tooltip reads "Decisions (Preview)".
 - Footer: Collapse menu. The collapsed menu is 72 px wide with icons and a tooltip label; the count badge becomes a dot.
 - Item height 40 px, padding 0 12 px, gap 12 px between icon and label, 4 px between items.
 
@@ -241,10 +248,10 @@ Height 24 px, padding 0 8 px, `--radius-pill`, `--type-caption` at 600, icon 12 
 | Draft | `--surface-3` | `--ink-2` | pencil |
 | Waiting for approval | `--accent-soft` | `--accent` | clock |
 | Published | `--ok-soft` | `--ok` | check |
-| Rejected | `--bad-soft` | `--bad` | cross |
-| Withdrawn | `--surface-3` | `--muted` | arrow back |
-| Preview (menu, page title) | none, 1 px `--line-strong` | `--muted` | none |
+| Preview (page title only) | none, 1 px `--line-strong` | `--muted` | none |
 | Demo (top bar, sign-in) | `--warn-soft` | `--warn` | none |
+
+A version has three states: Draft, Waiting for approval and Published. A rejected or withdrawn request sends the version back to Draft, so there is no Rejected or Withdrawn pill. Those words appear only in history rows and events, as text with an icon (`✕ Rejected by Trần Văn Minh`, `↩ Withdrawn by Nguyễn Thị Lan`), with no fill.
 
 ### Menu items
 
@@ -276,7 +283,7 @@ Underline tabs for the views of one object (Table · Changes · History): `--typ
 
 | Kind | Treatment |
 |---|---|
-| Error | `--bad-soft` fill, 1 px `--bad-fill` left edge 3 px, `--ink` text, ✕ icon in `--bad`. One plain sentence. The reference id sits behind a `Details` disclosure with a Copy button |
+| Error | `--bad-soft` fill, 1 px `--bad-fill` left edge 3 px, `--ink` text, ✕ icon in `--bad`. One plain sentence. The error code and the correlation id stay one click away: a `Details` disclosure shows both, each with a Copy button |
 | Warning | Same shape with `--warn*` |
 | Success | Toast at level 4, bottom right, `--ok` check icon, 6 seconds, `aria-live="polite"` |
 | Information | `--accent-soft` with an info icon; there is no separate info hue |
@@ -304,7 +311,7 @@ Layout at 1440x900:
 | Form column | Right, the form centred in the remaining width, 400 px wide, no card frame |
 | Form | Heading `Sign in` at `--type-h1`, one subtitle line, Username, Password, a full-width primary `Sign in` button |
 | Preferences | Top right of the form column: EN / VI and the theme button |
-| Demo accounts | Below the form, only on a demo host: a `--surface-2` box with a 1 px `--line`, the `Demo` tag, one sentence, and the demo users as a list of rows: name and role in words. Choosing a row fills the username. No amber frame and no upper-case heading |
+| Demo accounts | Below the form, only when the host runs the dev profile, never in any other environment: a `--surface-2` box with a 1 px `--line`, the `Demo` tag, one sentence, and the demo users as a list of rows: name and role in words. Choosing a row fills the username. No amber frame and no upper-case heading |
 | Error | The error alert sits between the subtitle and the fields; both fields get `aria-invalid` |
 | Signed out | A success line in the same place |
 
@@ -320,7 +327,7 @@ Below 960 px wide the brand panel becomes a 120 px band above the form.
 
 ## 12. CSS to add today
 
-Add these blocks to `cockpit/web/src/components/tokens.css` (light in `:root`; dark in both dark blocks, which must stay identical) and to the example host's `sign-in.css`.
+Add these blocks to `cockpit/web/src/components/tokens.css` and to the example host's `sign-in.css`. Dark mode is defined twice: once for an explicit dark choice (`data-theme="dark"`) and once for a dark system setting before any choice is stored. Both dark blocks below carry the same values and must stay identical, so a user on a dark system setting gets the same tokens and contrast as one who chose dark.
 
 ```css
 :root {
@@ -350,6 +357,7 @@ Add these blocks to `cockpit/web/src/components/tokens.css` (light in `:root`; d
   --sh-pop: 0 16px 40px -8px rgba(15, 23, 42, .18), 0 2px 6px rgba(15, 23, 42, .06);
 }
 
+/* Explicit dark choice */
 :root[data-theme="dark"] {
   --surface-contrast: #1B2840; --contrast-line: #3B5A86;
   --on-contrast: #F1F5F9; --on-contrast-muted: #A9B4C6; --on-contrast-accent: #7DD3FC;
@@ -358,6 +366,19 @@ Add these blocks to `cockpit/web/src/components/tokens.css` (light in `:root`; d
   --rail: #0E141F; --rail-line: var(--line);
   --sh-dock: 0 1px 0 rgba(255, 255, 255, .07) inset, 0 -12px 28px -12px rgba(0, 0, 0, .8);
   --sh-pop: 0 0 0 1px rgba(148, 163, 184, .34), 0 16px 40px -8px rgba(0, 0, 0, .8);
+}
+
+/* Dark system setting, before a choice is stored: same values as above */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface-contrast: #1B2840; --contrast-line: #3B5A86;
+    --on-contrast: #F1F5F9; --on-contrast-muted: #A9B4C6; --on-contrast-accent: #7DD3FC;
+    --contrast-action: #F1F5F9; --on-contrast-action: #0B0F17;
+    --primary-hover: #38BDF8; --primary-active: #0284C7;
+    --rail: #0E141F; --rail-line: var(--line);
+    --sh-dock: 0 1px 0 rgba(255, 255, 255, .07) inset, 0 -12px 28px -12px rgba(0, 0, 0, .8);
+    --sh-pop: 0 0 0 1px rgba(148, 163, 184, .34), 0 16px 40px -8px rgba(0, 0, 0, .8);
+  }
 }
 ```
 
