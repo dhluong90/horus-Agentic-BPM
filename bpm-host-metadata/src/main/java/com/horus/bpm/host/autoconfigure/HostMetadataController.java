@@ -1,5 +1,8 @@
 package com.horus.bpm.host.autoconfigure;
 
+import com.horus.bpm.host.spi.EngineAccess;
+import com.horus.bpm.host.spi.EngineAccessDeniedException;
+import com.horus.bpm.host.spi.EngineCaller;
 import com.horus.bpm.host.spi.ModuleDescriptor;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
@@ -12,7 +15,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,6 +32,10 @@ import org.springframework.web.bind.annotation.RestController;
  * is never served from the browser cache without asking the host. Bodies are built as ordered maps and
  * written by the host's own JSON converter, so absent optional fields are omitted rather than written as
  * {@code null}.
+ *
+ * <p>The caller, the tenant and every listed permission come from {@link EngineAccess}, the same seam the
+ * engine endpoints enforce with, so {@code /me} cannot list a permission the endpoints refuse or leave out
+ * one they allow.
  */
 @RestController
 @RequestMapping("/api/bpm")
@@ -42,19 +48,19 @@ final class HostMetadataController {
 
     private final List<ModuleDescriptor> modules;
     private final HostMetadataProperties properties;
-    private final CallerResolution callers;
+    private final EngineAccess access;
     /** {@code /me} depends on the caller's credentials and on the switch request header. */
-    static final String[] ME_VARY = {HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE, CallerResolution.TENANT_SWITCH_HEADER};
+    static final String[] ME_VARY = {HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE, DefaultEngineAccess.TENANT_SWITCH_HEADER};
 
-    HostMetadataController(List<ModuleDescriptor> modules, HostMetadataProperties properties, CallerResolution callers) {
+    HostMetadataController(List<ModuleDescriptor> modules, HostMetadataProperties properties, EngineAccess access) {
         this.modules = List.copyOf(modules);
         this.properties = properties;
-        this.callers = callers;
+        this.access = access;
     }
 
     @GetMapping("/meta")
     ResponseEntity<Map<String, Object>> meta(HttpServletRequest request) {
-        callers.resolve(request);
+        access.currentCaller();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("schemaVersion", 1);
         if (properties.hostId() != null) {
@@ -80,7 +86,7 @@ final class HostMetadataController {
 
     @GetMapping("/me")
     ResponseEntity<Map<String, Object>> me(HttpServletRequest request) {
-        Caller caller = callers.resolve(request);
+        EngineCaller caller = access.currentCaller();
         Map<String, Object> user = new LinkedHashMap<>();
         user.put("id", caller.userId());
         if (caller.displayName() != null) {
@@ -99,32 +105,20 @@ final class HostMetadataController {
         return cacheable(request, body, ME_CACHE_CONTROL, ME_VARY);
     }
 
-    @ExceptionHandler(ProblemException.class)
-    ResponseEntity<String> problem(ProblemException exception, HttpServletRequest request) {
-        Problem problem = exception.problem();
-        ResponseEntity.BodyBuilder response = ResponseEntity.status(problem.status())
-                .contentType(MediaType.parseMediaType(Problem.MEDIA_TYPE))
-                .header(HttpHeaders.CACHE_CONTROL, "no-store")
-                .header(CorrelationIds.HEADER, CorrelationIds.of(request));
-        if (exception.challenge() != null) {
-            response.header(HttpHeaders.WWW_AUTHENTICATE, exception.challenge());
-        }
-        return response.body(problem.toJson(request));
+    @ExceptionHandler(EngineAccessDeniedException.class)
+    ResponseEntity<String> refused(EngineAccessDeniedException exception, HttpServletRequest request) {
+        return EngineAccessProblems.response(exception, request);
     }
 
     /**
-     * The caller's permissions in each engine's display order: an authority equal to a permission, or a
-     * host authority the engine's role mapping grants it for. Nothing outside the installed engines'
-     * vocabularies is ever listed.
+     * The caller's permissions in each engine's display order: exactly those for which {@link EngineAccess}
+     * answers yes. Nothing outside the installed engines' vocabularies is ever listed.
      */
-    private List<String> permissions(Caller caller) {
+    private List<String> permissions(EngineCaller caller) {
         List<String> granted = new ArrayList<>();
         for (ModuleDescriptor module : modules) {
             for (String permission : module.permissions()) {
-                boolean held = caller.authorities().contains(permission)
-                        || module.rolePermissions().entrySet().stream().anyMatch(mapping ->
-                                caller.authorities().contains(mapping.getKey()) && mapping.getValue().contains(permission));
-                if (held) {
+                if (access.hasPermission(caller, permission)) {
                     granted.add(permission);
                 }
             }
@@ -136,7 +130,7 @@ final class HostMetadataController {
      * The caller's host roles that some engine maps to permissions, sorted. Host roles unrelated to the
      * engines stay out of the response, so the host's role model does not reach the browser.
      */
-    private List<String> roles(Caller caller) {
+    private List<String> roles(EngineCaller caller) {
         return caller.authorities().stream()
                 .filter(authority -> modules.stream().anyMatch(module -> module.rolePermissions().containsKey(authority)))
                 .sorted()

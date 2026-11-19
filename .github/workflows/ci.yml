@@ -68,6 +68,19 @@ jobs:
           java-version: ${{ matrix.java }}
           cache: maven
 
+      # The cockpit starter packages cockpit/web/dist; every leg builds the starter, and the example host's cockpit test needs it.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: cockpit/web/package-lock.json
+
+      - name: Build the cockpit bundle
+        working-directory: cockpit/web
+        run: |
+          npm ci
+          npm run build
+
       - name: Build, unit and ArchUnit tests, Testcontainers integration tests (Spring Boot 4.x)
         if: matrix.boot == '4.x'
         run: mvn -B -ntp verify -Dbpm.test.postgres.image="$POSTGRES_IMAGE"
@@ -144,6 +157,19 @@ jobs:
           python3 tools/check-dependency-policy.py poms
           python3 tools/check-dependency-policy.py grype-config
 
+      # The cockpit starter packages cockpit/web/dist, so the gates see the jar as it ships.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: cockpit/web/package-lock.json
+
+      - name: Build the cockpit bundle
+        working-directory: cockpit/web
+        run: |
+          npm ci
+          npm run build
+
       - name: Licence gate (TR-LIC-01) and CycloneDX SBOMs (TR-SEC-06)
         run: mvn -B -ntp verify -DskipTests
 
@@ -202,3 +228,57 @@ jobs:
             **/target/generated-sources/license/THIRD-PARTY.txt
           if-no-files-found: warn
           retention-days: 90
+
+  cockpit:
+    # The cockpit web application: licences of shipped packages, generated schemas, lint, types,
+    # Vitest, then Playwright on the bundled Chromium against the production build.
+    name: Cockpit (lint, typecheck, Vitest, Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cockpit/web
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: cockpit/web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Licences of shipped packages (TR-LIC-01)
+        run: npm run licences
+
+      - name: Generated schemas match cockpit/api/schema
+        run: npm run schemas:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Vitest
+        run: npm test
+
+      - name: Install the bundled Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright (production build, 1440x900 and 1440x1200, light and dark, English and Vietnamese)
+        run: npm run e2e
+
+      - name: Upload Playwright report and screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cockpit-playwright
+          path: |
+            cockpit/web/playwright-report/
+            cockpit/web/e2e/screenshots/
+            cockpit/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

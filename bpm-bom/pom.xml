@@ -65,6 +65,11 @@
         <artifactId>rule-engine-spring-boot-starter</artifactId>
         <version>${project.version}</version>
       </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
+        <artifactId>cockpit-spring-boot-starter</artifactId>
+        <version>${project.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 </project>
