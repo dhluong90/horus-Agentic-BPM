@@ -68,7 +68,7 @@ class DefinitionLifecycleIT {
     }
 
     @Test
-    void PRE_019_definition_requester_cannot_approve() throws Exception {
+    void PRE_019_no_maker_of_a_definition_version_can_approve() throws Exception {
         // Given a KYC onboarding draft imported and requested by lan; lan and minh both hold processes:approve
         JsonNode draft = importKyc("Review identity documents", 201);
         String v = BASE + "/kyc-onboarding/versions/" + draft.get("version").intValue();

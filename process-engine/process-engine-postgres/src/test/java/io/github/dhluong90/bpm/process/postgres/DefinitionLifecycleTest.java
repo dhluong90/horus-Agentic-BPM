@@ -118,7 +118,7 @@ class DefinitionLifecycleTest {
     }
 
     @Test
-    void PRE_019_definition_requester_cannot_approve() {
+    void PRE_019_no_maker_of_a_definition_version_can_approve() {
         // Given v2 pending approval, requested by alice; alice and bob both hold processes:approve
         activate(1);
         DefinitionVersion pending = request(importAs(2), null);
@@ -135,6 +135,14 @@ class DefinitionLifecycleTest {
         assertThat(stored(2).lockVersion()).isEqualTo(pending.lockVersion());
         assertThat(count("SELECT count(*) FROM pre_definition_history")).isEqualTo(historyBefore);
         assertThat(engine.events).hasSize(eventsBefore);
+
+        // When the importer approves (default rule: makers)
+        engine.identity.as("bank-a", "pipeline", "processes:deploy", "processes:approve", "processes:read");
+        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), null, null))
+                // Then it is refused as well, naming why, and nothing is written
+                .isInstanceOf(SelfApprovalForbiddenException.class).hasMessageContaining("importer");
+        assertThat(stored(2).lockVersion()).isEqualTo(pending.lockVersion());
+        assertThat(count("SELECT count(*) FROM pre_definition_history")).isEqualTo(historyBefore);
 
         // When bob approves with the current lock version
         DefinitionVersion approved = approveByBob(pending);
