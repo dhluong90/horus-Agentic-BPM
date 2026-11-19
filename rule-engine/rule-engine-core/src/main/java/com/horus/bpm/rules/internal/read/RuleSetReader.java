@@ -133,10 +133,16 @@ public final class RuleSetReader {
         CanonicalCells.normalize((ObjectNode) tree);
         requireOnlySafeIntegers(tree, "");
         Definitions model = model(tree);
+        // effectiveFrom is version metadata, not behaviour: it is kept on the model (and stored in
+        // rle_version.effective_from) but never printed, so the same rules have one hash whatever date they take
+        // effect (ADR-0026 decision 1, DESIGN section 3.1, #233).
+        ((ObjectNode) tree).remove("effectiveFrom");
         String canonical = printed.apply(CanonicalJson.write(tree));
         // What runs is what was hashed: the printed form must parse back to the same model (fail closed).
         JsonNode reread = EngineJson.JSON.readTree(canonical);
-        if (!model(reread).equals(model) || !CanonicalJson.write(reread).equals(canonical)) {
+        Definitions printedModel = new Definitions(model.name(), model.expressionLanguage(), model.timeZone(), null,
+                model.decisions());
+        if (!model(reread).equals(printedModel) || !CanonicalJson.write(reread).equals(canonical)) {
             throw invalid("The canonical form of this document does not reproduce it, so it cannot be approved;"
                     + " nothing was stored. Please report this document");
         }
