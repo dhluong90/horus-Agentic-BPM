@@ -68,6 +68,23 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
     }
 
     /**
+     * Creates settings with the default evaluation size limits.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     * @param queryMaxPageSize see the record
+     * @param reasonMaxLength see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
+                reasonMaxLength, EngineDefaults.OUTPUT_MAX_BYTES, EngineDefaults.STRING_MAX_LENGTH,
+                EngineDefaults.RULES_MAX);
+    }
+
+    /**
      * Returns the defaults.
      *
      * @return settings with every default of {@link EngineDefaults}

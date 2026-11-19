@@ -44,8 +44,7 @@ class RuleEngineSettingsTest {
                         "horus.bpm.rules.idempotency.retention=" + retention,
                         "horus.bpm.rules.evaluation.max-input-scale=" + maxScale)
                 .run(context -> assertThat(context.getBean(EngineSettings.class))
-                        .isEqualTo(new EngineSettings(maxEntries, Duration.parse(retention), maxScale, true,
-                                EngineDefaults.OUTPUT_MAX_BYTES, EngineDefaults.STRING_MAX_LENGTH, EngineDefaults.RULES_MAX)));
+                        .isEqualTo(new EngineSettings(maxEntries, Duration.parse(retention), maxScale, true)));
     }
 
     @ParameterizedTest
