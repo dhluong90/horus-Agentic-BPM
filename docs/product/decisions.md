@@ -121,6 +121,9 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-098](#pd-098-reference-feel-engine-as-a-test-only-oracle) | Reference FEEL engine as a test-only oracle | Decided (product manager, delegated, PD-073) |
 | [PD-099](#pd-099-inputs-are-not-masked-unless-declared-or-set-by-the-host) | Inputs are not masked unless declared or set by the host | Decided (product manager, delegated, PD-073) |
 | [PD-100](#pd-100-container-images-are-not-on-the-licence-allow-list) | Container images are not on the licence allow-list | Decided (product manager, delegated, PD-073) |
+| [PD-101](#pd-101-retiring-the-last-version-in-effect-needs-an-explicit-confirmation) | Retiring the last version in effect needs an explicit confirmation | Decided (product manager, delegated, PD-073) |
+| [PD-102](#pd-102-process-definitions-follow-the-rule-engines-retirement-rules) | Process definitions follow the Rule Engine's retirement rules | Decided (product manager, delegated, PD-073) |
+| [PD-103](#pd-103-cancelling-a-process-instance-needs-its-own-permission) | Cancelling a process instance needs its own permission | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -3001,3 +3004,77 @@ The versions are the ones resolved in the build, recorded in the build's allow-l
 **Status, 2026-11-20.** Not every test image is pinned yet. On `main` the PostgreSQL test containers use a tag, and so does PgBouncer in #265. The Playwright image of CI and the PostgreSQL image of the Compose file are already pinned by digest. #288 pins the rest.
 
 **Follow-ups.** Documentation: the release notes name the PostgreSQL image of the Compose file and its licence. Maintainers (engineering): pin every test image by digest (#288), and keep new ones pinned.
+
+### PD-101 Retiring the last version in effect needs an explicit confirmation
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | In the default `single` retirement mode (PD-080), may one approver retire the last version in effect and leave a rule set with no version to decide with? |
+| Raised by | Security review of pull request #269 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 3, with a host setting |
+
+**Context.** One approver may retire a live version because the usual reason is to stop a harmful rule quickly (PD-080). When the version is the last one in effect, every evaluation of that rule set fails until a new version is approved. That is a fail-closed outage for the host, not a silent wrong decision.
+
+**Options considered**
+
+1. Refuse to retire the last version. Consequence: no outage by mistake, but a harmful rule cannot be stopped until a replacement is approved, which is exactly the emergency single mode exists for.
+2. Require four-eyes in that case only. Consequence: safer, but a second approver must be on call at the moment the rule must stop.
+3. Allow it in `single` mode only with an explicit confirmation (chosen). The request carries `confirmNoVersionInEffect: true` and a reason. Without the confirmation the request is refused with `409 LAST_VERSION_IN_EFFECT`, and the detail names the rule set and what will stop working. The cockpit shows, before the click: "No version of card-fee will be in effect. Evaluations will fail until a new version is approved." The retirement event and the history row record that no version remains in effect.
+
+**Configuration (PD-074).** Setting `lifecycle.retire-last-version`, shared by both engines:
+- `confirm` (the default): option 3.
+- `four-eyes`: option 2.
+- `refuse`: option 1.
+
+The value in force is shown in `/api/bpm/meta`. In the `four-eyes` retirement mode of PD-080, a second approver is needed anyway.
+
+**Recommendation and decision.** Option 3 by default. It keeps the emergency stop, which is the purpose of single mode. It makes the outage a deliberate, recorded choice, not an accident. A bank that prefers to never stop a rule set without a replacement sets `refuse` or `four-eyes`.
+
+**Follow-ups.** Architect: `RLE-026` (a last-version case with and without the confirmation), DESIGN 3.3, the error code and the `/meta` setting. Maintainers (engineering): #269. Cockpit: the warning in the retire dialog.
+
+### PD-102 Process definitions follow the Rule Engine's retirement rules
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Retiring an active process definition is a one-person action in #264. Should it need four-eyes, or follow the Rule Engine's `single` mode? |
+| Raised by | Security review of pull request #264 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Follow the Rule Engine: the shared setting `lifecycle.retire-approval` (PD-080), `single` by default and `four-eyes` by setting, together with PD-101 for the last active version (chosen). Consequence: one governance model across both engines. Retiring a definition stops new starts and never stops running instances, which stay on their version. So one person can stop a bad flow quickly without breaking work in progress.
+2. Always four-eyes for process definitions. Consequence: stronger, but different from rule sets, and a second approver is needed exactly when a flawed process must stop taking new cases.
+
+**Rules.**
+- A retirement needs `processes:approve` and a mandatory reason.
+- It writes a history row and an event, both recording the approval mode in force.
+- The `four-eyes` mode works as in the Rule Engine: the requester can never confirm their own retirement, and the version keeps serving until a second approver confirms.
+- Retiring the last active version of a definition key follows PD-101: in the default `confirm` mode it needs an explicit confirmation, because new starts of that key will fail until a new version is approved.
+
+**Follow-ups.** Architect: process DESIGN 3.2 and a `PRE` statement for retirement, including the last-version case and running instances that stay on their version. Maintainers (engineering): #264.
+
+### PD-103 Cancelling a process instance needs its own permission
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | In #253 cancelling a running process instance needs only `processes:start`. Should cancel have its own permission? |
+| Raised by | Security review of pull request #253 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. A separate permission, `processes:cancel` (chosen). Consequence: starting a case and stopping someone else's case in flight are different duties. Being able to submit a loan application does not mean being able to cancel any running application. Hosts map the new permission to the roles that may cancel, as they do for every `<module>:<action>` permission (PD-003, X-F-06).
+2. Keep cancel under `processes:start`. Consequence: simpler, but every user who can start a case can stop every case in their tenant.
+
+**Rules.**
+- Cancel needs `processes:cancel` and a mandatory reason, at most 2,000 characters.
+- It writes a history row and an event with the actor and the reason, and runs compensation where the definition declares it.
+- `/api/bpm/me` lists the permission, so the cockpit shows Cancel only to users who hold it.
+- `processes:start` no longer grants cancel. Nothing has shipped with the old rule, so there is no migration.
+
+**Configuration.** Through role mapping only. Whether a second person must confirm a cancellation is not decided here. It returns as a decision if a pilot bank asks for it.
+
+**Follow-ups.** Architect: the permission catalogue, the process DESIGN REST row and a `PRE` statement for cancel. Maintainers (engineering): #253, and the `processes:cancel` entry in the module's permission catalogue and in the examples' role mapping.
