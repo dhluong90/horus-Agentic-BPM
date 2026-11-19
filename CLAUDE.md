@@ -1,6 +1,6 @@
 # HORUS Agentic BPM
 
-Lightweight, embeddable **Process Engine** and **Rule Engine** for Java 21 (Java 25 tested) / Spring Boot 4.x (3.5.x tested until 1.0, ADR-0011), PostgreSQL 14+, and an embeddable React Operations Cockpit, where **humans, services, and AI agents are first-class process participants**.
+Lightweight, embeddable **Process Engine** and **Rule Engine** for Java 21 (Java 25 tested) / Spring Boot 4.x (ADR-0011; 3.5.x support lands with the compatibility matrix, #9), PostgreSQL 14+, and an embeddable React Operations Cockpit, where **humans, services, and AI agents are first-class process participants**.
 
 Source-available under **PolyForm Noncommercial License 1.0.0**; commercial use under `COMMERCIAL-LICENSE.md`.
 
@@ -29,7 +29,7 @@ Read these before doing product, design, or implementation work:
 ## Build
 - `mvn -B verify` from the repository root builds every module and runs unit, ArchUnit and Testcontainers tests (needs JDK 21 or later and Docker). CI runs the same command (`.github/workflows/ci.yml`).
 - Layout: `pom.xml` (parent, Spring Boot BOM import), `bpm-bom/` (pins engine modules for hosts, no parent), `rule-engine/rule-engine-{core,postgres,spring-boot-starter}`, `examples/rule-engine-only/`. Java packages `com.horus.bpm.rules.*`; groupId `com.horus.bpm` (set once in the parent, rule-engine DESIGN open question 7.2).
-- Test methods that prove a requirement or specification statement start with its id in snake case, for example `tr_emb_01_...` or `rle_013_...`.
+- Test names start with the id they prove, upper case, hyphens as underscores: `RLE_013_...` for a `SPEC.md` statement, `TR_EMB_01_...` for a requirement. This is the prefix the spec-to-test gate (TR-QA-01) matches; tests that prove no id carry no prefix. See `rule-engine/docs/TEST-PLAN.md`.
 
 ## Conventions
 - Branches: `feat/<module>/<slug>`, `fix/...`, `docs/...`, `chore/...`. Keep `main` buildable.

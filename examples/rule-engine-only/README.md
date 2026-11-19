@@ -5,7 +5,7 @@ A minimal Spring Boot 4 service with its own table (`loan_application`) and its 
 1. One dependency, `com.horus.bpm:rule-engine-spring-boot-starter`.
 2. One configuration block, `horus.bpm.rules` in [`application.yml`](src/main/resources/application.yml).
 
-On start-up the host's Flyway applies `db/migration` to `flyway_schema_history`. Then the engine applies its own `rle_*` migrations to `rle_schema_history`, on the host's `DataSource` and transaction manager, with no pool of its own. The decision log `rle_decision` is partitioned by month, and the partitions for the current and the next month are created by the first migration.
+On start-up the host's Flyway applies `db/migration` to `flyway_schema_history`. Then the engine applies its own `rle_*` migrations to `rle_schema_history`, on the host's `DataSource` and transaction manager, with no pool of its own. The decision log `rle_decision` is partitioned by month: the migration creates the parent and a default partition. A start-up step then creates the partitions for the current and the next month, read from the host's `Clock` (UTC months).
 
 ```mermaid
 sequenceDiagram
@@ -18,6 +18,7 @@ sequenceDiagram
     HF->>DB: V1 loan_application, recorded in flyway_schema_history
     Host->>RE: all singletons created
     RE->>DB: baseline 0 and V1 rle_* tables, recorded in rle_schema_history
+    RE->>DB: partitions for the Clock month and the next, in one transaction
     Host->>DB: GET /actuator/health checks db and ruleEngine
 ```
 
@@ -37,7 +38,7 @@ Check it:
 
 ```bash
 curl -s localhost:8080/actuator/health
-# {"components":{"db":{"status":"UP"}, ... "ruleEngine":{"status":"UP"}, ...},"status":"UP"}
+# {"status":"UP"}   component names are shown to authorised callers only (show-components: when-authorized)
 
 docker exec horus-pg psql -U horus -d horus -c '\dt'
 # flyway_schema_history, loan_application, rle_decision (partitioned), rle_decision_YYYY_MM (this month and next),
@@ -47,6 +48,8 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  0       | Rule Engine baseline
 #  1       | V1__rle_baseline.sql
 ```
+
+To see the `ruleEngine` component locally, start with `--management.endpoint.health.show-components=always`. It reports the schema version, `pendingMigrations`, and whether next month's partition exists.
 
 ## Environment variables
 
@@ -62,23 +65,22 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 | Property | Default | Meaning |
 |---|---|---|
 | `horus.bpm.rules.enabled` | `true` | `false` switches the engine off entirely |
-| `horus.bpm.rules.schema.migrate` | `true` | `false` when the `rle_*` migrations are applied by a separate deployment step. The `ruleEngine` health contributor is then down until they are |
+| `horus.bpm.rules.migrate-on-start` | `true` | `false` for hosts that run the `rle_*` migrations in a separate job. If the schema is not current, the `ruleEngine` health contributor is down and partitions are not created until it is |
 
-The full list of properties for 0.1 is in `rule-engine/docs/DESIGN.md` section 4.4. Properties are added to the starter with the features that use them.
+The full list of properties is on the wiki page Rule Engine Configuration. The starter adds them with the features that use them.
 
 ## Run in CI
 
-`.github/workflows/ci.yml` runs `mvn -B verify` on every pull request on Java 21 and Spring Boot 4.x. In this module, Failsafe runs two Testcontainers suites on `postgres:16-alpine`:
+`.github/workflows/ci.yml` runs `mvn -B verify` on every pull request on Java 21 and Spring Boot 4.x. In this module, Failsafe runs two Testcontainers suites on `postgres:16-alpine`. The host's clock is fixed at 26 January 2027.
 
 | Test | Proves |
 |---|---|
-| `RuleEngineOnlyHostIT.tr_emb_01_*` | The host boots healthy on a clean database and the `rle_*` tables accept writes |
-| `RuleEngineOnlyHostIT.tr_emb_06_*` | Engine migrations are recorded only in `rle_schema_history`; the host's history holds only its own migration |
-| `RuleEngineOnlyHostIT.tr_emb_04_*` | The engine uses the host's only `DataSource` and transaction manager, and the host's Flyway bean is still the Spring Boot one |
-| `HostRestartIT.tr_emb_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
+| `RuleEngineOnlyHostIT.TR_EMB_01_*` | The host boots healthy on a clean database and the `rle_*` tables accept writes |
+| `RuleEngineOnlyHostIT.TR_OPS_04_*` | Start-up creates `rle_decision_2027_01` and `rle_decision_2027_02` from the host's clock |
+| `RuleEngineOnlyHostIT.TR_EMB_06_*` | Engine migrations are recorded only in `rle_schema_history`; the host's history holds only its own migration |
+| `RuleEngineOnlyHostIT.TR_EMB_04_*` | The engine uses the host's only `DataSource` and the transaction manager that manages it, and the host's Flyway bean is still the Spring Boot one |
+| `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.
 
-## Adding the engine to an existing host
-
-The engine baselines its own history at version 0, so it installs on a database that already has host tables. The reverse order needs one host setting. If the host adds Flyway after the engine's tables exist, Flyway refuses a schema that is not empty but has no history. Set `spring.flyway.baseline-on-migrate=true` (and `spring.flyway.baseline-version=0` if the host's first migration is `V1`) for that first run.
+To add the engine to a host that already has a database, or to add Flyway to a host after the engine, see "Install order" on the wiki page Getting Started.

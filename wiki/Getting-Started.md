@@ -25,7 +25,7 @@ Supported platform versions are listed in [[Technical Requirements]] (TR-EMB-02)
 
 ## 1. Create the service
 
-Generate a Spring Boot 4.x project (3.5.x also works until release 1.0) with the Web dependency (for example from `start.spring.io`, group `com.example`, artifact `loans`), or use an existing service.
+Generate a Spring Boot 4.x project (Spring Boot 4.x now; 3.5.x support lands with the compatibility matrix, [#9](https://github.com/dhluong90/horus-Agentic-BPM/issues/9)) with the Web dependency (for example from `start.spring.io`, group `com.example`, artifact `loans`), or use an existing service.
 
 ## 2. Add the starters
 
@@ -209,6 +209,17 @@ The decision is written to the decision log in your transaction. Both the HTTP c
 | `400 INPUT_INVALID` | An input is missing or has the wrong type, for example `income` sent as a number instead of `{ "currency", "amount" }` | Match the `inputs` declared in the table |
 | `401` or `403` on the curl call | No principal, or the principal lacks `rules:evaluate` | Pass credentials of a user with the permission; see [[Rule Engine Configuration]] |
 | Flyway fails at start-up | The database user cannot create tables | Grant `CREATE` on the schema, or set `migrate-on-start: false` and run the migrations yourself |
+| The host's own Flyway fails with "Found non-empty schema(s) without schema history table" | The host added Flyway after the engine's `rle_*` tables existed | See "Install order" below |
+
+## Install order
+
+The engine keeps its migrations in `rle_schema_history` and never reads or writes the host's `flyway_schema_history`.
+
+| Situation | What happens | What you do |
+|---|---|---|
+| New service, host Flyway and engine together | The host's Flyway runs first, then the engine records a baseline at version 0 and applies its migrations | Nothing |
+| Existing database with host tables, engine added | The engine baselines its own history at version 0 below its first migration, so every engine migration runs | Nothing |
+| Engine tables exist, host adds Flyway later | Flyway refuses a schema that is not empty but has no history table | For that first run set `spring.flyway.baseline-on-migrate=true` and `spring.flyway.baseline-version=0`. With Spring's default baseline version `1`, Flyway would record your own `V1` as the baseline and never run it |
 
 ## Next
 
