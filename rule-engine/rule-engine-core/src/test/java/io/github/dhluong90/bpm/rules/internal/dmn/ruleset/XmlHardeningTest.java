@@ -3,9 +3,9 @@ package io.github.dhluong90.bpm.rules.internal.dmn.ruleset;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.SourceFormat;
-import com.horus.bpm.rules.api.ValidationFailedException;
-import com.horus.bpm.rules.internal.read.RuleSetReader;
+import io.github.dhluong90.bpm.rules.api.SourceFormat;
+import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.internal.read.RuleSetReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
