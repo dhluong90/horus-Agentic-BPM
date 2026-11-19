@@ -5,7 +5,7 @@ info:
   description: |
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
-    export, request publication, approve, reject, history and evaluate. The remaining endpoints of
+    export, request publication, approve, reject, retire, history and evaluate. The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
     The tenant is never part of a request: it comes from the host's authenticated context
@@ -277,8 +277,9 @@ paths:
       summary: Read the lifecycle history of one version, oldest first
       description: |
         Permission `rules:read`. One entry per transition (`CREATED`, `REQUESTED`, `APPROVED`,
-        `REJECTED`), with actor, reason or comment, statuses before and after and the
-        `lockVersion` after (DESIGN section 3.3.3). A version created before the history table
+        `REJECTED`, `RETIRED`), with actor, reason or comment, statuses before and after and the
+        `lockVersion` after (DESIGN section 3.3.3). A `RETIRED` entry also carries `approvalMode`
+        (`single` by hand, `system` when superseded) and, when superseded, `supersededBy`. A version created before the history table
         existed starts with a backfilled `CREATED` entry; its earlier request and approval have
         no entries.
       parameters:
@@ -410,6 +411,54 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:retire:
+    post:
+      tags: [rule-sets]
+      operationId: retire
+      summary: Take a published version out of service by hand, with a reason
+      description: |
+        Permission `rules:approve`, checked before the body is read. Only a `PUBLISHED` version can be
+        retired; any other status is `409 INVALID_STATE`. The reason is required: blank, or longer than
+        `lifecycle.reason-max-length` (default 2,000 characters), is `400 INPUT_INVALID`
+        (ADR-0025, DESIGN section 3.3, `RLE-026`).
+
+        In the default mode `lifecycle.retire-approval: single` one identity is enough (PD-080). The
+        version becomes `RETIRED` with `retiredAt` set to the transaction's clock and `lockVersion`
+        incremented. One history entry `RETIRED` (actor, reason, `approvalMode: single`) and one
+        `rules.version.retired.v1` event (`rule-engine/api/schema/rules.version.retired.v1.schema.json`)
+        are written in the same transaction. Older `PUBLISHED` versions already in effect are retired
+        with it as superseded, so a retire never brings an older version back. Evaluation stops
+        selecting the version from `retiredAt` on, on every replica, because selection reads the
+        database; with no other version in force the answer is `404 NO_EFFECTIVE_VERSION`. A retired
+        version stays readable, replays, and is still selected for a clock before `retiredAt`.
+
+        `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
+        `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`, and a stale
+        `If-Match` is `409 VERSION_CONFLICT`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetireRequest'
+            example:
+              reason: Tet promotion ended
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}:evaluate:
     post:
       tags: [decisions]
@@ -528,6 +577,29 @@ components:
       schema:
         type: string
         example: '"1"'
+    IfMatchRequired:
+      name: If-Match
+      in: header
+      required: true
+      description: |
+        The `lockVersion` the change is based on, quoted; a stale value is `409 VERSION_CONFLICT`.
+        Required: without it the answer is `428 PRECONDITION_REQUIRED`.
+      schema:
+        type: string
+        example: '"3"'
+    IdempotencyKeyRequired:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Required: without it the answer is `400 INPUT_INVALID`. A replay with the same request
+        returns the original result and changes nothing. The same key with a different request is
+        `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; while the first request runs it is
+        `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`. Remembered 24 hours.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
   headers:
     ETag:
       description: The version's `lockVersion`, quoted.
@@ -616,6 +688,10 @@ components:
         requestedAt: { type: [string, 'null'], format: date-time }
         approvedBy: { type: [string, 'null'] }
         approvedAt: { type: [string, 'null'], format: date-time }
+        retiredAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the version was retired, by hand or as superseded; null while it is not retired
         createdBy:
           type: [string, 'null']
           description: Who imported the version; neither the author nor the requester may approve it
@@ -632,11 +708,11 @@ components:
         caller's permissions and the four-eyes rule: `request-publish` on a `DRAFT` with
         `rules:author`; `approve` on a `PENDING_APPROVAL` with `rules:approve` when the caller is
         neither the requester nor the author; `reject` on a `PENDING_APPROVAL` with
-        `rules:approve` when the caller is not the requester. A hint for screens only: the engine
-        checks again on every command.
+        `rules:approve` when the caller is not the requester; `retire` on a `PUBLISHED` version with
+        `rules:approve`. A hint for screens only: the engine checks again on every command.
       items:
         type: string
-        enum: [request-publish, approve, reject]
+        enum: [request-publish, approve, reject, retire]
     RuleSetSummary:
       type: object
       required: [ruleSet, latestVersion, latestStatus, publishedVersion, lastChangedAt]
@@ -711,7 +787,7 @@ components:
       properties:
         action:
           type: string
-          enum: [CREATED, REQUESTED, APPROVED, REJECTED]
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED, RETIRED]
         fromStatus:
           type: [string, 'null']
           enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, null]
@@ -721,7 +797,14 @@ components:
         actor: { type: string }
         reason:
           type: [string, 'null']
-          description: The rejection reason or the approval comment
+          description: The rejection or retirement reason (`SUPERSEDED` when superseded), or the approval comment
+        supersededBy:
+          type: [integer, 'null']
+          description: On a `RETIRED` entry of a superseded version, the version that took over; otherwise null
+        approvalMode:
+          type: [string, 'null']
+          enum: [single, four-eyes, system, null]
+          description: On a `RETIRED` entry, how the retirement was approved (`system` when superseded); otherwise null
         lockVersion: { type: integer }
         occurredAt: { type: string, format: date-time }
     VersionHistory:
@@ -732,6 +815,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/HistoryEntry'
+    RetireRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Why the version is taken out of service; stored in the history and the event
     RejectRequest:
       type: object
       required: [reason]
@@ -795,7 +887,8 @@ components:
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION,
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
-            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SCHEMA_NOT_READY]
+            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SCHEMA_NOT_READY,
+            PRECONDITION_REQUIRED]
         detail: { type: string }
         correlationId: { type: string }
         violations:
