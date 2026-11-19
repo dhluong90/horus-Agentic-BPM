@@ -433,79 +433,90 @@ class DefinitionLifecycleTest {
         assertThat(dev.services.find(v1.ref()).orElseThrow().status()).isEqualTo("RETIRED");
     }
 
-    // ---- retirement (PD-102, PD-101); the PRE statement is owed by the architect -----------------------------
+    // ---- retirement (PD-101, PD-102, PRE-053) ----------------------------------------------------------------
 
     @Test
-    void retiring_the_last_version_in_effect_needs_a_reason_and_an_explicit_confirmation() {
-        // Given kyc-onboarding v1, the only version in effect, with a running instance
-        DefinitionVersion v1 = activate(1);
-        ProcessInstance running = start("KYC-2027-0300");
-        int history = count("SELECT count(*) FROM pre_definition_history");
+    void PRE_053_retire_stops_new_starts_keeps_running_instances_and_confirms_last_version() {
+        // Given v1 in effect with three running instances, and v2 approved for a later date with its job due then
+        clock.set(Instant.parse("2027-04-20T09:00:00Z"));
+        activate(1);
+        List<ProcessInstance> running = List.of(start("LN-0001"), start("LN-0002"), start("LN-0003"));
+        DefinitionVersion v2 = approveByBob(request(importAs(2), Instant.parse("2027-05-01T00:00:00Z")));
+        DefinitionVersion v1 = stored(1);
         engine.events.clear();
 
-        // When bob retires it without a reason, then with a reason but without the confirmation
+        // Step 1: bob retires v2 (future), with an idempotency key, and replays it
         engine.identity.as("bank-a", "bob", APPROVER);
-        assertThatThrownBy(() -> engine.services.retire(v1.ref(), v1.lockVersion(), null, true, null))
-                .isInstanceOf(InputInvalidException.class);
-        assertThatThrownBy(() -> engine.services.retire(v1.ref(), v1.lockVersion(), "fraud check bypass found", false,
-                null))
-                // Then both are refused, the second naming what stops working, and nothing is written
+        DefinitionVersion retiredV2 = engine.services.retire(v2.ref(), v2.lockVersion(),
+                "pricing step points at the wrong rule set", false, "retire-v2");
+        DefinitionVersion replay = engine.services.retire(v2.ref(), v2.lockVersion(),
+                "pricing step points at the wrong rule set", false, "retire-v2");
+        assertThat(retiredV2.status()).isEqualTo("RETIRED");
+        assertThat(replay).isEqualTo(retiredV2);
+        assertThat(TestEngine.jdbc().sql("SELECT status FROM pre_timer WHERE definition_id = ?").param(v2.id())
+                .query(String.class).single()).isEqualTo("CANCELLED");
+        assertThat(engine.events).singleElement().satisfies(e -> assertThat(e.payload())
+                .containsEntry("reason", "pricing step points at the wrong rule set")
+                .containsEntry("approvalMode", "single").containsEntry("noVersionInEffect", false));
+
+        // Step 2: v1 without the confirmation
+        int history = count("SELECT count(*) FROM pre_definition_history");
+        assertThatThrownBy(() -> engine.services.retire(v1.ref(), v1.lockVersion(), "flawed credit routing", false, null))
                 .isInstanceOf(io.github.dhluong90.bpm.process.api.LastVersionInEffectException.class)
-                .hasMessageContaining("No version of kyc-onboarding will be in effect")
-                .extracting(e -> ((ProcessException) e).code()).isEqualTo("LAST_VERSION_IN_EFFECT");
+                .satisfies(e -> {
+                    var last = (io.github.dhluong90.bpm.process.api.LastVersionInEffectException) e;
+                    assertThat(last.code()).isEqualTo("LAST_VERSION_IN_EFFECT");
+                    assertThat(last.definitionKey()).isEqualTo(KEY);
+                    assertThat(last.version()).isEqualTo(1);
+                    assertThat(last.setting()).isEqualTo("confirm");
+                    assertThat(last.nextEffectiveFrom()).isNull();
+                });
         assertThat(stored(1).status()).isEqualTo("ACTIVE");
         assertThat(count("SELECT count(*) FROM pre_definition_history")).isEqualTo(history);
-        assertThat(engine.events).isEmpty();
 
-        // When bob confirms
+        // Failure cases: lan (author) is refused, a blank reason is refused; nothing changes
+        engine.identity.as("bank-a", "lan", "processes:author", "processes:start", "processes:read");
+        assertThatThrownBy(() -> engine.services.retire(v1.ref(), v1.lockVersion(), "flawed credit routing", true, null))
+                .isInstanceOf(PermissionDeniedException.class);
         engine.identity.as("bank-a", "bob", APPROVER);
-        DefinitionVersion retired = engine.services.retire(v1.ref(), v1.lockVersion(), "fraud check bypass found",
-                true, null);
+        assertThatThrownBy(() -> engine.services.retire(v1.ref(), v1.lockVersion(), " ", true, null))
+                .isInstanceOf(InputInvalidException.class);
+        assertThat(stored(1).status()).isEqualTo("ACTIVE");
 
-        // Then v1 is retired in single mode, recorded on the history row and the event; new starts stop
-        assertThat(retired.status()).isEqualTo("RETIRED");
-        assertThat(retired.retiredBy()).isEqualTo("bob");
+        // Step 3: v1 with the confirmation
+        engine.identity.as("bank-a", "bob", APPROVER);
+        DefinitionVersion retiredV1 = engine.services.retire(v1.ref(), v1.lockVersion(), "flawed credit routing", true,
+                null);
+        assertThat(retiredV1.status()).isEqualTo("RETIRED");
         assertThat(TestEngine.jdbc().sql("SELECT comment || ' ' || (details->>'approvalMode') || ' ' "
-                + "|| (details->>'noVersionInEffect') FROM pre_definition_history WHERE action = 'RETIRED'")
-                .query(String.class).single()).isEqualTo("fraud check bypass found single true");
-        assertThat(engine.events).singleElement().satisfies(e -> assertThat(e.payload())
-                .containsEntry("approvalMode", "single").containsEntry("noVersionInEffect", true)
-                .containsEntry("reason", "fraud check bypass found").containsEntry("retiredBy", "bob"));
-        assertThatThrownBy(() -> start("KYC-2027-0301"))
-                .isInstanceOf(io.github.dhluong90.bpm.process.api.NoEffectiveVersionException.class);
+                + "|| (details->>'noVersionInEffect') FROM pre_definition_history WHERE action = 'RETIRED' "
+                + "AND definition_id = ?").param(v1.id()).query(String.class).single())
+                .isEqualTo("flawed credit routing single true");
+        assertThat(engine.events).last().satisfies(e -> assertThat(e.payload()).containsEntry("noVersionInEffect", true));
 
-        // And the running instance continues on v1
+        // Steps 4 and 5: running instances stay on v1 and advance; a new start finds no version
         engine.identity.as("bank-a", "officer", "processes:task:work", "processes:read").roles = java.util.Set.of(
                 "KYC_OFFICER");
-        ProcessInstance.Task review = running.tasks().get(0);
-        ProcessInstance completed = engine.services.complete(review.id(), Map.of("approved", true), review.lockVersion(),
-                "complete-kyc-0300");
-        assertThat(completed.definitionVersion()).isEqualTo(1);
-        assertThat(completed.status()).isEqualTo("COMPLETED");
+        ProcessInstance.Task task = running.get(0).tasks().get(0);
+        ProcessInstance advanced = engine.services.complete(task.id(), Map.of("approved", true), task.lockVersion(),
+                "complete-ln-0001");
+        assertThat(advanced.status()).isEqualTo("COMPLETED");
+        assertThat(running).allSatisfy(i -> assertThat(i.definitionVersion()).isEqualTo(1));
+        assertThat(count("SELECT count(*) FROM pre_instance WHERE definition_ver = 1 AND status = 'RUNNING'"))
+                .isEqualTo(2);
+        engine.identity.as("bank-a", "lan", "processes:author", "processes:start", "processes:read");
+        assertThatThrownBy(() -> engine.services.start(new StartRequest(KEY, "LN-0004", Map.of(), null)))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.NoEffectiveVersionException.class);
+
+        // Step 6: on 1 May the cancelled job retires or starts nothing
+        clock.set(Instant.parse("2027-05-01T00:01:00Z"));
+        assertThat(engine.jobs.pollOnce()).isZero();
+        assertThat(stored(2).status()).isEqualTo("RETIRED");
+        assertThat(count("SELECT count(*) FROM pre_definition_history WHERE action = 'RETIRED'")).isEqualTo(2);
     }
 
     @Test
-    void retiring_a_version_that_is_not_the_last_in_effect_needs_no_confirmation() {
-        // Given v1 in effect and v2 approved for a later date
-        activate(1);
-        DefinitionVersion v2 = approveByBob(request(importAs(2), Instant.parse("2027-04-01T00:00:00Z")));
-
-        // When bob retires v2 before its date
-        engine.identity.as("bank-a", "bob", APPROVER);
-        DefinitionVersion retired = engine.services.retire(v2.ref(), v2.lockVersion(), "start date moved", false, null);
-
-        // Then v2 is retired, v1 stays in effect, and v2's effective-date job later changes nothing
-        assertThat(retired.status()).isEqualTo("RETIRED");
-        assertThat(TestEngine.jdbc().sql("SELECT details->>'noVersionInEffect' FROM pre_definition_history "
-                + "WHERE action = 'RETIRED'").query(String.class).single()).isEqualTo("false");
-        clock.set(Instant.parse("2027-04-01T00:01:00Z"));
-        assertThat(engine.jobs.pollOnce()).isEqualTo(1);
-        assertThat(stored(1).status()).isEqualTo("ACTIVE");
-        assertThat(start("KYC-2027-0400").definitionVersion()).isEqualTo(1);
-    }
-
-    @Test
-    void with_retire_last_version_refuse_the_last_version_cannot_be_retired_even_when_confirmed() {
+    void PRE_053_with_retire_last_version_refuse_the_last_version_cannot_be_retired_even_when_confirmed() {
         TestEngine strict = TestEngine.replica("pod-1", clock).autoApprove(false)
                 .retireLastVersion(io.github.dhluong90.bpm.process.internal.service.EngineSettings.RetireLastVersionRule
                         .REFUSE).build();
@@ -518,7 +529,8 @@ class DefinitionLifecycleTest {
 
         assertThatThrownBy(() -> strict.services.retire(active.ref(), active.lockVersion(), "stop it", true, null))
                 .isInstanceOf(io.github.dhluong90.bpm.process.api.LastVersionInEffectException.class)
-                .hasMessageContaining("refuse");
+                .satisfies(e -> assertThat(((io.github.dhluong90.bpm.process.api.LastVersionInEffectException) e)
+                        .setting()).isEqualTo("refuse"));
         assertThat(strict.services.find(v1.ref()).orElseThrow().status()).isEqualTo("ACTIVE");
     }
 

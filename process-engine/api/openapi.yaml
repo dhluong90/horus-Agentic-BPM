@@ -580,6 +580,16 @@ components:
           description: Present on `VALIDATION_FAILED` and `BPMN_UNSUPPORTED_ELEMENT`
           items: { $ref: '#/components/schemas/DefinitionProblemItem' }
         nodeId: { type: string, description: Present on `STEP_FAILED` }
+        definitionKey: { type: string, description: Present on `LAST_VERSION_IN_EFFECT` }
+        version: { type: integer, description: Present on `LAST_VERSION_IN_EFFECT` }
+        setting:
+          type: string
+          enum: [confirm, refuse]
+          description: Present on `LAST_VERSION_IN_EFFECT`, the `lifecycle.retire-last-version` value in force
+        nextEffectiveFrom:
+          type: [string, 'null']
+          format: date-time
+          description: Present on `LAST_VERSION_IN_EFFECT`; when the next approved version takes effect, or null
         reason:
           type: string
           description: Present on `STEP_FAILED`, for example `UNHANDLED_BUSINESS_ERROR`, `DECISION_NO_MATCH`, `STEP_LIMIT`

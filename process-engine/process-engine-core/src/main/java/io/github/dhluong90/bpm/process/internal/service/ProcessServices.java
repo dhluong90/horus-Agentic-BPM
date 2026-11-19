@@ -421,17 +421,26 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             boolean othersInEffect = locked.all().stream().anyMatch(d -> !d.id().equals(current.id())
                     && "ACTIVE".equals(d.status()) && d.effectiveFrom() != null && !d.effectiveFrom().isAfter(now));
             boolean last = inEffect && !othersInEffect;
-            if (last && settings.retireLastVersion() == EngineSettings.RetireLastVersionRule.REFUSE) {
-                throw new LastVersionInEffectException(ref.key() + " v" + ref.version() + " is the last version in "
-                        + "effect and horus.bpm.lifecycle.retire-last-version is refuse; approve a replacement first");
-            }
-            if (last && !confirmNoVersionInEffect) {
-                throw new LastVersionInEffectException("No version of " + ref.key() + " will be in effect: new starts "
-                        + "will fail with NO_EFFECTIVE_VERSION until a new version is approved. Running instances "
-                        + "continue. Send confirmNoVersionInEffect: true to retire it.");
+            if (last) {
+                Instant next = locked.all().stream().filter(d -> !d.id().equals(current.id())
+                        && "ACTIVE".equals(d.status()) && d.effectiveFrom() != null && d.effectiveFrom().isAfter(now))
+                        .map(StoredDefinition::effectiveFrom).min(Instant::compareTo).orElse(null);
+                if (settings.retireLastVersion() == EngineSettings.RetireLastVersionRule.REFUSE) {
+                    throw new LastVersionInEffectException(ref.key() + " v" + ref.version() + " is the last version "
+                            + "in effect and horus.bpm.lifecycle.retire-last-version is refuse; approve a replacement "
+                            + "first", ref.key(), ref.version(), "refuse", next);
+                }
+                if (!confirmNoVersionInEffect) {
+                    throw new LastVersionInEffectException("No version of " + ref.key() + " will be in effect: new "
+                            + "starts will fail with NO_EFFECTIVE_VERSION until a new version is approved. Running "
+                            + "instances continue. Send confirmNoVersionInEffect: true to retire it.", ref.key(),
+                            ref.version(), "confirm", next);
+                }
             }
             StoredDefinition updated = current.retired(caller, now, null);
             write(updated);
+            // PRE-053: a version retired before its start date never takes effect, so its effective-date job goes too.
+            jobs.cancelDefinitionJobs(tenant, current.id(), now);
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("approvalMode", EngineSettings.RETIRE_APPROVAL_MODE);
             details.put("noVersionInEffect", last);
