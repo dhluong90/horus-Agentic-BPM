@@ -4,7 +4,7 @@
 - Date: 2026-11-18
 - Deciders: maintainers
 - Module: rule-engine
-- Superseded in part by: [ADR-0017](0017-full-bpmn-and-dmn-support-no-cmmn.md) (option 4 and the DMN import consequence: full FEEL is now the target) and, when accepted, [ADR-0019](0019-feel-strategy-horus-built-deterministic-feel.md) (FEEL strategy). The hand-written parser, the closed set of operations and the explicit clock stay.
+- Superseded in part by: [ADR-0017](0017-full-bpmn-and-dmn-support-no-cmmn.md) (option 4 and the DMN import consequence: full FEEL is now the target) and, since 2026-11-19, [ADR-0019](0019-feel-strategy-horus-built-deterministic-feel.md) (FEEL strategy). The hand-written parser, the closed set of operations and the explicit clock stay.
 
 ## Context
 Rule conditions and outputs need expressions. General-purpose expression libraries allow method calls, reflection and I/O, which contradicts the no-code-execution principle and makes security review hard.

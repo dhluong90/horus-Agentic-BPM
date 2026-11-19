@@ -22,7 +22,7 @@ This page explains what the Process Engine does, which guarantees it gives for h
 | Level | States | Meaning |
 |---|---|---|
 | `pre_instance.status` | `RUNNING`, `COMPENSATING`, `COMPLETED`, `CANCELLED`, `FAILED` | `FAILED` is the terminal state after compensation. An open incident does not change the instance state |
-| `pre_token.status` | `ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER`, `JOINED`, `COMPLETED`, `COMPENSATED` | One row per active position; `parallelGateway` creates one token per outgoing branch |
+| `pre_token.status` | `ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER`, `WAITING_SCOPE`, `JOINED`, `COMPLETED`, `COMPENSATED`, `CANCELLED` | Flow tokens: one row per position; `parallelGateway` creates one token per outgoing branch. Scope tokens: one per instance and one per entered `saga` block, `WAITING_SCOPE` while their steps run (ADR-0020) |
 
 The transition table with guards and emitted events is in [[Architecture]] section 3.3.
 
@@ -71,7 +71,7 @@ FROM claimed WHERE t.id = claimed.id RETURNING t.*;
 
 ![Parallel join](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/parallel-join.svg)
 
-When two branches finish on two replicas at the same instant, each transaction locks the parent `pre_instance` row `FOR UPDATE` before it marks its token `JOINED` and counts the remaining tokens in the join scope. The lock serialises the two counts, so exactly one transaction sees zero remaining and creates the single outgoing token (`PRE-005`, `TR-ASY-03`). The lock is per instance and held for about 2 ms, so it never contends across instances.
+When two branches finish on two replicas at the same instant, each transaction locks the parent `pre_instance` row `FOR UPDATE` before it marks its token `JOINED` and counts the remaining tokens under the same scope token (the instance, or the enclosing `saga` block). The lock serialises the two counts, so exactly one transaction sees zero remaining and creates the single outgoing token (`PRE-005`, `TR-ASY-03`). The lock is per instance and held for about 2 ms, so it never contends across instances.
 
 ## Idempotency and business keys
 
@@ -115,7 +115,7 @@ Java API methods take the same keys as parameters (ADR-0006). The idempotency re
   compensate: manual                           # raises an incident for operations instead
   onFailure: compensate                        # after retries: run compensations of completed steps in reverse
 ```
-A `saga` block groups steps that compensate together; `throwCompensation` ends a block explicitly. Compensation handlers are Async Wait-State steps themselves. Every compensation is a history row (ADR-0007).
+A `saga` block groups steps that compensate together: each entered block gets its own scope token, and a failure inside it runs only the compensations recorded under that block, newest first (ADR-0020). Steps outside any block compensate under the instance's scope. `throwCompensation` ends a block explicitly. Compensation handlers are Async Wait-State steps themselves. Every compensation is a history row (ADR-0007).
 
 ## Business calendar for SLA
 ```yaml

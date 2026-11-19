@@ -1,8 +1,8 @@
 # ADR-0008: External steps run as Async Wait-State with a lease, never inside a database transaction
 
-- Status: proposed
-- Date: 2026-11-18
-- Deciders: maintainers
+- Status: accepted, 2026-11-19
+- Date: 2026-11-18 (proposed), 2026-11-19 (accepted)
+- Deciders: maintainers; accepted by the product owner (PD-029)
 - Module: process-engine
 
 ## Context
@@ -28,3 +28,7 @@ B is chosen because the timeout already bounds every call, so a lease derived fr
 
 ## Consequences
 Adapters must be idempotent by `attemptId` (`TR-IDEM-04`): with option B a takeover only happens after a crash or a stall longer than the margin, but then a late result is discarded while its side effect may have happened. Changing a step's `timeout` changes its lease and its crash recovery time together. The engine part of an async step costs about 10 ms of database time. Hosts size adapter thread pools, not the connection pool, for agent concurrency. Verified by `TR-ASY-01`, `TR-ASY-02`, `PRE-009` and `PRE-017`; documented in `wiki/Architecture.md` section 4.
+
+## History
+- 2026-11-18: proposed by the maintainers.
+- 2026-11-19: accepted by the product owner without change (PD-029).
