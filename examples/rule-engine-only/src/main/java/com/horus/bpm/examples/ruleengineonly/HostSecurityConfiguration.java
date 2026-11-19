@@ -29,6 +29,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.AndRequestMatcher;
 import org.springframework.security.web.util.matcher.NegatedRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
@@ -52,8 +53,9 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
  * users carry no tenant, so {@code application-dev.yml} sets {@code horus.bpm.tenancy.dev-tenant: bank-a},
  * which the engines accept on the {@code dev} profile only (PD-079).
  *
- * <p>Demo users exist on the {@code dev} profile only: {@code lan} (role PRICING_AUTHOR) and {@code minh}
- * (role PRICING_APPROVER), with the password from {@code HORUS_DEMO_PASSWORD}. Their roles map to engine
+ * <p>Demo users exist on the {@code dev} profile only: {@code lan} (role PRICING_AUTHOR), {@code minh}
+ * (role PRICING_APPROVER), {@code hoa} (both) and {@code tuan} (role TELLER), with the password from
+ * {@code HORUS_DEMO_PASSWORD}. On that profile they may also use HTTP Basic, for the curl walkthrough. Their roles map to engine
  * permissions in {@code application.yml}. A real host signs users in through its identity provider instead.
  */
 @Configuration(proxyBeanMethods = false)
@@ -77,12 +79,18 @@ class HostSecurityConfiguration {
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
                         .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
-                        .ignoringRequestMatchers(HostSecurityConfiguration::bearerRequest))
+                        .ignoringRequestMatchers(request -> bearerRequest(request)
+                                || (environment.matchesProfiles(DEV_PROFILE) && basicRequest(request))))
                 // Only pages are remembered for the redirect after sign-in, so an anonymous API call creates no session
                 .requestCache(cache -> cache.requestCache(pagesOnly(engineApi)))
                 .exceptionHandling(exceptions -> exceptions
                         .defaultAuthenticationEntryPointFor(problemEntryPoint, engineApi)
                         .defaultAccessDeniedHandlerFor(new BpmProblemAccessDeniedHandler(), engineApi));
+        if (environment.matchesProfiles(DEV_PROFILE)) {
+            // Local development only: the curl walkthrough of the README signs the demo users in with Basic
+            // credentials. Each call carries its credentials and no cookie, so CSRF does not apply to it.
+            http.httpBasic(basic -> basic.authenticationEntryPoint(problemEntryPoint));
+        }
         if (jwtDecoder.getIfAvailable() != null) {
             http.oauth2ResourceServer(server -> server
                     .jwt(jwt -> jwt.jwtAuthenticationConverter(rolesAndPermissions()))
@@ -91,9 +99,20 @@ class HostSecurityConfiguration {
         return http.build();
     }
 
+    /**
+     * The page to return to after sign-in. Engine calls, background calls (X-Requested-With) and the
+     * browser's automatic favicon request are never remembered: otherwise the sign-in page's own
+     * {@code /favicon.ico} request replaces the page the user asked for, such as {@code /bpm/cockpit/}.
+     * Spring Security's default matcher skips the last two; a custom matcher must keep doing so.
+     */
     static HttpSessionRequestCache pagesOnly(RequestMatcher engineApi) {
+        RequestMatcher favicon = PathPatternRequestMatcher.withDefaults().matcher("/favicon.*");
+        RequestMatcher backgroundCall = request -> "XMLHttpRequest".equals(request.getHeader("X-Requested-With"));
         HttpSessionRequestCache requestCache = new HttpSessionRequestCache();
-        requestCache.setRequestMatcher(new NegatedRequestMatcher(engineApi));
+        requestCache.setRequestMatcher(new AndRequestMatcher(
+                new NegatedRequestMatcher(engineApi),
+                new NegatedRequestMatcher(favicon),
+                new NegatedRequestMatcher(backgroundCall)));
         return requestCache;
     }
 
@@ -101,6 +120,12 @@ class HostSecurityConfiguration {
     static boolean bearerRequest(HttpServletRequest request) {
         String authorization = request.getHeader("Authorization");
         return authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7);
+    }
+
+    /** A request with Basic credentials sends no session cookie; accepted on the {@code dev} profile only. */
+    static boolean basicRequest(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        return authorization != null && authorization.regionMatches(true, 0, "Basic ", 0, 6);
     }
 
     /**
@@ -121,6 +146,9 @@ class HostSecurityConfiguration {
             String encoded = encoder.encode(password);
             users.add(User.withUsername("lan").password(encoded).roles("PRICING_AUTHOR").build());
             users.add(User.withUsername("minh").password(encoded).roles("PRICING_APPROVER").build());
+            // The walkthrough of the README: hoa may author and approve, so four eyes is visible; tuan prices.
+            users.add(User.withUsername("hoa").password(encoded).roles("PRICING_AUTHOR", "PRICING_APPROVER").build());
+            users.add(User.withUsername("tuan").password(encoded).roles("TELLER").build());
         }
         return new InMemoryUserDetailsManager(users);
     }
