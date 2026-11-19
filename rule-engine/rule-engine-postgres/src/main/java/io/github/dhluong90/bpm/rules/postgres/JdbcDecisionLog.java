@@ -1,8 +1,8 @@
-package com.horus.bpm.rules.postgres;
+package io.github.dhluong90.bpm.rules.postgres;
 
-import com.horus.bpm.rules.internal.store.DecisionLog;
-import com.horus.bpm.rules.internal.json.Ulid;
-import com.horus.bpm.rules.internal.store.DecisionRecord;
+import io.github.dhluong90.bpm.rules.internal.store.DecisionLog;
+import io.github.dhluong90.bpm.rules.internal.json.Ulid;
+import io.github.dhluong90.bpm.rules.internal.store.DecisionRecord;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;

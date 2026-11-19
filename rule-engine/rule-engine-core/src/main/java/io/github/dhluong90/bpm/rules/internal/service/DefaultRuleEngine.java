@@ -1,32 +1,32 @@
-package com.horus.bpm.rules.internal.service;
+package io.github.dhluong90.bpm.rules.internal.service;
 
-import com.horus.bpm.rules.api.ClockNotAllowedException;
-import com.horus.bpm.rules.api.DecisionInput;
-import com.horus.bpm.rules.api.DecisionNotFoundException;
-import com.horus.bpm.rules.api.DecisionRequest;
-import com.horus.bpm.rules.api.DecisionResult;
-import com.horus.bpm.rules.api.InputInvalidException;
-import com.horus.bpm.rules.api.InvalidStateException;
-import com.horus.bpm.rules.api.NoEffectiveVersionException;
-import com.horus.bpm.rules.api.ReplayNotPossibleException;
-import com.horus.bpm.rules.api.RuleEngine;
-import com.horus.bpm.rules.api.RuleSetNotFoundException;
-import com.horus.bpm.rules.api.VersionNotFoundException;
-import com.horus.bpm.rules.internal.model.InputClause;
-import com.horus.bpm.rules.internal.eval.CompiledRuleSet;
-import com.horus.bpm.rules.internal.json.CanonicalJson;
-import com.horus.bpm.rules.internal.json.CorrelationIds;
-import com.horus.bpm.rules.internal.json.ExactForm;
-import com.horus.bpm.rules.internal.json.InputLimits;
-import com.horus.bpm.rules.internal.json.EngineJson;
-import com.horus.bpm.rules.internal.json.EngineValues;
-import com.horus.bpm.rules.internal.json.Hashes;
-import com.horus.bpm.rules.internal.json.Ulid;
-import com.horus.bpm.rules.internal.read.RuleSetReader;
-import com.horus.bpm.rules.internal.store.DecisionLog;
-import com.horus.bpm.rules.internal.store.DecisionRecord;
-import com.horus.bpm.rules.internal.store.RuleStore;
-import com.horus.bpm.rules.internal.store.StoredVersion;
+import io.github.dhluong90.bpm.rules.api.ClockNotAllowedException;
+import io.github.dhluong90.bpm.rules.api.DecisionInput;
+import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
+import io.github.dhluong90.bpm.rules.api.DecisionRequest;
+import io.github.dhluong90.bpm.rules.api.DecisionResult;
+import io.github.dhluong90.bpm.rules.api.InputInvalidException;
+import io.github.dhluong90.bpm.rules.api.InvalidStateException;
+import io.github.dhluong90.bpm.rules.api.NoEffectiveVersionException;
+import io.github.dhluong90.bpm.rules.api.ReplayNotPossibleException;
+import io.github.dhluong90.bpm.rules.api.RuleEngine;
+import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
+import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
+import io.github.dhluong90.bpm.rules.internal.model.InputClause;
+import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
+import io.github.dhluong90.bpm.rules.internal.json.CanonicalJson;
+import io.github.dhluong90.bpm.rules.internal.json.CorrelationIds;
+import io.github.dhluong90.bpm.rules.internal.json.ExactForm;
+import io.github.dhluong90.bpm.rules.internal.json.InputLimits;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
+import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
+import io.github.dhluong90.bpm.rules.internal.json.Hashes;
+import io.github.dhluong90.bpm.rules.internal.json.Ulid;
+import io.github.dhluong90.bpm.rules.internal.read.RuleSetReader;
+import io.github.dhluong90.bpm.rules.internal.store.DecisionLog;
+import io.github.dhluong90.bpm.rules.internal.store.DecisionRecord;
+import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
+import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -121,7 +121,7 @@ public final class DefaultRuleEngine implements RuleEngine {
         }
         Map<String, Object> typed = new java.util.LinkedHashMap<>();
         for (Map.Entry<String, Object> output : outputs.entrySet()) {
-            com.horus.bpm.rules.internal.model.ValueType.Kind kind = rules.outputs().stream()
+            io.github.dhluong90.bpm.rules.internal.model.ValueType.Kind kind = rules.outputs().stream()
                     .filter(clause -> clause.name().equals(output.getKey())).findFirst()
                     .map(clause -> clause.type().kind()).orElse(null);
             typed.put(output.getKey(), typedValue(output.getValue(), kind));
@@ -133,16 +133,16 @@ public final class DefaultRuleEngine implements RuleEngine {
                 stored.evaluatedAt(), outcome);
     }
 
-    private static Object typedValue(Object value, com.horus.bpm.rules.internal.model.ValueType.Kind kind) {
+    private static Object typedValue(Object value, io.github.dhluong90.bpm.rules.internal.model.ValueType.Kind kind) {
         if (value instanceof List<?> list) {
             List<Object> elements = new ArrayList<>(list.size());
             list.forEach(element -> elements.add(typedValue(element, kind)));
             return java.util.Collections.unmodifiableList(elements);
         }
-        if (value instanceof String text && kind == com.horus.bpm.rules.internal.model.ValueType.Kind.DATE) {
+        if (value instanceof String text && kind == io.github.dhluong90.bpm.rules.internal.model.ValueType.Kind.DATE) {
             return java.time.LocalDate.parse(text);
         }
-        if (value instanceof String text && kind == com.horus.bpm.rules.internal.model.ValueType.Kind.DATETIME) {
+        if (value instanceof String text && kind == io.github.dhluong90.bpm.rules.internal.model.ValueType.Kind.DATETIME) {
             return Instant.parse(text);
         }
         return value;
@@ -151,7 +151,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     private DecisionResult doEvaluate(String tenant, String caller, DecisionRequest request) {
         Instant now = context.clock().instant();
         Instant at = request.clock() == null ? now : request.clock();
-        if (!com.horus.bpm.rules.internal.read.RuleSetReader.isRuleSetName(request.ruleSet())) {
+        if (!io.github.dhluong90.bpm.rules.internal.read.RuleSetReader.isRuleSetName(request.ruleSet())) {
             // Not a possible name (a NUL byte, upper case): not found, without a query the driver would refuse.
             throw new RuleSetNotFoundException("(invalid name)");
         }

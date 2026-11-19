@@ -1,19 +1,19 @@
-package com.horus.bpm.rules.postgres;
+package io.github.dhluong90.bpm.rules.postgres;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.DecisionInput;
-import com.horus.bpm.rules.api.DecisionNotFoundException;
-import com.horus.bpm.rules.api.DecisionRequest;
-import com.horus.bpm.rules.api.DecisionResult;
-import com.horus.bpm.rules.api.ImportRequest;
-import com.horus.bpm.rules.api.Money;
-import com.horus.bpm.rules.api.WriteOptions;
-import com.horus.bpm.rules.internal.service.EngineSettings;
-import com.horus.bpm.rules.internal.service.RuleEngines;
-import com.horus.bpm.rules.spi.CallerResolver;
-import com.horus.bpm.rules.spi.TenantResolver;
+import io.github.dhluong90.bpm.rules.api.DecisionInput;
+import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
+import io.github.dhluong90.bpm.rules.api.DecisionRequest;
+import io.github.dhluong90.bpm.rules.api.DecisionResult;
+import io.github.dhluong90.bpm.rules.api.ImportRequest;
+import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
+import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
+import io.github.dhluong90.bpm.rules.spi.CallerResolver;
+import io.github.dhluong90.bpm.rules.spi.TenantResolver;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;

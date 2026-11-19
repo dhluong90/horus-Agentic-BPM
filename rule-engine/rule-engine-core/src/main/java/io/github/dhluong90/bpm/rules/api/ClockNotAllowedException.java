@@ -1,4 +1,4 @@
-package com.horus.bpm.rules.api;
+package io.github.dhluong90.bpm.rules.api;
 
 /**
  * {@code 403 CLOCK_NOT_ALLOWED}: the request chose its own clock, which only {@code rules:simulate} may do, because a
