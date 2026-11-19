@@ -27,6 +27,8 @@ import tools.jackson.databind.node.ObjectNode;
 @RestControllerAdvice(assignableTypes = {RuleSetController.class, DecisionController.class})
 public class ProblemDetails {
 
+    private static final System.Logger LOG = System.getLogger(ProblemDetails.class.getName());
+
     /** Request header carrying the caller's correlation id. */
     public static final String CORRELATION_HEADER = "X-Correlation-Id";
 
@@ -53,7 +55,8 @@ public class ProblemDetails {
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
             Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE),
-            Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE));
+            Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
+            Map.entry("INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR));
 
     /**
      * Answers an engine exception.
@@ -74,12 +77,40 @@ public class ProblemDetails {
                 item.set("column", EngineValues.value(v.column()));
                 item.put("message", v.message());
             }
+            body.put("violationsTruncated", failed.truncated());
         }
         ResponseEntity<byte[]> response = response(status, body);
         if (status == HttpStatus.CONFLICT && "IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {
             return ResponseEntity.status(status).header("Retry-After", "1").contentType(PROBLEM).body(response.getBody());
         }
         return response;
+    }
+
+    /**
+     * Answers anything else an engine controller throws (RLE-036, TR-SEC-08). A failure Spring already classifies as
+     * a client error (unreadable body, unsupported media type, missing parameter) keeps its 4xx status as
+     * {@code INPUT_INVALID}. Everything else is {@code 500 INTERNAL_ERROR} with only a {@code correlationId}: no
+     * message, class name, SQL or table name reaches the body. The exception is logged with the same id.
+     *
+     * @param e the exception
+     * @param request the request, for its correlation id
+     * @return the problem response
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<byte[]> handleUnexpected(Exception e, WebRequest request) {
+        return unexpected(e, request.getHeader(CORRELATION_HEADER));
+    }
+
+    static ResponseEntity<byte[]> unexpected(Exception e, String correlationHeader) {
+        String correlationId = correlationId(correlationHeader);
+        if (e instanceof org.springframework.web.ErrorResponse error && error.getStatusCode().is4xxClientError()) {
+            HttpStatus status = HttpStatus.valueOf(error.getStatusCode().value());
+            return response(status, body("INPUT_INVALID", status, "The request could not be read: "
+                    + status.getReasonPhrase(), correlationId));
+        }
+        LOG.log(System.Logger.Level.ERROR, "Unexpected failure in a Rule Engine endpoint, correlationId " + correlationId, e);
+        return response(HttpStatus.INTERNAL_SERVER_ERROR, body("INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR,
+                "Unexpected failure; quote the correlationId to the operator", correlationId));
     }
 
     static ObjectNode body(String code, HttpStatus status, String detail, String correlationId) {

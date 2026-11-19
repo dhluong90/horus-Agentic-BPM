@@ -42,6 +42,12 @@ public final class CompiledRuleSet {
     private static final Set<String> SHORTHAND_PREFIXES = Set.of("==", "!=", "<", ">", "in ", "in[", "not in",
             "is ", "between ");
 
+    /**
+     * Most violations one {@code 422 VALIDATION_FAILED} lists; further problems only set the truncated flag, so a
+     * document of many small mistakes cannot make the answer larger than the request. A safety bound, not a setting.
+     */
+    public static final int MAX_VIOLATIONS = 100;
+
     private final String name;
     private final HitPolicy hitPolicy;
     private final List<InputClause> inputs;
@@ -75,25 +81,36 @@ public final class CompiledRuleSet {
         for (int i = 0; i < table.inputs().size(); i++) {
             slots.put(table.inputs().get(i).name(), i);
         }
-        List<Violation> problems = new ArrayList<>();
+        Problems problems = new Problems(MAX_VIOLATIONS);
         Map<String, Expr> defaults = new LinkedHashMap<>();
         for (OutputClause output : table.outputs()) {
             defaults.put(output.name(), output.defaultValue() == null
                     ? new Expr.Literal(null) : output(output.defaultValue(), output, slots, table.inputs(), null, problems));
         }
         List<CompiledRule> rules = new ArrayList<>();
+        Map<String, OutputClause> declared = new LinkedHashMap<>();
+        table.outputs().forEach(output -> declared.put(output.name(), output));
         for (Rule rule : table.rules()) {
             Expr condition = when(rule.when(), slots, table.inputs(), rule.id(), problems);
+            // Output cells are checked in the order they are written, so violations follow the document (RLE-041),
+            // and placed by declaration order for evaluation.
+            Map<String, Expr> written = new HashMap<>();
+            for (Map.Entry<String, Cell> cell : rule.then().entrySet()) {
+                OutputClause output = declared.get(cell.getKey());
+                if (output == null) {
+                    problems.add(new Violation(rule.id(), cell.getKey(), "unknown output '" + cell.getKey() + "'"));
+                } else {
+                    written.put(output.name(), output(cell.getValue(), output, slots, table.inputs(), rule.id(), problems));
+                }
+            }
             List<Expr> thens = new ArrayList<>();
             for (OutputClause output : table.outputs()) {
-                Cell cell = rule.then().get(output.name());
-                thens.add(cell == null ? defaults.get(output.name())
-                        : output(cell, output, slots, table.inputs(), rule.id(), problems));
+                thens.add(written.getOrDefault(output.name(), defaults.get(output.name())));
             }
             rules.add(new CompiledRule(rule.id(), condition, thens));
         }
-        if (!problems.isEmpty()) {
-            throw new ValidationFailedException(problems);
+        if (!problems.kept.isEmpty()) {
+            throw new ValidationFailedException(problems.kept, problems.truncated);
         }
         return new CompiledRuleSet(model, rules);
     }
@@ -268,7 +285,7 @@ public final class CompiledRuleSet {
     }
 
     private static Expr when(When when, Map<String, Integer> slots, List<InputClause> inputs, String ruleId,
-            List<Violation> problems) {
+            Problems problems) {
         List<Expr> parts = new ArrayList<>();
         for (Map.Entry<String, String> cell : when.cells().entrySet()) {
             parts.add(condition(cell.getKey(), cell.getValue(), slots, inputs, ruleId, problems));
@@ -293,7 +310,15 @@ public final class CompiledRuleSet {
 
     /** Parses and type-checks one condition cell; a problem is recorded on its cell and a placeholder returned. */
     private static Expr condition(String input, String text, Map<String, Integer> slots, List<InputClause> inputs,
-            String ruleId, List<Violation> problems) {
+            String ruleId, Problems problems) {
+        if (!slots.containsKey(input)) {
+            problems.add(new Violation(ruleId, input, "unknown input '" + input + "'"));
+            return new Expr.Literal(Boolean.FALSE);
+        }
+        if (text == null) {
+            problems.add(new Violation(ruleId, input, "the condition must be a non-empty string"));
+            return new Expr.Literal(Boolean.FALSE);
+        }
         String trimmed = text.strip();
         boolean shorthand = SHORTHAND_PREFIXES.stream().anyMatch(trimmed::startsWith);
         String source = shorthand ? input + " " + trimmed : trimmed;
@@ -313,9 +338,13 @@ public final class CompiledRuleSet {
 
     /** Parses one output cell (or an output default, with no rule id) and checks it against the output's type. */
     private static Expr output(Cell cell, OutputClause output, Map<String, Integer> slots, List<InputClause> inputs,
-            String ruleId, List<Violation> problems) {
+            String ruleId, Problems problems) {
         Expr expr = switch (cell) {
             case Cell.Literal literal -> new Expr.Literal(literal.value());
+            case Cell.Expression expression when expression.source() == null -> {
+                problems.add(new Violation(ruleId, output.name(), "a cell must be a string, number, boolean or null"));
+                yield new Expr.Literal(null);
+            }
             case Cell.Expression expression -> {
                 try {
                     yield Parser.parse(expression.source(), name -> slots.getOrDefault(name, -1));
@@ -330,6 +359,25 @@ public final class CompiledRuleSet {
             problems.add(new Violation(ruleId, output.name(), problem));
         }
         return expr;
+    }
+
+    /** Collects violations up to a cap and remembers whether more were found. */
+    private static final class Problems {
+        private final int cap;
+        private final List<Violation> kept = new ArrayList<>();
+        private boolean truncated;
+
+        Problems(int cap) {
+            this.cap = cap;
+        }
+
+        void add(Violation violation) {
+            if (kept.size() < cap) {
+                kept.add(violation);
+            } else {
+                truncated = true;
+            }
+        }
     }
 
     private record CompiledRule(String id, Expr condition, List<Expr> thens) {

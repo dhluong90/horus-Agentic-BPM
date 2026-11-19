@@ -62,7 +62,8 @@ paths:
       description: |
         Stores the version as `DRAFT`, with the source document byte for byte, its SHA-256
         (`sourceHash`) and the SHA-256 of its RFC 8785 canonical form (`canonicalHash`). Nothing
-        in the document is evaluated. Permission `rules:author`.
+        in the document is evaluated. Permission `rules:author`, checked before the body is read. A
+        body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -90,6 +91,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}:
     get:
@@ -156,7 +158,9 @@ paths:
       tags: [rule-sets]
       operationId: importVersion
       summary: Import a YAML document as the next draft version of an existing rule set
-      description: The document's `ruleSet` must equal `{name}`. Permission `rules:author`.
+      description: |
+        The document's `ruleSet` must equal `{name}`. Permission `rules:author`, checked before the
+        body is read. A body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -172,6 +176,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:
     get:
@@ -209,8 +214,9 @@ paths:
       description: |
         Permission `rules:read`. One entry per transition (`CREATED`, `REQUESTED`, `APPROVED`,
         `REJECTED`), with actor, reason or comment, statuses before and after and the
-        `lockVersion` after (DESIGN section 3.3.3). Versions created before the history table
-        existed have no entries for those earlier transitions.
+        `lockVersion` after (DESIGN section 3.3.3). A version created before the history table
+        existed starts with a backfilled `CREATED` entry; its earlier request and approval have
+        no entries.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -290,6 +296,8 @@ paths:
               properties:
                 comment:
                   type: string
+                  maxLength: 2000
+                  description: Optional; stored in the history. Longer than `lifecycle.reason-max-length` (default 2,000 characters) is `400 INPUT_INVALID`
             example:
               comment: Fees checked against the tariff
       responses:
@@ -439,7 +447,10 @@ components:
       name: cursor
       in: query
       required: false
-      description: The `nextCursor` of the previous page, unchanged. A cursor that was not issued by this endpoint is `400 QUERY_INVALID`.
+      description: |
+        The `nextCursor` of the previous page, unchanged. Cursors are signed for the tenant and the
+        list: a cursor not issued by this endpoint to this tenant (forged, edited, from another list
+        or another tenant) is `400 QUERY_INVALID`.
       schema:
         type: string
         maxLength: 400
@@ -479,8 +490,19 @@ components:
           schema:
             $ref: '#/components/schemas/RuleSetVersion'
     Problem:
-      description: RFC 9457 problem; see the wiki page Common Error Codes
+      description: >-
+        RFC 9457 problem; see the wiki page Common Error Codes. `401 UNAUTHENTICATED` carries a
+        `WWW-Authenticate` challenge (the host's `horus.bpm.security.challenge`, `Bearer` by default, with
+        `error="invalid_token"` when no tenant could be resolved for the caller). `403` is
+        `PERMISSION_DENIED` when the caller lacks the endpoint's permission, `SELF_APPROVAL_FORBIDDEN` for a
+        maker approving their own version, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
+        another tenant than the caller's while tenant switching is off, or the principal's tenant attribute
+        contradicts the resolved tenant (RLE-018, RLE-037).
       headers:
+        WWW-Authenticate:
+          description: Sent with every `401`
+          schema:
+            type: string
         Retry-After:
           description: Seconds to wait; sent with `409 IDEMPOTENCY_IN_FLIGHT`
           schema:
@@ -559,7 +581,10 @@ components:
           enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
         publishedVersion:
           type: [integer, 'null']
-          description: The version in effect at the host clock, or null
+          description: |
+            The version evaluation selects at the host clock (DESIGN section 3.3.1, ADR-0025), or
+            null when none is in effect. An approved version whose `effectiveFrom` is still in the
+            future does not count until that instant.
         lastChangedAt:
           type: string
           format: date-time
@@ -696,23 +721,29 @@ components:
         status: { type: integer }
         code:
           type: string
-          enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, SELF_APPROVAL_FORBIDDEN,
-            RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, VERSION_CONFLICT, INVALID_STATE,
-            IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED, IDEMPOTENCY_KEY_REUSE_MISMATCH,
-            EVALUATION_ERROR, PAYLOAD_TOO_LARGE]
+          enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
+            SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION,
+            VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
+            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, PAYLOAD_TOO_LARGE, INTERNAL_ERROR]
         detail: { type: string }
         correlationId: { type: string }
         violations:
           type: array
           description: |
             Present on `VALIDATION_FAILED` only, with at least one entry. Every cell problem of the
-            document is listed, in document order, so a screen can mark each cell at once. A
-            problem in the document's structure (a missing key, an unknown property) stops reading
-            and is the only entry.
+            document is listed, in document order (rule by rule; conditions, then outputs, each as
+            written), up to 100 entries, so a screen can mark each cell
+            at once; `violationsTruncated` says whether more were found. A problem in the
+            document's structure (a missing key, an unknown property) stops reading and is the only
+            entry.
+          maxItems: 100
           items:
             $ref: '#/components/schemas/Violation'
           example:
-            - { ruleId: R3, column: fee, message: 'output fee is money; write the amount with its currency, for example 30000 VND' }
+            - { ruleId: R3, column: fee, message: 'output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code' }
+        violationsTruncated:
+          type: boolean
+          description: Present on `VALIDATION_FAILED`; true when the document has more than the 100 problems listed
         decisionId:
           type: string
           description: Present on `EVALUATION_ERROR`; the failed decision is logged

@@ -259,6 +259,18 @@ public final class JdbcRuleStore implements RuleStore {
                 .list();
     }
 
+    @Override
+    public byte[] engineKey(String name, byte[] candidate, Instant now) {
+        // ON CONFLICT so concurrent first uses on two replicas neither fail nor doom the caller's transaction.
+        jdbc.sql("""
+                INSERT INTO rle_engine_key (name, key_bytes, created_at) VALUES (:name, :key, :at)
+                ON CONFLICT (name) DO NOTHING
+                """)
+                .param("name", name).param("key", candidate).param("at", Timestamp.from(now)).update();
+        return jdbc.sql("SELECT key_bytes FROM rle_engine_key WHERE name = :name")
+                .param("name", name).query(byte[].class).single();
+    }
+
     private static RuleSetSummary summary(ResultSet rs, int row) throws SQLException {
         int published = rs.getInt("published_version");
         Integer publishedVersion = rs.wasNull() ? null : published;

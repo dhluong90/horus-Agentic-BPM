@@ -187,6 +187,98 @@ class EditorApiPostgresIT {
                 .isEqualTo(approved.canonicalHash());
     }
 
+    /** V4: the history is append-only in the database, not only by convention (security review, M2). */
+    @Test
+    void RLE_025_history_rows_cannot_be_updated_deleted_or_truncated() {
+        // Given card-fee v2 rejected by minh: a REJECTED row exists
+        publish("card-fee", null);
+        caller.as("bank-a", "lan");
+        versions.importVersion("card-fee", ImportRequest.yaml(renamed("card-fee", null)));
+        versions.requestPublish("card-fee", 2, WriteOptions.none());
+        caller.as("bank-a", "minh");
+        versions.reject("card-fee", 2, new WriteOptions(null, null, "R2 waiver needs pricing committee minutes"));
+        long rows = count("rle_version_history");
+
+        // Then the application role can neither rewrite, remove nor truncate it
+        for (String sql : new String[] {
+                "UPDATE rle_version_history SET reason = 'approved after all', actor = 'lan' WHERE action = 'REJECTED'",
+                "DELETE FROM rle_version_history WHERE action = 'REJECTED'",
+                "TRUNCATE rle_version_history"}) {
+            assertThatThrownBy(() -> jdbc.sql(sql).update()).as(sql)
+                    .hasRootCauseInstanceOf(org.postgresql.util.PSQLException.class)
+                    .rootCause().hasMessageContaining("rle_version_history is append-only")
+                    .satisfies(e -> assertThat(((org.postgresql.util.PSQLException) e).getSQLState()).isEqualTo("55000"));
+        }
+        assertThat(count("rle_version_history")).isEqualTo(rows);
+        assertThat(jdbc.sql("SELECT actor || ' ' || reason FROM rle_version_history WHERE action = 'REJECTED'")
+                .query(String.class).single()).isEqualTo("minh R2 waiver needs pricing committee minutes");
+        // and inserting still works: the next transition appends
+        caller.as("bank-a", "lan");
+        versions.requestPublish("card-fee", 2, WriteOptions.none());
+        assertThat(count("rle_version_history")).isEqualTo(rows + 1);
+    }
+
+    @Test
+    void RLE_039_a_cursor_replayed_in_another_tenant_is_query_invalid() {
+        publish("card-fee", null);
+        imported("fx-margin");
+        caller.as("bank-b", "lan");
+        versions.importRuleSet(ImportRequest.yaml(renamed("aml-score", null)));
+        versions.importRuleSet(ImportRequest.yaml(renamed("zz-limits", null)));
+        caller.as("bank-a", "dan");
+        String cursor = versions.listRuleSets(new PageRequest(1, null)).nextCursor();
+
+        // The key is stored once in rle_engine_key, so the cursor works for its own tenant on any replica
+        assertThat(versions.listRuleSets(new PageRequest(10, cursor)).items()).extracting(RuleSetSummary::ruleSet)
+                .containsExactly("fx-margin");
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_engine_key WHERE name = 'cursor-hmac' AND octet_length(key_bytes) = 32")
+                .query(Long.class).single()).isEqualTo(1L);
+        caller.as("bank-b", "dan");
+        assertThatThrownBy(() -> versions.listRuleSets(new PageRequest(10, cursor)))
+                .isInstanceOf(com.horus.bpm.rules.api.QueryInvalidException.class);
+    }
+
+    /** V3 backfills one CREATED row per version that existed before it, so their history starts at creation. */
+    @Test
+    void RLE_025_versions_created_before_the_history_table_get_their_created_row() {
+        // Given a database at V2 with card-fee v1 by lan (published) and v2 written before authors were recorded
+        DataSource db = freshDatabase();
+        org.flywaydb.core.Flyway.configure().dataSource(db).table("rle_schema_history")
+                .locations(RuleEngineSchemaMigrator.MIGRATION_LOCATION).baselineOnMigrate(true).baselineVersion("0")
+                .target("2").load().migrate();
+        JdbcClient old = JdbcClient.create(db);
+        old.sql("INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES "
+                + "('bank-a', '01KD00000000000000000RS001', 'card-fee', '2026-11-01T00:00:00Z')").update();
+        String insert = """
+                INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy, canonical_json,
+                  canonical_hash, source_format, source_document, source_hash, lock_version, requested_by, approved_by,
+                  created_by, created_at)
+                VALUES ('bank-a', :id, '01KD00000000000000000RS001', :num, :status, 'FIRST', '{}', :hash, 'YAML', '',
+                  :hash, :lock, :requestedBy, :approvedBy, :createdBy, CAST(:at AS timestamptz))
+                """;
+        String hash = "0".repeat(64);
+        old.sql(insert).param("id", "01KD00000000000000000VS001").param("num", 1).param("status", "PUBLISHED")
+                .param("hash", hash).param("lock", 2).param("requestedBy", "lan").param("approvedBy", "minh")
+                .param("createdBy", "lan").param("at", "2026-11-01T00:00:00Z").update();
+        old.sql(insert).param("id", "01KD00000000000000000VS002").param("num", 2).param("status", "DRAFT")
+                .param("hash", hash).param("lock", 0).param("requestedBy", null).param("approvedBy", null)
+                .param("createdBy", null).param("at", "2026-11-05T00:00:00Z").update();
+
+        // When V3 runs
+        new RuleEngineSchemaMigrator(db).migrate();
+
+        // Then each version has exactly one CREATED row: actor the author, or system when none was recorded
+        assertThat(old.sql("""
+                SELECT string_agg(version_id || ' ' || action || ' ' || to_status || ' ' || actor || ' ' || lock_version
+                  || ' ' || to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), ', ' ORDER BY version_id)
+                FROM rle_version_history WHERE tenant_id = 'bank-a'
+                """).query(String.class).single()).isEqualTo(
+                "01KD00000000000000000VS001 CREATED DRAFT lan 0 2026-11-01, "
+                        + "01KD00000000000000000VS002 CREATED DRAFT system 0 2026-11-05");
+        assertThat(old.sql("SELECT count(*) FROM rle_version_history WHERE from_status IS NOT NULL")
+                .query(Long.class).single()).isZero();
+    }
+
     @Test
     void RLE_042_money_output_without_currency_is_refused_at_import() {
         caller.as("bank-a", "lan");

@@ -390,22 +390,20 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ---
 
-## Authoring API for the Rule Editor (proposed, #147)
-
-Statements `RLE-039` to `RLE-043` are proposed by #147 for the cockpit rule editor and await review of the architecture owner; until then they are not release gates of any milestone beyond their tests passing.
+## Authoring API for the Rule Editor (#147)
 
 ### RLE-039 A caller lists the rule sets of their own tenant, by name, a page at a time
 - **Traces to:** `TR-TEN-01`, `TR-SEC-03`, `TR-UI-02`
-- **Milestone:** M1 (proposed, #147)
+- **Milestone:** M1
 - **Given:** Tenant `bank-a` has `card-fee` (v1 `PUBLISHED` effective since `2026-12-01T00:00:00Z`, v2 `PENDING_APPROVAL` requested at `2026-12-10T03:00:00Z`), `fx-margin` (v1 `DRAFT`) and `kyc-risk` (v1 `DRAFT`); tenant `bank-b` has its own `aml-score`. Caller `lan` holds `rules:read` in `bank-a`; the host clock reads `2026-12-10T03:00:00Z`.
-- **When:** `lan` sends `GET /api/bpm/rules/v1/rule-sets?limit=2`, then the same request with the returned `cursor`. Failure cases: `limit=0`, `limit=201`, a `cursor` that was not issued by the endpoint, and a caller without `rules:read`.
-- **Then:** The first page lists `card-fee` (`latestVersion: 2`, `latestStatus: PENDING_APPROVAL`, `publishedVersion: 1`, `lastChangedAt: 2026-12-10T03:00:00Z`) and `fx-margin` (`latestVersion: 1`, `latestStatus: DRAFT`, `publishedVersion: null`) and a `nextCursor`; the second page lists `kyc-risk` alone and `nextCursor: null`. `aml-score` never appears. `limit=0`, `limit=201` and the forged cursor return `400 QUERY_INVALID`; the caller without the permission gets `403 PERMISSION_DENIED`. `GET /rule-sets/card-fee` returns the same summary as the list item, and a `bank-b` caller reading it gets `404 RULE_SET_NOT_FOUND`. The list writes nothing.
+- **When:** `lan` sends `GET /api/bpm/rules/v1/rule-sets?limit=2`, then the same request with the returned `cursor`. Failure cases: `limit=0`, `limit=201`, a `cursor` that was not issued by the endpoint, a cursor whose decoded key is not a rule set name (for example a NUL byte), a cursor issued to `lan` replayed by a `bank-b` caller, and a caller without `rules:read`.
+- **Then:** The first page lists `card-fee` (`latestVersion: 2`, `latestStatus: PENDING_APPROVAL`, `publishedVersion: 1`, `lastChangedAt: 2026-12-10T03:00:00Z`) and `fx-margin` (`latestVersion: 1`, `latestStatus: DRAFT`, `publishedVersion: null`) and a `nextCursor`; the second page lists `kyc-risk` alone and `nextCursor: null`. `aml-score` never appears. `limit=0`, `limit=201`, the forged cursor, the NUL key and the replayed cursor return `400 QUERY_INVALID`, never `500`: a cursor is signed (HMAC-SHA256 over tenant, list and position, with a key stored once per database), so only a cursor issued to the same tenant for the same list is accepted; the caller without the permission gets `403 PERMISSION_DENIED`. `GET /rule-sets/card-fee` returns the same summary as the list item, and a `bank-b` caller reading it gets `404 RULE_SET_NOT_FOUND`. A name that cannot be a rule set name (`card\u0000fee`, upper case) is `404 RULE_SET_NOT_FOUND` on every endpoint that takes one. The list writes nothing.
 - **Example:** `limit=2 -> [card-fee v2 PENDING_APPROVAL published 1, fx-margin v1 DRAFT] + cursor; next -> [kyc-risk]; bank-b's aml-score never listed`.
 - **Test ID:** `RLE_039_rule_sets_are_listed_per_tenant_by_name_with_a_cursor`
 
 ### RLE-040 A caller lists the versions of one rule set, newest first, with who created, requested and approved each
 - **Traces to:** `TR-TEN-01`, `TR-SEC-04`, `TR-UI-02`
-- **Milestone:** M1 (proposed, #147)
+- **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v1 created by `lan`, requested by `lan` and approved by `minh`; v2 created and requested by `lan`; v3 `DRAFT` created by `lan`. Caller `minh` holds `rules:read` and `rules:approve`.
 - **When:** `minh` sends `GET /api/bpm/rules/v1/rule-sets/card-fee/versions?limit=2`, then follows `nextCursor`. Failure cases: the same request from a `bank-b` caller; `GET /rule-sets/no-such-set/versions`; `limit=500`.
 - **Then:** The first page lists v3 (`DRAFT`, `createdBy: lan`, `requestedBy: null`) then v2 (`PENDING_APPROVAL`, `requestedBy: lan`, `approvedBy: null`); the second page lists v1 (`PUBLISHED`, `approvedBy: minh`) and `nextCursor: null`. Items carry no definition. The `bank-b` caller and the unknown name get `404 RULE_SET_NOT_FOUND`; `limit=500` returns `400 QUERY_INVALID`. The list writes nothing.
@@ -414,16 +412,16 @@ Statements `RLE-039` to `RLE-043` are proposed by #147 for the cockpit rule edit
 
 ### RLE-041 A refused document lists every cell problem with its rule id and column
 - **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-SEC-08`
-- **Milestone:** M1 (proposed, #147)
+- **Milestone:** M1
 - **Given:** Tenant `bank-a`; caller `lan` holds `rules:author`. File `card-fee-bad.yaml` with inputs `tier` (string) and `balance` (money), output `fee` (money), and rows `R2` (`balance: ">= 50000000"`, a number compared with money) and `R4` (`then: { fee: "+ 1" }`, which does not parse). Second file: a document with an unknown root property `maks`.
 - **When:** `lan` posts each file to `POST /api/bpm/rules/v1/rule-sets`.
-- **Then:** The first returns `422 VALIDATION_FAILED` whose `violations` are, in document order, `{ ruleId: R2, column: balance, message: ... }` and `{ ruleId: R4, column: fee, message: ... }`; each `message` carries no rule id or column prefix. The second returns `422 VALIDATION_FAILED` with one violation whose `ruleId` and `column` are null and whose `message` names `maks`. Neither stores a rule set, a version or a source document.
+- **Then:** The first returns `422 VALIDATION_FAILED` whose `violations` are, in document order (rule by rule; within a rule the conditions, then the outputs, each in the order written, nested `any` and `all` groups after the plain conditions), `{ ruleId: R2, column: balance, message: ... }` and `{ ruleId: R4, column: fee, message: ... }`; each `message` carries no rule id or column prefix. The second returns `422 VALIDATION_FAILED` with one violation whose `ruleId` and `column` are null and whose `message` names `maks`. Neither stores a rule set, a version or a source document. Both carry `violationsTruncated: false`; a document with 150 bad output cells lists the first 100 in document order with `violationsTruncated: true`.
 - **Example:** `R2 balance >= 50000000 and R4 fee "+ 1" -> 422, violations [R2/balance, R4/fee]`.
 - **Test ID:** `RLE_041_validation_failure_lists_each_cell_problem_with_rule_and_column`
 
 ### RLE-042 A money output written without a currency is refused at import, not at evaluation
 - **Traces to:** `TR-DET-02`, `TR-DET-03`
-- **Milestone:** M1 (proposed, #147)
+- **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee.yaml` whose output `fee` is `money`, with row `R2` (`txCount >= 3 -> fee: "30000"`) and a second file where `R2` writes `fee: 30000` (a YAML number). Third file: output `waived` of type `boolean` with `R1` writing `waived: "'yes'"`. Fourth file: `R2` writes `fee: "30000 VND"`.
 - **When:** `lan` imports each file.
 - **Then:** The first three return `422 VALIDATION_FAILED` with a violation `{ ruleId: R2, column: fee }` (`{ ruleId: R1, column: waived }` for the third) whose message says the output is `money` and must carry a currency (is `boolean` for the third); nothing is stored, so no decision can ever fail with `EVALUATION_ERROR` for this reason. The fourth imports as `DRAFT`, and once approved, evaluating it with `tier = "SILVER"`, `txCount = 5` returns `fee: { "currency": "VND", "amount": 30000 }` from `R2`.
@@ -432,7 +430,7 @@ Statements `RLE-039` to `RLE-043` are proposed by #147 for the cockpit rule edit
 
 ### RLE-043 A version tells the caller which lifecycle actions they may take, with four eyes applied
 - **Traces to:** `TR-SEC-04`, `TR-UI-02`
-- **Milestone:** M1 (proposed, #147)
+- **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v2 `PENDING_APPROVAL`, created and requested by `lan`; v3 `DRAFT` created by `lan`; v1 `PUBLISHED`. `lan` holds `rules:read`, `rules:author` and `rules:approve`; `minh` holds `rules:read` and `rules:approve`; `dan` holds `rules:read` only.
 - **When:** Each of them reads v1, v2 and v3 with `GET .../versions/{v}` and lists the versions.
 - **Then:** On v2 `lan` gets `allowedActions: ["reject"]` (withdrawal; `approve` is absent because `lan` requested it), `minh` gets `["approve", "reject"]`, `dan` gets `[]`. On v3 `lan` gets `["request-publish"]` and `minh` gets `[]`. On v1 everyone gets `[]`. The list items carry the same values. `lan`'s `approve` of v2 is still refused with `403 SELF_APPROVAL_FORBIDDEN`, because `allowedActions` is a hint and the command checks again. An idempotent replay of a command returns the actions computed for the caller at replay time, not the stored ones.
@@ -441,9 +439,9 @@ Statements `RLE-039` to `RLE-043` are proposed by #147 for the cockpit rule edit
 
 ### RLE-044 Command and evaluation bodies are read up to their limit; a larger body is `413 PAYLOAD_TOO_LARGE`
 - **Traces to:** `TR-SEC-07`, `TR-SEC-08`
-- **Milestone:** M1 (proposed, #147)
+- **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v1 published and v2 `PENDING_APPROVAL`; caller `minh` holds `rules:approve` and `rules:evaluate`. The limits are 16,384 bytes for `:approve` and `:reject` bodies and 1,048,576 bytes for `:evaluate` (`EngineDefaults`), the import limit of `RuleSetReader`.
-- **When:** `minh` sends `:reject` and `:approve` of v2 with a 16,385-byte body; `:reject` with a body that has no `Content-Length` (chunked) and never ends; `:evaluate` of `card-fee` with a 1,048,577-byte body; and `:reject` with `{ "reason": "R2 waiver needs pricing committee minutes" }`.
-- **Then:** The oversized and endless bodies return `413 PAYLOAD_TOO_LARGE` as problem details; a declared `Content-Length` above the limit is refused before the body is read, and an undeclared one is read at most one byte past the limit. None of them changes v2, writes an event, a history row, a decision row or an idempotency record. The normal reject returns `200`.
+- **When:** `minh` sends `:reject` and `:approve` of v2 with a 16,385-byte body; `:reject` with a body that has no `Content-Length` (chunked) and never ends; `:evaluate` of `card-fee` with a 1,048,577-byte body; `POST /rule-sets` with a 1,048,577-byte YAML body, declared and chunked; the same import by a caller with only `rules:read`; and `:reject` with `{ "reason": "R2 waiver needs pricing committee minutes" }`.
+- **Then:** The oversized and endless bodies return `413 PAYLOAD_TOO_LARGE` as problem details; a declared `Content-Length` above the limit is refused before the body is read, and an undeclared one is read at most one byte past the limit. The caller with only `rules:read` gets `403 PERMISSION_DENIED`, because every endpoint checks its permission before it reads the body. None of them changes v2, creates a rule set, writes an event, a history row, a decision row or an idempotency record. The normal reject returns `200`.
 - **Example:** `:reject with 16,385 bytes -> 413 PAYLOAD_TOO_LARGE, v2 still PENDING_APPROVAL; :evaluate with 1 MiB + 1 byte -> 413, 0 rle_decision rows`.
 - **Test ID:** `RLE_044_oversized_command_and_evaluation_bodies_are_refused_with_413`

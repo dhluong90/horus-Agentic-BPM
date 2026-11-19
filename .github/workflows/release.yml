@@ -1,0 +1,112 @@
+name: Release (dry run)
+
+# Builds a release from a clean checkout: the cockpit bundle from these sources with the pinned Node,
+# then every Java artifact, staged into target/release/maven-repo, with one bill of materials covering
+# the Maven packages and the npm packages in the cockpit bundle (TR-LIC-01, TR-SEC-06, TR-UI-06).
+# Nothing is published: the Maven Central namespace is not registered yet, and real publishing will be
+# a separate workflow with no pull_request trigger (docs/RELEASING.md). The staged artifacts, the bills
+# of materials, BUILD-INFO.json and SHA256SUMS are uploaded to the workflow run.
+# Actions are pinned by commit SHA; the comment names the release. Update both together.
+
+on:
+  push:
+    tags: ["*/v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "tools/release/**"
+      - "tools/licence-policy/**"
+
+permissions:
+  contents: read
+
+# A pull request run is replaced by a newer one; a tag or dispatch run is never cancelled halfway.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  release-dry-run:
+    name: Release dry run (cockpit bundle, artifacts, release SBOM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GRYPE_VERSION: "0.122.1"
+      # SHA-256 of grype_0.122.1_linux_amd64.tar.gz, from the signed checksum file of that release.
+      GRYPE_SHA256: "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538"
+      # Tag builds check the tag against the version and main (release-build.sh); empty otherwise.
+      BPM_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          # A tag build checks that the tagged commit is on main, which needs the history.
+          fetch-depth: ${{ github.ref_type == 'tag' && '0' || '1' }}
+
+      # No dependency cache: a release build never restores a cache another run could have written.
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # The exact Node version of every release build; release-build.sh refuses any other.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: tools/release/node-version
+          package-manager-cache: false
+
+      - name: Release build (bundle, tests, licence gates, staging, bills of materials, SHA256SUMS)
+        run: tools/release/release-build.sh
+
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        if: ${{ !cancelled() && hashFiles('target/release/bom-release.json') != '' }}
+
+      - name: Install Grype (signature and pinned checksum verified)
+        if: ${{ !cancelled() && hashFiles('target/release/bom-release.json') != '' }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          base="https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}"
+          tarball="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          sums="grype_${GRYPE_VERSION}_checksums.txt"
+          curl -sSfL -O "$base/$tarball" -O "$base/$sums" -O "$base/$sums.sigstore.json"
+          cosign verify-blob "$sums" --bundle "$sums.sigstore.json" \
+            --certificate-identity "https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          grep " ${tarball}\$" "$sums" | sha256sum -c -
+          echo "${GRYPE_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" grype
+          echo "GRYPE=$RUNNER_TEMP/grype" >> "$GITHUB_ENV"
+
+      - name: Vulnerability gate on the release SBOM, Java and npm, fails on high or critical (TR-SEC-06)
+        if: ${{ !cancelled() && env.GRYPE != '' }}
+        run: tools/scan-dependencies.sh target/release/bom-release.json
+
+      # Named by outcome, so the archive of a failed run can never be taken for a passing one.
+      - name: Upload staged artifacts and bills of materials
+        id: upload
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dry-run-${{ job.status }}
+          path: |
+            target/release/
+            target/grype-bom-release.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Record the archive digest in the step summary
+        if: ${{ !cancelled() && steps.upload.outputs.artifact-id != '' }}
+        env:
+          ARTIFACT_NAME: release-dry-run-${{ job.status }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          {
+            echo "### Release dry run: uploaded archive"
+            echo
+            echo "| Name | Artifact id | SHA-256 of the archive |"
+            echo "|---|---|---|"
+            echo "| \`${ARTIFACT_NAME}\` | ${ARTIFACT_ID} | \`${ARTIFACT_DIGEST}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

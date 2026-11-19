@@ -125,4 +125,15 @@ public interface RuleStore {
      * @return the rows
      */
     List<HistoryRow> history(String tenantId, String versionId);
+
+    /**
+     * Returns the engine key of a purpose, storing {@code candidate} first when none exists. Every replica gets the
+     * same key: the first insert wins and later ones read it.
+     *
+     * @param name the purpose, for example {@code cursor-hmac}
+     * @param candidate random bytes to store when no key exists yet
+     * @param now the creation time
+     * @return the stored key
+     */
+    byte[] engineKey(String name, byte[] candidate, Instant now);
 }
