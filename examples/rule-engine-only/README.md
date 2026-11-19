@@ -254,6 +254,72 @@ public Money cardFee(String tier, int txCount) {
 }
 ```
 
+## Demo: retire a version by hand and by supersession
+
+[`rules/tet-fee-waiver.yaml`](src/main/resources/rules/tet-fee-waiver.yaml) waives the card fee during the Tet promotion. Minh, who holds `rules:approve`, ends the promotion by retiring the version with a reason. From that instant no replica serves it. Start the host on the `dev` profile as in the demo above, then:
+
+1. Hoa imports and requests the waiver, and Minh approves it. Tuan's card transaction is waived, and the version offers `retire` to Minh:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+     --data-binary @examples/rule-engine-only/src/main/resources/rules/tet-fee-waiver.yaml
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:request-publish
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:approve
+   # 200 {"version":1,"status":"PUBLISHED","lockVersion":2,...}
+   curl -s -u tuan:demo-only -X POST $H/decisions/tet-fee-waiver:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"channel":"CARD"}}'
+   # 200 {...,"version":1,"matchedRuleIds":["R1"],"outputs":{"waiveFee":true}}
+   curl -s -u minh:demo-only $H/rule-sets/tet-fee-waiver/versions/1
+   # ETag: "2"   {"status":"PUBLISHED","allowedActions":["retire"],...}
+   ```
+
+2. Minh retires it. `If-Match` and `Idempotency-Key` are required, and so is a reason:
+
+   ```bash
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -d '{"reason":"Tet promotion ended"}'
+   # 428 {"code":"PRECONDITION_REQUIRED",...}
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -H 'If-Match: "2"' -d '{"reason":"Tet promotion ended"}'
+   # 200 {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T15:56:45.001643Z",...}
+   ```
+
+   An empty reason is `400 INPUT_INVALID`. A caller with `rules:author` only is `403 PERMISSION_DENIED`, before the headers are read. A stale `If-Match` is `409 VERSION_CONFLICT`.
+
+3. It stops serving at once, and the history and the event record the actor, the reason and the mode:
+
+   ```bash
+   curl -s -u tuan:demo-only -X POST $H/decisions/tet-fee-waiver:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"channel":"CARD"}}'
+   # 404 {"code":"NO_EFFECTIVE_VERSION",...}
+   curl -s -u minh:demo-only $H/rule-sets/tet-fee-waiver/versions/1/history
+   # {"data":[...,{"action":"RETIRED","fromStatus":"PUBLISHED","toStatus":"RETIRED","actor":"minh",
+   #   "reason":"Tet promotion ended","supersededBy":null,"approvalMode":"single","lockVersion":3,...}]}
+   docker exec horus-pg psql -U horus -d horus -tAc "SELECT payload->>'retiredBy', payload->>'reason', \
+     payload->>'approvalMode' FROM rle_decision_outbox WHERE payload->>'eventType' = 'rules.version.retired.v1'"
+   # minh|Tet promotion ended|single
+   ```
+
+4. A newer version in effect at its approval retires the older one in the same transaction. Import [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml) twice, as v1 and v2, and approve both:
+
+   ```bash
+   curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1
+   # {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T15:56:51.832282Z",...}
+   curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1/history
+   # {"data":[...,{"action":"RETIRED","actor":"system","reason":"SUPERSEDED","supersededBy":2,"approvalMode":"system",...}]}
+   ```
+
+   A version scheduled for a later date retires its predecessor when the date comes, through the lifecycle sweep (`horus.bpm.rules.lifecycle.sweep-interval`, one minute by default). Evaluation switches at the date itself, without waiting for the sweep.
+
+5. The host shows the retirement mode in force:
+
+   ```bash
+   curl -s -u minh:demo-only localhost:8080/api/bpm/meta
+   # {...,"modules":[{"module":"rules",...,"settings":{"authoring.cockpit-drafts":true,"lifecycle.retire-approval":"single"}}],...}
+   ```
+
+The same steps run as `RetireVersionIT` against a Testcontainers database on every build.
+
 ## Demo: import a DMN decision table
 
 A `.dmn` file goes through the same import endpoint as YAML, with `Content-Type: application/xml` (or `text/xml`, `application/dmn+xml`). It becomes a `DRAFT` that a second person approves before it evaluates. The sample is a hand-written table in the style a common DMN modeller writes: [`card-fee-modeller.dmn`](src/test/resources/rules/dmn/card-fee-modeller.dmn).

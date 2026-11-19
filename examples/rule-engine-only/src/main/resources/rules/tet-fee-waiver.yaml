@@ -7,7 +7,7 @@ effectiveFrom: "2026-11-01T00:00:00Z"
 hitPolicy: first
 
 inputs:
-  - { name: channel, type: string, description: CARD, ATM or BRANCH }
+  - { name: channel, type: string, description: "CARD, ATM or BRANCH" }
 
 outputs:
   - { name: waiveFee, type: boolean }
