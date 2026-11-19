@@ -29,7 +29,7 @@ Source: [`diagrams/components.mmd`](diagrams/components.mmd).
 
 | Module | Contents | May depend on |
 |---|---|---|
-| `process-engine-core` | `api`, `spi` and `internal` packages: domain model, lifecycle, graph diff, validation, ports | JDK, Jackson 3 in `internal` only (ADR-0021, `TR-EMB-07`), `rule-engine` API (optional for `decision` steps and guardrails; its `ExpressionLanguage` SPI is the only way gateway conditions are compiled and evaluated, M2, DN-05) |
+| `process-engine-core` | `api`, `spi` and `internal` packages: domain model, lifecycle, graph diff, validation, ports | JDK, Jackson 3 in `internal` only (ADR-0021, `TR-EMB-07`), `bpm-expression` (value types and the `ExpressionLanguage` SPI, the only way gateway conditions are compiled and evaluated, DN-05, ADR-0027); the Rule Engine only through the `DecisionPort` for `businessRuleTask`, adapted in the starter when a `RuleEngine` bean exists |
 | `process-engine-bpmn` | BPMN subset reader and writer (section 5.5) | `process-engine-core`, JDK `javax.xml.stream` only |
 | `process-engine-postgres` | `JdbcClient` adapters for every driven port, Flyway scripts, `SKIP LOCKED` poller, rollup job | core, Spring JDBC, Flyway |
 | `process-engine-rest` | Controllers under `/api/bpm/processes/v1`, RFC 9457 errors, ETag, idempotency filter | core, bpmn, Spring WebMvc |
@@ -68,7 +68,7 @@ Source: [`diagrams/definition-lifecycle.mmd`](diagrams/definition-lifecycle.mmd)
 | `DRAFT` | `requestApproval(effectiveFrom)` | `processes:author` or `processes:deploy` | Zero validation errors; `effectiveFrom` absent (means at approval) or not in the past | `PENDING_APPROVAL` | `requested_by`, `requested_at`; `processes.definition.publish-requested.v1` |
 | `PENDING_APPROVAL` | `approve(comment)` | `processes:approve` | Caller is not `requested_by` (`403 SELF_APPROVAL_FORBIDDEN`); no `ACTIVE` version with a higher number (`409 VERSION_SUPERSEDED`); guardrail contract re-checked | `ACTIVE` | `approved_by`, `approved_at`; job `DEFINITION_EFFECTIVE` at `effective_from`; `processes.definition.approved.v1` |
 | `PENDING_APPROVAL` | `reject(reason)` | `processes:approve` | Reason not blank | `DRAFT` | `decision_comment`; `processes.definition.rejected.v1` |
-| `DRAFT` | `importDefinition` in the `dev` profile with `definitions-auto-approve: true` | `processes:deploy` | Profile `dev` active, else start-up fails (`TR-SEC-11`) | `ACTIVE` | `approved_by = system:dev-auto-approve`; `approved.v1` |
+| `DRAFT` | `importDefinition` in the `dev` profile with `definitions.auto-approve: true` | `processes:deploy` | Profile `dev` active and no other profile, else start-up fails (`TR-SEC-11`) | `ACTIVE` | `approved_by = system:dev-auto-approve`; `approved.v1` |
 | `ACTIVE` | Effective-date job finds a newer `ACTIVE` version effective | scheduler | `effective_from <= now()` of the newer version | `RETIRED` | `processes.definition.retired.v1`. Running instances keep their version |
 | `ACTIVE` | `retire` | `processes:approve` | None | `RETIRED` | `retired.v1`; new starts of the key get `404 NO_EFFECTIVE_VERSION` if no other version is effective |
 | `DRAFT` | `retire` (withdraw a draft) | `processes:author` | None | `RETIRED` | `retired.v1` |
@@ -130,7 +130,7 @@ Source: [`diagrams/token-states.mmd`](diagrams/token-states.mmd).
 | `ACTIVE` | Arrives at a converging `parallelGateway` | `JOINED` | Under the `pre_instance` row lock; the last arrival among the tokens of the same scope token creates the post-join `ACTIVE` token (`TR-ASY-03`) |
 | `ACTIVE` | `end` step, or the end of a `saga` block's `steps` | `COMPLETED` | The scope token is checked for completion in the same transaction |
 | `COMPLETED` | Compensation of the token's steps ran (for a `SCOPE` token: a later `throwCompensation` walked its stack) | `COMPENSATED` | |
-| `ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER` | Instance cancelled, or migrated off the node | `CANCELLED` | Under the `pre_instance` row lock: open task `CANCELLED`, open job `CANCELLED`. An adapter call already running is not stopped; its TX2 finds the job `CANCELLED` and writes only `LATE_RESULT_DISCARDED` (M2, DN-10, `PRE-041`). From S1 interrupting boundary events and terminate end events use the same transition |
+| `ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER`, `WAITING_EVENT` | Instance cancelled, or migrated off the node | `CANCELLED` | Under the `pre_instance` row lock: open task `CANCELLED`, open job `CANCELLED`, event subscriptions of the token deleted (S2). An adapter call already running is not stopped; its TX2 finds the job `CANCELLED` and writes only `LATE_RESULT_DISCARDED` (M2, DN-10, `PRE-041`). From S1 interrupting boundary events and terminate end events use the same transition |
 
 Every token row carries `definition_id`, copied from the instance and changed with it by migration, so live counts per node read one index (section 8.2).
 
@@ -246,6 +246,23 @@ A `userTask` declares `form` as one of: a form key registered by the host throug
 
 `GET /step-catalogue` returns what an author may place on the canvas: service handlers and agent adapters registered through `StepRegistry` (name, mode, input schema, compensable), rule sets usable as `decision` steps (name, effective version, inputs, outputs), rule sets that meet the guardrail contract, calendars, form keys, and roles and groups when the host provides a `RoleCatalogue`. Handlers are registered as typed functional interfaces under a name; the engine never invokes a method by reflection (`TR-SEC-01`). Import validation uses the same registry, so a step the catalogue does not offer cannot be imported either.
 
+### 5.8 First executable slice (0.1.0): decisions of 19 Nov 2026
+
+The first Process Engine slice (pull request #149, on the contract of #139) settles these points. Each one stays until the slice named in its last column replaces it.
+
+| Topic | Decision | Until |
+|---|---|---|
+| HORUS extension namespace | BPMN: `urn:horus-bpm:bpmn:extensions:v1`, prefix `horus`. DMN uses the same pattern: `urn:horus-bpm:dmn:extensions:v1`. A new major version of the extension vocabulary is a new URI; readers keep reading every earlier URI | Permanent |
+| Behaviour registration | `BehaviorRegistry` keys behaviours by node class plus event-definition type: no definition, exactly one definition class, or `MULTIPLE` (S3). Lookup is exact; a node with no registered key is `422 BPMN_NOT_EXECUTABLE` at activation, naming the element, its id and the stage that adds it. This is the only change to the kernel contract of #139 | Permanent |
+| Kernel ids | Child ids derive from the instance id and `pre_instance.seq`, so `apply` is deterministic and a replay gives the same ids. `seq` is incremented only under the instance row lock, in the transaction of the tokens it numbers. Derived ids are predictable within a tenant, so no read or write relies on id secrecy: the assignment and tenant checks are the control | Permanent |
+| Import status | An import creates a `DRAFT`. It becomes `ACTIVE` only through `definitions.auto-approve`, which applies to start-up and `POST /definitions` imports alike and which start-up refuses unless `dev` is the only active profile (besides `test`). Request-publish, approve and reject arrive with the definition lifecycle slice (`PRE-018` to `PRE-021`). Until then a draft cannot be started outside `dev`, so the Process Engine in 0.1.0 is a preview for evaluation, and the release notes say so | Definition lifecycle slice |
+| Task completion | `POST /tasks/{id}:complete` needs no prior claim in 0.1.0. Still enforced: the caller must be a candidate (the task's user, role or group), the tenant comes from `EngineAccess`, and both `Idempotency-Key` and `If-Match` are required (`428` without `If-Match`), so two candidates cannot overwrite each other. Not yet enforced: four eyes on tasks, so a user who started an instance and is a candidate for its task can complete it; the release notes say so beside the preview statement. When the task slice lands, the `OPEN` to `COMPLETED` path is removed and a regression test proves it | Task slice |
+| What is compiled | The kernel is compiled from the stored source document. The approval binds it: `source_hash` and the BPMN reader version are recorded in `processes.definition.approved.v1` (and in the dev auto-approval) and in the history row of the approval transaction. Before compiling, the engine compares the SHA-256 of the stored source with the **approved** `source_hash`; on a mismatch it refuses to start or advance that version, raises an incident on each affected instance, writes an audit entry and alerts. A reader version different from the approved one is logged at WARN with the definition and both versions. This is the interim form of ADR-0026 decision 4 (pull request #150). `definition_hash` is not presented as a behaviour hash until the canonical writer of the v1 profile exists; from then on the kernel compiles only from the stored canonical JSON, as for rule sets | Canonical writer (`PRE-043`) |
+| Events | Handed to the host's `ProcessEventPublisher`, whose default is Spring `ApplicationEventPublisher`, inside the state change's transaction (section 6.4); the engine has no outbox table. Listener contract: a listener runs in the engine's transaction and an exception it throws rolls the state change back; a listener must not do network I/O (the rule of `ServiceTaskHandler`); a host forwarding events to a broker writes its own outbox row in that transaction. The audit trail (`pre_history`) is written by the engine itself and never depends on a listener | Permanent |
+| Gateway conditions | Compiled at import through an internal `ExpressionEvaluator` port with a comparison subset of `horus-expr-v1`, under the decided semantics: FEEL null logic (PD-058), `DECIMAL128` numbers, instance variables bound from JSON as `BigDecimal` and never through `double`, money compared only within one currency (number against money is a type error), and a type error failing the step. A condition that evaluates to `null` is not `true`: if no outgoing flow is selected the default flow is taken, and without one the step fails with an incident; never the first flow in document order. The parser applies the `horus-expr-v1` length, depth and node limits at import | `bpm-expression` and the `ExpressionLanguage` SPI (ADR-0027) |
+| Local handlers and decisions | Run inside the caller's transaction (section 4). Each call is timed, and above `handlers.slow-call-warning` (default 200 ms) a `process.step.slow` warning names the step, the target and the elapsed time, never the inputs. The no-network rule is stated on `ServiceTaskHandler` | Permanent |
+| Dependency on the Rule Engine | `process-engine-core` depends on `rule-engine-core` for now; ADR-0027 replaces this with `bpm-expression` plus a `DecisionPort` | ADR-0027 (0.2.0) |
+
 ## 6. Java API and REST contract
 
 ### 6.1 Java API (`io.github.dhluong90.bpm.process.api`, ADR-0022)
@@ -335,7 +352,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | Event | Payload beyond the envelope |
 |---|---|
 | `processes.definition.publish-requested.v1` | `definitionKey`, `version`, `definitionHash`, `requestedBy`, `effectiveFrom`, `source` |
-| `processes.definition.approved.v1` | Same plus `approvedBy`, `approvedAt` |
+| `processes.definition.approved.v1` | Same plus `approvedBy`, `approvedAt`, `sourceHash`, `readerVersion` (5.8) |
 | `processes.definition.rejected.v1` | `definitionKey`, `version`, `rejectedBy`, `reason` |
 | `processes.definition.retired.v1` | `definitionKey`, `version`, `retiredBy` or `supersededBy` |
 | `processes.instance.started.v1`, `.completed.v1`, `.cancelled.v1`, `.failed.v1` | `instanceId`, `definitionKey`, `version`, `businessKey` |
@@ -350,8 +367,9 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 
 | Property | Default | Meaning |
 |---|---|---|
-| `definitions` | empty | Classpath locations imported at start-up through the `importDefinition` path, as drafts |
-| `definitions-auto-approve` | `false` | Approve imported drafts automatically. Start-up fails unless the `dev` profile is active (`TR-SEC-11`) |
+| `definitions.locations` | empty | Classpath locations imported at start-up through the `importDefinition` path, as drafts |
+| `definitions.startup-tenants` | empty | Tenants the start-up import runs for; there is no principal at start-up, so the tenant is explicit. Empty means no start-up import |
+| `definitions.auto-approve` | `false` | Approve imported drafts automatically, for start-up imports and for `POST /definitions` imports alike; each auto-approved import is logged at WARN with tenant and definition key. Start-up fails unless `dev` is the only active profile besides `test`, and fails whenever the removed key `definitions-auto-approve` is set at all (`TR-SEC-11`, `PRE-022`) |
 | `maker-checker.enabled` | `true` | `false` is refused outside the `dev` profile (`TR-SEC-11`) |
 | `authoring.cockpit-drafts` | `true` | `false` refuses draft creation and draft edits through `processes:author` endpoints with `403 DRAFT_AUTHORING_DISABLED`; imports with `processes:deploy`, approvals and layout writes still work (PD-036) |
 | `definitions.max-nodes`, `definitions.max-bytes` | `500`, `1MB` | May be lowered, never raised (`TR-DEF-05`) |
@@ -442,6 +460,7 @@ CREATE TABLE pre_instance (
   business_key    TEXT,
   status          TEXT        NOT NULL CHECK (status IN ('RUNNING','COMPLETED','COMPENSATING','CANCELLED','FAILED')),
   variables       JSONB       NOT NULL,
+  seq             BIGINT      NOT NULL DEFAULT 0,   -- kernel id counter, incremented only under this row's lock and written in the transaction of the tokens it numbers (5.8)
   lock_version    BIGINT      NOT NULL DEFAULT 0,
   started_by      TEXT,
   started_at      TIMESTAMPTZ NOT NULL,
@@ -465,7 +484,9 @@ CREATE TABLE pre_token (
   token_kind      TEXT        NOT NULL CHECK (token_kind IN ('SCOPE','FLOW','MI_BODY')),  -- MI_BODY from S1 (ADR-0020)
   scope_token_id  VARCHAR(26),                    -- enclosing scope token; null only for the root scope token
   current_node_id TEXT        NOT NULL,          -- step id; definition key for the root scope; saga block id for a saga scope
-  status          TEXT        NOT NULL CHECK (status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_SCOPE','JOINED','COMPLETED','COMPENSATED','CANCELLED')),
+  status          TEXT        NOT NULL CHECK (status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT','WAITING_SCOPE','JOINED','COMPLETED','COMPENSATED','CANCELLED')),  -- WAITING_EVENT used from S2
+  activity_instance_id VARCHAR(26),              -- one activation of an activity; boundary jobs and subscriptions key on it (ADR-0020)
+  locals          JSONB,                          -- scope-local variables and data objects; null when none; same size limit, masking and retention as variables (5.8)
   entered_at      TIMESTAMPTZ NOT NULL,          -- when the token reached current_node_id
   created_at      TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, id),
@@ -481,7 +502,7 @@ CREATE UNIQUE INDEX uq_pre_token_root
   ON pre_token (tenant_id, instance_id) WHERE token_kind = 'SCOPE' AND scope_token_id IS NULL;   -- one root per instance
 CREATE INDEX idx_pre_token_live
   ON pre_token (tenant_id, definition_id, status, current_node_id)
-  WHERE status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER');
+  WHERE status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT');
 
 CREATE TABLE pre_task (
   tenant_id       TEXT        NOT NULL,
