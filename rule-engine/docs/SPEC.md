@@ -361,6 +361,30 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `card-fee-v3.yaml -> 201 v3 DRAFT; replay k-401 -> same 201; kyc-risk.yaml on card-fee -> 400; R4 without currency -> 422 at R4/balance`.
 - **Test ID:** `RLE_033_import_as_new_version_creates_next_draft_or_refuses_whole`
 
+### RLE-047 The author replaces their draft in place, with the import checks and without a new version
+- **Status:** proposed with #165, pending the architect's review of the id and wording.
+- **Traces to:** `TR-STD-01`, `TR-STD-03`, `TR-IDEM-01`, `TR-SEC-04`, `TR-UI-02`, PD-094
+- **Milestone:** M1
+- **Given:** Tenant `bank-a` with `horus.bpm.rules.authoring.cockpit-drafts: true`; `card-fee` v1 `PUBLISHED`; v2 `DRAFT` created by `lan` from `card-fee.yaml` (`R2`: `txCount >= 3 -> fee: 10000 VND`), `lockVersion 0`, canonical hash `H2`; `lan` holds `rules:author`, `minh` holds `rules:author` and `rules:approve`, `dan` holds `rules:read`. File `card-fee-r2-zero.yaml` is `card-fee.yaml` with `R2` writing `fee: "0 VND"`.
+- **When:** `lan` sends `PUT /api/bpm/rules/v1/rule-sets/card-fee/versions/2` with `card-fee-r2-zero.yaml`, `Idempotency-Key: k-501` and `If-Match: "0"`, then repeats it. Failure cases: the same `PUT` with `If-Match: "0"` again and a new key; without `If-Match`; without `Idempotency-Key`; a file whose `R4` has `balance >= 50000000` with no currency; a file whose `ruleSet` is `kyc-risk`; a `PUT` of v1; `minh` replaces v2; `dan` replaces v2; a caller of `bank-b` replaces v2; the host with `cockpit-drafts: false`; two `PUT` requests with `If-Match: "0"` and different keys at the same moment.
+- **Then:**
+  - `200`; v2 is still `DRAFT`, still number 2 and still created by `lan`, with `lockVersion 1`, `ETag: "1"`, a canonical hash different from `H2` (the hash of the printed model, `RLE-045`), the new file as `sourceDocument` with its own `sourceHash`, and `R2` returning `fee: { "currency": "VND", "amount": 0 }` once approved. No v3 exists, and no history row and no event are written.
+  - The repeat with `k-501` returns the same `200` body and changes nothing.
+  - The stale `If-Match` is `409 VERSION_CONFLICT`; no `If-Match` is `428 PRECONDITION_REQUIRED`; no key is `400 INPUT_INVALID`; the bad file is `422 VALIDATION_FAILED` with a violation at `R4` and `balance`; the `kyc-risk` file is `400 INPUT_INVALID` naming the mismatch; v1 is `409 INVALID_STATE`; `minh` (not the author) and `dan` get `403 PERMISSION_DENIED`; the `bank-b` caller gets `404 RULE_SET_NOT_FOUND`; with drafts off `lan` gets `403 DRAFT_AUTHORING_DISABLED`. In every failure case v2's document, hashes, source and `lockVersion` are unchanged and no idempotency record is stored.
+  - Of the two concurrent requests exactly one returns `200`; the other returns `409 VERSION_CONFLICT`, and v2 holds the winner's document.
+- **Example:** `lan PUTs card-fee-r2-zero.yaml on draft v2 with If-Match "0" -> 200, still v2, lockVersion 1, new canonical hash; If-Match "0" again -> 409; minh -> 403; drafts off -> 403 DRAFT_AUTHORING_DISABLED`.
+- **Test ID:** `RLE_047_author_replaces_draft_in_place_with_import_checks`
+
+### RLE-048 The diff marks look-alike characters and reports header and column changes
+- **Status:** proposed with #165, pending the architect's review of the id and wording.
+- **Traces to:** `TR-UI-02`, `TR-STD-03`, ADR-0026 decision 6
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `kyc-route` v1 with input `country` (string) and rule `R1` (`country != 'VN' -> route: "MANUAL"`); v2 equal except that `R1` reads `country != 'ВN'` with a Cyrillic `В`; v3 equal to v1 except that `R1` reads `country != 'V\u200BN'` (an escaped zero-width space); v4 equal to v1 except that the hit policy is `unique`, the input `country` has `mask: true` and a new input `segment` (string) is declared. Caller `bob` holds `rules:read`.
+- **When:** `bob` sends `GET .../rule-sets/kyc-route/versions/2/diff?base=1`, then `versions/3/diff?base=1` and `versions/4/diff?base=1`.
+- **Then:** The v2 diff lists `R1` as `CHANGED` with field `/when/country` from `!= 'VN'` to `!= 'ВN'` and `nonAscii: true`, and different canonical hashes. The v3 diff lists the same field with `to` `!= 'V\u200BN'` and `nonAscii: true`. In both, a field whose values are printable ASCII has `nonAscii: false`. The v4 diff has no row change and `unchangedCount: 1`; `header` holds `{ path: /hitPolicy, from: first, to: unique }`; `inputs.added` is `[segment]`; `inputs.changed` holds `country` with field `/mask` from null to `true`.
+- **Example:** `country != 'VN' -> country != 'ВN' (Cyrillic) -> CHANGED /when/country, nonAscii true; hit policy first -> unique -> header /hitPolicy`.
+- **Test ID:** `RLE_048_diff_marks_non_ascii_literals_and_reports_header_and_column_changes`
+
 ---
 
 ## Platform Requirements Made Testable (RE-F-10, RE-F-13, X-F-05)
