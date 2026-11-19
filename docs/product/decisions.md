@@ -3016,6 +3016,8 @@ The versions are the ones resolved in the build, recorded in the build's allow-l
 
 **Context.** One approver may retire a live version because the usual reason is to stop a harmful rule quickly (PD-080). When the version is the last one in effect, every evaluation of that rule set fails until a new version is approved. That is a fail-closed outage for the host, not a silent wrong decision.
 
+**"Last version in effect", defined.** A retirement leaves no version in effect when no other approved version is in effect at the instant of the retirement. A version approved with a future effective date does not close the gap. If v1 is in effect and v2 takes effect on 1 December, retiring v1 today leaves no version in effect until then, so the rule applies. The refusal detail names when the next version takes effect, if one is scheduled.
+
 **Options considered**
 
 1. Refuse to retire the last version. Consequence: no outage by mistake, but a harmful rule cannot be stopped until a replacement is approved, which is exactly the emergency single mode exists for.
@@ -3028,6 +3030,8 @@ The versions are the ones resolved in the build, recorded in the build's allow-l
 - `refuse`: option 1.
 
 The value in force is shown in `/api/bpm/meta`. In the `four-eyes` retirement mode of PD-080, a second approver is needed anyway.
+
+**Until four-eyes retirement ships.** Four-eyes retirement is RE-F-49 (M3, last on the M3 cut list, to 1.1 if cut). Until it ships, a host that sets `four-eyes` in `lifecycle.retire-last-version` or in `lifecycle.retire-approval` fails at start-up with a message that names the setting. A bank cannot set a control that does nothing.
 
 **Recommendation and decision.** Option 3 by default. It keeps the emergency stop, which is the purpose of single mode. It makes the outage a deliberate, recorded choice, not an accident. A bank that prefers to never stop a rule set without a replacement sets `refuse` or `four-eyes`.
 
@@ -3050,7 +3054,7 @@ The value in force is shown in `/api/bpm/meta`. In the `four-eyes` retirement mo
 **Rules.**
 - A retirement needs `processes:approve` and a mandatory reason.
 - It writes a history row and an event, both recording the approval mode in force.
-- The `four-eyes` mode works as in the Rule Engine: the requester can never confirm their own retirement, and the version keeps serving until a second approver confirms.
+- The `four-eyes` mode works as in the Rule Engine: the requester can never confirm their own retirement, and the version keeps serving until a second approver confirms. Until four-eyes retirement ships for process definitions, setting it fails at start-up, as in PD-101. RE-F-49 is extended to cover both engines.
 - Retiring the last active version of a definition key follows PD-101: in the default `confirm` mode it needs an explicit confirmation, because new starts of that key will fail until a new version is approved.
 
 **Follow-ups.** Architect: process DESIGN 3.2 and a `PRE` statement for retirement, including the last-version case and running instances that stay on their version. Maintainers (engineering): #264.
@@ -3071,7 +3075,7 @@ The value in force is shown in `/api/bpm/meta`. In the `four-eyes` retirement mo
 
 **Rules.**
 - Cancel needs `processes:cancel` and a mandatory reason, at most 2,000 characters.
-- It writes a history row and an event with the actor and the reason, and runs compensation where the definition declares it.
+- It writes a history row and an event with the actor and the reason. Open tasks, jobs and timers are cancelled as ADR-0020 says. Whether a cancel also runs compensation is not decided here (PE-F-65, 1.2).
 - `/api/bpm/me` lists the permission, so the cockpit shows Cancel only to users who hold it.
 - `processes:start` no longer grants cancel. Nothing has shipped with the old rule, so there is no migration.
 
