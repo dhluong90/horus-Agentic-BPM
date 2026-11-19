@@ -15,6 +15,7 @@ import com.horus.bpm.rules.internal.model.OutputClause;
 import com.horus.bpm.rules.internal.model.Rule;
 import com.horus.bpm.rules.internal.model.ValueType;
 import com.horus.bpm.rules.internal.model.When;
+import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -28,6 +29,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.snakeyaml.engine.v2.api.LoadSettings;
+import org.snakeyaml.engine.v2.api.lowlevel.Parse;
+import org.snakeyaml.engine.v2.events.AliasEvent;
+import org.snakeyaml.engine.v2.events.CollectionStartEvent;
+import org.snakeyaml.engine.v2.events.Event;
+import org.snakeyaml.engine.v2.events.NodeEvent;
+import org.snakeyaml.engine.v2.events.ScalarEvent;
+import org.snakeyaml.engine.v2.exceptions.YamlEngineException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 
@@ -51,6 +60,10 @@ public final class RuleSetReader {
             "expressionLanguage", "timeZone", "hitPolicy", "effectiveFrom", "moneyRounding", "inputs", "outputs",
             "rules");
 
+    private static final Set<String> INPUT_KEYS = Set.of("name", "type", "description", "allowed", "mask");
+    private static final Set<String> OUTPUT_KEYS = Set.of("name", "type", "description", "default", "collect");
+    private static final Set<String> RULE_KEYS = Set.of("id", "description", "when", "then");
+
     private RuleSetReader() {
     }
 
@@ -69,7 +82,10 @@ public final class RuleSetReader {
         JsonNode tree;
         try {
             tree = switch (format) {
-                case YAML -> EngineJson.YAML.readTree(source);
+                case YAML -> {
+                    refuseAnchorsAliasesAndTags(source);
+                    yield EngineJson.YAML.readTree(source);
+                }
                 case JSON -> EngineJson.JSON.readTree(source);
                 case DMN_XML -> throw new ValidationFailedException("DMN XML import is not available in this release");
             };
@@ -80,6 +96,7 @@ public final class RuleSetReader {
             throw new ValidationFailedException("Document must be a mapping");
         }
         Definitions model = model(tree);
+        requireExactNumbers(tree, "");
         String canonical = CanonicalJson.write(tree);
         return new ParsedRuleSet(model, canonical, Hashes.sha256(canonical));
     }
@@ -146,16 +163,21 @@ public final class RuleSetReader {
         Set<String> inputNames = new HashSet<>();
         for (JsonNode input : array(root, "inputs", 0)) {
             String inputName = identifier(input, "inputs");
+            onlyKeys(input, INPUT_KEYS, "Input '" + inputName + "'");
             if (!inputNames.add(inputName)) {
                 throw invalid("Duplicate input '" + inputName + "'");
             }
-            inputs.add(new InputClause(inputName, type(input, inputName),
-                    input.has("mask") && input.get("mask").asBoolean()));
+            JsonNode mask = input.get("mask");
+            if (mask != null && !mask.isBoolean()) {
+                throw invalid("Input '" + inputName + "': mask must be true or false");
+            }
+            inputs.add(new InputClause(inputName, type(input, inputName), mask != null && mask.booleanValue()));
         }
         List<OutputClause> outputs = new ArrayList<>();
         Set<String> outputNames = new HashSet<>();
         for (JsonNode output : array(root, "outputs", 1)) {
             String outputName = identifier(output, "outputs");
+            onlyKeys(output, OUTPUT_KEYS, "Output '" + outputName + "'");
             if (!outputNames.add(outputName)) {
                 throw invalid("Duplicate output '" + outputName + "'");
             }
@@ -177,6 +199,7 @@ public final class RuleSetReader {
                 throw invalid("Every rule must be a mapping");
             }
             String id = text(rule, "id");
+            onlyKeys(rule, RULE_KEYS, "Rule " + id);
             if (!RULE_ID.matcher(id).matches() || id.length() > 64) {
                 throw invalid("Rule id '" + id + "' is not a valid id");
             }
@@ -199,6 +222,62 @@ public final class RuleSetReader {
         }
         DecisionTable table = new DecisionTable(hitPolicy, rounding, inputs, outputs, rules);
         return new Definitions(name, language, zone, effectiveFrom, List.of(new Decision(name, name, table)));
+    }
+
+    /**
+     * Refuses YAML anchors, aliases and explicit tags before Jackson reads the document. Jackson keeps an alias as
+     * its name and drops a tag, so the stored document would differ from what a reviewer reads in the source. The
+     * check walks the low-level events of snakeyaml-engine, the YAML parser Jackson itself uses (a transitive
+     * dependency of jackson-dataformat-yaml), because Jackson does not report anchors on scalars.
+     */
+    private static void refuseAnchorsAliasesAndTags(byte[] source) {
+        LoadSettings settings = LoadSettings.builder().setMaxAliasesForCollections(0).build();
+        try {
+            for (Event event : new Parse(settings).parseInputStream(new java.io.ByteArrayInputStream(source))) {
+                String line = event.getStartMark().map(mark -> " (line " + (mark.getLine() + 1) + ")").orElse("");
+                if (event instanceof AliasEvent) {
+                    throw invalid("YAML aliases are not allowed" + line + "; repeat the value");
+                }
+                if (event instanceof NodeEvent node && node.getAnchor().isPresent()) {
+                    throw invalid("YAML anchors are not allowed" + line);
+                }
+                if ((event instanceof ScalarEvent scalar && scalar.getTag().isPresent())
+                        || (event instanceof CollectionStartEvent collection && collection.getTag().isPresent())) {
+                    throw invalid("YAML tags are not allowed" + line);
+                }
+            }
+        } catch (YamlEngineException e) {
+            throw invalid("Document is not well-formed YAML: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Refuses a number that the RFC 8785 form would change (I-JSON): the hash, the stored canonical JSON and
+     * the evaluation must all carry the value the checker read in the source.
+     */
+    private static void requireExactNumbers(JsonNode node, String path) {
+        if (node.isNumber()) {
+            BigDecimal value = node.decimalValue();
+            boolean exact;
+            try {
+                exact = new BigDecimal(CanonicalJson.number(value)).compareTo(value) == 0;
+            } catch (IllegalArgumentException | ArithmeticException e) {
+                exact = false;
+            }
+            if (!exact) {
+                throw invalid("Number at " + (path.isEmpty() ? "/" : path)
+                        + " cannot be stored exactly; use at most 15 significant digits or a string expression");
+            }
+        } else if (node.isArray()) {
+            int i = 0;
+            for (JsonNode element : node) {
+                requireExactNumbers(element, path + "/" + i++);
+            }
+        } else if (node.isObject()) {
+            for (Map.Entry<String, JsonNode> member : node.properties()) {
+                requireExactNumbers(member.getValue(), path + "/" + member.getKey());
+            }
+        }
     }
 
     private static When when(JsonNode node, Set<String> inputNames, String ruleId) {
@@ -274,6 +353,15 @@ public final class RuleSetReader {
         List<JsonNode> items = new ArrayList<>();
         node.forEach(items::add);
         return items;
+    }
+
+    /** additionalProperties: false of the schema, so a misspelt key such as {@code maks} is never ignored. */
+    private static void onlyKeys(JsonNode node, Set<String> allowed, String where) {
+        for (String key : node.propertyNames()) {
+            if (!allowed.contains(key)) {
+                throw invalid(where + ": Unknown property '" + key + "'");
+            }
+        }
     }
 
     private static JsonNode required(JsonNode node, String key) {

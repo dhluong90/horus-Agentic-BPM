@@ -3,6 +3,7 @@ package com.horus.bpm.rules.internal.service;
 import com.horus.bpm.rules.api.ImportRequest;
 import com.horus.bpm.rules.api.InputInvalidException;
 import com.horus.bpm.rules.api.InvalidStateException;
+import com.horus.bpm.rules.api.RuleSetExistsException;
 import com.horus.bpm.rules.api.RuleSetNotFoundException;
 import com.horus.bpm.rules.api.RuleSetVersion;
 import com.horus.bpm.rules.api.SelfApprovalForbiddenException;
@@ -34,6 +35,10 @@ import java.util.Optional;
  * Imports versions and runs the publication lifecycle with maker-checker. Thread-safe and stateless.
  */
 public final class DefaultVersionService implements VersionService {
+
+    static final String PERMISSION_AUTHOR = "rules:author";
+    static final String PERMISSION_APPROVE = "rules:approve";
+    static final String PERMISSION_READ = "rules:read";
 
     static final String EVENT_CREATED = "rules.version.created.v1";
     static final String EVENT_PUBLISH_REQUESTED = "rules.version.publish-requested.v1";
@@ -70,10 +75,10 @@ public final class DefaultVersionService implements VersionService {
     private RuleSetVersion importDocument(String targetRuleSet, ImportRequest request) {
         Objects.requireNonNull(request, "request must not be null");
         String tenant = context.tenant();
-        String actor = context.caller();
+        String actor = context.callerWith(PERMISSION_AUTHOR);
         byte[] source = request.source();
         String operation = targetRuleSet == null ? "import-rule-set" : "import-version";
-        String requestHash = Hashes.sha256Parts(operation, targetRuleSet, request.format().name(), Hashes.sha256(source));
+        String requestHash = Hashes.sha256Parts(operation, actor, targetRuleSet, request.format().name(), Hashes.sha256(source));
         return context.idempotent(tenant, operation, request.idempotencyKey(), requestHash, 201,
                 () -> doImport(tenant, actor, targetRuleSet, request.format(), source),
                 version -> EngineValues.write(EngineValues.version(version)),
@@ -91,6 +96,9 @@ public final class DefaultVersionService implements VersionService {
         Instant now = context.clock().instant();
         String ruleSetId;
         if (targetRuleSet == null) {
+            if (store.findRuleSetId(tenant, name).isPresent()) {
+                throw new RuleSetExistsException(name);
+            }
             ruleSetId = Ulid.next(now);
             store.createRuleSet(tenant, ruleSetId, name, now);
         } else {
@@ -103,7 +111,7 @@ public final class DefaultVersionService implements VersionService {
         StoredVersion version = new StoredVersion(tenant, Ulid.next(now), ruleSetId, name, number, VersionStatus.DRAFT,
                 parsed.model().decision().table().hitPolicy().name(), parsed.model().effectiveFrom(),
                 parsed.canonicalJson(), parsed.canonicalHash(), format, sourceText, Hashes.sha256(source), 0,
-                null, null, null, null, null, now);
+                null, null, null, null, null, actor, now);
         store.insertVersion(version);
         event(tenant, EVENT_CREATED, version, actor, now);
         return version.toView(false);
@@ -113,8 +121,8 @@ public final class DefaultVersionService implements VersionService {
     public RuleSetVersion requestPublish(String ruleSet, int version, WriteOptions options) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
         String tenant = context.tenant();
-        String actor = context.caller();
-        String requestHash = Hashes.sha256Parts("request-publish", ruleSet, Integer.toString(version),
+        String actor = context.callerWith(PERMISSION_AUTHOR);
+        String requestHash = Hashes.sha256Parts("request-publish", actor, ruleSet, Integer.toString(version),
                 String.valueOf(opts.expectedLockVersion()));
         return context.idempotent(tenant, "request-publish", opts.idempotencyKey(), requestHash, 200, () -> {
             StoredVersion current = load(tenant, ruleSet, version);
@@ -134,15 +142,16 @@ public final class DefaultVersionService implements VersionService {
     public RuleSetVersion approve(String ruleSet, int version, WriteOptions options) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
         String tenant = context.tenant();
-        String actor = context.caller();
-        String requestHash = Hashes.sha256Parts("approve", ruleSet, Integer.toString(version),
+        String actor = context.callerWith(PERMISSION_APPROVE);
+        String requestHash = Hashes.sha256Parts("approve", actor, ruleSet, Integer.toString(version),
                 String.valueOf(opts.expectedLockVersion()), opts.comment());
         return context.idempotent(tenant, "approve", opts.idempotencyKey(), requestHash, 200, () -> {
             StoredVersion current = load(tenant, ruleSet, version);
             if (current.status() != VersionStatus.PENDING_APPROVAL) {
                 throw new InvalidStateException(ruleSet, version, current.status(), "approve");
             }
-            if (actor.equals(current.requestedBy())) {
+            // Four eyes: neither the person who requested publication nor the author of the content may approve it.
+            if (actor.equals(current.requestedBy()) || actor.equals(current.createdBy())) {
                 throw new SelfApprovalForbiddenException(ruleSet, version);
             }
             checkLock(current, opts);
@@ -157,7 +166,8 @@ public final class DefaultVersionService implements VersionService {
     @Override
     public Optional<RuleSetVersion> find(String ruleSet, int version, boolean includeSource) {
         String tenant = context.tenant();
-        return context.transactions().inTransaction(() ->
+        context.callerWith(PERMISSION_READ);
+        return context.withoutDooming(() ->
                 store.findVersion(tenant, ruleSet, version, false).map(v -> v.toView(includeSource)));
     }
 

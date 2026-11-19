@@ -16,7 +16,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import javax.sql.DataSource;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
@@ -31,7 +30,7 @@ public final class JdbcRuleStore implements RuleStore {
             v.tenant_id, v.id, v.rule_set_id, s.name, v.version_num, v.status, v.hit_policy, v.effective_from,
             v.canonical_json::text AS canonical_json, v.canonical_hash, v.source_format, v.source_document,
             v.source_hash, v.lock_version, v.requested_by, v.requested_at, v.approved_by, v.approved_at,
-            v.approval_comment, v.created_at
+            v.approval_comment, v.created_by, v.created_at
             """;
 
     private final JdbcClient jdbc;
@@ -53,11 +52,15 @@ public final class JdbcRuleStore implements RuleStore {
 
     @Override
     public void createRuleSet(String tenantId, String id, String name, Instant createdAt) {
-        try {
-            jdbc.sql("INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES (:tenant, :id, :name, :at)")
-                    .param("tenant", tenantId).param("id", id).param("name", name)
-                    .param("at", Timestamp.from(createdAt)).update();
-        } catch (DuplicateKeyException e) {
+        // ON CONFLICT instead of a failing INSERT: a unique violation would abort the caller's PostgreSQL
+        // transaction, and the refusal must leave the host's transaction usable (TR-EMB-04).
+        int inserted = jdbc.sql("""
+                INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES (:tenant, :id, :name, :at)
+                ON CONFLICT (tenant_id, name) DO NOTHING
+                """)
+                .param("tenant", tenantId).param("id", id).param("name", name)
+                .param("at", Timestamp.from(createdAt)).update();
+        if (inserted == 0) {
             throw new RuleSetExistsException(name);
         }
     }
@@ -75,10 +78,10 @@ public final class JdbcRuleStore implements RuleStore {
         jdbc.sql("""
                 INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy, effective_from,
                   canonical_json, canonical_hash, source_format, source_document, source_hash, lock_version,
-                  requested_by, requested_at, approved_by, approved_at, approval_comment, created_at)
+                  requested_by, requested_at, approved_by, approved_at, approval_comment, created_by, created_at)
                 VALUES (:tenant, :id, :ruleSetId, :num, :status, :hitPolicy, :effectiveFrom,
                   CAST(:canonicalJson AS jsonb), :canonicalHash, :sourceFormat, :sourceDocument, :sourceHash, :lock,
-                  :requestedBy, :requestedAt, :approvedBy, :approvedAt, :comment, :createdAt)
+                  :requestedBy, :requestedAt, :approvedBy, :approvedAt, :comment, :createdBy, :createdAt)
                 """)
                 .param("tenant", v.tenantId()).param("id", v.id()).param("ruleSetId", v.ruleSetId())
                 .param("num", v.version()).param("status", v.status().name()).param("hitPolicy", v.hitPolicy())
@@ -88,7 +91,8 @@ public final class JdbcRuleStore implements RuleStore {
                 .param("sourceHash", v.sourceHash()).param("lock", v.lockVersion())
                 .param("requestedBy", v.requestedBy()).param("requestedAt", timestamp(v.requestedAt()))
                 .param("approvedBy", v.approvedBy()).param("approvedAt", timestamp(v.approvedAt()))
-                .param("comment", v.approvalComment()).param("createdAt", Timestamp.from(v.createdAt()))
+                .param("comment", v.approvalComment()).param("createdBy", v.createdBy())
+                .param("createdAt", Timestamp.from(v.createdAt()))
                 .update();
         JsonNode rules = EngineValues.read(v.canonicalJson()).get("rules");
         int order = 0;
@@ -155,7 +159,8 @@ public final class JdbcRuleStore implements RuleStore {
                 rs.getString("canonical_hash"), SourceFormat.valueOf(rs.getString("source_format")),
                 rs.getString("source_document"), rs.getString("source_hash"), rs.getLong("lock_version"),
                 rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("approved_by"),
-                instant(rs, "approved_at"), rs.getString("approval_comment"), instant(rs, "created_at"));
+                instant(rs, "approved_at"), rs.getString("approval_comment"), rs.getString("created_by"),
+                instant(rs, "created_at"));
     }
 
     static Instant instant(ResultSet rs, String column) throws SQLException {

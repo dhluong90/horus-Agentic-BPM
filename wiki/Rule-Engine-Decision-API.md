@@ -15,7 +15,7 @@ These operations are built and tested; their contract file is [`rule-engine/api/
 | `POST /rule-sets/{name}/versions/{v}:approve` | `VersionService.approve(...)` | `rules:approve` | Optional body `{ "comment": "..." }`; the requester gets `403 SELF_APPROVAL_FORBIDDEN` |
 | `POST /decisions/{ruleSet}:evaluate` | `RuleEngine.evaluate(...)` | `rules:evaluate` | Body `{ "inputs": { ... } }`; `first` hit policy only; one `rle_decision` row in the request's transaction |
 
-All of them accept `Idempotency-Key` with the semantics below, and every state change writes an outbox row (`rules.version.created.v1`, `rules.version.publish-requested.v1`, `rules.version.published.v1`). A caller without the permission gets `403 PERMISSION_DENIED`. In this build: YAML import only, no `clock`, `copyOf` or version-pinned evaluation, no validation report in the response, and the `unique` and `collect` hit policies are refused at import. A runnable walkthrough is in [`examples/rule-engine-only/README.md`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-engine-only/README.md).
+All of them accept `Idempotency-Key` with the semantics below, and every state change writes an outbox row (`rules.version.created.v1`, `rules.version.publish-requested.v1`, `rules.version.published.v1`). A caller without the permission gets `403 PERMISSION_DENIED`, through the Java API as well as REST. The approver must be neither the requester nor the author (`createdBy`) of the version. Evaluate refuses an undeclared input name and a number with more than 34 significant digits or a scale outside `evaluation.max-input-scale` with `400 INPUT_INVALID`; only declared inputs are written to the decision log. Imports refuse unknown properties, YAML anchors, aliases and tags, numbers that the canonical form would change, and conditions that do not produce true or false. In this build: YAML import only, no `clock`, `copyOf` or version-pinned evaluation, no validation report in the response, and the `unique` and `collect` hit policies are refused at import. A runnable walkthrough is in [`examples/rule-engine-only/README.md`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-engine-only/README.md).
 
 ![Rule evaluation flow](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/rule-evaluation-flow.svg)
 
@@ -83,7 +83,9 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | Freeze the draft, record the requester | `rules:author` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:approve` | Publish; approver must differ from requester | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:reject` | Back to draft with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
-| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason. In `four-eyes` mode (M3) it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:confirm-retire` | M3, `four-eyes` mode: retire the version a retirement request names; the requester gets `403 SELF_APPROVAL_FORBIDDEN` | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:cancel-retire` | M3: withdraw a pending retirement request, with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `GET /rule-sets/{name}/versions/{v}/export` | YAML export | `rules:read` | |
 | `POST /rule-sets/{name}/versions:import` | Create a draft from YAML or JSON | `rules:author` | `Idempotency-Key` |
 | `GET /decisions/{id}` | One decision; masked inputs stay hashed | `rules:log:read` | |
@@ -191,7 +193,8 @@ Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ER
 | `rules.version.publish-requested.v1` | `:request-publish` | `ruleSet`, `version`, `requestedBy` |
 | `rules.version.published.v1` | `:approve` | `ruleSet`, `version`, `effectiveFrom`, `approvedBy`, `requestedBy` |
 | `rules.version.rejected.v1` | `:reject` | `ruleSet`, `version`, `rejectedBy`, `reason` |
-| `rules.version.retired.v1` | `:retire` or superseded | `ruleSet`, `version`, `retiredBy` (`system` when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `retiredAt` |
+| `rules.version.retire-requested.v1` | `:retire` in `four-eyes` mode (M3) | `ruleSet`, `version`, `requestedBy`, `reason` |
+| `rules.version.retired.v1` | `:retire` in `single` mode, `:confirm-retire`, or superseded | `ruleSet`, `version`, `retiredBy` (`system` when superseded; the confirmer in `four-eyes` mode), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the requester in `four-eyes` mode, else null), `retiredAt` |
 | `rules.decision.evaluated.v1` | every decision, off by default (`events.decision-evaluated`) | `decisionId`, `ruleSet`, `version`, `outcome` |
 
 Envelope: `eventId` (ULID), `eventType`, `occurredAt`, `tenantId`, `correlationId`, `causationId`, `producer`, `schemaVersion`, `payload`. Changes are additive within a `.v1` type. Events go through the host's `RuleEventPublisher` inside the same transaction as the state change.

@@ -16,13 +16,15 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *     host {@code DataSource}; {@code false} for hosts that run migrations in a separate job
  * @param cache the compiled-version cache
  * @param idempotency idempotency records
+ * @param evaluation limits on evaluation inputs
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
         @DefaultValue("true") boolean enabled,
         @DefaultValue("true") boolean migrateOnStart,
         @DefaultValue Cache cache,
-        @DefaultValue Idempotency idempotency) {
+        @DefaultValue Idempotency idempotency,
+        @DefaultValue Evaluation evaluation) {
 
     /**
      * The compiled-version cache.
@@ -41,6 +43,17 @@ public record RuleEngineProperties(
     }
 
     /**
+     * Limits on evaluation inputs.
+     *
+     * @param maxInputScale the largest absolute scale of a number input, 0 to 34; default 34. May be lowered,
+     *     never raised
+     * @param rejectUndeclaredInputs refuse input names the rule set does not declare; default true. When false,
+     *     undeclared inputs are ignored and never logged
+     */
+    public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs) {
+    }
+
+    /**
      * Returns the validated settings; an out-of-range value fails start-up naming the property.
      *
      * @return the engine settings
@@ -48,6 +61,9 @@ public record RuleEngineProperties(
     public EngineSettings toSettings() {
         return new EngineSettings(
                 cache.maxEntries() == null ? EngineDefaults.CACHE_MAX_ENTRIES : cache.maxEntries(),
-                idempotency.retention() == null ? EngineDefaults.IDEMPOTENCY_RETENTION : idempotency.retention());
+                idempotency.retention() == null ? EngineDefaults.IDEMPOTENCY_RETENTION : idempotency.retention(),
+                evaluation.maxInputScale() == null ? EngineDefaults.INPUT_MAX_SCALE : evaluation.maxInputScale(),
+                evaluation.rejectUndeclaredInputs() == null
+                        ? EngineDefaults.REJECT_UNDECLARED_INPUTS : evaluation.rejectUndeclaredInputs());
     }
 }

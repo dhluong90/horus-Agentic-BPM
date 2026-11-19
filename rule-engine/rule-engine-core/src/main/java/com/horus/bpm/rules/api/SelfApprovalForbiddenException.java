@@ -1,6 +1,6 @@
 package com.horus.bpm.rules.api;
 
-/** {@code 403 SELF_APPROVAL_FORBIDDEN}: the approver is the requester of the publication (TR-SEC-04). */
+/** {@code 403 SELF_APPROVAL_FORBIDDEN}: the approver requested the publication or authored the version (TR-SEC-04). */
 public final class SelfApprovalForbiddenException extends HorusBpmException {
 
     private static final long serialVersionUID = 1L;
@@ -12,6 +12,6 @@ public final class SelfApprovalForbiddenException extends HorusBpmException {
      * @param version the version number
      */
     public SelfApprovalForbiddenException(String ruleSet, int version) {
-        super("SELF_APPROVAL_FORBIDDEN", "The requester of " + ruleSet + " v" + version + " cannot approve it");
+        super("SELF_APPROVAL_FORBIDDEN", "The requester or author of " + ruleSet + " v" + version + " cannot approve it");
     }
 }

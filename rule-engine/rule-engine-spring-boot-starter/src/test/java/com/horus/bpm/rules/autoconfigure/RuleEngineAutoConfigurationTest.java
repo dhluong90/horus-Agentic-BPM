@@ -20,6 +20,7 @@ import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
@@ -45,6 +46,12 @@ import org.springframework.transaction.support.TransactionOperations;
  */
 @ExtendWith(OutputCaptureExtension.class)
 class RuleEngineAutoConfigurationTest {
+
+    /**
+     * Tests of the health contributor, which exists on Spring Boot 4 only for now (ADR-0011); the 3.5 leg
+     * skips them. #116 adds the contributor for Spring Boot 3.5 hosts and removes this tag.
+     */
+    static final String SPRING_BOOT_4_ONLY = "spring-boot-4-only";
 
     private static final Instant JAN_26_2027 = Instant.parse("2027-01-26T00:00:00Z");
 
@@ -194,6 +201,7 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    @Tag(SPRING_BOOT_4_ONLY)
     void health_is_down_while_migrations_are_pending() {
         RuleEngineSchemaMigrator migrator = mock(RuleEngineSchemaMigrator.class);
         when(migrator.status()).thenReturn(new SchemaStatus("1", 2));
@@ -205,6 +213,7 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    @Tag(SPRING_BOOT_4_ONLY)
     void health_is_down_when_no_engine_migration_is_applied() {
         RuleEngineSchemaMigrator migrator = mock(RuleEngineSchemaMigrator.class);
         when(migrator.status()).thenReturn(new SchemaStatus(null, 1));
@@ -216,6 +225,7 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    @Tag(SPRING_BOOT_4_ONLY)
     void health_is_up_and_reports_a_missing_next_month_partition() {
         RuleEngineSchemaMigrator migrator = mock(RuleEngineSchemaMigrator.class);
         when(migrator.status()).thenReturn(new SchemaStatus("1", 0));
@@ -232,6 +242,7 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    @Tag(SPRING_BOOT_4_ONLY)
     void health_state_is_computed_at_most_once_per_ttl() {
         RuleEngineSchemaMigrator migrator = mock(RuleEngineSchemaMigrator.class);
         when(migrator.status()).thenReturn(new SchemaStatus("1", 0));
@@ -250,6 +261,7 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    @Tag(SPRING_BOOT_4_ONLY)
     void health_contributor_is_registered_as_rule_engine() {
         runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
             assertThat(context).hasBean("ruleEngineHealthIndicator");

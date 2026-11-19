@@ -10,6 +10,11 @@ import java.util.Optional;
  * own otherwise. Each command writes the version row, one outbox row and, with an idempotency key,
  * one {@code rle_idempotency} row, all in that transaction. The tenant and the actor come from the
  * {@code TenantResolver} and {@code CallerResolver}, never from an argument.
+ *
+ * <p>Permissions (ADR-0010) are checked here, not only over REST: import and {@code requestPublish} need
+ * {@code rules:author}, {@code approve} needs {@code rules:approve}, {@code find} needs {@code rules:read}. A
+ * caller without them gets {@link PermissionDeniedException}; an unresolved caller or tenant gets
+ * {@link UnauthenticatedException}. The approver must be neither the requester nor the author of the version.
  */
 public interface VersionService {
 

@@ -22,7 +22,8 @@ final class RestSupport {
     }
 
     static void require(CallerResolver callers, String permission) {
-        if (callers.currentCallerId() == null) {
+        String caller = callers.currentCallerId();
+        if (caller == null || caller.isBlank()) {
             throw new UnauthenticatedException("Authentication required");
         }
         if (!callers.currentPermissions().contains(permission)) {

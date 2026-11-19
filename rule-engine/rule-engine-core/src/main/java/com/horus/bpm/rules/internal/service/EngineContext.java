@@ -1,8 +1,10 @@
 package com.horus.bpm.rules.internal.service;
 
+import com.horus.bpm.rules.api.HorusBpmException;
 import com.horus.bpm.rules.api.IdempotencyInFlightException;
 import com.horus.bpm.rules.api.IdempotencyKeyReuseException;
 import com.horus.bpm.rules.api.InputInvalidException;
+import com.horus.bpm.rules.api.PermissionDeniedException;
 import com.horus.bpm.rules.api.UnauthenticatedException;
 import com.horus.bpm.rules.internal.store.IdempotencyStore;
 import com.horus.bpm.rules.internal.store.TransactionRunner;
@@ -47,6 +49,18 @@ public record EngineContext(
         return tenant;
     }
 
+    /**
+     * Refuses the call unless the caller holds a permission (ADR-0010). Checked in the services, so a host that
+     * calls the Java API directly gets the same guard as the REST endpoints.
+     */
+    String callerWith(String permission) {
+        String caller = caller();
+        if (!callers.currentPermissions().contains(permission)) {
+            throw new PermissionDeniedException(permission);
+        }
+        return caller;
+    }
+
     String caller() {
         String caller = callers.currentCallerId();
         if (caller == null || caller.isBlank()) {
@@ -63,7 +77,7 @@ public record EngineContext(
         if (key != null && (key.isBlank() || key.length() > MAX_KEY_LENGTH)) {
             throw new InputInvalidException("Idempotency-Key must be 1 to " + MAX_KEY_LENGTH + " characters");
         }
-        return transactions.inTransaction(() -> {
+        return withoutDooming(() -> {
             if (key == null) {
                 return action.get();
             }
@@ -80,5 +94,28 @@ public record EngineContext(
                 }
             };
         });
+    }
+
+    /**
+     * Runs work in the caller's transaction, but returns an engine refusal ({@link HorusBpmException}) as a value
+     * out of the transaction callback and throws it afterwards, so a refusal the host catches never marks the
+     * host's transaction rollback-only (TR-EMB-04). Every refusal happens before the engine writes anything that
+     * matters; unexpected exceptions still roll back.
+     */
+    <T> T withoutDooming(Supplier<T> work) {
+        Result<T> result = transactions.inTransaction(() -> {
+            try {
+                return new Result<>(work.get(), null);
+            } catch (HorusBpmException refusal) {
+                return new Result<>(null, refusal);
+            }
+        });
+        if (result.refusal() != null) {
+            throw result.refusal();
+        }
+        return result.value();
+    }
+
+    private record Result<T>(T value, HorusBpmException refusal) {
     }
 }

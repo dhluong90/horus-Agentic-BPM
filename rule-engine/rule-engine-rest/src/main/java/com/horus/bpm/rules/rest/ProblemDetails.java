@@ -1,6 +1,7 @@
 package com.horus.bpm.rules.rest;
 
 import com.horus.bpm.rules.api.HorusBpmException;
+import com.horus.bpm.rules.internal.json.CorrelationIds;
 import com.horus.bpm.rules.internal.json.EngineJson;
 import com.horus.bpm.rules.internal.json.EngineValues;
 import com.horus.bpm.rules.internal.json.Ulid;
@@ -26,6 +27,9 @@ public class ProblemDetails {
     /** Request header carrying the caller's correlation id. */
     public static final String CORRELATION_HEADER = "X-Correlation-Id";
 
+    /** 422 by number: the enum constant is named differently in Spring Framework 6.2 and 7 (ADR-0011). */
+    static final HttpStatus UNPROCESSABLE = HttpStatus.valueOf(422);
+
     private static final MediaType PROBLEM = MediaType.parseMediaType("application/problem+json");
     private static final String TYPE_BASE = "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#";
 
@@ -41,10 +45,10 @@ public class ProblemDetails {
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
-            Map.entry("VALIDATION_FAILED", HttpStatus.UNPROCESSABLE_CONTENT),
-            Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", HttpStatus.UNPROCESSABLE_CONTENT),
-            Map.entry("EVALUATION_ERROR", HttpStatus.UNPROCESSABLE_CONTENT),
-            Map.entry("UNIQUE_HIT_VIOLATION", HttpStatus.UNPROCESSABLE_CONTENT));
+            Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
+            Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
+            Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
+            Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE));
 
     /**
      * Answers an engine exception.
@@ -71,7 +75,18 @@ public class ProblemDetails {
                 .put("status", status.value())
                 .put("code", code)
                 .put("detail", detail)
-                .put("correlationId", correlationId != null ? correlationId : Ulid.next(Instant.now()));
+                .put("correlationId", correlationId(correlationId));
+    }
+
+    /**
+     * Returns the caller's correlation id when it is well-formed, otherwise a generated one, so a header is never
+     * echoed or stored unbounded.
+     *
+     * @param header the {@code X-Correlation-Id} header, possibly null
+     * @return a safe correlation id
+     */
+    static String correlationId(String header) {
+        return CorrelationIds.isValid(header) ? header : Ulid.next(Instant.now());
     }
 
     static ResponseEntity<byte[]> response(HttpStatus status, ObjectNode body) {

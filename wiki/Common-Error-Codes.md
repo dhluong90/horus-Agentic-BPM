@@ -63,7 +63,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`) and the Process Engine (`
 `400`. A list query breaks a read limit (ADR-0015): `limit` above 200, a time range longer than 31 days, or `GET /decisions` without `ruleSet`, `from` and `to`. Narrow the query and page with the cursor.
 
 ### UNAUTHENTICATED
-`401`. No principal, or a token whose audience is another host. Sign in again or request a token for this host.
+`401`. No principal, a token whose audience is another host, or a principal with no tenant the `TenantResolver` can read (for example no `tenant_id` attribute). Sign in again, request a token for this host, or give the user a tenant in your identity provider.
 
 ### PERMISSION_DENIED
 `403`. The principal lacks the permission the endpoint checks. Map the permission to the caller's role; see [[Multi-Tenancy and Security]].

@@ -18,7 +18,7 @@ sequenceDiagram
     Host->>HF: migrate db/migration
     HF->>DB: V1 loan_application, recorded in flyway_schema_history
     Host->>RE: all singletons created
-    RE->>DB: baseline 0 and V1 rle_* tables, recorded in rle_schema_history
+    RE->>DB: baseline 0, V1 rle_* tables and V2, recorded in rle_schema_history
     RE->>DB: partitions for the Clock month and the next, in one transaction
     Host->>DB: GET /actuator/health checks db and ruleEngine
 ```
@@ -48,6 +48,7 @@ docker exec horus-pg psql -U horus -d horus -c '\dt'
 docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_schema_history ORDER BY installed_rank'
 #  0       | Rule Engine baseline
 #  1       | V1__rle_baseline.sql
+#  2       | V2__rle_version_created_by.sql
 ```
 
 To see the `ruleEngine` component locally, start with `--management.endpoint.health.show-components=always`. It reports the schema version, `pendingMigrations`, and whether next month's partition exists.
@@ -167,7 +168,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 
 ## Run in CI
 
-`.github/workflows/ci.yml` runs `mvn -B verify` on every pull request on Java 21 and Spring Boot 4.x. In this module, Failsafe runs three Testcontainers suites on `postgres:16-alpine`. The host's clock is fixed: 26 January 2027 in the start-up suites, 15 December 2026 in the lifecycle suite.
+`.github/workflows/ci.yml` runs these tests on every pull request on Java 21 and 25, Spring Boot 4.x and 3.5.x, and PostgreSQL 14 and 18 (see [Technical Requirements](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Technical-Requirements) on the wiki). In this module, Failsafe runs four Testcontainers suites on the image in `bpm.test.postgres.image` (`postgres:16-alpine` locally). On Spring Boot 3.5 the host uses `spring-boot-starter-web` and `flyway-core` (profile `host-spring-boot-3.5`); the code is the same. To run that leg locally: `mvn -B install -DskipTests`, then `mvn -B -Dspring-boot.line=3.5 surefire:test failsafe:integration-test failsafe:verify`. The host's clock is fixed at 26 January 2027.
 
 | Test | Proves |
 |---|---|

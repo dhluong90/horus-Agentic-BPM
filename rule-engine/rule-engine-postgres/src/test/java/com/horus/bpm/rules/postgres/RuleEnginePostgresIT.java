@@ -237,6 +237,41 @@ class RuleEnginePostgresIT {
     }
 
     @Test
+    void RLE_009_the_database_refuses_approval_by_the_author_written_around_the_service() {
+        engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()));
+        caller.as("bank-a", "bob");
+        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+
+        assertThat(JdbcClient.create(db).sql("SELECT created_by || ' ' || requested_by FROM rle_version WHERE tenant_id = 'bank-a'")
+                .query(String.class).single()).isEqualTo("alice bob");
+        assertThatThrownBy(() -> JdbcClient.create(db)
+                .sql("UPDATE rle_version SET status = 'PUBLISHED', approved_by = 'alice' WHERE tenant_id = 'bank-a'")
+                .update()).isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("rle_version_four_eyes");
+        assertThat(JdbcClient.create(db)
+                .sql("UPDATE rle_version SET status = 'PUBLISHED', approved_by = 'carol' WHERE tenant_id = 'bank-a'")
+                .update()).isEqualTo(1);
+    }
+
+    @Test
+    void TR_SEC_05_undeclared_inputs_never_reach_rle_decision() {
+        publishCardFee();
+        caller.as("bank-a", "teller-01");
+
+        RuleEngines lenient = PostgresRuleEngines.create(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)),
+                caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), new EngineSettings(1000, java.time.Duration.ofHours(24), 34, false));
+        assertThatThrownBy(() -> engines.ruleEngine().evaluate("card-fee",
+                DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5, "nationalId", "079090001234"))))
+                .isInstanceOf(com.horus.bpm.rules.api.InputInvalidException.class);
+
+        lenient.ruleEngine().evaluate("card-fee",
+                DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5, "nationalId", "079090001234")));
+
+        assertThat(JdbcClient.create(db).sql("SELECT masked_inputs::text FROM rle_decision WHERE tenant_id = 'bank-a'")
+                .query(String.class).single()).isEqualTo("{\"tier\": \"GOLD\", \"txCount\": 5}");
+    }
+
+    @Test
     void RLE_020_import_keeps_source_document_and_canonical_hash() {
         byte[] file = cardFee();
 
@@ -343,7 +378,7 @@ class RuleEnginePostgresIT {
 
         @Override
         public Set<String> currentPermissions() {
-            return Set.of();
+            return Set.of("rules:author", "rules:approve", "rules:evaluate", "rules:read");
         }
     }
 

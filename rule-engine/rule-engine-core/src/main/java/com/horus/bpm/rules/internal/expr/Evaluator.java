@@ -50,6 +50,9 @@ public final class Evaluator {
                 Object value = evaluate(between.target(), slots);
                 Object low = evaluate(between.low(), slots);
                 Object high = evaluate(between.high(), slots);
+                if (value == null || low == null || high == null) {
+                    yield null;
+                }
                 yield and(compare(Expr.BinaryOp.GE, value, low), compare(Expr.BinaryOp.LE, value, high));
             }
             case Expr.IsNull isNull -> (evaluate(isNull.target(), slots) == null) != isNull.negated();

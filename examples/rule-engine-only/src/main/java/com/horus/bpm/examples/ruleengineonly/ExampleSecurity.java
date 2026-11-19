@@ -39,7 +39,9 @@ public class ExampleSecurity {
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .anyRequest().authenticated())
                 .httpBasic(Customizer.withDefaults())
-                // A stateless API called with Basic credentials, not a browser session.
+                // Demo only: CSRF is off for /api/** because the demo calls it with curl and Basic credentials.
+                // A browser that has cached Basic credentials could be driven cross-site, so a production host
+                // must not copy this: use bearer tokens from its identity provider, or keep CSRF on.
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))
                 .build();
     }
@@ -59,7 +61,10 @@ public class ExampleSecurity {
         return new InMemoryUserDetailsManager(users);
     }
 
-    /** The tenant is the {@code tenant:<id>} authority of the authenticated user, never a request field. */
+    /**
+     * The tenant is the {@code tenant:<id>} authority of the authenticated user, never a request field. A user with
+     * none or with more than one has no tenant, so every engine call is refused rather than picking one.
+     */
     @Bean
     TenantResolver tenantResolver() {
         return () -> {
@@ -67,9 +72,10 @@ public class ExampleSecurity {
             if (authentication == null) {
                 return null;
             }
-            return authentication.getAuthorities().stream().map(GrantedAuthority::getAuthority)
+            List<String> tenants = authentication.getAuthorities().stream().map(GrantedAuthority::getAuthority)
                     .filter(a -> a.startsWith(TENANT_PREFIX)).map(a -> a.substring(TENANT_PREFIX.length()))
-                    .findFirst().orElse(null);
+                    .toList();
+            return tenants.size() == 1 ? tenants.getFirst() : null;
         };
     }
 

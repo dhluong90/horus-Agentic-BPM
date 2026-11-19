@@ -317,6 +317,14 @@ public final class Parser {
     private record Token(Kind kind, String text, int position) {
     }
 
+    private static boolean isAsciiLetter(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    }
+
+    private static boolean isAsciiDigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
     private static List<Token> lex(String source) {
         List<Token> tokens = new ArrayList<>();
         int i = 0;
@@ -327,14 +335,17 @@ public final class Parser {
                 i++;
             } else if (c >= '0' && c <= '9') {
                 int start = i;
-                while (i < n && Character.isDigit(source.charAt(i))) {
+                while (i < n && isAsciiDigit(source.charAt(i))) {
                     i++;
                 }
-                if (i + 1 < n && source.charAt(i) == '.' && Character.isDigit(source.charAt(i + 1))) {
+                if (i + 1 < n && source.charAt(i) == '.' && isAsciiDigit(source.charAt(i + 1))) {
                     i++;
-                    while (i < n && Character.isDigit(source.charAt(i))) {
+                    while (i < n && isAsciiDigit(source.charAt(i))) {
                         i++;
                     }
+                }
+                if (i < n && Character.isDigit(source.charAt(i))) {
+                    throw new ExpressionException("Only the digits 0 to 9 are allowed in numbers", i);
                 }
                 tokens.add(new Token(Kind.NUMBER, source.substring(start, i), start));
             } else if (c == '\'') {
@@ -360,9 +371,9 @@ public final class Parser {
                     throw new ExpressionException("Unterminated string", start);
                 }
                 tokens.add(new Token(Kind.STRING, text.toString(), start));
-            } else if (Character.isLetter(c) || c == '_') {
+            } else if (isAsciiLetter(c) || c == '_') {
                 int start = i;
-                while (i < n && (Character.isLetterOrDigit(source.charAt(i)) || source.charAt(i) == '_')) {
+                while (i < n && (isAsciiLetter(source.charAt(i)) || isAsciiDigit(source.charAt(i)) || source.charAt(i) == '_')) {
                     i++;
                 }
                 tokens.add(new Token(Kind.IDENT, source.substring(start, i), start));
