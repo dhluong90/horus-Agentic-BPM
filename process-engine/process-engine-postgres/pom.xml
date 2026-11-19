@@ -34,6 +34,18 @@
       <artifactId>flyway-database-postgresql</artifactId>
     </dependency>
     <dependency>
+      <groupId>com.horus.bpm</groupId>
+      <artifactId>process-engine-bpmn</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.horus.bpm</groupId>
+      <artifactId>process-engine-test</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>

@@ -4,6 +4,8 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 
 **Preview in 0.1.0.** The Process Engine ships as a walking skeleton. Outside the `dev` profile an imported definition stays `DRAFT`, and nothing in this release can activate it, because the approval flow comes later. On `dev`, `horus.bpm.processes.definitions.auto-approve` activates imports without approval. Claims, forms, incidents, timers, asynchronous steps and masking of instance variables are not in this release.
 
+**Added in 0.2.0.** The intermediate timer catch event (`timeDuration` or `timeDate`) and replica-safe timer jobs: a timer fires once across copies of the host, and a crashed copy's timers are taken over after the lease (see Process Engine Overview, Timers and jobs with leases).
+
 ## Endpoints
 
 | Method and path | Java | Permission | Notes |
