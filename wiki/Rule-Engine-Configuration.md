@@ -31,7 +31,7 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `decision-log.partitions-ahead` | `P7D` | 0.1 (M1) | How far ahead the scheduler creates monthly `rle_decision` partitions. See [Decision log partitions](#decision-log-partitions) |
 | `decision-log.retention` | unset; required outside `dev` from M3 | M3 | ISO 8601 period in whole months, at least `decision-log.retention-floor`, for example `P12M` or `P120M`. From M3, outside the `dev` profile, the engine refuses to start until it is set, and refuses a value below the floor or not in whole months, naming the property. The scheduler drops whole monthly partitions that end before `now() - retention`. Nothing is deleted in the `dev` profile or before M3; before M3 the property is ignored with a start-up note. No decision row is ever deleted by date |
 | `decision-log.mask-default` | `false` | Built | Mask every input that declares no `mask`; an input with `mask: false` is never masked by this default. A change is logged at start-up, one line per tenant with the old and new value, and the value in force is shown in `/api/bpm/meta`. See [Personal data guards](#personal-data-guards) |
-| `decision-log.require-explicit-mask` | `false` | 0.2 | Strict mode: every input must declare `mask: true` or `mask: false`. An undeclared input is `422 VALIDATION_FAILED` naming it, at import, draft replacement and publication request. Shown in `/api/bpm/meta`. Turn it on for production |
+| `decision-log.require-explicit-mask` | `false` | 0.2 | Strict mode: every input must declare `mask: true` or `mask: false`. An undeclared input is `422 VALIDATION_FAILED` naming it, at import, draft replacement, publication request and approval. Shown in `/api/bpm/meta`. Turn it on for production |
 | `decision-log.personal-data-names` | the built-in list | 0.2 | Input names that look like personal data, replacing the built-in list. An undeclared input that matches one gets a warning the approver sees |
 | `decision-log.additional-personal-data-names` | empty | 0.2 | More names, added to the list |
 | `masking.hmac-key` | unset | Built | Base64 key, 32 bytes or more after decoding, for HMAC-SHA256 of masked inputs, used by every tenant without its own key. Supply it from an environment variable (`HORUS_BPM_RULES_MASKING_HMAC_KEY`) or a secret store. When unset, the shared `horus.bpm.masking.hmac-key` is used. See [Masking keys](#masking-keys) |
@@ -102,11 +102,11 @@ The decision log can never be edited, so an input that holds personal data and w
 | Guard | What happens |
 |---|---|
 | Warning | An input that declares no `mask` and whose name looks like personal data gets a warning in `warnings` of the version: `{ code: UNMASKED_PERSONAL_DATA, input: nationalId, matchedName: "national id", message }`. It comes back from the import, the draft replacement and the publication request, and on every read of the version, so the approver sees it too |
-| Strict mode | With `decision-log.require-explicit-mask: true`, an input that declares no `mask` is `422 VALIDATION_FAILED`, one violation per input with `column` naming it, and nothing is stored. A draft imported before strict mode was turned on cannot be sent for approval until every input is declared |
+| Strict mode | With `decision-log.require-explicit-mask: true`, an input that declares no `mask` is `422 VALIDATION_FAILED`, one violation per input with `column` naming it, and nothing is stored. A draft imported, or a request made, before strict mode was turned on can be neither sent for approval nor approved until every input is declared |
 | Diff | The version diff lists every input's masking status in `masking`, and marks changes: `nationalId: MASKED to NOT_MASKED` |
 | Masking default | A change of `decision-log.mask-default` since the last start-up is one log line per tenant with the old and new value, at WARN when masking is turned off. `/api/bpm/meta` shows the masking default and strict mode in force for the caller's tenant |
 
-The built-in names cover national id, citizen id, `cccd`, `cmnd`, passport, `ho chieu`, phone, `so dien thoai`, `sdt`, email, address, `dia chi`, date of birth, `dob`, `ngay sinh`, account number, `so tai khoan`, `stk`, IBAN and card number. Names are compared as words, ignoring case, punctuation and accents, without regular expressions: `nationalId`, `national_id` and `NATIONAL_ID` match "national id", and `company` matches nothing. Only names are checked, never values.
+The built-in names cover full name, `ho ten`, `ho va ten`, national id, citizen id, `cccd`, `cmnd`, passport, `ho chieu`, phone, `so dien thoai`, `sdt`, email, address, `dia chi`, date of birth, `dob`, `ngay sinh`, account number, `so tai khoan`, `stk`, IBAN, card number, tax id, `ma so thue`, `mst`, driver licence, `giay phep lai xe`, `gplx` and `bang lai`. Names are compared as words, ignoring case, punctuation and accents, without regular expressions: `nationalId`, `national_id` and `NATIONAL_ID` match "national id", and `company` matches nothing. Only names are checked, never values.
 
 ```yaml
 horus:
@@ -114,7 +114,7 @@ horus:
     rules:
       decision-log:
         require-explicit-mask: true              # every input must say mask: true or mask: false
-        additional-personal-data-names: ["ma so thue", "cif"]
+        additional-personal-data-names: ["cif", "customer ref"]
       masking:
         tenants:
           sandbox:

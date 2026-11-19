@@ -51,6 +51,27 @@ class PersonalDataNamesTest {
         assertThat(builtIn.match("ngaySinh")).contains("ngay sinh");
         assertThat(builtIn.match("soTaiKhoan")).contains("so tai khoan");
         assertThat(builtIn.match("soHoChieu")).contains("ho chieu");
+        assertThat(builtIn.match("hoTenKhachHang")).contains("ho ten");
+        assertThat(builtIn.match("ho_va_ten")).contains("ho va ten");
+        assertThat(builtIn.match("maSoThue")).contains("ma so thue");
+        assertThat(builtIn.match("MST")).contains("mst");
+        assertThat(builtIn.match("soGiayPhepLaiXe")).contains("giay phep lai xe");
+        assertThat(builtIn.match("soGPLX")).contains("gplx");
+        assertThat(builtIn.match("bangLaiXe")).contains("bang lai");
+    }
+
+    @Test
+    void RLE_049_built_in_names_cover_full_name_tax_id_and_driver_licence_in_english() {
+        assertThat(builtIn.match("customerFullName")).contains("full name");
+        assertThat(builtIn.match("taxId")).contains("tax id");
+        assertThat(builtIn.match("TAX_CODE")).contains("tax code");
+        assertThat(builtIn.match("driverLicenceNo")).contains("driver licence");
+        assertThat(builtIn.match("driver_license_number")).contains("driver license");
+        assertThat(builtIn.match("drivingLicence")).contains("driving licence");
+        // Words that only resemble them do not match
+        assertThat(builtIn.match("fullAmount")).isEmpty();
+        assertThat(builtIn.match("taxRate")).isEmpty();
+        assertThat(builtIn.match("hotel")).isEmpty();
     }
 
     @Test
