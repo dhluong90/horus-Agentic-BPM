@@ -78,6 +78,24 @@ class CockpitEmbeddedIT {
     }
 
     @Test
+    void TR_SEC_09_the_host_sign_in_page_is_branded_strict_and_lists_demo_users_on_the_dev_profile_only() throws Exception {
+        HttpClient browser = HttpClient.newBuilder().cookieHandler(new CookieManager()).build();
+        HttpResponse<String> page = browser.send(HttpRequest.newBuilder(url("/login?lang=vi")).header("Accept", "text/html").GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertThat(page.statusCode()).isEqualTo(200);
+        assertThat(page.body()).contains("<html lang=\"vi\">", "HORUS Cockpit", "Loan origination", "<code>lan</code>", "<code>minh</code>")
+                .doesNotContain("test-only-password").doesNotContainPattern("<script(?![^>]*\\ssrc=)").doesNotContain("<style");
+        assertThat(page.headers().firstValue("Content-Security-Policy")).hasValueSatisfying(csp ->
+                assertThat(csp).contains("script-src 'self'").contains("frame-ancestors 'none'").doesNotContain("unsafe-inline"));
+        assertThat(page.headers().firstValue("Cache-Control")).hasValueSatisfying(value -> assertThat(value).contains("no-store"));
+        // Its styles and script load before sign-in.
+        for (String asset : List.of("/sign-in/sign-in.css", "/sign-in/sign-in.js")) {
+            assertThat(get(browser, asset).statusCode()).as(asset).isEqualTo(200);
+        }
+    }
+
+    @Test
     void CKP_001_after_sign_in_the_user_returns_to_the_cockpit_even_after_the_browser_asked_for_a_favicon() throws Exception {
         HttpClient browser = HttpClient.newBuilder().cookieHandler(new CookieManager()).build();
         // What a browser does: open the cockpit, follow it to the sign-in page, ask for the favicon there.
