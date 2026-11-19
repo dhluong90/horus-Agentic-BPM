@@ -75,8 +75,8 @@ class HostMetadataAutoConfigurationTest {
 
     @Test
     void claims_are_read_from_oauth2_principals_when_oauth2_is_present() {
-        assertThat(HostMetadataAutoConfiguration.claims(getClass().getClassLoader())).isInstanceOf(OAuth2Claims.class);
-        assertThat(HostMetadataAutoConfiguration.claims(new ClassLoader(null) { }))
+        assertThat(EngineAccessAutoConfiguration.claims(getClass().getClassLoader())).isInstanceOf(OAuth2Claims.class);
+        assertThat(EngineAccessAutoConfiguration.claims(new ClassLoader(null) { }))
                 .isNotInstanceOf(OAuth2Claims.class);
     }
 }
