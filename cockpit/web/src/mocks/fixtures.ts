@@ -15,7 +15,8 @@ export const registryEmbedded = {
 export const metaRulesOnly: BpmMetaV1 = {
   schemaVersion: 1,
   hostId: 'loans',
-  modules: [{ module: 'rules', engineVersion: '0.1.0', apiVersion: 'v1', features: [] }],
+  // Like the example host: cockpit draft editing turned on (PD-094 makes it off when the setting is missing).
+  modules: [{ module: 'rules', engineVersion: '0.1.0', apiVersion: 'v1', features: [], settings: { 'authoring.cockpit-drafts': true } }],
   tenancy: { switching: false },
   limits: { maxPageSize: 200 },
 };
@@ -71,7 +72,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -96,6 +97,13 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       return { ...ok, me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }) };
     case 'rules-approver':
       return { ...ok, me: json({ ...meMinh, permissions: [...meMinh.permissions, 'rules:evaluate'] }) };
+    case 'rules-author-drafts-default':
+      // A host that does not report authoring.cockpit-drafts at all: off by default in 0.1.0 (PD-094).
+      return {
+        ...ok,
+        meta: json({ ...metaRulesOnly, modules: [{ module: 'rules', engineVersion: '0.1.0', apiVersion: 'v1', features: [] }] }),
+        me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }),
+      };
     case 'rules-author-drafts-off':
       return {
         ...ok,

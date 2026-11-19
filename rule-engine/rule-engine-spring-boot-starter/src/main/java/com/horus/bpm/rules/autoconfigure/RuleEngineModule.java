@@ -24,6 +24,9 @@ final class RuleEngineModule {
      */
     static final List<String> FEATURES = List.of();
 
+    /** The rules setting clients read to offer or hide draft editing (PD-075, PD-094). */
+    static final String COCKPIT_DRAFTS = "authoring.cockpit-drafts";
+
     private static final String VERSION_RESOURCE = "rule-engine.properties";
 
     private RuleEngineModule() {
@@ -33,10 +36,12 @@ final class RuleEngineModule {
      * The descriptor for this host.
      *
      * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
+     * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}, or null when the host leaves it unset
      * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
      */
-    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions) {
-        return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, Map.of(), PERMISSIONS, rolePermissions);
+    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts) {
+        Map<String, Object> settings = cockpitDrafts == null ? Map.of() : Map.of(COCKPIT_DRAFTS, cockpitDrafts);
+        return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);
     }
 
     static String engineVersion() {

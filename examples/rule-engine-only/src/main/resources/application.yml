@@ -27,6 +27,9 @@ horus:
     host-id: rule-engine-only
     rules:
       enabled: true
+      # Draft editing in the cockpit is off by default in 0.1.0 (PD-094); this example turns it on for the demo.
+      authoring:
+        cockpit-drafts: true
       security:
         # The host's roles mapped to engine permissions, listed by GET /api/bpm/me.
         role-permissions:

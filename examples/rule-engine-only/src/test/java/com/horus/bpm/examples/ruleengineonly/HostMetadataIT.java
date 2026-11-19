@@ -88,6 +88,8 @@ class HostMetadataIT {
         assertThat(metaBody.path("hostId").asString()).isEqualTo("rule-engine-only");
         assertThat(metaBody.path("modules")).hasSize(1);
         assertThat(metaBody.path("modules").get(0).path("module").asString()).isEqualTo("rules");
+        // PD-094: the cockpit edits drafts only where the host turns it on; this example does, for the demo.
+        assertThat(metaBody.path("modules").get(0).path("settings").path("authoring.cockpit-drafts").asBoolean()).isTrue();
         assertThat(metaBody.path("modules").get(0).path("engineVersion").asString())
                 .isEqualTo(System.getProperty("rule-engine.version"));
         assertThat(meta.headers().firstValue("Cache-Control")).hasValue("private, max-age=60");
