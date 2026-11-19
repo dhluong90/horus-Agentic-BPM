@@ -21,7 +21,7 @@ The dev server answers `cockpit-hosts.json`, `/api/bpm/meta` and `/api/bpm/me` f
 | `npm run lint` | ESLint, strict type-checked rules; inline styles and raw HTML are refused |
 | `npm run typecheck` | TypeScript, strict |
 | `npm test` | Vitest and Testing Library against the mock host |
-| `npm run e2e` | Builds, serves the build with the same security headers as the starter, and runs Playwright on Chromium. Screenshots at 1440x900 and 1440x1200, light and dark, English and Vietnamese, go to `e2e/screenshots/` |
+| `npm run e2e` | Builds, serves the build with the same security headers as the starter, and runs Playwright on Chromium. Screenshots at 1440x900 and 1440x1200, light and dark, English and Vietnamese, go to `e2e/screenshots/`. Set `COCKPIT_E2E_PORT` to run beside another checkout (default 4173) |
 | `npm run schemas` | Regenerates `src/api/generated/` from `cockpit/api/schema`; `npm run schemas:check` fails when they differ |
 | `npm run licences` | Fails when a shipped package has a licence other than Apache 2.0, MIT or BSD |
 
@@ -32,6 +32,10 @@ Test names start with the specification id they prove, for example `CKP_001_...`
 | Folder | Holds |
 |---|---|
 | `src/app/config` | Loading and validating `cockpit-hosts.json` |
+| `src/app/people.tsx`, `src/app/links.ts` | Display names for people in lists; documentation links |
+| `src/app/route.ts`, `src/app/navigation.ts` | Hash routes (`#/home`, `#/rules/...`, `#/approvals`, `#/decisions`, `#/processes`), the menu areas each user may use, and the landing area |
+| `src/shell` | The top bar's breadcrumb, the left menu (`NavRail`) and the frame that routes to an area (`AppFrame`) |
+| `src/features` | One folder per area: `home`, `rules`, `approvals`, `decisions`, `processes`, and `overview` for the lists that Home and Approvals share |
 | `src/app/session` | The session state: registry, `/meta` and `/me` as one state |
 | `src/api` | The host client, problem-details parsing and the generated schemas |
 | `src/components` | Design tokens, the header and the state panels |

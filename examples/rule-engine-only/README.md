@@ -316,6 +316,27 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choos
 
 Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
 
+The cockpit opens on Home for every role. Home's content depends on the user: Lan sees her drafts and requests, Minh the requests waiting for his review, and Tuan, who has no rule permission, one line saying so. The menu shows Home, Rules, Approvals and, under Preview, Decisions to anyone with a rule permission; Processes appears only where a Process Engine is registered. A host can open the cockpit on `rules` or `approvals` with the `cockpit.landing` setting in `/api/bpm/meta`.
+
+### Sign-in page
+
+The sign-in page belongs to the host, not to the cockpit library. This example serves its own page at `GET /login`, and Spring Security still handles `POST /login`, CSRF and the redirect back to the cockpit.
+
+| Part | File |
+|---|---|
+| Template | [`sign-in/sign-in.html`](src/main/resources/sign-in/sign-in.html) |
+| Text in English and Vietnamese | [`sign-in/messages*.properties`](src/main/resources/sign-in) |
+| Styles and script, served from `/sign-in/` | [`static/sign-in/`](src/main/resources/static/sign-in) |
+| Rendering and headers | [`SignInPage`](src/main/java/com/horus/bpm/examples/ruleengineonly/SignInPage.java), [`SignInController`](src/main/java/com/horus/bpm/examples/ruleengineonly/SignInController.java) |
+
+- **Language:** `?lang=en` or `?lang=vi`, otherwise a Vietnamese browser, otherwise `horus.bpm.cockpit.default-locale`. The page also follows the language and theme chosen in the cockpit.
+- **Brand panel:** the service name, what it is for and three points, from the host's own messages. A bank replaces this panel.
+- **Demo users:** listed by name and role on the `dev` profile, and only when `HORUS_DEMO_PASSWORD` is set. Choosing one fills the username. The page never shows a password.
+- **Security:** no inline script or style, so the page has its own strict `Content-Security-Policy`, with `frame-ancestors 'none'` and `Cache-Control: no-store`.
+- **Changing it:** copy the template and set `host.sign-in.template` to your copy, for example `file:/etc/loans/sign-in.html`. Double braces always insert escaped text; triple braces are allowed only for the page's own markup blocks. An unknown or misused placeholder stops the page with an error that names it.
+
+![Sign-in page](../../cockpit/docs/images/screenshots/example-host-signin-1440x900-light-en.png)
+
 ## Rule Engine properties
 
 | Property | Default | Meaning |
@@ -344,6 +365,8 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `SessionSignInIT.RLE_019_*` | The curl demo above on the `dev` profile: form sign-in, then `200` from `/meta` and `/me` with the session for both users |
 | `SessionSignInIT.TR_SEC_03_*`, `SessionSignInIT.session_*` | A session caller cannot choose its tenant with a header; a state-changing call with the session needs the CSRF token; other pages still redirect to `/login` |
 | `CockpitEmbeddedIT.TR_SEC_09_*` | Without a session the cockpit path redirects to the host's sign-in and serves no file; the cockpit page carries the strict CSP and `X-Frame-Options: SAMEORIGIN` |
+| `CockpitEmbeddedIT.TR_SEC_09_the_host_sign_in_page_*` | `/login?lang=vi` is the branded page with the demo user names and no password, a strict CSP (`frame-ancestors 'none'`, no `unsafe-inline`) and `no-store`; its styles and script load before sign-in |
+| `SignInPageTest` | The page in English and Vietnamese, the error and signed-out states, the escaped CSRF field, demo users only on `dev` with a password, no inline script or style, and the same message keys in both languages |
 | `CockpitEmbeddedIT.CKP_001_*` | On the `dev` profile: form sign-in, the cockpit page and its one-host registry, then `200` from `/api/bpm/meta` and `/api/bpm/me` with the session, valid against the cockpit schemas; a call that changes data needs `X-XSRF-TOKEN` from the cookie |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
 | `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*`, `RLE_002_*`, `RLE_003_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
