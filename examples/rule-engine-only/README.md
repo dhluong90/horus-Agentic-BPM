@@ -18,7 +18,7 @@ sequenceDiagram
     Host->>HF: migrate db/migration
     HF->>DB: V1 loan_application, recorded in flyway_schema_history
     Host->>RE: all singletons created
-    RE->>DB: baseline 0 and V1 rle_* tables, recorded in rle_schema_history
+    RE->>DB: baseline 0, V1 rle_* tables and V2, recorded in rle_schema_history
     RE->>DB: partitions for the Clock month and the next, in one transaction
     Host->>DB: GET /actuator/health checks db and ruleEngine
 ```
@@ -48,6 +48,7 @@ docker exec horus-pg psql -U horus -d horus -c '\dt'
 docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_schema_history ORDER BY installed_rank'
 #  0       | Rule Engine baseline
 #  1       | V1__rle_baseline.sql
+#  2       | V2__rle_version_created_by.sql
 ```
 
 ### Host metadata with two demo users
@@ -80,6 +81,93 @@ Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve"]`.
 The demo users exist only on the `dev` profile, and the host refuses to start on `dev` beside another profile (other than `test`) or with a token issuer that is not on this machine. Without `dev` the user store is empty. The host accepts bearer tokens when an issuer, JWK set or public key is configured, and then requires its own audience; token claim `roles` becomes `ROLE_*` authorities and claim `tenant_id` the tenant.
 
 To see the `ruleEngine` component locally, start with `--management.endpoint.health.show-components=always`. It reports the schema version, `pendingMigrations`, and whether next month's partition exists.
+
+## Demo: import, approve as a second person, evaluate
+
+This walkthrough uses the demo users of the `dev` profile, in tenant `bank-a` (the profile's `dev-tenant`), with the password in `HORUS_DEMO_PASSWORD`. Their roles reach engine permissions through `horus.bpm.rules.security.role-permissions` in [`application.yml`](src/main/resources/application.yml), the same mapping `GET /api/bpm/me` lists. On the `dev` profile only they may also send HTTP Basic credentials, which keeps the curl steps short.
+
+| User | Roles | Engine permissions |
+|---|---|---|
+| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve` |
+| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
+| `tuan` | `TELLER` | `rules:evaluate` |
+
+Start PostgreSQL as above, then start the host on the `dev` profile:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+H=localhost:8080/api/bpm/rules/v1
+```
+
+1. Hoa imports the card fee table from [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml). It is stored as a draft with the file kept byte for byte:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+     -H 'Idempotency-Key: demo-import-1' --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee.yaml
+   # 201 {"ruleSet":"card-fee","version":1,"status":"DRAFT","sourceFormat":"YAML",
+   #      "canonicalHash":"596414cd75b2ef85719562ae8014a3f26bad0527ee2d6ef191377aec572f9142",...}
+   ```
+
+   Sending the same request again with the same `Idempotency-Key` returns the same `201` and creates nothing. The same key with a changed file returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+
+2. Hoa requests publication:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:request-publish
+   # 200 {"status":"PENDING_APPROVAL","requestedBy":"hoa",...}
+   ```
+
+3. Hoa tries to approve her own request and is refused:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
+   # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
+   ```
+
+4. Minh approves; the version is published and takes effect now:
+
+   ```bash
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve \
+     -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
+   # 200 {"status":"PUBLISHED","requestedBy":"hoa","approvedBy":"minh",...}
+   ```
+
+5. Tuan, a teller, prices a Gold customer's card. Rule `R1` matches and the fee is 0 VND:
+
+   ```bash
+   curl -s -u tuan:demo-only -X POST $H/decisions/card-fee:evaluate \
+     -H 'Content-Type: application/json' -d '{"inputs":{"tier":"GOLD","txCount":5}}'
+   # 200 {"decisionId":"01M7RVDNER5T0V2T4QH6SE2C25","ruleSet":"card-fee","version":1,"outcome":"MATCHED",
+   #      "matchedRuleIds":["R1"],"outputs":{"fee":{"currency":"VND","amount":0}},...}
+   ```
+
+6. The decision is in the log, written in the same transaction as the request:
+
+   ```bash
+   docker exec horus-pg psql -U horus -d horus -c \
+     'SELECT rule_set_name, version_num, outcome, matched_rule_ids, outputs, caller_id FROM rle_decision'
+   #  card-fee | 1 | OK | ["R1"] | {"fee": {"amount": 0, "currency": "VND"}} | tuan
+   ```
+
+7. A user of another tenant cannot reach the rule set, even when the body names the tenant. The `dev` profile has one tenant, so this step runs with bearer tokens for `bank-a` and `tenant-b` in `RuleLifecycleIT.RLE_011_*`: the answer is `404 RULE_SET_NOT_FOUND` and no decision row.
+
+8. The original file, comments included, is returned with `?include=source`:
+
+   ```bash
+   curl -s -u hoa:demo-only "$H/rule-sets/card-fee/versions/1?include=source"
+   # {..., "sourceDocument":"# Monthly card fee, the rule set of the Rule Engine walking skeleton (RLE-001).\n...", ...}
+   ```
+
+The same path in Java, inside the host's own transaction:
+
+```java
+@Transactional
+public Money cardFee(String tier, int txCount) {
+    DecisionResult result = ruleEngine.evaluate("card-fee", DecisionInput.of(Map.of("tier", tier, "txCount", txCount)));
+    return (Money) result.outputs().get("fee");   // rolls back with the host's work; one rle_decision row on commit
+}
+```
 
 ## Environment variables
 
@@ -120,6 +208,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `SessionSignInIT.RLE_019_*` | The curl demo above on the `dev` profile: form sign-in, then `200` from `/meta` and `/me` with the session for both users |
 | `SessionSignInIT.TR_SEC_03_*`, `SessionSignInIT.session_*` | A session caller cannot choose its tenant with a header; a state-changing call with the session needs the CSRF token; other pages still redirect to `/login` |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
+| `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.
 
