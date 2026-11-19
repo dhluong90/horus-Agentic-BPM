@@ -133,7 +133,41 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnProperty(prefix = "horus.bpm.processes.jobs", name = "enabled", havingValue = "true",
             matchIfMissing = true)
     ProcessJobPoller processEngineJobPoller(JobExecutor executor, ProcessEngineProperties properties) {
-        return new ProcessJobPoller(executor, properties.jobs().pollInterval());
+        return new ProcessJobPoller(executor::pollOnce, executor.replicaId(), properties.jobs().pollInterval(),
+                Clock.systemUTC());
+    }
+
+    /** Bean name of the job poller health contributor on both Spring Boot lines ({@code processEngineJobs}). */
+    static final String JOBS_HEALTH_BEAN = "processEngineJobsHealthIndicator";
+
+    /** Spring Boot 4 hosts with the health module: job poller health. */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.boot.health.contributor.HealthIndicator")
+    static class JobsHealthConfiguration {
+
+        @Bean(JOBS_HEALTH_BEAN)
+        @ConditionalOnMissingBean(name = JOBS_HEALTH_BEAN)
+        @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(ProcessJobPoller.class)
+        org.springframework.boot.health.contributor.HealthIndicator processEngineJobsHealthIndicator(
+                ProcessJobPoller poller) {
+            return new ProcessJobsHealthIndicator(poller);
+        }
+    }
+
+    /** Spring Boot 3.5 hosts with Actuator, only when the Spring Boot 4 health module is absent. */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.boot.actuate.health.HealthIndicator")
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass(
+            "org.springframework.boot.health.contributor.HealthIndicator")
+    static class JobsSpringBoot35HealthConfiguration {
+
+        @Bean(JOBS_HEALTH_BEAN)
+        @ConditionalOnMissingBean(name = JOBS_HEALTH_BEAN)
+        @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(ProcessJobPoller.class)
+        org.springframework.boot.actuate.health.HealthIndicator processEngineJobsHealthIndicator(
+                ProcessJobPoller poller) {
+            return new ProcessJobsSpringBoot35HealthIndicator(poller);
+        }
     }
 
     @Bean
