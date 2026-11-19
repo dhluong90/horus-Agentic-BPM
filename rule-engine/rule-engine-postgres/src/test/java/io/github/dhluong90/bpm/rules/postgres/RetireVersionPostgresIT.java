@@ -247,7 +247,7 @@ class RetireVersionPostgresIT {
         assertThat(retiredRows()).isEqualTo(20);
         assertThat(jdbc.sql("SELECT DISTINCT actor || ' ' || reason || ' ' || superseded_by || ' ' || approval_mode"
                 + " FROM rle_version_history WHERE action = 'RETIRED'").query(String.class).list())
-                .containsExactly("system SUPERSEDED 2 system");
+                .containsExactly("system:supersession SUPERSEDED 2 system");
         assertThat(jdbc.sql("SELECT DISTINCT retired_at FROM rle_version WHERE status = 'RETIRED'")
                 .query(Timestamp.class).single().toInstant()).isEqualTo(Instant.parse("2026-12-01T00:00:01Z"));
         // and no advisory lock or session state was used

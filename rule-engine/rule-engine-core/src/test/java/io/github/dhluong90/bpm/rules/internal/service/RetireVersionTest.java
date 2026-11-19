@@ -232,7 +232,7 @@ class RetireVersionTest {
         // Then v1 retires with it, as superseded by v2, and nothing serves
         assertThat(history("bank-a", "card-fee", 1).getLast()).satisfies(row -> {
             assertThat(row.action()).isEqualTo(LifecycleAction.RETIRED);
-            assertThat(row.actor()).isEqualTo("system");
+            assertThat(row.actor()).isEqualTo("system:supersession");
             assertThat(row.reason()).isEqualTo("SUPERSEDED");
             assertThat(row.supersededBy()).isEqualTo(2);
             assertThat(row.approvalMode()).isEqualTo("system");
@@ -416,6 +416,41 @@ class RetireVersionTest {
         assertThat(EngineSettings.defaults().retireLastVersion()).isEqualTo("confirm");
     }
 
+    @Test
+    void RLE_026_a_caller_whose_id_is_in_the_system_namespace_is_refused_for_every_operation() {
+        // Given a published version, and a host user whose id is the supersession actor's
+        RuleSetVersion v1 = publish("bank-a", "tet-fee-waiver", tetFeeWaiver("2027-01-20T00:00:00Z"),
+                Instant.parse("2027-01-15T00:00:00Z"));
+        clock.set(Instant.parse("2027-02-17T08:00:00Z"));
+        int events = stores.outbox.size();
+        int rows = stores.history.size();
+        int decisions = stores.decisions.size();
+        Set<String> everything = Set.of("rules:read", "rules:author", "rules:approve", "rules:evaluate");
+
+        for (String id : new String[] {"system:supersession", "system:anything"}) {
+            caller.become("bank-a", id, everything);
+            // Then every command and read is 403 PERMISSION_DENIED, before anything is read or written
+            List<org.assertj.core.api.ThrowableAssert.ThrowingCallable> calls = List.of(
+                    () -> versions.retire("tet-fee-waiver", 1,
+                            new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"), true),
+                    () -> versions.importVersion("tet-fee-waiver",
+                            ImportRequest.yaml(tetFeeWaiver("2027-03-01T00:00:00Z"))),
+                    () -> versions.find("tet-fee-waiver", 1, false),
+                    () -> versions.history("tet-fee-waiver", 1),
+                    () -> podA.ruleEngine().evaluate("tet-fee-waiver", DecisionInput.of(Map.of("channel", "CARD"))));
+            for (var call : calls) {
+                assertThatThrownBy(call).isInstanceOf(PermissionDeniedException.class)
+                        .hasMessageContaining("reserved").hasMessageNotContaining(id);
+            }
+        }
+        assertThat(stores.outbox).hasSize(events);
+        assertThat(stores.history).hasSize(rows);
+        assertThat(stores.decisions).hasSize(decisions);
+        // and a user named plain system, outside the namespace, is an ordinary caller
+        caller.become("bank-a", "system", APPROVER);
+        assertThat(versions.find("tet-fee-waiver", 1, false)).isPresent();
+    }
+
     // ------------------------------------------------------------------ RLE-027
 
     @Test
@@ -445,7 +480,7 @@ class RetireVersionTest {
         assertThat(a + b).isEqualTo(1);
         assertThat(retiredEvents()).singleElement().satisfies(event -> {
             assertThat(event.path("version").asInt()).isEqualTo(1);
-            assertThat(event.path("retiredBy").asString()).isEqualTo("system");
+            assertThat(event.path("retiredBy").asString()).isEqualTo("system:supersession");
             assertThat(event.path("reason").asString()).isEqualTo("SUPERSEDED");
             assertThat(event.path("supersededBy").asInt()).isEqualTo(2);
             assertThat(event.path("approvalMode").asString()).isEqualTo("system");
@@ -454,7 +489,7 @@ class RetireVersionTest {
         });
         assertThat(history("bank-a", "card-fee", 1)).filteredOn(e -> e.action() == LifecycleAction.RETIRED)
                 .singleElement().satisfies(row -> {
-                    assertThat(row.actor()).isEqualTo("system");
+                    assertThat(row.actor()).isEqualTo("system:supersession");
                     assertThat(row.supersededBy()).isEqualTo(2);
                 });
         // and an evaluation with a clock of 20 Nov still selects v1
@@ -507,7 +542,7 @@ class RetireVersionTest {
 
     @Test
     void RLE_027_the_system_actor_is_configurable() {
-        RuleEngines pod = engines(EngineSettings.defaults().withLifecycle("pricing-sweeper", "single"));
+        RuleEngines pod = engines(EngineSettings.defaults().withLifecycle("system:pricing-sweeper", "single"));
         publish("bank-a", "card-fee", cardFee("card-fee", "2026-11-01T00:00:00Z", "50000 VND"),
                 Instant.parse("2026-10-20T00:00:00Z"));
         publish("bank-a", "card-fee", cardFee("card-fee", "2026-12-01T00:00:00Z", "30000 VND"),
@@ -515,21 +550,27 @@ class RetireVersionTest {
         clock.set(Instant.parse("2026-12-01T00:00:00Z").plus(Duration.ofMinutes(1)));
 
         assertThat(pod.lifecycleSweep().run()).isEqualTo(1);
-        assertThat(retiredEvents().getFirst().path("retiredBy").asString()).isEqualTo("pricing-sweeper");
-        assertThat(history("bank-a", "card-fee", 1).getLast().actor()).isEqualTo("pricing-sweeper");
+        assertThat(retiredEvents().getFirst().path("retiredBy").asString()).isEqualTo("system:pricing-sweeper");
+        assertThat(history("bank-a", "card-fee", 1).getLast().actor()).isEqualTo("system:pricing-sweeper");
     }
 
     @Test
     void RLE_026_lifecycle_settings_are_validated_at_start_up() {
-        assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle("system", "four-eyes"))
+        assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle("system:supersession", "four-eyes"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("horus.bpm.lifecycle.retire-approval").hasMessageContaining("M3");
-        assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle("system", "dual"))
+        assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle("system:supersession", "dual"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("must be single");
         assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle(" ", "single"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("horus.bpm.rules.lifecycle.system-actor");
         assertThat(EngineSettings.defaults().retireApproval()).isEqualTo("single");
-        assertThat(EngineSettings.defaults().systemActor()).isEqualTo("system");
+        assertThat(EngineSettings.defaults().systemActor()).isEqualTo("system:supersession");
+        // the actor lives in the reserved system: namespace, which no caller id may use
+        for (String actor : new String[] {"system", "sweeper", "system:", "SYSTEM:x"}) {
+            assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle(actor, "single"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("horus.bpm.rules.lifecycle.system-actor must start with system:");
+        }
     }
 }

@@ -83,7 +83,7 @@ From the instant of the retirement no replica selects version 3: every evaluatio
 
 ### Automatic retirement of a superseded version
 
-When a newer approved version comes into effect, the older one stops serving at that instant. Its status follows within one `lifecycle.sweep-interval` (1 minute by default), or at once when the newer version is in effect at its approval. The older version becomes `RETIRED` with one history row and one `rules.version.retired.v1` event: actor `system`, reason `SUPERSEDED`, `supersededBy` the version in force, `approvalMode: system`. Every replica runs the sweep in an ordinary transaction with no advisory lock, and each retirement is still recorded exactly once.
+When a newer approved version comes into effect, the older one stops serving at that instant. Its status follows within one `lifecycle.sweep-interval` (1 minute by default), or at once when the newer version is in effect at its approval. The older version becomes `RETIRED` with one history row and one `rules.version.retired.v1` event: actor `system:supersession`, reason `SUPERSEDED`, `supersededBy` the version in force, `approvalMode: system`. Every replica runs the sweep in an ordinary transaction with no advisory lock, and each retirement is still recorded exactly once.
 
 ## Give one tenant different rules
 

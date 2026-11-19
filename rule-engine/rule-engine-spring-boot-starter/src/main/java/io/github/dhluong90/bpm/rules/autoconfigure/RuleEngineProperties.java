@@ -93,8 +93,8 @@ public record RuleEngineProperties(
      *     default 2000. May be lowered, never raised
      * @param sweepInterval how often the lifecycle sweep retires versions a newer version in effect has superseded,
      *     {@code PT1S} to {@code PT1H}; default {@code PT1M}. Status only: selection follows the effective date
-     * @param systemActor the actor recorded on the history row and event of a superseded version; default
-     *     {@code system}
+     * @param systemActor the actor recorded on the history row and event of a superseded version; it must start with
+     *     {@code system:}, a namespace no caller id may use; default {@code system:supersession}
      */
     public record Lifecycle(Integer reasonMaxLength, Duration sweepInterval, String systemActor) {
 

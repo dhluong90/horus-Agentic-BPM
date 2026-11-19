@@ -18,7 +18,8 @@ import java.time.Duration;
  * @param maxOutputBytes {@code horus.bpm.rules.evaluation.max-output-bytes}, 1 to {@value EngineDefaults#OUTPUT_MAX_BYTES}
  * @param maxStringLength {@code horus.bpm.rules.evaluation.max-string-length}, 1 to {@value EngineDefaults#STRING_MAX_LENGTH}
  * @param maxRows {@code horus.bpm.rules.evaluation.max-rows}, 1 to {@value EngineDefaults#RULES_MAX}
- * @param systemActor {@code horus.bpm.rules.lifecycle.system-actor}: the actor recorded when a version is superseded,
+ * @param systemActor {@code horus.bpm.rules.lifecycle.system-actor}: the actor recorded when a version is superseded, in the reserved
+ *     {@code system:} namespace (default {@code system:supersession}),
  *     1 to {@value EngineDefaults#SYSTEM_ACTOR_MAX_LENGTH} characters, not blank
  * @param retireApproval {@code horus.bpm.lifecycle.retire-approval} (PD-080): {@code single}, recorded on every
  *     retirement; {@code four-eyes} is refused until it ships in M3 (RLE-038)
@@ -50,9 +51,12 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         requireLowerOnly("horus.bpm.rules.evaluation.max-output-bytes", maxOutputBytes, EngineDefaults.OUTPUT_MAX_BYTES);
         requireLowerOnly("horus.bpm.rules.evaluation.max-string-length", maxStringLength, EngineDefaults.STRING_MAX_LENGTH);
         requireLowerOnly("horus.bpm.rules.evaluation.max-rows", maxRows, EngineDefaults.RULES_MAX);
-        if (systemActor == null || systemActor.isBlank() || systemActor.length() > EngineDefaults.SYSTEM_ACTOR_MAX_LENGTH) {
-            throw new IllegalArgumentException("horus.bpm.rules.lifecycle.system-actor must be 1 to "
-                    + EngineDefaults.SYSTEM_ACTOR_MAX_LENGTH + " characters and not blank, was '" + systemActor + "'");
+        if (systemActor == null || !systemActor.startsWith(EngineDefaults.RESERVED_ACTOR_PREFIX)
+                || systemActor.length() == EngineDefaults.RESERVED_ACTOR_PREFIX.length()
+                || systemActor.length() > EngineDefaults.SYSTEM_ACTOR_MAX_LENGTH) {
+            throw new IllegalArgumentException("horus.bpm.rules.lifecycle.system-actor must start with "
+                    + EngineDefaults.RESERVED_ACTOR_PREFIX + ", have a name after it and be at most "
+                    + EngineDefaults.SYSTEM_ACTOR_MAX_LENGTH + " characters, was '" + systemActor + "'");
         }
         if ("four-eyes".equals(retireApproval)) {
             throw new IllegalArgumentException("horus.bpm.lifecycle.retire-approval: four-eyes arrives in M3"

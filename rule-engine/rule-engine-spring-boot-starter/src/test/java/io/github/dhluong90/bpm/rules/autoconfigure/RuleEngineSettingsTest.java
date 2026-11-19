@@ -74,14 +74,14 @@ class RuleEngineSettingsTest {
         runner.run(context -> {
             assertThat(context.getBean(EngineSettings.class))
                     .extracting(EngineSettings::systemActor, EngineSettings::retireApproval)
-                    .containsExactly("system", "single");
+                    .containsExactly("system:supersession", "single");
             assertThat(context.getBean(RuleEngineProperties.class).lifecycle().sweepIntervalOrDefault())
                     .isEqualTo(Duration.ofMinutes(1));
         });
-        runner.withPropertyValues("horus.bpm.rules.lifecycle.system-actor=pricing-sweeper",
+        runner.withPropertyValues("horus.bpm.rules.lifecycle.system-actor=system:pricing-sweeper",
                         "horus.bpm.rules.lifecycle.sweep-interval=PT1S")
                 .run(context -> {
-                    assertThat(context.getBean(EngineSettings.class).systemActor()).isEqualTo("pricing-sweeper");
+                    assertThat(context.getBean(EngineSettings.class).systemActor()).isEqualTo("system:pricing-sweeper");
                     assertThat(context.getBean(RuleEngineProperties.class).lifecycle().sweepIntervalOrDefault())
                             .isEqualTo(Duration.ofSeconds(1));
                 });

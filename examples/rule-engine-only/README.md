@@ -313,7 +313,7 @@ public Money cardFee(String tier, int txCount) {
    curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1
    # {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T19:32:01.858780Z",...}
    curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1/history
-   # {"data":[...,{"action":"RETIRED","actor":"system","reason":"SUPERSEDED","supersededBy":2,"approvalMode":"system",...}]}
+   # {"data":[...,{"action":"RETIRED","actor":"system:supersession","reason":"SUPERSEDED","supersededBy":2,"approvalMode":"system",...}]}
    ```
 
    A version scheduled for a later date retires its predecessor when the date comes, through the lifecycle sweep (`horus.bpm.rules.lifecycle.sweep-interval`, one minute by default). Evaluation switches at the date itself, without waiting for the sweep.

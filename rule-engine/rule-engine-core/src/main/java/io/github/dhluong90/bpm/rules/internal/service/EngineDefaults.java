@@ -95,7 +95,13 @@ public final class EngineDefaults {
     public static final java.time.Duration CURSOR_KEY_REFRESH = java.time.Duration.ofMinutes(5);
 
     /** Default of {@code horus.bpm.rules.lifecycle.system-actor}: the actor recorded when a version is superseded. */
-    public static final String SYSTEM_ACTOR = "system";
+    public static final String SYSTEM_ACTOR = "system:supersession";
+
+    /**
+     * The namespace of the engine's own actors: {@code lifecycle.system-actor} must start with it, and no caller id
+     * may, so a host user can never act or appear in the audit trail under an engine actor's name.
+     */
+    public static final String RESERVED_ACTOR_PREFIX = "system:";
 
     /** Longest {@code lifecycle.system-actor}, in characters, the bound of every recorded actor. */
     public static final int SYSTEM_ACTOR_MAX_LENGTH = 200;

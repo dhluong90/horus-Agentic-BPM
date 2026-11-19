@@ -42,7 +42,8 @@ class RetireVersionIT {
             "lan", List.of("rules:read", "rules:author"),
             "bob", List.of("rules:read", "rules:approve"),
             "dan", List.of("rules:read"),
-            "teller", List.of("rules:evaluate"));
+            "teller", List.of("rules:evaluate"),
+            "system:supersession", List.of("rules:read", "rules:approve"));
 
     /** The host clock, moved between steps. */
     static final class HostClock extends Clock {
@@ -214,6 +215,11 @@ class RetireVersionIT {
                 "application/json", "k-7", v1.etag()), 413, "PAYLOAD_TOO_LARGE");
         assertProblem(send("bank-retire-other", "bob", "POST", path, reason, "application/json", "k-8", v1.etag()),
                 404, "RULE_SET_NOT_FOUND");
+        // a host user whose id is in the engine's reserved system: namespace, even with rules:approve
+        assertProblem(send(t, "system:supersession", "POST", path, reason, "application/json", "k-9", v1.etag()),
+                403, "PERMISSION_DENIED");
+        assertProblem(send(t, "system:supersession", "GET", "/rule-sets/tet-fee-waiver/versions/1", null, null, null,
+                null), 403, "PERMISSION_DENIED");
 
         assertThat(rows(t)).isEqualTo(before);
         assertThat(send(t, "dan", "GET", "/rule-sets/tet-fee-waiver/versions/1", null, null, null, null)
@@ -236,7 +242,7 @@ class RetireVersionIT {
         JsonNode history = send(t, "dan", "GET", "/rule-sets/tet-fee-waiver/versions/1/history", null, null, null, null)
                 .json().path("data");
         JsonNode last = history.get(history.size() - 1);
-        assertThat(last.path("actor").asString()).isEqualTo("system");
+        assertThat(last.path("actor").asString()).isEqualTo("system:supersession");
         assertThat(last.path("reason").asString()).isEqualTo("SUPERSEDED");
         assertThat(last.path("supersededBy").asInt()).isEqualTo(2);
         assertThat(last.path("approvalMode").asString()).isEqualTo("system");

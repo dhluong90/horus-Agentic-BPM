@@ -48,7 +48,7 @@
       "format": "date-time"
     },
     "retiredBy": {
-      "description": "The identity that retired the version by hand, or lifecycle.system-actor (default system) when it was superseded.",
+      "description": "The identity that retired the version by hand, or lifecycle.system-actor (default system:supersession; the system: namespace is refused for callers) when it was superseded.",
       "type": "string"
     },
     "reason": {
@@ -111,9 +111,9 @@
       "ruleSet": "card-fee",
       "version": 1,
       "tenantId": "bank-a",
-      "actor": "system",
+      "actor": "system:supersession",
       "occurredAt": "2026-12-01T00:00:01Z",
-      "retiredBy": "system",
+      "retiredBy": "system:supersession",
       "reason": "SUPERSEDED",
       "supersededBy": 2,
       "retiredAt": "2026-12-01T00:00:01Z",
