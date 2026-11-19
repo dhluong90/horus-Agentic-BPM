@@ -5,11 +5,10 @@ import { scenarioResponses, type MockResponse, type Scenario } from '../src/mock
 export async function mockHost(page: Page, scenario: Scenario = 'ready'): Promise<string[]> {
   const responses = scenarioResponses(scenario);
   const calls: string[] = [];
-  const fulfil = (response: MockResponse) => ({
-    status: response.status,
-    contentType: response.contentType,
-    body: JSON.stringify(response.body),
-  });
+  const fulfil = (response: MockResponse) =>
+    response.location !== undefined
+      ? { status: response.status, headers: { Location: response.location }, body: '' }
+      : { status: response.status, contentType: response.contentType, body: JSON.stringify(response.body) };
   await page.route('**/cockpit-hosts.json', async (route) => {
     calls.push(new URL(route.request().url()).pathname);
     await route.fulfill(fulfil(responses.registry));

@@ -62,14 +62,23 @@ export const problemUnauthenticated = {
   correlationId: '01JD3C5D7E9F1G3H5J7K9M1N3P',
 } as const;
 
+/** The longest values the starter accepts: host label 80, environment 40, banner 40 characters. */
+export const LONGEST = {
+  label: 'Hệ thống khởi tạo, thẩm định và phê duyệt khoản vay tiêu dùng cho khách hàng cá n'.slice(0, 80),
+  environment: 'Môi trường kiểm thử chấp nhận người dùng',
+  banner: 'MÔI TRƯỜNG KIỂM THỬ, KHÔNG DÙNG DỮ LIỆU THẬT'.slice(0, 40),
+  userName: 'Nguyễn Hoàng Phương Thảo Nguyên',
+} as const;
+
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'meta-not-found', 'registry-invalid', 'registry-oidc'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
   status: number;
   contentType: string;
   body: unknown;
+  location?: string;
 }
 
 const json = (body: unknown, status = 200): MockResponse => ({ status, contentType: 'application/json', body });
@@ -89,7 +98,12 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       return { ...ok, me: problem(problemInternal) };
     case 'meta-internal-error':
       return { ...ok, meta: problem(problemInternal) };
-    case 'signed-out':
+    case 'signed-out': {
+      // The host's sign-in redirect for an ended session.
+      const toSignIn: MockResponse = { status: 302, contentType: 'text/html', body: '', location: '/login' };
+      return { ...ok, meta: toSignIn, me: toSignIn };
+    }
+    case 'me-unauthenticated':
       return { ...ok, meta: problem(problemUnauthenticated), me: problem(problemUnauthenticated) };
     case 'me-bad-shape':
       return { ...ok, me: json({ schemaVersion: 1, user: { id: '' }, permissions: [] }) };
@@ -98,6 +112,29 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       return { ...ok, meta: json({ timestamp: '2026-11-19T02:00:00.000+00:00', status: 404, error: 'Not Found', path: '/api/bpm/meta' }, 404) };
     case 'registry-invalid':
       return { ...ok, registry: json({ ...registryEmbedded, hosts: [{ id: 'loans', label: 'Loans', baseUrl: 'http://loans.bank.example' }] }) };
+    case 'ready-longest-labels':
+      return {
+        registry: json({
+          schemaVersion: 1,
+          auth: { mode: 'host-session' },
+          hosts: [{ id: 'loans', label: { en: LONGEST.label, vi: LONGEST.label }, baseUrl: '', environment: LONGEST.environment }],
+          ui: { defaultLocale: 'vi', environmentBanner: LONGEST.banner },
+        }),
+        meta: json(metaRulesOnly),
+        me: json({ ...meLan, user: { id: 'thao.nguyen', displayName: LONGEST.userName }, tenant: { current: 'ngan-hang-sao-mai-chi-nhanh-ha-noi', allowed: ['ngan-hang-sao-mai-chi-nhanh-ha-noi'] } }),
+      };
+    case 'registry-duplicate-id':
+      return {
+        ...ok,
+        registry: json({
+          schemaVersion: 1,
+          auth: { mode: 'host-session' },
+          hosts: [
+            { id: 'loans', label: 'Loans', baseUrl: '' },
+            { id: 'loans', label: 'Loans again', baseUrl: 'https://loans.api.bank.example' },
+          ],
+        }),
+      };
     case 'registry-oidc':
       return {
         ...ok,

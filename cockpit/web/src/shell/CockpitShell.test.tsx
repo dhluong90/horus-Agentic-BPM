@@ -87,13 +87,24 @@ describe('embedded shell, failure paths', () => {
     expect(screen.queryByTestId('header-user')).not.toBeInTheDocument();
   });
 
-  it('CKP_001_ended_session_offers_sign_in_again_with_the_problem_reference', async () => {
+  it('CKP_001_redirect_to_the_host_sign_in_offers_sign_in_again', async () => {
     setScenario('signed-out');
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Your session has ended' })).toBeInTheDocument();
-    expect(screen.getByTestId('error-code')).toHaveTextContent('UNAUTHENTICATED');
     expect(screen.getByRole('button', { name: 'Sign in again' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('CKP_001_401_problem_while_the_page_was_served_shows_code_and_reference_with_retry_not_sign_in', async () => {
+    setScenario('me-unauthenticated');
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'The service did not accept your sign-in' })).toBeInTheDocument();
+    expect(screen.getByTestId('error-code')).toHaveTextContent('UNAUTHENTICATED');
+    expect(screen.getByTestId('error-correlation-id')).toHaveTextContent('01JD3C5D7E9F1G3H5J7K9M1N3P');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign in again' })).not.toBeInTheDocument();
   });
 
   it('CKP_001_response_that_breaks_the_schema_is_an_error_never_a_partial_render', async () => {
@@ -119,12 +130,21 @@ describe('embedded shell, failure paths', () => {
 });
 
 describe('host registry', () => {
-  it('TR_UI_01_invalid_registry_names_the_json_pointer_and_calls_no_host', async () => {
+  it('CKP_012_invalid_base_url_names_the_json_pointer_and_calls_no_host', async () => {
     setScenario('registry-invalid');
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'The cockpit configuration cannot be used' })).toBeInTheDocument();
     expect(screen.getByTestId('config-pointer')).toHaveTextContent('/hosts/0/baseUrl');
+    expect(requested.every((path) => path.endsWith('/cockpit-hosts.json'))).toBe(true);
+  });
+
+  it('CKP_012_duplicate_host_id_is_named_and_no_host_is_called', async () => {
+    setScenario('registry-duplicate-id');
+    render(<App />);
+
+    expect(await screen.findByText('Two services use the id loans.')).toBeInTheDocument();
+    expect(screen.getByTestId('config-pointer')).toHaveTextContent('/hosts/1/id');
     expect(requested.every((path) => path.endsWith('/cockpit-hosts.json'))).toBe(true);
   });
 

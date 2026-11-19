@@ -46,6 +46,18 @@ describe('host client', () => {
     expect(await failure(async () => redirected)).toMatchObject({ kind: 'signed-out' });
   });
 
+  it('CKP_001_redirect_status_from_a_non_browser_fetch_is_a_signed_out_session', async () => {
+    const response = new Response(null, { status: 302, headers: { Location: '/login' } });
+    expect(await failure(respond(response))).toEqual({ kind: 'signed-out' });
+  });
+
+  it('CKP_001_401_problem_stays_a_problem_with_code_and_correlation_id', async () => {
+    const body = JSON.stringify({ status: 401, code: 'UNAUTHENTICATED', correlationId: 'c-3' });
+    expect(await failure(respond(new Response(body, { status: 401, headers: problemHeaders })))).toMatchObject({
+      kind: 'problem', status: 401, code: 'UNAUTHENTICATED', correlationId: 'c-3',
+    });
+  });
+
   it('CKP_001_network_failure_is_unreachable', async () => {
     expect(await failure(respond(new TypeError('Failed to fetch')))).toEqual({ kind: 'unreachable' });
   });

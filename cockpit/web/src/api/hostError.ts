@@ -3,7 +3,9 @@ import { z } from 'zod';
 /**
  * Why a call to a host did not give a usable answer. Every variant the shell can show:
  * - problem: the host answered with an RFC 9457 problem (ADR-0010: `code` and `correlationId`);
- * - signed-out: the host session has ended, so the host asked for sign-in;
+ * - signed-out: the host redirected the call to its sign-in page, so the session really ended and a
+ *   reload goes through the host's sign-in. A 401 problem is not this: the page was served, so the
+ *   session works for the page and the API refused it for another reason; it stays a `problem`;
  * - unreachable: no answer at all (network, timeout);
  * - unexpected-response: an answer that is neither the documented body nor a problem.
  */
@@ -16,7 +18,7 @@ export type HostError =
       title: string | undefined;
       detail: string | undefined;
     }
-  | { kind: 'signed-out'; code: string | undefined; correlationId: string | undefined }
+  | { kind: 'signed-out' }
   | { kind: 'unreachable' }
   | { kind: 'unexpected-response'; status: number; correlationId: string | undefined };
 

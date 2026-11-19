@@ -44,6 +44,7 @@ export const vi: Record<MessageKey, string> = {
 
   'error.problem.title': 'Dịch vụ từ chối yêu cầu',
   'error.problem.body': 'Gửi mã lỗi và mã tham chiếu cho bộ phận hỗ trợ.',
+  'error.notAccepted.title': 'Dịch vụ không chấp nhận phiên đăng nhập của bạn',
   'error.notFound.title': 'Dịch vụ này chưa có điểm kết nối cho cockpit',
   'error.notFound.body': 'Kiểm tra dịch vụ có chạy phiên bản bộ máy được hỗ trợ.',
   'error.signedOut.title': 'Phiên đăng nhập đã kết thúc',

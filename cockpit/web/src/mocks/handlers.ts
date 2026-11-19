@@ -2,10 +2,9 @@ import { http, HttpResponse } from 'msw';
 import { scenarioResponses, type MockResponse, type Scenario } from './fixtures';
 
 function reply(response: MockResponse) {
-  return new HttpResponse(JSON.stringify(response.body), {
-    status: response.status,
-    headers: { 'Content-Type': response.contentType },
-  });
+  const headers: Record<string, string> = { 'Content-Type': response.contentType };
+  if (response.location !== undefined) headers['Location'] = response.location;
+  return new HttpResponse(response.location !== undefined ? null : JSON.stringify(response.body), { status: response.status, headers });
 }
 
 /** MSW handlers of the mock host. Paths match any origin, so they serve the embedded (same-origin) case. */

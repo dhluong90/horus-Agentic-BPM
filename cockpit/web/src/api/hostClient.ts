@@ -32,16 +32,10 @@ export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): Hos
       if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
       throw new HostCallError({ kind: 'unreachable' });
     }
-    if (response.type === 'opaqueredirect') {
-      throw new HostCallError({ kind: 'signed-out', code: undefined, correlationId: undefined });
-    }
-    if (response.status === 401) {
-      const problem = await readProblem(response);
-      throw new HostCallError({
-        kind: 'signed-out',
-        code: problem.kind === 'problem' ? problem.code : undefined,
-        correlationId: problem.kind === 'problem' || problem.kind === 'unexpected-response' ? problem.correlationId : undefined,
-      });
+    // A redirect means the host sends the browser to its sign-in page: the session has ended.
+    // Browsers report it as an opaque redirect; other fetch implementations as the 3xx status itself.
+    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+      throw new HostCallError({ kind: 'signed-out' });
     }
     if (!response.ok) {
       throw new HostCallError(await readProblem(response));

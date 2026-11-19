@@ -21,15 +21,21 @@ const ERROR_TEXT: Record<HostError['kind'], { title: MessageKey; body: MessageKe
   'unexpected-response': { title: 'error.unexpected.title', body: 'error.unexpected.body' },
 };
 
-const NOT_FOUND_TEXT = { title: 'error.notFound.title', body: 'error.notFound.body' } as const satisfies { title: MessageKey; body: MessageKey };
+function errorText(error: HostError): { title: MessageKey; body: MessageKey } {
+  if (error.kind !== 'problem') return ERROR_TEXT[error.kind];
+  // 404 on the metadata endpoints: the host has no engine metadata module, or an engine too old for it.
+  if (error.status === 404) return { title: 'error.notFound.title', body: 'error.notFound.body' };
+  // 401 while the page itself was served: page and API authenticate differently. A reload cannot fix it.
+  if (error.status === 401) return { title: 'error.notAccepted.title', body: 'error.problem.body' };
+  return ERROR_TEXT.problem;
+}
 
 /** A host that answers with an error shows its code and correlation id, never a blank page. */
 export function HostErrorPanel({ error, onRetry }: { error: HostError; onRetry: () => void }) {
   const { t } = useI18n();
-  // 404 on the metadata endpoints: the host has no engine metadata module, or an engine too old for it.
-  const text = error.kind === 'problem' && error.status === 404 ? NOT_FOUND_TEXT : ERROR_TEXT[error.kind];
-  const code = error.kind === 'problem' || error.kind === 'signed-out' ? error.code : undefined;
-  const correlationId = error.kind === 'unreachable' ? undefined : error.correlationId;
+  const text = errorText(error);
+  const code = error.kind === 'problem' ? error.code : undefined;
+  const correlationId = error.kind === 'problem' || error.kind === 'unexpected-response' ? error.correlationId : undefined;
   const status = error.kind === 'problem' || error.kind === 'unexpected-response' ? error.status : undefined;
   return (
     <section className="panel panel--error" role="alert" aria-labelledby="host-error-title">
@@ -38,7 +44,7 @@ export function HostErrorPanel({ error, onRetry }: { error: HostError; onRetry: 
         {t(text.title)}
       </h1>
       <p className="panel__body">{t(text.body)}</p>
-      {error.kind !== 'unreachable' ? (
+      {error.kind === 'problem' || error.kind === 'unexpected-response' ? (
         <dl className="facts">
           <div>
             <dt>{t('error.code')}</dt>

@@ -30,11 +30,11 @@ export function format(template: string, params: Readonly<Record<string, string>
 }
 
 export function I18nProvider({ children, initialLocale }: { children: ReactNode; initialLocale?: Locale }) {
-  const stored = readStoredLocale();
-  const [state, setState] = useState<{ locale: Locale; chosen: boolean }>(() => ({
-    locale: initialLocale ?? stored ?? 'en',
-    chosen: stored !== undefined,
-  }));
+  // Storage is read once, in the lazy initialiser.
+  const [state, setState] = useState<{ locale: Locale; chosen: boolean }>(() => {
+    const stored = readStoredLocale();
+    return { locale: initialLocale ?? stored ?? 'en', chosen: stored !== undefined };
+  });
 
   useEffect(() => {
     document.documentElement.lang = state.locale;

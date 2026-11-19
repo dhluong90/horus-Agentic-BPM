@@ -42,6 +42,7 @@ export const en = {
 
   'error.problem.title': 'The service refused the request',
   'error.problem.body': 'Share the error code and reference with your support team.',
+  'error.notAccepted.title': 'The service did not accept your sign-in',
   'error.notFound.title': 'This service has no cockpit endpoints',
   'error.notFound.body': 'Check that the service runs a supported engine version.',
   'error.signedOut.title': 'Your session has ended',
