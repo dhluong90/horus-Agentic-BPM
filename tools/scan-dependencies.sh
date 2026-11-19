@@ -10,7 +10,8 @@
 #          script runs the anchore/grype container image with Docker.
 #          The first run downloads the vulnerability database (about 100 MB),
 #          so it needs network access; later runs reuse the cache.
-# Exit:    0 no high or critical finding, 1 at least one, 2 SBOM or tooling missing.
+# Exit:    0 no high or critical finding, 1 at least one, 2 SBOM missing, Grype
+#          missing or the scan itself failed (for example no network for the database).
 #
 # The table lists each finding with the package, its version, the fixed version
 # when there is one, and the advisory id (GHSA-..., CVE-...). Settings, including
@@ -29,6 +30,8 @@ fi
 
 SBOM_DIR="$(cd "$(dirname "$SBOM")" && pwd)"
 SBOM_FILE="$(basename "$SBOM")"
+target=""
+config=""
 
 if [[ -n "${GRYPE:-}" ]]; then
   cmd=("$GRYPE")
@@ -44,11 +47,26 @@ elif command -v docker >/dev/null 2>&1; then
     -e GRYPE_DB_CACHE_DIR=/cache
     "$GRYPE_IMAGE")
   echo "Scanning $SBOM with $GRYPE_IMAGE"
-  exec "${cmd[@]}" "sbom:/sbom/$SBOM_FILE" --config /.grype.yaml
+  target="sbom:/sbom/$SBOM_FILE"
+  config=/.grype.yaml
 else
   echo "Grype not found. Install it (https://github.com/anchore/grype#installation) or install Docker." >&2
   exit 2
 fi
 
-echo "Scanning $SBOM with $("${cmd[@]}" version 2>/dev/null | awk '/^Version:/ {print "grype " $2}')"
-exec "${cmd[@]}" "sbom:$SBOM" --config "$ROOT/.grype.yaml"
+if [[ -z "${target:-}" ]]; then
+  echo "Scanning $SBOM with $("${cmd[@]}" version 2>/dev/null | awk '/^Version:/ {print "grype " $2}')"
+  target="sbom:$SBOM"
+  config="$ROOT/.grype.yaml"
+fi
+
+# Grype exits 2 when a finding reaches fail-on-severity and 1 on any other error.
+status=0
+"${cmd[@]}" "$target" --config "$config" || status=$?
+case "$status" in
+  0) echo "Vulnerability gate passed: no high or critical finding." ;;
+  2) echo "Vulnerability gate FAILED: the table above names each package and advisory at high or critical. Upgrade it, or see wiki/Contributing.md." >&2
+     exit 1 ;;
+  *) echo "Vulnerability scan did not complete (grype exit $status)." >&2
+     exit 2 ;;
+esac
