@@ -31,6 +31,7 @@ PostgreSQL 14 and later is supported; CI covers 14 and the newest release.
 | Group | Ids | Covers |
 |---|---|---|
 | Embedding and compatibility | `TR-EMB-*` | One starter, your `DataSource` and transactions, no network I/O; supported Java, Spring Boot and PostgreSQL versions (`TR-EMB-02`); fixed table names (`TR-EMB-06`); the engine's own JSON library, unaffected by your JSON settings (`TR-EMB-07`) |
+| Configuration and extension | `TR-EXT-*` | Business behaviour as validated properties with safe defaults, replaceable default beans, no business constants in core, controls never switched off, every setting documented ([[Configuration and Extension Points]]) |
 | Determinism and correctness | `TR-DET-*` | Same version, inputs and clock give the same result; expressions checked at publish time |
 | Security | `TR-SEC-*` | No code execution, bounded regex, tenant from the resolver only, maker-checker, masking, error bodies, cockpit headers |
 | Reliability under retries | `TR-IDEM-*` | Idempotency keys, business keys, optimistic locking |

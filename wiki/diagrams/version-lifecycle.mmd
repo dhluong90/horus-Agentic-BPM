@@ -6,9 +6,9 @@ stateDiagram-v2
   [*] --> DRAFT: create, import, or copy from a retired version
   DRAFT --> DRAFT: edit (lock version), validate, simulate
   DRAFT --> PENDING_APPROVAL: request-publish (zero validation errors)
-  PENDING_APPROVAL --> DRAFT: reject
+  PENDING_APPROVAL --> DRAFT: reject with a reason (the requester may withdraw)
   PENDING_APPROVAL --> PUBLISHED: approve by a different identity
-  PUBLISHED --> RETIRED: newer version becomes effective, or retire
+  PUBLISHED --> RETIRED: superseded (system, once), or retire with a reason
   PUBLISHED --> [*]
   RETIRED --> [*]
   note right of RETIRED

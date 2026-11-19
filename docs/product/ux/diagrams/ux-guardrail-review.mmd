@@ -1,0 +1,29 @@
+sequenceDiagram
+  autonumber
+  participant AG as Agent adapter
+  participant EN as Process Engine
+  participant GR as Guardrail rule set
+  participant CK as Cockpit control tower
+  actor TU as Reviewer (Tuấn)
+  AG->>EN: agent output for APP-1042
+  EN->>EN: schema gate, 7 of 7 fields pass
+  EN->>GR: evaluate output
+  GR-->>EN: G3 matched, allow false, LOW_CONFIDENCE_HIGH_VALUE
+  EN->>EN: create "Review agent output" task, triggering identity excluded
+  CK->>EN: merged inbox query across hosts
+  EN-->>CK: task, masked inputs, output, schema verdict, matched row
+  TU->>CK: open case, compare evidence with field cards
+  alt Approve agent output
+    TU->>CK: Approve
+    CK->>EN: complete task, Idempotency-Key, If-Match
+  else Override and approve
+    TU->>CK: income 62,000,000 to 26,000,000 VND, reason, tag
+    CK->>EN: complete with override diff and reason
+  end
+  alt 200 OK
+    EN-->>CK: recorded, process continues
+    CK-->>TU: outcome shown after the answer, never before
+  else 409 VERSION_CONFLICT
+    EN-->>CK: problem with correlationId
+    CK-->>TU: reload offered, nothing marked done
+  end

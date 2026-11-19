@@ -88,7 +88,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 | Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-13 | Tighten an eligibility threshold (minimum income, maximum debt-to-income) | Credit policy change approved by the credit committee | CSV round-trip (M1); grid (M2) | M2 | M1 | CK-F-35, CK-F-10, RE-F-02 |
-| UC-RE-14 | Write conditions without expression syntax (equals, one of, between, at least, any) | Every edit | Cell shorthand in CSV (M1); drop-downs and plain-language reading in the grid (M2) | later | M1 | CK-F-35, CK-F-37 |
+| UC-RE-14 | Write conditions without expression syntax (equals, one of, between, at least, any) | Every edit | Cell shorthand in CSV (M1); read-only plain-language reading of each row (M1, PD-056); drop-downs and readings while editing in the matrix (M2) | later | M1 | CK-F-35, CK-F-37 |
 | UC-RE-15 | Create a new rule set from a template | New lending product | Cockpit grid: New rule set; then a developer wires it (journey 2) | later | M2 | CK-F-36, CK-F-10, RE-F-02 |
 | UC-RE-16 | Create a new rule set from scratch: name, hit policy, inputs, outputs, allowed values | New product with no similar table | Cockpit grid, blank template; today only through a business analyst in YAML | later | M2 | CK-F-36, CK-F-10 |
 | UC-RE-17 | Return every reason for a decline, not only the first | Customers and regulators ask why | `collect` hit policy with a reason code output | M1 | M1 | RE-F-01 |
@@ -114,7 +114,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 | Id | Goal | Trigger | Surface | Before PD-043 | Plan | Features |
 |---|---|---|---|---|---|---|
 | UC-RE-29 | Learn that a change waits for approval | Author requests publication | Cockpit: Approvals; the bank's email or chat from the `publish-requested` event | M1 | M1 | CK-F-04, RE-F-29 |
-| UC-RE-30 | Read a change as a row diff in business terms | Opens a pending request | Cockpit: Diff; plain-language conditions from M2 | M1 | M1 | CK-F-03, RE-F-08, CK-F-37 |
+| UC-RE-30 | Read a change as a row diff in business terms | Opens a pending request | Cockpit: change dossier with the matrix diff and a plain-language redline of each row (M1, PD-056) | M1 | M1 | CK-F-03, RE-F-08, CK-F-44 |
 | UC-RE-31 | Try their own cases on the pending version | Doubt about an edge case | Cockpit: Simulation | M1 | M1 | CK-F-05, RE-F-21 |
 | UC-RE-32 | Approve, confirming the effective date | Change is understood | Cockpit: Approvals | M1 | M1 | CK-F-04, RE-F-06 |
 | UC-RE-33 | Reject with a reason that goes back to the author | Change is wrong or unclear | Cockpit: Approvals | M1 | M1 | CK-F-04, RE-F-07 |
@@ -122,7 +122,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 | UC-RE-35 | Approve from the bank's own ticket or workflow tool | Policy requires one approval tool (K8) | REST and events; integration is the host's | M1 | M1 | RE-F-20, RE-F-29 |
 | UC-RE-36 | Require two approvers from different functions (risk and compliance) | Credit policy needs two sign-offs | Not planned | later | later | RE-F-36 |
 | UC-RE-37 | Approve an urgent change alone | Fee charged in error, out of hours | The emergency path, only if the bank turned it on by configuration; logged and reviewed afterwards (PD-012, decided 2026-11-19); milestone set by the architect's ADR | never | later | RE-F-48 |
-| UC-RE-38 | Retire a rule set no longer used | Product withdrawn | Cockpit or REST `:retire` | M1 | M1 | RE-F-07 |
+| UC-RE-38 | Retire a rule set no longer used | Product withdrawn | Cockpit or REST `:retire`, one `rules:approve` holder with a reason by default; a host can require a second approver by setting from M3 (PD-080) | M1 | M1 | RE-F-07, RE-F-49 |
 
 ### Operations and customer support staff
 
@@ -169,7 +169,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 | UC-RE-62 | Set the masking key; start-up fails without it | Go-live | Host configuration and secret store | M1 | M1 | RE-F-13, RE-F-12 |
 | UC-RE-63 | Serve the cockpit embedded or standalone and register hosts | Go-live | Configuration | M1 | M1 | CK-F-01, CK-F-23, X-F-22 |
 | UC-RE-64 | Monitor evaluation latency, errors and cache freshness | Daily operations | Metrics and events in the bank's monitoring | M1 | M1 | RE-F-29, RE-F-09, RE-F-10 |
-| UC-RE-65 | Choose transactional or async decision logging | High-volume host | Configuration | M1 (cut candidate) | M1 (cut candidate) | RE-F-15 |
+| UC-RE-65 | Choose transactional or async decision logging | High-volume host | Configuration: synchronous by default (PD-075) | M1 (cut candidate) | M2 (cut candidate) | RE-F-15 |
 | UC-RE-66 | Set decision log retention | Records policy | Configuration | M3 | M3 | RE-F-31 |
 | UC-RE-67 | Turn on OpenTelemetry spans | Tracing standard | Configuration | M3 | M3 | X-F-11 |
 | UC-RE-68 | Upgrade the engine without downtime | New minor release | Rolling upgrade | M3 | M3 | X-F-10 |
@@ -181,6 +181,7 @@ Each row is one thing a person in a bank or fintech does with the Rule Engine. "
 |---|---|---|---|---|---|---|
 | Before PD-043 | 37 | 5 | 10 | 13 | 4 | 69 |
 | Plan (PD-043 and PD-012 decided) | 43 | 6 | 11 | 6 | 3 | 69 |
+| Plan (delegated decisions of 2026-11-19: UC-RE-65 to M2, PD-075) | 42 | 7 | 11 | 6 | 3 | 69 |
 
 Per persona, under the plan:
 
@@ -193,7 +194,7 @@ Per persona, under the plan:
 | Operations and customer support staff | 3 | 1 | 1 | 0 | 0 | 5 |
 | Internal auditor | 3 | 1 | 1 | 0 | 0 | 5 |
 | Host-service developer | 9 | 2 | 0 | 0 | 0 | 11 |
-| Platform administrator | 5 | 0 | 3 | 2 | 0 | 10 |
+| Platform administrator | 4 | 1 | 3 | 2 | 0 | 10 |
 ## Journeys
 
 Six journeys cover the most frequent and the most consequential use cases. Each step names the screen or call. The examples use the `card-fee` rule set from [the authoring guide](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Rule-Engine-Authoring-Decision-Tables).

@@ -36,7 +36,7 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
 ## 3. Domain model and compiler (`rule-engine-core`)
 
 ### 3.1 Immutable rule set and typed tree
-- `RuleSetDefinition` (`record`): `schemaVersion`, `expressionLanguage` (only `urn:horus-bpm:expr:v1` before S1), `timeZone` (IANA zone id, default `UTC`; M1, DN-06), `ruleSetName`, `version` (the rule set version number, 1, 2, 3; never the optimistic lock), `hitPolicy` (`FIRST | UNIQUE | COLLECT`), `collectAggregate` (`NONE | SUM | MIN | MAX | COUNT`), `moneyRounding` (default `HALF_EVEN`), `effectiveFrom` (`Instant`), `inputs` (`List<InputSchema>`), `outputs` (`List<OutputSchema>`), `rules` (`List<RuleRow>`), `canonicalHash` (SHA-256).
+- `RuleSetDefinition` (`record`): `schemaVersion`, `expressionLanguage` (only `urn:horus-bpm:expr:v1` before S1), `timeZone` (IANA zone id, default `UTC`; M1, DN-06), `ruleSetName`, `version` (the rule set version number, 1, 2, 3; never the optimistic lock), `hitPolicy` (`FIRST | UNIQUE | COLLECT`), `collectAggregate` (`NONE | SUM | MIN | MAX | COUNT`), `moneyRounding` (default `HALF_EVEN`), `inputs` (`List<InputSchema>`), `outputs` (`List<OutputSchema>`), `rules` (`List<RuleRow>`), `canonicalHash` (SHA-256).
 - `Expr` (`sealed interface`):
   - `LiteralExpr(ValueType type, Object value)`
   - `VarRefExpr(int slotIndex, String name, ValueType type)` *(bound to slot index at compile time)*
@@ -49,7 +49,8 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
 - `Money` (`record(String currency, long minorUnits)`, scale derived from the currency): the canonical contract is section 3.4.
 - The definition document format is owned by `rule-engine/api/schema/rule-set.v1.schema.json` (JSON Schema 2020-12). `tools/validate-examples.sh` checks every YAML example in `wiki/` against it.
 - **Decision model identity (M1, DN-08).** A rule set is a DMN decision model (`definitions`) named after the rule set with exactly one decision, a decision table with the rule set's name. `RuleSetDefinition` is built as that DMN-shaped model (`Definitions`, `Decision`, `DecisionTable`, `InputClause`, `OutputClause`, `Rule`) by the v1 reader, so DRDs with several decisions (S1) extend the model instead of replacing it (ADR-0018, PD-060, [`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 3.6). The canonical writer prints the model back as the rule set's canonical JSON; for a v1 document the result is its RFC 8785 form unchanged, so `canonical_hash` does not depend on the model (`RLE-024`, `TR-STD-28`).
-- **Hash identity (M1, DN-04).** `canonical_hash` is the SHA-256 of the RFC 8785 form of the document in the schema version it is stored in. It is never recomputed when a later schema version exists; upgrading is an author action that creates a new draft. A DMN XML import (RE-F-30, M3) produces the lowest schema version that can express the model, so a v1 rule set exported to DMN and imported again keeps its hash.
+- **Effective date is version metadata, not content (M1).** `effectiveFrom` is stored in `rle_version.effective_from`, never in `canonical_json`, and is not part of `canonical_hash`. A document may still carry `effectiveFrom` (the v1 schema allows it): import moves the value to the draft's `effective_from` as the proposed date and removes it from the canonical document; the source document keeps it (`TR-STD-01`); `:request-publish` may override it, and from then on it is frozen with the version, shown to the approver and carried in `rules.version.publish-requested.v1` and `rules.version.published.v1`. Export never writes it. So the same rules scheduled for different dates in two environments have one hash, a date change is not a content change in the diff, and an exported version imports back with its hash (`RLE-032`). The pipeline that compares Git with production removes `effectiveFrom` before hashing, as the Process Engine removes `diagram` (process engine DESIGN 5.2).
+- **Hash identity (M1, DN-04).** `canonical_hash` is the SHA-256 of the RFC 8785 form of the document, without `effectiveFrom`, in the schema version it is stored in. It is never recomputed when a later schema version exists; upgrading is an author action that creates a new draft. A DMN XML import (RE-F-30, M3) produces the lowest schema version that can express the model, so a v1 rule set exported to DMN and imported again keeps its hash.
 
 ### 3.2 Two-phase compilation and slot-indexed evaluation
 1. **Compile & Static Type-Check (Save / Publish):**
@@ -75,13 +76,13 @@ Source: [`diagrams/version-lifecycle.mmd`](diagrams/version-lifecycle.mmd).
 
 | From State | Command / Trigger | Guard | To State | Side Effect / Event |
 |---|---|---|---|---|
-| *(none)* | `createDraft` / `importYaml` | Valid schema & tenant | `DRAFT` | Assign sequential `version`, store canonical JSON + hash |
-| `DRAFT` | `updateDraft` | `lockVersion` matches (`If-Match`) | `DRAFT` | Re-validate AST; reject if parse/type errors on publish prep |
-| `DRAFT` | `requestPublish(effectiveFrom)` | Zero validation errors; valid `Idempotency-Key` | `PENDING_APPROVAL` | Freeze snapshot; record `requested_by`; emit `rules.version.publish-requested.v1` |
-| `PENDING_APPROVAL` | `approve(comment)` | `approverId != requestedBy` (`TR-SEC-04`); `rules:approve`; `lockVersion` matches | `PUBLISHED` | Set `published_at`, `approved_by`; emit `rules.version.published.v1` + `pg_notify` + increment `cache_epoch` |
-| `PENDING_APPROVAL` | `reject(reason)` | `rules:approve`; `lockVersion` matches | `DRAFT` | Record rejection comment; allow edits; emit `rules.version.rejected.v1` |
-| `PUBLISHED` | Newer version becomes effective | `new.effectiveFrom <= now` | `RETIRED` | Emit `rules.version.retired.v1`; keep readable forever for explain/replay |
-| `PUBLISHED` | `retire` | `rules:approve` | `RETIRED` | Emit `rules.version.retired.v1`; increment `cache_epoch`; `pg_notify` after commit |
+| *(none)* | `POST /rule-sets` (new rule set) or `POST /rule-sets/{name}/versions` (document, or `?copyOf={v}`) | Valid schema; document `ruleSet` equals `{name}`; `rules:author` | `DRAFT` | Next `version_num`; canonical JSON and hash stored; `effectiveFrom` of the document moved to `effective_from` (section 3.1); history row `CREATED` |
+| `DRAFT` | `updateDraft` | `lockVersion` matches (`If-Match`) | `DRAFT` | Re-validate; content and hash replaced |
+| `DRAFT` | `requestPublish(effectiveFrom)` | Zero validation errors; `effectiveFrom` absent (means at approval) or not in the past; valid `Idempotency-Key` | `PENDING_APPROVAL` | Freeze snapshot and effective date; record `requested_by`, `requested_at`; history row `REQUESTED`; emit `rules.version.publish-requested.v1` |
+| `PENDING_APPROVAL` | `approve(comment)` | `approverId != requestedBy` (`TR-SEC-04`); `rules:approve`; `lockVersion` matches | `PUBLISHED` | Set `approved_at`, `approved_by`, `approval_comment`, and `effective_from = approved_at` when it was absent; history row `APPROVED`; emit `rules.version.published.v1`; increment `cache_epoch`; `pg_notify` after commit. If `effective_from <= now`, the versions it supersedes are retired in the same transaction (row below) |
+| `PENDING_APPROVAL` | `reject(reason)` | `rules:approve`; `reason` not blank (at most 2,000 characters, else `400 INPUT_INVALID`); `lockVersion` matches. The requester may reject their own request: it withdraws a change and cannot publish anything, so four-eyes does not apply | `DRAFT` | Clear `requested_by`, `requested_at`; history row `REJECTED` with actor and reason; emit `rules.version.rejected.v1` |
+| `PUBLISHED` | Superseded: a newer `PUBLISHED` version of the rule set has `effective_from <= now` | Conditional update, exactly once across replicas (section 3.3.2) | `RETIRED` | `retired_at = now`; history row `RETIRED`, actor `system`, reason `SUPERSEDED`; emit `rules.version.retired.v1` with `supersededBy`; keep readable forever for explain and replay |
+| `PUBLISHED` | `retire(reason)` | `rules:approve`; `reason` not blank (at most 2,000 characters); `lockVersion` matches. One identity is enough (ADR-0025); the PD-012 emergency path is a different feature and is not involved | `RETIRED` | `retired_at = now`; history row `RETIRED` with actor and reason; emit `rules.version.retired.v1`; increment `cache_epoch`; `pg_notify` after commit. Older `PUBLISHED` versions with `effective_from <= now` are retired in the same transaction as `SUPERSEDED`, so a retire never brings an older version back |
 
 Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` for this engine and `processes` for the Process Engine. The Rule Engine emits exactly these types: `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`, `rules.version.retired.v1`, and `rules.decision.evaluated.v1` (off by default, `events.decision-evaluated`). A breaking payload change publishes a `.v2` type alongside `.v1`; additive fields stay in `.v1`.
 
@@ -92,6 +93,40 @@ Approval, cache invalidation after commit, and the epoch fallback when a notific
 ![Approve and invalidate caches](images/publish-approval.svg)
 
 Source: [`diagrams/publish-approval.mmd`](diagrams/publish-approval.mmd).
+
+#### 3.3.1 Effective version at an instant (ADR-0025)
+
+The effective version of a rule set at instant `T` (the decision's clock) is the version with the highest `version_num` among those that were approved (`approved_at IS NOT NULL`; approval fills an absent `effective_from` with the approval instant), have `effective_from <= T`, and were not retired at `T` (`retired_at IS NULL OR retired_at > T`). The status column is not read. So:
+
+- A newer version takes over at its effective date on every replica whether or not the superseded version's status has changed yet (`RLE-008`, `RLE-027`).
+- A version retired by hand stops being selected from `retired_at` on, and stays selected for any clock before it: evaluating with `clock = 2027-02-01T09:00:00Z` (`rules:simulate`) selects `tet-fee-waiver` v1 retired on 2027-02-17, because it was effective then (`RLE-026`). A retire cannot be back-dated; `retired_at` is the transaction's clock.
+- Replay never selects: it uses the logged version number (`TR-DET-05`), so a retired version always replays.
+
+The lookup reads `idx_rle_version_effective`; a rule set has tens of versions, so the scan is a few index entries.
+
+#### 3.3.2 Automatic retirement of superseded versions (ADR-0025, `TR-OPS-05`)
+
+Status `RETIRED` and its event are bookkeeping; selection does not depend on them. Two paths write them, both in an ordinary transaction with no advisory lock and no session state:
+
+1. **At approval.** When the approved version's `effective_from` is not after the approval instant, the approve transaction also runs the statement below for its rule set.
+2. **Lifecycle sweep.** The starter's scheduler thread runs the statement every `lifecycle.sweep-interval` (default `PT1M`) across tenants (an engine-internal sweep, like partition maintenance), with the engine `Clock` as `:now`:
+
+```sql
+UPDATE rle_version old
+   SET status = 'RETIRED', retired_at = :now, lock_version = old.lock_version + 1
+  FROM rle_version newer
+ WHERE old.status = 'PUBLISHED'
+   AND newer.tenant_id = old.tenant_id AND newer.rule_set_id = old.rule_set_id
+   AND newer.status = 'PUBLISHED' AND newer.version_num > old.version_num
+   AND newer.effective_from <= :now
+RETURNING old.tenant_id, old.id, old.rule_set_id, old.version_num, newer.version_num AS superseded_by;
+```
+
+In the same transaction, for each returned row only, the engine inserts the history row (`RETIRED`, actor `system`, reason `SUPERSEDED`), emits `rules.version.retired.v1` with `supersededBy`, and increments `cache_epoch`. Exactly once across replicas: under `READ COMMITTED`, a second replica's `UPDATE` waits on the first one's row lock, re-checks `old.status = 'PUBLISHED'` on the committed row, finds `RETIRED` and returns nothing, so it writes no history row and no event. Retirement at evaluation time was rejected: evaluation is a read plus one insert in the host's transaction, and a status write there would put a row lock on the hottest path. The status may lag the effective date by up to one sweep interval; no decision is affected.
+
+#### 3.3.3 Lifecycle history
+
+`rle_version` holds the current state; every transition also appends one row to `rle_version_history` (section 5) in its own transaction: `CREATED`, `REQUESTED`, `APPROVED`, `REJECTED`, `RETIRED`, with actor, reason or comment, the status before and after, and the `lockVersion` after. A version rejected twice and approved on the third request keeps all three requests, both rejection reasons and the approval comment; `approval_comment` on `rle_version` is only the latest approval's copy. `GET /rule-sets/{name}/versions/{v}/history` returns the rows oldest first (`rules:read`).
 
 ### 3.4 Money contract (canonical)
 
@@ -146,7 +181,7 @@ public interface RuleEngine {
   <T> T evaluateAs(String ruleSet, DecisionInput input, Class<T> outputType); // throws instead of returning Failed
 }
 ```
-`DecisionRequest` carries an optional `decision` (the id of a decision inside the decision model) in its builder before the 1.0 freeze; in M1 it may be absent or equal to the rule set name, anything else is `400 INPUT_INVALID`; from S1 it selects a decision of a DRD (DN-08). `DecisionResult.outcome()` is a sealed type (`Matched`, `NoMatch`, `Failed`). `UNIQUE_HIT_VIOLATION` and `EVALUATION_ERROR` are returned as `Failed` with a `code()`, because they are logged decisions; `evaluateAs` throws `DecisionFailedException` with the same code (ADR-0016). Outbound SPIs, each with an engine default that is `@ConditionalOnMissingBean` in the starter: `TenantResolver`, `CallerResolver`, `RuleFunctionRegistry`, `RuleEventPublisher`. Time comes from the host's `java.time.Clock` bean when it has exactly one, otherwise `Clock.systemUTC()`; the starter never registers a `Clock` bean. That clock is the default of `DecisionRequest.clock` and drives partition creation and the health check (`TR-DET-01`).
+`DecisionRequest` carries an optional `decision` (the id of a decision inside the decision model) in its builder before the 1.0 freeze; in M1 it may be absent or equal to the rule set name, anything else is `400 INPUT_INVALID`; from S1 it selects a decision of a DRD (DN-08). `DecisionResult.outcome()` is a sealed type (`Matched`, `NoMatch`, `Failed`). `UNIQUE_HIT_VIOLATION` and `EVALUATION_ERROR` are returned as `Failed` with a `code()`, because they are logged decisions; `evaluateAs` throws `DecisionFailedException` with the same code (ADR-0016). Outbound SPIs, each with an engine default that is `@ConditionalOnMissingBean` in the starter (ADR-0024, `TR-EXT-02`): `TenantResolver` (default: the claim named by `tenancy.claim`), `CallerResolver`, `RuleFunctionRegistry`, `RuleEventPublisher`, `CurrencyRegistry` (default: ISO 4217 scales from the JDK; a host adds or overrides a currency's scale, for example `XAU`), `DecisionExplainer` (default: the English template of section 4.7) and `LifecycleGuard` (default: allows everything; a host guard may veto a transition with its own code, for example to require a change ticket on retire, and can never make a refused transition succeed, `TR-EXT-06`). Time comes from the host's `java.time.Clock` bean when it has exactly one, otherwise `Clock.systemUTC()`; the starter never registers a `Clock` bean. That clock is the default of `DecisionRequest.clock` and drives partition creation and the health check (`TR-DET-01`).
 
 ### 4.2 REST endpoints (`/api/bpm/rules/v1`)
 
@@ -160,10 +195,15 @@ Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `ru
 | `POST /rule-sets/{name}/versions/{v}:simulate` | `rules:simulate` | Sample inputs, at most 1,000 sets; writes no decision row (`RLE-016`) | `400 INPUT_INVALID`, `404 VERSION_NOT_FOUND`, `422 VALIDATION_FAILED` |
 | `GET /rule-sets`, `GET /rule-sets/{name}` | `rules:read` | Cursor, at most 200 | `404 RULE_SET_NOT_FOUND` |
 | `GET /rule-sets/{name}/versions/{v}` | `rules:read` | `ETag`; `?include=source` adds `sourceFormat`, `sourceDocument` and `sourceHash` (M1, DN-01) | `404 VERSION_NOT_FOUND` |
-| `POST /rule-sets`, `POST /rule-sets/{name}/versions`, `PUT /rule-sets/{name}/versions/{v}` | `rules:author` | `Idempotency-Key` on `POST`; `If-Match: "<lockVersion>"` on `PUT` | `400 INPUT_INVALID`, `409 RULE_SET_EXISTS`, `409 VERSION_CONFLICT`, `422 VALIDATION_FAILED` |
+| `GET /rule-sets/{name}/versions/{v}/history` | `rules:read` | Lifecycle history rows oldest first (section 3.3.3) | `404 VERSION_NOT_FOUND` |
+| `GET /rule-sets/{name}/versions/{v}/diff?base={w}` | `rules:read` | Row-level diff of two versions of one rule set (section 4.5); writes nothing | `400 INPUT_INVALID` (`base` missing or equal to `v`), `404 RULE_SET_NOT_FOUND`, `404 VERSION_NOT_FOUND` |
+| `GET /rule-sets/{name}/versions/{v}/export?format=yaml\|json` | `rules:read` | Canonical document, default `yaml` (section 4.6); `ETag: "<lockVersion>"`; writes nothing | `400 INPUT_INVALID` (other `format`), `404 VERSION_NOT_FOUND` |
+| `POST /rule-sets` (create the rule set and its version 1 from a document), `POST /rule-sets/{name}/versions` (next version from a document, or `?copyOf={v}` with no body), `PUT /rule-sets/{name}/versions/{v}` (replace a draft) | `rules:author` | `Content-Type: application/yaml` or `application/json`; `Idempotency-Key` on `POST`; `If-Match: "<lockVersion>"` on `PUT`; a refused document stores nothing (`RLE-033`) | `400 INPUT_INVALID` (document `ruleSet` differs from `{name}`), `409 RULE_SET_EXISTS`, `409 VERSION_CONFLICT`, `422 VALIDATION_FAILED` with `violations` naming row and column |
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | `rules:author` | `Idempotency-Key`; `If-Match` | `409 VERSION_CONFLICT`, `409 INVALID_STATE`, `422 VALIDATION_FAILED` |
-| `POST /rule-sets/{name}/versions/{v}:approve`, `:reject`, `:retire` | `rules:approve` | `Idempotency-Key`; `If-Match`; approver is not the requester | `403 SELF_APPROVAL_FORBIDDEN`, `409 INVALID_STATE`, `409 VERSION_CONFLICT` |
-| `GET /decisions/{id}`, `GET /decisions/{id}/explain`, `GET /decisions` | `rules:log:read` | Cursor; `GET /decisions` requires a rule set and a time range of at most 31 days (ADR-0015); masked inputs stay hashed | `400 QUERY_INVALID`, `404 DECISION_NOT_FOUND` |
+| `POST /rule-sets/{name}/versions/{v}:approve` | `rules:approve` | `Idempotency-Key`; `If-Match`; approver is not the requester | `403 SELF_APPROVAL_FORBIDDEN`, `409 INVALID_STATE`, `409 VERSION_CONFLICT` |
+| `POST /rule-sets/{name}/versions/{v}:reject`, `:retire` | `rules:approve` | `Idempotency-Key`; `If-Match`; body `{ "reason": "..." }` required; the requester may reject their own request (section 3.3) | `400 INPUT_INVALID` (blank or longer than 2,000 characters), `409 INVALID_STATE`, `409 VERSION_CONFLICT` |
+| `GET /decisions/{id}`, `GET /decisions/{id}/explain`, `GET /decisions` | `rules:log:read` | Cursor; `GET /decisions` requires a rule set and a time range of at most 31 days (ADR-0015); masked inputs stay hashed; explain is built from the row and the stored version only (section 4.7) | `400 QUERY_INVALID`, `404 DECISION_NOT_FOUND` |
+| Every endpoint | | An unexpected failure | `500 INTERNAL_ERROR` with `correlationId` only: no stack trace, class name, SQL or table name; the same `correlationId` is in the server log (`TR-SEC-08`, `RLE-036`) |
 
 All errors are RFC 9457 `application/problem+json` with `code`, `detail` and `correlationId`; `type` is `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#<code in lower case>` (ADR-0010). `409` is used only for state conflicts a client resolves by reloading; `UNIQUE_HIT_VIOLATION` is `422` because it is an authoring defect in the published rule set (ADR-0010, PD-008). Every endpoint that accepts `Idempotency-Key` also returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` for a key reused with a different request hash and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` while the first request runs (ADR-0006, `RLE-014`). Every endpoint returns `403 TENANT_NOT_ALLOWED` when `X-Tenant-Id` names a tenant outside the token's allowed list (ADR-0014, `RLE-018`).
 
@@ -183,8 +223,92 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `decision-log.partitions-ahead` | `P7D` | How far ahead monthly partitions are created |
 | `cache.max-entries`, `cache.epoch-check-interval`, `cache.listen-notify` | `1000`, `PT5S`, `true` | ADR-0009 |
 | `evaluation.regex-timeout-ms` | `50` | `TR-SEC-02` |
+| `evaluation.max-batch`, `simulation.max-inputs` | `1000`, `1000` | Items per `:evaluate-batch` and per `:simulate`; may be lowered, never raised |
+| `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | Bounds of `GET /decisions` and list reads (ADR-0015); range and page size may be lowered only |
+| `idempotency.retention` | `PT24H` | How long an idempotency record answers replays |
+| `tenancy.resolver`, `tenancy.claim` | `security-context`, `tenant_id` | Where the tenant comes from: the named JWT claim, `header:X-Tenant-Id` behind a gateway, or a `TenantResolver` bean |
+| `lifecycle.reason-required`, `lifecycle.reason-max-length` | `true`, `2000` | Reason on `:reject` and `:retire`; a host may make it optional for reject only, never for retire (a retire must say why, ADR-0025) |
+| `lifecycle.system-actor` | `system` | Actor recorded for automatic supersession |
+| `decision-log.retention-floor` | engine floor from PD-050 (pending) | Shortest `decision-log.retention` accepted; a host may raise it, never lower it below the engine floor (`TR-EXT-05`) |
+| `lifecycle.sweep-interval` | `PT1M` | How often the scheduler retires superseded versions (section 3.3.2); status only, never selection |
+| `masking.hmac-key` | unset | Base64 key for HMAC-SHA256 of masked inputs; at least 32 bytes after decoding. Start-up fails when a loaded rule set masks an input and the key is missing, not Base64 or shorter than 32 bytes; the message names `horus.bpm.rules.masking.hmac-key` and the rule set, never the value. Shared with the Process Engine as `horus.bpm.masking.hmac-key` when both run in one host. The value is never logged, returned, put in an event or used as a metric tag (`TR-SEC-10`, `RLE-035`) |
 
 There is no `clock` property. A fixed instant in configuration could reach production and freeze effective-version selection and partition months, and it would bypass the `rules:simulate` check that guards a caller-chosen instant. Tests declare a fixed `Clock` bean (or use `TestClock` from `rule-engine-test`); a single decision reasons about another instant through `DecisionRequest.clock` (section 4.1).
+
+### 4.5 Version diff (`RLE-028`)
+
+`GET /rule-sets/{name}/versions/{v}/diff?base={w}` compares the canonical models of two versions of the same rule set (section 3.1, `RLE-024`); source text, comments and `effectiveFrom` never show as content changes. Any statuses may be compared. Rows are matched by rule id, never by position:
+
+| `change` | Meaning |
+|---|---|
+| `ADDED` | Rule id only in `v`; `position` is its 1-based place in `v` |
+| `REMOVED` | Rule id only in `w`; `basePosition` is its place in `w` |
+| `CHANGED` | Same rule id, different `when` or `then` cells; `fields` lists `{ "path", "from", "to" }` with JSON Pointer paths into the row (`/then/fee`, `/when/tier`) and canonical values (money as `{ "currency", "amount" }` in minor units) |
+| `MOVED` | Same rule id, same cells, and its order relative to the other common rows changed. The moved set is the smallest one: the common rule ids not in the longest common subsequence of the two orders. Inserting or removing rows never moves the rows around them. A row that is both moved and changed is `CHANGED` with `"moved": true`. Under `first` order is behaviour, so the cockpit shows `MOVED` as a change that needs review |
+
+```json
+{ "ruleSet": "card-fee", "version": 2, "base": 1,
+  "canonicalHash": "4be1...", "baseCanonicalHash": "9c07...", "sourceHashChanged": true,
+  "effectiveFrom": { "from": "2026-11-01T00:00:00Z", "to": null },
+  "header": [ { "path": "/hitPolicy", "from": "first", "to": "first", "changed": false } ],
+  "inputs": { "added": [], "removed": [], "changed": [] }, "outputs": { "added": [], "removed": [], "changed": [] },
+  "rows": [
+    { "ruleId": "R2", "change": "CHANGED", "position": 2, "basePosition": 2,
+      "fields": [ { "path": "/then/fee", "from": { "currency": "VND", "amount": 30000 }, "to": { "currency": "VND", "amount": 0 } } ] },
+    { "ruleId": "R6", "change": "ADDED", "position": 3 } ],
+  "unchangedCount": 2 }
+```
+
+`header` lists only changed members (hit policy, aggregate, time zone, money rounding, expression language); the example shows the shape. `effectiveFrom` is reported as version metadata beside the content diff. Rows are ordered by `position` in `v`, then removed rows by `basePosition`; field order follows the canonical document, so the same request returns a byte-identical body. Cost: two canonical documents of at most 1,000 rows, O(n log n) for the subsequence, under 5 ms.
+
+### 4.6 Export and import (`RLE-032`, `RLE-033`)
+
+| Rule | Detail |
+|---|---|
+| Export path | `GET /rule-sets/{name}/versions/{v}/export?format=yaml\|json`, default `yaml`; any other value is `400 INPUT_INVALID`. A query parameter rather than `Accept`, so a download link, a log line and a cache key all name the format |
+| JSON content | The canonical document, RFC 8785 bytes, written from the model; `Content-Disposition: attachment; filename="<name>-v<v>.json"` |
+| YAML content | The same model as YAML 1.2 with keys in canonical order; comments of the source are not reproduced (they stay available through `?include=source`) |
+| Never exported | Tenant, status, `lockVersion`, `effectiveFrom`, requester, approver, comments and decision data |
+| Import paths | `POST /rule-sets` creates the rule set and version 1 (`409 RULE_SET_EXISTS` when the name exists); `POST /rule-sets/{name}/versions` creates the next version (`400 INPUT_INVALID` when the document's `ruleSet` differs from `{name}`, `404 RULE_SET_NOT_FOUND` when it does not exist). Both store the file as the source document (`TR-STD-01`) and arrive as `DRAFT` |
+| Round trip | Export then import gives the same `canonical_hash` in any tenant, because the hash excludes `effectiveFrom` and the writer prints the canonical form |
+| Refusal | Validation runs before the transaction opens; a refused document writes no version, no source and no idempotency success record |
+
+### 4.7 Decision explanation (`RLE-030`, `RLE-031`, depends on PD-027)
+
+The explanation is built from the `rle_decision` row and the stored version it names. Nothing is evaluated: every condition of a matched row was `true` by definition, so the engine formats the recorded value and the cell's test. Rows that did not match are not explained, because showing why they failed would mean evaluating again, which is impossible for masked inputs and would be a second evaluation path that could disagree with the first. The cockpit shows the whole table with the matched rows marked (`CKP-005`).
+
+```json
+{ "decisionId": "D7", "ruleSet": "card-fee", "version": 1, "hitPolicy": "FIRST", "outcome": "OK", "errorCode": null,
+  "clock": "2026-11-20T10:00:00Z",
+  "matched": [ { "ruleId": "R2", "position": 2,
+      "conditions": [ { "input": "txCount", "test": ">= 3", "value": 5, "masked": false, "missing": false, "result": true } ],
+      "outputs": { "fee": { "currency": "VND", "amount": 10000 } } } ],
+  "outputs": { "fee": { "currency": "VND", "amount": 10000 } },
+  "reasons": [ { "code": "RULE_MATCHED", "params": { "ruleId": "R2", "version": 1 } } ],
+  "text": "Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Result: fee 10000 VND." }
+```
+
+| Rule | Detail |
+|---|---|
+| Contract | `matched`, `outputs` and `reasons` are the contract. Reason codes: `RULE_MATCHED`, `NO_RULE_MATCHED`, `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`, `VALUE_MISSING`, `VALUE_MASKED`, each with named parameters |
+| Language | `text` is one English rendering for logs and API users, generated from `reasons` by the default `DecisionExplainer`; a host bean replaces it for another language or house wording without changing `reasons`. The cockpit renders `reasons` itself in English or Vietnamese from its dictionaries (`TR-UI-04`) and does not parse `text` |
+| Numbers in `text` | Locale-neutral, as in the expression language: plain digits with no grouping, `.` as the decimal mark, money in major units with the currency code (`10000 VND`, `12.50 USD`), dates and instants in ISO 8601. Grouping such as `10,000` or `10.000` is the cockpit's job per locale. JSON fields keep canonical values (money in minor units) |
+| Masked inputs | `value` is the stored `hmac:<hex>`, `masked: true`, reason `VALUE_MASKED`; the plain value is never available to the engine at explain time |
+| Null inputs | `missing: true` and reason `VALUE_MISSING`; text "income has no value" |
+| No match | `matched: []`, reason `NO_RULE_MATCHED`, no outputs |
+| Failures | `UNIQUE_HIT_VIOLATION` lists every matched row (the log stores them, section 5); `EVALUATION_ERROR` names the error code and, when recorded, the row |
+| Stability | Same decision, same bytes: the version is immutable and the template is versioned with the engine; a template change ships only in a minor release and is listed in the release notes |
+
+### 4.8 Metrics
+
+Micrometer names, exported to Prometheus with the usual suffixes; no tenant, rule set or input value is ever a tag value unless listed.
+
+| Micrometer name | Type | Prometheus | Tags |
+|---|---|---|---|
+| `horus.rle.cache.size` | Gauge | `horus_rle_cache_size` | none |
+| `horus.rle.cache.evictions` | Counter | `horus_rle_cache_evictions_total` | `cause` (`size`, `epoch`, `notify`) |
+| `horus.rle.partition.default.rows` | Gauge | `horus_rle_partition_default_rows` | none |
+| `horus.rle.lifecycle.retired` | Counter | `horus_rle_lifecycle_retired_total` | `reason` (`SUPERSEDED`, `MANUAL`) |
 
 ## 5. Storage model (`rule-engine-postgres`)
 
@@ -209,8 +333,8 @@ CREATE TABLE rle_version (
   version_num       INT         NOT NULL,
   status            TEXT        NOT NULL CHECK (status IN ('DRAFT','PENDING_APPROVAL','PUBLISHED','RETIRED')),
   hit_policy        TEXT        NOT NULL CHECK (hit_policy IN ('FIRST','UNIQUE','COLLECT')),
-  effective_from    TIMESTAMPTZ,
-  canonical_json    JSONB       NOT NULL,
+  effective_from    TIMESTAMPTZ,                 -- version metadata, never in canonical_json; set to approved_at when absent at approval
+  canonical_json    JSONB       NOT NULL,        -- without effectiveFrom (section 3.1)
   canonical_hash    CHAR(64)    NOT NULL,        -- SHA-256 of RFC 8785 form, in the stored schema version (DN-04)
   source_format     TEXT        NOT NULL CHECK (source_format IN ('JSON','YAML','DMN_XML')),   -- M1, DN-01
   source_document   TEXT        NOT NULL,        -- the document as received, never executed (TR-STD-01)
@@ -220,7 +344,8 @@ CREATE TABLE rle_version (
   requested_at      TIMESTAMPTZ,
   approved_by       TEXT,
   approved_at       TIMESTAMPTZ,
-  approval_comment  TEXT,
+  approval_comment  TEXT,                        -- latest approval only; full history in rle_version_history
+  retired_at        TIMESTAMPTZ,                 -- added by the next migration (additive); selection reads it (section 3.3.1)
   created_at        TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, rule_set_id, version_num),
@@ -229,6 +354,26 @@ CREATE TABLE rle_version (
 );
 CREATE INDEX idx_rle_version_effective
   ON rle_version (tenant_id, rule_set_id, status, effective_from DESC);
+
+-- Append-only lifecycle history (section 3.3.3); one row per transition, in the transition's transaction.
+CREATE TABLE rle_version_history (
+  tenant_id         TEXT        NOT NULL,
+  id                VARCHAR(26) NOT NULL,
+  version_id        VARCHAR(26) NOT NULL,
+  action            TEXT        NOT NULL CHECK (action IN ('CREATED','REQUESTED','APPROVED','REJECTED','RETIRED')),
+  from_status       TEXT,
+  to_status         TEXT        NOT NULL,
+  actor             TEXT        NOT NULL,        -- caller id, or 'system' for supersession
+  reason            TEXT,                        -- reject and retire reason, approval comment, or 'SUPERSEDED'
+  superseded_by     INT,                         -- version_num, for automatic retirement
+  lock_version      BIGINT      NOT NULL,        -- after the transition
+  occurred_at       TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, version_id) REFERENCES rle_version (tenant_id, id)
+);
+CREATE INDEX idx_rle_version_history_version ON rle_version_history (tenant_id, version_id, occurred_at);
+CREATE INDEX idx_rle_version_published           -- lifecycle sweep, crosses tenants (section 3.3.2)
+  ON rle_version (tenant_id, rule_set_id, version_num) WHERE status = 'PUBLISHED';
 
 CREATE TABLE rle_rule (
   tenant_id       TEXT        NOT NULL,
@@ -255,7 +400,7 @@ CREATE TABLE rle_decision (
   error_code       TEXT,
   masked_inputs    JSONB       NOT NULL,        -- inputs with mask=true stored as keyed HMAC-SHA256
   outputs          JSONB,
-  matched_rule_ids JSONB       NOT NULL,
+  matched_rule_ids JSONB       NOT NULL,        -- every matched row, also for UNIQUE_HIT_VIOLATION; [] for no match and EVALUATION_ERROR
   caller_id        TEXT,
   correlation_id   TEXT,
   eval_clock       TIMESTAMPTZ NOT NULL,
@@ -336,6 +481,7 @@ Targets, not measurements, on the reference shape (one replica, 20-connection po
 | Decision log growth | 2,000/s at a sustained peak, about 1.2 KB per row | 207 GB/day at peak; size from the daily average | 2 TB/day | Monthly partitions; retention drops whole months |
 | Monthly partition size | Average of 200 decisions/s over a month | 200 x 2.6 million s = 518 million rows x 1.2 KB = about 620 GB per partition | 6.2 TB per partition | The 200/s average is a planning input to confirm with pilots; the partition count stays 12 a year, and a dropped month frees its space at once |
 | Compiled cache | 2,000 entries x 75 KB unbounded = 150 MB | Bounded at `cache.max-entries` 1,000: 75 MB | 20,000 entries: still 75 MB | Eviction keeps the heap flat (`TR-PERF-06`) |
+| Lifecycle sweep | 1,000 published versions across all tenants, every `PT1M` | One index-only scan of `idx_rle_version_published` (about 1,000 entries, under 5 ms) and normally zero rows updated | 10,000 published versions: about 20 ms a minute, 0.03 percent of one connection | None needed; the interval can be raised |
 | Epoch sweep | 50 cached tenants, every 5 s | 10 indexed reads/s per replica | 500 tenants x 10 replicas: 1,000 reads/s | Sweep only tenants evaluated since the last sweep |
 | `GET /decisions` | One rule set, at most 31 days, page 200 | `idx_rle_decision_lookup` range in at most 2 partitions | Same per request | ADR-0015 bounds |
 | Partition `DROP` | Once a month | Inserts wait at most 2 s | Same | Run in the host's quiet hours with `decision-log.retention-window` if needed (open question 7.4) |
@@ -350,3 +496,23 @@ Targets, not measurements, on the reference shape (one replica, 20-connection po
 | 7.4 | Should partition drops run only in a configured window? | Add `decision-log.retention-window` only if a pilot reports insert stalls | Architect, M2 |
 | 7.5 | P1: adopt FEEL three-valued null logic in M1 (changes `RLE-006` for `!=`, `not` and `not in`) | **Decided** 2026-11-19 (PD-058 option 1): applied in section 3.2 (`RLE-006`, `RLE-021`, `TR-STD-02`) | Closed |
 | 7.6 | P3: build `RuleSetDefinition` as the DMN-shaped model of ADR-0018 | **Decided** 2026-11-19 (PD-060 option 2): applied in section 3.1 (`RLE-024`, `TR-STD-28`) | Closed |
+
+### Design questions closed on 2026-11-19 for `RLE-025` to `RLE-036` and `CKP-030`
+
+| # | Question | Decision | Where |
+|---|---|---|---|
+| Q1 | Diff path and shape | `GET /rule-sets/{name}/versions/{v}/diff?base={w}`; rows matched by rule id; `ADDED`, `REMOVED`, `CHANGED`, `MOVED`, where the moved set is the common rows outside the longest common subsequence, so inserts never move neighbours; changed and moved is `CHANGED` with `moved: true`; JSON Pointer field paths | 4.5, `RLE-028` |
+| Q2 | Export path | `GET /rule-sets/{name}/versions/{v}/export?format=yaml\|json`, default `yaml`, other values `400 INPUT_INVALID`; `Accept` is not used | 4.6, `RLE-032` |
+| Q3 | Is `effectiveFrom` in the canonical document | No. Version metadata in `effective_from`; removed from the canonical document and the hash at import; frozen at request-publish and shown to the approver; never exported. The round-trip hash holds | 3.1, `RLE-032` |
+| Q4 | Who may retire a live version | One `rules:approve` holder with a mandatory reason, an event and a history row; no four-eyes, because a retire only stops behaviour; older versions are retired with it, so nothing comes back. Separate from the PD-012 emergency path, which is about publishing | 3.3, ADR-0025, `RLE-026` |
+| Q5 | Self-reject | Allowed: rejecting your own request withdraws it and publishes nothing. `SELF_APPROVAL_FORBIDDEN` applies to `:approve` only; the REST and state tables now agree | 3.3, 4.2, `RLE-025` |
+| Q6 | Automatic retirement | Conditional `UPDATE ... RETURNING` at approval (when effective at once) and in a sweep every `lifecycle.sweep-interval`; exactly once through the row lock and the status predicate, no advisory or session lock (`TR-OPS-05`); actor `system`, reason `SUPERSEDED`; not at evaluation time | 3.3.2, ADR-0025, `RLE-027` |
+| Q7 | Past-clock evaluation of a hand-retired version | Selection is time-aware through `retired_at`: a version is selected for clocks before its retirement and never after; replay uses the logged version | 3.3.1, `RLE-026` |
+| Q8 | Rejection history | Append-only `rle_version_history`, one row per transition; `approval_comment` keeps only the latest approval | 3.3.3, 5 |
+| Q9 | Explanation language and numbers | Structured `matched` and `reasons` are the contract; `text` is one English rendering; the cockpit renders `reasons` in English or Vietnamese. Numbers in `text` are locale-neutral (no grouping, `.` decimal, major units with currency code) | 4.7, `RLE-030` |
+| Q10 | Explain earlier non-matching rows | No. Only matched rows; no re-evaluation, which masked inputs make impossible | 4.7, `RLE-031` |
+| Q11 | `matched_rule_ids` on `UNIQUE_HIT_VIOLATION` | Yes, every matched row; `[]` for no match and `EVALUATION_ERROR` | 5, `RLE-031` |
+| Q12 | Heap margin and metric name | Hard gates: entry count and evictions. Heap: retained heap after full GC at round 10 within 10 percent or 8 MB of round 2, whichever is larger, median of three measurements. Counter `horus.rle.cache.evictions`, Prometheus `horus_rle_cache_evictions_total` | 4.8, `RLE-034` |
+| Q13 | `INTERNAL_ERROR` missing from the matrix | Added as an every-endpoint row in 4.2 | 4.2, `RLE-036` |
+| Q14 | Masking key setting | `horus.bpm.rules.masking.hmac-key` (shared `horus.bpm.masking.hmac-key`), Base64, at least 32 bytes decoded | 4.4, `RLE-035` |
+
