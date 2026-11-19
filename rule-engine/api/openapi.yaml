@@ -240,8 +240,9 @@ paths:
       summary: Replace the document of a DRAFT version in place
       description: |
         Permission `rules:author`, checked before the body is read; only the draft's author
-        (`createdBy`) may replace it, anyone else gets `403 PERMISSION_DENIED` and imports a new
-        version instead, so the four-eyes check on `createdBy` keeps holding. When the host sets
+        (`createdBy`) may replace it. Anyone else gets `403 PERMISSION_DENIED`, with a detail pointing
+        to `POST .../versions?copyOf={v}`, which starts their own draft; so the four-eyes check on
+        `createdBy` keeps holding. When the host sets
         `horus.bpm.rules.authoring.cockpit-drafts` to `false` the answer is
         `403 DRAFT_AUTHORING_DISABLED` (DESIGN section 4.4).
 
@@ -252,8 +253,10 @@ paths:
 
         On success the version keeps its number, status `DRAFT`, author and creation time; its
         canonical document, `canonicalHash`, source document, `sourceHash`, `sourceFormat`, hit
-        policy and `effectiveFrom` are replaced and `lockVersion` is incremented. No history row and
-        no event are written: a draft's content is not a lifecycle transition (DESIGN section 3.3).
+        policy and `effectiveFrom` are replaced and `lockVersion` is incremented. One history entry
+        `DRAFT_UPDATED` (actor, `lockVersion`, the canonical hash before and after) and one
+        `rules.version.draft-updated.v1` event (`rule-engine/api/schema/rules.version.draft-updated.v1.schema.json`)
+        are written in the same transaction (DESIGN section 3.3).
         Only a `DRAFT` can be replaced; any other status is `409 INVALID_STATE`.
 
         `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
@@ -410,7 +413,7 @@ paths:
       summary: Read the lifecycle history of one version, oldest first
       description: |
         Permission `rules:read`. One entry per transition (`CREATED`, `REQUESTED`, `APPROVED`,
-        `REJECTED`), with actor, reason or comment, statuses before and after and the
+        `REJECTED`) and per replacement of a draft (`DRAFT_UPDATED`, with both canonical hashes), with actor, reason or comment, statuses before and after and the
         `lockVersion` after (DESIGN section 3.3.3). A version created before the history table
         existed starts with a backfilled `CREATED` entry; its earlier request and approval have
         no entries.
@@ -867,7 +870,7 @@ components:
       properties:
         action:
           type: string
-          enum: [CREATED, REQUESTED, APPROVED, REJECTED]
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED, DRAFT_UPDATED]
         fromStatus:
           type: [string, 'null']
           enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, null]
@@ -880,6 +883,14 @@ components:
           description: The rejection reason or the approval comment
         lockVersion: { type: integer }
         occurredAt: { type: string, format: date-time }
+        canonicalHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: On `DRAFT_UPDATED` only; the canonical hash after the replacement
+        previousCanonicalHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: On `DRAFT_UPDATED` only; the canonical hash before the replacement
     VersionHistory:
       type: object
       required: [data]

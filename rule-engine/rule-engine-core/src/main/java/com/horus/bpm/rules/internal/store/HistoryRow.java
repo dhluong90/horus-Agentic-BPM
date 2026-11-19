@@ -21,7 +21,26 @@ import java.time.Instant;
  */
 public record HistoryRow(String tenantId, String id, String versionId, LifecycleAction action,
         VersionStatus fromStatus, VersionStatus toStatus, String actor, String reason, long lockVersion,
-        Instant occurredAt) {
+        Instant occurredAt, String canonicalHash, String previousCanonicalHash) {
+
+    /**
+     * Creates a row without content hashes, for every action except {@code DRAFT_UPDATED}.
+     *
+     * @param tenantId the tenant
+     * @param id the row id
+     * @param versionId the version id
+     * @param action the action
+     * @param fromStatus the status before, or null
+     * @param toStatus the status after
+     * @param actor who did it
+     * @param reason the reason or comment, or null
+     * @param lockVersion the lock version after
+     * @param occurredAt when
+     */
+    public HistoryRow(String tenantId, String id, String versionId, LifecycleAction action, VersionStatus fromStatus,
+            VersionStatus toStatus, String actor, String reason, long lockVersion, Instant occurredAt) {
+        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, null, null);
+    }
 
     /**
      * Returns the caller's view.
@@ -29,6 +48,7 @@ public record HistoryRow(String tenantId, String id, String versionId, Lifecycle
      * @return the entry
      */
     public VersionHistoryEntry toEntry() {
-        return new VersionHistoryEntry(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt);
+        return new VersionHistoryEntry(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt,
+                canonicalHash, previousCanonicalHash);
     }
 }

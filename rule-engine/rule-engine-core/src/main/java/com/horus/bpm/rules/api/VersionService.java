@@ -45,7 +45,8 @@ public interface VersionService {
     /**
      * Replaces the document of a draft in place (RLE-047): the same reading, validation and violations as
      * {@link #importVersion}, the canonical and source hashes recomputed, the version number, author and creation time
-     * kept, and the lock version incremented. Writes no history row and no event. Needs {@code rules:author}, the
+     * kept, and the lock version incremented. Writes one {@code DRAFT_UPDATED} history row with the old and new
+     * canonical hash and one {@code rules.version.draft-updated.v1} event. Needs {@code rules:author}, the
      * caller must be the draft's author, and the host must allow draft authoring
      * ({@code horus.bpm.rules.authoring.cockpit-drafts}).
      *

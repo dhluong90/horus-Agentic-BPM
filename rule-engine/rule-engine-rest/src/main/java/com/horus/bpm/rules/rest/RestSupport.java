@@ -111,6 +111,10 @@ final class RestSupport {
         node.set("reason", EngineValues.value(entry.reason()));
         node.put("lockVersion", entry.lockVersion());
         node.put("occurredAt", entry.occurredAt().toString());
+        if (entry.canonicalHash() != null) {
+            node.put("canonicalHash", entry.canonicalHash());
+            node.put("previousCanonicalHash", entry.previousCanonicalHash());
+        }
         return node;
     }
 

@@ -5,5 +5,7 @@ public enum LifecycleAction {
     CREATED,
     REQUESTED,
     APPROVED,
-    REJECTED
+    REJECTED,
+    /** The author replaced the draft's document in place (RLE-047); records the old and new canonical hash. */
+    DRAFT_UPDATED
 }

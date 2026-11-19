@@ -121,10 +121,22 @@ class DraftReplaceAndDiffIT {
         assertThat(replay.body()).isEqualTo(replaced.body());
         assertThat(send(t, "dan", "GET", path + "?include=source", null, null, null, null).json().path("sourceDocument")
                 .asString()).isEqualTo(new String(cardFee("0 VND"), StandardCharsets.UTF_8));
-        // and no new version, history row or event
+        // and no new version; the history shows one DRAFT_UPDATED entry with both hashes, and one event is written
         assertThat(jdbc.sql("SELECT count(*) FROM rle_version WHERE tenant_id = :t").param("t", t).query(Long.class).single())
                 .isEqualTo(2L);
-        assertThat(send(t, "dan", "GET", path + "/history", null, null, null, null).json().path("data").size()).isEqualTo(1);
+        JsonNode history = send(t, "dan", "GET", path + "/history", null, null, null, null).json().path("data");
+        assertThat(history.size()).isEqualTo(2);
+        assertThat(history.get(1).path("action").asString()).isEqualTo("DRAFT_UPDATED");
+        assertThat(history.get(1).path("actor").asString()).isEqualTo("lan");
+        assertThat(history.get(1).path("previousCanonicalHash").asString()).isEqualTo(draft.json().path("canonicalHash").asString());
+        assertThat(history.get(1).path("canonicalHash").asString()).isEqualTo(replaced.json().path("canonicalHash").asString());
+        assertThat(history.get(0).has("canonicalHash")).isFalse();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision_outbox WHERE tenant_id = :t "
+                + "AND payload->>'eventType' = 'rules.version.draft-updated.v1'").param("t", t).query(Long.class).single())
+                .isEqualTo(1L);
+        // and minh, another author, is pointed to ?copyOf=
+        assertThat(send(t, "minh", "PUT", path, cardFee("0 VND"), "application/yaml", "k-m2", replaced.etag()).json()
+                .path("detail").asString()).contains("?copyOf=2");
     }
 
     @Test

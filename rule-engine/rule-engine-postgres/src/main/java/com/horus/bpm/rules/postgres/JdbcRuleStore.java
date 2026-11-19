@@ -259,14 +259,15 @@ public final class JdbcRuleStore implements RuleStore {
     public void appendHistory(HistoryRow row) {
         jdbc.sql("""
                 INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor,
-                  reason, lock_version, occurred_at)
-                VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :lock, :at)
+                  reason, lock_version, occurred_at, canonical_hash, previous_canonical_hash)
+                VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :lock, :at, :hash, :previousHash)
                 """)
                 .param("tenant", row.tenantId()).param("id", row.id()).param("versionId", row.versionId())
                 .param("action", row.action().name())
                 .param("from", row.fromStatus() == null ? null : row.fromStatus().name())
                 .param("to", row.toStatus().name()).param("actor", row.actor()).param("reason", row.reason())
                 .param("lock", row.lockVersion()).param("at", Timestamp.from(row.occurredAt()))
+                .param("hash", row.canonicalHash()).param("previousHash", row.previousCanonicalHash())
                 .update();
     }
 
@@ -275,10 +276,10 @@ public final class JdbcRuleStore implements RuleStore {
         // Only the actions this release writes; the retirement actions arrive with their features.
         return jdbc.sql("""
                 SELECT tenant_id, id, version_id, action, from_status, to_status, actor, reason, lock_version,
-                  occurred_at
+                  occurred_at, canonical_hash, previous_canonical_hash
                 FROM rle_version_history
                 WHERE tenant_id = :tenant AND version_id = :versionId
-                  AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED')
+                  AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED','DRAFT_UPDATED')
                 ORDER BY occurred_at, id
                 """)
                 .param("tenant", tenantId).param("versionId", versionId)
@@ -286,7 +287,8 @@ public final class JdbcRuleStore implements RuleStore {
                         rs.getString("version_id"), LifecycleAction.valueOf(rs.getString("action")),
                         rs.getString("from_status") == null ? null : VersionStatus.valueOf(rs.getString("from_status")),
                         VersionStatus.valueOf(rs.getString("to_status")), rs.getString("actor"), rs.getString("reason"),
-                        rs.getLong("lock_version"), instant(rs, "occurred_at")))
+                        rs.getLong("lock_version"), instant(rs, "occurred_at"), rs.getString("canonical_hash"),
+                        rs.getString("previous_canonical_hash")))
                 .list();
     }
 

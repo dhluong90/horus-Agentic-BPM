@@ -95,14 +95,28 @@ class DraftReplaceAndDiffTest {
         assertThat(replaced.sourceHash()).isEqualTo(com.horus.bpm.rules.internal.json.Hashes.sha256(r2Zero()));
         assertThat(versions.find("card-fee", 2, true).orElseThrow().sourceDocument())
                 .isEqualTo(new String(r2Zero(), StandardCharsets.UTF_8));
-        // and no new version, no history row and no event
+        // and no new version, one DRAFT_UPDATED history row with both hashes, one draft-updated event
         assertThat(versions.find("card-fee", 3, false)).isEmpty();
-        assertThat(stores.history).hasSize(history);
-        assertThat(stores.outbox).hasSize(events);
+        assertThat(stores.history).hasSize(history + 1);
+        com.horus.bpm.rules.api.VersionHistoryEntry audit = versions.history("card-fee", 2).getLast();
+        assertThat(audit.action()).isEqualTo(com.horus.bpm.rules.api.LifecycleAction.DRAFT_UPDATED);
+        assertThat(audit.actor()).isEqualTo("lan");
+        assertThat(audit.fromStatus()).isEqualTo(VersionStatus.DRAFT);
+        assertThat(audit.toStatus()).isEqualTo(VersionStatus.DRAFT);
+        assertThat(audit.lockVersion()).isEqualTo(replaced.lockVersion());
+        assertThat(audit.previousCanonicalHash()).isEqualTo(draft.canonicalHash());
+        assertThat(audit.canonicalHash()).isEqualTo(replaced.canonicalHash());
+        assertThat(stores.outbox).hasSize(events + 1);
+        assertThat(stores.outbox.getLast().payload()).contains("\"eventType\":\"rules.version.draft-updated.v1\"",
+                "\"updatedBy\":\"lan\"", "\"ruleSet\":\"card-fee\"", "\"version\":2", "\"tenantId\":\"bank-a\"",
+                "\"canonicalHash\":\"" + replaced.canonicalHash() + "\"",
+                "\"previousCanonicalHash\":\"" + draft.canonicalHash() + "\"");
 
-        // When the PUT is repeated with k-501: the same result, nothing changes
+        // When the PUT is repeated with k-501: the same result, nothing changes, no second row or event
         assertThat(versions.replaceDraft("card-fee", 2, ImportRequest.yaml(r2Zero()), put)).isEqualTo(replaced);
         assertThat(versions.find("card-fee", 2, false).orElseThrow().lockVersion()).isEqualTo(replaced.lockVersion());
+        assertThat(stores.history).hasSize(history + 1);
+        assertThat(stores.outbox).hasSize(events + 1);
 
         // And once requested and approved, R2 charges 0 VND
         versions.requestPublish("card-fee", 2, WriteOptions.none());
@@ -121,6 +135,8 @@ class DraftReplaceAndDiffTest {
         versions.replaceDraft("card-fee", 2, ImportRequest.yaml(r2Zero()), new WriteOptions("k-501", 0L, null));
         RuleSetVersion current = versions.find("card-fee", 2, true).orElseThrow();
         int keys = stores.idempotency.size();
+        int history = stores.history.size();
+        int events = stores.outbox.size();
         byte[] noCurrency = new String(CardFee.yaml(), StandardCharsets.UTF_8)
                 .replace("  - { name: txCount, type: integer, description: card transactions in the month }",
                         "  - { name: txCount, type: integer, description: card transactions in the month }\n"
@@ -150,7 +166,7 @@ class DraftReplaceAndDiffTest {
         assertThatThrownBy(() -> versions.replaceDraft("card-fee", 2, ImportRequest.yaml(CardFee.yaml()),
                 new WriteOptions("k-506", current.lockVersion(), null)))
                 .isInstanceOfSatisfying(PermissionDeniedException.class,
-                        e -> assertThat(e.getMessage()).contains("Only the author"));
+                        e -> assertThat(e.getMessage()).contains("Only the author", "?copyOf=2"));
         // dan only reads
         caller.become("bank-a", "dan", READER);
         assertThatThrownBy(() -> versions.replaceDraft("card-fee", 2, ImportRequest.yaml(CardFee.yaml()),
@@ -173,6 +189,8 @@ class DraftReplaceAndDiffTest {
         // and v2 is exactly as before, with no new idempotency record
         assertThat(versions.find("card-fee", 2, true).orElseThrow()).isEqualTo(current);
         assertThat(stores.idempotency).hasSize(keys);
+        assertThat(stores.history).hasSize(history);
+        assertThat(stores.outbox).hasSize(events);
     }
 
     // ---------------------------------------------------------------- RLE-028 diff

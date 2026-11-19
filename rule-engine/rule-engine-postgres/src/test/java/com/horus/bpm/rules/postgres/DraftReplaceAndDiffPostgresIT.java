@@ -101,9 +101,21 @@ class DraftReplaceAndDiffPostgresIT {
                 FROM rle_rule r JOIN rle_version v ON v.tenant_id = r.tenant_id AND v.id = r.version_id
                 WHERE r.tenant_id = 'bank-a' AND v.version_num = 2
                 """).query(String.class).single()).isEqualTo("R1=0 VND,R2=0 VND,R3=50000 VND");
-        // and no history row, no event, one idempotency record
-        assertThat(count("rle_version_history")).isEqualTo(history);
-        assertThat(count("rle_decision_outbox")).isEqualTo(outbox);
+        // and one DRAFT_UPDATED row with both hashes, one draft-updated event, one idempotency record
+        assertThat(count("rle_version_history")).isEqualTo(history + 1);
+        assertThat(jdbc.sql("""
+                SELECT actor || ' ' || from_status || ' ' || to_status || ' ' || lock_version || ' '
+                  || previous_canonical_hash || ' ' || canonical_hash
+                FROM rle_version_history WHERE tenant_id = 'bank-a' AND action = 'DRAFT_UPDATED'
+                """).query(String.class).single()).isEqualTo("lan DRAFT DRAFT 1 " + draft.canonicalHash() + " "
+                + replaced.canonicalHash());
+        assertThat(count("rle_decision_outbox")).isEqualTo(outbox + 1);
+        assertThat(jdbc.sql("""
+                SELECT payload->>'updatedBy' || ' ' || (payload->>'previousCanonicalHash') || ' ' || (payload->>'canonicalHash')
+                FROM rle_decision_outbox WHERE tenant_id = 'bank-a' AND payload->>'eventType' = 'rules.version.draft-updated.v1'
+                """).query(String.class).single()).isEqualTo("lan " + draft.canonicalHash() + " " + replaced.canonicalHash());
+        assertThat(versions.history("card-fee", 2).getLast().action())
+                .isEqualTo(com.horus.bpm.rules.api.LifecycleAction.DRAFT_UPDATED);
         assertThat(jdbc.sql("SELECT count(*) FROM rle_idempotency WHERE tenant_id = 'bank-a' AND operation = 'replace-draft'")
                 .query(Long.class).single()).isEqualTo(1L);
 
@@ -197,6 +209,34 @@ class DraftReplaceAndDiffPostgresIT {
                 .isInstanceOf(com.horus.bpm.rules.api.VersionNotFoundException.class);
         // and nothing was written
         assertThat(count("rle_decision_outbox")).isEqualTo(outbox);
+    }
+
+    /** V6: only DRAFT_UPDATED rows carry both hashes, and the V4 append-only triggers still hold. */
+    @Test
+    void RLE_047_draft_updated_rows_carry_both_hashes_and_stay_append_only() {
+        who.set("bank-a", "lan");
+        RuleSetVersion draft = versions.importRuleSet(ImportRequest.yaml(RuleEnginePostgresIT.cardFee()));
+        versions.replaceDraft("card-fee", 1, ImportRequest.yaml(r2Zero()), new WriteOptions("k-601", draft.lockVersion(), null));
+        String versionId = jdbc.sql("SELECT id FROM rle_version WHERE tenant_id = 'bank-a'").query(String.class).single();
+        String hash = "a".repeat(64);
+
+        // a DRAFT_UPDATED row without hashes, and another action with hashes, are refused by the database
+        for (String sql : new String[] {
+                "INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor, "
+                        + "lock_version, occurred_at) VALUES ('bank-a', 'X1', :v, 'DRAFT_UPDATED', 'DRAFT', 'DRAFT', 'mallory', 9, now())",
+                "INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor, "
+                        + "lock_version, occurred_at, canonical_hash, previous_canonical_hash) VALUES ('bank-a', 'X2', :v, "
+                        + "'REJECTED', 'PENDING_APPROVAL', 'DRAFT', 'mallory', 9, now(), :h, :h)"}) {
+            assertThatThrownBy(() -> jdbc.sql(sql).param("v", versionId).param("h", hash).update()).as(sql)
+                    .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        }
+        // and the recorded row can be neither rewritten nor removed
+        assertThatThrownBy(() -> jdbc.sql("UPDATE rle_version_history SET canonical_hash = :h WHERE action = 'DRAFT_UPDATED'")
+                .param("h", hash).update()).rootCause().hasMessageContaining("append-only");
+        assertThatThrownBy(() -> jdbc.sql("DELETE FROM rle_version_history WHERE action = 'DRAFT_UPDATED'").update())
+                .rootCause().hasMessageContaining("append-only");
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_version_history WHERE action = 'DRAFT_UPDATED'").query(Long.class)
+                .single()).isEqualTo(1L);
     }
 
     // ---------------------------------------------------------------- helpers

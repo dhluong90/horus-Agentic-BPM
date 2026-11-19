@@ -59,6 +59,7 @@ public final class DefaultVersionService implements VersionService {
     static final String EVENT_PUBLISH_REQUESTED = "rules.version.publish-requested.v1";
     static final String EVENT_PUBLISHED = "rules.version.published.v1";
     static final String EVENT_REJECTED = "rules.version.rejected.v1";
+    static final String EVENT_DRAFT_UPDATED = "rules.version.draft-updated.v1";
 
     private static final String CURSOR_RULE_SETS = "rule-sets";
     private static final String CURSOR_VERSIONS = "versions";
@@ -201,6 +202,15 @@ public final class DefaultVersionService implements VersionService {
                     parsed.model().effectiveFrom(), parsed.canonicalJson(), parsed.canonicalHash(), request.format(),
                     sourceText, Hashes.sha256(source));
             store.replaceDraft(updated, current.lockVersion());
+            // Every content change leaves an immutable audit row with both hashes (architecture decision on #234).
+            Instant now = context.clock().instant();
+            store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.DRAFT_UPDATED,
+                    VersionStatus.DRAFT, VersionStatus.DRAFT, actor, null, updated.lockVersion(), now,
+                    updated.canonicalHash(), current.canonicalHash()));
+            event(tenant, EVENT_DRAFT_UPDATED, updated, actor, now, payload -> payload
+                    .put("updatedBy", actor)
+                    .put("canonicalHash", updated.canonicalHash())
+                    .put("previousCanonicalHash", current.canonicalHash()));
             return updated.toView(false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
