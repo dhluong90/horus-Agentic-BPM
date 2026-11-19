@@ -27,6 +27,8 @@ The engines are held to numbered, testable requirements with ids such as `TR-EMB
 | Observability and audit | `TR-OBS-*` | Append-only logs, metrics, traces, events |
 | Performance and scalability | `TR-PERF-*` | Evaluation latency, compile time, replicas sharing jobs, bounded cache |
 | Operability | `TR-OPS-*` | Forward-only migrations, upgrades, incidents, connection poolers |
+| Recovery | `TR-DR-*` | The engines inherit the recovery point and recovery time of your PostgreSQL; you own backup, point-in-time recovery and reconciling side effects (`TR-DR-01`). After a restore they need no extra step, add at most 5 seconds to start-up and reclaim unfinished work by themselves (`TR-DR-02`). Both Must (1.0) |
+| Capacity | `TR-CAP-01` | Each release from 1.0 is load-tested on named hardware to the published envelope (200 tenants, 100 rule sets per tenant, 1 million active instances, 2,000 decisions per second). Only measured numbers are published, marked "tested, not a limit"; none is coded into the engine. Must (1.0) |
 | Cockpit | `TR-UI-*` | Authoring and approval in the cockpit, accessibility, languages |
 | Definitions and diagrams | `TR-DEF-*` | Definition lifecycle, content hash, layout, size limits, BPMN subset interchange |
 | Standards conformance | `TR-STD-*` | Source documents kept, stable hashes, FEEL-aligned expressions (`TR-STD-02`), BPMN and DMN models as the canonical model (`TR-STD-28`), scope tokens (`TR-STD-29`), staged BPMN and DMN conformance |

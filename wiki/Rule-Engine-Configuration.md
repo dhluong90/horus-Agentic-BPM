@@ -10,7 +10,6 @@ Reference for every `horus.bpm.rules.*` property of the Rule Engine starter and 
 | 0.1 (M1) | Planned for Rule Engine 0.1, milestone M1, 15 Jan 2027. Setting it today has no effect |
 | 0.1 (M1), may move | Planned for 0.1; the [[Roadmap]] names the milestone it moves to if M1 runs late |
 | M2, M3 | Planned for that milestone (M2 26 Mar 2027, M3 21 May 2027). Setting it today has no effect |
-| Pending ADR-nnnn | Decided by the product; the architecture decision record that sets the detail is being updated |
 
 ## Properties
 
@@ -27,7 +26,7 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `rest.base-path` | `/api/bpm/rules/v1` | 0.1 (M1) | Base path of the REST API. Keep the version segment when you change it; the cockpit reads the same value |
 | `rest.cors.allowed-origins` | empty | 0.1 (M1) | Origins allowed to call the REST API, needed only for a standalone cockpit. Empty disables CORS |
 | `decision-log.enabled` | `true` | 0.1 (M1) | Write `rle_decision` rows |
-| `decision-log.mode` | `transactional` | `transactional` 0.1 (M1); `async` M2, may move to M3 | `transactional`: one `INSERT` in the caller's transaction. `async`: insert into `rle_decision_outbox`, relayed by the scheduler thread |
+| `decision-log.mode` | `transactional` | `transactional` 0.1 (M1); `async` M2 (March 2027), may move to M3 | `transactional`: one `INSERT` in the caller's transaction. `async`: insert into `rle_decision_outbox`, relayed by the scheduler thread, for high-volume hosts. Until `async` ships, setting it stops start-up with a message naming the milestone |
 | `decision-log.async.batch-size` | `100` | M2, may move to M3 | Outbox rows relayed per poll in `async` mode |
 | `decision-log.partitions-ahead` | `P7D` | 0.1 (M1) | How far ahead the scheduler creates monthly `rle_decision` partitions. See [Decision log partitions](#decision-log-partitions) |
 | `decision-log.retention` | unset | M3 | ISO 8601 period in whole months, at least `P12M`, for example `P60M`. Required outside the `dev` profile from M3: the engine refuses to start until it is set. The scheduler drops whole monthly partitions that end before `now() - retention`. Before M3 nothing is deleted. No decision row is ever deleted by date |
@@ -46,11 +45,13 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `lifecycle.sweep-interval` | `PT1M` | 0.1 (M1) | How often superseded versions are marked retired; evaluation already switches at `effectiveFrom` |
 | `lifecycle.reason-required`, `lifecycle.reason-max-length` | `true`, `2000` | 0.1 (M1) | Reason on reject and retire; may be made optional for reject only |
 | `lifecycle.system-actor` | `system` | 0.1 (M1) | Actor recorded when the engine retires a superseded version |
-| `lifecycle.retire-approval` (proposed name) | `single` | M3, may move to 1.1 | Approval mode for retiring a published version by hand. `single`: one `rules:approve` holder retires it with a mandatory reason. `four-eyes`: a second `rules:approve` holder, never the requester, confirms the retire request, and the version keeps serving until then; the requester's confirmation is refused with `403 SELF_APPROVAL_FORBIDDEN`. The mode in force is shown in `/api/bpm/meta` and recorded on every retirement event and history row. Separate from the emergency single-approver path, which never applies to retirement |
+| `lifecycle.retire-approval` | `single` | 0.1 (M1); `four-eyes` M3 (May 2027), may move to 1.1 | Approval mode for retiring a published version by hand. `single`: one `rules:approve` holder retires it with a mandatory reason. `four-eyes`: `:retire` only records a request and the version keeps serving; a second `rules:approve` holder confirms with `:confirm-retire`, and the requester's own confirmation is refused with `403 SELF_APPROVAL_FORBIDDEN`; any holder can withdraw the request with `:cancel-retire` and a reason. The mode in force is shown in `/api/bpm/meta` and recorded on every retirement event and history row. Independent of the emergency single-approver path, which governs publication only. See [[Rule Engine Versioning and Publishing]] |
+| `explain.default-language` | `en` | 0.1 (M1) | Language of the explanation `text` when the request asks for none, or for a language without a catalogue. English (`en`) and Vietnamese (`vi`) catalogues ship; a host can override or extend them |
+| `publication.require-simulation-report` | `false` | M3 (May 2027) | `true`: `:request-publish` is refused with `422 VALIDATION_FAILED` unless a stored simulation report of the draft is attached. Applies to the whole host, or only to the rule sets listed in `publication.require-simulation-report.rule-sets`. Until M3 the approver runs the simulation herself |
 | `decision-log.retention-floor` | `P12M` | M3 | Shortest `decision-log.retention` accepted; you may raise it, not lower it below `P12M` |
 | `maker-checker.enabled` | `true` | 0.1 (M1) | `false` is refused unless the `dev` profile is active |
 | `tenancy.claim` | `tenant_id` | 0.1 (M1) | Claim or principal attribute read by the default `TenantResolver`, for a token or a server-side session login alike |
-| `tenancy.resolver` | `security-context` | 0.1 (M1); `header:X-Tenant-Id` pending ADR-0014 | `security-context`, `header:X-Tenant-Id` (behind a gateway only), or the name of a `TenantResolver` bean |
+| `tenancy.dev-tenant` | unset | 0.1 (M1) | Fixed tenant for local work without an identity provider. `dev` profile only: start-up is refused when it is set outside `dev` |
 | `events.decision-evaluated` | `false` | 0.1 (M1) | Publish `rules.decision.evaluated.v1` for every decision |
 | `scheduler.enabled` | `true` | 0.1 (M1) | Run the engine's scheduler thread (outbox relay, partition creation, partition drop, idempotency cleanup) on this replica |
 | `security.role-permissions` | empty | 0.1 (M1) | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities) |
@@ -63,9 +64,18 @@ These settings are decided. Their property names and ranges arrive with the spec
 |---|---|---|---|
 | Cockpit editing per environment | On | 0.1 (M1) | Off: the cockpit cannot create or edit rule drafts in this environment. Imports, approvals and reading still work. For hosts that keep production rule changes in Git |
 | Reading style | `sentence` | 0.1 (M1) | How the cockpit reads each row: `sentence` (plain-language policy sentence) or `shorthand` (the condition shorthand). If the 8 Jan 2027 checkpoint fails, 0.1 ships `shorthand` only. Sentence patterns are a message catalogue per language that the host can override or extend |
-| Cockpit landing area | By the user's permissions | 0.1 (M1) | The screen the cockpit opens on when no link names a screen; see [[Cockpit]] |
-| Required simulation report | Off, per rule set | M3 | On: a publication request for that rule set is accepted only with a stored simulation report |
 | Emergency single-approver path | Off | Set by its ADR | On: a logged path lets one person publish in an emergency; every use is reviewed afterwards. Never applies to retirement |
+
+The cockpit's own landing area is the cockpit setting `cockpit.landing` (default `by-role`); see [[Cockpit]].
+
+### Process Engine properties decided so far
+
+The full Process Engine list arrives with its 0.2 configuration page. These are already decided, under `horus.bpm.processes.`:
+
+| Property | Default | Status | Meaning |
+|---|---|---|---|
+| `agents.labels.max-count`, `agents.labels.max-key-length`, `agents.labels.max-value-length` | `16`, `64`, `256` | M2 | Bounds of the optional labels an agent adapter reports with a result, recorded in history and never acted on. `model` and `promptVersion` are reserved keys. May be lowered, never raised |
+| `authoring.cockpit-drafts` | `true` | M2 | `false` refuses creating and editing process drafts from the cockpit with `403 DRAFT_AUTHORING_DISABLED`. Imports, approvals and layout saves still work |
 
 Properties with a prefix of `tenancy`, `masking` and `rest.cors` are shared with the Process Engine starter under `horus.bpm.processes.*`; when both engines run in one host, set them once under `horus.bpm.*`.
 
@@ -113,12 +123,12 @@ The `ruleEngine` health contributor also reports whether next month's partition 
 
 | Bean | Default | Override when |
 |---|---|---|
-| `TenantResolver` | Reads the `tenancy.claim` attribute of the authenticated principal in the security context: a validated token or a server-side session login | Tenant comes from somewhere else, such as your user directory, realm, path or subdomain. A resolver you write that trusts a request header is your risk |
+| `TenantResolver` | Reads the `tenancy.claim` attribute of the authenticated principal in the security context: a validated token or a server-side session login. A call with no resolvable tenant gets `401 UNAUTHENTICATED` | Tenant comes from somewhere else, such as your user directory, realm, path or subdomain. No header-based resolver ships; a resolver you write that trusts a request header is your risk |
 | `CallerResolver` | Principal name | Audit needs a different identity |
 | `RuleFunctionRegistry` | Built-in pure functions | Host registers extra pure functions, listed in the cockpit |
 | `RuleEventPublisher` | Spring `ApplicationEventPublisher` | Events go to an outbox or a bus |
 | `CurrencyRegistry` | ISO 4217 scales from the JDK | A currency has no ISO scale (for example `XAU`) or needs another scale |
-| `DecisionExplainer` | Explanation text from a message catalogue per language | House wording or a language the catalogue lacks; the structured reasons stay the same |
+| `DecisionExplainer` | Explanation text from a message catalogue per language (`en`, `vi`), default language `explain.default-language` | House wording beyond what catalogue overrides allow; the structured reasons stay the same |
 | `LifecycleGuard` | Allows every transition | An extra veto, such as a change ticket on retire; it cannot let through what the engine refuses |
 | `Clock` | System UTC | Tests and replays. The engine's only source of time: the default for `DecisionRequest.clock`, partition creation and the health check. The engine uses the host's bean when there is exactly one and never registers a `Clock` bean of its own |
 
@@ -163,7 +173,7 @@ horus.bpm.rules:
   definitions: classpath:rules/*.yaml
   definitions-tenant: dev
   definitions-auto-publish: true          # dev profile only
-  tenancy.resolver: header:X-Tenant-Id    # send X-Tenant-Id: dev with every request
+  tenancy.dev-tenant: dev                 # dev profile only; every call runs as tenant dev
 ```
 ```java
 @Bean @Profile("dev")
@@ -174,4 +184,4 @@ UserDetailsService devUsers(PasswordEncoder enc) {
     User.withUsername("checker").password(enc.encode("checker")).authorities("rules:read", "rules:approve").build());
 }
 ```
-With HTTP basic enabled, `curl -u dev:dev -H 'X-Tenant-Id: dev' ...` holds `rules:evaluate`. Maker-checker still applies: `dev` requests publication and `checker` approves. Outside the `dev` profile the starter refuses `definitions-auto-publish: true` and `maker-checker.enabled: false`, and logs a warning when `tenancy.resolver` is a header.
+With HTTP basic enabled, `curl -u dev:dev ...` holds `rules:evaluate` and runs as tenant `dev`. Maker-checker still applies: `dev` requests publication and `checker` approves. Outside the `dev` profile the starter refuses to start with `definitions-auto-publish: true`, `maker-checker.enabled: false` or any `tenancy.dev-tenant` value.

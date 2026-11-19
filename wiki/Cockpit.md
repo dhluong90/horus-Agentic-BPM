@@ -12,6 +12,8 @@ Screens sit in three tiers: the shell (sign-in, host and tenant), one area per j
 
 ![Cockpit screen hierarchy in three tiers: shell, areas, screens](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/cockpit-screen-hierarchy.svg)
 
+There is no dashboard of counts (a "pulse strip") before 1.0. Each queue shows its own count in its header, for example the number of pending approvals or open incidents.
+
 ## Embed it in your service
 
 Add the starter next to the engine starter:
@@ -38,7 +40,7 @@ An embedded cockpit also works when your web application signs users in with a s
 
 ### Where the cockpit opens
 
-A link into a screen always opens that screen. Otherwise the cockpit opens on a landing area that follows the user's permissions. The host can set another landing area; it is read from `/api/bpm/meta`.
+A link into a screen always opens that screen. Otherwise the cockpit opens on a landing area chosen by the user's role. This is the host setting `cockpit.landing`, default `by-role`, which the cockpit reads from `/api/bpm/meta`; the host can set another landing area.
 
 | User | Cockpit 0.1 opens on |
 |---|---|

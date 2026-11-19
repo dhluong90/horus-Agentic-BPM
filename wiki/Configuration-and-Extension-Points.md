@@ -24,6 +24,7 @@ A use case you do not configure stays off or uses its documented default.
 | Typed and validated | An invalid value stops start-up with a message naming the property |
 | Safe default, documented range, tested | Every setting has a default and a range; the default and each boundary are tested. A setting that no named user needs is not added |
 | Documented | Every property has a description and a default in your IDE's Spring configuration hints |
+| Visible at run time | Every setting appears in the `settings` object of the host's `/api/bpm/meta` with its effective value, so an operator or auditor sees what is in force without reading `application.yaml`. Secrets such as `masking.hmac-key` show only as `set` or `unset`. A setting that relaxes a control is listed whenever it is on (`TR-EXT-08`) |
 | Protective limits only go down | Page sizes, ranges, batch sizes and definition sizes may be lowered, never raised |
 | Controls stay on | Maker-checker, the audit trail, idempotency, tenant isolation, masking and fail-closed guardrails can be tightened, never switched off outside the `dev` profile. A setting that relaxes a control is off by default, logged when used and shown in `/api/bpm/meta`: the emergency single-approver path exists only when you turn it on, and every use is logged |
 | No business values in engine code | Currencies, tiers, fee codes, reason codes, roles, languages, calendars and SLA periods come from your definitions, configuration or beans. Examples and seed data may use banking data; the engine core does not |

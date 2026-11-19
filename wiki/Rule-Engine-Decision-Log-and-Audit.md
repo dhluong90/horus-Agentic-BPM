@@ -48,7 +48,11 @@ Filters: `ruleSet`, `from`, `to`, `outcome`, matched rule id, and any output val
   "text": "Rule R2 of card-fee version 2 matched because tier is GOLD and balance is 60000000 VND, which is at least 50000000 VND. Result: fee 0 VND." }
 ```
 
-`matched`, `outputs` and `reasons` are the contract; `text` is one English rendering with locale-neutral numbers (no grouping, money in major units with its currency code). The cockpit renders the reasons in English or Vietnamese with local number formatting. The explanation is built from the log entry and the stored version only: nothing is evaluated again, rows that did not match are not explained, masked inputs show as `hmac:<hex>` and missing inputs as "has no value". Generated explanations in 0.1 depend on a pending product decision (PD-027); templates per rule set can override the wording later (see [[Roadmap]]).
+`matched`, `outputs` and `reasons` are the contract; `text` is rendered from `reasons` through a message catalogue per language, with locale-neutral numbers (no grouping, money in major units with its currency code). English and Vietnamese catalogues ship. Ask for a language with `?lang=vi` or `Accept-Language`; without one, `text` uses `horus.bpm.rules.explain.default-language` (default `en`), and a missing entry falls back to English. The cockpit reads the same catalogues, so the plain-language readings and the explanations use one wording.
+
+To change the wording or add a language, place your own catalogue resource on the host's classpath; no code is needed. To replace the renderer entirely, declare a `DecisionExplainer` bean ([[Configuration and Extension Points]]). `reasons` never change.
+
+The explanation is built from the log entry and the stored version only: nothing is evaluated again, rows that did not match are not explained, masked inputs show as `hmac:<hex>` and missing inputs as "has no value". Templates per rule set can override the wording in M3 (see [[Roadmap]]).
 
 ## Mask personal data
 
