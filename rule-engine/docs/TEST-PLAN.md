@@ -35,7 +35,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-016 | `RLE_016_sample_simulation_leaves_decision_log_untouched` | Integration, SQL capture | M1 | `TR-OBS-01`, `TR-DET-01` | Planned |
 | RLE-017 | `RLE_017_decision_log_monthly_partitions_and_retention_by_drop` | Testcontainers migration, SQL capture | M1 | `TR-OPS-04`, `TR-OBS-01` | Planned |
 | RLE-018 | `RLE_018_tenant_header_accepted_only_within_allowed_tenants` | WebMvc, log capture | M2 | `TR-SEC-03`, `TR-TEN-01` | Planned |
-| RLE-019 | `RLE_019_meta_and_me_describe_host_and_caller` | WebMvc, JSON Schema contract | M1 | `TR-UI-08`, `TR-SEC-08` | Planned |
+| RLE-019 | `RLE_019_meta_and_me_describe_host_and_caller`; also `HostMetadataEndpointsTest.RLE_019_*` (role mapping, `401`, empty permissions, vocabulary filter, cache headers), `HostMetadataContractTest.RLE_019_*` (JSON Schema and OpenAPI), `RuleEngineModuleDescriptorTest.RLE_019_*`, `HostMetadataIT.RLE_019_*` and `DevUsersIT.RLE_019_*` in the example host | WebMvc, JSON Schema contract, example host over HTTP | M1 | `TR-UI-08`, `TR-SEC-08` | Implemented |
 | RLE-020 | `RLE_020_import_keeps_source_document_and_canonical_hash` | Integration, WebMvc | M1 | `TR-STD-01`, `TR-STD-03` | Planned |
 | RLE-021 | `RLE_021_v1_expressions_match_their_feel_translation` | Property, differential against a reference FEEL in test scope | M1 (proposed with ADR-0019) | `TR-STD-02`, `TR-DET-01` | Planned |
 | RLE-022 | `RLE_022_today_uses_rule_set_time_zone` | Unit, replay | M1 | `TR-DET-01`, `TR-DET-05` | Planned |
@@ -52,6 +52,7 @@ Tests that prove a platform requirement directly, before any `SPEC.md` statement
 | `TR-EMB-06` | `RuleEngineOnlyHostIT.TR_EMB_06_*`, `HostRestartIT.TR_EMB_06_*`, `RuleEngineSchemaMigratorIT.TR_EMB_06_*` | Testcontainers, example host | Full |
 | `TR-OPS-04` | `RuleEngineSchemaMigratorIT.TR_OPS_04_*`, `RuleEngineOnlyHostIT.TR_OPS_04_*`, `RuleEngineAutoConfigurationTest.TR_OPS_04_*` | Testcontainers with fixed instants, context runner | **Partial.** Start-up creation of the current and next UTC month, UTC boundaries and the move of rows out of the default partition. Scheduled creation up to `partitions-ahead`, retention by drop and the default-rows gauge are `RLE-017` |
 | `TR-SEC-01` | `CoreArchitectureTest.TR_SEC_01_core_has_no_scripting_reflection_class_loading_or_deserialisation` | ArchUnit | Partial: the boundary rule. The parser and evaluator tests of `RLE-004` and `RLE-007` complete it |
+| `TR-SEC-03` | `HostMetadataEndpointsTest.TR_SEC_03_*` | WebMvc, log capture | **Partial.** The tenant of `/api/bpm/meta` and `/api/bpm/me` comes from the token claim or the gateway header, never from a query parameter; a different `X-Tenant-Id` is `403 TENANT_NOT_ALLOWED` and logged. Request bodies and cross-tenant reads of engine resources are `RLE-011` |
 
 ## Known gaps
 | Gap | Plan |

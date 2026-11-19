@@ -1,0 +1,6 @@
+# Local development only: demo users over HTTP basic (HostSecurityConfiguration) and the tenant
+# taken from the X-Tenant-Id header, because a basic-auth user has no token to carry a tenant claim.
+horus:
+  bpm:
+    tenancy:
+      resolver: header:X-Tenant-Id

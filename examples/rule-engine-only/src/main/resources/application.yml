@@ -23,5 +23,12 @@ management:
 # The one configuration block a host adds for the Rule Engine.
 horus:
   bpm:
+    # Shown by clients for this host; returned by GET /api/bpm/meta.
+    host-id: rule-engine-only
     rules:
       enabled: true
+      security:
+        # The host's roles mapped to engine permissions, listed by GET /api/bpm/me.
+        role-permissions:
+          ROLE_PRICING_ANALYST: [rules:read, rules:author]
+          ROLE_PRICING_APPROVER: [rules:read, rules:approve]

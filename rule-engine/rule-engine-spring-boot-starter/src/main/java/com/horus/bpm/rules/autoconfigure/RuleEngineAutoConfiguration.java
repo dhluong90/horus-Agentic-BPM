@@ -1,5 +1,6 @@
 package com.horus.bpm.rules.autoconfigure;
 
+import com.horus.bpm.host.spi.ModuleDescriptor;
 import com.horus.bpm.rules.postgres.DecisionLogPartitions;
 import com.horus.bpm.rules.postgres.RuleEngineSchemaMigrator;
 import com.horus.bpm.rules.postgres.RuleEngineTransactions;
@@ -77,6 +78,16 @@ public class RuleEngineAutoConfiguration {
             RuleEngineProperties properties,
             ObjectProvider<Clock> clock) {
         return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock));
+    }
+
+    /**
+     * The {@code rules} entry of {@code GET /api/bpm/meta} and the permissions {@code GET /api/bpm/me} may
+     * list. A role mapping that names an unknown permission stops the start-up.
+     */
+    @Bean
+    @ConditionalOnMissingBean(name = "ruleEngineModuleDescriptor")
+    ModuleDescriptor ruleEngineModuleDescriptor(RuleEngineProperties properties) {
+        return RuleEngineModule.descriptor(properties.security().rolePermissions());
     }
 
     /** The host's unique {@code Clock} bean if it has one, otherwise system UTC. Never registered as a bean. */
