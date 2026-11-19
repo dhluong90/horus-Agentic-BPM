@@ -46,7 +46,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-022](#pd-022-conflict-simulation-report-in-cockpit-01-approvals) | Conflict: simulation report in Cockpit 0.1 approvals | Decided (product manager, delegated, PD-073) |
 | [PD-023](#pd-023-conflict-milestone-of-the-instance-migration-screen) | Conflict: milestone of the instance migration screen | Decided (product manager, delegated, PD-073) |
 | [PD-024](#pd-024-conflict-compensation-runs-view-and-sla-breach-list) | Conflict: compensation runs view and SLA breach list | Decided (product manager, delegated, PD-073) |
-| [PD-025](#pd-025-conflict-process-engine-version-label) | Conflict: Process Engine version label | Decided (product manager, delegated, PD-073) |
+| [PD-025](#pd-025-conflict-process-engine-version-label) | Conflict: Process Engine version label | Decided (superseded by PD-087) |
 | [PD-026](#pd-026-conflict-should-requirements-used-as-release-gates) | Conflict: Should requirements used as release gates | Decided (product manager, delegated, PD-073) |
 | [PD-027](#pd-027-conflict-decision-explanation-in-m1) | Conflict: decision explanation in M1 | Decided (product manager, delegated, PD-073) |
 | [PD-028](#pd-028-conflict-agent-chosen-steps-in-m3-or-after-10) | Conflict: agent-chosen steps in M3 or after 1.0 | Decided |
@@ -74,7 +74,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-050](#pd-050-retention-default-for-the-decision-log-and-history) | Retention default for the decision log and history | Decided |
 | [PD-051](#pd-051-tenant-exit-export-and-purge) | Tenant exit: export and purge | Decided (product manager, delegated, PD-073) |
 | [PD-052](#pd-052-tamper-evidence-beyond-append-only) | Tamper evidence beyond append-only | Decided (product manager, delegated, PD-073) |
-| [PD-053](#pd-053-licence-rule-for-test-and-build-tools) | Licence rule for test and build tools | Decided (product manager, delegated, PD-073) |
+| [PD-053](#pd-053-licence-rule-for-test-and-build-tools) | Licence rule for test and build tools | Decided (product manager, delegated, PD-073; jqwik allowance superseded by PD-090) |
 | [PD-054](#pd-054-deprecation-length) | Deprecation length | Decided (product manager, delegated, PD-073) |
 | [PD-055](#pd-055-postgresql-version-range) | PostgreSQL version range | Decided (product manager, delegated, PD-073) |
 | [PD-056](#pd-056-rule-management-ux-direction) | Rule management UX direction | Decided |
@@ -110,6 +110,9 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-086](#pd-086-dmn-tck-test-cases-as-build-time-test-data) | DMN TCK test cases as build-time test data | Decided (product manager, delegated, PD-073) |
 | [PD-087](#pd-087-release-labels-after-010) | Release labels after 0.1.0 | Decided (product manager, delegated, PD-073) |
 | [PD-088](#pd-088-unique-and-collect-follow-dmn-15) | `unique` and `collect` follow DMN 1.5 | Decided (product manager, delegated, PD-073) |
+| [PD-089](#pd-089-a-requester-withdraws-their-own-pending-request) | A requester withdraws their own pending request | Decided (product manager, delegated, PD-073) |
+| [PD-090](#pd-090-property-tests-without-jqwik) | Property tests without jqwik | Decided |
+| [PD-091](#pd-091-no-tag-ruleset-or-immutable-releases-for-now) | No tag ruleset or immutable releases for now | Decided (revisitable) |
 
 ---
 
@@ -719,6 +722,8 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 2. Align all modules on one version number. Consequence: Process Engine would start at 0.2 with no 0.1, which confuses release notes and tags.
 
 **Recommendation.** Option 1.
+
+Superseded by [PD-087](#pd-087-release-labels-after-010) on 2026-11-19: one project-wide version and one project tag (`v0.1.0`), so module versions are no longer independent.
 
 **Rationale.** Each module is tagged separately (`process-engine/v0.1.0`); Release Notes already say so.
 
@@ -1611,6 +1616,8 @@ The architect reviewed the technical, non-functional and developer requirements 
 **Applied, 2026-11-19 (delegated decision, PD-073).** Option 2, targeted 1.1, preferring a sealed fingerprint of each monthly partition when it closes over a per-row chain. Configurable: yes. Once shipped, sealing is on by default, since it never touches the insert path; where the sealed manifest goes is an extension point. By default it is kept in the host database, and a bank sends it to its own write-once storage by supplying an implementation. From 1.0 the documentation states the boundary: append-only protects against the engine's code; database audit and privileged access controls protect against administrators. Feature X-F-30 is added as later (targeted 1.1), design preview. Not applied here: `TR-OBS-09`, the mechanism and its cost at 2,000 inserts per second (architect).
 
 ### PD-053 Licence rule for test and build tools
+
+The jqwik allowance in this entry is superseded by [PD-090](#pd-090-property-tests-without-jqwik). The rest of the entry stands.
 
 | Field | Value |
 |---|---|
@@ -2507,6 +2514,8 @@ Committed: the release does not ship without these.
 | New issue: Docker Compose example | The example host and PostgreSQL start with one command from a fresh clone | X-F-14 (deployable part) |
 | New issue: release review and GitHub Release | The go or no-go review and the GitHub Release with artifacts, checksums, bill of materials and release notes | X-F-09, X-F-19 |
 
+**Added to the committed scope, 2026-11-19 (product manager, delegated, on the product owner's feedback).** The product owner found the cockpit empty, with no menu, and the sign-in page unattractive. The release review is visual, so the cockpit navigation shell, a non-empty Home and a branded sign-in page for the example host are committed for the Fri 20 Nov review (#180). The shell follows the approved prototype (PD-056): Home, Rules, Approvals, and Decisions and Processes labelled Preview. Home shows only pending approvals and recent rule sets (PD-078). Decisions has no read API in 0.1.0, and logged decisions may hold personal data until masking arrives, so the Decisions area shows a one-line "comes in 0.2.0" empty state and no decision data. Sign-in stays the host's page; the cockpit library has no login of its own.
+
 Pulled in by PD-084: in the release only if each meets the same readiness bar at the Fri 20 Nov review; otherwise cut in the order below.
 
 | Issue | What ships | Feature map |
@@ -2530,7 +2539,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] No BLOCKING finding from the architecture, security or QA reviews is open; each one closed with a test that fails without the fix. Every open SHOULD-FIX is listed in the release notes as a known limit.
 - [ ] Each merged pull request links a green CI run at its head commit (PD-081), and the last run on `main` at the release commit is green on every leg: Java 21 and 25, Spring Boot 4.x, 4.0.x and 3.5.x, PostgreSQL 14 and 18.
 - [ ] The spec-to-test gate, the licence gate and the vulnerability scan are green at the release commit; no high or critical finding.
-- [ ] The package rename (#21) is merged before the 0.1.0 tag, and the search for `com.horus` in the repository returns nothing (PD-070). The tag guard of the release workflow (#126) refuses the tag otherwise.
+- [ ] The package rename (#21) is merged before the `v0.1.0` tag, and the search for `com.horus` in the repository returns nothing (PD-070). The tag guard of the release workflow (#126) refuses the tag otherwise.
 - [ ] The release workflow builds from a clean checkout of the release commit; the cockpit bundle is built from source; the bill of materials lists the Java and npm packages; `shasum -c SHA256SUMS` verifies every artifact.
 - [ ] From a fresh clone on a clean machine with Docker only, `docker compose up` reaches a first logged decision by following the README; done by someone other than the author, with the time and every deviation recorded.
 - [ ] The security behaviour is shown by tests in CI: another tenant's rule set answers `404`; self-approval answers `403` through Java and REST; a reused idempotency key with another body answers `422`; no-store holds with the metadata endpoints switched off; the development tenant is refused beside a production profile; the container runs as a non-root user and holds no secret.
@@ -2539,7 +2548,8 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] The README, Getting Started and release notes claim only what ships: "first BPMN and DMN subset", no conformance claim (`TR-STD-05`), unsupported features named as later, the forward-only migrations listed (X-F-09), and no compatibility promise before 1.0.
 - [x] The version label is decided: `0.1.0` (PD-083, 2026-11-19).
 - [ ] A recorded walkthrough of the release journey exists for the review.
-- [ ] The GitHub Release upload (#153) is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the `v0.1.0` release.
+- [ ] The GitHub Release upload (#153) is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the release of the `v0.1.0` tag, the one project tag for 0.1.0 (PD-087, #163).
+- [ ] The release notes call the Process Engine a preview (ADR-0027, process DESIGN 5.8): outside `dev`, imports stay drafts, activation is by the development auto-approve setting only, and there is no claim step.
 
 **Assumption to test.** [ASSUMPTION] Pull requests #87, #17 and #126 and issues #133, #131 and #21 can all be reviewed and merged by Fri 20 Nov without a new BLOCKING finding. Cheap test: a merge-order check on Thu 19 Nov evening (#133, then #87, then #21, then #17 and #126) with the count of open findings; if more than two BLOCKING findings are open on Fri 20 Nov 08:00 ICT, the product manager tells the product owner before the review, not at it.
 
@@ -2665,7 +2675,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 
 **Recommendation and decision.** Option 1. The modules share one build, one BOM and one release workflow, so one version is the honest description. 1.0 keeps its meaning (PD-083).
 
-**Consequences.** The roadmap and feature map name the releases `0.2.0`, `0.3.0` and `1.0.0` next to M1, M2 and M3. The project board's Release options are renamed: "Rule Engine 0.1 / Cockpit 0.1 (Jan)" to "0.2.0 (15 Jan)" and "Process Engine 0.1 / Cockpit 0.2 (Mar)" to "0.3.0 (26 Mar)"; renaming an option keeps every value already set. The GitHub milestones keep their titles until the maintainers rename them.
+**Consequences.** The roadmap and feature map name the releases `0.2.0`, `0.3.0` and `1.0.0` next to M1, M2 and M3. The project board's Release options are renamed: "Rule Engine 0.1 / Cockpit 0.1 (Jan)" to "0.2.0 (15 Jan)" and "Process Engine 0.1 / Cockpit 0.2 (Mar)" to "0.3.0 (26 Mar)"; renaming an option keeps every value already set. The GitHub milestones keep their titles until the maintainers rename them. The release tag is one project tag, `vX.Y.Z`, starting with `v0.1.0` (#163). PD-025 (independent module versions and per-module tags) is superseded.
 
 **Follow-ups.** Maintainers (engineering): rename the two board options and, if wanted, the milestone titles. Documentation: the wiki Roadmap page uses the new labels.
 
@@ -2688,3 +2698,77 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Consequences.** RE-F-01 is reworded. `RLE-002` changes: zero matches is no match with null outputs, logged as outcome `OK` with `matched_rule_ids = []`, so the decision log schema does not change; several matches are unchanged. `RLE-003` states the DMN 1.5 rules: null entries kept and aligned with `matchedRuleIds`; `count` includes nulls; a null under `sum`, `min` or `max` is `EVALUATION_ERROR` in strict mode; no match is `NoMatch` with null outputs, logged as outcome `OK` with `matched_rule_ids = []`, exactly as for `first`. Pull request #132 implements both before it merges. The deviation register gets no entry for either point.
 
 **Follow-ups.** Architect: `RLE-002` and `RLE-003` in the rule engine SPEC (applied in this change), the error matrix (ADR-0010), and the `collect` aggregation rules, checked against DMN 1.5 sections 8.2.11, 10.3.2.10 and 10.3.4.4 and applied to `RLE-003` in this change. Maintainers (engineering): pull request #132 and its tests. Documentation: the wiki hit policy page.
+
+### PD-089 A requester withdraws their own pending request
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Only a holder of `rules:approve` can reject a pending version (rule engine DESIGN 3.3). An author who holds only `rules:author` cannot take back their own publication request, and sees no action on it. Should the requester be able to withdraw it? |
+| Raised by | Maintainers (engineering), review of the reject slice (pull request #152) |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1 |
+
+**Options considered**
+
+1. The requester withdraws their own pending request with `rules:author`, as a separate action named withdraw (chosen). The version returns to `DRAFT`, nothing is published, the effective version is unchanged, and a history row and an event record the withdrawal with who and when; a reason is optional. Only the identity that requested publication may withdraw it. Consequence: an author fixes a mistake without asking an approver to reject it; four-eyes is untouched, because withdrawing publishes nothing; the audit trail keeps "the author took it back" apart from "an approver refused it".
+2. Keep it approver-only: the author asks an approver to reject. Consequence: no new action; approvers spend time on requests the author already knows are wrong, and the log records a rejection that was really a withdrawal.
+
+**Recommendation and decision.** Option 1. It is the common maker-checker pattern and it relaxes no control, so under PD-074 it is not a setting. Reject stays the approver's action, with a mandatory comment.
+
+**Rules for the specification.**
+- Withdraw is allowed only on a `PENDING_APPROVAL` version, only by its requester, and needs `rules:author`. Anyone else, an approver included, gets `403`; an approver uses reject.
+- A withdrawn version is a `DRAFT` again: editable, and it can be requested again, which starts a new approval.
+- Withdraw accepts an idempotency key like every mutation, and a stale `If-Match` gets the usual conflict.
+- The cockpit shows Withdraw to the requester on their own pending version and never shows Approve to them.
+
+**Consequences.** RE-F-35 moves from later to M1 as a spec gap (feature map M1 from 57 to 58, later from 13 to 12). It reaches 0.1.0 only if it meets the readiness bar. Otherwise it ships in 0.2.0. It is not on any cut list.
+
+**Follow-ups.** Architect: a new SPEC statement for withdraw, the state transition `PENDING_APPROVAL` to `DRAFT` in DESIGN 3.3, the endpoint `:withdraw` in `openapi.yaml`, and the event and history row. Maintainers (engineering): an issue for the withdraw action, separate from reject in pull request #152. Documentation: the wiki approval how-to.
+
+**Applied, 2026-11-19 (pull request #161).** `RLE-046` specifies withdraw as decided above. The same change also refuses a requester's reject of their own request with `403 SELF_APPROVAL_FORBIDDEN`, with a detail pointing to `:withdraw` (`RLE-025`). This reverses the earlier design answer (rule engine DESIGN Q5), which allowed self-reject. The product manager accepts the reversal under this entry. With withdraw available, a self-reject would record an author taking a request back as an approver's refusal, which is the audit confusion this decision removes. Reject therefore stays the action of a second person, like approve. A requester who holds `rules:approve` but not `rules:author` cannot take their own request back and asks another approver to reject it, an accepted edge case.
+
+### PD-090 Property tests without jqwik
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | jqwik is the property-testing library on the PD-053 allow-list. Version 1.10.2 ships a notice that restricts how the library may be used. Does the project keep it? |
+| Raised by | Maintainers (engineering) |
+| Decision | Decided by the product owner, 2026-11-19, option 1. Supersedes the jqwik allowance of PD-053 |
+
+**Options considered**
+
+1. Remove jqwik and add no other property-testing library (chosen). Property tests are written in plain JUnit 5 with a small seeded generator kept in the project's test sources. Consequence: the notice is respected, and one test-scope dependency fewer is on the allow-list. The project now maintains its own generators, shrinking and seed reporting, so a failure must print its seed and be reproducible from it.
+2. Replace jqwik with another property-testing library. Consequence: less code to maintain; a new dependency to review under `TR-LIC-01`, and test changes all the same.
+3. Keep jqwik at a version before the notice. Consequence: no test changes now; the project stays pinned to an old release.
+
+**Consequences.** Every property test keeps its specification id in its name and its coverage (`TR-QA-01`); only the generator changes. Each run uses a recorded seed, and a failing case prints it. The PD-053 allow-list keeps the JUnit Jupiter API and JMH. Nothing that ships changes.
+
+**Follow-ups.** Maintainers (engineering): the removal and the in-house generator. Architect: remove jqwik from `TR-LIC-01` in [requirements](requirements.md), the allow-list in the build and the test plans that name it. Documentation: wiki pages that mention jqwik.
+
+### PD-091 No tag ruleset or immutable releases for now
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | Should release tags (`v*`) be protected by a repository ruleset, and should published GitHub Releases be made immutable? |
+| Raised by | Security review of the release workflow |
+| Decision | Decided by the product owner, 2026-11-19, option 2. Revisitable |
+
+**The product owner's words.** "Not needed for now; team velocity and self-operation come first."
+
+**Options considered**
+
+1. A tag ruleset for `v*` (only the release workflow or named maintainers may create release tags) and immutable releases. Consequence: a release tag and its assets cannot be created or replaced by mistake; every release needs an admin-configured path, which slows the team in the release week.
+2. Neither, for now (chosen). Consequence: the team tags and publishes on its own; the protection rests on the release workflow's checks and on the rule below, not on repository settings.
+
+**Residual risk (security review).** Anyone with write access can push a `v*` tag and publish a Release, and the assets of a published Release can be replaced.
+
+**Mitigations, in place once #166 and #168 merge, before the `v0.1.0` tag.**
+- The tag guard of the release workflow (#166) refuses a tag that is not on `main`, is not of the form `vX.Y.Z`, does not match every module's version, or builds a group id other than `io.github.dhluong90.bpm`.
+- Verification before publishing (#168): the publishing job checks the checksums and the build information before the Release is published; the bill of materials is validated earlier, by the release build.
+- A bad release is fixed with a new patch release (`v0.1.1`); a published tag is never moved, deleted and re-created, and published assets are never replaced.
+
+**Revisit when** any of these happens: an outside contributor gets write access; a tag or Release asset is created or changed outside the release workflow; or an adopter or bank review asks for tamper-evident releases. The product manager then brings option 1 back to the product owner. Same pattern as PD-081 for branch protection.
+
+**Follow-ups.** Maintainers (engineering): the "never re-tag, release a patch" rule in `CONTRIBUTING.md` and the release runbook. Security: confirm the guard and the verification cover the risk above at the Fri 20 Nov review.

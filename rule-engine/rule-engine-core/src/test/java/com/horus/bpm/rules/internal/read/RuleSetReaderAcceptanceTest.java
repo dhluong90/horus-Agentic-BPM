@@ -114,7 +114,10 @@ class RuleSetReaderAcceptanceTest {
         HEADER + "effectiveFrom: 2026-12-01\n" + INPUTS + OUTPUTS + RULES
     })
     void RLE_020_a_value_of_the_wrong_type_or_shape_is_refused_as_validation_failed(String yaml) {
-        assertThatThrownBy(() -> read(yaml)).isInstanceOf(ValidationFailedException.class);
+        // As import does: read, then compile. Cell-level problems (an unknown input or output, a cell of the wrong
+        // JSON type) are reported by the compiler on their cell, so they never hide later cells (RLE-041).
+        assertThatThrownBy(() -> com.horus.bpm.rules.internal.eval.CompiledRuleSet.compile(read(yaml).model()))
+                .isInstanceOf(ValidationFailedException.class);
     }
 
     /**

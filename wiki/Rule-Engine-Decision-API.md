@@ -10,12 +10,17 @@ These operations are built and tested; their contract file is [`rule-engine/api/
 |---|---|---|---|
 | `POST /rule-sets` | `VersionService.importRuleSet(ImportRequest)` | `rules:author` | Body is the YAML document (`Content-Type: application/yaml`); creates the rule set named in the document and its version 1 as `DRAFT`. `201`, `ETag`, `Location` |
 | `POST /rule-sets/{name}/versions` | `VersionService.importVersion(name, ImportRequest)` | `rules:author` | The next draft version; the document's `ruleSet` must equal `{name}` |
+| `GET /rule-sets` | `VersionService.listRuleSets(PageRequest)` | `rules:read` | The caller's rule sets by name: `ruleSet`, `latestVersion`, `latestStatus`, `publishedVersion` (in effect now, or null), `lastChangedAt`. Pages as below |
+| `GET /rule-sets/{name}` | `VersionService.findRuleSet(name)` | `rules:read` | The same summary for one rule set |
+| `GET /rule-sets/{name}/versions` | `VersionService.listVersions(name, PageRequest)` | `rules:read` | Versions newest first, with `createdBy`, `requestedBy`, `approvedBy`, their times and `allowedActions`; no definition |
 | `GET /rule-sets/{name}/versions/{v}` | `VersionService.find(name, v, includeSource)` | `rules:read` | `?include=source` adds `sourceDocument`, the file as imported, comments included |
+| `GET /rule-sets/{name}/versions/{v}/history` | `VersionService.history(name, v)` | `rules:read` | `{ "data": [...] }`, oldest first: `action` (`CREATED`, `REQUESTED`, `APPROVED`, `REJECTED`), `fromStatus`, `toStatus`, `actor`, `reason`, `lockVersion`, `occurredAt` |
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | `VersionService.requestPublish(...)` | `rules:author` | `If-Match` optional |
 | `POST /rule-sets/{name}/versions/{v}:approve` | `VersionService.approve(...)` | `rules:approve` | Optional body `{ "comment": "..." }`; the requester gets `403 SELF_APPROVAL_FORBIDDEN` |
+| `POST /rule-sets/{name}/versions/{v}:reject` | `VersionService.reject(...)` | `rules:approve` | Body `{ "reason": "..." }`, required, at most `lifecycle.reason-max-length` (2,000) characters. A `PENDING_APPROVAL` version goes back to `DRAFT` with the request cleared, a `REJECTED` history row and `rules.version.rejected.v1`. The requester gets `403 SELF_APPROVAL_FORBIDDEN` pointing to `:withdraw` (PD-089) |
 | `POST /decisions/{ruleSet}:evaluate` | `RuleEngine.evaluate(...)` | `rules:evaluate` | Body `{ "inputs": { ... } }`; `first` hit policy only; one `rle_decision` row in the request's transaction |
 
-All of them accept `Idempotency-Key` with the semantics below, and every state change writes an outbox row (`rules.version.created.v1`, `rules.version.publish-requested.v1`, `rules.version.published.v1`). A caller without the permission gets `403 PERMISSION_DENIED`, through the Java API as well as REST. The approver must be neither the requester nor the author (`createdBy`) of the version. Evaluate refuses an undeclared input name and a number with more than 34 significant digits or a scale outside `evaluation.max-input-scale` with `400 INPUT_INVALID`; only declared inputs are written to the decision log. Imports refuse unknown properties, YAML anchors, aliases and tags, numbers that the canonical form would change, and conditions that do not produce true or false. In this build: YAML import only, no `clock`, `copyOf` or version-pinned evaluation, no validation report in the response, and the `unique` and `collect` hit policies are refused at import. A runnable walkthrough is in [`examples/rule-engine-only/README.md`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-engine-only/README.md).
+Every `POST` accepts `Idempotency-Key` with the semantics below, and every state change writes an outbox row (`rules.version.created.v1`, `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`) and a history row. Every version response carries `allowedActions`, the lifecycle commands the caller may send now (`request-publish`, `approve`, `reject`), computed from the status, the caller's permissions and four eyes; it is a hint for screens, and the command checks again. A refused document answers `422 VALIDATION_FAILED` with `violations` placed on rule and column ([[Common Error Codes]]); a `money` output written without a currency is refused at import. Command bodies over 16,384 bytes and evaluation bodies over 1,048,576 bytes are `413 PAYLOAD_TOO_LARGE`. A caller without the permission gets `403 PERMISSION_DENIED`, through the Java API as well as REST. The approver must be neither the requester nor the author (`createdBy`) of the version. Evaluate refuses an undeclared input name and a number with more than 34 significant digits or a scale outside `evaluation.max-input-scale` with `400 INPUT_INVALID`; only declared inputs are written to the decision log. Imports refuse unknown properties, YAML anchors, aliases and tags, numbers that the canonical form would change, and conditions that do not produce true or false. In this build: YAML and DMN 1.5 decision table import (DMN export with `?format=dmn`), no `clock`, `copyOf` or version-pinned evaluation, no validation report in the response, and the `unique` and `collect` hit policies are refused at import. A runnable walkthrough is in [`examples/rule-engine-only/README.md`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-engine-only/README.md).
 
 ![Rule evaluation flow](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/rule-evaluation-flow.svg)
 
@@ -155,14 +160,14 @@ Every draft response carries `version` in the body and `ETag: "<version>"`. `PUT
   "violations": []
 }
 ```
-`type` points at the code's heading on [[Common Error Codes]] (ADR-0010). `violations` lists `{ "field", "ruleId", "message" }` entries for validation errors. Responses never contain stack traces. `500` responses carry only `code: INTERNAL_ERROR` and the `correlationId` to find the server log.
+`type` points at the code's heading on [[Common Error Codes]] (ADR-0010). `violations` is present on `VALIDATION_FAILED` only and lists `{ "ruleId", "column", "message" }` entries, `column` being the input or output name. Responses never contain stack traces. `500` responses carry only `code: INTERNAL_ERROR` and the `correlationId` to find the server log.
 
 ## Error code matrix
 
 | HTTP | `code` | When | Endpoints |
 |---|---|---|---|
 | 400 | `INPUT_INVALID` | Missing or mistyped input, malformed JSON | all |
-| 400 | `QUERY_INVALID` | `limit` above 200, a decision log query without `ruleSet`, `from` and `to`, or a range longer than 31 days (ADR-0015) | `GET /decisions`, every list |
+| 400 | `QUERY_INVALID` | `limit` below 1 or above 200, a cursor the list did not issue, a decision log query without `ruleSet`, `from` and `to`, or a range longer than 31 days (ADR-0015) | `GET /decisions`, every list |
 | 401 | `UNAUTHENTICATED` | No principal | all |
 | 403 | `PERMISSION_DENIED` | Principal lacks the permission | all |
 | 403 | `SELF_APPROVAL_FORBIDDEN` | Approver equals requester (`TR-SEC-04`) | `:approve` |
@@ -176,7 +181,8 @@ Every draft response carries `version` in the body and `ETag: "<version>"`. `PUT
 | 409 | `INVALID_STATE` | Action not allowed in the current state, for example `:approve` on a `DRAFT` | lifecycle actions |
 | 409 | `IDEMPOTENCY_IN_FLIGHT` | Same key, first request still running; `Retry-After: 1` | all with `Idempotency-Key` |
 | 409 | `RULE_SET_EXISTS` | Name already used in this tenant | `POST /rule-sets` |
-| 422 | `VALIDATION_FAILED` | Parse or type errors; `violations` lists rows (`TR-DET-02`) | `PUT`, `:validate`, `:request-publish`, `:import` |
+| 413 | `PAYLOAD_TOO_LARGE` | Body over the endpoint's limit: 16,384 bytes for `:approve` and `:reject`, 1,048,576 bytes for `:evaluate` and imports | `:approve`, `:reject`, `:evaluate`, imports |
+| 422 | `VALIDATION_FAILED` | Parse or type errors; `violations` lists every cell problem with `ruleId` and `column` (`TR-DET-02`) | `PUT`, `:validate`, `:request-publish`, `:import` |
 | 422 | `UNIQUE_HIT_VIOLATION` | `unique` table matched several rows (`TR-DET-04`). An authoring defect, so retrying does not help (ADR-0010) | `:evaluate`, item error in `:evaluate-batch` |
 | 422 | `EVALUATION_ERROR` | Currency mismatch, division by zero, regex timeout; `detail` names the reason (`CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT`, `FUNCTION_ERROR`) | `:evaluate` |
 | 422 | `IDEMPOTENCY_KEY_REUSE_MISMATCH` | Same key, different payload | all with `Idempotency-Key` |

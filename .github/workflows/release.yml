@@ -1,6 +1,6 @@
 name: Release (dry run)
 
-# Builds a release from a clean checkout: the cockpit bundle from these sources with the pinned Node,
+# Runs on every vX.Y.Z tag (one project tag per release, PD-087). Builds a release from a clean checkout: the cockpit bundle from these sources with the pinned Node,
 # then every Java artifact, staged into target/release/maven-repo, with one bill of materials covering
 # the Maven packages and the npm packages in the cockpit bundle (TR-LIC-01, TR-SEC-06, TR-UI-06).
 # Nothing is published: the Maven Central namespace is not registered yet, and real publishing will be
@@ -10,7 +10,8 @@ name: Release (dry run)
 
 on:
   push:
-    tags: ["*/v*"]
+    # One project tag per release, vX.Y.Z (PD-087); tools/release/check-release-tag.sh refuses any other.
+    tags: ["v*"]
   workflow_dispatch:
   pull_request:
     paths:
@@ -27,6 +28,28 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  tag-guard-tests:
+    # Dry runs of the release tag guard on a scratch copy of the tree: v0.1.0 passes; a per-module tag,
+    # a module at another version and a commit off main are refused. Nothing is built.
+    name: Release tag guard tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Unit tests of the tag check
+        run: python3 tools/release/test_release_sbom.py -v
+
+      - name: Dry runs of the tag guard
+        run: tools/release/test-release-tag.sh
+
   release-dry-run:
     name: Release dry run (cockpit bundle, artifacts, release SBOM)
     runs-on: ubuntu-latest

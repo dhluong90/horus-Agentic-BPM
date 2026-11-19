@@ -4,9 +4,9 @@ info:
   version: 0.1.0
   description: |
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
-    This file covers the endpoints implemented so far: import (YAML and DMN), read, export,
-    request publication, approve and evaluate. The remaining endpoints of rule-engine/docs/DESIGN.md section 4.2 are
-    added with the features that implement them.
+    This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
+    export, request publication, approve, reject, history and evaluate. The remaining endpoints of
+    rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
     The tenant is never part of a request: it comes from the host's authenticated context
     (`TenantResolver`). A `tenantId` in a body is ignored. Money is `{currency, amount}` with the
@@ -25,6 +25,37 @@ tags:
     description: Evaluation and the decision log
 paths:
   /rule-sets:
+    get:
+      tags: [rule-sets]
+      operationId: listRuleSets
+      summary: List the rule sets of the caller's tenant, by name
+      description: |
+        Permission `rules:read`. Keyset-paged by rule set name in ascending order; follow
+        `nextCursor` until it is null. `publishedVersion` is the version evaluation selects at the
+        host clock (DESIGN section 3.3.1), or null when none is in effect. Writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of rule sets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleSetPage'
+              example:
+                data:
+                  - ruleSet: card-fee
+                    latestVersion: 2
+                    latestStatus: PENDING_APPROVAL
+                    publishedVersion: 1
+                    lastChangedAt: '2026-12-15T02:00:00Z'
+                nextCursor: null
+                hasNext: false
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
     post:
       tags: [rule-sets]
       operationId: importRuleSet
@@ -32,7 +63,7 @@ paths:
       description: |
         Stores the version as `DRAFT`, with the source document byte for byte, its SHA-256
         (`sourceHash`) and the SHA-256 of its RFC 8785 canonical form (`canonicalHash`). Nothing
-        in the document is evaluated. Permission `rules:author`.
+        in the document is evaluated. Permission `rules:author`, checked before the body is read.
 
         A DMN 1.2 to 1.5 file (`application/xml`, `text/xml` or a DMN media type such as
         `application/dmn+xml`) holding one decision with a decision table is read into the lowest
@@ -85,14 +116,76 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}:
+    get:
+      tags: [rule-sets]
+      operationId: getRuleSet
+      summary: Read the summary of one rule set
+      description: Permission `rules:read`. The same summary as an item of `GET /rule-sets`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+      responses:
+        '200':
+          description: The rule set summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleSetSummary'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions:
+    get:
+      tags: [rule-sets]
+      operationId: listVersions
+      summary: List the versions of a rule set, newest first
+      description: |
+        Permission `rules:read`. Keyset-paged by version number in descending order. Items carry
+        the lifecycle fields without the definition; read one version for its definition.
+        `allowedActions` is computed for the caller. A rule set of another tenant is
+        `404 RULE_SET_NOT_FOUND`. Writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of versions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionPage'
+              example:
+                data:
+                  - ruleSet: card-fee
+                    version: 2
+                    status: PENDING_APPROVAL
+                    hitPolicy: FIRST
+                    effectiveFrom: null
+                    lockVersion: 1
+                    canonicalHash: 3f1c9a5e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d
+                    createdBy: lan
+                    createdAt: '2026-12-15T01:00:00Z'
+                    requestedBy: lan
+                    requestedAt: '2026-12-15T01:30:00Z'
+                    approvedBy: null
+                    approvedAt: null
+                    allowedActions: [reject]
+                nextCursor: null
+                hasNext: false
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
     post:
       tags: [rule-sets]
       operationId: importVersion
       summary: Import a YAML document or a DMN decision table as the next draft version of an existing rule set
       description: |
         The document's `ruleSet` (for DMN, the decision id) must equal `{name}`. DMN files are read
-        as for `importRuleSet`. Permission `rules:author`.
+        as for `importRuleSet`. Permission `rules:author`, checked before the body is read. A body
+        over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -177,6 +270,53 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}/history:
+    get:
+      tags: [rule-sets]
+      operationId: getVersionHistory
+      summary: Read the lifecycle history of one version, oldest first
+      description: |
+        Permission `rules:read`. One entry per transition (`CREATED`, `REQUESTED`, `APPROVED`,
+        `REJECTED`), with actor, reason or comment, statuses before and after and the
+        `lockVersion` after (DESIGN section 3.3.3). A version created before the history table
+        existed starts with a backfilled `CREATED` entry; its earlier request and approval have
+        no entries.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      responses:
+        '200':
+          description: The history entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionHistory'
+              example:
+                data:
+                  - action: CREATED
+                    fromStatus: null
+                    toStatus: DRAFT
+                    actor: lan
+                    reason: null
+                    lockVersion: 0
+                    occurredAt: '2026-12-15T01:00:00Z'
+                  - action: REQUESTED
+                    fromStatus: DRAFT
+                    toStatus: PENDING_APPROVAL
+                    actor: lan
+                    reason: null
+                    lockVersion: 1
+                    occurredAt: '2026-12-15T01:30:00Z'
+                  - action: REJECTED
+                    fromStatus: PENDING_APPROVAL
+                    toStatus: DRAFT
+                    actor: minh
+                    reason: R2 waiver needs pricing committee minutes
+                    lockVersion: 2
+                    occurredAt: '2026-12-15T02:00:00Z'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:request-publish:
     post:
       tags: [rule-sets]
@@ -204,7 +344,8 @@ paths:
       description: |
         Permission `rules:approve`. The requester of the publication cannot approve it:
         `403 SELF_APPROVAL_FORBIDDEN`, and the version stays `PENDING_APPROVAL`. Without an
-        `effectiveFrom` in the document the version takes effect at approval.
+        `effectiveFrom` in the document the version takes effect at approval. A body over
+        16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -219,6 +360,8 @@ paths:
               properties:
                 comment:
                   type: string
+                  maxLength: 2000
+                  description: Optional; stored in the history. Longer than `lifecycle.reason-max-length` (default 2,000 characters) is `400 INPUT_INVALID`
             example:
               comment: Fees checked against the tariff
       responses:
@@ -228,6 +371,44 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:reject:
+    post:
+      tags: [rule-sets]
+      operationId: reject
+      summary: Send a pending version back to DRAFT with a reason
+      description: |
+        Permission `rules:approve`. Only a `PENDING_APPROVAL` version can be rejected; any other
+        status is `409 INVALID_STATE`. The version returns to `DRAFT` with `requestedBy` and
+        `requestedAt` cleared, one history entry `REJECTED` and one `rules.version.rejected.v1`
+        event. The requester of the publication cannot reject it: `403 SELF_APPROVAL_FORBIDDEN`,
+        with a detail pointing to `:withdraw`, and the version stays `PENDING_APPROVAL` (PD-089,
+        DESIGN section 3.3, `RLE-025`).
+        A blank reason, or one longer than `lifecycle.reason-max-length` (default 2,000
+        characters), is `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectRequest'
+            example:
+              reason: R2 waiver needs pricing committee minutes
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}:evaluate:
     post:
@@ -237,7 +418,8 @@ paths:
       description: |
         Permission `rules:evaluate`. Writes exactly one `rle_decision` row in the request's
         transaction. A failed evaluation (`EVALUATION_ERROR`) is logged and answered `422` with
-        the `decisionId`. Members other than `inputs` are ignored, including `tenantId`.
+        the `decisionId`. Members other than `inputs` are ignored, including `tenantId`. A body over
+        1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - name: ruleSet
           in: path
@@ -281,6 +463,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
@@ -315,6 +498,27 @@ components:
         type: string
         minLength: 1
         maxLength: 200
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Items per page, 1 to `query.max-page-size` (default 200). Outside that range is `400 QUERY_INVALID`.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: |
+        The `nextCursor` of the previous page, unchanged. Cursors are signed for the tenant and the
+        list: a cursor not issued by this endpoint to this tenant (forged, edited, from another list
+        or another tenant) is `400 QUERY_INVALID`.
+      schema:
+        type: string
+        maxLength: 400
     IfMatch:
       name: If-Match
       in: header
@@ -415,9 +619,140 @@ components:
           type: [string, 'null']
           description: Who imported the version; neither the author nor the requester may approve it
         createdAt: { type: string, format: date-time }
+        allowedActions:
+          $ref: '#/components/schemas/AllowedActions'
         definition:
           type: object
           description: The canonical definition, rule-engine/api/schema/rule-set.v1.schema.json
+    AllowedActions:
+      type: array
+      description: |
+        Lifecycle actions the caller may take on this version now, from its status, the
+        caller's permissions and the four-eyes rule: `request-publish` on a `DRAFT` with
+        `rules:author`; `approve` on a `PENDING_APPROVAL` with `rules:approve` when the caller is
+        neither the requester nor the author; `reject` on a `PENDING_APPROVAL` with
+        `rules:approve` when the caller is not the requester. A hint for screens only: the engine
+        checks again on every command.
+      items:
+        type: string
+        enum: [request-publish, approve, reject]
+    RuleSetSummary:
+      type: object
+      required: [ruleSet, latestVersion, latestStatus, publishedVersion, lastChangedAt]
+      properties:
+        ruleSet: { type: string }
+        latestVersion: { type: integer, minimum: 1 }
+        latestStatus:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+        publishedVersion:
+          type: [integer, 'null']
+          description: |
+            The version evaluation selects at the host clock (DESIGN section 3.3.1, ADR-0025), or
+            null when none is in effect. An approved version whose `effectiveFrom` is still in the
+            future does not count until that instant.
+        lastChangedAt:
+          type: string
+          format: date-time
+          description: The latest creation, request, approval or rejection of any version of the rule set
+    RuleSetPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleSetSummary'
+        nextCursor:
+          type: [string, 'null']
+          description: Pass as `cursor` for the next page; null on the last page
+        hasNext:
+          type: boolean
+          description: True when `nextCursor` is set
+    VersionSummary:
+      type: object
+      required: [ruleSet, version, status, hitPolicy, lockVersion, canonicalHash, createdAt, allowedActions]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        status:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+        hitPolicy:
+          type: string
+          enum: [FIRST, UNIQUE, COLLECT]
+        effectiveFrom: { type: [string, 'null'], format: date-time }
+        lockVersion: { type: integer }
+        canonicalHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdBy: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        requestedBy: { type: [string, 'null'] }
+        requestedAt: { type: [string, 'null'], format: date-time }
+        approvedBy: { type: [string, 'null'] }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        allowedActions:
+          $ref: '#/components/schemas/AllowedActions'
+    VersionPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/VersionSummary'
+        nextCursor:
+          type: [string, 'null']
+        hasNext:
+          type: boolean
+    HistoryEntry:
+      type: object
+      required: [action, toStatus, actor, lockVersion, occurredAt]
+      properties:
+        action:
+          type: string
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED]
+        fromStatus:
+          type: [string, 'null']
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, null]
+        toStatus:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+        actor: { type: string }
+        reason:
+          type: [string, 'null']
+          description: The rejection reason or the approval comment
+        lockVersion: { type: integer }
+        occurredAt: { type: string, format: date-time }
+    VersionHistory:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryEntry'
+    RejectRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Why the version goes back to its author; stored in the history and the event
+    Violation:
+      type: object
+      required: [ruleId, column, message]
+      properties:
+        ruleId:
+          type: [string, 'null']
+          description: The rule (row) the problem is in, or null for a problem outside the rules
+        column:
+          type: [string, 'null']
+          description: The input or output name (column) the problem is in, or null when it concerns the row or the document
+        message:
+          type: string
+          description: The problem, in English, without the rule id and column
     EvaluateRequest:
       type: object
       required: [inputs]
@@ -452,11 +787,29 @@ components:
         status: { type: integer }
         code:
           type: string
-          enum: [INPUT_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED, SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND,
-            VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT,
-            RULE_SET_EXISTS, VALIDATION_FAILED, IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, PAYLOAD_TOO_LARGE]
+          enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
+            SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION,
+            VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
+            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SCHEMA_NOT_READY]
         detail: { type: string }
         correlationId: { type: string }
+        violations:
+          type: array
+          description: |
+            Present on `VALIDATION_FAILED` only, with at least one entry. Every cell problem of the
+            document is listed, in document order (rule by rule; conditions, then outputs, each as
+            written), up to 100 entries, so a screen can mark each cell
+            at once; `violationsTruncated` says whether more were found. A problem in the
+            document's structure (a missing key, an unknown property) stops reading and is the only
+            entry.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Violation'
+          example:
+            - { ruleId: R3, column: fee, message: 'output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code' }
+        violationsTruncated:
+          type: boolean
+          description: Present on `VALIDATION_FAILED`; true when the document has more than the 100 problems listed
         decisionId:
           type: string
           description: Present on `EVALUATION_ERROR`; the failed decision is logged

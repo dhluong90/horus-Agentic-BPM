@@ -153,7 +153,9 @@ class CoreArchitectureTest {
                         // and tags that Jackson does not report (security review of #1, finding 7).
                         "org.snakeyaml.engine..",
                         // The JDK streaming XML parser for DMN XML, hardened in one place (no DTD, no external entity).
-                        "javax.xml", "javax.xml.stream..", "javax.xml.namespace..")
+                        "javax.xml", "javax.xml.stream..", "javax.xml.namespace..",
+                        // JDK cryptography (HMAC-SHA256), used to sign list cursors (RLE-039, QA review of #147).
+                        "javax.crypto..")
                 .because("rule-engine-core depends on the JDK and Jackson 3 only (TR-EMB-03, ADR-0021)")
                 .check(core);
     }

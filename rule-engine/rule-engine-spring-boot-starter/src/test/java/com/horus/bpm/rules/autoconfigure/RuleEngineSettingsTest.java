@@ -47,6 +47,18 @@ class RuleEngineSettingsTest {
                         .isEqualTo(new EngineSettings(maxEntries, Duration.parse(retention), maxScale, true)));
     }
 
+    @Test
+    void TR_EXT_03_page_size_and_reason_length_may_be_lowered() {
+        runner.withPropertyValues("horus.bpm.rules.query.max-page-size=50",
+                        "horus.bpm.rules.lifecycle.reason-max-length=500")
+                .run(context -> assertThat(context.getBean(EngineSettings.class))
+                        .extracting(EngineSettings::queryMaxPageSize, EngineSettings::reasonMaxLength)
+                        .containsExactly(50, 500));
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class))
+                .extracting(EngineSettings::queryMaxPageSize, EngineSettings::reasonMaxLength)
+                .containsExactly(EngineDefaults.QUERY_MAX_PAGE_SIZE, EngineDefaults.REASON_MAX_LENGTH));
+    }
+
     @org.junit.jupiter.api.Test
     void TR_EXT_01_undeclared_inputs_can_be_ignored_instead_of_refused() {
         runner.withPropertyValues("horus.bpm.rules.evaluation.reject-undeclared-inputs=false")
@@ -60,7 +72,11 @@ class RuleEngineSettingsTest {
         "horus.bpm.rules.idempotency.retention=PT30S, horus.bpm.rules.idempotency.retention",
         "horus.bpm.rules.idempotency.retention=P31D, horus.bpm.rules.idempotency.retention",
         "horus.bpm.rules.evaluation.max-input-scale=35, horus.bpm.rules.evaluation.max-input-scale",
-        "horus.bpm.rules.evaluation.max-input-scale=-1, horus.bpm.rules.evaluation.max-input-scale"
+        "horus.bpm.rules.evaluation.max-input-scale=-1, horus.bpm.rules.evaluation.max-input-scale",
+        "horus.bpm.rules.query.max-page-size=0, horus.bpm.rules.query.max-page-size",
+        "horus.bpm.rules.query.max-page-size=201, horus.bpm.rules.query.max-page-size",
+        "horus.bpm.rules.lifecycle.reason-max-length=0, horus.bpm.rules.lifecycle.reason-max-length",
+        "horus.bpm.rules.lifecycle.reason-max-length=2001, horus.bpm.rules.lifecycle.reason-max-length"
     })
     void TR_EXT_03_an_invalid_value_fails_start_up_naming_the_property(String property, String name) {
         runner.withPropertyValues(property).run(context -> assertThat(context).hasFailed()

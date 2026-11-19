@@ -43,13 +43,33 @@ curl -s localhost:8080/actuator/health
 
 docker exec horus-pg psql -U horus -d horus -c '\dt'
 # flyway_schema_history, loan_application, rle_decision (partitioned), rle_decision_YYYY_MM (this month and next),
-# rle_decision_default, rle_decision_outbox, rle_idempotency, rle_rule, rle_rule_set, rle_schema_history, rle_version
+# rle_decision_default, rle_decision_outbox, rle_idempotency, rle_rule, rle_rule_set, rle_schema_history, rle_version,
+# rle_version_history, rle_engine_key
 
 docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_schema_history ORDER BY installed_rank'
 #  0       | Rule Engine baseline
 #  1       | V1__rle_baseline.sql
 #  2       | V2__rle_version_created_by.sql
+#  3       | V3__rle_version_history.sql
+#  4       | V4__rle_version_history_append_only.sql
+#  5       | V5__rle_engine_key.sql
 ```
+
+### The cursor key
+
+At start-up, after the migrations, the engine creates its list-cursor key in `rle_engine_key` if it is missing and reads it, so the runtime database user needs `SELECT` and `INSERT` on that table; without them start-up stops with a message naming the table. Requests only use the key in memory.
+
+### Protect the audit tables
+
+`rle_version_history` is append-only: migration `V4` adds triggers that refuse `UPDATE`, `DELETE` and `TRUNCATE`. A role that owns the table can still drop a trigger, so if you run migrations with one role and the application with another, also take the rights away from the application role:
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON rle_version_history FROM horus_app;   -- your runtime role
+```
+
+### Upgrading to the release with lifecycle history
+
+Migration `V3` creates the history table and gives every existing version one `CREATED` row. During a rolling upgrade, replicas still on the old release keep serving request-publish and approve but write no history rows, so those transitions are missing from `GET .../history` for good. If that matters, hold lifecycle commands (imports, requests, approvals) until every replica runs the new release; evaluation is unaffected.
 
 ### Host metadata with two demo users
 
@@ -159,6 +179,36 @@ H=localhost:8080/api/bpm/rules/v1
    # {..., "sourceDocument":"# Monthly card fee, the rule set of the Rule Engine walking skeleton (RLE-001).\n...", ...}
    ```
 
+9. Lists for an editor: rule sets by name and versions newest first, a page at a time (`limit` 1 to 200, default 50; pass `nextCursor` back as `cursor`). Each version carries `allowedActions` for the caller:
+
+   ```bash
+   curl -s -u minh:demo-only "$H/rule-sets?limit=2"
+   # {"data":[{"ruleSet":"card-fee","latestVersion":2,"latestStatus":"PENDING_APPROVAL","publishedVersion":1,
+   #           "lastChangedAt":"..."},{"ruleSet":"fx-margin",...}],"nextCursor":"cnVsZS1zZXRzOmZ4LW1hcmdpbg","hasNext":true}
+   curl -s -u minh:demo-only "$H/rule-sets/card-fee/versions"
+   # {"data":[{"version":2,"status":"PENDING_APPROVAL","createdBy":"hoa","requestedBy":"hoa",
+   #           "allowedActions":["approve","reject"],...},{"version":1,"status":"PUBLISHED","approvedBy":"minh",...}],...}
+   ```
+
+10. Minh sends a pending version back with a reason; it is a draft again and the reason is in its history:
+
+    ```bash
+    curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:reject -H 'Content-Type: application/json' \
+      -H 'Idempotency-Key: demo-reject-1' -H 'If-Match: "1"' -d '{"reason":"R2 waiver needs pricing committee minutes"}'
+    # 200 {"status":"DRAFT","lockVersion":2,"requestedBy":null,...}
+    curl -s -u hoa:demo-only $H/rule-sets/card-fee/versions/2/history
+    # {"data":[{"action":"CREATED",...},{"action":"REQUESTED",...},
+    #          {"action":"REJECTED","actor":"minh","reason":"R2 waiver needs pricing committee minutes",...}]}
+    ```
+
+11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them:
+
+    ```bash
+    # 422 {"code":"VALIDATION_FAILED","violations":[
+    #   {"ruleId":"R2","column":"balance","message":"compares a money with a number"},
+    #   {"ruleId":"R3","column":"fee","message":"output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code"}]}
+    ```
+
 The same path in Java, inside the host's own transaction:
 
 ```java
@@ -240,6 +290,8 @@ Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUT
 | `horus.bpm.host-id` | unset; `rule-engine-only` here | Id returned by `GET /api/bpm/meta` |
 | `horus.bpm.rules.security.role-permissions` | empty; `ROLE_PRICING_AUTHOR` and `ROLE_PRICING_APPROVER` here | Host role to `rules:*` permissions, listed by `GET /api/bpm/me` |
 | `horus.bpm.rules.migrate-on-start` | `true` | `false` for hosts that run the `rle_*` migrations in a separate job. If the schema is not current, the `ruleEngine` health contributor is down and partitions are not created until it is |
+| `horus.bpm.rules.query.max-page-size` | `200` | Largest `limit` of `GET /rule-sets` and `GET .../versions`, 1 to 200; may be lowered, never raised |
+| `horus.bpm.rules.lifecycle.reason-max-length` | `2000` | Longest `:reject` reason in characters, 1 to 2000; may be lowered, never raised |
 
 The full list of properties is on the wiki page Rule Engine Configuration. The starter adds them with the features that use them.
 
