@@ -116,6 +116,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-092](#pd-092-the-cockpit-opens-on-home-for-every-role) | The cockpit opens on Home for every role | Decided (product manager, delegated, PD-073) |
 | [PD-093](#pd-093-cockpit-menu-for-authors-and-two-changes-to-the-approved-prototype) | Cockpit menu for authors and two changes to the approved prototype | Decided (product manager, delegated, PD-073) |
 | [PD-094](#pd-094-cockpit-draft-editing-is-off-by-default-in-010) | Cockpit draft editing is off by default in 0.1.0 | Decided (product manager, delegated, PD-073) |
+| [PD-096](#pd-096-the-approver-differs-from-everyone-who-made-the-change) | The approver differs from everyone who made the change | Decided (product manager, delegated, PD-073) |
+| [PD-097](#pd-097-process-definitions-follow-the-rule-engine-withdraw-not-self-reject) | Process definitions follow the Rule Engine: withdraw, not self-reject | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2857,3 +2859,51 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - **Import button:** the cockpit's "Import rule set" action depends on `rules:author` only, not on this setting.
 
 **Follow-ups.** Maintainers (engineering): the cockpit default, the example host setting and the import action. Architect: DESIGN section 4.4. Documentation: the release notes and the wiki Rule Engine Configuration page.
+
+### PD-096 The approver differs from everyone who made the change
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Under four-eyes, must the approver of a process definition differ only from the requester (process SPEC `PRE-019`, ADR-0012), or from every identity that made the version: the importer, every editor of the draft and the requester (open question 11.2 of #47)? |
+| Raised by | Maintainers (engineering), pull request #264 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1, with a host setting whose relaxed value is off by default |
+
+**Context.** In the Rule Engine the approver already differs from the importer and the requester, and only the author may replace a draft. The case of "a second author edits, then approves" therefore cannot arise there. Process definitions will be editable by several people once draft editing and the modeller arrive, so the hole would open there unless the rule names every maker.
+
+**Options considered**
+
+1. The approver differs from every maker of the version: the identity that imported or created it, every identity that edited the draft, and the requester (chosen). Consequence: no one approves a change they shaped, whatever path they used. The engine keeps the set of makers on the version from its history rows, so the check is one lookup. A small team with few approvers may need a second approver more often.
+2. The approver differs only from the requester. Consequence: simplest, as written today. Someone who edited a draft and then let a colleague request publication could approve their own work.
+
+**Configuration (PD-074).** Setting `lifecycle.approver-must-differ-from`, shared by both engines:
+- `makers` (the default): the approver differs from the importer or creator, every editor and the requester.
+- `requester`: the approver differs from the requester only. This relaxes a control, so it is never the default. It is reported in `/api/bpm/meta`, logged at WARN at start-up, and recorded on every approval history row.
+
+The requester can never approve under either value. The refusal is `403 SELF_APPROVAL_FORBIDDEN`, with a detail that names why the caller may not approve.
+
+**Consequences.**
+- **Process Engine:** `PRE-019` changes from "the requester cannot approve" to "no maker of the version can approve", with a case for an editor who did not request. Until draft editing exists, the makers are the importer and the requester. #264 adds the importer to the check, which is a small change.
+- **Rule Engine:** the behaviour is unchanged. Its makers are the importer, the author and the requester, which `RLE-009` already covers. The setting applies to it too, with the same default.
+
+**Follow-ups.** Architect: `PRE-019`, ADR-0012 (the answer to 11.2), both engines' DESIGN configuration tables and the `/meta` setting. Maintainers (engineering): #264, including the importer in the check. QA: the editor case once draft editing lands.
+
+### PD-097 Process definitions follow the Rule Engine: withdraw, not self-reject
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | In #47 a requester may reject their own request for a process definition. The Rule Engine refuses that and offers withdraw instead (PD-089, `RLE-025`, `RLE-046`). Should the engines behave the same? |
+| Raised by | Maintainers (engineering), pull request #264 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Align with the Rule Engine (chosen). A requester's reject of their own request is refused with `403 SELF_APPROVAL_FORBIDDEN`, with a detail pointing to withdraw. Withdraw (`processes:author`, the requester only) returns the version to draft, publishes nothing, and writes its own history row and event. Consequence: one governance model across both engines, one approvals screen in the cockpit, and an audit trail that keeps "the author took it back" apart from "an approver refused it".
+2. Keep self-reject for processes. Consequence: no new action, but the two engines answer the same request differently, and a bank's auditor reads a rejection that was really a withdrawal.
+
+**Configuration.** None. Withdraw gives the requester the same outcome as a self-reject, so there is no business choice to configure. Under PD-074, one action has one meaning in both engines.
+
+**Timing.** #264 refuses self-reject now. Process withdraw is a separate issue for 0.3.0, the release in which process definition approval ships to adopters. Until then a requester asks an approver to reject, as in the Rule Engine of 0.1.0.
+
+**Follow-ups.** Architect: process DESIGN 3.2 (the reject guard and the withdraw transition) and a `PRE` statement for withdraw. Maintainers (engineering): #264 (reject guard) and the withdraw issue. Documentation: the wiki Process Engine API page.
