@@ -267,9 +267,10 @@ class ProcessRestApiIT {
     }
 
     @Test
-    void PRE_050_cancel_needs_processes_cancel_which_processes_start_does_not_grant() throws Exception {
+    void PRE_054_cancel_needs_processes_cancel_and_a_reason_and_runs_no_step_or_compensation() throws Exception {
         String id = submit("IT-CANCEL-2", "C-002");
         String etag = etag(id);
+        long before = history(id);
 
         HttpResponse<String> teller = cancel("tuan", id, etag, "cancel-it-2", REASON);
         HttpResponse<String> officer = cancel("an", id, etag, "cancel-it-3", REASON);
@@ -277,14 +278,27 @@ class ProcessRestApiIT {
         assertThat(problem(teller)).as("tuan may start but not cancel").isEqualTo("403 PERMISSION_DENIED");
         assertThat(JSON.readTree(teller.body()).get("detail").stringValue()).contains("processes:cancel");
         assertThat(problem(officer)).isEqualTo("403 PERMISSION_DENIED");
+        assertThat(status(id)).isEqualTo("RUNNING");
+        assertThat(history(id)).as("a refused cancel writes nothing").isEqualTo(before);
+
+        HttpResponse<String> supervisor = cancel("hoa", id, etag, "cancel-it-4", REASON);
+
+        assertThat(supervisor.statusCode()).as(supervisor.body()).isEqualTo(200);
+        assertThat(jdbc.sql("SELECT event_type FROM pre_history WHERE tenant_id = 'bank-a' AND instance_id = ? "
+                + "AND occurred_at > (SELECT max(occurred_at) FROM pre_history WHERE tenant_id = 'bank-a' "
+                + "AND instance_id = ? AND event_type <> 'INSTANCE_ENDED' AND event_type <> 'TOKEN_CANCELLED') "
+                + "ORDER BY occurred_at, id").params(id, id).query(String.class).list())
+                .as("the cancel only cancels tokens and ends the instance: no step entered, no handler, no compensation")
+                .containsOnly("TOKEN_CANCELLED", "INSTANCE_ENDED");
+        assertThat(jdbc.sql("SELECT details->>'actor' || ' | ' || (details->>'reason') || ' | ' || (details->>'status') "
+                + "FROM pre_history WHERE tenant_id = 'bank-a' AND instance_id = ? AND event_type = 'INSTANCE_ENDED'")
+                .param(id).query(String.class).single()).isEqualTo("hoa | " + REASON + " | CANCELLED");
         assertThat(meLists("hoa")).contains("processes:cancel", "processes:start");
         assertThat(meLists("tuan")).contains("processes:start").doesNotContain("processes:cancel");
-        assertThat(status(id)).isEqualTo("RUNNING");
-        assertThat(ended(id)).isZero();
     }
 
     @Test
-    void PRE_050_a_missing_blank_or_too_long_reason_is_400_and_nothing_is_written() throws Exception {
+    void PRE_054_a_missing_blank_or_too_long_reason_is_400_and_nothing_is_written() throws Exception {
         String id = submit("IT-CANCEL-R", "C-002");
         String etag = etag(id);
 

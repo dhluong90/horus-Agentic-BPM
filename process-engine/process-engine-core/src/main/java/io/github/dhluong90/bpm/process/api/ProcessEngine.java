@@ -33,7 +33,7 @@ public interface ProcessEngine {
      * Cancels a running instance of the caller's tenant: every live token and open task, with an
      * {@code INSTANCE_ENDED} history entry and {@code processes.instance.cancelled.v1}, both with the actor and the
      * reason, in one transaction. Needs {@code processes:cancel}, which {@code processes:start} does not grant (PD-103).
-     * Compensation declared by the definition is not run yet; it comes with saga compensation (#67).
+     * Cancel makes no adapter call and runs no compensation in 0.2.0 (ADR-0020 decision 2).
      *
      * @param instanceId the instance id
      * @param expectedLockVersion the instance's lock version ({@link ProcessInstance#lockVersion()}), sent as

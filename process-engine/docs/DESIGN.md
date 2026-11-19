@@ -93,7 +93,7 @@ Source: [`diagrams/instance-states.mmd`](diagrams/instance-states.mmd).
 | none | `start` | Effective version exists; business key unused for `(tenant, key)`, else the existing instance is returned (`TR-IDEM-02`) | `RUNNING` | `processes.instance.started.v1` |
 | `RUNNING` | Step transition, incident retry, migration | `pre_instance` row lock | `RUNNING` | `processes.step.completed.v1` |
 | `RUNNING` | Last token reaches an `end` step | None | `COMPLETED` | `processes.instance.completed.v1` |
-| `RUNNING` | `cancel(reason)` | `processes:cancel` (PD-103) | `CANCELLED` | `processes.instance.cancelled.v1` with actor and reason; open tasks cancelled; declared compensation from #67 on |
+| `RUNNING` | `cancel(reason)` | `processes:cancel` (PD-103) | `CANCELLED` | Under the `pre_instance` row lock, live tokens and open tasks are cancelled (and open jobs and timers once timers exist, ADR-0020); history row `INSTANCE_ENDED` whose `details` hold the actor, the reason and `CANCELLED`; `processes.instance.cancelled.v1` with `cancelledBy` and the reason; no adapter call and no compensation runs in 0.2.0 (ADR-0020 decision 2; compensation on cancel is planned for 1.2) (`PRE-054`) |
 | `RUNNING` | `onFailure: compensate` exhausted, or `throwCompensation` | Compensation stack not empty | `COMPENSATING` | `processes.compensation.started.v1` |
 | `COMPENSATING` | Stack walked to the bottom | Every handler `DONE` or resolved | `FAILED` | `processes.instance.failed.v1` |
 
@@ -331,7 +331,7 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `GET /instances?status=&definitionKey=&startedFrom=&startedTo=` | `processes:read` | List; `status` defaults to `RUNNING`; the range is at most 31 days | Cursor, at most 200 | `400 QUERY_INVALID` | M2 |
 | `GET /instances/{id}` | `processes:read` | State, tokens, masked variables | `ETag` | `404 INSTANCE_NOT_FOUND` | M2 |
 | `GET /instances/{id}/activities` | `processes:read` | Per node: entered, completed, duration, attempts, actor, incident; bounded by the instance's lifetime | Cursor, at most 200, `ETag` | `404 INSTANCE_NOT_FOUND` | M2 |
-| `POST /instances/{id}:cancel` | `processes:cancel` (PD-103; `processes:start` does not grant it) | Cancel with a required reason (at most `lifecycle.reason-max-length`, 2,000), recorded with the actor on the history entry and the event; declared compensation runs from saga compensation (#67) on | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
+| `POST /instances/{id}:cancel` | `processes:cancel` (PD-103; `processes:start` does not grant it) | Cancel with a required reason (at most `lifecycle.reason-max-length`, 2,000), recorded with the actor on the history entry and the event; no compensation runs in 0.2.0 (ADR-0020 decision 2; compensation on cancel is planned for 1.2) (`PRE-054`) | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
 | `GET /tasks?assignment=&status=&role=&group=&dueBefore=&slaBreached=` | `processes:task:work`; `any` needs `processes:task:manage` | Task query (section 8.2): `assignment` is one or more of `mine`, `candidate`, `any`; `status` one or more of `OPEN`, `CLAIMED`; ordered by `(dueAt, id)` | Cursor, at most 200, `ETag` | `400 QUERY_INVALID` | M2 |
 | `GET /tasks/{id}`, `GET /tasks/{id}/form` | `processes:task:work` | Task context and resolved form | `ETag` | `404 TASK_NOT_FOUND` | M2 |
 | `POST /tasks/{id}:claim`, `:unclaim`, `:complete` | `processes:task:work` | Section 3.5 | `Idempotency-Key`, `If-Match` | `403 SELF_APPROVAL_FORBIDDEN`, `422 FORM_VALIDATION_FAILED` | M2 |

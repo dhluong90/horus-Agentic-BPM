@@ -68,6 +68,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-050 | `PRE_050_*` in `ProcessRestApiIT` | Testcontainers host over HTTP, concurrent requests, event capture after commit | M2 | `TR-IDEM-01`, `TR-IDEM-03`, `TR-OBS-04` | Done |
 | PRE-052 | `PRE_052_requester_withdraws_own_pending_definition_to_draft` | Service, WebMvc, Testcontainers history and event capture | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Planned |
 
+Cancellation under PD-103 (`PRE-054`, specified with the product decision records) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
+
 The error matrix of the REST layer (`TR-SEC-08`) is `ProcessRestErrorMatrixTest` in `process-engine-rest`: MockMvc over the controller with in-memory services, every code of `ProcessProblemDetails.STATUS` answered as `application/problem+json` with `code`, `correlationId` and `type`, and an injected failure answered `500 INTERNAL` with no message, class name or SQL. Tenant isolation over HTTP (`TR-TEN-01`) is `ProcessRestApiIT.TR_TEN_01_*`: another tenant's read, list and cancel are not found and write nothing, and a tenant header for another tenant is `403 TENANT_NOT_ALLOWED`.
 
 ## Known gaps

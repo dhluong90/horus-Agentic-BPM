@@ -226,8 +226,8 @@ paths:
         Cancels every live token and open task of the instance in one transaction, writes the `INSTANCE_ENDED`
         history entry and hands `processes.instance.cancelled.v1` to the host publisher, both carrying the actor and
         the reason. Only a `RUNNING` instance can be cancelled (`409 INVALID_STATE`). Permission `processes:cancel`,
-        which `processes:start` does not grant (PD-103). Compensation declared by the definition is not run in this
-        release; it comes with saga compensation.
+        which `processes:start` does not grant (PD-103). Cancel makes no adapter call and runs no compensation in
+        0.2.0; compensation on cancel is planned for 1.2.
       parameters:
         - name: id
           in: path
