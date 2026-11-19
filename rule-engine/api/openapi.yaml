@@ -355,8 +355,9 @@ paths:
       summary: Evaluate the version effective at the host clock and log one decision
       description: |
         Permission `rules:evaluate`. Writes exactly one `rle_decision` row in the request's
-        transaction. A failed evaluation (`EVALUATION_ERROR`) is logged and answered `422` with
-        the `decisionId`. Members other than `inputs` are ignored, including `tenantId`. A body over
+        transaction. A failed evaluation (`EVALUATION_ERROR`, or `UNIQUE_HIT_VIOLATION` when a
+        `unique` table matches several rules; no match is outcome `NO_MATCH`) is logged and answered `422` with the
+        `decisionId` and `matchedRuleIds`, never with partial outputs. Members other than `inputs` are ignored, including `tenantId`. A body over
         1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - name: ruleSet
@@ -710,6 +711,10 @@ components:
         outcome:
           type: string
           enum: [MATCHED, NO_MATCH]
+          description: A failed evaluation is answered with a Problem instead, carrying decisionId and matchedRuleIds
+        matched:
+          type: boolean
+          description: False for a no-match, where every output is null and matchedRuleIds is empty
         matchedRuleIds:
           type: array
           items: { type: string }
@@ -728,7 +733,7 @@ components:
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION,
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
-            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SCHEMA_NOT_READY]
+            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SCHEMA_NOT_READY]
         detail: { type: string }
         correlationId: { type: string }
         violations:
@@ -750,4 +755,8 @@ components:
           description: Present on `VALIDATION_FAILED`; true when the document has more than the 100 problems listed
         decisionId:
           type: string
-          description: Present on `EVALUATION_ERROR`; the failed decision is logged
+          description: Present on `EVALUATION_ERROR` and `UNIQUE_HIT_VIOLATION`; the failed decision is logged
+        matchedRuleIds:
+          type: array
+          items: { type: string }
+          description: On `UNIQUE_HIT_VIOLATION`, every matched rule (two or more); empty on `EVALUATION_ERROR`

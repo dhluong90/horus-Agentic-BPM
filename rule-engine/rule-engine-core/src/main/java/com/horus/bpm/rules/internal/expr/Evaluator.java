@@ -18,14 +18,26 @@ import java.time.LocalDate;
 public final class Evaluator {
 
     private final RoundingMode moneyRounding;
+    private final int maxStringLength;
+
+    /**
+     * Creates an evaluator with the default string bound.
+     *
+     * @param moneyRounding rounding of money multiplication and division
+     */
+    public Evaluator(RoundingMode moneyRounding) {
+        this(moneyRounding, com.horus.bpm.rules.internal.service.EngineDefaults.STRING_MAX_LENGTH);
+    }
 
     /**
      * Creates an evaluator.
      *
      * @param moneyRounding rounding of money multiplication and division
+     * @param maxStringLength the longest string {@code +} may build; longer is {@link EvaluationException}
      */
-    public Evaluator(RoundingMode moneyRounding) {
+    public Evaluator(RoundingMode moneyRounding, int maxStringLength) {
         this.moneyRounding = moneyRounding;
+        this.maxStringLength = maxStringLength;
     }
 
     /**
@@ -222,6 +234,10 @@ public final class Evaluator {
             return scale(b, a, op);
         }
         if (left instanceof String a && right instanceof String b && op == Expr.BinaryOp.ADD) {
+            // Checked before concatenating, so the oversized string is never built.
+            if ((long) a.length() + b.length() > maxStringLength) {
+                throw new EvaluationException("String longer than " + maxStringLength + " characters");
+            }
             return a + b;
         }
         return null;
@@ -250,7 +266,14 @@ public final class Evaluator {
         }
     }
 
-    private static int compareCodePoints(String a, String b) {
+    /**
+     * Compares strings by Unicode code point, the order of {@code <} and of {@code collect} min and max.
+     *
+     * @param a the first string
+     * @param b the second string
+     * @return negative, zero or positive
+     */
+    public static int compareCodePoints(String a, String b) {
         int i = 0;
         int j = 0;
         while (i < a.length() && j < b.length()) {

@@ -209,6 +209,40 @@ H=localhost:8080/api/bpm/rules/v1
     #   {"ruleId":"R3","column":"fee","message":"output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code"}]}
     ```
 
+### Hit policies: exactly one row, or every matching row
+
+Two more rule sets ship with the example. [`loan-pricing.yaml`](src/main/resources/rules/loan-pricing.yaml) uses `hitPolicy: unique`, and its rows `R1` (score 700 or more) and `R2` (income 20,000,000 VND or more) overlap on purpose. [`risk-flags.yaml`](src/main/resources/rules/risk-flags.yaml) uses `hitPolicy: collect`: every matching row adds a flag and a penalty. Import, request and approve each one as in steps 1 to 4, then:
+
+12. A customer who matches both pricing rows gets no price, only an error. The decision is still logged with both rule ids:
+
+    ```bash
+    curl -s -u tuan:demo-only -X POST $H/decisions/loan-pricing:evaluate -H 'Content-Type: application/json' \
+      -d '{"inputs":{"score":750,"income":{"currency":"VND","amount":25000000}}}'
+    # 422 {"code":"UNIQUE_HIT_VIOLATION","detail":"2 rules matched; a unique table must match exactly one rule",
+    #      "decisionId":"...","matchedRuleIds":["R1","R2"],...}
+    ```
+
+    With `{"score":500, "income":{"currency":"VND","amount":5000000}}` no row matches: `200` with `"outcome":"NO_MATCH"`, `"matched":false` and `"outputs":{"rate":null}`, as under `first` (DMN 1.5), logged as `OK` with no matched rules. With a score of 750 and an income of 10,000,000 VND only `R1` matches: `200` and `"outputs":{"rate":0.085}`.
+
+13. A card transaction with high velocity from a new device fires two flags, and their penalties add up to 15:
+
+    ```bash
+    curl -s -u tuan:demo-only -X POST $H/decisions/risk-flags:evaluate -H 'Content-Type: application/json' \
+      -d '{"inputs":{"txPerHour":12,"country":"VN","newDevice":true}}'
+    # 200 {"outcome":"MATCHED","matchedRuleIds":["R1","R3"],"outputs":{"flags":["HIGH_VELOCITY","NEW_DEVICE"],"penalty":15},...}
+    ```
+
+14. The log holds every decision, the refusals included:
+
+    ```bash
+    docker exec horus-pg psql -U horus -d horus -c \
+      "SELECT rule_set_name, outcome, matched_rule_ids, outputs FROM rle_decision WHERE rule_set_name <> 'card-fee'"
+    #  loan-pricing | UNIQUE_HIT_VIOLATION | ["R1", "R2"] |
+    #  loan-pricing | OK                   | []           | {"rate": null}
+    #  loan-pricing | OK                   | ["R1"]       | {"rate": 0.085}
+    #  risk-flags   | OK                   | ["R1", "R3"] | {"flags": ["HIGH_VELOCITY", "NEW_DEVICE"], "penalty": 15}
+    ```
+
 The same path in Java, inside the host's own transaction:
 
 ```java
@@ -275,7 +309,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `CockpitEmbeddedIT.TR_SEC_09_*` | Without a session the cockpit path redirects to the host's sign-in and serves no file; the cockpit page carries the strict CSP and `X-Frame-Options: SAMEORIGIN` |
 | `CockpitEmbeddedIT.CKP_001_*` | On the `dev` profile: form sign-in, the cockpit page and its one-host registry, then `200` from `/api/bpm/meta` and `/api/bpm/me` with the session, valid against the cockpit schemas; a call that changes data needs `X-XSRF-TOKEN` from the cookie |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
-| `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
+| `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*`, `RLE_002_*`, `RLE_003_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.
 

@@ -30,11 +30,29 @@ public final class InputLimits {
      * @throws InputInvalidException naming the input
      */
     public static void check(DecisionInput input, int maxPrecision, int maxScale) {
-        input.values().forEach((name, value) -> check(name, value, maxPrecision, maxScale));
+        check(input, maxPrecision, maxScale, Integer.MAX_VALUE);
     }
 
-    private static void check(String name, Object value, int maxPrecision, int maxScale) {
+    /**
+     * Checks every number and string of the inputs, in lists too.
+     *
+     * @param input the inputs
+     * @param maxPrecision the largest number of significant digits
+     * @param maxScale the largest absolute scale
+     * @param maxStringLength the longest string, in UTF-16 code units
+     * @throws InputInvalidException naming the input
+     */
+    public static void check(DecisionInput input, int maxPrecision, int maxScale, int maxStringLength) {
+        input.values().forEach((name, value) -> check(name, value, maxPrecision, maxScale, maxStringLength));
+    }
+
+    private static void check(String name, Object value, int maxPrecision, int maxScale, int maxStringLength) {
         switch (value) {
+            case String text -> {
+                if (text.length() > maxStringLength) {
+                    throw new InputInvalidException("Input " + name + " is longer than " + maxStringLength + " characters");
+                }
+            }
             case BigDecimal d -> {
                 if (Math.abs((long) d.scale()) > maxScale || (d.signum() != 0 && d.precision() > maxPrecision)) {
                     throw outOfBounds(name, maxPrecision, maxScale);
@@ -49,10 +67,10 @@ public final class InputLimits {
                     + "use an integer, a BigDecimal or a decimal string");
             case Float ignored -> throw new InputInvalidException("Input " + name + " is a floating-point value; "
                     + "use an integer, a BigDecimal or a decimal string");
-            case List<?> list -> list.forEach(element -> check(name, element, maxPrecision, maxScale));
-            case Map<?, ?> map -> map.values().forEach(element -> check(name, element, maxPrecision, maxScale));
+            case List<?> list -> list.forEach(element -> check(name, element, maxPrecision, maxScale, maxStringLength));
+            case Map<?, ?> map -> map.values().forEach(element -> check(name, element, maxPrecision, maxScale, maxStringLength));
             case null, default -> {
-                // Strings, booleans, money (long minor units), dates and longs are bounded by their types.
+                // Booleans, money (long minor units), dates and longs are bounded by their types.
             }
         }
     }
