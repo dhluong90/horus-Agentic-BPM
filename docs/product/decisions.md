@@ -124,6 +124,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-101](#pd-101-retiring-the-last-version-in-effect-needs-an-explicit-confirmation) | Retiring the last version in effect needs an explicit confirmation | Decided (product manager, delegated, PD-073) |
 | [PD-102](#pd-102-process-definitions-follow-the-rule-engines-retirement-rules) | Process definitions follow the Rule Engine's retirement rules | Decided (product manager, delegated, PD-073) |
 | [PD-103](#pd-103-cancelling-a-process-instance-needs-its-own-permission) | Cancelling a process instance needs its own permission | Decided (product manager, delegated, PD-073) |
+| [PD-104](#pd-104-approving-a-version-with-personal-data-warnings-needs-an-acknowledgement) | Approving a version with personal-data warnings needs an acknowledgement | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -3082,3 +3083,34 @@ The value in force is shown in `/api/bpm/meta`. In the `four-eyes` retirement mo
 **Configuration.** Through role mapping only. Whether a second person must confirm a cancellation is not decided here. It returns as a decision if a pilot bank asks for it.
 
 **Follow-ups.** Architect: the permission catalogue, the process DESIGN REST row and a `PRE` statement for cancel. Maintainers (engineering): #253, and the `processes:cancel` entry in the module's permission catalogue and in the examples' role mapping.
+
+### PD-104 Approving a version with personal-data warnings needs an acknowledgement
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | A version can carry `UNMASKED_PERSONAL_DATA` warnings (PD-099, mitigation 1): an input looks like personal data and is not masked. The approval screen shows the warning (#312), but the approval record does not say the approver saw and accepted it. Should approval require an explicit acknowledgement? |
+| Raised by | Review of pull request #312 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Context.** The decision log is append-only. An approval that lets an unmasked personal-data input go live is the moment a bank accepts that risk, and an auditor must be able to see that someone accepted it knowingly.
+
+**Options considered**
+
+1. Require an explicit acknowledgement, recorded with the approval (chosen).
+   - The approve request carries the warning codes the approver accepts, for example `acknowledgedWarnings: ["UNMASKED_PERSONAL_DATA"]`.
+   - An approval of a version with an unacknowledged listed warning is refused with `409 WARNINGS_NOT_ACKNOWLEDGED`. The refusal names the warnings and the inputs.
+   - The approval history row and the published event record the acknowledged codes and the input names.
+   - In the cockpit the approver ticks a box worded "I accept that these inputs are logged without masking: nationalId", and Approve stays unavailable until it is ticked.
+
+   Consequence: the record shows who accepted the risk and for which inputs. One extra click, and only on versions that carry the warning.
+2. Show the warning only, as today. Consequence: no friction, but nothing proves the approver read it.
+
+**Configuration (PD-074).** Setting `lifecycle.acknowledge-warnings`, a list of warning codes that need an acknowledgement before approval. The default is `[UNMASKED_PERSONAL_DATA]`.
+- A host may add codes as new warnings appear.
+- Removing `UNMASKED_PERSONAL_DATA` relaxes a control. It is allowed, logged at WARN at start-up, and shown in `/api/bpm/meta`.
+- Strict mode (`decision-log.require-explicit-mask`, PD-099) turns the same case into a publish error, so no acknowledgement is ever needed there.
+
+**Recommendation and decision.** Option 1, in 0.2.0, with the other PD-099 mitigations, before the first pilot on real data. It completes mitigation 1: the warning is not only shown, it is accepted on the record.
+
+**Follow-ups.** Architect: a statement in the rule engine SPEC for the approve request, the error code and the history and event fields, and the setting in DESIGN 4.4. Maintainers (engineering): the implementation issue (engine and cockpit). Documentation: the approval how-to.
