@@ -3,6 +3,7 @@
      approved automatically, any other fee goes to a card officer. Opens in BPMN modellers; the horus attributes and
      inputs are the engine's extension namespace. -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                   xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
                   xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
                   xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
@@ -54,13 +55,13 @@
     <bpmn:sequenceFlow id="load-profile__price-card" sourceRef="load-profile" targetRef="price-card"/>
     <bpmn:sequenceFlow id="price-card__fee-check" sourceRef="price-card" targetRef="fee-check"/>
     <bpmn:sequenceFlow id="fee-check__auto" name="fee is 0" sourceRef="fee-check" targetRef="auto-approve">
-      <bpmn:conditionExpression language="urn:horus-bpm:expr:v1">pricing.fee == 0 VND</bpmn:conditionExpression>
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">pricing.fee == 0 VND</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="fee-check__review" name="fee charged" sourceRef="fee-check" targetRef="officer-review"/>
     <bpmn:sequenceFlow id="auto-approve__end" sourceRef="auto-approve" targetRef="end-approved"/>
     <bpmn:sequenceFlow id="officer-review__outcome" sourceRef="officer-review" targetRef="review-outcome"/>
     <bpmn:sequenceFlow id="review-outcome__approve" name="approved" sourceRef="review-outcome" targetRef="approve-after-review">
-      <bpmn:conditionExpression language="urn:horus-bpm:expr:v1">review.approved == true</bpmn:conditionExpression>
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">review.approved == true</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="review-outcome__reject" name="not approved" sourceRef="review-outcome" targetRef="reject"/>
     <bpmn:sequenceFlow id="approve__end" sourceRef="approve-after-review" targetRef="end-approved"/>

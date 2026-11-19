@@ -85,14 +85,16 @@ public final class JdbcProcessStore implements ProcessStore {
             + "business_key, status, variables::text AS variables, seq, lock_version, started_by, started_at, ended_at";
 
     @Override
-    public void insertInstance(InstanceRow r) {
-        jdbc.sql("INSERT INTO pre_instance (tenant_id, id, definition_id, definition_key, definition_ver, business_key, "
+    public boolean insertInstance(InstanceRow r) {
+        // A concurrent start with the same business key blocks on the unique index, then inserts nothing.
+        return jdbc.sql("INSERT INTO pre_instance (tenant_id, id, definition_id, definition_key, definition_ver, business_key, "
                         + "status, variables, seq, lock_version, started_by, started_at, ended_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)")
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?) "
+                        + "ON CONFLICT (tenant_id, definition_key, business_key) WHERE business_key IS NOT NULL DO NOTHING")
                 .params(r.tenantId(), r.id(), r.definitionId(), r.definitionKey(), r.definitionVersion(), r.businessKey(),
                         r.status(), r.variablesJson(), r.sequence(), r.lockVersion(), r.startedBy(), ts(r.startedAt()),
                         ts(r.endedAt()))
-                .update();
+                .update() == 1;
     }
 
     @Override
@@ -149,18 +151,21 @@ public final class JdbcProcessStore implements ProcessStore {
         List<Token> ordered = tokens.stream().sorted((a, b) -> Boolean.compare(a.kind() != TokenKind.SCOPE,
                 b.kind() != TokenKind.SCOPE)).toList();
         for (Token t : ordered) {
-            jdbc.sql("INSERT INTO pre_token (tenant_id, id, instance_id, definition_id, token_kind, scope_token_id, "
+            int written = jdbc.sql("INSERT INTO pre_token (tenant_id, id, instance_id, definition_id, token_kind, scope_token_id, "
                             + "current_node_id, status, activity_instance_id, locals, entered_at, created_at) "
                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?) "
                             + "ON CONFLICT (tenant_id, id) DO UPDATE SET current_node_id = EXCLUDED.current_node_id, "
                             + "status = EXCLUDED.status, activity_instance_id = EXCLUDED.activity_instance_id, "
                             + "locals = EXCLUDED.locals, entered_at = CASE WHEN pre_token.current_node_id "
                             + "<> EXCLUDED.current_node_id THEN EXCLUDED.entered_at ELSE pre_token.entered_at END "
-                            + "WHERE pre_token.status <> EXCLUDED.status OR pre_token.current_node_id <> EXCLUDED.current_node_id "
-                            + "OR pre_token.activity_instance_id IS DISTINCT FROM EXCLUDED.activity_instance_id")
+                            // A token row of another instance is never touched: zero rows fails the transaction.
+                            + "WHERE pre_token.instance_id = EXCLUDED.instance_id")
                     .params(tenant, t.id(), instanceId, definitionId, t.kind().name(), t.scopeTokenId(), t.nodeId(),
                             t.status().name(), t.activityInstanceId(), Values.write(t.locals()), ts(now), ts(now))
                     .update();
+            if (written != 1) {
+                throw new IllegalStateException("Token " + t.id() + " belongs to another instance");
+            }
         }
     }
 

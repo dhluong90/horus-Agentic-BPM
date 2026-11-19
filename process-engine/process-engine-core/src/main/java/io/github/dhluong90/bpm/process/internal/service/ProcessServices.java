@@ -84,6 +84,16 @@ import java.util.function.Function;
  */
 public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService {
 
+    /**
+     * The result of a start: the instance, and whether this request created it ({@code false} when an instance with
+     * the business key already existed, PRE-002).
+     *
+     * @param instance the instance
+     * @param created whether the request created it
+     */
+    public record Started(ProcessInstance instance, boolean created) {
+    }
+
     static final String PERMISSION_DEPLOY = "processes:deploy";
     static final String PERMISSION_START = "processes:start";
     static final String PERMISSION_READ = "processes:read";
@@ -221,6 +231,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     @Override
     public ProcessInstance start(StartRequest request) {
+        return startDetailed(request).instance();
+    }
+
+    /**
+     * Starts an instance and reports whether this request created it; used by the REST layer for 201 or 200.
+     *
+     * @param request the request
+     * @return the instance and whether it was created
+     */
+    public Started startDetailed(StartRequest request) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_START);
         if (request.businessKey() != null && (request.businessKey().isBlank()
@@ -236,7 +256,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 InstanceRow existing = store.findInstanceByBusinessKey(tenant, request.definitionKey(),
                         request.businessKey()).orElse(null);
                 if (existing != null) {
-                    return read(tenant, existing);
+                    return new Started(read(tenant, existing), false);
                 }
             }
             Instant now = clock.instant();
@@ -245,11 +265,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             String instanceId = Ulid.next(now);
             InstanceRow row = new InstanceRow(tenant, instanceId, definition.id(), definition.key(), definition.version(),
                     request.businessKey(), "RUNNING", "{}", 0, 0, caller, now, null);
-            store.insertInstance(row);
+            if (!store.insertInstance(row)) {
+                return new Started(read(tenant, store.findInstanceByBusinessKey(tenant, request.definitionKey(),
+                        request.businessKey()).orElseThrow()), false);
+            }
             InstanceState state = InstanceState.created(instanceId, tenant, definition.id(), request.businessKey());
             run(definition, row, state, new Command.Start(request.variables(), caller));
-            return read(tenant, store.findInstance(tenant, instanceId).orElseThrow());
-        }, Views::instanceToJson, Views::instanceFromJson));
+            return new Started(read(tenant, store.findInstance(tenant, instanceId).orElseThrow()), true);
+        }, Views::startedToJson, Views::startedFromJson));
     }
 
     @Override
@@ -351,8 +374,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         List<String> cancelledTasks = new ArrayList<>();
         Deque<Command> queue = new ArrayDeque<>();
         queue.add(first);
+        int applied = 0;
         try {
             while (!queue.isEmpty()) {
+                // One budget for the whole call: a loop through a local service task cannot run forever.
+                if (++applied > EngineDefaults.MAX_COMMANDS_PER_CALL) {
+                    throw new ExecutionException("STEP_LIMIT", null, "More than " + EngineDefaults.MAX_COMMANDS_PER_CALL
+                            + " steps in one call; the process loops without a wait state");
+                }
                 Transition t = compiled.kernel().apply(state, queue.poll(), clock);
                 state = t.state();
                 history.addAll(t.history());

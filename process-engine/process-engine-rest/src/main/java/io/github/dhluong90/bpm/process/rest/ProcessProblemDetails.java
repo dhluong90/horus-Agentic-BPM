@@ -24,6 +24,7 @@ import tools.jackson.databind.node.ObjectNode;
 @RestControllerAdvice(assignableTypes = ProcessController.class)
 public class ProcessProblemDetails {
 
+    private static final System.Logger LOG = System.getLogger(ProcessProblemDetails.class.getName());
     private static final MediaType PROBLEM = MediaType.parseMediaType("application/problem+json");
     private static final String TYPE_BASE = "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#";
     private static final Pattern CORRELATION = Pattern.compile("^[A-Za-z0-9._:-]{1,64}$");
@@ -73,7 +74,31 @@ public class ProcessProblemDetails {
             case StepFailedException s -> body.put("nodeId", s.nodeId()).put("reason", s.reason());
             default -> { }
         }
-        return ResponseEntity.status(status).contentType(PROBLEM)
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(status).contentType(PROBLEM);
+        if ("IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {
+            response.header("Retry-After", "1");
+        }
+        return response.body(EngineJson.JSON.writeValueAsString(body).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Anything else is {@code 500 INTERNAL} as problem details with a correlation id only; the cause stays in the log.
+     *
+     * @param e the exception
+     * @param request the request
+     * @return the problem response
+     */
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<byte[]> unexpected(RuntimeException e, WebRequest request) {
+        String correlationId = Ulid.next(Instant.now());
+        LOG.log(System.Logger.Level.ERROR, "process.rest.internal correlationId=" + correlationId, e);
+        ObjectNode body = EngineJson.NODES.objectNode()
+                .put("type", TYPE_BASE + "internal")
+                .put("title", "Internal Server Error")
+                .put("status", 500)
+                .put("code", "INTERNAL")
+                .put("correlationId", correlationId);
+        return ResponseEntity.status(500).contentType(PROBLEM)
                 .body(EngineJson.JSON.writeValueAsString(body).getBytes(StandardCharsets.UTF_8));
     }
 }

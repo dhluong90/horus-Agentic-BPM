@@ -13,6 +13,7 @@ import io.github.dhluong90.bpm.process.api.StartRequest;
 import io.github.dhluong90.bpm.process.api.TaskService;
 import io.github.dhluong90.bpm.process.internal.json.EngineJson;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
+import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.internal.service.Views;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
@@ -84,9 +85,19 @@ public class ProcessController {
         }
         JsonNode businessKey = request.get("businessKey");
         Map<String, Object> variables = Views.variables(request.get("variables"));
-        ProcessInstance instance = engine.start(new StartRequest(key.stringValue(),
-                businessKey == null || businessKey.isNull() ? null : businessKey.stringValue(), variables, idempotencyKey));
-        return json(HttpStatus.CREATED, Views.instance(instance), instance.lockVersion(),
+        StartRequest start = new StartRequest(key.stringValue(),
+                businessKey == null || businessKey.isNull() ? null : businessKey.stringValue(), variables, idempotencyKey);
+        // 201 when this request created the instance, 200 when one with the business key existed (PRE-002).
+        boolean created = true;
+        ProcessInstance instance;
+        if (engine instanceof ProcessServices services) {
+            ProcessServices.Started started = services.startDetailed(start);
+            instance = started.instance();
+            created = started.created();
+        } else {
+            instance = engine.start(start);
+        }
+        return json(created ? HttpStatus.CREATED : HttpStatus.OK, Views.instance(instance), instance.lockVersion(),
                 BASE + "/instances/" + instance.id());
     }
 

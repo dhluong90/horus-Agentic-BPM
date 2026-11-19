@@ -28,6 +28,8 @@ public final class EngineDefaults {
     public static final int MAX_VARIABLES_CHARS = 262_144;
     /** Largest JSON request body of the REST endpoints, in bytes. */
     public static final int MAX_JSON_BODY_BYTES = 262_144;
+    /** Most kernel commands one start or completion may apply (local steps included); a loop without a wait state stops here. */
+    public static final int MAX_COMMANDS_PER_CALL = 1_000;
     /** Longest business key. */
     public static final int MAX_BUSINESS_KEY_LENGTH = 200;
 

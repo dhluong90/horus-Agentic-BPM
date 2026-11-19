@@ -44,7 +44,10 @@ public interface ProcessStore {
 
     void insertDefinition(StoredDefinition definition);
 
-    void insertInstance(InstanceRow row);
+    /**
+     * @return false when an instance with the same business key exists (a concurrent start committed first)
+     */
+    boolean insertInstance(InstanceRow row);
 
     /** Reads and locks the instance row ({@code FOR UPDATE}); all transitions of one instance serialise on it. */
     Optional<InstanceRow> lockInstance(String tenant, String id);

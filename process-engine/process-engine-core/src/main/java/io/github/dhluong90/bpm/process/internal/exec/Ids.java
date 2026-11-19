@@ -1,9 +1,14 @@
 package io.github.dhluong90.bpm.process.internal.exec;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+
 /**
- * Deterministic child ids: the first 20 characters of the instance ULID (48 bits of time, 50 random bits) and the
- * instance sequence in 6 Crockford base-32 characters, 26 characters in all. The same state and command always
- * give the same ids, so {@link ExecutionKernel#apply} stays a pure function.
+ * Deterministic child ids (tokens, tasks, attempts): the first 130 bits of SHA-256 over the whole instance id and the
+ * instance sequence, in 26 Crockford base-32 characters. The same state and command always give the same ids, so
+ * {@link ExecutionKernel#apply} stays a pure function, and two instances never share a child id, even when their
+ * ULIDs were created in the same millisecond and share a prefix.
  */
 public final class Ids {
 
@@ -13,23 +18,33 @@ public final class Ids {
     }
 
     /**
-     * @param instanceId the instance ULID (26 characters)
-     * @param sequence the sequence value, at most 2^30 - 1
-     * @return the child id
+     * @param instanceId the instance id
+     * @param sequence the sequence value, not negative
+     * @return the child id, 26 characters
      */
     public static String child(String instanceId, long sequence) {
-        if (instanceId.length() < 20) {
-            throw new IllegalArgumentException("instance id must be a ULID");
+        if (instanceId == null || instanceId.isEmpty()) {
+            throw new IllegalArgumentException("instance id required");
         }
-        if (sequence < 0 || sequence >= (1L << 30)) {
+        if (sequence < 0) {
             throw new IllegalArgumentException("sequence out of range: " + sequence);
         }
-        char[] out = new char[6];
-        long v = sequence;
-        for (int i = 5; i >= 0; i--) {
-            out[i] = ALPHABET[(int) (v & 31)];
-            v >>>= 5;
+        byte[] digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256")
+                    .digest((instanceId + "/" + sequence).getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required by every Java platform", e);
         }
-        return instanceId.substring(0, 20) + new String(out);
+        char[] out = new char[26];
+        int bit = 0;
+        for (int i = 0; i < 26; i++) {
+            int value = 0;
+            for (int b = 0; b < 5; b++, bit++) {
+                value = (value << 1) | ((digest[bit / 8] >> (7 - bit % 8)) & 1);
+            }
+            out[i] = ALPHABET[value];
+        }
+        return new String(out);
     }
 }

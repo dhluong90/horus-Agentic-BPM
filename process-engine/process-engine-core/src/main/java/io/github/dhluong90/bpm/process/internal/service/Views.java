@@ -98,6 +98,18 @@ public final class Views {
                 Instant.parse(n.get("startedAt").stringValue()), ended == null ? null : Instant.parse(ended));
     }
 
+    static String startedToJson(ProcessServices.Started started) {
+        ObjectNode o = EngineJson.NODES.objectNode().put("created", started.created());
+        o.set("instance", instance(started.instance()));
+        return EngineJson.JSON.writeValueAsString(o);
+    }
+
+    static ProcessServices.Started startedFromJson(String json) {
+        JsonNode n = EngineJson.JSON.readTree(json);
+        return new ProcessServices.Started(instanceFromJson(EngineJson.JSON.writeValueAsString(n.get("instance"))),
+                n.get("created").booleanValue());
+    }
+
     /** @param problems problems @return JSON array */
     public static ArrayNode problems(List<DefinitionProblem> problems) {
         ArrayNode a = EngineJson.NODES.arrayNode();

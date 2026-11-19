@@ -135,6 +135,9 @@ public final class SubsetBpmnReader {
         private final Set<String> ids = new HashSet<>();
         private int depth;
         private int elements;
+        private int previousLine;
+        private int startLine;
+        private String documentLanguage;
 
         Pass(XMLStreamReader xml) {
             this.xml = xml;
@@ -146,6 +149,7 @@ public final class SubsetBpmnReader {
                 throw new ValidationFailedException(List.of(new DefinitionProblem("NOT_BPMN",
                         "The root element must be definitions in namespace " + BPMN, xml.getLocalName(), null, line())));
             }
+            documentLanguage = attr("expressionLanguage");
             Process process = null;
             while (nextChild()) {
                 String ns = xml.getNamespaceURI();
@@ -322,11 +326,16 @@ public final class SubsetBpmnReader {
             String name = attr("name");
             String source = attr("sourceRef");
             String target = attr("targetRef");
+            if (source == null || target == null) {
+                invalid.add(new DefinitionProblem("FLOW_REF_INVALID", "A sequenceFlow needs sourceRef and targetRef",
+                        "sequenceFlow", safe(id), line()));
+            }
             Expression condition = null;
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (BPMN.equals(xml.getNamespaceURI()) && "conditionExpression".equals(local)) {
-                    String language = attr("language");
+                    // A condition without its own language takes the document's (BPMN 2.0 section 8.3.1).
+                    String language = attr("language") != null ? attr("language") : documentLanguage;
                     int line = line();
                     String text = text();
                     if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
@@ -405,8 +414,7 @@ public final class SubsetBpmnReader {
 
         private void nextStart() throws XMLStreamException {
             while (xml.hasNext()) {
-                int event = xml.next();
-                guard(event);
+                int event = next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     enter();
                     return;
@@ -417,8 +425,7 @@ public final class SubsetBpmnReader {
 
         private boolean nextChild() throws XMLStreamException {
             while (xml.hasNext()) {
-                int event = xml.next();
-                guard(event);
+                int event = next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     enter();
                     return true;
@@ -435,8 +442,7 @@ public final class SubsetBpmnReader {
         private String text() throws XMLStreamException {
             StringBuilder out = new StringBuilder();
             while (xml.hasNext()) {
-                int event = xml.next();
-                guard(event);
+                int event = next();
                 switch (event) {
                     case XMLStreamConstants.CHARACTERS, XMLStreamConstants.CDATA, XMLStreamConstants.SPACE -> {
                         out.append(xml.getText());
@@ -456,6 +462,21 @@ public final class SubsetBpmnReader {
                 }
             }
             return out.toString();
+        }
+
+        /**
+         * Advances one event. The parser reports a start tag's location at its end, so the line where the tag starts
+         * is taken from the end of the previous event.
+         */
+        private int next() throws XMLStreamException {
+            int event = xml.next();
+            guard(event);
+            int current = xml.getLocation() == null ? 0 : xml.getLocation().getLineNumber();
+            if (event == XMLStreamConstants.START_ELEMENT) {
+                startLine = previousLine > 0 ? previousLine : current;
+            }
+            previousLine = current;
+            return event;
         }
 
         private void skip() throws XMLStreamException {
@@ -490,7 +511,10 @@ public final class SubsetBpmnReader {
 
         private String id() {
             String id = attr("id");
-            if (id != null && !ids.add(id)) {
+            if (id == null) {
+                invalid.add(new DefinitionProblem("ID_MISSING", "Every flow element needs an id", xml.getLocalName(),
+                        null, line()));
+            } else if (!ids.add(id)) {
                 invalid.add(new DefinitionProblem("DUPLICATE_ID", "Duplicate id", xml.getLocalName(), safe(id), line()));
             }
             return id == null ? "_missing_" + elements : id;
@@ -506,8 +530,9 @@ public final class SubsetBpmnReader {
             return value == null || value.isBlank() ? null : value.strip();
         }
 
+        /** @return the line where the current element's start tag begins */
         private int line() {
-            return xml.getLocation() == null ? 0 : xml.getLocation().getLineNumber();
+            return startLine;
         }
 
         private void unsupported(String element, String id, String stage) {

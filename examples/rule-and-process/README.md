@@ -156,6 +156,8 @@ curl -s -u tuan:$P localhost:8080/api/cards/applications/APP-1002
 # {"applicationId":"APP-1002","customerId":"C-002","status":"APPROVED","fee":{"currency":"VND","amount":10000}}
 ```
 
+Starting again with the same `businessKey` returns the existing instance with `200` (a new instance is `201`), and a retry with the same `Idempotency-Key` returns the first answer, also when the two requests run at the same time.
+
 An unknown customer fails the first step, and the host's row rolls back with the engine's:
 
 ```bash

@@ -77,8 +77,16 @@ public final class LocalServiceInvoker implements ServiceInvoker {
         if (handler == null) {
             return new StepResult.Failed("HANDLER_NOT_REGISTERED", "No ServiceTaskHandler named " + call.target(), false);
         }
-        HandlerResult result = handler.handle(new ServiceCall(tenantId, instanceId, call.nodeId(), businessKey,
-                call.attemptId(), call.inputs()));
+        HandlerResult result;
+        try {
+            result = handler.handle(new ServiceCall(tenantId, instanceId, call.nodeId(), businessKey, call.attemptId(),
+                    call.inputs()));
+        } catch (RuntimeException e) {
+            // The step fails and everything rolls back; the exception text stays in the log.
+            LOG.log(System.Logger.Level.WARNING, "process.handler.error target={0} node={1} instance={2} exception={3}",
+                    call.target(), call.nodeId(), instanceId, e.getClass().getName());
+            return new StepResult.Failed("HANDLER_ERROR", String.valueOf(e.getMessage()), false);
+        }
         return switch (result) {
             case HandlerResult.Completed c -> new StepResult.Completed(c.output());
             case HandlerResult.BusinessError e -> new StepResult.BusinessError(e.code(), e.message());
