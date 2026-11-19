@@ -115,6 +115,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-091](#pd-091-no-tag-ruleset-or-immutable-releases-for-now) | No tag ruleset or immutable releases for now | Decided (revisitable) |
 | [PD-092](#pd-092-the-cockpit-opens-on-home-for-every-role) | The cockpit opens on Home for every role | Decided (product manager, delegated, PD-073) |
 | [PD-093](#pd-093-cockpit-menu-for-authors-and-two-changes-to-the-approved-prototype) | Cockpit menu for authors and two changes to the approved prototype | Decided (product manager, delegated, PD-073) |
+| [PD-094](#pd-094-cockpit-draft-editing-is-off-by-default-in-010) | Cockpit draft editing is off by default in 0.1.0 | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2558,6 +2559,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] The README, Getting Started and release notes claim only what ships: "first BPMN and DMN subset", no conformance claim (`TR-STD-05`), unsupported features named as later, the forward-only migrations listed (X-F-09), and no compatibility promise before 1.0.
 - [x] The version label is decided: `0.1.0` (PD-083, 2026-11-19).
 - [ ] A recorded walkthrough of the release journey exists for the review.
+- [ ] Cockpit draft editing is off unless the host turns it on (PD-094), and the release notes state its known limit.
 - [x] The GitHub Release upload workflow (#153) is merged; it runs when the tag is pushed. The upload itself is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the release of the `v0.1.0` tag, the one project tag for 0.1.0 (PD-087, #163).
 - [ ] The release notes call the Process Engine a preview (ADR-0027, process DESIGN 5.8): outside `dev`, imports stay drafts, activation is by the development auto-approve setting only, and there is no claim step.
 
@@ -2826,3 +2828,32 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Consequences.** The styleguide (#182) and the cockpit shell (#183) follow (a) to (c). The UX design document records (b) and (c) as changes to the approved prototype. Configurable: no.
 
 **Follow-ups.** Designer: the styleguide menu rule matches (a). Maintainers (engineering): #183. Architect: the cockpit DESIGN section 3 menu list, with the PD-092 changes.
+
+### PD-094 Cockpit draft editing is off by default in 0.1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Question | In 0.1.0 the cockpit draft editor (#146) creates a new draft version on every save. Saving a draft in place arrives with #165. Today the cockpit treats a missing `authoring.cockpit-drafts` setting as on. What is the release default? |
+| Raised by | Delivery lead, pre-tag gates of 0.1.0 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1. Changes the default of PD-036 and PD-075 for 0.1.0 only |
+
+**Options considered**
+
+1. Off by default; each host turns it on with `authoring.cockpit-drafts: true` (chosen). Consequence: no adopter gets a growing list of draft versions without choosing it. The example host turns it on, so the demo and the review still show editing. The release notes state the limit.
+2. Show the editor only under the `dev` profile. Consequence: safe, but a bank cannot try editing in a test environment, and a profile check would decide product behaviour instead of a host setting, which goes against PD-074.
+3. On by default, with "each save creates a new draft version" as a known limit. Consequence: the fewest changes, but every adopter gets the limit by default, and approvers see several draft versions for one change.
+
+**Recommendation and decision.** Option 1, under PD-074: a behaviour with a known limit is off until the host chooses it, like the Process Engine preview. Import of a rule set document, approvals and simulation stay available whatever the setting, as rule engine DESIGN section 4.4 already says.
+
+**Release note line.** "Cockpit draft editing is off by default. Turn it on with `authoring.cockpit-drafts: true`. In 0.1.0 each save creates a new draft version; saving a draft in place comes in 0.2.0."
+
+**Revisit.** When #165 (replace a draft) ships, the default returns to on, as PD-036 decided, by a new entry in 0.2.0.
+
+**Consequences.**
+- **Cockpit:** a missing setting means off.
+- **Example host:** sets the setting to on, so the demo shows editing.
+- **Rule engine DESIGN section 4.4:** the default is `false` for 0.1.0.
+- **Import button:** the cockpit's "Import rule set" action depends on `rules:author` only, not on this setting.
+
+**Follow-ups.** Maintainers (engineering): the cockpit default, the example host setting and the import action. Architect: DESIGN section 4.4. Documentation: the release notes and the wiki Rule Engine Configuration page.
