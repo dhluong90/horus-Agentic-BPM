@@ -1,6 +1,6 @@
 package io.github.dhluong90.bpm.rules.internal.dmn.ruleset;
 
-import com.horus.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Collections;
