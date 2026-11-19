@@ -56,20 +56,20 @@ class PersonalDataGuardPropertiesTest {
     @Test
     void RLE_049_the_host_extends_the_list_and_a_tenant_replaces_it_for_that_tenant_only() {
         runner.withPropertyValues(
-                        "horus.bpm.rules.decision-log.additional-personal-data-names[0]=ma so thue",
+                        "horus.bpm.rules.decision-log.additional-personal-data-names[0]=ma khach hang",
                         "horus.bpm.rules.masking.tenants.bank-b.personal-data-names[0]=customer ref",
                         "horus.bpm.rules.masking.tenants.bank-c.additional-personal-data-names[0]=cif")
                 .run(context -> {
                     PropertyMaskingPolicy policy = context.getBean(PropertyMaskingPolicy.class);
-                    // bank-a: the built-in list plus the host's "ma so thue"
+                    // bank-a: the built-in list plus the host's "ma khach hang"
                     assertThat(policy.personalDataNames("bank-a").match("nationalId")).contains("national id");
-                    assertThat(policy.personalDataNames("bank-a").match("maSoThue")).contains("ma so thue");
+                    assertThat(policy.personalDataNames("bank-a").match("maKhachHang")).contains("ma khach hang");
                     // bank-b: its own list only
                     assertThat(policy.personalDataNames("bank-b").match("customerRef")).contains("customer ref");
                     assertThat(policy.personalDataNames("bank-b").match("nationalId")).isEmpty();
                     // bank-c: the host's list plus its own "cif"
                     assertThat(policy.personalDataNames("bank-c").match("cifNumber")).contains("cif");
-                    assertThat(policy.personalDataNames("bank-c").match("maSoThue")).contains("ma so thue");
+                    assertThat(policy.personalDataNames("bank-c").match("maKhachHang")).contains("ma khach hang");
                     assertThat(policy.personalDataNames("bank-a").match("cifNumber")).isEmpty();
                 });
     }

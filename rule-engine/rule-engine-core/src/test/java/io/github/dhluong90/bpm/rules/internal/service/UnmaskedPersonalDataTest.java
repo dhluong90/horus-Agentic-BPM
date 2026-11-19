@@ -291,6 +291,31 @@ class UnmaskedPersonalDataTest {
     }
 
     @Test
+    void RLE_050_strict_mode_turned_on_between_request_and_approval_stops_the_approval() {
+        // Given lan requested publication of kyc-routing (nationalId undeclared) while strict mode was off
+        VersionService versions = versions();
+        caller.become("bank-a", "lan", AUTHOR);
+        versions.importRuleSet(yaml(KYC_ROUTING));
+        RuleSetVersion requested = versions.requestPublish("kyc-routing", 1, WriteOptions.none());
+        int events = stores.outbox.size();
+
+        // When bank-a turns strict mode on and bob approves with the current lock version
+        policy.strict.add("bank-a");
+        caller.become("bank-a", "bob", APPROVER);
+
+        // Then the approval is refused naming nationalId, nothing is published, and no event is written
+        assertThatThrownBy(() -> versions.approve("kyc-routing", 1,
+                new WriteOptions(null, requested.lockVersion(), null)))
+                .isInstanceOfSatisfying(ValidationFailedException.class, e ->
+                        assertThat(e.violations()).extracting(Violation::column).containsExactly("nationalId"));
+        RuleSetVersion stored = versions.find("kyc-routing", 1, false).orElseThrow();
+        assertThat(stored.status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
+        assertThat(stored.approvedBy()).isNull();
+        assertThat(stored.lockVersion()).isEqualTo(requested.lockVersion());
+        assertThat(stores.outbox).hasSize(events);
+    }
+
+    @Test
     void RLE_050_strict_mode_checks_a_replaced_draft_and_is_set_per_tenant() {
         // Given bank-a in strict mode with a declared draft, and bank-b not in strict mode
         policy.strict.add("bank-a");

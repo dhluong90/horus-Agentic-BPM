@@ -201,8 +201,8 @@ tenant.switch.refused reason=switching-off user=lan%40bank-a.vn tokenTenant=bank
 | Header | Value |
 |---|---|
 | `Cache-Control` | `/meta`: `private, max-age=60`. `/me`: `private, no-cache`, so the browser asks again every time (cheaply, with `If-None-Match`) and a revoked role or a sign-out is never shown from cache. Errors: `no-store` |
-| `ETag` | A weak validator of the body; send it back as `If-None-Match` to get `304` |
-| `Vary` | On `/me`: `Authorization, Cookie, X-Tenant-Id` |
+| `ETag` | A weak validator of the body and the caller's tenant; send it back as `If-None-Match` to get `304` |
+| `Vary` | On `/meta` and `/me`: `Authorization, Cookie, X-Tenant-Id`. `/meta` can hold settings of the caller's tenant, so its ETag is computed over the tenant and the body: a cached `/meta` or a `304` of one tenant is never used in another |
 | `X-Correlation-Id` | A ULID issued by the host for every request, also in every problem body. A caller's own `X-Correlation-Id` is never adopted; it is logged as `clientCorrelationId` |
 | `WWW-Authenticate` | On every `401`. `Bearer` by default (`horus.bpm.security.challenge`); for a caller without a tenant a bearer challenge adds `error="invalid_token"` |
 

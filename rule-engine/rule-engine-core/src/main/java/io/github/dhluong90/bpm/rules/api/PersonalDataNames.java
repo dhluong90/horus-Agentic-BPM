@@ -28,10 +28,13 @@ import java.util.Optional;
 public final class PersonalDataNames {
 
     /**
-     * The built-in list, in English and in Vietnamese without accents (accents are ignored when matching): national
-     * id, passport, phone, email, address, date of birth and account number, and close variants.
+     * The built-in list, in English and in Vietnamese without accents (accents are ignored when matching): full name,
+     * national id, passport, phone, email, address, date of birth, account and card number, tax id and driver
+     * licence, and close variants.
      */
     public static final List<String> BUILT_IN = List.of(
+            // Full name (họ tên, họ và tên).
+            "full name", "ho ten", "ho va ten",
             // National identity documents.
             "national id", "citizen id", "identity number", "identity card", "id number", "id card", "ssn",
             "social security number", "cccd", "cmnd", "can cuoc", "so dinh danh",
@@ -46,7 +49,12 @@ public final class PersonalDataNames {
             // Date of birth.
             "date of birth", "birth date", "birthday", "dob", "ngay sinh",
             // Account and card numbers.
-            "account number", "account no", "iban", "card number", "so tai khoan", "stk", "so the");
+            "account number", "account no", "iban", "card number", "so tai khoan", "stk", "so the",
+            // Tax id (mã số thuế, MST).
+            "tax id", "tax code", "ma so thue", "mst",
+            // Driver licence (giấy phép lái xe, GPLX, bằng lái).
+            "driver licence", "driver license", "driving licence", "driving license", "giay phep lai xe", "gplx",
+            "bang lai");
 
     /** Longest configured name accepted, in characters. */
     public static final int MAX_NAME_LENGTH = 100;

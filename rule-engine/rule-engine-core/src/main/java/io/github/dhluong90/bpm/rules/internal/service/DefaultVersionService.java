@@ -288,6 +288,9 @@ public final class DefaultVersionService implements VersionService {
             if (actor.equals(current.requestedBy()) || actor.equals(current.createdBy())) {
                 throw new SelfApprovalForbiddenException(ruleSet, version);
             }
+            // A version requested before strict mode was turned on is checked again, so it never reaches the
+            // append-only decision log with an undeclared input (security review of #308).
+            requireMaskDeclarations(tenant, current.canonicalJson());
             checkLock(current, opts);
             Instant now = context.clock().instant();
             StoredVersion updated = current.approved(actor, now, opts.comment());

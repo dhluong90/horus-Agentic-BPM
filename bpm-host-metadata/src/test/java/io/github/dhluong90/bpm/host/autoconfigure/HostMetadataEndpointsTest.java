@@ -125,6 +125,49 @@ class HostMetadataEndpointsTest {
     }
 
     @Test
+    void RLE_052_one_session_in_two_tenants_gets_two_meta_bodies_and_never_a_304_across_tenants() {
+        // Given lan holds a role in bank-a and in bank-b; bank-b masks undeclared inputs by default
+        TestHosts.runner().withUserConfiguration(RulesWithTenantSettings.class).run(context -> {
+            MockMvc mvc = TestHosts.mockMvc(context);
+
+            // When lan reads /meta in bank-a, then switches to bank-b and revalidates with bank-a's ETag
+            MvcResult inA = call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-a", "rules:read")));
+            String etagA = inA.getResponse().getHeader("ETag");
+            MvcResult inB = call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-b", "rules:read"))
+                    .header("If-None-Match", etagA));
+
+            // Then bank-b answers 200 with its own body and ETag, never 304 with bank-a's cached body
+            assertThat(inB.getResponse().getStatus()).isEqualTo(200);
+            assertThat(inB.getResponse().getHeader("ETag")).isNotEqualTo(etagA);
+            assertThat(json(inA).path("modules").get(0).path("settings").path("decision-log.mask-default")
+                    .asBoolean(true)).isFalse();
+            assertThat(json(inB).path("modules").get(0).path("settings").path("decision-log.mask-default")
+                    .asBoolean(false)).isTrue();
+            // And /meta varies like /me, so a shared or browser cache keys it by credentials and tenant header
+            for (MvcResult meta : List.of(inA, inB)) {
+                assertThat(String.join(", ", meta.getResponse().getHeaders("Vary")))
+                        .isEqualTo("Authorization, Cookie, X-Tenant-Id");
+            }
+            // And the same tenant still revalidates to 304
+            assertThat(call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-a", "rules:read"))
+                    .header("If-None-Match", etagA)).getResponse().getStatus()).isEqualTo(304);
+        });
+
+        // Given two tenants whose /meta bodies are byte for byte equal
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).run(context -> {
+            MockMvc mvc = TestHosts.mockMvc(context);
+            MvcResult inA = call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-a", "rules:read")));
+            MvcResult inB = call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-b", "rules:read"))
+                    .header("If-None-Match", inA.getResponse().getHeader("ETag")));
+
+            // Then the ETags still differ, because the tenant is part of the validator
+            assertThat(inB.getResponse().getContentAsString()).isEqualTo(inA.getResponse().getContentAsString());
+            assertThat(inB.getResponse().getStatus()).isEqualTo(200);
+            assertThat(inB.getResponse().getHeader("ETag")).isNotEqualTo(inA.getResponse().getHeader("ETag"));
+        });
+    }
+
+    @Test
     void RLE_019_role_mapping_lists_rules_approve_and_removing_it_drops_it() {
         // Given minh holds the host role PRICING_APPROVER and rules:read, and the host maps the role
         TestHosts.runner().withUserConfiguration(TestHosts.RulesWithApproverMapping.class).run(context -> {
