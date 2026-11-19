@@ -120,9 +120,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-012 `agentTask` logs masked inputs, output, guardrail decision ID, and human override
 - **Traces to:** `TR-AGT-02`, `TR-OBS-01`
 - **Milestone:** M2
-- **Given:** `agentTask` with `nationalId` marked `mask: true` routes to human `userTask`; reviewer changes `recommendation` from `"APPROVE"` to `"REJECT"`.
+- **Given:** `agentTask` with `nationalId` marked `mask: true` routes to human `userTask`; the adapter returns labels `{ "model": "scoring-2026-10", "promptVersion": "p7", "vendor": "in-house" }`; reviewer changes `recommendation` from `"APPROVE"` to `"REJECT"`. Second case: an adapter result with 17 labels while `agents.labels.max-count` is 16.
 - **When:** Reviewer completes the `userTask`.
-- **Then:** `pre_history` records hashed `nationalId` (no plaintext), raw agent output, `guardrailDecisionId`, adapter latency, and `human_override` diff for Eval replay.
+- **Then:** `pre_history` records hashed `nationalId` (no plaintext), raw agent output, `guardrailDecisionId`, adapter latency, the three labels unchanged, and `human_override` diff for Eval replay; the engine takes no decision from a label. In the second case the attempt fails with `AGENT_LABELS_INVALID` and is retried like an invalid output (`PRE-011`).
 - **Example:** `Override APPROVE -> REJECT logged in pre_history with guardrailDecisionId`.
 - **Test ID:** `PRE_012_agent_task_audits_masked_io_and_human_override`
 

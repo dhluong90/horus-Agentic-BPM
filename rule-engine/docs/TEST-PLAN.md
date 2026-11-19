@@ -26,7 +26,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-007 | `RLE_007_regex_timeout_aborts_adversarial_input` | Unit, adversarial | M1 | `TR-SEC-02` | Planned |
 | RLE-008 | `RLE_008_explicit_clock_resolves_effective_version_and_replays` | Unit, replay | M1 | `TR-DET-01`, `TR-DET-05` | Planned |
 | RLE-009 | `RLE_009_maker_checker_blocks_self_approval` | Service, WebMvc | M1 | `TR-SEC-04` | Planned |
-| RLE-010 | `RLE_010_multi_replica_cache_invalidates_on_publish` | Two-replica Testcontainers, PgBouncer | M1 | `TR-DET-01`, `TR-OBS-04` | Planned |
+| RLE-010 | `RLE_010_multi_replica_cache_invalidates_on_publish` | Two-replica Testcontainers, direct and PgBouncer runs | M1 | `TR-ASY-04`, `TR-DET-01`, `TR-OBS-04` | Planned |
 | RLE-011 | `RLE_011_tenant_isolation_ignores_body_and_blocks_cross_tenant_read` | WebMvc, two-tenant integration | M1 | `TR-SEC-03`, `TR-TEN-01`, `TR-TEN-02` | Planned |
 | RLE-012 | `RLE_012_masked_inputs_stored_as_keyed_hmac` | Integration, log capture | M1 | `TR-SEC-05`, `TR-OBS-01` | Planned |
 | RLE-013 | `RLE_013_transactional_decision_log_rolls_back_with_host` | Testcontainers, SQL capture | M1 | `TR-EMB-04`, `TR-PERF-03`, `TR-OBS-01` | Planned |
@@ -46,13 +46,15 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-027 | `RLE_027_previous_version_retires_once_when_newer_becomes_effective` | Two-replica Testcontainers with `TestClock`, PgBouncer leg, event capture | M1 | `TR-OBS-04`, `TR-DET-01`, `TR-OPS-05` | Planned |
 | RLE-028 | `RLE_028_version_diff_lists_added_changed_removed_and_moved_rows` | Unit (diff of models), WebMvc, two-tenant integration | M1 | `TR-UI-02`, `TR-STD-28`, `TR-STD-03` | Planned |
 | RLE-029 | `RLE_029_decision_search_by_rule_set_and_period_is_bounded` | Testcontainers, query-plan check, two-tenant integration | M1 | `TR-OBS-01`, `TR-SEC-05`, `TR-TEN-01` | Planned |
-| RLE-030 | `RLE_030_explanation_is_generated_from_log_entry_and_version` | Unit, WebMvc, SQL capture | M1 | `TR-OBS-05`, `TR-DET-05`; depends on PD-027 | Planned |
-| RLE-031 | `RLE_031_explanation_masks_inputs_and_covers_no_match_null_and_failure` | Unit, integration, log capture | M1 | `TR-OBS-05`, `TR-SEC-05`, `TR-STD-02`; depends on PD-027 | Planned |
+| RLE-030 | `RLE_030_explanation_is_generated_from_log_entry_and_version` | Unit, WebMvc, SQL capture | M1 | `TR-OBS-05`, `TR-DET-05`; PD-027 decided | Planned |
+| RLE-031 | `RLE_031_explanation_masks_inputs_and_covers_no_match_null_and_failure` | Unit, integration, log capture | M1 | `TR-OBS-05`, `TR-SEC-05`, `TR-STD-02`; PD-027 decided | Planned |
 | RLE-032 | `RLE_032_export_round_trips_to_same_canonical_hash` | Integration, WebMvc, RFC 8785 vectors | M1 | `TR-STD-03`, `TR-STD-28`, `TR-UI-02` | Planned |
 | RLE-033 | `RLE_033_import_as_new_version_creates_next_draft_or_refuses_whole` | WebMvc, integration | M1 | `TR-STD-01`, `TR-IDEM-01`, `TR-UI-02` | Planned |
 | RLE-034 | `RLE_034_compiled_cache_is_bounded_and_heap_stays_flat` | Integration with heap measurement (median of three after full GC), metrics check | M1 | `TR-PERF-06` | Planned |
 | RLE-035 | `RLE_035_masking_key_required_at_startup_and_never_leaked` | Context runner, example host start-up, log capture | M1 | `TR-SEC-10` | Planned |
 | RLE-036 | `RLE_036_every_rest_error_is_problem_details_with_stable_code` | WebMvc over the error matrix, injected failure | M1 | `TR-SEC-08` | Planned |
+| RLE-037 | `RLE_037_tenant_from_principal_session_or_token_never_from_browser` | Starter context runner with session and token principals, WebMvc | M1 | `TR-SEC-03`, `TR-TEN-01`, `TR-EXT-02` | Planned |
+| RLE-038 | `RLE_038_four_eyes_retirement_needs_second_approver` | Service, WebMvc, two-replica Testcontainers, event capture | M3 | `TR-SEC-04`, `TR-OBS-04`, `TR-EXT-05` | Planned |
 
 ## Requirement-level tests
 Tests that prove a platform requirement directly, before any `SPEC.md` statement covers it. "Partial" means the test proves a precondition or part of the requirement; the named statement completes it.
