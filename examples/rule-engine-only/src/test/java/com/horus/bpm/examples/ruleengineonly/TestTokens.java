@@ -77,6 +77,21 @@ final class TestTokens {
         }
     }
 
+    /** A token that carries host roles ({@code roles} claim) instead of engine permissions. */
+    static String bearerWithRoles(String user, String tenant, List<String> roles) {
+        try {
+            JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                    .subject(user).audience(AUDIENCE).claim("tenant_id", tenant).claim("roles", roles)
+                    .issueTime(Date.from(Instant.now())).expirationTime(Date.from(Instant.now().plusSeconds(600)))
+                    .build();
+            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.RS256), claims);
+            jwt.sign(new RSASSASigner((RSAPrivateKey) KEYS.getPrivate()));
+            return "Bearer " + jwt.serialize();
+        } catch (com.nimbusds.jose.JOSEException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private static KeyPair rsaKeys() {
         try {
             KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
