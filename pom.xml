@@ -78,8 +78,18 @@
       manages; tools/check-jackson-coexistence.py fails the 3.5 legs when they differ.
     -->
     <jackson-3.version>3.1.7</jackson-3.version>
-    <!-- PostgreSQL image of the Testcontainers tests; the CI matrix sets 14 and the newest release. -->
-    <bpm.test.postgres.image>postgres:16-alpine</bpm.test.postgres.image>
+    <!--
+      Container images the tests start, pinned by digest (PD-100); tests read them through TestImages and
+      name no image themselves. Testcontainers 2 refuses a tag and a digest together, so the value is
+      <name>@sha256:<digest> and the comment names the tag and the version the digest resolved to. Update
+      digest and comment together (wiki Contributing, Dependency checks, test container images). The CI matrix
+      sets the PostgreSQL image per leg (14, 16 and 18), also pinned; tools/check-image-pins.py refuses
+      an image reference without a digest.
+    -->
+    <!-- postgres:16-alpine, PostgreSQL 16.16, resolved 20 Nov 2026 (the image docker-compose.yml pins). -->
+    <bpm.test.postgres.image>postgres@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857</bpm.test.postgres.image>
+    <!-- edoburu/pgbouncer:v1.26.1-p0, resolved 20 Nov 2026. -->
+    <bpm.test.pgbouncer.image>edoburu/pgbouncer@sha256:488422e38cff912895d0d65d8963fcd306e6ac589a724398b6eb8e294e94d624</bpm.test.pgbouncer.image>
     <!-- JUnit tags of tests that apply to one Spring Boot line only; the 3.5 profile swaps the value. -->
     <excludedGroups>spring-boot-3.5-only</excludedGroups>
     <archunit.version>1.5.1</archunit.version>
@@ -156,6 +166,7 @@
           <configuration>
             <systemPropertyVariables>
               <bpm.test.postgres.image>${bpm.test.postgres.image}</bpm.test.postgres.image>
+              <bpm.test.pgbouncer.image>${bpm.test.pgbouncer.image}</bpm.test.pgbouncer.image>
               <bpm.root>${bpm.root}</bpm.root>
             </systemPropertyVariables>
           </configuration>
@@ -169,6 +180,7 @@
             <classesDirectory>${project.build.outputDirectory}</classesDirectory>
             <systemPropertyVariables>
               <bpm.test.postgres.image>${bpm.test.postgres.image}</bpm.test.postgres.image>
+              <bpm.test.pgbouncer.image>${bpm.test.pgbouncer.image}</bpm.test.pgbouncer.image>
               <bpm.root>${bpm.root}</bpm.root>
             </systemPropertyVariables>
           </configuration>

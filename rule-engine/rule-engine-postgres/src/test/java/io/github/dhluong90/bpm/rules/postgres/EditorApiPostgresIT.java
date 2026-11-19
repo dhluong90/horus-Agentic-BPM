@@ -42,7 +42,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class EditorApiPostgresIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant DEC_01 = Instant.parse("2026-12-01T00:00:00Z");
     static final Instant DEC_10 = Instant.parse("2026-12-10T03:00:00Z");

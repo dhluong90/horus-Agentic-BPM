@@ -14,6 +14,14 @@ on:
 permissions:
   contents: read
 
+# PostgreSQL images of the verify matrix, pinned by digest (PD-100). Testcontainers 2 refuses a tag and a
+# digest together, so each value is postgres@sha256:<digest> and the comment names the tag and version the
+# digest resolved to. Update digest and comment together; tools/check-image-pins.py refuses an unpinned image.
+env:
+  POSTGRES_14_IMAGE: postgres@sha256:e7d9e6aac7fe3232f7661da103aebc0ce38b04105b46af5e9edd5ef6bc343f20 # 14-alpine, 14.25
+  POSTGRES_16_IMAGE: postgres@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857 # 16-alpine, 16.16
+  POSTGRES_18_IMAGE: postgres@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff # 18-alpine, 18.7
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -38,6 +46,13 @@ jobs:
       - name: Tests of the Maven retry script (stub mvn, no network)
         run: tools/test-mvn-retry.sh
 
+      - name: Tests of the image pin check
+        run: python3 tools/test_check_image_pins.py -v
+
+      # PD-100: every container image in tests, workflows, POMs and tool scripts is pinned by digest.
+      - name: Container images pinned by digest
+        run: python3 tools/check-image-pins.py
+
   verify:
     # TR-EMB-02: the supported matrix (ADR-0011). Each Java version runs on both Spring Boot lines and
     # each Spring Boot line on both PostgreSQL versions (14 and the newest release), pairwise; Spring
@@ -58,12 +73,23 @@ jobs:
           # ADR-0011 tests every 4.x minor in open-source support. Remove this leg, and the
           # spring-boot-4.0 profile in pom.xml, after Spring Boot 4.0 leaves it on 2026-12-31.
           - { java: "21", boot: "4.0.x", postgres: "16" }
-    env:
-      POSTGRES_IMAGE: postgres:${{ matrix.postgres }}-alpine
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+
+      # The digest-pinned image of this leg's PostgreSQL version, pulled here so the log shows the digest.
+      - name: PostgreSQL ${{ matrix.postgres }} image, pinned by digest
+        env:
+          PINNED: ${{ env[format('POSTGRES_{0}_IMAGE', matrix.postgres)] }}
+          VERSION: ${{ matrix.postgres }}
+        run: |
+          if [ -z "$PINNED" ]; then
+            echo "::error title=PostgreSQL image not pinned::No POSTGRES_${VERSION}_IMAGE in the env of ci.yml. Add postgres@sha256:<digest> for PostgreSQL ${VERSION}."
+            exit 1
+          fi
+          docker pull "$PINNED"
+          echo "POSTGRES_IMAGE=$PINNED" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
