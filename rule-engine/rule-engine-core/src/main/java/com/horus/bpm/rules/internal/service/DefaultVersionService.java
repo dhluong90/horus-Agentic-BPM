@@ -166,7 +166,12 @@ public final class DefaultVersionService implements VersionService {
             StoredVersion updated = current.requested(actor, now);
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.REQUESTED, current.status(), actor, null, now);
-            event(tenant, EVENT_PUBLISH_REQUESTED, updated, actor, now);
+            // DESIGN 3.3: the request names the behaviour hash and the date it asks for (null means at approval).
+            event(tenant, EVENT_PUBLISH_REQUESTED, updated, actor, now, payload -> {
+                payload.put("canonicalHash", updated.canonicalHash());
+                payload.put("requestedBy", actor);
+                payload.set("effectiveFrom", EngineValues.value(updated.effectiveFrom()));
+            });
             return updated.toView(false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
@@ -193,7 +198,13 @@ public final class DefaultVersionService implements VersionService {
             StoredVersion updated = current.approved(actor, now, opts.comment());
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.APPROVED, current.status(), actor, opts.comment(), now);
-            event(tenant, EVENT_PUBLISHED, updated, actor, now);
+            // DESIGN 3.3: the publication names what was approved, from when, and both people of the four eyes.
+            event(tenant, EVENT_PUBLISHED, updated, actor, now, payload -> {
+                payload.put("canonicalHash", updated.canonicalHash());
+                payload.set("effectiveFrom", EngineValues.value(updated.effectiveFrom()));
+                payload.put("requestedBy", updated.requestedBy());
+                payload.put("approvedBy", actor);
+            });
             return updated.toView(false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }

@@ -333,6 +333,29 @@ class RuleEnginePostgresIT {
         assertThat(decisionRows()).isZero();
     }
 
+    /** #237 step 1: the outbox rows of request and approval carry the DESIGN 3.3 fields, through JSONB. */
+    @Test
+    void RLE_009_publication_events_carry_canonical_hash_effective_date_and_both_actors() {
+        caller.as("bank-a", "alice");
+        String hash = engines.versionService().importRuleSet(ImportRequest.yaml(cardFee())).canonicalHash();
+        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        caller.as("bank-a", "bob");
+        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+
+        JdbcClient sql = JdbcClient.create(db);
+        assertThat(sql.sql("""
+                SELECT payload->>'canonicalHash' || ' ' || (payload->>'requestedBy') || ' '
+                  || coalesce(payload->>'effectiveFrom', 'at-approval') || ' ' || jsonb_typeof(payload->'effectiveFrom')
+                FROM rle_decision_outbox WHERE tenant_id = 'bank-a'
+                  AND payload->>'eventType' = 'rules.version.publish-requested.v1'
+                """).query(String.class).single()).isEqualTo(hash + " alice at-approval null");
+        assertThat(sql.sql("""
+                SELECT payload->>'canonicalHash' || ' ' || (payload->>'effectiveFrom') || ' ' || (payload->>'requestedBy')
+                  || ' ' || (payload->>'approvedBy')
+                FROM rle_decision_outbox WHERE tenant_id = 'bank-a' AND payload->>'eventType' = 'rules.version.published.v1'
+                """).query(String.class).single()).isEqualTo(hash + " " + NOW + " alice bob");
+    }
+
     private void publish(String resource, String name) {
         caller.as("bank-a", "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(resource(resource)));
