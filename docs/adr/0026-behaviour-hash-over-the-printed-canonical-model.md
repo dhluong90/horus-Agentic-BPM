@@ -11,17 +11,36 @@ ADR-0018 makes the DMN and BPMN semantic models canonical and our JSON their ser
 Nothing has been released or logged in production yet. 0.1.0 is the first release.
 
 ## Decision
-1. **The behaviour hash is computed over the canonical model as the engine prints it.** `canonical_hash` (rule sets) and `definition_hash` (processes) are the SHA-256 of the RFC 8785 form of the canonical JSON *written from the model*. In that JSON every expression is printed in its normal form: the parsed tree, printed by the engine's canonical printer. The rest of section 3.4 is unchanged: the hash is taken in the stored schema version, never recomputed, without layout, foreign extensions or `effectiveFrom`. Two documents with the same meaning in any serialisation (YAML, JSON, DMN XML, later BPMN XML) have the same hash.
-2. **The normal form, per expression kind:**
-   - a `when` cell is printed as a unary test without the column name (`>= 3`, `between 1 and 5`, `is not null`, `!= 'VN'`);
-   - lists are printed with `, ` separators and single-quoted strings;
-   - instants are printed in UTC with `Z`;
-   - money is printed at the currency's minor-unit scale (`12.50 USD`, `10000 VND`); more fraction digits than the currency allows is refused at import with the line;
-   - numbers are printed in their plain form without exponent.
+1. **The behaviour hash is computed over the canonical model as the engine prints it.** `canonical_hash` (rule sets) and `definition_hash` (processes) are the SHA-256 of the RFC 8785 form of the canonical JSON *written from the model*. In that JSON, every expression and every value is printed in the normal form of decision 2. The rest of section 3.4 is unchanged: the hash is taken in the stored schema version, never recomputed, without layout, foreign extensions or `effectiveFrom`. Two documents with the same meaning in any serialisation (YAML, JSON, DMN XML, later BPMN XML) have the same hash. Two documents with different behaviour never do.
+2. **The normal form.** It merges only texts that are the same behaviour.
+   - **JSON numbers.** A JSON number appears in the canonical document only for an integer within plus or minus 2^53 - 1. Every other number (a decimal output, a default, a constant) is a JSON string in plain `BigDecimal` form with its scale kept (`toPlainString`, never `stripTrailingZeros`): `"0.1"`, `"0.10"` and `"0.1000000000000000055511151231257827"` are three different values. Import reads numbers exactly, never through `double`. A JSON number that an RFC 8785 writer cannot reproduce exactly is refused with `422 VALIDATION_FAILED` naming its line (I-JSON, RFC 7493). The canonical writer never converts a number to `double`.
+   - **Cells.** A `when` cell drops the column name only when the cell is a comparison whose left operand is that column's own input (`x >= 3` in column `x` becomes `>= 3`). A comparison of another input or of two inputs (`y >= 3` or `x > y` in column `x`) keeps its operands as written, in normal spacing.
+   - **Lists** are printed with `, ` separators.
+   - **Strings** are single-quoted. `'` and `\` are escaped. C0 and C1 control characters and Unicode format characters (category Cf, including U+200B to U+200F and U+2060 to U+2064) are printed as `\uXXXX` escapes. No Unicode normalisation is ever applied, because strings compare by code point and NFC and NFD forms are different behaviours. Bidirectional controls (U+202A to U+202E, U+2066 to U+2069) are refused at import in expressions, literals and identifiers.
+   - **Instants.** The M1 `datetime` type (an `Instant`) is printed in UTC with `Z`. Zoned FEEL values from S1 (`date and time` with an offset or zone id) keep their offset or zone id, because day, hour and DST arithmetic can observe them.
+   - **Money** is printed at the currency's minor-unit scale (`12.50 USD`, `10000 VND`). More fraction digits than the currency allows is refused at import with the line, never rounded.
    The printer and parser are the same ones the DMN reader uses (`V1Forms`), so YAML and DMN share one normal form.
-3. **The printer is frozen per schema version.** Its output for `rule-set.v1` is fixed by a golden test file of cell to normal form. Any change to it is a new schema version, never a patch. A stored hash is never recomputed (`TR-STD-03`), so stored versions are unaffected either way.
-4. **"Does production match Git" uses `source_hash`.** That is the SHA-256 of the bytes as received (`TR-STD-01`), so a pipeline compares it with `sha256sum <file>`, which is still one string comparison (PD-036). `canonical_hash` answers a different question, "same behaviour", and stays the hash approved under maker-checker, diffed, exported and logged.
-5. **The stored source does not change.** The document is kept byte for byte, comments and authoring style included, and `?include=source` returns it. The canonical document and the row-level diff show the normal form, which is exactly what is hashed and approved.
+3. **The printer and the parser are frozen per schema version, as one contract.** The hash identifies text, and the parser decides what that text does. Neither may change behaviour inside a schema version. The following gates enforce it:
+   - **Golden file, both directions.** For each schema version, cell text maps to a tree dump, and tree to text. Its own SHA-256 is pinned in the test, so any edit fails CI unless the schema version changes. CODEOWNERS requires a maintainer review for it.
+   - **Coverage gate.** Every grammar production and every escape class has at least one golden entry. CI fails when a production has none.
+   - **Property tests over generated trees**, in the `RLE-021` harness: `parse(print(t)) == t`, `print(parse(print(t))) == print(t)`, and the same evaluation result for `t` and `parse(print(t))` on generated inputs and clock.
+   - **Corpus of earlier versions.** CI keeps canonical documents from every earlier schema version and checks that each still parses to the same tree dump.
+   The Process Engine's `ExpressionLanguage` printer and parser follow the same rule from M2, with their own golden file.
+4. **What runs is what was hashed and approved.**
+   - The engine compiles a version only by parsing its stored `canonical_json`, on every replica and after every restart. It never compiles from the import-time model or from the source document.
+   - At import, the engine checks that `parse(print(model))` is structurally equal to `model`. If not, it refuses with `422 VALIDATION_FAILED` and stores nothing (fail closed).
+   - Before compiling a version, the engine checks that the SHA-256 of the RFC 8785 form of the stored `canonical_json` equals `canonical_hash`. If not, it refuses to serve that version: the evaluation is `EVALUATION_ERROR` with code `DEFINITION_INTEGRITY`, and the engine raises an alert and writes an audit entry.
+   - `canonical_json` is stored as `JSONB`. Because decimals are strings and integers are within plus or minus 2^53 - 1, reading it back and re-serialising it is exact.
+5. **"Was this version imported from that file?" uses `source_hash`.**
+   - `source_hash` is the SHA-256 of the raw request bytes, taken before any decoding or trimming.
+   - Import refuses a source that is not valid UTF-8, contains NUL, or starts with a byte order mark. So `source_document TEXT` holds exactly the bytes that were hashed, and `?include=source` returns them.
+   - A pipeline hashes the committed blob (`git show <commit>:<path> | sha256sum`), not the working-tree file, which line-ending settings and filters can change.
+   - A matching `source_hash` proves where the version came from. It does not by itself prove what runs: that is decision 4 together with `canonical_hash`. A drift check compares both hashes.
+   - `canonical_hash` means "same behaviour". It stays the hash approved under maker-checker, diffed, exported and logged.
+6. **What the approver sees.**
+   - The source document is kept byte for byte, comments and authoring style included.
+   - The canonical document and the row-level diff show the normal form, which is exactly what is hashed, approved and run.
+   - The diff marks every changed literal that contains a non-ASCII character, so a look-alike character or an escaped format character is visible to the approver.
 
 ## Options considered
 1. **Carry the original YAML text on each exported DMN entry** (a `horus:` attribute, used on import when it parses to the same tree).
@@ -35,8 +54,25 @@ Nothing has been released or logged in production yet. 0.1.0 is the first releas
    - Against: a pipeline cannot compute `canonical_hash` with a generic JSON canonicaliser, which is why Git comparison moves to `source_hash` (decision 4). The printer becomes part of the hash contract, which is why it is frozen (decision 3).
 
 ## Consequences
-- `standards-compliance.md` section 3.4, `TR-DEF-04` and `TR-STD-03`, `RLE-020` and `RLE-024`, rule engine DESIGN "Hash identity" and process engine DESIGN section 5.2 are updated in the same change. So is the wiki sentence on comparing a version with Git.
-- `RLE-039` is new: YAML cells in non-normal form and their DMN export have one hash.
-- Pull request #145 implements it. The canonical writer prints from the model, the money import prints at the currency scale, and the tests named by `RLE-020`, `RLE-024` and `RLE-039` include the QA cases of review 5969673183. The hand-written RFC 8785 vector of `RLE-020` is recomputed over the printed form.
-- Development databases with versions stored before this change keep their old hashes (never recomputed). Re-importing those documents gives a new version with the new hash, which is expected before 0.1.0.
-- Process definitions follow the same rule from M2, for gateway conditions, timer expressions and mappings, through the `ExpressionLanguage` printer.
+- **Updated in this change:**
+  - `standards-compliance.md` section 3.4;
+  - `TR-DEF-04` and `TR-STD-03`;
+  - `RLE-020` and `RLE-024`, and the new `RLE-039` with its negative cases;
+  - rule engine DESIGN: hash identity, effective date, compilation from `canonical_json` and `source_document`;
+  - process engine DESIGN section 5.2;
+  - the wiki sentence on comparing a version with Git.
+- **The current canonical writer has a number collision.** It prints numbers through `double` (`CanonicalJson`), so `0.1` and `0.1000000000000000055511151231257827` share a hash today. The example `card-fee.rule-set.json` contains the second value. Pull request #145 rewrites the canonical writer and fixes this, together with the example file.
+- **Pull request #145 implements decisions 1 to 6:**
+  - the canonical writer prints from the model, with numbers exact;
+  - the import checks of decisions 2, 4 and 5;
+  - the load-time hash check;
+  - the golden files, the coverage gate, the property tests and the corpus;
+  - tests named by `RLE-020`, `RLE-024` and `RLE-039`, including the QA cases of review 5969673183 and the security cases of review 5969746899;
+  - the RFC 8785 vector of `RLE-020`, recomputed over the printed form.
+- **Follow-up issue:** a no-write validate operation, an API call and a command-line tool on the same printer, that returns `canonical_hash` and `source_hash` for a file. Until it exists, a pipeline reads `canonical_hash` from the draft after import.
+- **Development databases.** Versions stored before this change keep their old hashes and fail the load-time check of decision 4. Delete them, or import them again, before 0.1.0. Nothing is released yet.
+- **Process definitions** follow the same rules from M2, for gateway conditions, timer expressions and mappings, through the `ExpressionLanguage` printer.
+
+## History
+- 2026-11-19: accepted, in answer to QA review 5969673183 on #145.
+- 2026-11-19: revised after security review 5969746899 on #150. Changes: exact numbers (H1); compilation only from the stored canonical document, with a round-trip check at import and a hash check at load (M1); the parser frozen with the printer, plus property tests, a coverage gate and a pinned golden file (M2, M3); narrower normal-form rules for instants, numbers, column names and strings (M4); escaped and refused characters, and non-ASCII marking in the diff (M5); raw-byte source hash, the committed blob, and UTF-8 only (L1).
