@@ -44,7 +44,7 @@ public record ModuleDescriptor(
     private static final Pattern ENGINE_VERSION = Pattern.compile("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$");
     private static final Pattern API_VERSION = Pattern.compile("^v[0-9]+$");
     private static final Pattern FEATURE = Pattern.compile("^[a-z]+(\\.[a-z0-9-]+)+$");
-    private static final Pattern PERMISSION = Pattern.compile("^(rules|processes)(:[a-z]+){1,2}$");
+    private static final Pattern PERMISSION = Pattern.compile("^(rules|processes)(:[a-z]+(-[a-z]+)*){1,2}$");
 
     /** Validates every field and copies the collections. */
     public ModuleDescriptor {
