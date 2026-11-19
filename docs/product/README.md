@@ -26,15 +26,15 @@ HORUS Agentic BPM is two Java libraries and a static cockpit that run inside a t
 | Milestone | Target date | Outcome | Features |
 |---|---|---|---|
 | M0 Architecture | 4 Dec 2026 | Contracts verified against a live PostgreSQL; this review decided | 3 |
-| M1 Rule Engine 0.1, Cockpit 0.1 | 15 Jan 2027 | Business staff change governed rules without a deployment, from one cockpit that reaches every host | 56 |
+| M1 Rule Engine 0.1, Cockpit 0.1 | 15 Jan 2027 | Business staff change governed rules without a deployment, from one cockpit that reaches every host | 57 |
 | M2 Process Engine 0.1 with `agentTask`, Cockpit 0.2 | 26 Mar 2027 | Approvals, sagas and guarded AI agent steps inside the team's own service; every instance on its diagram; one inbox across services | 65 |
-| M3 Agentic depth, compatibility, 1.0 | 21 May 2027 | Production use with offline evaluation of agent changes, governed process changes and a frozen API | 31 |
+| M3 Agentic depth, compatibility, 1.0 | 21 May 2027 | Production use with offline evaluation of agent changes, governed process changes and a frozen API | 32 |
 | S1 Standards 1.1 | Pending PD-062 | Any BPMN 2.0 model imported and shown in full; subprocesses, boundary events and multi-instance run; DMN Level 2 | 11 |
 | S2 Standards 1.2 | Pending PD-062 | Messages and signals across services; full FEEL and DMN Level 3 | 5 |
 | S3 Standards 1.3 | Pending PD-062 | BPMN 2.0.2 execution and DMN Level 3 conformance with published deviations | 2 |
 | After 1.0 | Candidates | Agent-chosen steps, multi-agent planning, more databases, a hosted cockpit; the emergency approval path until its ADR sets a milestone | 11 |
 
-Full plan: [roadmap.md](roadmap.md). M2 and M3 moved by two weeks each when the product owner accepted the cockpit direction on 2026-11-18 (PD-042). Date risk: M1 has about five working weeks after the year-end break and holds only with the pre-approved cuts in PD-031 (decided 2026-11-19); M2 has about nine working weeks after the Lunar New Year break and keeps five cut candidates; M3 carries 31 features in about seven working weeks, with eight cut candidates, and depends on two outside adopters (kill assumption K13). Agent-chosen steps moved from M3 to after 1.0 (PD-028, decided 2026-11-19).
+Full plan: [roadmap.md](roadmap.md). M2 and M3 moved by two weeks each when the product owner accepted the cockpit direction on 2026-11-18 (PD-042). Date risk: M1 has about five working weeks after the year-end break and holds only with the pre-approved cuts in PD-031 (decided 2026-11-19); M2 has about nine working weeks after the Lunar New Year break and keeps five cut candidates; M3 carries 32 features in about seven working weeks, with nine cut candidates, and depends on two outside adopters (kill assumption K13). Agent-chosen steps moved from M3 to after 1.0 (PD-028, decided 2026-11-19).
 
 ## Feature map in numbers
 
@@ -42,15 +42,15 @@ Full plan: [roadmap.md](roadmap.md). M2 and M3 moved by two weeks each when the 
 |---|---|---|---|---|
 | Rule Engine | 48 | 18 | 21 | 9 |
 | Process Engine | 66 | 21 | 32 | 13 |
-| Cockpit | 42 | 12 | 25 | 5 |
+| Cockpit | 44 | 12 | 27 | 5 |
 | Cross-cutting | 28 | 12 | 12 | 4 |
-| **Total** | **184** | **63** | **90** | **31** |
+| **Total** | **186** | **63** | **92** | **31** |
 
-The standards direction (PD-057) added 27 features: 10 foundations before 1.0 (8 already specified) and 17 standards-track previews, with PE-F-40 moved into 1.2. 52 SPEC statements are indexed to a feature. The module SPECs hold 93; the 41 written since the last index (RLE-017 to RLE-019, PRE-018 to PRE-038, CKP-012 to CKP-028) are not yet mapped, so some features shown as spec gaps may already be specified. Mapping them is the next feature map update. PD-058 to PD-060 (decided 2026-11-19) added 3 foundation features, now counted: RE-F-41 and X-F-28 in M1, PE-F-58 in M2. PD-028 moved PE-F-39 from M3 to after 1.0. PD-043 (decided 2026-11-19) added 7 features (3 in M1, 3 in M2, 1 in M3) and moved batch evaluate from M1 to M2; PD-012 added the emergency path (RE-F-48) as later until its ADR. 25 M1 features have no SPEC statement in the map; closing them is an M0 exit criterion. 14 features are cut candidates (1 in M1 under PD-031, 5 in M2 and 8 in M3 under PD-042 and PD-043); no standards feature is one. Details: [feature-map.md](feature-map.md).
+The standards direction (PD-057) added 27 features: 10 foundations before 1.0 (8 already specified) and 17 standards-track previews, with PE-F-40 moved into 1.2. 52 SPEC statements are indexed to a feature. The module SPECs hold 93; the 41 written since the last index (RLE-017 to RLE-019, PRE-018 to PRE-038, CKP-012 to CKP-028) are not yet mapped, so some features shown as spec gaps may already be specified. Mapping them is the next feature map update. PD-058 to PD-060 (decided 2026-11-19) added 3 foundation features, now counted: RE-F-41 and X-F-28 in M1, PE-F-58 in M2. PD-028 moved PE-F-39 from M3 to after 1.0. PD-043 (decided 2026-11-19) added 7 features (3 in M1, 3 in M2, 1 in M3) and moved batch evaluate from M1 to M2; PD-012 added the emergency path (RE-F-48) as later until its ADR. PD-056 (decided 2026-11-19) added 2 cockpit features: plain-language policy readings in M1 (CK-F-44) and the condition builder lens in M3 (CK-F-45). 26 M1 features have no SPEC statement in the map; closing them is an M0 exit criterion. 15 features are cut candidates (1 in M1 under PD-031, 5 in M2 and 9 in M3 under PD-042, PD-043 and PD-056); no standards feature is one. Details: [feature-map.md](feature-map.md).
 
 ## Decisions waiting for the product owner
 
-Forty-three decisions are recorded as decided: PD-001 to PD-011; PD-032 to PD-042 on the cockpit direction; PD-057 on the standards direction; PD-067 approving the roadmap; PD-068 and PD-069 on the process; and, on 2026-11-19, PD-012, PD-013, PD-019, PD-020, PD-028 to PD-031, PD-043, PD-050, PD-058 to PD-061 and PD-070 to PD-072 ([Decided on 2026-11-19](#decided-on-2026-11-19)). Twenty-nine need a decision: the thirteen below; eleven from the requirements review (PD-044 to PD-055 except PD-050) in [Requirements review (pending)](#requirements-review-pending); and five on the standards track (PD-062 to PD-066) in [Standards direction](#standards-direction-decided-2026-11-18). Full options and consequences: [decisions.md](decisions.md).
+Forty-four decisions are recorded as decided: PD-001 to PD-011; PD-032 to PD-042 on the cockpit direction; PD-057 on the standards direction; PD-067 approving the roadmap; PD-068 and PD-069 on the process; and, on 2026-11-19, PD-012, PD-013, PD-019, PD-020, PD-028 to PD-031, PD-043, PD-050, PD-058 to PD-061 and PD-070 to PD-072 ([Decided on 2026-11-19](#decided-on-2026-11-19)) and PD-056 on the cockpit UX ([Cockpit UX direction](#cockpit-ux-direction-decided-2026-11-19)). Twenty-eight need a decision: the twelve below; eleven from the requirements review (PD-044 to PD-055 except PD-050) in [Requirements review (pending)](#requirements-review-pending); and five on the standards track (PD-062 to PD-066) in [Standards direction](#standards-direction-decided-2026-11-18). Full options and consequences: [decisions.md](decisions.md).
 
 | Id | Question | Recommendation |
 |---|---|---|
@@ -66,7 +66,6 @@ Forty-three decisions are recorded as decided: PD-001 to PD-011; PD-032 to PD-04
 | PD-025 | Process Engine "0.2" label (wiki Concepts) | Process Engine 0.1 in M2; module versions are independent |
 | PD-026 | Should requirements used as gates | `TR-PERF-04` reported only; accessibility and two languages gate, with `TR-UI-03` and `TR-UI-04` raised to Must (M1) |
 | PD-027 | Decision explanation in M1 without a SPEC statement | Generated explanation from the log in M1; author templates in M3 |
-| PD-056 | Rule management UX direction: grid, sentences, change request, or a hybrid? | Hybrid: change request page with CSV rows and engine readings in 0.1; editable grid with a sentence view in 0.2; replay, stored evidence and history in M3; assistant only after 1.0. Six sub-questions in the entry. Decide after the four-paradigm prototype the product owner requested, which is not yet delivered |
 
 ## Decided on 2026-11-19
 
@@ -93,6 +92,21 @@ In a decision session on 2026-11-19 the product owner accepted the product manag
 | PD-072 | Option 1: the `schema-prefix` property is dropped and table names are fixed at `rle_`; a dedicated PostgreSQL schema is the stated path if an adopter needs isolation |
 
 Effect on scope: M1 from 52 to 56 features, M2 from 60 to 65, M3 from 31 to 31 (PE-F-39 out, CK-F-38 in), after 1.0 from 9 to 11. No date changes. PD-063 (principle 9 wording) stays pending; with PD-060 decided, its recommendation is option 1. Follow-ups outside the product documents: the emergency path ADR, SPEC `RLE-006`, `TR-DEF-01`, `TR-STD-02`, `TR-API-07` and `TR-OPS-04` wording, module DESIGN files, the package rename and Maven Central namespace, and the wiki pages each entry names.
+
+## Cockpit UX direction (decided 2026-11-19)
+
+The product owner approved the cockpit UI and UX on 2026-11-19 and asked for it to be applied to the project: [PD-056](decisions.md#pd-056-rule-management-ux-direction), option 4, the hybrid shown in the approved cockpit prototype and UX design document ([ux-design.md](ux-design.md)).
+
+| Part | Lands |
+|---|---|
+| Process canvas as home, decision table docked below | Docked table in 0.1 (home is changes and rule sets until processes exist); canvas home in 0.2 |
+| Dense grid or matrix editor for authors | Spreadsheet round-trip in 0.1 (PD-043); dense matrix in 0.2; minimal 0.1 editing only if CK-F-43 is confirmed (PD-013) |
+| Plain-language policy readings for approvers and support | Read only in 0.1 (CK-F-44); updating while editing in 0.2 |
+| Change dossier: three-way diff (matrix, policy redline, process graph), four-eyes gate | Matrix and redline in 0.1; process graph diff in M3 |
+| Control tower with an agent guardrail inspector | 0.2 |
+| Nested And/Or condition builder lens | M3, first M3 cut (CK-F-45) |
+
+Visual rules from 0.1: specification ids hidden, one view at a time, one language at a time; the reviewed light and dark colour tokens; every screen checked at 1440x900 with the primary action and its result visible without scrolling, and at 1440x1200. Effect on scope: M1 from 56 to 57 features, M3 from 31 to 32; no date change. Kill test K24 runs in the week 2 M1 sessions. Still open: CK-F-43 (PD-013) and the proposed M1 fallback for readings, both for the product owner to confirm.
 
 ## Cockpit direction (decided 2026-11-18)
 

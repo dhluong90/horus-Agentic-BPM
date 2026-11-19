@@ -1,0 +1,39 @@
+flowchart LR
+  subgraph P ["People at Sao Mai Bank"]
+    LI["Linh, pricing manager<br/>Author"]
+    MI["Minh, compliance officer<br/>Approver"]
+    HO["Hoa, contact-centre agent<br/>Support"]
+    AUD["Internal auditor<br/>Auditor"]
+    TU["Tuấn, operations officer<br/>Operator and reviewer"]
+  end
+  subgraph C ["Cockpit lenses"]
+    ME["Matrix editor<br/>edit, simulate, see impact"]
+    DO["Change dossier<br/>three-way diff, four-eyes gate"]
+    CV["Canvas home<br/>docked table, readings, trace"]
+    DP["Decision page<br/>matched row and reading"]
+    CT["Control tower<br/>guardrail inspector"]
+  end
+  EN["Engines in the host service<br/>validate, enforce four-eyes,<br/>publish, write the log"]
+  LI -- "1. edits a draft" --> ME
+  ME -- "2. requests approval" --> DO
+  MI -- "3. reads diff and readings" --> DO
+  DO -- "4. approve, or reject with comment" --> EN
+  DO -. "rejected: back to draft" .-> ME
+  EN -- "5. version goes live" --> CV
+  HO -- "6. explains one decision" --> DP
+  AUD -- "6. reconstructs a decision" --> DP
+  EN -- "7. guardrail routes to a person" --> CT
+  TU -- "8. approve or override with a reason" --> CT
+  CT -- "9. decision recorded" --> EN
+  TU -. "reads stuck work" .-> CV
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F;
+  classDef host fill:#E8F5E9,stroke:#2E7D32,color:#16231F;
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F;
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F;
+  classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F;
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F;
+  class LI,MI,HO,AUD,TU obs;
+  class ME,DO,CV,DP,CT client;
+  class EN engine;
+  style P fill:none,stroke:#9E9E9E,stroke-dasharray:5 5
+  style C fill:none,stroke:#1565C0,stroke-dasharray:5 5

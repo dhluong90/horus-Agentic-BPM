@@ -1,0 +1,21 @@
+stateDiagram-v2
+  direction LR
+  state "Waiting for approval" as WaitingForApproval
+  [*] --> Draft: import, spreadsheet or edit
+  Draft --> Draft: save, engine validates
+  Draft --> WaitingForApproval: maker requests approval
+  WaitingForApproval --> WaitingForApproval: maker tries to approve, 403 SELF_APPROVAL_FORBIDDEN
+  WaitingForApproval --> Draft: checker rejects with a comment
+  WaitingForApproval --> Scheduled: checker approves, effective date ahead
+  WaitingForApproval --> Live: checker approves, effective now
+  WaitingForApproval --> Draft: effective date passed, maker picks a new date
+  Scheduled --> Live: effective date reached
+  Live --> Retired: a newer version goes live
+  Retired --> [*]
+  note right of WaitingForApproval
+    Engine state PENDING_APPROVAL.
+    Approve shown only when allowed actions say so.
+  end note
+  note right of Scheduled
+    UI word for PUBLISHED with a future effectiveFrom
+  end note

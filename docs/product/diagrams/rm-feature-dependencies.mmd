@@ -7,7 +7,8 @@ flowchart LR
     RE14["RE-F-14 decision log"]
     RE21["RE-F-21, RE-F-25<br/>simulation, import"]
     RE05["RE-F-05, RE-F-17, RE-F-18<br/>replay, query, explain"]
-    CK04["CK-F-02, CK-F-04<br/>version view, approvals"]
+    CK04["CK-F-02, CK-F-04<br/>version view, change dossier"]
+    CK44["CK-F-44<br/>plain-language policy readings"]
     CK23["CK-F-23 host registry<br/>X-F-22 meta and me"]
   end
   subgraph S2 ["M2"]
@@ -23,6 +24,7 @@ flowchart LR
     CK24["CK-F-24, CK-F-25<br/>definition and instance diagrams"]
     CK28["CK-F-28, CK-F-29<br/>merged inbox and incidents"]
     CK12["CK-F-12, CK-F-16<br/>timeline, agent task inspector"]
+    CK10["CK-F-10, CK-F-37<br/>dense matrix editor"]
   end
   subgraph S3 ["M3"]
     direction TB
@@ -31,6 +33,7 @@ flowchart LR
     PE44["PE-F-44, PE-F-52<br/>layout storage, step catalogue"]
     CK32["CK-F-32 modeller canvas"]
     CK31["CK-F-31 definition approval screens"]
+    CK45["CK-F-45 condition builder lens"]
     PE49["PE-F-49, CK-F-27<br/>hourly rollup, heatmap"]
     PE31["PE-F-31, CK-F-19, CK-F-33<br/>renamed-step migration, screens"]
     XF18["X-F-18 API freeze"]
@@ -40,6 +43,12 @@ flowchart LR
   RE02 --> CK04
   RE06 --> CK04
   RE14 --> RE05
+  RE05 --> CK44
+  CK04 --> CK44
+  CK44 --> CK24
+  CK44 --> CK10
+  RE02 --> CK10
+  CK10 --> CK45
   RE01 ==> PE09
   RE01 ==> PE18
   PE16 --> PE18
@@ -69,7 +78,7 @@ flowchart LR
   classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
   class RE01,RE02,RE06,RE14,RE21,RE05 engine;
   class PE09,PE16,PE18,PE15,PE45,PE47,PE50,PE30,PE34,PE37,PE44,PE49,PE31 engine;
-  class CK04,CK23,CK24,CK28,CK12,CK32,CK31 client;
+  class CK04,CK44,CK23,CK24,CK28,CK12,CK10,CK32,CK31,CK45 client;
   class XF18 host;
   style S1 fill:none,stroke:#1565C0,stroke-dasharray:5 5
   style S2 fill:none,stroke:#1565C0,stroke-dasharray:5 5

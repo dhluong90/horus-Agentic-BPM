@@ -155,18 +155,18 @@ A PRD capability row that bundles several outcomes is split into several feature
 |---|---|---|---|---|---|---|---|---|---|
 | CK-F-01 | The cockpit runs embedded in the host or standalone from one base URL, with security headers and a CORS allowlist | All | M1 | CK 7.2 | CKP-001 | TR-UI-01, TR-SEC-09 | specified | | PD-035 |
 | CK-F-02 | An author lists rule sets, reads a version and imports or exports it | Author | M1 | CK 7.3, 8 | | TR-UI-02 | spec gap | RE-F-25 | PD-013 |
-| CK-F-03 | An approver sees added, changed and removed rows side by side | Approver | M1 | CK 7.2 | CKP-002 | TR-UI-02 | specified | RE-F-08 | |
-| CK-F-04 | An approver works the approvals queue; Approve is disabled for the requester; reject needs a comment | Approver | M1 | CK 7.2 | CKP-003 | TR-SEC-04, TR-UI-02 | specified | RE-F-06, RE-F-07 | PD-016 |
+| CK-F-03 | An approver sees added, changed and removed rows and cells in the matrix diff of the change dossier | Approver | M1 | CK 7.2 | CKP-002 | TR-UI-02 | specified | RE-F-08 | PD-056 |
+| CK-F-04 | An approver works the approvals queue and opens each change as one dossier (effective date, maker's note, diff, simulation, checks); Approve is unavailable to the requester; reject needs a comment | Approver | M1 | CK 7.2 | CKP-003 | TR-SEC-04, TR-UI-02 | specified (dossier layout not yet in CKP-003) | RE-F-06, RE-F-07 | PD-016, PD-056 |
 | CK-F-05 | An author runs a sample simulation and sees changed outcomes | Author | M1 | CK 7.2 | CKP-004 | TR-UI-02 | specified | RE-F-21 | |
 | CK-F-06 | An auditor filters decisions, opens one and sees the matched row, the explanation and masked inputs | Auditor | M1 | CK 7.2 | CKP-005 | TR-SEC-05, TR-OBS-05 | specified (filters not yet in CKP-005) | RE-F-17, RE-F-18 | PD-027 |
 | CK-F-07 | Every error shows its code and `correlationId`; every mutation sends an idempotency key and `If-Match` | All | M1 | CK 7.2 API | CKP-008 (0.2 only) | TR-SEC-08, TR-IDEM-01 | spec gap | X-F-05 | |
-| CK-F-08 | Every screen is keyboard operable with WCAG 2.1 AA contrast in light and dark themes | All | M1 (re-run M2) | CK 7.2 | CKP-009 | TR-UI-03 | specified | | PD-026 |
-| CK-F-09 | Every screen is available in English and Vietnamese | All | M1 (re-run M2) | CK 7.2 | CKP-010 | TR-UI-04 | specified | | PD-026 |
-| CK-F-10 | An author edits a table in a grid with inline validation | Author | M2 | CK 7.2 | CKP-006 | TR-DET-02, TR-UI-02 | specified | RE-F-02 | PD-013 |
+| CK-F-08 | Every screen is keyboard operable with WCAG 2.1 AA contrast in light and dark themes using the reviewed colour tokens; the primary action and its result are visible without scrolling at 1440x900, and the screen is checked at 1440x1200 | All | M1 (re-run M2) | CK 7.2 | CKP-009 | TR-UI-03 | specified (tokens and viewport checks not yet in CKP-009) | | PD-026, PD-056 |
+| CK-F-09 | Every screen is available in English and Vietnamese, one language at a time, chosen by the user | All | M1 (re-run M2) | CK 7.2 | CKP-010 | TR-UI-04 | specified | | PD-026, PD-056 |
+| CK-F-10 | An author edits a table in a dense matrix inside the change dossier, with inline validation | Author | M2 | CK 7.2 | CKP-006 | TR-DET-02, TR-UI-02 | specified | RE-F-02 | PD-013, PD-056 |
 | CK-F-11 | An author replays logged decisions through a draft in the cockpit | Author, Approver | M3 | CK 7.2 | CKP-011 | TR-UI-02 | specified | RE-F-22 | PD-018, PD-031, PD-042 |
 | CK-F-12 | An operator browses definitions and opens an instance with its current step and history timeline; the diagram view is CK-F-25 | Operator, Auditor | M2 | CK 7.3, 8 | | | spec gap | PE-F-15, PE-F-28 | PD-032 |
 | CK-F-13 | An operator works task queues: claim, complete, reassign | Operator | M2 | CK 7.3, 8 | | | spec gap | PE-F-07 | |
-| CK-F-14 | A reviewer inspects an escalated agent task and approves or overrides it with a reason | Approver | M2 | CK 7.2 | CKP-007 | TR-AGT-01, TR-AGT-02 | specified | PE-F-18, PE-F-22 | |
+| CK-F-14 | A reviewer opens an escalated agent task from the control tower, sees masked inputs, the schema verdict and the guardrail row that fired, and approves or overrides it with a reason | Approver | M2 | CK 7.2 | CKP-007 | TR-AGT-01, TR-AGT-02 | specified | PE-F-18, PE-F-22 | PD-056 |
 | CK-F-15 | An operator works the incident queue and retries or resolves an incident | Operator | M2 | CK 7.2 | CKP-008 | TR-OPS-03 | specified | PE-F-25 | PD-016 |
 | CK-F-16 | An operator sees which compensation handlers ran, in which order, in the instance timeline | Operator | M2 | CK 7.3 | | TR-COMP-02 | spec gap | PE-F-26, CK-F-12 | PD-024 |
 | CK-F-17 | An operator filters the task queue to SLA breaches | Operator | M2 | CK 7.3 | | TR-CAL-01 | spec gap | PE-F-11, CK-F-13 | PD-024, PD-016 |
@@ -176,7 +176,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | CK-F-21 | Landing views show a strip of key counts and health | Operator | later (not scheduled) | CK 7.3 | | | design preview | | PD-016 |
 | CK-F-22 | A hosted cockpit | All | later | CK 8 | | | design preview | | |
 | CK-F-23 | The standalone cockpit lists several hosts from its configuration, signs in once with OIDC PKCE, switches host, and hides screens a host or user cannot use | All | M1 | CK 7.2 | | TR-UI-01, TR-SEC-09 | spec gap | CK-F-01, X-F-22 | PD-035 |
-| CK-F-24 | An operator or auditor sees a definition version as a diagram, laid out automatically when it has no stored layout | Operator, Auditor | M2 | CK 7.3 | | TR-UI-03 | spec gap | PE-F-01 | PD-032 |
+| CK-F-24 | An operator or auditor sees a definition version as a diagram, laid out automatically when it has no stored layout; this canvas is the cockpit home, and selecting a decision node docks its decision table below, read only | Operator, Auditor | M2 | CK 7.3 | | TR-UI-03 | spec gap | PE-F-01, CK-F-44 | PD-032, PD-056 |
 | CK-F-25 | An operator sees an instance as a diagram with its current tokens and, per node, when it ran, how long, attempts and who acted | Operator, Auditor | M2 | CK 7.3 | | TR-UI-03 | spec gap | CK-F-24, PE-F-47, CK-F-12 | PD-032 |
 | CK-F-26 | An operator sees live active-token and incident counts on each node of a definition diagram | Operator | M2 (cut candidate) | CK 7.3 | | | spec gap | CK-F-24, PE-F-48 | PD-038, PD-016 |
 | CK-F-27 | A process owner sees a historical heatmap of counts and p50 and p95 durations per node for a chosen window | Operator | M3 (cut candidate) | CK 7.3 | | | spec gap | CK-F-24, PE-F-49 | PD-038 |
@@ -189,13 +189,15 @@ A PRD capability row that bundles several outcomes is split into several feature
 | CK-F-34 | A host screen links to one decision in the cockpit by its id; the cockpit opens it after sign-in, with the same masking and permissions | Auditor, support staff | M1 | CK 7.3; UJ UC-RE-40 | | TR-SEC-05 | spec gap | CK-F-06 | PD-043 |
 | CK-F-35 | An author exports a rule set's rows as CSV, edits them in a spreadsheet and imports the file as a new draft; cells accept the condition shorthand; errors name the row and column in plain language in English and Vietnamese; inputs and outputs cannot change through the file | Author | M1 | CK 7.3; UJ UC-RE-01, UC-RE-02, UC-RE-03, UC-RE-13, UC-RE-14, UC-RE-25 | | TR-DET-02, TR-UI-02, TR-UI-04 | spec gap | RE-F-25, RE-F-02 | PD-043, PD-013 |
 | CK-F-36 | An author creates a new rule set in the grid from a template (fee by tier, eligibility with reason codes, limit by segment, blank): name, hit policy, inputs and outputs with types and allowed values, then rows | Author | M2 | CK 7.3; UJ UC-RE-15, UC-RE-16 | | TR-UI-02 | spec gap | CK-F-10 | PD-043 |
-| CK-F-37 | Grid cells accept the condition shorthand, offer allowed values as drop-downs and show each condition in plain language ("Balance is at least 50,000,000 VND") to the author and the approver | Author, Approver | M2 | CK 7.3; UJ UC-RE-14, UC-RE-30 | | TR-UI-02, TR-UI-04 | spec gap | CK-F-10, CK-F-35 | PD-043 |
+| CK-F-37 | Matrix cells accept the condition shorthand and offer allowed values as drop-downs, and each row's plain-language reading updates as the author edits; the read-only reading is CK-F-44 | Author | M2 | CK 7.3; UJ UC-RE-14 | | TR-UI-02, TR-UI-04 | spec gap | CK-F-10, CK-F-35, CK-F-44 | PD-043, PD-056 |
 | CK-F-38 | An auditor sees a rule set's version history (author, requester, approver, comments, effective dates) and exports it with selected decisions as CSV or JSON evidence; masked inputs stay masked | Auditor | M3 (cut candidate) | CK 7.3; UJ UC-RE-45, UC-RE-47 | | TR-SEC-05, TR-OBS-01 | spec gap | RE-F-07, RE-F-17 | PD-043 |
 | CK-F-39 | An author copies a rule set from one tenant into another as a draft ("fork from tenant default"); until then, export and import | Author | later | UJ UC-RE-21 | | TR-TEN-01 | design preview | RE-F-25, RE-F-11 | |
 | CK-F-40 | Diagram nodes are drawn by BPMN element type plus HORUS subtype; a type the cockpit build does not know renders as a labelled generic node and the rest of the diagram stays intact; host details show the standards stage each host reports | Operator, Auditor | M2 | CK 7.3 | CKP-029 | TR-UI-07, TR-UI-08 | specified | CK-F-24, X-F-22 | PD-057 |
 | CK-F-41 | Every BPMN 2.0 and DMN symbol is displayed (pools, lanes, message flows, artifacts, events, gateways, DRDs); editing stays limited to what the host can execute | Operator, Auditor, Author | 1.1 (S1) | CK 8 | | TR-STD-10 | design preview | CK-F-40, PE-F-63 | PD-057, PD-062 |
 | CK-F-42 | An operator follows a conversation between pools in different hosts by correlation key, read from each host, and sees message and signal waits on the diagram | Operator | 1.2 (S2) | CK 8 | | TR-STD-13 | design preview | CK-F-41, PE-F-40 | PD-057, PD-062 |
-| CK-F-43 | An author edits a draft of an existing rule set in the cockpit: changes a cell with the condition shorthand, adds, copies, deletes or moves a row, and saves with validation shown on each cell | Author | M1 if the PD-013 scope is confirmed | CK 7.3 | | TR-UI-02 | spec gap | CK-F-35, RE-F-02 | PD-013, PD-043 |
+| CK-F-43 | An author edits a draft of an existing rule set in the cockpit: changes a cell with the condition shorthand, adds, copies, deletes or moves a row, and saves with validation shown on each cell | Author | M1 if the PD-013 scope is confirmed | CK 7.3 | | TR-UI-02 | spec gap | CK-F-35, RE-F-02 | PD-013, PD-043, PD-056 |
+| CK-F-44 | Approvers, support staff and auditors read every row as a plain-language policy sentence in their language ("Balance is at least 50,000,000 VND"), read only, in the docked table, the change dossier (old reading struck, new reading added), the simulation and the decision page | Approver, Auditor, support staff | M1 | CK 7.3; UJ UC-RE-30 | | TR-UI-02, TR-UI-04 | spec gap | CK-F-02, CK-F-03, RE-F-18 | PD-056, PD-043 |
+| CK-F-45 | An author edits one row's conditions as nested And, Or and Not groups with typed operators and values; the result is saved as a draft that the engine validates | Author | M3 (cut candidate) | CK 7.3 | | TR-UI-02 | spec gap | CK-F-10, CK-F-37 | PD-056 |
 
 ## Cross-cutting
 
@@ -277,31 +279,33 @@ Each cell: features (specified / spec gap / design preview). Generated from the 
 |---|---|---|---|---|---|---|---|---|---|
 | Rule Engine | 0 | 31 (17 / 14 / 0) | 2 (0 / 2 / 0) | 6 (1 / 5 / 0) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 4 (0 / 0 / 4) | 48 (18 / 21 / 9) |
 | Process Engine | 0 | 0 | 44 (21 / 22 / 1) | 11 (0 / 10 / 1) | 5 (0 / 0 / 5) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 2 (0 / 0 / 2) | 66 (21 / 32 / 13) |
-| Cockpit | 0 | 12 (7 / 5 / 0) | 16 (4 / 12 / 0) | 9 (1 / 8 / 0) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 0 | 3 (0 / 0 / 3) | 42 (12 / 25 / 5) |
+| Cockpit | 0 | 13 (7 / 6 / 0) | 16 (4 / 12 / 0) | 10 (1 / 9 / 0) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 0 | 3 (0 / 0 / 3) | 44 (12 / 27 / 5) |
 | Cross-cutting | 3 (3 / 0 / 0) | 13 (7 / 6 / 0) | 3 (1 / 2 / 0) | 5 (1 / 4 / 0) | 2 (0 / 0 / 2) | 0 | 0 | 2 (0 / 0 / 2) | 28 (12 / 12 / 4) |
-| **All** | 3 (3 / 0 / 0) | 56 (31 / 25 / 0) | 65 (26 / 38 / 1) | 31 (3 / 27 / 1) | 11 (0 / 0 / 11) | 5 (0 / 0 / 5) | 2 (0 / 0 / 2) | 11 (0 / 0 / 11) | 184 (63 / 90 / 31) |
+| **All** | 3 (3 / 0 / 0) | 57 (31 / 26 / 0) | 65 (26 / 38 / 1) | 32 (3 / 28 / 1) | 11 (0 / 0 / 11) | 5 (0 / 0 / 5) | 2 (0 / 0 / 2) | 11 (0 / 0 / 11) | 186 (63 / 92 / 31) |
 
 ![Features per module per milestone](images/fm-features-per-module.svg)
 
 The same counts as the table. Teal: engines; blue: cockpit; green: cross-cutting; purple: the standards track. Source: [diagrams/fm-features-per-module.mmd](diagrams/fm-features-per-module.mmd).
 
-Totals: 184 features; 63 specified, 90 spec gaps, 31 design previews. The cockpit direction (PD-032 to PD-042, decided 2026-11-18) added 24 features, all spec gaps: 2 in M1, 14 in M2 and 8 in M3. It moved RE-F-22, CK-F-11 and CK-F-18 from M2 to M3 and took PE-F-41 off the cut list.
+Totals: 186 features; 63 specified, 92 spec gaps, 31 design previews. The cockpit direction (PD-032 to PD-042, decided 2026-11-18) added 24 features, all spec gaps: 2 in M1, 14 in M2 and 8 in M3. It moved RE-F-22, CK-F-11 and CK-F-18 from M2 to M3 and took PE-F-41 off the cut list.
 
 The standards direction (PD-057, decided 2026-11-18) added 27 counted features. Foundations before 1.0: 10 (4 in M1, all Rule Engine; 5 in M2, 4 Process Engine and 1 Cockpit; 1 cross-cutting in M3), of which 8 are specified by SPEC statements already written and 2 are spec gaps. Standards track: 17 new design previews (11 in 1.1, 4 in 1.2, 2 in 1.3) and PE-F-40 moved from later to 1.2, for 18 in the track. No standards feature is a cut candidate: the foundations are the items that are expensive later.
 
-PD-043 (decided 2026-11-19, option 3) added 7 features, all spec gaps: RE-F-33, CK-F-34 and CK-F-35 in M1; RE-F-34, CK-F-36 and CK-F-37 in M2; CK-F-38 in M3. It moved RE-F-26 (batch evaluate) from M1 to M2. M1 holds 56, M2 65 and M3 31. PD-012 (decided 2026-11-19, option 4) added RE-F-48, the configurable emergency path, as later until the architect's ADR sets its milestone. PD-050 (decided 2026-11-19) reworded RE-F-31: retention is required outside `dev`, at least 12 months; with PD-020 (option 2) the setting, the start-up check and the purge arrive together in M3.
+PD-043 (decided 2026-11-19, option 3) added 7 features, all spec gaps: RE-F-33, CK-F-34 and CK-F-35 in M1; RE-F-34, CK-F-36 and CK-F-37 in M2; CK-F-38 in M3. It moved RE-F-26 (batch evaluate) from M1 to M2. After PD-043, M1 held 56, M2 65 and M3 31. PD-012 (decided 2026-11-19, option 4) added RE-F-48, the configurable emergency path, as later until the architect's ADR sets its milestone. PD-050 (decided 2026-11-19) reworded RE-F-31: retention is required outside `dev`, at least 12 months; with PD-020 (option 2) the setting, the start-up check and the purge arrive together in M3.
 
-Not counted: CK-F-43, minimal editing in the cockpit for M1, proposed under PD-013 (decided 2026-11-19: import and in-cockpit authoring both gate M1). If confirmed together with moving RE-F-15 to M2, M1 stays at 56, M2 becomes 66 and RE-F-15 heads the M2 cut list.
+PD-056 (decided 2026-11-19, option 4, the hybrid cockpit direction) added 2 features, both spec gaps: CK-F-44 in M1, the read-only plain-language reading split out of CK-F-37, and CK-F-45 in M3, the nested And/Or condition builder lens, added at the head of the M3 cut list. It reworded CK-F-03, CK-F-04, CK-F-08, CK-F-09, CK-F-10, CK-F-14, CK-F-24 and CK-F-37 without changing their milestones. M1 holds 57, M2 65 and M3 32.
+
+Not counted: CK-F-43, minimal editing in the cockpit for M1, proposed under PD-013 (decided 2026-11-19: import and in-cockpit authoring both gate M1). If confirmed together with moving RE-F-15 to M2, M1 stays at 57, M2 becomes 66 and RE-F-15 heads the M2 cut list.
 
 Decided on 2026-11-19 and now counted: RE-F-41 (M1, PD-058, specified by RLE-021); PE-F-58 (M2, PD-059, spec gap); X-F-28 (M1 and M2, PD-060, spec gap, counted in M1). The same session moved PE-F-39 (agent-chosen steps) from M3 to later as a design preview (PD-028). Net change: M1 from 52 to 54, M2 from 60 to 61, M3 from 31 to 30, later from 9 to 10; total from 173 to 176. None of the three foundation features is a cut candidate.
 
-Cut candidates: 14 features.
+Cut candidates: 15 features.
 
 | Milestone | Checkpoint | Cut, in this order | Decision |
 |---|---|---|---|
 | M1 | 8 Jan 2027 | RE-F-15, then decision log filters beyond rule set and period | PD-031, PD-043 (decided 2026-11-19) |
 | M2 | 5 Mar 2027 | PE-F-30, CK-F-26, PE-F-12, RE-F-26, RE-F-34 | PD-042, PD-043 |
-| M3 | 23 Apr 2027 | CK-F-18, CK-F-32, CK-F-27, PE-F-53, RE-F-30, RE-F-24, X-F-17, CK-F-38 | PD-042, PD-043 |
+| M3 | 23 Apr 2027 | CK-F-45, CK-F-18, CK-F-32, CK-F-27, PE-F-53, RE-F-30, RE-F-24, X-F-17, CK-F-38 | PD-056, PD-042, PD-043 |
 
 PD-043 moved RE-F-26 from the M1 list to M2 up front, so the M1 list keeps RE-F-15 and the decision log filters.
 
