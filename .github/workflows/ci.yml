@@ -73,7 +73,6 @@ jobs:
       - name: Drop remembered download failures from the Maven cache
         run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
 
-
       # The cockpit starter packages cockpit/web/dist; every leg builds the starter, and the example host's cockpit test needs it.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -175,7 +174,6 @@ jobs:
       # then reports the artifact "(absent)" without asking Central again (#171). Ask again.
       - name: Drop remembered download failures from the Maven cache
         run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
-
 
       - name: Gate settings only in the root POM; Grype config lint
         run: |
