@@ -88,7 +88,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | Freeze the draft, record the requester | `rules:author` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:approve` | Publish; approver must differ from requester | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:reject` | Back to draft with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
-| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason. In `four-eyes` mode (M3) it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason (`{ "reason": "Tet promotion ended" }`); it stops serving at once on every replica, and versions it had superseded retire with it. In `four-eyes` mode (M3) it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key` and `If-Match` both required (`400 INPUT_INVALID`, `428 PRECONDITION_REQUIRED`) |
 | `POST /rule-sets/{name}/versions/{v}:confirm-retire` | M3, `four-eyes` mode: retire the version a retirement request names; the requester gets `403 SELF_APPROVAL_FORBIDDEN` | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:cancel-retire` | M3: withdraw a pending retirement request, with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `GET /rule-sets/{name}/versions/{v}/export` | YAML, JSON or DMN 1.5 export | `rules:read` | |

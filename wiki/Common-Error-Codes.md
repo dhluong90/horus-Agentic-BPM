@@ -41,6 +41,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 409 | [RULE_SET_EXISTS](#rule_set_exists) | rules | M1 |
 | 409 | [VERSION_SUPERSEDED](#version_superseded) | processes | M2 |
 | 413 | [PAYLOAD_TOO_LARGE](#payload_too_large) | rules | M1 |
+| 428 | [PRECONDITION_REQUIRED](#precondition_required) | rules | M1 (0.2.0) |
 | 422 | [VALIDATION_FAILED](#validation_failed) | both | M1 |
 | 422 | [IDEMPOTENCY_KEY_REUSE_MISMATCH](#idempotency_key_reuse_mismatch) | both | M1 |
 | 422 | [UNIQUE_HIT_VIOLATION](#unique_hit_violation) | rules | M1 |
@@ -108,7 +109,10 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is the rule (row), `column` the input or output name, and either is `null` when the problem is outside them; `message` carries no location prefix. Every cell problem of the document is listed at once, in document order, up to 100 entries (`violationsTruncated: true` when there were more), so an editor can mark each cell; a structural problem (an unknown property, a missing key) stops reading and is the only entry. Example: `[{ "ruleId": "R3", "column": "fee", "message": "output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code" }]`.
 
 ### PAYLOAD_TOO_LARGE
-`413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve` and `:reject`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
+`413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve`, `:reject` and `:retire`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
+
+### PRECONDITION_REQUIRED
+`428`. A command that must be conditional was sent without `If-Match`, for example `:retire`, so it could overwrite a change the caller has not seen (RFC 6585). Read the version, then send its `ETag` back as `If-Match: "3"`. Nothing is written.
 
 ### VERSION_SUPERSEDED
 `409`. Processes only. An older pending version cannot be approved because a version with a higher number is already `ACTIVE` (ADR-0012). Create a new draft from the effective version and request approval again.
