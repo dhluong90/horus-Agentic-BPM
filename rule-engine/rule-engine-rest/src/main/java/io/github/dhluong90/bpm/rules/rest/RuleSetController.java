@@ -28,6 +28,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -140,6 +141,52 @@ public class RuleSetController {
         return versions.find(name, version, withSource)
                 .map(v -> RestSupport.version(HttpStatus.OK, v, callers))
                 .orElseThrow(() -> new VersionNotFoundException(name, version));
+    }
+
+    /**
+     * {@code PUT /rule-sets/{name}/versions/{v}}: replaces a draft's document in place (RLE-047). The permission is
+     * checked first, then the required headers, then the body is read within the import limit.
+     */
+    @PutMapping("/{name}/versions/{version:\\d+}")
+    public ResponseEntity<byte[]> replaceDraft(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version,
+            InputStream body,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
+            @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
+            @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        RestSupport.require(callers, "rules:author");
+        String key = RestSupport.requiredIdempotencyKey(idempotencyKey, "PUT of a draft");
+        long lock = RestSupport.requiredIfMatch(ifMatch, "PUT of a draft");
+        ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength), key);
+        return RestSupport.version(HttpStatus.OK,
+                versions.replaceDraft(name, version, request, new WriteOptions(key, lock, null)), callers);
+    }
+
+    /**
+     * {@code GET /rule-sets/{name}/versions/{v}/diff?base={w}}: the engine's row-level diff of two versions (RLE-028).
+     * Writes nothing.
+     */
+    @GetMapping("/{name}/versions/{version:\\d+}/diff")
+    public ResponseEntity<byte[]> diff(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version,
+            @RequestParam(value = "base", required = false) String base) {
+        RestSupport.require(callers, "rules:read");
+        if (base == null || base.isBlank()) {
+            throw new InputInvalidException("base is required: the version to compare against");
+        }
+        int against;
+        try {
+            against = Integer.parseInt(base.strip());
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException("base must be a version number");
+        }
+        if (against < 1) {
+            throw new InputInvalidException("base must be a version number");
+        }
+        return RestSupport.json(HttpStatus.OK, RestSupport.diff(versions.diff(name, version, against)));
     }
 
     /** {@code POST /rule-sets/{name}/versions/{v}:request-publish}. */

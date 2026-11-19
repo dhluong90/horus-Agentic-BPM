@@ -7,5 +7,7 @@ public enum LifecycleAction {
     APPROVED,
     REJECTED,
     /** The requester took their own publication request back (PD-089, RLE-046). */
-    WITHDRAWN
+    WITHDRAWN,
+    /** The author replaced the draft's document in place (RLE-047); records the old and new canonical hash. */
+    DRAFT_UPDATED
 }

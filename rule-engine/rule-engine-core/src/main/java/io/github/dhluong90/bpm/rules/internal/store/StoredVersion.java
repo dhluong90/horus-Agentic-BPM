@@ -99,6 +99,26 @@ public record StoredVersion(
     }
 
     /**
+     * Returns a copy of this draft with its document replaced (RLE-047): the content columns change, the number,
+     * status, author and creation time stay, and the lock version moves on.
+     *
+     * @param hitPolicyName the new hit policy name
+     * @param newEffectiveFrom the document's {@code effectiveFrom}, or null
+     * @param newCanonicalJson the new canonical JSON
+     * @param newCanonicalHash its SHA-256
+     * @param newSourceFormat the new source format
+     * @param newSourceDocument the new source text
+     * @param newSourceHash SHA-256 of the new source bytes
+     * @return the new state with the lock version incremented
+     */
+    public StoredVersion replaced(String hitPolicyName, Instant newEffectiveFrom, String newCanonicalJson,
+            String newCanonicalHash, SourceFormat newSourceFormat, String newSourceDocument, String newSourceHash) {
+        return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicyName, newEffectiveFrom,
+                newCanonicalJson, newCanonicalHash, newSourceFormat, newSourceDocument, newSourceHash, lockVersion + 1,
+                requestedBy, requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt);
+    }
+
+    /**
      * Returns the list view.
      *
      * @return the summary

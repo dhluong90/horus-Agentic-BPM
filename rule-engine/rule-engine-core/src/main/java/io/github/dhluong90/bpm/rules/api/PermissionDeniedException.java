@@ -29,4 +29,18 @@ public final class PermissionDeniedException extends HorusBpmException {
         return new PermissionDeniedException("Only the requester of " + ruleSet + " v" + version
                 + " may withdraw it; an approver sends it back with :reject", true);
     }
+
+    /**
+     * Returns the refusal of a draft replacement by anyone but its author (RLE-047): otherwise a second author could
+     * replace the content and then approve it, because four eyes compares the approver with the author.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @return the exception
+     */
+    public static PermissionDeniedException notAuthor(String ruleSet, int version) {
+        return new PermissionDeniedException("Only the author of " + ruleSet + " v" + version
+                + " may replace it; start your own draft with POST .../rule-sets/" + ruleSet + "/versions?copyOf="
+                + version, true);
+    }
 }
