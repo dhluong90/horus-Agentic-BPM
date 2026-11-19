@@ -4,7 +4,6 @@ import com.horus.bpm.rules.api.HorusBpmException;
 import com.horus.bpm.rules.internal.json.EngineJson;
 import com.horus.bpm.rules.internal.json.EngineValues;
 import com.horus.bpm.rules.internal.json.Ulid;
-import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Locale;
@@ -14,6 +13,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
@@ -54,7 +54,7 @@ public class ProblemDetails {
      * @return the problem response
      */
     @ExceptionHandler(HorusBpmException.class)
-    public ResponseEntity<byte[]> handle(HorusBpmException e, HttpServletRequest request) {
+    public ResponseEntity<byte[]> handle(HorusBpmException e, WebRequest request) {
         HttpStatus status = STATUS.getOrDefault(e.code(), HttpStatus.INTERNAL_SERVER_ERROR);
         ResponseEntity<byte[]> response = response(status, body(e.code(), status, e.getMessage(),
                 request.getHeader(CORRELATION_HEADER)));
