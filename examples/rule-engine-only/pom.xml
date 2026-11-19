@@ -18,6 +18,8 @@
   <properties>
     <!-- An example, never published. -->
     <maven.deploy.skip>true</maven.deploy.skip>
+    <!-- An example host never ships; the licence gate (TR-LIC-01) covers engine modules only. -->
+    <bpm.licence-gate.skip>true</bpm.licence-gate.skip>
   </properties>
 
   <dependencies>

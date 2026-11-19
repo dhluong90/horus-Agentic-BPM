@@ -18,6 +18,29 @@
   <description>Embeddable Process Engine and Rule Engine for Java and Spring Boot.</description>
   <url>https://github.com/dhluong90/horus-Agentic-BPM</url>
 
+  <!--
+    TR-LIC-02: every artifact carries the project licence notice and the commercial-licence pointer.
+    Inherited by every module; bpm-bom has no parent and repeats this block.
+  -->
+  <licenses>
+    <license>
+      <name>PolyForm-Noncommercial-1.0.0</name>
+      <url>https://polyformproject.org/licenses/noncommercial/1.0.0</url>
+      <distribution>repo</distribution>
+    </license>
+    <license>
+      <name>LicenseRef-HORUS-Commercial</name>
+      <url>https://github.com/dhluong90/horus-Agentic-BPM/blob/main/COMMERCIAL-LICENSE.md</url>
+      <distribution>manual</distribution>
+      <comments>Any use not permitted by the PolyForm Noncommercial License needs a separate written agreement with HORUS.</comments>
+    </license>
+  </licenses>
+
+  <organization>
+    <name>HORUS</name>
+    <url>https://github.com/dhluong90/horus-Agentic-BPM</url>
+  </organization>
+
   <modules>
     <module>bpm-bom</module>
     <module>rule-engine</module>
@@ -43,6 +66,13 @@
     <maven-install-plugin.version>3.1.4</maven-install-plugin.version>
     <maven-deploy-plugin.version>3.1.4</maven-deploy-plugin.version>
     <maven-clean-plugin.version>3.5.0</maven-clean-plugin.version>
+    <license-maven-plugin.version>2.9.0</license-maven-plugin.version>
+    <cyclonedx-maven-plugin.version>2.9.3</cyclonedx-maven-plugin.version>
+
+    <!-- Root of the reactor, for files every jar carries (LICENSE, COMMERCIAL-LICENSE.md). -->
+    <bpm.root>${maven.multiModuleProjectDirectory}</bpm.root>
+    <!-- Modules that never ship (example hosts) set this to true. -->
+    <bpm.licence-gate.skip>false</bpm.licence-gate.skip>
   </properties>
 
   <dependencyManagement>
@@ -104,6 +134,16 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-jar-plugin</artifactId>
           <version>${maven-jar-plugin.version}</version>
+          <configuration>
+            <archive>
+              <!-- TR-LIC-02: licence notice and commercial-licence pointer in every jar manifest. -->
+              <manifestEntries>
+                <Bundle-License>https://polyformproject.org/licenses/noncommercial/1.0.0</Bundle-License>
+                <X-HORUS-License>PolyForm Noncommercial License 1.0.0; see META-INF/LICENSE</X-HORUS-License>
+                <X-HORUS-Commercial-License>Commercial use needs a separate agreement; see META-INF/COMMERCIAL-LICENSE.md</X-HORUS-Commercial-License>
+              </manifestEntries>
+            </archive>
+          </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
@@ -130,10 +170,102 @@
           <artifactId>spring-boot-maven-plugin</artifactId>
           <version>${spring-boot.version}</version>
         </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>license-maven-plugin</artifactId>
+          <version>${license-maven-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.cyclonedx</groupId>
+          <artifactId>cyclonedx-maven-plugin</artifactId>
+          <version>${cyclonedx-maven-plugin.version}</version>
+        </plugin>
       </plugins>
     </pluginManagement>
 
+    <!-- TR-LIC-02: LICENSE and COMMERCIAL-LICENSE.md go into META-INF/ of every jar. -->
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <resource>
+        <directory>${bpm.root}</directory>
+        <targetPath>META-INF</targetPath>
+        <includes>
+          <include>LICENSE</include>
+          <include>COMMERCIAL-LICENSE.md</include>
+        </includes>
+      </resource>
+    </resources>
+
     <plugins>
+      <!--
+        TR-LIC-01: third-party dependencies that ship (compile and runtime scope) must be Apache 2.0,
+        MIT or BSD. The build fails naming the library and its licence. Test and provided scopes are
+        out of this check until PD-053 decides the rule for test and build tools.
+        Licence names vary between POMs; licenseMerges folds the spellings into one SPDX id each.
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>license-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>licence-gate</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>add-third-party</goal>
+            </goals>
+            <configuration>
+              <skipAddThirdParty>${bpm.licence-gate.skip}</skipAddThirdParty>
+              <excludedScopes>test,provided,system</excludedScopes>
+              <excludedGroups>com\.horus\.bpm</excludedGroups>
+              <failOnMissing>true</failOnMissing>
+              <failOnBlacklist>true</failOnBlacklist>
+              <includedLicenses>
+                <includedLicense>Apache-2.0</includedLicense>
+                <includedLicense>MIT</includedLicense>
+                <includedLicense>BSD-2-Clause</includedLicense>
+                <includedLicense>BSD-3-Clause</includedLicense>
+              </includedLicenses>
+              <licenseMerges>
+                <licenseMerge>Apache-2.0|Apache License, Version 2.0|The Apache License, Version 2.0|The Apache Software License, Version 2.0|Apache License 2.0|Apache 2.0|Apache-2.0 License|Apache License Version 2.0|Apache Software License - Version 2.0|ASL 2.0|ASF 2.0|Apache 2</licenseMerge>
+                <licenseMerge>MIT|MIT License|The MIT License|The MIT License (MIT)|MIT-0</licenseMerge>
+                <licenseMerge>BSD-2-Clause|BSD 2-Clause License|The BSD 2-Clause License|BSD-2-Clause License|BSD 2-Clause|BSD License 2</licenseMerge>
+                <licenseMerge>BSD-3-Clause|BSD 3-Clause License|The BSD 3-Clause License|New BSD License|Revised BSD License|BSD License 3|BSD 3-Clause|Eclipse Distribution License - v 1.0|EDL 1.0</licenseMerge>
+              </licenseMerges>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!--
+        TR-SEC-06: CycloneDX SBOM of the shipped modules at target/bom.json (and bom.xml) in the
+        reactor root. Runtime scopes only; example hosts never ship and are left out.
+        tools/scan-dependencies.sh scans it for high and critical vulnerabilities.
+      -->
+      <plugin>
+        <groupId>org.cyclonedx</groupId>
+        <artifactId>cyclonedx-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>sbom</id>
+            <phase>package</phase>
+            <goals>
+              <goal>makeAggregateBom</goal>
+            </goals>
+            <configuration>
+              <outputName>bom</outputName>
+              <outputFormat>all</outputFormat>
+              <projectType>library</projectType>
+              <includeTestScope>false</includeTestScope>
+              <includeProvidedScope>false</includeProvidedScope>
+              <includeSystemScope>false</includeSystemScope>
+              <excludeArtifactId>example-rule-engine-only</excludeArtifactId>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>

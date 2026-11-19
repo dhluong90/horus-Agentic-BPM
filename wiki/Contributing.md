@@ -43,6 +43,18 @@ This wiki is the `wiki/` folder of the repository; a workflow publishes it on me
 | One owner per fact | Endpoints: [[Rule Engine Decision API]]. Properties: [[Rule Engine Configuration]]. Terms: [[Concepts]]. Dates and scope: [[Roadmap]]. Elsewhere, link; do not restate |
 | Prose | Active voice, short sentences, concrete values with units and currency, no promotional adjectives, no emojis |
 
+## Dependency checks
+
+Every pull request runs three checks on the modules that ship (CI job "Dependency licences, SBOM and vulnerabilities"). Example hosts never ship and are left out.
+
+| Check | Rule | Run it locally | When it fails |
+|---|---|---|---|
+| Licence (`TR-LIC-01`) | Compile and runtime dependencies must be Apache 2.0, MIT, BSD-2-Clause or BSD-3-Clause. The build names the library and its licence | `mvn -B verify` (licence plugin in the parent `pom.xml`) | Pick a permissively licensed alternative. If the licence is permissive but spelled differently in the library's POM, add the spelling to `licenseMerges` in `pom.xml` in its own pull request |
+| Bill of materials (`TR-SEC-06`) | A CycloneDX SBOM of every runtime dependency, attached to the CI run as `sbom-cyclonedx` | `mvn -B verify`, then read `target/bom.json` | Not a gate; it is the input of the vulnerability check |
+| Vulnerabilities (`TR-SEC-06`) | No dependency with a known high or critical vulnerability. The table names the package, version, fixed version and advisory | `tools/scan-dependencies.sh` after the build; needs Grype or Docker | Upgrade to the fixed version, or override the transitive version in `dependencyManagement`. Only when no fix exists may a maintainer add a reviewed exception to `.grype.yaml` with the advisory, the reason and a review date |
+
+Test and provided scopes are not part of the licence check until PD-053 in the [decision log](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/product/decisions.md) sets the rule for test and build tools. Every engine jar carries `META-INF/LICENSE`, `META-INF/COMMERCIAL-LICENSE.md` and licence entries in its manifest and POM (`TR-LIC-02`).
+
 ## Releases
 
 Each module is versioned independently and tagged `<module>/vX.Y.Z`; see [[Technical Stack]]. What shipped is recorded in [[Release Notes]].

@@ -57,4 +57,4 @@ Tests that prove a platform requirement directly, before any `SPEC.md` statement
 | Gap | Plan |
 |---|---|
 | The Jackson major for `*-core` is undecided (DESIGN open question 7.1) | Decide at M1 start; the contract suite then runs on both Spring Boot lines |
-| The licence scope for JUnit, jqwik and JMH is pending PD-053 | Tests are written now; the CI licence check is configured after the decision |
+| The licence scope for JUnit, jqwik and JMH is pending PD-053 | Tests are written now. The CI licence check (`TR-LIC-01`) covers compile and runtime scopes of the shipped modules; test and provided scopes join it after the decision |

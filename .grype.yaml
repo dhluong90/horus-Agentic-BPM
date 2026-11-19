@@ -1,0 +1,11 @@
+# Vulnerability gate (TR-SEC-06), read by tools/scan-dependencies.sh.
+# A dependency with a known vulnerability of high or critical severity fails the build.
+fail-on-severity: high
+output: table
+# Report every finding, fixed upstream or not; "won't fix" findings still fail the gate.
+only-fixed: false
+
+# Reviewed exceptions. Each entry needs the advisory id, the package, a reason a maintainer
+# has accepted (for example "the vulnerable code path is not reachable from the engine"),
+# and a review date. Keep the list empty unless a fix is impossible; see wiki/Contributing.md.
+ignore: []
