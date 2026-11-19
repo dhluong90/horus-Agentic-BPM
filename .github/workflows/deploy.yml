@@ -68,14 +68,16 @@ jobs:
       - name: No password in the environment of either container
         run: |
           set -euo pipefail
-          for service in postgres host; do
+          # Each /proc/1/environ is read as the user that owns process 1 (capabilities are dropped).
+          for pair in postgres:postgres host:10001; do
+            service="${pair%%:*}"; user="${pair#*:}"
             env_json="$(docker inspect "$(docker compose ps -q "$service")" --format '{{json .Config.Env}}')"
             for f in secrets/*; do
               if grep -q -F -- "$(cat "$f")" <<< "$env_json"; then
                 echo "FAIL  the value of $(basename "$f") is in Config.Env of $service" >&2; exit 1
               fi
             done
-            environ="$(docker compose exec -T "$service" cat /proc/1/environ | tr '\0' '\n')"
+            environ="$(docker compose exec -T -u "$user" "$service" cat /proc/1/environ | tr '\0' '\n')"
             test -n "$environ"
             for f in secrets/*; do
               if grep -q -F -- "$(cat "$f")" <<< "$environ"; then
