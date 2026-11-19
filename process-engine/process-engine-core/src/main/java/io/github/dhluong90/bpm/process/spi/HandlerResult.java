@@ -31,7 +31,8 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
     }
 
     /**
-     * A business outcome the process has no path for yet; the step fails and the transaction rolls back.
+     * A business outcome the process has no path for yet; the step fails and the transaction rolls back. The code may
+     * be returned to API callers; the message is for logs and must not contain personal data.
      *
      * @param code business error code
      * @param message detail
@@ -40,7 +41,8 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
     }
 
     /**
-     * A technical failure; the step fails and the transaction rolls back. Retries are not in this skeleton.
+     * A technical failure; the step fails and the transaction rolls back. Retries are not in this skeleton. The code
+     * may be returned to API callers; the detail is for logs and must not contain personal data.
      *
      * @param errorCode error code
      * @param detail detail

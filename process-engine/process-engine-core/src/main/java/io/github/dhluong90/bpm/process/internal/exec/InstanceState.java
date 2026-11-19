@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Everything the kernel needs to know about one instance: positions and variables. Tasks, jobs and subscriptions
@@ -17,10 +18,12 @@ import java.util.Objects;
  * @param status instance status
  * @param tokens the execution tree in creation order
  * @param variables process-level variables
+ * @param participants identities that started the instance or completed a task of it, for four-eyes (PRE-007)
  * @param sequence counter for deterministic child ids (tokens, tasks, attempts, jobs); never decreases
  */
 public record InstanceState(String instanceId, String tenantId, String definitionId, String businessKey,
-        InstanceStatus status, List<Token> tokens, Map<String, Object> variables, long sequence) {
+        InstanceStatus status, List<Token> tokens, Map<String, Object> variables, Set<String> participants,
+        long sequence) {
 
     public InstanceState {
         Objects.requireNonNull(instanceId, "instanceId must not be null");
@@ -29,6 +32,7 @@ public record InstanceState(String instanceId, String tenantId, String definitio
         Objects.requireNonNull(status, "status must not be null");
         tokens = tokens == null ? List.of() : List.copyOf(tokens);
         variables = variables == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(variables));
+        participants = participants == null ? Set.of() : Set.copyOf(participants);
     }
 
     /**
@@ -42,6 +46,6 @@ public record InstanceState(String instanceId, String tenantId, String definitio
      */
     public static InstanceState created(String instanceId, String tenantId, String definitionId, String businessKey) {
         return new InstanceState(instanceId, tenantId, definitionId, businessKey, InstanceStatus.RUNNING, List.of(),
-                Map.of(), 0);
+                Map.of(), Set.of(), 0);
     }
 }

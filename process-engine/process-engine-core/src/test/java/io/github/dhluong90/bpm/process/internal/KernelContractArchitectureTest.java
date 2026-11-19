@@ -16,10 +16,21 @@ class KernelContractArchitectureTest {
 
     @Test
     void kernel_and_model_do_no_io_and_no_reflection() {
-        noClasses().that().resideInAnyPackage("..internal.exec..", "..internal.model..")
+        noClasses().that().resideInAnyPackage("..internal.exec..", "..internal.model..", "..internal.expr..",
+                        "..internal.json..")
                 .should().dependOnClassesThat().resideInAnyPackage("java.sql..", "javax.sql..", "java.net..",
                         "java.net.http..", "java.io..", "java.nio.file..", "java.lang.reflect..", "javax.script..",
                         "org.springframework..")
+                .check(CORE);
+    }
+
+    @Test
+    void core_loads_no_classes_by_name_and_starts_no_processes() {
+        noClasses().should(com.tngtech.archunit.lang.conditions.ArchConditions.callMethodWhere(
+                        com.tngtech.archunit.base.DescribedPredicate.describe("Class.forName",
+                                call -> call.getTargetOwner().isEquivalentTo(Class.class)
+                                        && call.getName().equals("forName"))))
+                .orShould().dependOnClassesThat().belongToAnyOf(ClassLoader.class, Runtime.class, ProcessBuilder.class)
                 .check(CORE);
     }
 
