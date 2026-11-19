@@ -28,6 +28,7 @@ final class WorkingContext implements ExecutionContext {
     private final String actor;
     private final List<Token> tokens;
     private final Map<String, Object> variables;
+    private final java.util.Set<String> participants;
     private final List<Effect> effects = new ArrayList<>();
     private final List<HistoryEntry> history = new ArrayList<>();
     private final Deque<String> agenda = new ArrayDeque<>();
@@ -43,13 +44,14 @@ final class WorkingContext implements ExecutionContext {
         this.actor = actor;
         this.tokens = new ArrayList<>(state.tokens());
         this.variables = new LinkedHashMap<>(state.variables());
+        this.participants = new java.util.LinkedHashSet<>(state.participants());
         this.status = state.status();
         this.sequence = state.sequence();
     }
 
     Transition transition() {
         InstanceState state = new InstanceState(initial.instanceId(), initial.tenantId(), initial.definitionId(),
-                initial.businessKey(), status, tokens, variables, sequence);
+                initial.businessKey(), status, tokens, variables, participants, sequence);
         return new Transition(state, effects, history);
     }
 
@@ -68,6 +70,16 @@ final class WorkingContext implements ExecutionContext {
 
     InstanceStatus status() {
         return status;
+    }
+
+    boolean isParticipant(String identity) {
+        return identity != null && participants.contains(identity);
+    }
+
+    void addParticipant(String identity) {
+        if (identity != null) {
+            participants.add(identity);
+        }
     }
 
     void putAllVariables(Map<String, Object> values) {

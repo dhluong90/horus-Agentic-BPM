@@ -12,4 +12,14 @@ public interface TransactionRunner {
      * @return the result; an exception rolls the transaction back
      */
     <T> T inTransaction(Supplier<T> work);
+
+    /**
+     * Runs an action after the current transaction commits, and never when it rolls back; without a transaction it
+     * runs at once. Used for event delivery, which is therefore at most once.
+     *
+     * @param action the action
+     */
+    default void afterCommit(Runnable action) {
+        action.run();
+    }
 }

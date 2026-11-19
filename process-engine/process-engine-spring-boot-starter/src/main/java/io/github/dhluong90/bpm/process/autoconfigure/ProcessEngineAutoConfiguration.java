@@ -105,9 +105,8 @@ public class ProcessEngineAutoConfiguration {
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
             ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
-        if (properties.definitions().autoApprove() && !environment.matchesProfiles(DEV_PROFILE)) {
-            throw new IllegalStateException("horus.bpm.processes.definitions.auto-approve imports definitions as active "
-                    + "without four-eyes approval and is accepted on the dev profile only (PRE-022).");
+        if (properties.definitions().autoApprove()) {
+            requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");
         }
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -120,13 +119,31 @@ public class ProcessEngineAutoConfiguration {
             }
         });
         SubsetBpmnReader reader = new SubsetBpmnReader(new Limits(properties.definitions().maxBytes(),
-                EngineDefaults.MAX_XML_DEPTH, EngineDefaults.MAX_XML_ELEMENTS, 0));
+                Limits.DEFAULTS.maxDepth(), Limits.DEFAULTS.maxElements(), Limits.DEFAULTS.maxForeignFragmentBytes(),
+                Limits.DEFAULTS.maxTextChars(), Limits.DEFAULTS.maxAttributeChars()));
         return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
                 new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
                         properties.handlers().slowCallWarning()), publisher,
                 properties.toSettings(), BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES));
+    }
+
+    /**
+     * A dev-only relaxation is accepted only when {@code dev} is an explicitly active profile and every other active
+     * profile is {@code test}: {@code prod,dev} is refused, and so is {@code spring.profiles.default=dev} with no
+     * active profile (PRE-022).
+     *
+     * @param environment the environment
+     * @param property the relaxing property, named in the refusal
+     */
+    static void requireDevProfileOnly(Environment environment, String property) {
+        List<String> active = List.of(environment.getActiveProfiles());
+        boolean ok = active.contains(DEV_PROFILE) && active.stream().allMatch(p -> p.equals(DEV_PROFILE) || p.equals("test"));
+        if (!ok) {
+            throw new IllegalStateException(property + " relaxes a control and is accepted only when the dev profile is "
+                    + "active on its own (optionally with test); active profiles are " + active + " (PRE-022).");
+        }
     }
 
     @Bean
@@ -185,8 +202,9 @@ public class ProcessEngineAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        ProcessController processEngineController(DefinitionService definitions, ProcessEngine engine, TaskService tasks) {
-            return new ProcessController(definitions, engine, tasks);
+        ProcessController processEngineController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
+                ProcessEngineProperties properties) {
+            return new ProcessController(definitions, engine, tasks, properties.definitions().maxBytes());
         }
 
         @Bean

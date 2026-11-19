@@ -80,6 +80,26 @@ class RuleAndProcessIT {
         }
     }
 
+    /** Records engine events as the host sees them: after commit only. */
+    @TestConfiguration(proxyBeanMethods = false)
+    static class EventRecorder {
+        static final List<io.github.dhluong90.bpm.process.spi.ProcessEventPublisher.Event> EVENTS =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        @Bean
+        Object processEventRecorder() {
+            return new Object() {
+                @org.springframework.context.event.EventListener
+                void on(io.github.dhluong90.bpm.process.spi.ProcessEventPublisher.Event event) {
+                    EVENTS.add(event);
+                }
+            };
+        }
+    }
+
+    @Autowired
+    org.springframework.transaction.PlatformTransactionManager transactionManager;
+
     @LocalServerPort
     int port;
 
@@ -92,6 +112,9 @@ class RuleAndProcessIT {
     @Autowired
     TaskService tasks;
 
+    @Autowired
+    io.github.dhluong90.bpm.process.api.DefinitionService definitions;
+
     @AfterEach
     void clear() {
         SecurityContextHolder.clearContext();
@@ -103,7 +126,7 @@ class RuleAndProcessIT {
                 + "WHERE tenant_id = 'bank-a' AND key_name = 'card-fee-review'").query(String.class).list())
                 .containsExactly("1 ACTIVE BPMN_XML STARTUP");
         assertThat(jdbc.sql("SELECT version FROM pre_schema_history WHERE success ORDER BY installed_rank")
-                .query(String.class).list()).containsExactly("0", "1");
+                .query(String.class).list()).containsExactly("0", "1", "2");
         assertThat(jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE script LIKE '%pre_%'").query(Long.class)
                 .single()).isZero();
     }
@@ -177,6 +200,8 @@ class RuleAndProcessIT {
                 .single()).isZero();
         assertThat(jdbc.sql("SELECT count(*) FROM pre_token t JOIN pre_instance i ON i.tenant_id = t.tenant_id "
                 + "AND i.id = t.instance_id WHERE i.business_key = 'IT-1099'").query(Long.class).single()).isZero();
+        assertThat(EventRecorder.EVENTS).as("rolled-back work emits no event")
+                .noneMatch(e -> "IT-1099".equals(e.payload().get("businessKey")));
     }
 
     @Test
@@ -187,7 +212,7 @@ class RuleAndProcessIT {
 
         as("officer-b", List.of("ROLE_CARD_OFFICER", "TENANT_bank-b"), () -> {
             assertThatThrownBy(() -> processes.instance(instanceId)).isInstanceOf(InstanceNotFoundException.class);
-            assertThatThrownBy(() -> tasks.complete(taskId, Map.of("approved", true), null, null))
+            assertThatThrownBy(() -> tasks.complete(taskId, Map.of("approved", true), 0L, "k-iso"))
                     .isInstanceOf(TaskNotFoundException.class);
             return null;
         });
@@ -217,6 +242,110 @@ class RuleAndProcessIT {
         assertThat(failure.reason()).isEqualTo("PERMISSION_DENIED");
         assertThat(jdbc.sql("SELECT count(*) FROM pre_instance WHERE business_key = 'IT-3001'").query(Long.class)
                 .single()).isZero();
+    }
+
+    @Test
+    void PRE_007_four_eyes_blocks_same_actor_approval() throws Exception {
+        // REST: the supervisor hoa holds both roles; she submits, then may not review her own application.
+        JsonNode submitted = post("hoa", "/api/cards/applications", "{\"applicationId\":\"IT-5001\",\"customerId\":\"C-002\"}", 201);
+        JsonNode instance = get("hoa", "/api/bpm/processes/v1/instances/" + submitted.get("instanceId").stringValue());
+        String complete = "/api/bpm/processes/v1/tasks/" + instance.at("/tasks/0/id").stringValue() + ":complete";
+        HttpResponse<String> own = send("hoa", complete, "{\"result\":{\"approved\":true}}", "\"0\"");
+        assertThat(own.statusCode()).isEqualTo(403);
+        assertThat(JSON.readTree(own.body()).get("code").stringValue()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
+        assertThat(get("an", "/api/bpm/processes/v1/instances/" + submitted.get("instanceId").stringValue())
+                .at("/tasks/0/status").stringValue()).isEqualTo("OPEN");
+        post("an", complete, "{\"result\":{\"approved\":true}}", 200, "\"0\"");
+
+        // Java API: the same rule holds without REST.
+        ProcessInstance started = as("supervisor", List.of("ROLE_TELLER", "ROLE_CARD_OFFICER"), () -> {
+            jdbc.sql("INSERT INTO card_application (tenant_id, application_id, customer_id, status, submitted_at) "
+                    + "VALUES ('bank-a', 'IT-5002', 'C-002', 'SUBMITTED', now())").update();
+            return processes.start(StartRequest.of("card-fee-review").withBusinessKey("IT-5002")
+                    .withVariables(Map.of("applicationId", "IT-5002", "customerId", "C-002")));
+        });
+        as("supervisor", List.of("ROLE_TELLER", "ROLE_CARD_OFFICER"), () -> {
+            assertThatThrownBy(() -> tasks.complete(started.openTasks().get(0).id(), Map.of("approved", true), 0L, "k-own"))
+                    .isInstanceOf(io.github.dhluong90.bpm.process.api.SelfApprovalForbiddenException.class);
+            return null;
+        });
+    }
+
+    @Test
+    void two_concurrent_starts_with_one_idempotency_key_do_the_work_once() throws Exception {
+        java.util.concurrent.CountDownLatch firstStarted = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch releaseFirst = new java.util.concurrent.CountDownLatch(1);
+        StartRequest request = StartRequest.of("card-fee-review").withIdempotencyKey("retry-4001")
+                .withVariables(Map.of("applicationId", "IT-4001", "customerId", "C-002"));
+        org.springframework.transaction.support.TransactionTemplate tx =
+                new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var first = pool.submit(() -> as("tuan", List.of("ROLE_TELLER"), () -> tx.execute(status -> {
+                ProcessInstance instance = processes.start(request);
+                firstStarted.countDown();
+                await(releaseFirst);              // hold the transaction open while the retry arrives
+                return instance;
+            })));
+            await(firstStarted);
+            var second = pool.submit(() -> as("tuan", List.of("ROLE_TELLER"), () -> processes.start(request)));
+            Thread.sleep(500);                    // the retry is now blocked on the claimed key
+            releaseFirst.countDown();
+            ProcessInstance a = first.get(30, java.util.concurrent.TimeUnit.SECONDS);
+            ProcessInstance b = second.get(30, java.util.concurrent.TimeUnit.SECONDS);
+
+            assertThat(b.id()).isEqualTo(a.id());
+            assertThat(jdbc.sql("SELECT count(*) FROM pre_instance WHERE variables->>'applicationId' = 'IT-4001'")
+                    .query(Long.class).single()).isEqualTo(1);
+            assertThat(jdbc.sql("SELECT count(*) FROM pre_history WHERE node_id = 'load-profile' AND event_type = "
+                    + "'NODE_COMPLETED' AND instance_id IN (SELECT id FROM pre_instance WHERE variables->>'applicationId' "
+                    + "= 'IT-4001')").query(Long.class).single()).as("the handler ran once").isEqualTo(1);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void a_definition_whose_stored_source_was_changed_is_never_started() {
+        String original = jdbc.sql("SELECT source_document FROM pre_definition WHERE tenant_id = 'bank-a' "
+                + "AND key_name = 'card-fee-review' AND version_num = 1").query(String.class).single();
+        String copy = original.replace("id=\"card-fee-review\"", "id=\"tamper-check\"");
+        as("lan", List.of("ROLE_PROCESS_DEPLOYER"), () -> definitions.importDefinition(io.github.dhluong90.bpm.process.api.ImportRequest.bpmn(
+                        copy.getBytes(StandardCharsets.UTF_8))));
+        // Turn the officer review into an automatic approval behind the version's back.
+        jdbc.sql("UPDATE pre_definition SET source_document = replace(source_document, 'pricing.fee == 0 VND', "
+                + "'pricing.fee >= 0 VND') WHERE tenant_id = 'bank-a' AND key_name = 'tamper-check'").update();
+
+        as("tuan", List.of("ROLE_TELLER"), () -> {
+            assertThatThrownBy(() -> processes.start(StartRequest.of("tamper-check")
+                    .withVariables(Map.of("applicationId", "IT-6001", "customerId", "C-002"))))
+                    .isInstanceOf(io.github.dhluong90.bpm.process.api.DefinitionIntegrityException.class);
+            return null;
+        });
+    }
+
+    @Test
+    void oversized_bodies_and_missing_preconditions_are_refused_with_4xx() throws Exception {
+        String big = "{\"definitionKey\":\"card-fee-review\",\"variables\":{\"pad\":\"" + "x".repeat(300_000) + "\"}}";
+        assertThat(send("tuan", "/api/bpm/processes/v1/instances", big, null).statusCode()).isEqualTo(413);
+
+        JsonNode submitted = post("tuan", "/api/cards/applications", "{\"applicationId\":\"IT-7001\",\"customerId\":\"C-003\"}", 201);
+        String taskId = get("an", "/api/bpm/processes/v1/instances/" + submitted.get("instanceId").stringValue())
+                .at("/tasks/0/id").stringValue();
+        HttpResponse<String> noIfMatch = send("an", "/api/bpm/processes/v1/tasks/" + taskId + ":complete",
+                "{\"result\":{\"approved\":true}}", null);
+        assertThat(noIfMatch.statusCode()).isEqualTo(428);
+    }
+
+    private static void await(java.util.concurrent.CountDownLatch latch) {
+        try {
+            if (!latch.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new IllegalStateException("latch timed out");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------
@@ -249,6 +378,9 @@ class RuleAndProcessIT {
                 .POST(HttpRequest.BodyPublishers.ofString(body));
         if (ifMatch != null) {
             request.header("If-Match", ifMatch);
+        }
+        if (path.endsWith(":complete")) {
+            request.header("Idempotency-Key", "it-" + java.util.UUID.randomUUID());
         }
         return HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }

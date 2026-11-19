@@ -16,14 +16,18 @@ import java.util.Objects;
  * or      := and ("or" and)*
  * and     := unary ("and" unary)*
  * unary   := "not" unary | compare
- * compare := operand (("==" | "!=" | "&lt;" | "&lt;=" | "&gt;" | "&gt;=") operand)?
+ * compare := operand (("==" | "!=" | "&lt;" | "&lt;=" | "&gt;" | "&gt;=") operand | "is" ["not"] "null")?
  * operand := number [CURRENCY] | 'text' | true | false | null | path | "(" expr ")"
  * path    := identifier ("." identifier)*
  * </pre>
  *
- * <p>Paths read instance variables; {@code 50000 VND} is a money literal in major units. Money compares only with
- * money of the same currency. Text, booleans and null support {@code ==} and {@code !=} only. Any type error is
- * an {@link ConditionException} at run time, never a silent {@code false}. Parsed once at import; evaluated
+ * <p>Paths read instance variables; {@code 50000 VND} is a money literal in major units. Semantics follow the Rule
+ * Engine's (RLE-006, PD-058): null follows FEEL three-valued logic, so an ordering with a null operand is null,
+ * {@code ==} and {@code !=} are two-valued ({@code null != 'GOLD'} is true), {@code and}, {@code or} and
+ * {@code not} follow the FEEL truth tables, and {@code x is null} is always true or false. A condition holds only
+ * when it is {@code true}; null does not hold. Numbers are {@code BigDecimal} in {@code DECIMAL128}; money compares
+ * only with money of the same currency. A type error (text against a number, two currencies) is a
+ * {@link ConditionException} at run time, never a silent {@code false}. Parsed once at import; evaluated
  * without reflection or allocation beyond the operands. A full shared {@code ExpressionLanguage} SPI from the
  * Rule Engine replaces this class when it is published (DESIGN section 2, DN-05).
  */
@@ -69,6 +73,9 @@ public final class Condition {
      */
     public boolean test(Map<String, Object> variables) {
         Object value = root.eval(variables);
+        if (value == null) {
+            return false;
+        }
         if (value instanceof Boolean b) {
             return b;
         }
@@ -82,7 +89,7 @@ public final class Condition {
 
     // ---- AST ----------------------------------------------------------------------------------------------
 
-    private sealed interface Node permits Literal, Path, Not, Logical, Compare {
+    private sealed interface Node permits Literal, Path, Not, Logical, Compare, IsNull {
         Object eval(Map<String, Object> variables);
     }
 
@@ -111,21 +118,31 @@ public final class Condition {
     private record Not(Node operand) implements Node {
         @Override
         public Object eval(Map<String, Object> variables) {
-            return !bool(operand.eval(variables), "not");
+            Boolean value = bool(operand.eval(variables), "not");
+            return value == null ? null : !value;
+        }
+    }
+
+    private record IsNull(Node operand, boolean negated) implements Node {
+        @Override
+        public Object eval(Map<String, Object> variables) {
+            return (operand.eval(variables) == null) != negated;
         }
     }
 
     private record Logical(boolean and, Node left, Node right) implements Node {
         @Override
         public Object eval(Map<String, Object> variables) {
-            boolean l = bool(left.eval(variables), and ? "and" : "or");
-            if (and && !l) {
-                return false;
+            // FEEL: false dominates and, true dominates or; otherwise any null gives null.
+            Boolean l = bool(left.eval(variables), and ? "and" : "or");
+            if (l != null && l != and) {
+                return l;
             }
-            if (!and && l) {
-                return true;
+            Boolean r = bool(right.eval(variables), and ? "and" : "or");
+            if (r != null && r != and) {
+                return r;
             }
-            return bool(right.eval(variables), and ? "and" : "or");
+            return l == null || r == null ? null : and;
         }
     }
 
@@ -137,6 +154,9 @@ public final class Condition {
             if (op.equals("==") || op.equals("!=")) {
                 boolean equal = equal(l, r);
                 return op.equals("==") == equal;
+            }
+            if (l == null || r == null) {
+                return null;
             }
             int c = order(l, r, op);
             return switch (op) {
@@ -175,9 +195,9 @@ public final class Condition {
                 + kind(l) + " and " + kind(r));
     }
 
-    private static boolean bool(Object value, String op) {
-        if (value instanceof Boolean b) {
-            return b;
+    private static Boolean bool(Object value, String op) {
+        if (value == null || value instanceof Boolean) {
+            return (Boolean) value;
         }
         throw new ConditionException("Operator " + op + " needs booleans, got " + kind(value));
     }
@@ -197,7 +217,8 @@ public final class Condition {
         return switch (value) {
             case Long l -> BigDecimal.valueOf(l);
             case Integer i -> BigDecimal.valueOf(i);
-            case BigInteger i -> new BigDecimal(i);
+            case BigInteger i -> new BigDecimal(i, java.math.MathContext.DECIMAL128);
+            case BigDecimal d -> d.round(java.math.MathContext.DECIMAL128);
             case null, default -> value;
         };
     }
@@ -284,6 +305,14 @@ public final class Condition {
                 return new Not(unary(depth + 1));
             }
             Node left = operand(depth);
+            if (keyword("is")) {
+                boolean negated = keyword("not");
+                Token nul = take("'null'");
+                if (!nul.kind().equals("ident") || !nul.text().equals("null")) {
+                    throw new ConditionException("Expected 'null' after 'is' at position " + nul.position());
+                }
+                return new IsNull(left, negated);
+            }
             Token next = peek();
             if (next != null && next.kind().equals("op")) {
                 at++;
@@ -312,13 +341,13 @@ public final class Condition {
                         at++;
                         try {
                             return new Literal(Money.ofMajor(next.text(), t.text()));
-                        } catch (IllegalArgumentException e) {
+                        } catch (IllegalArgumentException | ArithmeticException e) {
                             throw new ConditionException("Invalid money literal at position " + t.position() + ": "
                                     + e.getMessage());
                         }
                     }
                     try {
-                        return new Literal(new BigDecimal(t.text()));
+                        return new Literal(new BigDecimal(t.text(), java.math.MathContext.DECIMAL128));
                     } catch (NumberFormatException e) {
                         throw new ConditionException("Invalid number at position " + t.position());
                     }
@@ -334,7 +363,7 @@ public final class Condition {
                         case "null" -> {
                             return new Literal(null);
                         }
-                        case "and", "or", "not" -> throw new ConditionException("Unexpected '" + t.text()
+                        case "and", "or", "not", "is" -> throw new ConditionException("Unexpected '" + t.text()
                                 + "' at position " + t.position());
                         default -> {
                             List<String> parts = new ArrayList<>(List.of(t.text()));

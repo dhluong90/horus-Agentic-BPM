@@ -248,13 +248,25 @@ public final class JdbcProcessStore implements ProcessStore {
     }
 
     @Override
-    public void saveIdempotency(IdempotencyRecord r) {
-        jdbc.sql("INSERT INTO pre_idempotency (tenant_id, operation, idempotency_key, request_hash, response_body, expires_at) "
-                        + "VALUES (?, ?, ?, ?, ?::jsonb, ?) ON CONFLICT (tenant_id, operation, idempotency_key) DO UPDATE "
-                        + "SET request_hash = EXCLUDED.request_hash, response_body = EXCLUDED.response_body, "
-                        + "expires_at = EXCLUDED.expires_at WHERE pre_idempotency.expires_at <= now()")
-                .params(r.tenantId(), r.operation(), r.key(), r.requestHash(), r.responseJson(), ts(r.expiresAt()))
-                .update();
+    public boolean claimIdempotency(String tenant, String operation, String key, String requestHash, Instant expiresAt,
+            Instant now) {
+        return jdbc.sql("INSERT INTO pre_idempotency (tenant_id, operation, idempotency_key, request_hash, status, "
+                        + "response_body, expires_at) VALUES (?, ?, ?, ?, 'PENDING', NULL, ?) "
+                        + "ON CONFLICT (tenant_id, operation, idempotency_key) DO UPDATE SET request_hash = EXCLUDED.request_hash, "
+                        + "status = 'PENDING', response_body = NULL, expires_at = EXCLUDED.expires_at "
+                        + "WHERE pre_idempotency.expires_at <= ?")
+                .params(tenant, operation, key, requestHash, ts(expiresAt), ts(now))
+                .update() == 1;
+    }
+
+    @Override
+    public void completeIdempotency(String tenant, String operation, String key, String responseJson) {
+        int updated = jdbc.sql("UPDATE pre_idempotency SET status = 'DONE', response_body = ?::jsonb "
+                        + "WHERE tenant_id = ? AND operation = ? AND idempotency_key = ? AND status = 'PENDING'")
+                .params(responseJson, tenant, operation, key).update();
+        if (updated != 1) {
+            throw new IllegalStateException("Idempotency claim lost for " + operation);
+        }
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------

@@ -31,7 +31,7 @@ public interface ProcessStore {
             Instant createdAt, Instant completedAt) {
     }
 
-    /** Recorded answer to an idempotent write. */
+    /** Recorded answer to an idempotent write; {@code responseJson} is null while the claim is pending. */
     record IdempotencyRecord(String tenantId, String operation, String key, String requestHash, String responseJson,
             Instant expiresAt) {
     }
@@ -76,5 +76,15 @@ public interface ProcessStore {
 
     Optional<IdempotencyRecord> idempotency(String tenant, String operation, String key, Instant now);
 
-    void saveIdempotency(IdempotencyRecord record);
+    /**
+     * Claims a key before the work runs: inserts a pending record, or takes over an expired one. A concurrent claim of
+     * the same key blocks on the primary key until the first transaction ends.
+     *
+     * @return true when this transaction holds the claim; false when a live record exists
+     */
+    boolean claimIdempotency(String tenant, String operation, String key, String requestHash, Instant expiresAt,
+            Instant now);
+
+    /** Stores the answer of a claimed key in the same transaction as the work. */
+    void completeIdempotency(String tenant, String operation, String key, String responseJson);
 }

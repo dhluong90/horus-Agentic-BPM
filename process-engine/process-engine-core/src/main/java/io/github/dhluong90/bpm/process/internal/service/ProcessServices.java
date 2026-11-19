@@ -1,6 +1,12 @@
 package io.github.dhluong90.bpm.process.internal.service;
 
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
+import io.github.dhluong90.bpm.process.api.IdempotencyInFlightException;
+import io.github.dhluong90.bpm.process.api.DefinitionIntegrityException;
+import io.github.dhluong90.bpm.process.api.TenantNotAllowedException;
+import io.github.dhluong90.bpm.process.api.SelfApprovalForbiddenException;
+import io.github.dhluong90.bpm.process.api.PreconditionRequiredException;
+import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.IdempotencyKeyReuseException;
@@ -40,6 +46,7 @@ import io.github.dhluong90.bpm.process.internal.exec.Transition;
 import io.github.dhluong90.bpm.process.internal.json.Hashes;
 import io.github.dhluong90.bpm.process.internal.json.CanonicalProcessWriter;
 import io.github.dhluong90.bpm.process.internal.json.Ulid;
+import io.github.dhluong90.bpm.process.internal.json.Utf8;
 import io.github.dhluong90.bpm.process.internal.json.Values;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
@@ -82,6 +89,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     static final String PERMISSION_READ = "processes:read";
     static final String PERMISSION_TASK_WORK = "processes:task:work";
     static final String DEV_APPROVER = "system:dev-auto-approve";
+    private static final System.Logger LOG = System.getLogger(ProcessServices.class.getName());
 
     private final TenantResolver tenants;
     private final CallerResolver callers;
@@ -154,6 +162,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     private DefinitionVersion importAs(String tenant, String caller, ImportRequest request, String source) {
         byte[] bytes = request.source();
+        String text = Utf8.strict(bytes);
         Function<byte[], Process> reader = readers.get(request.format());
         if (reader == null) {
             throw new InputInvalidException("Source format " + request.format() + " is not supported");
@@ -176,13 +185,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     boolean active = settings.definitionsAutoApprove();
                     StoredDefinition stored = new StoredDefinition(tenant, Ulid.next(now), process.id(),
                             latest == null ? 1 : latest.version() + 1, active ? "ACTIVE" : "DRAFT", process.name(),
-                            canonical, hash, request.format().name(), new String(bytes, StandardCharsets.UTF_8),
-                            Hashes.sha256(bytes), nodeCount, source, active ? now : null, caller, now,
+                            canonical, hash, request.format().name(), text,
+                            Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
                             active ? DEV_APPROVER : null, active ? now : null);
                     store.insertDefinition(stored);
-                    publisher.publish(new ProcessEventPublisher.Event(active ? "processes.definition.approved.v1"
-                            : "processes.definition.imported.v1", tenant, now, Map.of("definitionKey", stored.key(),
-                            "version", stored.version(), "definitionHash", hash)));
+                    ProcessEventPublisher.Event event = new ProcessEventPublisher.Event(active
+                            ? "processes.definition.approved.v1" : "processes.definition.imported.v1", tenant, now,
+                            Map.of("definitionKey", stored.key(), "version", stored.version(), "definitionHash", hash));
+                    transactions.afterCommit(() -> publisher.publish(event));
                     return view(stored);
                 }, Views::definitionToJson, Views::definitionFromJson));
     }
@@ -218,7 +228,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new InputInvalidException("businessKey must be 1 to " + EngineDefaults.MAX_BUSINESS_KEY_LENGTH
                     + " characters");
         }
-        String variablesJson = Values.write(request.variables());
+        String variablesJson = boundedJson(request.variables(), "variables");
         String requestHash = Hashes.sha256Parts("start", caller, request.definitionKey(), request.businessKey(),
                 variablesJson);
         return transactions.inTransaction(() -> idempotent(tenant, "start", request.idempotencyKey(), requestHash, () -> {
@@ -253,25 +263,33 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     // ---- TaskService --------------------------------------------------------------------------------------
 
     @Override
-    public ProcessInstance complete(String taskId, Map<String, Object> result, Long expectedLockVersion,
+    public ProcessInstance complete(String taskId, Map<String, Object> result, long expectedLockVersion,
             String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_TASK_WORK);
+        if (idempotencyKey == null) {
+            throw new PreconditionRequiredException("Completing a task needs an Idempotency-Key");
+        }
         Map<String, Object> values = result == null ? Map.of() : result;
-        String requestHash = Hashes.sha256Parts("complete", caller, taskId, Values.write(values),
+        String requestHash = Hashes.sha256Parts("complete", caller, taskId, boundedJson(values, "result"),
                 String.valueOf(expectedLockVersion));
         return transactions.inTransaction(() -> idempotent(tenant, "complete", idempotencyKey, requestHash, () -> {
             TaskRow task = store.findTask(tenant, taskId).orElseThrow(() -> new TaskNotFoundException("No task " + taskId));
             InstanceRow row = store.lockInstance(tenant, task.instanceId()).orElseThrow();
             task = store.findTask(tenant, taskId).orElseThrow();
-            if (expectedLockVersion != null && expectedLockVersion != task.lockVersion()) {
+            if (expectedLockVersion != task.lockVersion()) {
                 throw new VersionConflictException("Task " + taskId + " is at lock version " + task.lockVersion());
             }
             if (!"OPEN".equals(task.status()) && !"CLAIMED".equals(task.status())) {
                 throw new InvalidStateException("Task " + taskId + " is " + task.status());
             }
             if (!assigned(task.assignee(), caller)) {
-                throw new TaskNotAssignedException("Task " + taskId + " is assigned to " + task.assignee());
+                throw new TaskNotAssignedException("The caller is not an assignee of task " + taskId);
+            }
+            java.util.Set<String> participants = participants(tenant, row);
+            if (task.fourEyes() && participants.contains(caller)) {
+                throw new SelfApprovalForbiddenException("The identity that started this instance or completed an earlier"
+                        + " task of it cannot complete this four-eyes task");
             }
             Instant now = clock.instant();
             if (store.completeTask(tenant, taskId, task.lockVersion(), caller, now) != 1) {
@@ -280,10 +298,35 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
             InstanceState state = new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
                     InstanceStatus.valueOf(row.status()), store.tokens(tenant, row.id()), Values.readMap(row.variablesJson()),
-                    row.sequence());
+                    participants, row.sequence());
             run(definition, row, state, new Command.CompleteTask(taskId, task.tokenId(), values, caller));
             return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
         }, Views::instanceToJson, Views::instanceFromJson));
+    }
+
+    /** Four-eyes participants: the starter and everyone who completed a task of the instance (PRE-007). */
+    private java.util.Set<String> participants(String tenant, InstanceRow row) {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        if (row.startedBy() != null) {
+            out.add(row.startedBy());
+        }
+        store.tasks(tenant, row.id()).stream().filter(t -> "COMPLETED".equals(t.status()) && t.completedBy() != null)
+                .forEach(t -> out.add(t.completedBy()));
+        return out;
+    }
+
+    /** Serialises request values, refusing values JSON cannot hold and anything above the size limit. */
+    private static String boundedJson(Map<String, Object> values, String what) {
+        String json;
+        try {
+            json = Values.write(values);
+        } catch (RuntimeException e) {
+            throw new InputInvalidException(what + " hold a value that cannot be stored");
+        }
+        if (json.length() > EngineDefaults.MAX_VARIABLES_CHARS) {
+            throw new PayloadTooLargeException(what + " exceed " + EngineDefaults.MAX_VARIABLES_CHARS + " characters of JSON");
+        }
+        return json;
     }
 
     private boolean assigned(String assignee, String caller) {
@@ -320,6 +363,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 task.assignee(), task.fourEyes(), "OPEN", 0, null, clock.instant(), null));
                         case Effect.CancelUserTask cancel -> cancelledTasks.add(cancel.taskId());
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
+                            if (call.kind() == ServiceKind.DECISION && !state.tenantId().equals(tenants.currentTenantId())) {
+                                // The Rule Engine resolves its tenant from the caller; it must be the instance's tenant.
+                                throw new TenantNotAllowedException("The caller's tenant is not the instance's tenant");
+                            }
                             var result = invoker.invoke(state.tenantId(), state.instanceId(), state.businessKey(), call);
                             if (call.kind() == ServiceKind.DECISION
                                     && result instanceof io.github.dhluong90.bpm.process.internal.exec.StepResult.Completed c) {
@@ -337,8 +384,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             if (state.businessKey() != null) {
                                 payload.put("businessKey", state.businessKey());
                             }
-                            publisher.publish(new ProcessEventPublisher.Event(event.type(), state.tenantId(),
-                                    clock.instant(), payload));
+                            ProcessEventPublisher.Event published = new ProcessEventPublisher.Event(event.type(),
+                                    state.tenantId(), clock.instant(), payload);
+                            transactions.afterCommit(() -> publisher.publish(published));
                         }
                         default -> throw new ExecutionException("EFFECT_NOT_SUPPORTED", null,
                                 effect.getClass().getSimpleName() + " is not supported in this release");
@@ -346,14 +394,25 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 }
             }
         } catch (ExecutionException e) {
-            throw new StepFailedException(e.nodeId() == null ? "-" : e.nodeId(), e.code(), e.getMessage());
+            if ("SELF_APPROVAL_FORBIDDEN".equals(e.code())) {
+                throw new SelfApprovalForbiddenException(e.getMessage());
+            }
+            // Handler and decision texts may carry personal data: they go to the log, the caller gets the code.
+            LOG.log(System.Logger.Level.DEBUG, "process.step.failed node={0} code={1} detail={2}", e.nodeId(), e.code(),
+                    e.getMessage());
+            throw new StepFailedException(e.nodeId() == null ? "-" : e.nodeId(), e.code(), "see the engine log");
         } catch (NotExecutableException e) {
-            throw new StepFailedException(e.nodeId(), "BPMN_NOT_EXECUTABLE", e.getMessage());
+            throw new StepFailedException(e.nodeId(), "BPMN_NOT_EXECUTABLE", "not executable in this release");
+        }
+        String variablesJson = Values.write(state.variables());
+        if (variablesJson.length() > EngineDefaults.MAX_VARIABLES_CHARS) {
+            throw new PayloadTooLargeException("The instance variables exceed " + EngineDefaults.MAX_VARIABLES_CHARS
+                    + " characters of JSON");
         }
         Instant now = clock.instant();
         store.saveTokens(state.tenantId(), state.instanceId(), definition.id(), state.tokens(), now);
         store.updateInstance(new InstanceRow(row.tenantId(), row.id(), row.definitionId(), row.definitionKey(),
-                row.definitionVersion(), row.businessKey(), state.status().name(), Values.write(state.variables()),
+                row.definitionVersion(), row.businessKey(), state.status().name(), variablesJson,
                 state.sequence(), row.lockVersion(), row.startedBy(), row.startedAt(),
                 state.status() == InstanceStatus.RUNNING ? null : now));
         String tenant = state.tenantId();
@@ -365,8 +424,18 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private Compiled compiled(StoredDefinition definition) {
         return kernels.computeIfAbsent(definition.tenantId() + "/" + definition.id(), k -> {
             Function<byte[], Process> reader = readers.get(SourceFormat.valueOf(definition.sourceFormat()));
-            // The stored source is re-read and recompiled; its hash was fixed at import.
-            Process process = reader.apply(definition.sourceDocument().getBytes(StandardCharsets.UTF_8));
+            // Interim form of ADR-0026 decision 4: the version runs from its stored source, so the source must be the
+            // one that was validated and hashed at import. Any difference refuses the version.
+            byte[] source = definition.sourceDocument().getBytes(StandardCharsets.UTF_8);
+            if (!Hashes.sha256(source).equals(definition.sourceHash())) {
+                throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
+                        + ": the stored source does not match its source hash");
+            }
+            Process process = reader.apply(source);
+            if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
+                throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
+                        + ": the stored source no longer gives the recorded definition hash");
+            }
             CompiledProcess compiledProcess = compiler.compile(definition.id(), process);
             return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions));
         });
@@ -401,17 +470,21 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     + " characters");
         }
         Instant now = clock.instant();
-        IdempotencyRecord previous = store.idempotency(tenant, operation, key, now).orElse(null);
-        if (previous != null) {
-            if (!previous.requestHash().equals(requestHash)) {
-                throw new IdempotencyKeyReuseException("Idempotency-Key " + key + " was used with a different request");
-            }
-            return fromJson.apply(previous.responseJson());
+        // Claim first: a concurrent request with the same key blocks here until this transaction ends, then replays.
+        if (store.claimIdempotency(tenant, operation, key, requestHash, now.plus(settings.idempotencyRetention()), now)) {
+            T result = action.get();
+            store.completeIdempotency(tenant, operation, key, toJson.apply(result));
+            return result;
         }
-        T result = action.get();
-        store.saveIdempotency(new IdempotencyRecord(tenant, operation, key, requestHash, toJson.apply(result),
-                now.plus(settings.idempotencyRetention())));
-        return result;
+        IdempotencyRecord previous = store.idempotency(tenant, operation, key, now)
+                .orElseThrow(() -> new IdempotencyInFlightException("A request with this Idempotency-Key is running"));
+        if (!previous.requestHash().equals(requestHash)) {
+            throw new IdempotencyKeyReuseException("The Idempotency-Key was used with a different request");
+        }
+        if (previous.responseJson() == null) {
+            throw new IdempotencyInFlightException("A request with this Idempotency-Key is running");
+        }
+        return fromJson.apply(previous.responseJson());
     }
 
     private String tenant() {

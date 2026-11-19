@@ -23,7 +23,7 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
     }
 
     /**
-     * A user task was completed; the shell has checked assignment and four-eyes.
+     * A user task was completed. The shell has checked assignment and four-eyes (refusing with SELF_APPROVAL_FORBIDDEN before applying), and a four-eyes user task behaviour refuses an actor among the participants again.
      *
      * @param taskId task id
      * @param tokenId the waiting token
