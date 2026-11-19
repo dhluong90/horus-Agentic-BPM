@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-#
 # Container image of an example host (a Spring Boot service that embeds the engines).
 # Build context: the repository root.
 #
