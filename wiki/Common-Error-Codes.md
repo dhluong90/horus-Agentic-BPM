@@ -54,6 +54,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [BPMN_UNSAFE_XML](#bpmn_unsafe_xml) | processes | M3 |
 | 429 | [RATE_LIMITED](#rate_limited) | both | M1 |
 | 500 | [INTERNAL_ERROR](#internal_error) | both | M1 |
+| 503 | [SCHEMA_NOT_READY](#schema_not_ready) | rules | M1 |
 
 ## Codes on every endpoint
 
@@ -97,6 +98,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 ### NO_EFFECTIVE_VERSION
 `404`. No approved version is effective at the clock: nothing is published or active yet, the effective date is in the future, the last version was retired, or the request names a tenant with no version. Publish or approve a version, or check the tenant.
+
+### SCHEMA_NOT_READY
+`503`. The engine's schema was not current at start-up and `horus.bpm.rules.migrate-on-start` is `false`, so the list cursor key was not loaded; `detail` names the schema version and the pending migrations. Run the engine migrations and restart the host. Only `GET /rule-sets` and `GET /rule-sets/{name}/versions` answer it.
 
 ### VALIDATION_FAILED
 `422`. A rule set or process definition does not parse or type-check; `violations` lists each problem with its location. Fix the document and save again.

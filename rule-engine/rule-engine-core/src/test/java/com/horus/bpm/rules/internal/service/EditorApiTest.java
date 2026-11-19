@@ -580,6 +580,22 @@ class EditorApiTest {
         assertThat(versions.history("card-fee", 1).getLast().reason()).hasSize(2000);
     }
 
+    @Test
+    void RLE_039_without_a_loaded_key_lists_are_schema_not_ready_naming_the_schema_state() {
+        InMemoryStores fresh = new InMemoryStores();
+        RuleEngines unloaded = RuleEngines.create(
+                new EngineContext(caller, caller, clock, fresh, fresh, EngineSettings.defaults()), fresh, fresh, fresh);
+        unloaded.cursorKeys().notReady("schema at version 4, 1 migration(s) pending, migrate-on-start=false");
+        caller.become("bank-a", "dan", READER);
+
+        assertThatThrownBy(() -> unloaded.versionService().listRuleSets(PageRequest.first()))
+                .isInstanceOfSatisfying(com.horus.bpm.rules.api.SchemaNotReadyException.class, e -> {
+                    assertThat(e.code()).isEqualTo("SCHEMA_NOT_READY");
+                    assertThat(e.getMessage()).contains("schema at version 4", "migrate-on-start=false");
+                });
+        assertThat(fresh.engineKeys).as("no key is created on the request path").isEmpty();
+    }
+
     // ---------------------------------------------------------------- RLE-043 allowed actions
 
     @Test

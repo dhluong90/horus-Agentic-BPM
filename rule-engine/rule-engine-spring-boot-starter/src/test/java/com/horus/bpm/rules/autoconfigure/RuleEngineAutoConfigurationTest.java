@@ -483,6 +483,22 @@ class RuleEngineAutoConfigurationTest {
         }
     }
 
+    @Test
+    void RLE_039_a_pending_schema_without_migration_tells_the_cursor_key_the_schema_state() {
+        java.util.List<String> states = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicInteger loads = new java.util.concurrent.atomic.AtomicInteger();
+        runner.withUserConfiguration(HostWithPendingSchema.class)
+                .withBean(RuleEngineCursorKeyInitializer.class,
+                        () -> new RuleEngineCursorKeyInitializer(loads::incrementAndGet, () -> { }, states::add))
+                .withPropertyValues("horus.bpm.rules.migrate-on-start=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(loads).hasValue(0);
+                    assertThat(states).singleElement().asString()
+                            .contains("1 migration(s) pending", "migrate-on-start=false");
+                });
+    }
+
     @Configuration(proxyBeanMethods = false)
     @Import(HostJdbc.class)
     static class HostWithPendingSchema {

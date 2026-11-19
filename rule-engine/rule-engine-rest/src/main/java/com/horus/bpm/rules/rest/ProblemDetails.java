@@ -56,7 +56,8 @@ public class ProblemDetails {
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
             Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
-            Map.entry("INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR));
+            Map.entry("INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR),
+            Map.entry("SCHEMA_NOT_READY", HttpStatus.SERVICE_UNAVAILABLE));
 
     /**
      * Answers an engine exception.

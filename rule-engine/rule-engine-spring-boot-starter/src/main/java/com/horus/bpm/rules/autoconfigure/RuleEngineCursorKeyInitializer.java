@@ -22,15 +22,31 @@ public final class RuleEngineCursorKeyInitializer implements DisposableBean {
 
     private final Runnable load;
     private final Runnable refresh;
+    private final java.util.function.Consumer<String> notReady;
     private ScheduledExecutorService refresher;
 
     RuleEngineCursorKeyInitializer(CursorKeys keys) {
-        this(Objects.requireNonNull(keys, "keys must not be null")::load, keys::refresh);
+        this(Objects.requireNonNull(keys, "keys must not be null")::load, keys::refresh, keys::notReady);
     }
 
     RuleEngineCursorKeyInitializer(Runnable load, Runnable refresh) {
+        this(load, refresh, state -> { });
+    }
+
+    RuleEngineCursorKeyInitializer(Runnable load, Runnable refresh, java.util.function.Consumer<String> notReady) {
         this.load = Objects.requireNonNull(load, "load must not be null");
         this.refresh = Objects.requireNonNull(refresh, "refresh must not be null");
+        this.notReady = Objects.requireNonNull(notReady, "notReady must not be null");
+    }
+
+    /**
+     * Records that the key was not loaded because the schema is not current, so list calls answer
+     * {@code 503 SCHEMA_NOT_READY} naming the state.
+     *
+     * @param schemaState the schema state
+     */
+    void notReady(String schemaState) {
+        notReady.accept(schemaState);
     }
 
     /**
