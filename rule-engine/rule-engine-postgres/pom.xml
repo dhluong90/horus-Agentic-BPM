@@ -32,10 +32,11 @@
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-core</artifactId>
     </dependency>
-    <!-- Deliberate licence-gate failure (EPL-1.0 / LGPL-2.1); reverted in the next commit. -->
+    <!-- Deliberate vulnerability-gate failure (CVE-2022-42889, critical); reverted in the next commit. -->
     <dependency>
-      <groupId>ch.qos.logback</groupId>
-      <artifactId>logback-classic</artifactId>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-text</artifactId>
+      <version>1.9</version>
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
