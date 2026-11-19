@@ -3113,4 +3113,11 @@ The value in force is shown in `/api/bpm/meta`. In the `four-eyes` retirement mo
 
 **Recommendation and decision.** Option 1, in 0.2.0, with the other PD-099 mitigations, before the first pilot on real data. It completes mitigation 1: the warning is not only shown, it is accepted on the record.
 
+**Inputs masked by the tenant default (confirmed with the architect, 2026-11-20).** An undeclared input that the tenant's `decision-log.mask-default: true` masks still raises `UNMASKED_PERSONAL_DATA` (`RLE-049`), because its declaration is missing. Its values are never logged in clear, though, so "logged without masking" would be false for it.
+- Such an input needs no acknowledgement. If no input needs one, the approval records an empty list.
+- The approval history row records that the input is masked by the tenant default, not by its declaration.
+- If the tenant later turns the default off, that change is the moment the risk is accepted. It is logged with the old and new value and shown in `/api/bpm/meta` (PD-099, mitigation 4). That later change does not need a new approval of each version.
+
+The acknowledgement therefore covers exactly the inputs that will be logged in clear under the tenant's masking in force at the approval.
+
 **Follow-ups.** Architect: a statement in the rule engine SPEC for the approve request, the error code and the history and event fields, and the setting in DESIGN 4.4. Maintainers (engineering): the implementation issue (engine and cockpit). Documentation: the approval how-to.
