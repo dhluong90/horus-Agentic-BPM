@@ -20,6 +20,7 @@
 
   <modules>
     <module>bpm-bom</module>
+    <module>bpm-host-metadata</module>
     <module>rule-engine</module>
     <module>examples/rule-engine-only</module>
   </modules>
@@ -33,6 +34,8 @@
     <!-- ADR-0011: build against the newest generally available Spring Boot 4.x minor. -->
     <spring-boot.version>4.1.2</spring-boot.version>
     <archunit.version>1.5.1</archunit.version>
+    <!-- Test scope only: validates REST responses against the published JSON Schemas (Apache 2.0). -->
+    <json-schema-validator.version>2.0.1</json-schema-validator.version>
 
     <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
     <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
@@ -59,6 +62,11 @@
         <groupId>com.tngtech.archunit</groupId>
         <artifactId>archunit-junit5</artifactId>
         <version>${archunit.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.networknt</groupId>
+        <artifactId>json-schema-validator</artifactId>
+        <version>${json-schema-validator.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

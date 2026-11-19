@@ -1,0 +1,37 @@
+# Host metadata
+
+Serves `GET /api/bpm/meta` and `GET /api/bpm/me` once per host, whatever engines the host runs (ADR-0014). Each engine starter contributes one `ModuleDescriptor` bean; the module turns them into the two responses defined by [`cockpit/api/schema/bpm-meta.v1.schema.json`](../cockpit/api/schema/bpm-meta.v1.schema.json) and [`bpm-me.v1.schema.json`](../cockpit/api/schema/bpm-me.v1.schema.json).
+
+Hosts do not depend on this module directly: the engine starters bring it. User documentation is the wiki page Host Metadata and Permissions.
+
+```mermaid
+flowchart LR
+    RS[Rule Engine starter] -- ModuleDescriptor rules --> HM[bpm-host-metadata]
+    PS[Process Engine starter, M2] -. ModuleDescriptor processes .-> HM
+    SEC[Host security chain] -- authenticated caller --> HM
+    HM -- GET /api/bpm/meta --> C[Cockpit and other clients]
+    HM -- GET /api/bpm/me --> C
+```
+
+| Package | Contents |
+|---|---|
+| `com.horus.bpm.host.spi` | `ModuleDescriptor`, implemented by engine starters only. Its constructor checks every value against the published schema, so a wrong entry stops the start-up |
+| `com.horus.bpm.host.autoconfigure` | Auto-configuration, `horus.bpm.*` properties, the controller, and `BpmProblemAuthenticationEntryPoint` and `BpmProblemAccessDeniedHandler` for the host's security chain |
+
+The endpoints register only in a servlet host with Spring MVC and Spring Security, and only when at least one engine has contributed an entry, so `/meta` never lists zero modules. Spring MVC, Spring Security and Spring Security OAuth2 are optional dependencies. Main code uses no JSON library: responses go through the host's own message converters and problem bodies are written by a small writer, so the module works with either Jackson major.
+
+## Contract
+
+- OpenAPI 3.1: [`api/openapi.yaml`](api/openapi.yaml). It references the two schemas instead of copying them.
+- `HostMetadataContractTest` validates responses for several callers and host configurations against the schemas, and the OpenAPI examples too.
+
+Generate a TypeScript client and type-check it:
+
+```bash
+npx openapi-typescript@7 bpm-host-metadata/api/openapi.yaml -o host-contract.d.ts
+npx -p typescript@5 tsc --strict --noEmit host-contract.d.ts
+```
+
+## Build and test
+
+`mvn -B -pl bpm-host-metadata -am verify` from the repository root. The tests need no database and no identity provider; callers are set with Spring Security's test support.

@@ -22,6 +22,11 @@
     <dependencies>
       <dependency>
         <groupId>com.horus.bpm</groupId>
+        <artifactId>bpm-host-metadata</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
         <artifactId>rule-engine-core</artifactId>
         <version>${project.version}</version>
       </dependency>
