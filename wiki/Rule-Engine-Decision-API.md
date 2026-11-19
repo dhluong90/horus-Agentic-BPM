@@ -2,6 +2,21 @@
 
 Reference for the two Rule Engine surfaces: the in-process Java API and the optional REST API under `/api/bpm/rules/v1` that the cockpit and remote callers use. _Design preview: the contract is reviewed here before the code exists._
 
+## Available in 0.1.0-SNAPSHOT
+
+These operations are built and tested; their contract file is [`rule-engine/api/openapi.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/rule-engine/api/openapi.yaml). Everything else on this page is still a design preview.
+
+| Method and path | Java | Permission | Notes |
+|---|---|---|---|
+| `POST /rule-sets` | `VersionService.importRuleSet(ImportRequest)` | `rules:author` | Body is the YAML document (`Content-Type: application/yaml`); creates the rule set named in the document and its version 1 as `DRAFT`. `201`, `ETag`, `Location` |
+| `POST /rule-sets/{name}/versions` | `VersionService.importVersion(name, ImportRequest)` | `rules:author` | The next draft version; the document's `ruleSet` must equal `{name}` |
+| `GET /rule-sets/{name}/versions/{v}` | `VersionService.find(name, v, includeSource)` | `rules:read` | `?include=source` adds `sourceDocument`, the file as imported, comments included |
+| `POST /rule-sets/{name}/versions/{v}:request-publish` | `VersionService.requestPublish(...)` | `rules:author` | `If-Match` optional |
+| `POST /rule-sets/{name}/versions/{v}:approve` | `VersionService.approve(...)` | `rules:approve` | Optional body `{ "comment": "..." }`; the requester gets `403 SELF_APPROVAL_FORBIDDEN` |
+| `POST /decisions/{ruleSet}:evaluate` | `RuleEngine.evaluate(...)` | `rules:evaluate` | Body `{ "inputs": { ... } }`; `first` hit policy only; one `rle_decision` row in the request's transaction |
+
+All of them accept `Idempotency-Key` with the semantics below, and every state change writes an outbox row (`rules.version.created.v1`, `rules.version.publish-requested.v1`, `rules.version.published.v1`). A caller without the permission gets `403 PERMISSION_DENIED`, through the Java API as well as REST. The approver must be neither the requester nor the author (`createdBy`) of the version. Evaluate refuses an undeclared input name and a number with more than 34 significant digits or a scale outside `evaluation.max-input-scale` with `400 INPUT_INVALID`; only declared inputs are written to the decision log. Imports refuse unknown properties, YAML anchors, aliases and tags, numbers that the canonical form would change, and conditions that do not produce true or false. In this build: YAML import only, no `clock`, `copyOf` or version-pinned evaluation, no validation report in the response, and the `unique` and `collect` hit policies are refused at import. A runnable walkthrough is in [`examples/rule-engine-only/README.md`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-engine-only/README.md).
+
 ![Rule evaluation flow](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/rule-evaluation-flow.svg)
 
 ## Java
@@ -40,7 +55,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | Identifiers | ULID strings, for example `01JD2X5K9T1Q4N8V2M7B3C6D0E` |
 | Timestamps | ISO 8601 UTC, `2026-12-01T00:00:00Z` |
 | Money | `{ "currency": "VND", "amount": 60000000 }`: ISO 4217 code and an integer in minor units. Never a JSON float. In Java, `Money.ofMinor("VND", 60_000_000)` or `Money.ofMajor("USD", "12.50")` |
-| Tenant | Resolved from the security context or a trusted gateway header. A `tenantId` field in any request body is ignored (`TR-SEC-03`, `RLE-011`). With tenant switching on, `X-Tenant-Id` may name another tenant from the token's allowed list; any other value is `403 TENANT_NOT_ALLOWED` |
+| Tenant | Resolved by the `TenantResolver` from the authenticated principal, session or token, never from a header ([[Multi-Tenancy and Security]]). A `tenantId` field in any request body is ignored (`TR-SEC-03`, `RLE-011`). With tenant switching on, `X-Tenant-Id` may name another tenant from the token's allowed list; any other value is `403 TENANT_NOT_ALLOWED` |
 | Authentication | Every endpoint requires an authenticated principal from the host's Spring Security; see [[Multi Tenancy and Security]] |
 | Errors | RFC 9457 `application/problem+json` with a stable `code`; see the error matrix and [[Common Error Codes]]. Clients branch on `code`, never on `type` |
 | Idempotency | `Idempotency-Key` header on every `POST` and `PUT`; semantics below |

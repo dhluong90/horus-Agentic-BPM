@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.horus.bpm</groupId>
+    <artifactId>cockpit-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>cockpit-spring-boot-starter</artifactId>
+  <name>HORUS Cockpit Spring Boot Starter</name>
+  <description>Serves the static cockpit inside a Spring MVC host, behind the host's own sign-in.</description>
+
+  <properties>
+    <!--
+      -Dcockpit.bundle.skip=true builds the starter without the cockpit (a Java-only build, by choice).
+      The jar then serves 404 at the cockpit path; examples/rule-engine-only skips its cockpit test too.
+    -->
+    <cockpit.bundle.skip>false</cockpit.bundle.skip>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
+    </dependency>
+    <!-- Spring Framework artifact present on both Spring Boot lines (ADR-0011). -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-webmvc</artifactId>
+    </dependency>
+    <!--
+      The Servlet API, provided by the host's container. Compiled against Tomcat's copy (Apache 2.0)
+      rather than jakarta.servlet-api (EPL 2.0 or GPL 2 with Classpath Exception), which the licence
+      gate refuses. Nothing of it ships in the starter.
+    -->
+    <dependency>
+      <groupId>org.apache.tomcat.embed</groupId>
+      <artifactId>tomcat-embed-core</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <!-- Optional: loads the host's CSRF token for host-session mode when the host uses Spring Security. -->
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-web</artifactId>
+      <optional>true</optional>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <!--
+    TR-EMB-02: the tests run on both Spring Boot lines (parent POM, -Dspring-boot.line). Only the name of
+    the web starter differs between the lines.
+  -->
+  <profiles>
+    <profile>
+      <id>host-spring-boot-4</id>
+      <activation>
+        <property>
+          <name>spring-boot.line</name>
+          <value>!3.5</value>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-webmvc</artifactId>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>host-spring-boot-3.5</id>
+      <activation>
+        <property>
+          <name>spring-boot.line</name>
+          <value>3.5</value>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-web</artifactId>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
+
+  <build>
+    <!-- Replaces the parent's resources, so its TR-LIC-02 licence files are repeated here. -->
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <resource>
+        <directory>${bpm.root}</directory>
+        <targetPath>META-INF</targetPath>
+        <includes>
+          <include>LICENSE</include>
+          <include>COMMERCIAL-LICENSE.md</include>
+        </includes>
+      </resource>
+      <!--
+        The built React application (npm run build in ../web). It is packaged when present; a jar built
+        without it serves a 404 for the cockpit and logs a warning at start-up.
+      -->
+      <resource>
+        <directory>${project.basedir}/../web/dist</directory>
+        <targetPath>META-INF/horus-cockpit</targetPath>
+        <excludes>
+          <exclude>cockpit-hosts.json</exclude>
+        </excludes>
+      </resource>
+    </resources>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>require-cockpit-bundle</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <skip>${cockpit.bundle.skip}</skip>
+              <rules>
+                <requireFilesExist>
+                  <files>
+                    <file>${project.parent.basedir}/web/dist/index.html</file>
+                  </files>
+                  <message>The cockpit bundle is missing. Run "npm ci &amp;&amp; npm run build" in cockpit/web first, or build without the cockpit with -Dcockpit.bundle.skip=true.</message>
+                </requireFilesExist>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.springframework.boot</groupId>
+              <artifactId>spring-boot-configuration-processor</artifactId>
+              <version>${spring-boot.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

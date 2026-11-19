@@ -46,15 +46,13 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "management.endpoint.health.show-components=always")
+        properties = {
+                "management.endpoint.health.show-components=always",
+                "management.endpoint.health.show-details=always"})
 @Testcontainers
 class RuleEngineOnlyHostIT {
 
-    /**
-     * Tests of what exists on one Spring Boot line only; the other leg skips them (TR-EMB-02). The health
-     * component is Spring Boot 4 only until #116 adds it for 3.5 hosts and removes the tag.
-     */
-    static final String SPRING_BOOT_4_ONLY = "spring-boot-4-only";
+    /** Tests of what exists on one Spring Boot line only; the other leg skips them (TR-EMB-02). */
     static final String SPRING_BOOT_3_5_ONLY = "spring-boot-3.5-only";
 
     private static final Instant HOST_NOW = Instant.parse("2027-01-26T00:00:00Z");
@@ -119,12 +117,17 @@ class RuleEngineOnlyHostIT {
     }
 
     @Test
-    @Tag(SPRING_BOOT_4_ONLY)
-    void TR_EMB_01_rule_engine_health_component_is_up() throws Exception {
-        // The ruleEngine health contributor exists on Spring Boot 4 only until #116 (ADR-0011).
-        JsonNode health = JsonMapper.builder().build().readTree(get("/actuator/health").body());
+    void TR_EMB_01_rule_engine_health_component_is_up_with_the_same_details_on_both_lines() throws Exception {
+        // One health check, one adapter per Spring Boot line (#116): same component name and details.
+        JsonNode engine = JsonMapper.builder().build().readTree(get("/actuator/health").body())
+                .path("components").path("ruleEngine");
 
-        assertThat(health.path("components").path("ruleEngine").path("status").asString()).isEqualTo("UP");
+        assertThat(engine.path("status").asString()).isEqualTo("UP");
+        assertThat(engine.path("details").path("historyTable").asString()).isEqualTo("rle_schema_history");
+        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("2");
+        assertThat(engine.path("details").path("pendingMigrations").asInt()).isZero();
+        assertThat(engine.path("details").path("nextMonthPartition").asString()).isEqualTo("rle_decision_2027_02");
+        assertThat(engine.path("details").path("nextMonthPartitionPresent").asBoolean()).isTrue();
     }
 
     @Test
@@ -192,8 +195,9 @@ class RuleEngineOnlyHostIT {
                 .query(String.class).list();
 
         assertThat(hostHistory).containsExactly("1 V1__create_loan_application.sql");
-        // The host's tables existed first, so the engine baselines at 0 and still applies V1.
-        assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__rle_baseline.sql");
+        // The host's tables existed first, so the engine baselines at 0 and still applies V1 and V2.
+        assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__rle_baseline.sql",
+                "2 V2__rle_version_created_by.sql");
     }
 
     @Test

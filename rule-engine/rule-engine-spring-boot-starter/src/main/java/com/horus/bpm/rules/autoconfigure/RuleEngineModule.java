@@ -1,0 +1,55 @@
+package com.horus.bpm.rules.autoconfigure;
+
+import com.horus.bpm.host.spi.ModuleDescriptor;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+
+/**
+ * The Rule Engine's entry in the host contract: {@code rules}, REST API {@code v1}, the engine version of
+ * this build and the six permissions of ADR-0010.
+ */
+final class RuleEngineModule {
+
+    /** Every permission the Rule Engine checks, in the order clients show them (ADR-0010). */
+    static final List<String> PERMISSIONS = List.of(
+            "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read");
+
+    /**
+     * Feature flags turned on in this build. None yet: a flag is added with the feature it announces, so a
+     * client never offers a screen whose endpoints are missing.
+     */
+    static final List<String> FEATURES = List.of();
+
+    private static final String VERSION_RESOURCE = "rule-engine.properties";
+
+    private RuleEngineModule() {
+    }
+
+    /**
+     * The descriptor for this host.
+     *
+     * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
+     * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
+     */
+    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions) {
+        return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, Map.of(), PERMISSIONS, rolePermissions);
+    }
+
+    static String engineVersion() {
+        try (InputStream in = RuleEngineModule.class.getResourceAsStream(VERSION_RESOURCE)) {
+            if (in == null) {
+                throw new IllegalStateException("The Rule Engine starter is missing " + VERSION_RESOURCE
+                        + "; rebuild it with Maven.");
+            }
+            Properties properties = new Properties();
+            properties.load(in);
+            return properties.getProperty("engine-version");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+}

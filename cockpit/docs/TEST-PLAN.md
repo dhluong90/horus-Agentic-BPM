@@ -14,7 +14,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 ## Specification coverage
 | Spec id | Test | Level | Milestone | Traces to | Status |
 |---|---|---|---|---|---|
-| CKP-001 | `CKP_001_cockpit_boots_embedded_and_standalone_from_registry` | Playwright, embedded and standalone | M1 | `TR-UI-01`, `ADR-0005`, `ADR-0014` | Planned |
+| CKP-001 | `CKP_001_*` (case A: `cockpit/web/e2e/shell.spec.ts`, `cockpit/web/src/shell/CockpitShell.test.tsx`, `CockpitStarterTest`, `CockpitEmbeddedIT`) | Playwright, Vitest, MockMvc, Testcontainers | M1 | `TR-UI-01`, `ADR-0005`, `ADR-0014` | Pending. Case A (embedded boot) is automated; the statement stays pending until case B (standalone, #11) and the rule set list step (Sprint 2) are automated, or until the statement is split |
 | CKP-002 | `CKP_002_version_diff_highlights_row_changes` | Vitest, Testing Library | M1 | `TR-UI-02` | Planned |
 | CKP-003 | `CKP_003_maker_checker_ui_blocks_requester_self_approval` | Playwright | M1 | `TR-SEC-04`, `TR-UI-02` | Planned |
 | CKP-004 | `CKP_004_simulation_displays_outcome_changes_safely` | Playwright | M1 | `TR-UI-02` | Planned |
@@ -25,7 +25,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-009 | `CKP_009_wcag_aa_and_keyboard_navigation_pass` | Playwright, axe-core | M1 (Cockpit 0.1 screens); re-run at M2 over Cockpit 0.2 screens | `TR-UI-03` | Planned |
 | CKP-010 | `CKP_010_en_and_vi_i18n_coverage_complete` | Vitest, key parity | M1 (Cockpit 0.1 screens); re-run at M2 over Cockpit 0.2 screens | `TR-UI-04` | Planned |
 | CKP-011 | `CKP_011_replay_simulation_displays_outcome_changes_safely` | Playwright | M3 (replay simulation moved to M3 by PD-042) | `TR-UI-02` | Planned |
-| CKP-012 | `CKP_012_invalid_host_registry_blocks_all_host_calls` | Vitest, Playwright network capture | M1 | `TR-UI-01`, `TR-SEC-09` | Planned |
+| CKP-012 | `CKP_012_*` (`registry.test.ts`, `CockpitShell.test.tsx`, `e2e/shell.spec.ts`) | Vitest, Playwright network capture | M1 | `TR-UI-01`, `TR-SEC-09` | Pending. Parts (b) http `baseUrl` and (c) duplicate id, each with no host call, are automated; part (a), listing two hosts, needs the host list (#11) |
 | CKP-013 | `CKP_013_pkce_sign_in_with_per_host_tokens_in_memory` | Playwright, test identity provider | M1 | `TR-SEC-12`, `TR-UI-01` | Planned |
 | CKP-014 | `CKP_014_meta_features_and_version_skew_gate_screens` | Testing Library, mocked hosts | M1 | `TR-UI-08` | Planned |
 | CKP-015 | `CKP_015_host_switch_shows_one_host_at_a_time` | Playwright | M1 | `TR-UI-01` | Planned |

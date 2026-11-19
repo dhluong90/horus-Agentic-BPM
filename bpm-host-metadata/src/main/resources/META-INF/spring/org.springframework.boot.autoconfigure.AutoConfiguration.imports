@@ -1,0 +1,2 @@
+com.horus.bpm.host.autoconfigure.EngineAccessAutoConfiguration
+com.horus.bpm.host.autoconfigure.HostMetadataAutoConfiguration

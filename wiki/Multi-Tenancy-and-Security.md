@@ -18,7 +18,7 @@ The engines ask one extension point, `TenantResolver`, for the tenant of every c
 
 No header-based resolver ships. A gateway header as the tenant source was rejected: one misconfigured gateway would let one tenant's operator see another tenant's data. A host that writes a resolver that trusts a request header owns that risk.
 
-A call whose tenant cannot be resolved, for example a principal without the `tenant_id` attribute, is refused with `401 UNAUTHENTICATED` and touches no data (`RLE-037`). The `X-Tenant-Id` header is honoured only as the cockpit's tenant switch, for a tenant in the caller's allowed list; any other tenant gets `403 TENANT_NOT_ALLOWED`.
+A call whose tenant cannot be resolved, for example a principal without the `tenant_id` attribute, is refused with `401 UNAUTHENTICATED` and touches no data (`RLE-037`). The `X-Tenant-Id` header is honoured only as the cockpit's tenant switch, for a tenant in the caller's allowed list; any other tenant gets `403 TENANT_NOT_ALLOWED`. Whatever the resolver, a principal that carries the tenant attribute must match the tenant the resolver returns, so a host resolver cannot move a caller into another tenant. Both rules are built for `/api/bpm/meta` and `/api/bpm/me` ([[Host Metadata and Permissions]]).
 
 Rules that hold in every mode: tenant isolation is a guarantee that no setting relaxes; every table has `tenant_id` first in every index (`TR-TEN-01`); every repository method takes the tenant as a parameter; a `tenantId` in a request body is ignored (`TR-SEC-03`, `RLE-011`); the cockpit's tenant switch is accepted only for a tenant in the user's allowed list; a resource of another tenant answers `404`, never `403`, so names do not leak. The Java API resolves the tenant per call; `DecisionRequest.tenantId` for batch jobs needs an explicit host grant.
 
@@ -62,8 +62,8 @@ Expressions are parsed by a hand-written recursive-descent parser into a sealed,
 
 | Shape | Headers set by `cockpit-spring-boot-starter` |
 |---|---|
-| Embedded at `horus.bpm.cockpit.path` | `Content-Security-Policy: default-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` on API responses. Assets are served only to authenticated sessions |
-| Standalone | The host sets `rest.cors.allowed-origins` to the exact cockpit origin; credentials via bearer token, not cookies; `connect-src` on the cockpit side lists the host URLs |
+| Embedded at `horus.bpm.cockpit.path` | `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. The host may frame the cockpit in its own admin UI on the same origin; no other site can. Assets are served only to authenticated sessions. `Cache-Control: no-store` on engine API responses is tracked separately (see the cockpit page) |
+| Standalone | The host sets `rest.cors.allowed-origins` to the exact cockpit origin, and allows the request headers `Authorization`, `Accept`, `X-Requested-With`, `X-Tenant-Id`, `If-None-Match`, `If-Match` and `Idempotency-Key`; credentials via bearer token, not cookies; `connect-src` on the cockpit side lists the host URLs |
 
 The cockpit holds no secrets and no state (ADR-0005). It never marks an approval, a task completion or an incident retry as done before the API returns `200` or `201`.
 

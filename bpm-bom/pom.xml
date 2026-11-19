@@ -42,6 +42,11 @@
     <dependencies>
       <dependency>
         <groupId>com.horus.bpm</groupId>
+        <artifactId>bpm-host-metadata</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
         <artifactId>rule-engine-core</artifactId>
         <version>${project.version}</version>
       </dependency>
@@ -52,7 +57,17 @@
       </dependency>
       <dependency>
         <groupId>com.horus.bpm</groupId>
+        <artifactId>rule-engine-rest</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
         <artifactId>rule-engine-spring-boot-starter</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.horus.bpm</groupId>
+        <artifactId>cockpit-spring-boot-starter</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

@@ -43,7 +43,9 @@
 
   <modules>
     <module>bpm-bom</module>
+    <module>bpm-host-metadata</module>
     <module>rule-engine</module>
+    <module>cockpit</module>
     <module>examples</module>
   </modules>
 
@@ -80,6 +82,9 @@
     <!-- JUnit tags of tests that apply to one Spring Boot line only; the 3.5 profile swaps the value. -->
     <excludedGroups>spring-boot-3.5-only</excludedGroups>
     <archunit.version>1.5.1</archunit.version>
+    <jqwik.version>1.10.2</jqwik.version>
+    <!-- Test scope only: validates REST responses against the published JSON Schemas (Apache 2.0). -->
+    <json-schema-validator.version>2.0.1</json-schema-validator.version>
 
     <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
     <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
@@ -120,6 +125,16 @@
         <groupId>com.tngtech.archunit</groupId>
         <artifactId>archunit-junit5</artifactId>
         <version>${archunit.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>net.jqwik</groupId>
+        <artifactId>jqwik</artifactId>
+        <version>${jqwik.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.networknt</groupId>
+        <artifactId>json-schema-validator</artifactId>
+        <version>${json-schema-validator.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -434,7 +449,7 @@
       </activation>
       <properties>
         <spring-boot.version>${spring-boot-3.5.version}</spring-boot.version>
-        <!-- The ruleEngine health contributor exists on Spring Boot 4 only until #116 (ADR-0011). -->
+        <!-- Tests of something that exists on Spring Boot 4 only; none today (the health check is on both lines, #116). -->
         <excludedGroups>spring-boot-4-only</excludedGroups>
         <!-- This profile runs compiled tests only; main code is never recompiled against 3.5. -->
         <maven.main.skip>true</maven.main.skip>
@@ -504,6 +519,11 @@
           <dependency>
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
+            <version>${jackson-3.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>tools.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
             <version>${jackson-3.version}</version>
           </dependency>
         </dependencies>
