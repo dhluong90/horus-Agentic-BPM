@@ -228,7 +228,10 @@ describe('four eyes', () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/2', 'rules-approver');
     expect(await screen.findByText('1 added, 1 changed, 1 removed, 3 unchanged')).toBeInTheDocument();
-    expect(screen.queryByText(/Characters outside ASCII/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/look-alike/i)).not.toBeInTheDocument();
+    // One hint line at most, and only for a scheduled date: v2 has none, and the reason hint is spoken, not shown.
+    expect(screen.queryByText(/Takes effect/)).not.toBeInTheDocument();
+    expect(screen.getByText('Reject needs a reason; it is kept in the history.')).toHaveClass('sr-only');
     // One table: both versions side by side; each side's header carries its content hash.
     expect(screen.getAllByRole('table')).toHaveLength(1);
     const hashes = [...document.querySelectorAll('.sbs__hash')].map((el) => el.textContent);

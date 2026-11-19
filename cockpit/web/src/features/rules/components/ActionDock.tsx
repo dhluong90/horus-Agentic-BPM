@@ -43,14 +43,14 @@ export function DraftsOffNote() {
   return can('rules:author') && !cockpitDrafts ? <p className="rs-head__note">{t('dock.draftsOff')}</p> : null;
 }
 
-/** When the version takes effect once approved: its proposed date if it has one in the future, else at once. */
+/** A scheduled date, when the version has one in the future; otherwise nothing (the header already says when). */
 function TakesEffect({ effectiveFrom }: { effectiveFrom: string | null | undefined }) {
   const { t, locale } = useI18n();
   // Read once when the card opens: the hint must not flip while the approver is reading it.
   const [now] = useState(() => Date.now());
   const future = effectiveFrom !== null && effectiveFrom !== undefined && Date.parse(effectiveFrom) > now;
   const when = future ? formatDateTime(effectiveFrom, locale) : undefined;
-  return <p className="dock__hint">{when === undefined ? t('decision.takesEffect') : t('decision.takesEffectOn', { when })}</p>;
+  return when === undefined ? null : <p className="dock__hint">{t('decision.takesEffectOn', { when })}</p>;
 }
 
 /**
@@ -107,7 +107,8 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
                 </button>
               ) : null}
             </div>
-            {canReject ? <p id={hintId} className="dock__hint">{t('dock.reasonHint')}</p> : null}
+            {/* The placeholder already says Reject needs a reason; the hint stays as Reject's spoken description. */}
+            {canReject ? <p id={hintId} className="sr-only">{t('dock.reasonHint')}</p> : null}
             {canApprove ? <TakesEffect effectiveFrom={version.effectiveFrom} /> : null}
           </div>
         </>

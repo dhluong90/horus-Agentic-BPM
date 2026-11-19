@@ -72,6 +72,8 @@ describe('side-by-side version diff', () => {
     expect(within(changed).getByText('30,000 VND').closest('td')).toHaveClass('diff-td--old');
     expect(within(changed).getByText('35,000 VND').closest('td')).toHaveClass('diff-td--mod');
     expect(row('R1')).toHaveClass('diff-row--unchanged');
+    // A removed row is not struck: its values are not marked as replaced (strike-through means replaced).
+    expect(row('R4').querySelectorAll('.diff-td--old')).toHaveLength(0);
     expect(screen.getByRole('region', { name: 'Version 1 and version 2 of card-fee, side by side' })).toBeInTheDocument();
     expect(screen.queryByText(/>=|==/)).not.toBeInTheDocument();
   });
@@ -110,7 +112,7 @@ describe('side-by-side version diff', () => {
     expect(within(notes).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       'Hit policy: first matching row wins → exactly one row matches',
       'Condition columns are in a new order',
-      'Result column added: waived',
+      'Result column added: Waived',
     ]);
     // The added column exists on the proposed side only.
     expect(screen.getAllByRole('columnheader', { name: 'Waived' })).toHaveLength(1);
@@ -120,13 +122,21 @@ describe('side-by-side version diff', () => {
     // R1's GOLD now carries a Cyrillic capital O (U+041E): it reads like GOLD and never matches it.
     const lookalike: RuleSetDefinition = { ...proposed, rules: proposed.rules.map((r) => (r.id === 'R1' ? { ...r, when: { tier: "== 'GОLD'" } } : r)) };
     show({ ...diff, rows: [{ ruleId: 'R1', change: 'CHANGED', position: 1, basePosition: 1, moved: false, fields: [{ path: '/when/tier', from: "== 'GOLD'", to: "== 'GОLD'", nonAscii: true }] }, ...diff.rows] }, lookalike);
-    expect(within(row('R1')).getByText('Non-ASCII: О U+041E')).toBeInTheDocument();
-    expect(screen.getAllByText(/Non-ASCII/)).toHaveLength(1);
-    expect(screen.getByText('Characters outside ASCII in 1 changed cells')).toBeInTheDocument();
+    expect(within(row('R1')).getByText('Look-alike character: О U+041E')).toBeInTheDocument();
+    expect(screen.getAllByText(/Look-alike character:/)).toHaveLength(1);
+    expect(screen.getByText('1 changed cells contain look-alike characters')).toBeInTheDocument();
+  });
+
+  it('ADR_0026_vietnamese_names_look_alike_and_hidden_characters_in_plain_words', () => {
+    const lookalike: RuleSetDefinition = { ...proposed, rules: proposed.rules.map((r) => (r.id === 'R1' ? { ...r, when: { tier: "== 'GОLD'" } } : r)) };
+    show({ ...diff, rows: [{ ruleId: 'R1', change: 'CHANGED', position: 1, basePosition: 1, moved: false, fields: [{ path: '/when/tier', from: "== 'GOLD'", to: "== 'GОLD'", nonAscii: true }] }, ...diff.rows] }, lookalike, 'vi');
+    expect(within(row('R1')).getByText('Ký tự dễ nhầm: О U+041E')).toBeInTheDocument();
+    expect(screen.getByText('1 ô đã sửa có ký tự dễ nhầm')).toBeInTheDocument();
+    expect(screen.queryByText(/ASCII/)).not.toBeInTheDocument();
   });
 
   it('ADR_0026_a_flagged_value_without_a_visible_character_is_still_marked', () => {
     show({ ...diff, rows: [{ ruleId: 'R1', change: 'CHANGED', position: 1, basePosition: 1, moved: false, fields: [{ path: '/when/tier', from: "== 'GOLD'", to: "== 'GOLD\\u200B'", nonAscii: true }] }, ...diff.rows] });
-    expect(within(row('R1')).getByText('Hidden or escaped character')).toBeInTheDocument();
+    expect(within(row('R1')).getByText('Hidden character')).toBeInTheDocument();
   });
 });

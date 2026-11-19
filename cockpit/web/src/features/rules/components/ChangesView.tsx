@@ -101,7 +101,13 @@ function RowMarks({ pair }: { pair: RowPair }) {
   );
 }
 
-function NoteText({ note }: { note: StructureNote }) {
+/** A column named in a note reads with the same label as its header: from the version that has the column. */
+function noteColumn(note: { group: 'when' | 'then'; name: string }, from: RuleSetDefinition): string {
+  const clause = (note.group === 'when' ? from.inputs : from.outputs).find((c) => c.name === note.name);
+  return columnLabel(note.name, clause?.description);
+}
+
+function NoteText({ note, base, next }: { note: StructureNote; base: RuleSetDefinition; next: RuleSetDefinition }) {
   const { t } = useI18n();
   const policy = (value: string) => {
     const upper = value.toUpperCase();
@@ -115,7 +121,7 @@ function NoteText({ note }: { note: StructureNote }) {
     case 'columnAdded':
     case 'columnRemoved':
     case 'columnChanged':
-      return <>{t(`changes.note.${note.kind}.${note.group}`, { name: note.name })}</>;
+      return <>{t(`changes.note.${note.kind}.${note.group}`, { name: noteColumn(note, note.kind === 'columnRemoved' ? base : next) })}</>;
     case 'columnsReordered':
       return <>{t(`changes.note.columnsReordered.${note.group}`)}</>;
   }
@@ -145,7 +151,7 @@ export function ChangesView({ diff, base, next }: { diff: VersionDiff; base: Rul
       </p>
       {notes.length > 0 ? (
         <ul className="changes__notes" aria-label={t('changes.notesLabel')}>
-          {notes.map((note, index) => <li key={index}><NoteText note={note} /></li>)}
+          {notes.map((note, index) => <li key={index}><NoteText note={note} base={base.definition} next={next.definition} /></li>)}
         </ul>
       ) : null}
       <div className="dt-scroll" role="region" tabIndex={0} aria-label={caption}>

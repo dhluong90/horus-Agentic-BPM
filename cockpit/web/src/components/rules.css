@@ -121,7 +121,9 @@
 .change-mark--removed { background: var(--diff-del); color: var(--bad); }
 .diff-row--added > * { background: var(--diff-add); }
 .diff-row--removed > * { background: var(--diff-del); }
-.diff-row--removed td { color: var(--ink-2); text-decoration: line-through; }
+/* A removed row strikes nothing: strike-through means only "replaced by the value on the right". The Removed
+ * label, the tint and "Removed in version 2" carry it. */
+.diff-row--removed td { color: var(--ink-2); }
 .diff-row--unchanged > * { color: var(--ink-2); }
 .diff-td--mod { background: var(--diff-mod); }
 .diff-cell { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
@@ -424,6 +426,8 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .workbench--wide { grid-template-columns: minmax(0, 1fr); }
 .dt--sbs th, .dt--sbs td { padding: 10px 10px; }
 .dt--sbs .sbs__versions th { vertical-align: top; padding-top: 12px; padding-bottom: 8px; }
+.dt--sbs .dt__groups th { padding-bottom: 0; }
+.dt--sbs thead tr:last-child th { padding-top: 6px; }
 .sbs__side { white-space: normal; text-align: left; }
 .sbs__side--next { box-shadow: inset 0 3px 0 var(--accent-fill); }
 .sbs__title { display: block; color: var(--ink); font: 600 14px/1.4 var(--font-ui); }
