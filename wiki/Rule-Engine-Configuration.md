@@ -84,7 +84,7 @@ These settings are decided. Their property names and ranges arrive with the spec
 |---|---|---|---|
 | Emergency single-approver path | Off | Set by its ADR | On: a logged path lets one person publish in an emergency; every use is reviewed afterwards. Never applies to retirement |
 
-The cockpit's landing area is the host property `horus.bpm.cockpit.landing` (default `by-role`), published as `cockpit.landing` in `/api/bpm/meta`; see [[Cockpit]].
+The cockpit's landing area is the host property `horus.bpm.cockpit.landing` (default `home`; also `rules` or `approvals`), published as `cockpit.landing` in `/api/bpm/meta`; see [[Cockpit]].
 
 ### Process Engine properties decided so far
 
