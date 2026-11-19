@@ -70,6 +70,7 @@ public final class DmnReader {
             throw invalid("The root element must be a DMN 1.2 to 1.5 <definitions>; found <" + Quote.text(root.name())
                     + "> in namespace " + Quote.of(ns), root);
         }
+        refuseDevelopmentNamespace(root);
         String feel = Dmn.feelNamespaceOf(ns);
         requireFeel(root, "expressionLanguage", feel);
         requireFeel(root, "typeLanguage", feel);
@@ -105,8 +106,8 @@ public final class DmnReader {
         doc.put("ruleSet", ruleSetName(root, decision));
         Optional<String> description = description(decision).or(() -> description(root));
         description.ifPresent(d -> doc.put("description", d));
-        root.attribute(Dmn.HORUS_NAMESPACE, "timeZone").ifPresent(zone -> doc.put("timeZone", zone));
-        root.attribute(Dmn.HORUS_NAMESPACE, "moneyRounding").ifPresent(r -> doc.put("moneyRounding", r));
+        horus(root, "timeZone").ifPresent(zone -> doc.put("timeZone", zone));
+        horus(root, "moneyRounding").ifPresent(r -> doc.put("moneyRounding", r));
 
         XmlTree table = null;
         for (XmlTree child : decision.children()) {
@@ -205,7 +206,7 @@ public final class DmnReader {
         }
         ObjectNode node = inputs.addObject();
         node.put("name", name);
-        node.put("type", type(expression.attribute("typeRef"), input.attribute(Dmn.HORUS_NAMESPACE, "type"),
+        node.put("type", type(expression.attribute("typeRef"), horus(input, "type"),
                 "input '" + name + "'", expression));
         columnDescription(input, name).ifPresent(d -> node.put("description", d));
         Optional<XmlTree> values = input.child("inputValues");
@@ -231,7 +232,7 @@ public final class DmnReader {
                 }
             }
         }
-        input.attribute(Dmn.HORUS_NAMESPACE, "mask").ifPresent(mask -> {
+        horus(input, "mask").ifPresent(mask -> {
             if (!mask.equals("true") && !mask.equals("false")) {
                 throw invalid("horus:mask of input '" + name + "' must be true or false", input);
             }
@@ -254,7 +255,7 @@ public final class DmnReader {
         }
         ObjectNode node = outputs.addObject();
         node.put("name", name);
-        node.put("type", type(output.attribute("typeRef"), output.attribute(Dmn.HORUS_NAMESPACE, "type"),
+        node.put("type", type(output.attribute("typeRef"), horus(output, "type"),
                 "output '" + name + "'", output));
         columnDescription(output, name).ifPresent(d -> node.put("description", d));
         return name;
@@ -389,6 +390,25 @@ public final class DmnReader {
         }
         // A label other than the name is kept as the description, so no author text is lost.
         return column.attribute("label").map(String::strip).filter(l -> !l.isEmpty() && !l.equals(name));
+    }
+
+    /** A {@code horus:} extension attribute in {@code urn:horus-bpm:dmn:extensions:v1}. */
+    private static Optional<String> horus(XmlTree element, String local) {
+        return element.attribute(Dmn.HORUS_NAMESPACE, local);
+    }
+
+    /**
+     * Refuses the development spelling of the extension namespace instead of ignoring its attributes, which would
+     * silently drop horus:type, horus:mask and the rest (TR-STD-04).
+     */
+    private static void refuseDevelopmentNamespace(XmlTree element) {
+        boolean used = element.namespace().equals(Dmn.HORUS_NAMESPACE_DEV)
+                || element.attributes().keySet().stream().anyMatch(k -> k.startsWith("{" + Dmn.HORUS_NAMESPACE_DEV + "}"));
+        if (used) {
+            throw invalid("The extension namespace " + Dmn.HORUS_NAMESPACE_DEV + " is not supported; use "
+                    + Dmn.HORUS_NAMESPACE, element);
+        }
+        element.children().forEach(DmnReader::refuseDevelopmentNamespace);
     }
 
     private static Optional<String> description(XmlTree element) {

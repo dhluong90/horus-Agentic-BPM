@@ -10,8 +10,14 @@ final class Dmn {
     /** DMN 1.5 model namespace, written on export. */
     static final String MODEL_15 = "https://www.omg.org/spec/DMN/20230324/MODEL/";
 
-    /** Namespace of the HORUS extension attributes ({@code horus:type}, {@code horus:mask}, ...). */
-    static final String HORUS_NAMESPACE = "urn:horus-bpm:dmn:extensions:1";
+    /**
+     * Namespace of the HORUS extension attributes ({@code horus:type}, {@code horus:mask}, ...), following the pattern
+     * {@code urn:horus-bpm:<bpmn|dmn>:extensions:v1} of process engine DESIGN 5.8. Export writes only this one.
+     */
+    static final String HORUS_NAMESPACE = "urn:horus-bpm:dmn:extensions:v1";
+
+    /** The development spelling, refused at import with the replacement URI (#186, TR-STD-04). */
+    static final String HORUS_NAMESPACE_DEV = "urn:horus-bpm:dmn:extensions:1";
 
     /** Model namespace to FEEL namespace, DMN 1.2 to 1.5. */
     private static final Map<String, String> FEEL_BY_MODEL = Map.of(
