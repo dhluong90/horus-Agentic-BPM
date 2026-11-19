@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
  * Validated engine settings. A value outside its range fails construction with a message naming the
@@ -21,12 +22,24 @@ import java.time.Duration;
  * @param draftAuthoring {@code horus.bpm.rules.authoring.cockpit-drafts}: whether drafts may be replaced in place
  *     through {@code VersionService.replaceDraft}; false (the 0.1.0 default, PD-094) refuses it with
  *     {@code DRAFT_AUTHORING_DISABLED}
+ * @param acknowledgeWarnings {@code horus.bpm.rules.lifecycle.acknowledge-warnings}: the warning codes an approval
+ *     must acknowledge (RLE-053, PD-104), at most {@value EngineDefaults#ACKNOWLEDGE_WARNINGS_MAX}, each a code this
+ *     release raises ({@code VersionWarning.CODES}); default {@code [UNMASKED_PERSONAL_DATA]}; may be empty
  */
 public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
         boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
-        int maxStringLength, int maxRows, boolean draftAuthoring) {
+        int maxStringLength, int maxRows, boolean draftAuthoring, List<String> acknowledgeWarnings) {
 
     public EngineSettings {
+        acknowledgeWarnings = warningCodes(acknowledgeWarnings == null ? EngineDefaults.ACKNOWLEDGE_WARNINGS
+                : acknowledgeWarnings, "horus.bpm.rules.lifecycle.acknowledge-warnings");
+        for (String code : acknowledgeWarnings) {
+            if (!io.github.dhluong90.bpm.rules.api.VersionWarning.CODES.contains(code)) {
+                throw new IllegalArgumentException("horus.bpm.rules.lifecycle.acknowledge-warnings lists " + code
+                        + ", which is not a warning this release raises; known: "
+                        + new java.util.TreeSet<>(io.github.dhluong90.bpm.rules.api.VersionWarning.CODES));
+            }
+        }
         if (cacheMaxEntries < 1 || cacheMaxEntries > EngineDefaults.CACHE_MAX_ENTRIES_LIMIT) {
             throw new IllegalArgumentException("horus.bpm.rules.cache.max-entries must be 1 to "
                     + EngineDefaults.CACHE_MAX_ENTRIES_LIMIT + ", was " + cacheMaxEntries);
@@ -46,6 +59,66 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         requireLowerOnly("horus.bpm.rules.evaluation.max-output-bytes", maxOutputBytes, EngineDefaults.OUTPUT_MAX_BYTES);
         requireLowerOnly("horus.bpm.rules.evaluation.max-string-length", maxStringLength, EngineDefaults.STRING_MAX_LENGTH);
         requireLowerOnly("horus.bpm.rules.evaluation.max-rows", maxRows, EngineDefaults.RULES_MAX);
+    }
+
+    /**
+     * Creates settings with the default acknowledged warnings.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     * @param queryMaxPageSize see the record
+     * @param reasonMaxLength see the record
+     * @param maxOutputBytes see the record
+     * @param maxStringLength see the record
+     * @param maxRows see the record
+     * @param draftAuthoring see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
+            int maxStringLength, int maxRows, boolean draftAuthoring) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, draftAuthoring,
+                EngineDefaults.ACKNOWLEDGE_WARNINGS);
+    }
+
+    /**
+     * Validates a list of warning codes; a malformed, repeated or surplus code fails naming the property.
+     *
+     * @param codes the codes
+     * @param property the property name for the message
+     * @return an immutable copy
+     */
+    static List<String> warningCodes(List<String> codes, String property) {
+        if (codes.size() > EngineDefaults.ACKNOWLEDGE_WARNINGS_MAX) {
+            throw new IllegalArgumentException(property + " holds at most " + EngineDefaults.ACKNOWLEDGE_WARNINGS_MAX
+                    + " codes, was " + codes.size());
+        }
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String code : codes) {
+            if (code == null || !WARNING_CODE.matcher(code).matches()) {
+                throw new IllegalArgumentException(property + " codes are 1 to 64 upper-case letters, digits or _,"
+                        + " starting with a letter, was " + (code == null ? "null" : "'" + code + "'"));
+            }
+            if (!seen.add(code)) {
+                throw new IllegalArgumentException(property + " lists " + code + " twice");
+            }
+        }
+        return List.copyOf(codes);
+    }
+
+    private static final java.util.regex.Pattern WARNING_CODE = java.util.regex.Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
+
+    /**
+     * Returns a copy with {@code lifecycle.acknowledge-warnings} set.
+     *
+     * @param codes the warning codes an approval must acknowledge; may be empty
+     * @return the settings
+     */
+    public EngineSettings withAcknowledgeWarnings(List<String> codes) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, draftAuthoring, codes);
     }
 
     /**
@@ -125,7 +198,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withRejectUndeclaredInputs(boolean reject) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, reject, queryMaxPageSize,
-                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, draftAuthoring);
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, draftAuthoring, acknowledgeWarnings);
     }
 
     /**
@@ -138,7 +211,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withSizeLimits(int outputBytes, int stringLength, int rows) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows, draftAuthoring);
+                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows, draftAuthoring, acknowledgeWarnings);
     }
 
     /**
@@ -149,6 +222,6 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withDraftAuthoring(boolean enabled) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, enabled);
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, enabled, acknowledgeWarnings);
     }
 }

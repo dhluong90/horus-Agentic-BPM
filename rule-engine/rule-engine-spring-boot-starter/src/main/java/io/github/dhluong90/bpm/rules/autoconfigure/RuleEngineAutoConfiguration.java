@@ -93,7 +93,8 @@ public class RuleEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "ruleEngineModuleDescriptor")
     ModuleDescriptor ruleEngineModuleDescriptor(RuleEngineProperties properties) {
-        return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts());
+        return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts(),
+                properties.toSettings().acknowledgeWarnings());
     }
 
     /** The host's unique {@code Clock} bean if it has one, otherwise system UTC. Never registered as a bean. */

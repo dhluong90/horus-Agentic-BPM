@@ -5,6 +5,8 @@ import io.github.dhluong90.bpm.host.spi.TenantModuleSettings;
 import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
+import io.github.dhluong90.bpm.rules.api.VersionWarning;
+import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.rules.postgres.PostgresRuleEngines;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
@@ -66,8 +68,27 @@ class RuleEngineServicesConfiguration {
     RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
             MaskingPolicy masking) {
+        EngineSettings settings = properties.toSettings();
+        warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(), masking);
+                RuleEngineAutoConfiguration.engineClock(clock), settings, masking);
+    }
+
+    /**
+     * A list without {@code UNMASKED_PERSONAL_DATA} relaxes a control (PD-104): allowed, but never silently.
+     *
+     * @param settings the validated settings
+     * @return whether the warning was logged
+     */
+    static boolean warnIfApprovalsSkipPersonalDataAcknowledgement(EngineSettings settings) {
+        if (settings.acknowledgeWarnings().contains(VersionWarning.UNMASKED_PERSONAL_DATA)) {
+            return false;
+        }
+        LOG.warn("horus.bpm.rules.lifecycle.acknowledge-warnings is " + settings.acknowledgeWarnings()
+                + " and does not list " + VersionWarning.UNMASKED_PERSONAL_DATA + ": a version whose input looks like"
+                + " personal data and is logged unmasked can be approved without the approver accepting it on the"
+                + " record (PD-104). The setting is shown in /api/bpm/meta.");
+        return true;
     }
 
     @Bean

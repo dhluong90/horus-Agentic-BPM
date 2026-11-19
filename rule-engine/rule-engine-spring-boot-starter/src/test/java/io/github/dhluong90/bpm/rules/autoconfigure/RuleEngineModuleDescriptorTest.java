@@ -50,13 +50,15 @@ class RuleEngineModuleDescriptorTest {
     @Test
     void PD_094_cockpit_drafts_setting_is_published_false_by_default_and_true_when_the_host_sets_it() {
         runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", false)));
+                .containsEntry("authoring.cockpit-drafts", false)
+                .containsEntry("lifecycle.acknowledge-warnings", "UNMASKED_PERSONAL_DATA").hasSize(2));
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=true")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                        .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", true)));
+                        .containsEntry("authoring.cockpit-drafts", true).hasSize(2));
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=false")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                        .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", false)));
+                        .containsEntry("authoring.cockpit-drafts", false)
+                .containsEntry("lifecycle.acknowledge-warnings", "UNMASKED_PERSONAL_DATA").hasSize(2));
     }
 
     @Test

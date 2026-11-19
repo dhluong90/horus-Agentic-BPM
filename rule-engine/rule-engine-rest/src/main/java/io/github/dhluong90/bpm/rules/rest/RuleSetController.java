@@ -201,7 +201,10 @@ public class RuleSetController {
         return RestSupport.version(HttpStatus.OK, versions.requestPublish(name, version, options), callers);
     }
 
-    /** {@code POST /rule-sets/{name}/versions/{v}:approve}, optional body {@code {"comment": "..."}}. */
+    /**
+     * {@code POST /rule-sets/{name}/versions/{v}:approve}, optional body
+     * {@code {"comment": "...", "acknowledgedWarnings": ["UNMASKED_PERSONAL_DATA"]}} (RLE-053).
+     */
     @PostMapping("/{name}/versions/{version:\\d+}:approve")
     public ResponseEntity<byte[]> approve(
             @PathVariable("name") String name,
@@ -214,6 +217,7 @@ public class RuleSetController {
         long lock = RestSupport.requiredIfMatch(ifMatch, ":approve");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         String comment = null;
+        java.util.List<String> acknowledged = new java.util.ArrayList<>();
         if (body.length > 0) {
             JsonNode node = EngineValues.readRequest(body);
             JsonNode value = node.get("comment");
@@ -223,8 +227,20 @@ public class RuleSetController {
                 }
                 comment = value.stringValue();
             }
+            JsonNode codes = node.get("acknowledgedWarnings");
+            if (codes != null && !codes.isNull()) {
+                if (!codes.isArray()) {
+                    throw new InputInvalidException("acknowledgedWarnings must be a list of warning codes");
+                }
+                for (JsonNode code : codes) {
+                    if (!code.isString()) {
+                        throw new InputInvalidException("acknowledgedWarnings must be a list of warning codes");
+                    }
+                    acknowledged.add(code.stringValue());
+                }
+            }
         }
-        WriteOptions options = new WriteOptions(idempotencyKey, lock, comment);
+        WriteOptions options = new WriteOptions(idempotencyKey, lock, comment, acknowledged);
         return RestSupport.version(HttpStatus.OK, versions.approve(name, version, options), callers);
     }
 

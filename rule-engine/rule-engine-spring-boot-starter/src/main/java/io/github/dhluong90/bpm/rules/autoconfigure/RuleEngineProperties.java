@@ -179,8 +179,12 @@ public record RuleEngineProperties(
      *
      * @param reasonMaxLength the longest reason of {@code :reject}, in characters, 1 to 2000; default 2000. May be
      *     lowered, never raised
+     * @param acknowledgeWarnings warning codes an approver must accept with acknowledgedWarnings before a version is
+     *     published, else 409 WARNINGS_NOT_ACKNOWLEDGED; default [UNMASKED_PERSONAL_DATA]. A list without
+     *     UNMASKED_PERSONAL_DATA relaxes a control: it is accepted, logged at WARN at start-up and shown in
+     *     /api/bpm/meta. A code this release never raises stops start-up
      */
-    public record Lifecycle(Integer reasonMaxLength) {
+    public record Lifecycle(Integer reasonMaxLength, List<String> acknowledgeWarnings) {
     }
 
     /**
@@ -200,7 +204,9 @@ public record RuleEngineProperties(
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
                 evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows())
-                .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()));
+                .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()))
+                .withAcknowledgeWarnings(lifecycle.acknowledgeWarnings() == null
+                        ? EngineDefaults.ACKNOWLEDGE_WARNINGS : lifecycle.acknowledgeWarnings());
     }
 
     /**

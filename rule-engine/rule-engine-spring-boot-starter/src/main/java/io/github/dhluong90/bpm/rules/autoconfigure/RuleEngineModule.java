@@ -31,6 +31,9 @@ final class RuleEngineModule {
     /** The rules setting clients read to offer or hide draft editing (PD-075, PD-094). */
     static final String COCKPIT_DRAFTS = "authoring.cockpit-drafts";
 
+    /** The warning codes an approval must acknowledge (PD-104, RLE-053), comma-separated; empty when none. */
+    static final String ACKNOWLEDGE_WARNINGS = "lifecycle.acknowledge-warnings";
+
     /** The masking default in force for the caller's tenant (PD-099 mitigation 4, RLE-052). */
     static final String MASK_DEFAULT = "decision-log.mask-default";
 
@@ -50,8 +53,25 @@ final class RuleEngineModule {
      * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
      */
     static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts) {
+        return descriptor(rolePermissions, cockpitDrafts, io.github.dhluong90.bpm.rules.internal.service.EngineDefaults
+                .ACKNOWLEDGE_WARNINGS);
+    }
+
+    /**
+     * The descriptor for this host.
+     *
+     * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
+     * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}; null (unset) is published as false
+     * @param acknowledgeWarnings the validated {@code lifecycle.acknowledge-warnings}, published comma-separated
+     *     because {@code /meta} settings hold scalars only
+     * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
+     */
+    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
+            List<String> acknowledgeWarnings) {
         // Always published, false unless the host turns it on (PD-094), so clients never guess.
-        Map<String, Object> settings = Map.of(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
+        Map<String, Object> settings = new LinkedHashMap<>();
+        settings.put(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
+        settings.put(ACKNOWLEDGE_WARNINGS, String.join(",", acknowledgeWarnings));
         return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);
     }
 

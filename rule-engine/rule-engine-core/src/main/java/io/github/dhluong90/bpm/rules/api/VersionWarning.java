@@ -17,6 +17,9 @@ public record VersionWarning(String code, String input, String matchedName, Stri
     /** An input that declares no {@code mask} has a name that looks like personal data (PD-099). */
     public static final String UNMASKED_PERSONAL_DATA = "UNMASKED_PERSONAL_DATA";
 
+    /** Every warning code this release raises; {@code lifecycle.acknowledge-warnings} may list only these. */
+    public static final java.util.Set<String> CODES = java.util.Set.of(UNMASKED_PERSONAL_DATA);
+
     public VersionWarning {
         Objects.requireNonNull(code, "code must not be null");
         Objects.requireNonNull(input, "input must not be null");

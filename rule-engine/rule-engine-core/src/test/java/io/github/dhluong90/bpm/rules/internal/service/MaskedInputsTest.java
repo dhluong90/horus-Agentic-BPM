@@ -132,7 +132,7 @@ class MaskedInputsTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml.getBytes(StandardCharsets.UTF_8)));
         engines.versionService().requestPublish(name, 1, WriteOptions.none());
         caller.become(tenant, "bob");
-        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
+        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null, List.of("UNMASKED_PERSONAL_DATA")));
     }
 
     DecisionResult evaluate(RuleEngines engines, String tenant, String ruleSet, Map<String, Object> inputs) {

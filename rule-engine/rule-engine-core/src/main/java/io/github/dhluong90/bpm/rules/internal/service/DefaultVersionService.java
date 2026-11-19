@@ -26,6 +26,9 @@ import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.api.AcknowledgedWarning;
+import io.github.dhluong90.bpm.rules.api.VersionWarning;
+import io.github.dhluong90.bpm.rules.api.WarningsNotAcknowledgedException;
 import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
 import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
@@ -277,8 +280,10 @@ public final class DefaultVersionService implements VersionService {
         String actor = context.callerWith(PERMISSION_APPROVE);
         requireLockVersion(opts, ":approve");
         requireCommentLength(opts.comment());
+        List<String> acknowledged = acknowledgedCodes(opts.acknowledgedWarnings());
         String requestHash = Hashes.sha256Parts("approve", actor, ruleSet, Integer.toString(version),
-                String.valueOf(opts.expectedLockVersion()), opts.comment());
+                String.valueOf(opts.expectedLockVersion()), opts.comment(),
+                String.join(",", new java.util.TreeSet<>(acknowledged)));
         return context.idempotent(tenant, "approve", opts.idempotencyKey(), requestHash, 200, () -> {
             StoredVersion current = load(tenant, ruleSet, version);
             if (current.status() != VersionStatus.PENDING_APPROVAL) {
@@ -292,16 +297,23 @@ public final class DefaultVersionService implements VersionService {
             // append-only decision log with an undeclared input (security review of #308).
             requireMaskDeclarations(tenant, current.canonicalJson());
             checkLock(current, opts);
+            // After the permission, four-eyes, strict-mode and lock checks, before any write (DESIGN 3.3.5).
+            Acknowledgement acknowledgement = requireAcknowledgement(current, acknowledged);
             Instant now = context.clock().instant();
             StoredVersion updated = current.approved(actor, now, opts.comment());
             store.updateVersion(updated, current.lockVersion());
-            history(updated, LifecycleAction.APPROVED, current.status(), actor, opts.comment(), now);
-            // DESIGN 3.3: the publication names what was approved, from when, and both people of the four eyes.
+            store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.APPROVED,
+                    current.status(), updated.status(), actor, opts.comment(), updated.lockVersion(), now, null, null,
+                    acknowledgement.accepted(), acknowledgement.maskedByDefault()));
+            // DESIGN 3.3: the publication names what was approved, from when, both people of the four eyes, and the
+            // warnings the approver accepted on the record (PD-104).
             event(tenant, EVENT_PUBLISHED, updated, actor, now, payload -> {
                 payload.put("canonicalHash", updated.canonicalHash());
                 payload.set("effectiveFrom", EngineValues.value(updated.effectiveFrom()));
                 payload.put("requestedBy", updated.requestedBy());
                 payload.put("approvedBy", actor);
+                var accepted = payload.putArray("acknowledgedWarnings");
+                acknowledgement.accepted().forEach(w -> accepted.addObject().put("code", w.code()).put("input", w.input()));
             });
             return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
@@ -481,9 +493,60 @@ public final class DefaultVersionService implements VersionService {
      * tenant's settings on each read, so the approver sees what the author saw at import.
      */
     private RuleSetVersion view(StoredVersion version, boolean includeSource) {
+        return version.toView(includeSource).withWarnings(warnings(version));
+    }
+
+    /**
+     * What an approval put on the record (RLE-053, PD-104): the warnings accepted, empty when none needed it, and the
+     * inputs masked by the tenant's default rather than by their declaration.
+     */
+    private record Acknowledgement(List<AcknowledgedWarning> accepted, List<String> maskedByDefault) {
+    }
+
+    /**
+     * Refuses an approval that leaves a warning unacknowledged whose code the host lists in
+     * {@code lifecycle.acknowledge-warnings} (RLE-053, PD-104). The warnings are computed again, from the stored
+     * definition and the tenant's settings in force now, as the approver reads them. A warning on an input that the
+     * tenant's {@code decision-log.mask-default} masks needs no acknowledgement: its values never reach the log in
+     * plain text. A code given that no warning carries is ignored and not recorded, so the record never claims more
+     * than the approver accepted.
+     */
+    private Acknowledgement requireAcknowledgement(StoredVersion version, List<String> acknowledged) {
         String tenant = version.tenantId();
-        return version.toView(includeSource).withWarnings(MaskDeclarations.warnings(version.canonicalJson(),
-                context.masking().personalDataNames(tenant), context.masking().maskByDefault(tenant)));
+        boolean maskByDefault = context.masking().maskByDefault(tenant);
+        List<String> maskedByDefault = MaskDeclarations.statuses(version.canonicalJson(), maskByDefault).stream()
+                .filter(s -> s.masking() == io.github.dhluong90.bpm.rules.api.VersionDiff.Masking.MASKED_BY_DEFAULT)
+                .map(MaskDeclarations.Status::input)
+                .toList();
+        List<String> listed = context.settings().acknowledgeWarnings();
+        List<VersionWarning> needing = warnings(version).stream()
+                .filter(w -> listed.contains(w.code()))
+                .filter(w -> !maskedByDefault.contains(w.input()))
+                .toList();
+        List<WarningsNotAcknowledgedException.Unacknowledged> missing = needing.stream()
+                .filter(w -> !acknowledged.contains(w.code()))
+                .map(w -> new WarningsNotAcknowledgedException.Unacknowledged(w.code(), w.input(), w.matchedName()))
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new WarningsNotAcknowledgedException(version.ruleSet(), version.version(), missing, listed);
+        }
+        return new Acknowledgement(needing.stream().map(w -> new AcknowledgedWarning(w.code(), w.input())).toList(),
+                maskedByDefault);
+    }
+
+    /** Validates the acknowledged codes of an approval: at most 20, each a warning code. */
+    private static List<String> acknowledgedCodes(List<String> codes) {
+        try {
+            return EngineSettings.warningCodes(codes, "acknowledgedWarnings");
+        } catch (IllegalArgumentException e) {
+            throw new InputInvalidException(e.getMessage());
+        }
+    }
+
+    private List<VersionWarning> warnings(StoredVersion version) {
+        String tenant = version.tenantId();
+        return MaskDeclarations.warnings(version.canonicalJson(), context.masking().personalDataNames(tenant),
+                context.masking().maskByDefault(tenant));
     }
 
     /** Strict mode (RLE-050): every input declares {@code mask}, or the command is refused before anything is stored. */
