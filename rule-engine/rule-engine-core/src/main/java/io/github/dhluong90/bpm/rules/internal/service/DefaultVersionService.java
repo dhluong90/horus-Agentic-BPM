@@ -56,6 +56,7 @@ public final class DefaultVersionService implements VersionService {
     static final String EVENT_PUBLISH_REQUESTED = "rules.version.publish-requested.v1";
     static final String EVENT_PUBLISHED = "rules.version.published.v1";
     static final String EVENT_REJECTED = "rules.version.rejected.v1";
+    static final String EVENT_RETIRED = Supersession.EVENT_RETIRED;
 
     private static final String CURSOR_RULE_SETS = "rule-sets";
     private static final String CURSOR_VERSIONS = "versions";
@@ -65,6 +66,7 @@ public final class DefaultVersionService implements VersionService {
     private final EventOutbox outbox;
     /** The cursor key in memory, loaded at start-up (RLE-039). */
     private final CursorKeys cursorKeys;
+    private final Supersession supersession;
 
     /**
      * Creates the service.
@@ -74,12 +76,15 @@ public final class DefaultVersionService implements VersionService {
      * @param outbox event outbox
      * @param cursorKeys the cursor key, loaded at start-up; the only constructor, so a hand-wired engine always
      *     shares the holder that {@link RuleEngines#cursorKeys()} exposes for loading
+     * @param supersession retires superseded versions, shared with the lifecycle sweep
      */
-    DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox, CursorKeys cursorKeys) {
+    DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox, CursorKeys cursorKeys,
+            Supersession supersession) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.outbox = Objects.requireNonNull(outbox, "outbox must not be null");
         this.cursorKeys = Objects.requireNonNull(cursorKeys, "cursorKeys must not be null");
+        this.supersession = Objects.requireNonNull(supersession, "supersession must not be null");
     }
 
     @Override
@@ -205,6 +210,10 @@ public final class DefaultVersionService implements VersionService {
                 payload.put("requestedBy", updated.requestedBy());
                 payload.put("approvedBy", actor);
             });
+            if (!updated.effectiveFrom().isAfter(now)) {
+                // In effect at once: what it supersedes retires in this transaction (DESIGN 3.3.2, RLE-027).
+                supersession.retire(tenant, updated.ruleSetId(), now);
+            }
             return updated.toView(false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
@@ -235,6 +244,41 @@ public final class DefaultVersionService implements VersionService {
             event(tenant, EVENT_REJECTED, updated, actor, now, payload -> payload
                     .put("rejectedBy", actor)
                     .put("reason", reason));
+            return updated.toView(false);
+        }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
+    }
+
+    @Override
+    public RuleSetVersion retire(String ruleSet, int version, WriteOptions options) {
+        WriteOptions opts = options == null ? WriteOptions.none() : options;
+        String tenant = context.tenant();
+        String actor = context.callerWith(PERMISSION_APPROVE);
+        String reason = requireReason(opts.comment());
+        String requestHash = Hashes.sha256Parts("retire", actor, ruleSet, Integer.toString(version),
+                String.valueOf(opts.expectedLockVersion()), reason);
+        return context.idempotent(tenant, "retire", opts.idempotencyKey(), requestHash, 200, () -> {
+            StoredVersion current = load(tenant, ruleSet, version);
+            if (current.status() != VersionStatus.PUBLISHED) {
+                throw new InvalidStateException(ruleSet, version, current.status(), "retire");
+            }
+            checkLock(current, opts);
+            Instant now = context.clock().instant();
+            // Already superseded by a newer version in effect: it no longer serves and the sweep retires it; refused
+            // before anything is written, so the actor and reason are never recorded on the wrong transition.
+            Optional<StoredVersion> inForce = store.findEffective(tenant, ruleSet, now);
+            if (inForce.isPresent() && inForce.get().version() > current.version()) {
+                throw InvalidStateException.superseded(ruleSet, version, inForce.get().version());
+            }
+            // Retire what it superseded first, while it is still published, so a retire never brings back an older
+            // version whose status lags its supersession (ADR-0025 decision 1).
+            supersession.retire(tenant, current.ruleSetId(), now);
+            StoredVersion updated = current.retired(now);
+            store.updateVersion(updated, current.lockVersion());
+            String mode = context.settings().retireApproval();
+            store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.RETIRED,
+                    current.status(), updated.status(), actor, reason, updated.lockVersion(), now, null, mode));
+            outbox.append(tenant, Ulid.next(now), EngineValues.write(Supersession.retiredEvent(tenant, ruleSet,
+                    version, actor, reason, null, now, mode)), now);
             return updated.toView(false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }

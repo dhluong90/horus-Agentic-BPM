@@ -206,6 +206,37 @@ public class RuleSetController {
     }
 
     /**
+     * {@code POST /rule-sets/{name}/versions/{v}:retire}, body {@code {"reason": "..."}} required: takes a published
+     * version out of service (ADR-0025, RLE-026). {@code Idempotency-Key} and {@code If-Match} are required.
+     */
+    @PostMapping("/{name}/versions/{version:\\d+}:retire")
+    public ResponseEntity<byte[]> retire(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
+            @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        // Permission first, then the headers, then a bounded read: no body is buffered for a caller who may not send it.
+        RestSupport.require(callers, "rules:approve");
+        String key = RestSupport.requiredIdempotencyKey(idempotencyKey, ":retire");
+        long lock = RestSupport.requiredIfMatch(ifMatch, ":retire");
+        byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
+        String reason = null;
+        if (body.length > 0) {
+            JsonNode value = EngineValues.readRequest(body).get("reason");
+            if (value != null && !value.isNull()) {
+                if (!value.isString()) {
+                    throw new InputInvalidException("reason must be a string");
+                }
+                reason = value.stringValue();
+            }
+        }
+        WriteOptions options = new WriteOptions(key, lock, reason);
+        return RestSupport.version(HttpStatus.OK, versions.retire(name, version, options), callers);
+    }
+
+    /**
      * {@code GET /rule-sets/{name}/versions/{v}/export?format=json|dmn}: the version as a file that imports back with
      * the same canonical hash. Writes nothing.
      */

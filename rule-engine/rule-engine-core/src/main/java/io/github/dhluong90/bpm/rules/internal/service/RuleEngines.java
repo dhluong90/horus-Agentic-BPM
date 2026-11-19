@@ -12,8 +12,10 @@ import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
  * @param ruleEngine evaluation
  * @param versionService import and lifecycle
  * @param cursorKeys the cursor key in memory; {@link CursorKeys#load()} runs at start-up
+ * @param lifecycleSweep retires superseded versions; the starter runs it every {@code lifecycle.sweep-interval}
  */
-public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, CursorKeys cursorKeys) {
+public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, CursorKeys cursorKeys,
+        LifecycleSweep lifecycleSweep) {
 
     /**
      * Builds both entry points.
@@ -26,7 +28,9 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
      */
     public static RuleEngines create(EngineContext context, RuleStore store, DecisionLog log, EventOutbox outbox) {
         CursorKeys keys = new CursorKeys(store, context.transactions(), context.clock());
+        Supersession supersession = new Supersession(store, outbox, context.settings());
         return new RuleEngines(new DefaultRuleEngine(context, store, log),
-                new DefaultVersionService(context, store, outbox, keys), keys);
+                new DefaultVersionService(context, store, outbox, keys, supersession), keys,
+                new LifecycleSweep(context, supersession));
     }
 }

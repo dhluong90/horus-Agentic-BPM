@@ -23,6 +23,8 @@ import java.util.Objects;
  * @param approvedAt when it was approved, or null
  * @param createdBy who imported the version, or null when not recorded
  * @param createdAt when the version was created
+ * @param retiredAt when the version was retired, by hand or as superseded; from then on evaluation no longer selects
+ *     it, while a clock before it still does. Null while it is not retired
  */
 public record RuleSetVersion(
         String ruleSet,
@@ -41,7 +43,8 @@ public record RuleSetVersion(
         String approvedBy,
         Instant approvedAt,
         String createdBy,
-        Instant createdAt) {
+        Instant createdAt,
+        Instant retiredAt) {
 
     public RuleSetVersion {
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
@@ -55,6 +58,36 @@ public record RuleSetVersion(
     }
 
     /**
+     * Creates a version that is not retired.
+     *
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param status see the record
+     * @param hitPolicy see the record
+     * @param effectiveFrom see the record
+     * @param lockVersion see the record
+     * @param canonicalDocument see the record
+     * @param canonicalHash see the record
+     * @param sourceFormat see the record
+     * @param sourceHash see the record
+     * @param sourceDocument see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param approvedBy see the record
+     * @param approvedAt see the record
+     * @param createdBy see the record
+     * @param createdAt see the record
+     */
+    public RuleSetVersion(String ruleSet, int version, VersionStatus status, String hitPolicy, Instant effectiveFrom,
+            long lockVersion, String canonicalDocument, String canonicalHash, SourceFormat sourceFormat,
+            String sourceHash, String sourceDocument, String requestedBy, Instant requestedAt, String approvedBy,
+            Instant approvedAt, String createdBy, Instant createdAt) {
+        this(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument, canonicalHash,
+                sourceFormat, sourceHash, sourceDocument, requestedBy, requestedAt, approvedBy, approvedAt, createdBy,
+                createdAt, null);
+    }
+
+    /**
      * Returns a copy without the source document.
      *
      * @return this version without {@code sourceDocument}
@@ -62,6 +95,6 @@ public record RuleSetVersion(
     public RuleSetVersion withoutSource() {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument,
                 canonicalHash, sourceFormat, sourceHash, null, requestedBy, requestedAt, approvedBy, approvedAt,
-                createdBy, createdAt);
+                createdBy, createdAt, retiredAt);
     }
 }

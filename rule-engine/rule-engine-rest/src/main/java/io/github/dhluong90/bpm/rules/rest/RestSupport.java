@@ -109,6 +109,12 @@ final class RestSupport {
         node.put("toStatus", entry.toStatus().name());
         node.put("actor", entry.actor());
         node.set("reason", EngineValues.value(entry.reason()));
+        if (entry.action() == io.github.dhluong90.bpm.rules.api.LifecycleAction.RETIRED) {
+            // Only a retirement has these: by hand (approvalMode single) or superseded (system, supersededBy).
+            node.set("supersededBy", entry.supersededBy() == null
+                    ? EngineJson.NODES.nullNode() : EngineJson.NODES.numberNode(entry.supersededBy()));
+            node.set("approvalMode", EngineValues.value(entry.approvalMode()));
+        }
         node.put("lockVersion", entry.lockVersion());
         node.put("occurredAt", entry.occurredAt().toString());
         return node;
@@ -150,6 +156,35 @@ final class RestSupport {
         } catch (NumberFormatException e) {
             throw new io.github.dhluong90.bpm.rules.api.InputInvalidException("If-Match must be a quoted lock version, for example \"3\"");
         }
+    }
+
+    /**
+     * Parses a required {@code If-Match}; absent or blank is {@code 428 PRECONDITION_REQUIRED}.
+     *
+     * @param header the header value
+     * @param operation the command, named in the problem detail
+     * @return the lock version
+     */
+    static long requiredIfMatch(String header, String operation) {
+        Long lock = ifMatch(header);
+        if (lock == null) {
+            throw new io.github.dhluong90.bpm.rules.api.PreconditionRequiredException(operation);
+        }
+        return lock;
+    }
+
+    /**
+     * Returns a required {@code Idempotency-Key}; absent or blank is {@code 400 INPUT_INVALID} naming the header.
+     *
+     * @param key the header value
+     * @param operation the command, named in the problem detail
+     * @return the key
+     */
+    static String requiredIdempotencyKey(String key, String operation) {
+        if (key == null || key.isBlank()) {
+            throw new io.github.dhluong90.bpm.rules.api.InputInvalidException(operation + " requires an Idempotency-Key header");
+        }
+        return key;
     }
 
     /**

@@ -19,6 +19,9 @@ public final class VersionActions {
     /** {@code :reject}. */
     public static final String REJECT = "reject";
 
+    /** {@code :retire}: take a published version out of service (ADR-0025). */
+    public static final String RETIRE = "retire";
+
     private VersionActions() {
     }
 
@@ -51,8 +54,13 @@ public final class VersionActions {
                     actions.add(REJECT);
                 }
             }
-            case PUBLISHED, RETIRED -> {
-                // Retire arrives with its own feature; nothing is allowed yet.
+            case PUBLISHED -> {
+                if (permissions.contains(Permissions.APPROVE)) {
+                    actions.add(RETIRE);
+                }
+            }
+            case RETIRED -> {
+                // A retired version never changes state again; a rollback is a new version (DESIGN section 3.3).
             }
         }
         return List.copyOf(actions);

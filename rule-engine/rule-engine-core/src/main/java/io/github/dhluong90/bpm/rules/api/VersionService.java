@@ -79,6 +79,24 @@ public interface VersionService {
     RuleSetVersion reject(String ruleSet, int version, WriteOptions options);
 
     /**
+     * Takes a published version out of service by hand (ADR-0025, PD-080, RLE-026). In the default
+     * {@code lifecycle.retire-approval: single} mode one holder of {@code rules:approve} with a reason is enough. The
+     * version becomes {@code RETIRED} from the transaction's clock on: evaluation stops selecting it on every replica,
+     * while a clock before it still does and logged decisions still replay. Older published versions it had
+     * superseded are retired with it, so a retire never brings an older version back. Writes one {@code RETIRED}
+     * history row with the approval mode and one {@code rules.version.retired.v1} event.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key, optimistic lock and the required reason in {@link WriteOptions#comment()}
+     * @return the version, now retired
+     * @throws InputInvalidException when the reason is blank or longer than {@code lifecycle.reason-max-length}
+     * @throws InvalidStateException when the version is not published, or a newer version in effect supersedes it
+     * @throws VersionConflictException when the lock version is stale
+     */
+    RuleSetVersion retire(String ruleSet, int version, WriteOptions options);
+
+    /**
      * Lists the rule sets of the caller's tenant by name, a page at a time.
      *
      * @param page the page to read

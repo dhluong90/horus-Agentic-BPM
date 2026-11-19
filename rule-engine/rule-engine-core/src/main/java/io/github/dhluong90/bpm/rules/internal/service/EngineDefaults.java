@@ -68,8 +68,8 @@ public final class EngineDefaults {
     public static final int QUERY_DEFAULT_PAGE_SIZE = 50;
 
     /**
-     * Default and ceiling of {@code horus.bpm.rules.lifecycle.reason-max-length}: longest reason of a reject (and,
-     * later, a retire), in characters. A host may lower it, never raise it.
+     * Default and ceiling of {@code horus.bpm.rules.lifecycle.reason-max-length}: longest reason of a reject or a
+     * retire, in characters. A host may lower it, never raise it.
      */
     public static final int REASON_MAX_LENGTH = 2000;
 
@@ -93,6 +93,24 @@ public final class EngineDefaults {
      * verify re-reads at once. A bound of the engine, not a setting.
      */
     public static final java.time.Duration CURSOR_KEY_REFRESH = java.time.Duration.ofMinutes(5);
+
+    /** Default of {@code horus.bpm.rules.lifecycle.system-actor}: the actor recorded when a version is superseded. */
+    public static final String SYSTEM_ACTOR = "system";
+
+    /** Longest {@code lifecycle.system-actor}, in characters, the bound of every recorded actor. */
+    public static final int SYSTEM_ACTOR_MAX_LENGTH = 200;
+
+    /**
+     * Default of {@code horus.bpm.rules.lifecycle.retire-approval} (PD-080): one {@code rules:approve} holder with a
+     * reason retires a version. The other value, {@code four-eyes}, arrives in M3 (RLE-038).
+     */
+    public static final String RETIRE_APPROVAL = "single";
+
+    /** Default of {@code horus.bpm.rules.lifecycle.sweep-interval}: how often superseded versions are retired. */
+    public static final java.time.Duration SWEEP_INTERVAL = java.time.Duration.ofMinutes(1);
+
+    /** Reason recorded on a version retired because a newer one is in effect (ADR-0025 decision 2). */
+    public static final String REASON_SUPERSEDED = "SUPERSEDED";
 
     /** Longest accepted {@code X-Correlation-Id}; a longer or malformed one is replaced by a generated id. */
     public static final int CORRELATION_ID_MAX_LENGTH = 128;

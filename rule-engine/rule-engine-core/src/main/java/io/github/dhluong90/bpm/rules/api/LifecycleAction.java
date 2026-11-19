@@ -5,5 +5,7 @@ public enum LifecycleAction {
     CREATED,
     REQUESTED,
     APPROVED,
-    REJECTED
+    REJECTED,
+    /** Taken out of service: by hand ({@code :retire}) or when a newer approved version is in effect (ADR-0025). */
+    RETIRED
 }

@@ -100,8 +100,33 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     public Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at) {
         return versions.stream()
                 .filter(v -> v.tenantId().equals(tenantId) && v.ruleSet().equals(ruleSet)
-                        && v.status() == VersionStatus.PUBLISHED && !v.effectiveFrom().isAfter(at))
-                .max(Comparator.comparing(StoredVersion::effectiveFrom).thenComparing(StoredVersion::version));
+                        && v.approvedAt() != null && !v.effectiveFrom().isAfter(at)
+                        && (v.retiredAt() == null || v.retiredAt().isAfter(at)))
+                .max(Comparator.comparing(StoredVersion::version));
+    }
+
+    @Override
+    public synchronized List<Superseded> retireSuperseded(String tenantId, String ruleSetId, Instant now) {
+        List<Superseded> retired = new ArrayList<>();
+        for (int i = 0; i < versions.size(); i++) {
+            StoredVersion old = versions.get(i);
+            if (old.status() != VersionStatus.PUBLISHED || (tenantId != null && !old.tenantId().equals(tenantId))
+                    || (ruleSetId != null && !old.ruleSetId().equals(ruleSetId))) {
+                continue;
+            }
+            java.util.OptionalInt newer = versions.stream()
+                    .filter(n -> n.tenantId().equals(old.tenantId()) && n.ruleSetId().equals(old.ruleSetId())
+                            && n.status() == VersionStatus.PUBLISHED && n.version() > old.version()
+                            && !n.effectiveFrom().isAfter(now))
+                    .mapToInt(StoredVersion::version).max();
+            if (newer.isPresent()) {
+                StoredVersion done = old.retired(now);
+                versions.set(i, done);
+                retired.add(new Superseded(done.tenantId(), done.id(), done.ruleSet(), done.version(),
+                        done.lockVersion(), newer.getAsInt()));
+            }
+        }
+        return retired;
     }
 
     @Override
