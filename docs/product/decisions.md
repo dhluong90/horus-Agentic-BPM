@@ -46,7 +46,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-022](#pd-022-conflict-simulation-report-in-cockpit-01-approvals) | Conflict: simulation report in Cockpit 0.1 approvals | Decided (product manager, delegated, PD-073) |
 | [PD-023](#pd-023-conflict-milestone-of-the-instance-migration-screen) | Conflict: milestone of the instance migration screen | Decided (product manager, delegated, PD-073) |
 | [PD-024](#pd-024-conflict-compensation-runs-view-and-sla-breach-list) | Conflict: compensation runs view and SLA breach list | Decided (product manager, delegated, PD-073) |
-| [PD-025](#pd-025-conflict-process-engine-version-label) | Conflict: Process Engine version label | Decided (product manager, delegated, PD-073) |
+| [PD-025](#pd-025-conflict-process-engine-version-label) | Conflict: Process Engine version label | Decided (superseded by PD-087) |
 | [PD-026](#pd-026-conflict-should-requirements-used-as-release-gates) | Conflict: Should requirements used as release gates | Decided (product manager, delegated, PD-073) |
 | [PD-027](#pd-027-conflict-decision-explanation-in-m1) | Conflict: decision explanation in M1 | Decided (product manager, delegated, PD-073) |
 | [PD-028](#pd-028-conflict-agent-chosen-steps-in-m3-or-after-10) | Conflict: agent-chosen steps in M3 or after 1.0 | Decided |
@@ -720,6 +720,8 @@ Each entry records a disagreement found while writing the PRDs. Nothing is chang
 2. Align all modules on one version number. Consequence: Process Engine would start at 0.2 with no 0.1, which confuses release notes and tags.
 
 **Recommendation.** Option 1.
+
+Superseded by [PD-087](#pd-087-release-labels-after-010) on 2026-11-19: one project-wide version and one project tag (`v0.1.0`), so module versions are no longer independent.
 
 **Rationale.** Each module is tagged separately (`process-engine/v0.1.0`); Release Notes already say so.
 
@@ -2531,7 +2533,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] No BLOCKING finding from the architecture, security or QA reviews is open; each one closed with a test that fails without the fix. Every open SHOULD-FIX is listed in the release notes as a known limit.
 - [ ] Each merged pull request links a green CI run at its head commit (PD-081), and the last run on `main` at the release commit is green on every leg: Java 21 and 25, Spring Boot 4.x, 4.0.x and 3.5.x, PostgreSQL 14 and 18.
 - [ ] The spec-to-test gate, the licence gate and the vulnerability scan are green at the release commit; no high or critical finding.
-- [ ] The package rename (#21) is merged before the 0.1.0 tag, and the search for `com.horus` in the repository returns nothing (PD-070). The tag guard of the release workflow (#126) refuses the tag otherwise.
+- [ ] The package rename (#21) is merged before the `v0.1.0` tag, and the search for `com.horus` in the repository returns nothing (PD-070). The tag guard of the release workflow (#126) refuses the tag otherwise.
 - [ ] The release workflow builds from a clean checkout of the release commit; the cockpit bundle is built from source; the bill of materials lists the Java and npm packages; `shasum -c SHA256SUMS` verifies every artifact.
 - [ ] From a fresh clone on a clean machine with Docker only, `docker compose up` reaches a first logged decision by following the README; done by someone other than the author, with the time and every deviation recorded.
 - [ ] The security behaviour is shown by tests in CI: another tenant's rule set answers `404`; self-approval answers `403` through Java and REST; a reused idempotency key with another body answers `422`; no-store holds with the metadata endpoints switched off; the development tenant is refused beside a production profile; the container runs as a non-root user and holds no secret.
@@ -2540,7 +2542,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - [ ] The README, Getting Started and release notes claim only what ships: "first BPMN and DMN subset", no conformance claim (`TR-STD-05`), unsupported features named as later, the forward-only migrations listed (X-F-09), and no compatibility promise before 1.0.
 - [x] The version label is decided: `0.1.0` (PD-083, 2026-11-19).
 - [ ] A recorded walkthrough of the release journey exists for the review.
-- [ ] The GitHub Release upload (#153) is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the 0.1.0 release.
+- [ ] The GitHub Release upload (#153) is done by Sun 22 Nov 2026: artifacts, `SHA256SUMS`, bill of materials and release notes attached to the release of the `v0.1.0` tag, the one project tag for 0.1.0 (PD-087, #163).
 - [ ] The release notes call the Process Engine a preview (ADR-0027, process DESIGN 5.8): outside `dev`, imports stay drafts, activation is by the development auto-approve setting only, and there is no claim step.
 
 **Assumption to test.** [ASSUMPTION] Pull requests #87, #17 and #126 and issues #133, #131 and #21 can all be reviewed and merged by Fri 20 Nov without a new BLOCKING finding. Cheap test: a merge-order check on Thu 19 Nov evening (#133, then #87, then #21, then #17 and #126) with the count of open findings; if more than two BLOCKING findings are open on Fri 20 Nov 08:00 ICT, the product manager tells the product owner before the review, not at it.
@@ -2667,7 +2669,7 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 
 **Recommendation and decision.** Option 1. The modules share one build, one BOM and one release workflow, so one version is the honest description. 1.0 keeps its meaning (PD-083).
 
-**Consequences.** The roadmap and feature map name the releases `0.2.0`, `0.3.0` and `1.0.0` next to M1, M2 and M3. The project board's Release options are renamed: "Rule Engine 0.1 / Cockpit 0.1 (Jan)" to "0.2.0 (15 Jan)" and "Process Engine 0.1 / Cockpit 0.2 (Mar)" to "0.3.0 (26 Mar)"; renaming an option keeps every value already set. The GitHub milestones keep their titles until the maintainers rename them.
+**Consequences.** The roadmap and feature map name the releases `0.2.0`, `0.3.0` and `1.0.0` next to M1, M2 and M3. The project board's Release options are renamed: "Rule Engine 0.1 / Cockpit 0.1 (Jan)" to "0.2.0 (15 Jan)" and "Process Engine 0.1 / Cockpit 0.2 (Mar)" to "0.3.0 (26 Mar)"; renaming an option keeps every value already set. The GitHub milestones keep their titles until the maintainers rename them. The release tag is one project tag, `vX.Y.Z`, starting with `v0.1.0` (#163). PD-025 (independent module versions and per-module tags) is superseded.
 
 **Follow-ups.** Maintainers (engineering): rename the two board options and, if wanted, the milestone titles. Documentation: the wiki Roadmap page uses the new labels.
 
@@ -2716,3 +2718,5 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 **Consequences.** RE-F-35 moves from later to M1 as a spec gap (feature map M1 from 57 to 58, later from 13 to 12). It reaches 0.1.0 only if it meets the readiness bar. Otherwise it ships in 0.2.0. It is not on any cut list.
 
 **Follow-ups.** Architect: a new SPEC statement for withdraw, the state transition `PENDING_APPROVAL` to `DRAFT` in DESIGN 3.3, the endpoint `:withdraw` in `openapi.yaml`, and the event and history row. Maintainers (engineering): an issue for the withdraw action, separate from reject in pull request #152. Documentation: the wiki approval how-to.
+
+**Applied, 2026-11-19 (pull request #161).** `RLE-046` specifies withdraw as decided above. The same change also refuses a requester's reject of their own request with `403 SELF_APPROVAL_FORBIDDEN`, with a detail pointing to `:withdraw` (`RLE-025`). This reverses the earlier design answer (rule engine DESIGN Q5), which allowed self-reject. The product manager accepts the reversal under this entry. With withdraw available, a self-reject would record an author taking a request back as an approver's refusal, which is the audit confusion this decision removes. Reject therefore stays the action of a second person, like approve. A requester who holds `rules:approve` but not `rules:author` cannot take their own request back and asks another approver to reject it, an accepted edge case.
