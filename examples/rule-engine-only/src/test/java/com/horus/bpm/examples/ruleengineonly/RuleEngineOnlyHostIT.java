@@ -9,6 +9,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import javax.sql.DataSource;
@@ -17,8 +20,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -29,10 +34,26 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/** The example host started once on a clean PostgreSQL database with the starter and one configuration block. */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+/**
+ * The example host started once on a clean PostgreSQL database with the starter and one configuration
+ * block. The host's clock is fixed at 26 January 2027, so the decision log partitions it creates at
+ * start-up are known in advance.
+ */
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "management.endpoint.health.show-components=always")
 @Testcontainers
 class RuleEngineOnlyHostIT {
+
+    private static final Instant HOST_NOW = Instant.parse("2027-01-26T00:00:00Z");
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class FixedHostClock {
+        @Bean
+        Clock clock() {
+            return Clock.fixed(HOST_NOW, ZoneOffset.UTC);
+        }
+    }
 
     @Container
     @ServiceConnection
@@ -48,7 +69,7 @@ class RuleEngineOnlyHostIT {
     private JdbcClient jdbc;
 
     @Test
-    void tr_emb_01_host_boots_healthy_on_clean_database_and_rle_tables_are_usable() throws Exception {
+    void TR_EMB_01_host_boots_healthy_on_clean_database_and_rle_tables_are_usable() throws Exception {
         HttpResponse<String> response = HttpClient.newHttpClient().send(
                 HttpRequest.newBuilder(URI.create("http://localhost:" + environment.getProperty("local.server.port")
                         + "/actuator/health")).GET().build(),
@@ -82,7 +103,19 @@ class RuleEngineOnlyHostIT {
     }
 
     @Test
-    void tr_emb_06_engine_migrations_recorded_only_in_rle_schema_history() {
+    void TR_OPS_04_host_start_creates_partitions_for_the_host_clock_month_and_the_next() {
+        List<String> partitions = jdbc.sql("""
+                SELECT child.relname FROM pg_inherits i
+                JOIN pg_class child ON child.oid = i.inhrelid
+                WHERE i.inhparent = 'rle_decision'::regclass
+                """).query(String.class).list();
+
+        assertThat(partitions).containsExactlyInAnyOrder(
+                "rle_decision_default", "rle_decision_2027_01", "rle_decision_2027_02");
+    }
+
+    @Test
+    void TR_EMB_06_engine_migrations_recorded_only_in_rle_schema_history() {
         List<String> hostHistory = jdbc.sql(
                 "SELECT version || ' ' || script FROM flyway_schema_history ORDER BY installed_rank")
                 .query(String.class).list();
@@ -96,7 +129,7 @@ class RuleEngineOnlyHostIT {
     }
 
     @Test
-    void tr_emb_04_engine_uses_host_datasource_and_transaction_manager_and_no_pool_of_its_own() {
+    void TR_EMB_04_engine_uses_host_datasource_and_transaction_manager_and_no_pool_of_its_own() {
         ConfigurableListableBeanFactory beans = context.getBeanFactory();
 
         // Exactly one DataSource, the host's pool.

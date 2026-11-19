@@ -23,7 +23,7 @@ class HostRestartIT {
     private static final AtomicInteger DATABASES = new AtomicInteger();
 
     @Test
-    void tr_emb_06_restart_with_existing_engine_history_leaves_both_histories_unchanged() {
+    void TR_EMB_06_restart_with_existing_engine_history_leaves_both_histories_unchanged() {
         String db = freshDatabase();
         List<String> hostBefore;
         List<String> engineBefore;
@@ -41,7 +41,7 @@ class HostRestartIT {
     }
 
     @Test
-    void tr_emb_06_new_host_migration_with_existing_engine_history_does_not_touch_engine_history() {
+    void TR_EMB_06_new_host_migration_with_existing_engine_history_does_not_touch_engine_history() {
         String db = freshDatabase();
         List<String> engineBefore;
         try (ConfigurableApplicationContext first = start(db)) {

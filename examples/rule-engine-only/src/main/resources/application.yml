@@ -17,7 +17,8 @@ management:
         include: health
   endpoint:
     health:
-      show-components: always
+      # Component names only for authorised callers; hosts copy examples, so the safe default is shown.
+      show-components: when-authorized
 
 # The one configuration block a host adds for the Rule Engine.
 horus:
