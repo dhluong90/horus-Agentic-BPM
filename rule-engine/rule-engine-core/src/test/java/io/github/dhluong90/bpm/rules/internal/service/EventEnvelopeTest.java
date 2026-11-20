@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.VersionService;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import java.nio.file.Path;
@@ -28,10 +29,11 @@ class EventEnvelopeTest {
 
     /** The types the engine writes today; each one is driven below and checked against its schema file. */
     static final List<String> EMITTED = List.of("rules.version.created.v1", "rules.version.publish-requested.v1",
-            "rules.version.published.v1", "rules.version.rejected.v1");
+            "rules.version.published.v1", "rules.version.rejected.v1", "rules.version.withdrawn.v1");
 
     /** Every event type with a schema file: the emitted ones, and those whose emitting features follow. */
-    static final List<String> ALL_TYPES = List.of("rules.decision.evaluated.v1", "rules.version.created.v1",
+    static final List<String> ALL_TYPES = List.of("rules.decision-log.masked-input-searched.v1",
+            "rules.decision.evaluated.v1", "rules.version.created.v1",
             "rules.version.draft-updated.v1", "rules.version.publish-requested.v1", "rules.version.published.v1",
             "rules.version.rejected.v1", "rules.version.retired.v1", "rules.version.withdrawn.v1");
 
@@ -60,19 +62,25 @@ class EventEnvelopeTest {
 
     @Test
     void TR_OBS_06_every_emitted_event_type_satisfies_its_schema_and_carries_the_envelope() {
-        // Given card-fee v1 imported, requested and approved, and v2 imported, requested and rejected, each command
-        // with its own correlation id
+        // Given card-fee v1 imported, requested and approved, v2 imported, requested and rejected, and v2 requested
+        // again and withdrawn, each command with its own correlation id
         asLan();
         versions.importRuleSet(ImportRequest.yaml(CardFee.yaml()).withCorrelationId("req-import-1"));
         versions.requestPublish("card-fee", 1, WriteOptions.none().withCorrelationId("req-request-1"));
         asMinh();
-        versions.approve("card-fee", 1, WriteOptions.none().withCorrelationId("req-approve-1"));
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null).withCorrelationId("req-approve-1"));
         asLan();
         versions.importVersion("card-fee", ImportRequest.yaml(CardFee.yaml()).withCorrelationId("req-import-2"));
         versions.requestPublish("card-fee", 2, WriteOptions.none().withCorrelationId("req-request-2"));
         asMinh();
-        versions.reject("card-fee", 2, new WriteOptions(null, null, "Gold tier fee must stay at 0 VND")
+        versions.reject("card-fee", 2, new WriteOptions(null, 1L, "Gold tier fee must stay at 0 VND")
                 .withCorrelationId("req-reject-2"));
+        RuleSetVersion rejected = versions.find("card-fee", 2, false).orElseThrow();
+        asLan();
+        RuleSetVersion requestedAgain = versions.requestPublish("card-fee", 2,
+                new WriteOptions(null, rejected.lockVersion(), null).withCorrelationId("req-request-2b"));
+        versions.withdraw("card-fee", 2, new WriteOptions(null, requestedAgain.lockVersion(), "Wrong effective date")
+                .withCorrelationId("req-withdraw-2"));
 
         // Then every emitted type was written, each row satisfies its own schema file, and the envelope is complete
         Set<String> written = new LinkedHashSet<>();
@@ -92,10 +100,10 @@ class EventEnvelopeTest {
         assertThat(written).containsExactlyInAnyOrderElementsOf(EMITTED);
         assertThat(stores.outbox).extracting(row -> payload(row).path("correlationId").asString())
                 .containsExactly("req-import-1", "req-request-1", "req-approve-1", "req-import-2", "req-request-2",
-                        "req-reject-2");
-        // and the rejection names who refused it and why
-        assertThat(last().path("rejectedBy").asString()).isEqualTo("minh");
-        assertThat(last().path("reason").asString()).isEqualTo("Gold tier fee must stay at 0 VND");
+                        "req-reject-2", "req-request-2b", "req-withdraw-2");
+        // and the withdrawal names who took the request back and why
+        assertThat(last().path("withdrawnBy").asString()).isEqualTo("lan");
+        assertThat(last().path("reason").asString()).isEqualTo("Wrong effective date");
     }
 
     @Test

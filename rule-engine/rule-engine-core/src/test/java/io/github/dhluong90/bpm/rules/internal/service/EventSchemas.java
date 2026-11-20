@@ -38,7 +38,7 @@ final class EventSchemas {
     /** Every event schema file: one per event type, named after it. */
     static List<Path> eventSchemaFiles() {
         try (Stream<Path> files = Files.list(DIRECTORY)) {
-            return files.filter(f -> f.getFileName().toString().matches("rules\\.(version|decision)\\..+\\.schema\\.json"))
+            return files.filter(f -> f.getFileName().toString().matches("rules\\.(version|decision|decision-log)\\..+\\.schema\\.json"))
                     .sorted().toList();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
