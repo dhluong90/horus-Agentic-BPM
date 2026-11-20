@@ -140,6 +140,15 @@ jobs:
           python3 tools/check-jackson-coexistence.py examples/rule-engine-only/target/jackson-tree.txt \
             "$(tools/mvn-retry.sh -B -ntp -q help:evaluate -Dexpression=settings.localRepository -DforceStdout | tail -n 1)"
 
+      - name: Jackson 3 resolves beside the host's own Jackson 2 in the process host (TR-EMB-07, PRE-045)
+        if: matrix.boot == '3.5.x'
+        run: |
+          tools/mvn-retry.sh -B -ntp -q -Dspring-boot.line=3.5 -pl examples/rule-and-process \
+            org.apache.maven.plugins:maven-dependency-plugin:3.11.0:tree \
+            -Dincludes=com.fasterxml.jackson.core,tools.jackson.core -DoutputFile=target/jackson-tree.txt
+          python3 tools/check-jackson-coexistence.py examples/rule-and-process/target/jackson-tree.txt \
+            "$(tools/mvn-retry.sh -B -ntp -q help:evaluate -Dexpression=settings.localRepository -DforceStdout | tail -n 1)"
+
       - name: Name Maven Central downloads that failed
         if: failure()
         run: |
