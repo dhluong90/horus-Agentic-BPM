@@ -20,8 +20,16 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-002 | `PRE_002_business_key_and_idempotency_prevent_duplicate_starts` | Concurrent integration | M2 | `TR-IDEM-01`, `TR-IDEM-02` | Planned |
 | PRE-003 | `PRE_003_stale_task_completion_returns_conflict` (`RuleAndProcessIT`), `PRE_003_*` in `TaskLifecycleIT` | Testcontainers host over HTTP, two concurrent completions | M2 | `TR-IDEM-03` | Done |
 | PRE-004 | `PRE_004_exclusive_gateway_routes_single_matching_branch` | Unit | M2 | `TR-DET-01` | Planned |
+<<<<<<< HEAD
 | PRE-005 | `PRE_005_parallel_gateway_join_prevents_concurrent_lost_wakeup` | Two-replica Testcontainers, 1,000 iterations | M2 | `TR-PERF-05` | Planned |
 | PRE-006 | `PRE_006_timer_lease_recovers_after_worker_crash`, `PRE_006_two_replicas_fire_each_timer_exactly_once` | Testcontainers, replicas as separate engines on one database, TestClock; stalled-claim fencing | M2 | `TR-PERF-05`, `TR-ASY-02` | Done (`ExactlyOnceTimersTest`) |
+||||||| 2f4101dd
+| PRE-005 | `PRE_005_parallel_gateway_join_prevents_concurrent_lost_wakeup` | Two-replica Testcontainers, 1,000 iterations | M2 | `TR-PERF-05` | Planned |
+| PRE-006 | `PRE_006_timer_lease_recovers_after_worker_crash` | Two-replica fault injection | M2 | `TR-PERF-05` | Planned |
+=======
+| PRE-005 | `PRE_005_parallel_gateway_join_prevents_concurrent_lost_wakeup` | Two-replica Testcontainers, 1,000 iterations | M2 | `TR-PERF-05`, `TR-ASY-03` | Planned |
+| PRE-006 | `PRE_006_timer_lease_recovers_after_worker_crash` | Two-replica fault injection | M2 | `TR-PERF-05` | Planned |
+>>>>>>> origin/main
 | PRE-007 | `PRE_007_four_eyes_blocks_same_actor_approval` (`RuleAndProcessIT`, REST and Java API), `PRE_007_*` in `TaskLifecycleIT` | Testcontainers host over HTTP, Java API | M2 | `TR-SEC-04` | Done for claim and completion; delegate and reassign follow with their slice |
 | PRE-008 | `PRE_008_business_calendar_skips_holidays_and_weekends` | Unit across holidays and DST | M2 | `TR-CAL-01`, `TR-CAL-02` | Planned |
 | PRE-009 | `PRE_009_agent_task_executes_outside_db_transaction` | Testcontainers, 2-connection pool | M2 | `TR-AGT-03`, `TR-EMB-04` | Planned |

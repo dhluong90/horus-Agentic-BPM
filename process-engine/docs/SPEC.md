@@ -47,7 +47,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Test ID:** `PRE_004_exclusive_gateway_routes_single_matching_branch`
 
 ### PRE-005 Concurrent parallel gateway join prevents lost wakeup under multi-replica race
-- **Traces to:** `TR-PERF-05`
+- **Traces to:** `TR-PERF-05`, `TR-ASY-03`
 - **Milestone:** M2
 - **Given:** `parallelGateway` forks into Branch A (`credit-bureau`) and Branch B (`fraud-check`) which converge at `join-checks`.
 - **When:** Pod 1 finishes Branch A and Pod 2 finishes Branch B **at the exact same millisecond**.

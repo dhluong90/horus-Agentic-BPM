@@ -38,7 +38,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 final class TestEngine {
 
     private static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
     private static volatile DataSource dataSource;
 
     /** The caller and tenant of this replica's calls; tests change them between calls. */

@@ -58,7 +58,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class RuleEnginePostgresIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant NOW = Instant.parse("2026-12-15T02:00:00Z");
     private static final AtomicInteger DATABASES = new AtomicInteger();
