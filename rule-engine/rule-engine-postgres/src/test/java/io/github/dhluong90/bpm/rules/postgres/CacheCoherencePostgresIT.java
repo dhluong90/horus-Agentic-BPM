@@ -39,7 +39,7 @@ class CacheCoherencePostgresIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     static final DecisionInput SILVER = DecisionInput.of(Map.of("tier", "SILVER", "txCount", 1));
     private static final AtomicInteger DATABASES = new AtomicInteger();
@@ -166,9 +166,10 @@ class CacheCoherencePostgresIT {
         } else {
             replica.engines().versionService().importVersion("card-fee", ImportRequest.yaml(yaml));
         }
-        replica.engines().versionService().requestPublish("card-fee", version, WriteOptions.none());
+        long lock = replica.engines().versionService().requestPublish("card-fee", version, WriteOptions.none())
+                .lockVersion();
         replica.caller().as("bank-a", "bob");
-        replica.engines().versionService().approve("card-fee", version, WriteOptions.none());
+        replica.engines().versionService().approve("card-fee", version, new WriteOptions(null, lock, null));
     }
 
     /** Evaluates on the replica every 100 ms until it serves the version; returns System.nanoTime() of that call. */

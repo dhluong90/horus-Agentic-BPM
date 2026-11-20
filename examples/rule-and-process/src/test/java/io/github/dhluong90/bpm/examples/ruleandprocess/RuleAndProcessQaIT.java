@@ -50,7 +50,7 @@ class RuleAndProcessQaIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
@@ -170,8 +170,8 @@ class RuleAndProcessQaIT {
     void complete_replayed_with_the_same_idempotency_key_returns_the_stored_answer_and_completes_once() throws Exception {
         String taskPath = openTask("QA-C001");
 
-        HttpResponse<String> first = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"0\"", "qa-c1");
-        HttpResponse<String> replay = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"0\"", "qa-c1");
+        HttpResponse<String> first = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"1\"", "qa-c1");
+        HttpResponse<String> replay = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"1\"", "qa-c1");
 
         assertThat(first.statusCode()).as(first.body()).isEqualTo(200);
         assertThat(replay.statusCode()).as(replay.body()).isEqualTo(200);
@@ -187,7 +187,7 @@ class RuleAndProcessQaIT {
         String taskPath = openTask("QA-C002");
 
         List<HttpResponse<String>> answers = concurrently(8,
-                () -> send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"0\"", null));
+                () -> send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"1\"", null));
 
         assertThat(answers).extracting(HttpResponse::statusCode).as(bodies(answers)).containsOnly(200, 409);
         assertThat(answers).filteredOn(a -> a.statusCode() == 200).hasSize(1);
@@ -202,8 +202,8 @@ class RuleAndProcessQaIT {
     void complete_with_a_stale_if_match_after_a_replay_is_a_conflict_not_a_second_transition() throws Exception {
         String taskPath = openTask("QA-C003");
 
-        send("an", "POST", taskPath, "{\"result\":{\"approved\":false}}", "\"0\"", "qa-c3");
-        HttpResponse<String> stale = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"0\"", "qa-c3-other");
+        send("an", "POST", taskPath, "{\"result\":{\"approved\":false}}", "\"1\"", "qa-c3");
+        HttpResponse<String> stale = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"1\"", "qa-c3-other");
 
         assertThat(stale.statusCode()).isEqualTo(409);
         assertThat(JSON.readTree(stale.body()).get("code").stringValue()).isEqualTo("VERSION_CONFLICT");
@@ -240,8 +240,8 @@ class RuleAndProcessQaIT {
         assertThat(decisionVersion(decisionA)).isEqualTo(1);
 
         String taskA = instanceA.at("/tasks/0/id").stringValue();
-        HttpResponse<String> done = send("an", "POST", "/api/bpm/processes/v1/tasks/" + taskA + ":complete",
-                "{\"result\":{\"approved\":true}}", "\"0\"", null);
+        HttpResponse<String> done = send("an", "POST", claimedBy("an", taskA),
+                "{\"result\":{\"approved\":true}}", "\"1\"", null);
         assertThat(done.statusCode()).as(done.body()).isEqualTo(200);
         assertThat(jdbc.sql("SELECT fee_minor FROM card_application WHERE tenant_id = 'bank-a' AND application_id = 'QA-P001'")
                 .query(Long.class).single()).isEqualTo(10_000L);
@@ -269,13 +269,75 @@ class RuleAndProcessQaIT {
 
         // Then I1 continues and completes on v1; I2 runs on v2
         String task1 = instance1.at("/tasks/0/id").stringValue();
-        HttpResponse<String> done = send("an", "POST", "/api/bpm/processes/v1/tasks/" + task1 + ":complete",
-                "{\"result\":{\"approved\":true}}", "\"0\"", null);
+        HttpResponse<String> done = send("an", "POST", claimedBy("an", task1),
+                "{\"result\":{\"approved\":true}}", "\"1\"", null);
         assertThat(done.statusCode()).as(done.body()).isEqualTo(200);
         assertThat(JSON.readTree(done.body()).get("definitionVersion").intValue()).isEqualTo(1);
         JsonNode instance2 = get("an", START + "/" + i2.get("instanceId").stringValue());
         assertThat(instance2.get("definitionVersion").intValue()).isEqualTo(2);
         assertThat(instance2.at("/tasks/0/name").stringValue()).isEqualTo("Officer reviews the fee (v2)");
+    }
+
+    // ---- BPMN export (PRE-034) ------------------------------------------------------------------------------
+
+    @Test
+    @Order(30)
+    void PRE_034_bpmn_export_imports_back_to_the_same_definition_hash() throws Exception {
+        int latest = jdbc.sql("SELECT max(version_num) FROM pre_definition WHERE tenant_id = 'bank-a' "
+                + "AND key_name = 'card-fee-review'").query(Integer.class).single();
+        String hash = jdbc.sql("SELECT definition_hash FROM pre_definition WHERE tenant_id = 'bank-a' "
+                + "AND key_name = 'card-fee-review' AND version_num = ?").param(latest).query(String.class).single();
+        long rowsBefore = definitionRows();
+
+        // When the version is exported and the document imported again
+        HttpResponse<String> exported = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port
+                + "/api/bpm/processes/v1/definitions/card-fee-review/versions/" + latest + "/export?format=bpmn"))
+                .header("Authorization", basic("lan")).GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(exported.statusCode()).as(exported.body()).isEqualTo(200);
+        assertThat(exported.headers().firstValue("Content-Type")).hasValueSatisfying(
+                v -> assertThat(v).startsWith("application/bpmn+xml"));
+        assertThat(exported.headers().firstValue("ETag")).contains("\"" + hash + "\"");
+        assertThat(exported.body()).contains("<bpmndi:BPMNDiagram").contains("horus:handler=\"cardProfiles.load\"");
+        HttpResponse<String> imported = send("lan", "POST", "/api/bpm/processes/v1/definitions", exported.body(), null,
+                null, "application/bpmn+xml");
+
+        // Then the import finds the same definition: same hash, same version, no new row
+        assertThat(imported.statusCode()).as(imported.body()).isEqualTo(201);
+        JsonNode version = JSON.readTree(imported.body());
+        assertThat(version.get("definitionHash").stringValue()).isEqualTo(hash);
+        assertThat(version.get("version").intValue()).isEqualTo(latest);
+        assertThat(definitionRows()).isEqualTo(rowsBefore);
+    }
+
+    @Test
+    @Order(31)
+    void PRE_034_another_tenants_version_is_not_found_and_nothing_is_written() throws Exception {
+        // Given bank-b holds card-fee-review v99, which bank-a does not have
+        jdbc.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
+                + "definition_hash, source_format, source_document, source_hash, node_count, source, effective_from, "
+                + "created_by, created_at, approved_by, approved_at) "
+                + "SELECT 'bank-b', '01JDBANKB00000000000000000', key_name, 99, status, name, definition_json, "
+                + "definition_hash, source_format, source_document, source_hash, node_count, source, effective_from, "
+                + "created_by, created_at, approved_by, approved_at FROM pre_definition "
+                + "WHERE tenant_id = 'bank-a' AND key_name = 'card-fee-review' AND version_num = 1").update();
+        long rowsBefore = definitionRows();
+        long outboxBefore = jdbc.sql("SELECT count(*) FROM event_outbox").query(Long.class).single();
+
+        // When a bank-a user asks for v99
+        HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port
+                + "/api/bpm/processes/v1/definitions/card-fee-review/versions/99/export?format=bpmn"))
+                .header("Authorization", basic("lan")).GET().build(), HttpResponse.BodyHandlers.ofString());
+
+        // Then it is not found, nothing of bank-b is disclosed and nothing is written
+        assertThat(answer.statusCode()).as(answer.body()).isEqualTo(404);
+        assertThat(JSON.readTree(answer.body()).get("code").stringValue()).isEqualTo("DEFINITION_NOT_FOUND");
+        assertThat(answer.body()).doesNotContain("bank-b").doesNotContain("<bpmn:");
+        assertThat(definitionRows()).isEqualTo(rowsBefore);
+        assertThat(jdbc.sql("SELECT count(*) FROM event_outbox").query(Long.class).single()).isEqualTo(outboxBefore);
+    }
+
+    private long definitionRows() {
+        return jdbc.sql("SELECT count(*) FROM pre_definition").query(Long.class).single();
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------
@@ -284,7 +346,15 @@ class RuleAndProcessQaIT {
         JsonNode submitted = post("tuan", "/api/cards/applications",
                 "{\"applicationId\":\"" + applicationId + "\",\"customerId\":\"C-002\"}");
         JsonNode instance = get("an", START + "/" + submitted.get("instanceId").stringValue());
-        return "/api/bpm/processes/v1/tasks/" + instance.at("/tasks/0/id").stringValue() + ":complete";
+        return claimedBy("an", instance.at("/tasks/0/id").stringValue());
+    }
+
+    /** Claims the open task (lock version 0 to 1) and returns its completion path; complete with If-Match "1". */
+    private String claimedBy(String user, String taskId) throws Exception {
+        HttpResponse<String> claimed = send(user, "POST", "/api/bpm/processes/v1/tasks/" + taskId + ":claim", "", "\"0\"",
+                "qa-claim-" + taskId);
+        assertThat(claimed.statusCode()).as(claimed.body()).isEqualTo(200);
+        return "/api/bpm/processes/v1/tasks/" + taskId + ":complete";
     }
 
     private static String startBody(String businessKey, String customerId) {
@@ -379,8 +449,11 @@ class RuleAndProcessQaIT {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", contentType)
                 .method(method, HttpRequest.BodyPublishers.ofString(body));
-        if (ifMatch != null) {
-            request.header("If-Match", ifMatch);
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        String lock = ifMatch == null && path.matches(".*:(approve|reject)$") ? "\"1\"" : ifMatch;
+        if (lock != null) {
+            request.header("If-Match", lock);
         }
         if (idempotencyKey != null) {
             request.header("Idempotency-Key", idempotencyKey);

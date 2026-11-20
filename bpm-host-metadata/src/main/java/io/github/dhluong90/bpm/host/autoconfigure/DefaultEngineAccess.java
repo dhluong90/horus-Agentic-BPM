@@ -41,6 +41,13 @@ import org.springframework.web.context.request.ServletRequestAttributes;
  * {@code tenant.switch.refused} security log entry (ADR-0014). The current request is taken from Spring's
  * request context; outside a request (a host job running as a user) there is no header to check.
  *
+ * <p>Before any of that, a caller whose id starts with {@value #RESERVED_PREFIX} is refused with
+ * {@code 403 PERMISSION_DENIED} and a {@code caller.reserved.refused} security log entry: the engines record
+ * their own actions under such ids (a start-up import, a timer, a supersession), so a person signed in with
+ * one could have their actions credited to the engine in the audit trail. The match is exact and
+ * case-sensitive, so {@code systems-admin} is an ordinary caller. Neither claims nor the resolver are read
+ * for a refused caller.
+ *
  * <p>Within one request the caller is resolved once: the result, or the refusal, is kept as a request
  * attribute for the same authentication, so an operation that asks several times (the controller, then
  * the engine service) runs the resolver once and writes at most one security log entry. A refused
@@ -51,6 +58,11 @@ final class DefaultEngineAccess implements EngineAccess {
     static final String TENANT_SWITCH_HEADER = "X-Tenant-Id";
     /** 1 to 64 characters, starting with a letter or digit. */
     static final Pattern TENANT = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
+    /**
+     * The engines' own namespace for the actions they record themselves. Not a setting: the engines check
+     * the same prefix, so a host cannot move it.
+     */
+    static final String RESERVED_PREFIX = "system:";
     private static final Log SECURITY_LOG = LogFactory.getLog("io.github.dhluong90.bpm.security");
     private static final String RESOLVED_ATTRIBUTE = DefaultEngineAccess.class.getName() + ".resolved";
 
@@ -112,6 +124,9 @@ final class DefaultEngineAccess implements EngineAccess {
     }
 
     private EngineCaller resolve(Authentication authentication, @Nullable HttpServletRequest request) {
+        if (authentication.getName().startsWith(RESERVED_PREFIX)) {
+            throw reservedIdentity(request, authentication);
+        }
         Map<String, Object> tokenClaims = claims.apply(authentication);
         Set<String> authorities = authorities(authentication.getAuthorities());
         Context context = new Context(authentication.getName(), authentication.getPrincipal(), authorities, tokenClaims);
@@ -167,6 +182,19 @@ final class DefaultEngineAccess implements EngineAccess {
                 + " correlationId=" + correlationId
                 + " clientCorrelationId=" + clientCorrelationId(request));
         return new EngineAccessDeniedException(Reason.TENANT_NOT_ALLOWED, null, correlationId);
+    }
+
+    /**
+     * The user value is encoded and cut exactly as in {@code tenant.switch.refused}; nothing else of the
+     * caller is logged.
+     */
+    private static EngineAccessDeniedException reservedIdentity(@Nullable HttpServletRequest request,
+            Authentication authentication) {
+        String correlationId = correlationId(request);
+        SECURITY_LOG.warn("caller.reserved.refused user=" + CorrelationIds.loggable(authentication.getName())
+                + " correlationId=" + correlationId
+                + " clientCorrelationId=" + clientCorrelationId(request));
+        return new EngineAccessDeniedException(Reason.PERMISSION_DENIED, null, correlationId);
     }
 
     private static @Nullable HttpServletRequest currentRequest() {

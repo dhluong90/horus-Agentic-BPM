@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Loan checks (PRE-005): a credit bureau check and a fraud check run in parallel and join before underwriting.
+     The two checks are user tasks, so two analysts on two servers can finish them at the same moment. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-checks"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-checks" name="Loan checks" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:parallelGateway id="fork-checks" name="Run both checks"/>
+    <bpmn:userTask id="credit-bureau" name="Credit bureau check" horus:assignee="role:CREDIT_ANALYST" horus:resultVariable="bureau"/>
+    <bpmn:userTask id="fraud-check" name="Fraud check" horus:assignee="role:FRAUD_ANALYST" horus:resultVariable="fraud"/>
+    <bpmn:parallelGateway id="join-checks" name="Both checks done"/>
+    <bpmn:userTask id="underwrite" name="Underwrite" horus:assignee="role:UNDERWRITER" horus:resultVariable="underwriting"/>
+    <bpmn:endEvent id="end" name="Underwritten"/>
+
+    <bpmn:sequenceFlow id="start__fork-checks" sourceRef="start" targetRef="fork-checks"/>
+    <bpmn:sequenceFlow id="fork-checks__credit-bureau" sourceRef="fork-checks" targetRef="credit-bureau"/>
+    <bpmn:sequenceFlow id="fork-checks__fraud-check" sourceRef="fork-checks" targetRef="fraud-check"/>
+    <bpmn:sequenceFlow id="credit-bureau__join-checks" sourceRef="credit-bureau" targetRef="join-checks"/>
+    <bpmn:sequenceFlow id="fraud-check__join-checks" sourceRef="fraud-check" targetRef="join-checks"/>
+    <bpmn:sequenceFlow id="join-checks__underwrite" sourceRef="join-checks" targetRef="underwrite"/>
+    <bpmn:sequenceFlow id="underwrite__end" sourceRef="underwrite" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

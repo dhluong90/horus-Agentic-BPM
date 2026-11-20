@@ -19,9 +19,10 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * The compiled cache of one replica on the in-memory stores (ADR-0009): eviction after this replica's approval,
- * by notification and by the epoch check for another replica's approval, the hand-over to a later effective version
- * without an epoch change, and the bound of RLE-034. The PostgreSQL notification path and two real replicas are
+ * The compiled cache of one replica on the in-memory stores (ADR-0009): eviction after this replica's approval and
+ * retirement, by notification and by the epoch check for another replica's approval, the hand-over to a later
+ * effective version without an epoch change, a chosen clock served from the window that holds it, and the bound of
+ * RLE-034. The PostgreSQL notification path and two real replicas are
  * tested by CacheCoherencePostgresIT and the example host.
  */
 class CompiledCacheTest {
@@ -125,6 +126,51 @@ class CompiledCacheTest {
     }
 
     @Test
+    void RLE_008_a_chosen_clock_is_served_from_the_window_that_holds_it() {
+        // Given v1 in force since 15 Dec 2026 and v2 approved now, in force from 1 Jan 2027
+        RuleEngines a = replica(1000);
+        publish(a, "card-fee", CardFee.yaml(), 1);
+        Instant newYear = Instant.parse("2027-01-01T00:00:00Z");
+        publish(a, "card-fee", withDefaultFee(60000).replace("hitPolicy: first",
+                "effectiveFrom: \"" + newYear + "\"\nhitPolicy: first"), 2);
+
+        // When the same replica evaluates at the host clock, at a chosen clock in January, and at the host clock again
+        DecisionResult now = evaluate(a, "card-fee");
+        DecisionResult january = evaluateAt(a, "card-fee", Instant.parse("2027-01-05T09:00:00Z"));
+        DecisionResult again = evaluate(a, "card-fee");
+
+        // Then each instant gets the version in force at it, whatever the cache held before
+        assertThat(now.version()).isEqualTo(1);
+        assertThat(january.version()).isEqualTo(2);
+        assertThat(january.outputs()).containsEntry("fee", Money.ofMinor("VND", 60000));
+        assertThat(again.version()).isEqualTo(1);
+        assertThat(evaluateAt(a, "card-fee", newYear.minusMillis(1)).version()).isEqualTo(1);
+        assertThat(evaluateAt(a, "card-fee", newYear).version()).isEqualTo(2);
+    }
+
+    @Test
+    void RLE_026_a_retire_moves_the_epoch_and_this_replica_stops_serving_at_once() {
+        // Given card-fee v1 cached on replica A
+        RuleEngines a = replica(1000);
+        long lock = publish(a, "card-fee", CardFee.yaml(), 1).lockVersion();
+        assertThat(evaluate(a, "card-fee").version()).isEqualTo(1);
+        int notifications = stores.notifications.size();
+
+        // When bob retires v1 one hour later, confirming that no version stays in effect
+        Instant retiredAt = NOW.plus(Duration.ofHours(1));
+        clock.set(retiredAt);
+        caller.become("bank-a", "bob");
+        a.versionService().retire("card-fee", 1, new WriteOptions("k-retire", lock, "Fee table withdrawn"), true);
+
+        // Then the epoch moved once with a notification, A no longer serves v1, and a clock before still selects it
+        assertThat(stores.notifications).hasSize(notifications + 1);
+        assertThat(a.cache().evictions(CompiledCache.Cause.NOTIFY)).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> evaluate(a, "card-fee"))
+                .isInstanceOf(io.github.dhluong90.bpm.rules.api.NoEffectiveVersionException.class);
+        assertThat(evaluateAt(a, "card-fee", retiredAt.minusSeconds(1)).version()).isEqualTo(1);
+    }
+
+    @Test
     void RLE_034_compiled_cache_is_bounded_and_heap_stays_flat() {
         // Given cache.max-entries = 50 and 100 published rule sets fee-001 to fee-100 of 200 rows each
         RuleEngines bounded = replica(50);
@@ -182,20 +228,28 @@ class CompiledCacheTest {
         return replica.ruleEngine().evaluate(ruleSet, SILVER);
     }
 
-    private void publish(RuleEngines replica, String ruleSet, byte[] yaml, int version) {
+    private DecisionResult evaluateAt(RuleEngines replica, String ruleSet, Instant at) {
+        caller.become("bank-a", "analyst-01", java.util.Set.of("rules:evaluate", "rules:simulate"));
+        return replica.ruleEngine().evaluate(io.github.dhluong90.bpm.rules.api.DecisionRequest.of(ruleSet, SILVER)
+                .withClock(at));
+    }
+
+    private io.github.dhluong90.bpm.rules.api.RuleSetVersion publish(RuleEngines replica, String ruleSet, byte[] yaml,
+            int version) {
         caller.become("bank-a", "alice");
         if (version == 1) {
             replica.versionService().importRuleSet(ImportRequest.yaml(yaml));
         } else {
             replica.versionService().importVersion(ruleSet, ImportRequest.yaml(yaml));
         }
-        replica.versionService().requestPublish(ruleSet, version, WriteOptions.none());
+        long lock = replica.versionService().requestPublish(ruleSet, version, WriteOptions.none()).lockVersion();
         caller.become("bank-a", "bob");
-        replica.versionService().approve(ruleSet, version, WriteOptions.none());
+        return replica.versionService().approve(ruleSet, version, new WriteOptions(null, lock, null));
     }
 
-    private void publish(RuleEngines replica, String ruleSet, String yaml, int version) {
-        publish(replica, ruleSet, yaml.getBytes(StandardCharsets.UTF_8), version);
+    private io.github.dhluong90.bpm.rules.api.RuleSetVersion publish(RuleEngines replica, String ruleSet, String yaml,
+            int version) {
+        return publish(replica, ruleSet, yaml.getBytes(StandardCharsets.UTF_8), version);
     }
 
     private static String withDefaultFee(long fee) {

@@ -18,8 +18,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * The compiled versions one replica serves, keyed by tenant and rule set, bounded by {@code cache.max-entries}
  * with least-recently-used eviction (ADR-0009, RLE-034).
  *
- * <p>An entry holds the version effective over a window {@code [effectiveFrom, nextEffectiveFrom)} and the rule
- * set's {@code cache_epoch} it was read with. Inside the window an evaluation is served without reading the
+ * <p>An entry holds the version in force over a window {@code [validFrom, nextEffectiveFrom)} and the rule set's
+ * {@code cache_epoch} it was read with. The window is bounded by the nearest instants, before and after the
+ * evaluation instant, at which any approved version of the rule set starts or was retired, so the selection of
+ * DESIGN 3.3.1 cannot change inside it. Inside the window an evaluation is served without reading the
  * database; at {@code nextEffectiveFrom} a later published version takes over and the entry is reloaded, with no
  * epoch change. A publication increments the epoch and notifies every replica after commit; {@link #evict} drops
  * the entry on the notification, and {@link #checkEpochs()} catches what a connection pooler or a lost listener
@@ -213,12 +215,20 @@ public final class CompiledCache {
      * @param version the stored version (its canonical document already checked against its hash)
      * @param compiled the compiled rules
      * @param epoch the rule set's {@code cache_epoch} the version was read with
-     * @param nextEffectiveFrom when a later published version takes over, or null
+     * @param validFrom the start of the window: the latest instant at or before the evaluation instant at which an
+     *     approved version started or was retired
+     * @param nextEffectiveFrom the end of the window, exclusive: the next instant at which an approved version starts
+     *     or is retired, or null
      */
-    record Entry(StoredVersion version, CompiledRuleSet compiled, long epoch, Instant nextEffectiveFrom) {
+    record Entry(StoredVersion version, CompiledRuleSet compiled, long epoch, Instant validFrom,
+            Instant nextEffectiveFrom) {
+
+        Entry {
+            Objects.requireNonNull(validFrom, "validFrom must not be null");
+        }
 
         boolean covers(Instant at) {
-            return !at.isBefore(version.effectiveFrom()) && (nextEffectiveFrom == null || at.isBefore(nextEffectiveFrom));
+            return !at.isBefore(validFrom) && (nextEffectiveFrom == null || at.isBefore(nextEffectiveFrom));
         }
     }
 }

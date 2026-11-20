@@ -5,20 +5,61 @@
   "description": "Written to the Rule Engine outbox in the transaction where an author requests publication of a DRAFT version (POST .../versions/{v}:request-publish, DESIGN section 3.3). The version is now PENDING_APPROVAL and frozen. The outbox row id is the event id. Additive changes only within v1.",
   "type": "object",
   "required": [
+    "eventId",
     "eventType",
+    "occurredAt",
+    "tenantId",
+    "correlationId",
+    "causationId",
+    "producer",
+    "schemaVersion",
     "ruleSet",
     "version",
-    "tenantId",
     "actor",
-    "occurredAt",
     "canonicalHash",
     "requestedBy",
     "effectiveFrom"
   ],
   "additionalProperties": true,
   "properties": {
+    "eventId": {
+      "description": "The event id, a ULID; equal to the outbox row id. Consumers de-duplicate by it.",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
     "eventType": {
       "const": "rules.version.publish-requested.v1"
+    },
+    "occurredAt": {
+      "description": "When the state change committed, ISO 8601 UTC.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenantId": {
+      "description": "The tenant, from the authenticated context; never from a request body.",
+      "type": "string"
+    },
+    "correlationId": {
+      "description": "The caller's correlation id (X-Correlation-Id, or the one passed to the Java API). When the caller gave none, the event id: the event starts its own chain.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "causationId": {
+      "description": "The id of the command or event that caused this one, or null when a caller's command caused it directly.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "producer": {
+      "description": "rule-engine, a slash and the engine version that wrote the event.",
+      "type": "string",
+      "pattern": "^rule-engine/[0-9A-Za-z.+-]+$"
+    },
+    "schemaVersion": {
+      "description": "Version of the envelope layout; 1 for every .v1 type.",
+      "const": 1,
+      "type": "integer"
     },
     "ruleSet": {
       "description": "Rule set name, kebab-case.",
@@ -30,18 +71,9 @@
       "type": "integer",
       "minimum": 1
     },
-    "tenantId": {
-      "description": "The tenant, from the authenticated context; never from a request body.",
-      "type": "string"
-    },
     "actor": {
       "description": "Who sent the command.",
       "type": "string"
-    },
-    "occurredAt": {
-      "description": "When the transition committed, ISO 8601 UTC.",
-      "type": "string",
-      "format": "date-time"
     },
     "canonicalHash": {
       "description": "SHA-256 of the canonical document, lower-case hex: the behaviour under four eyes (ADR-0026). effectiveFrom is not part of it.",
@@ -63,12 +95,17 @@
   },
   "examples": [
     {
+      "eventId": "01KBX9Q3M4R7T2V8W6Y0Z1A2B3",
       "eventType": "rules.version.publish-requested.v1",
+      "occurredAt": "2026-12-10T03:00:00Z",
+      "tenantId": "bank-a",
+      "correlationId": "req-7f3a",
+      "causationId": null,
+      "producer": "rule-engine/0.2.0",
+      "schemaVersion": 1,
       "ruleSet": "card-fee",
       "version": 2,
-      "tenantId": "bank-a",
       "actor": "lan",
-      "occurredAt": "2026-12-10T03:00:00Z",
       "canonicalHash": "3f1c9a5e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d",
       "requestedBy": "lan",
       "effectiveFrom": "2027-01-01T00:00:00Z"

@@ -40,4 +40,12 @@ class KernelContractArchitectureTest {
                 "java.sql..", "com.fasterxml.jackson.databind..")
                 .check(CORE);
     }
+
+    @Test
+    void only_the_decision_port_reaches_the_rule_engines_tenant_scoped_entry_point() {
+        noClasses().that().resideOutsideOfPackage("..process.internal.service..")
+                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules.embedded..")
+                .because("the tenant-scoped entry point is engine-to-engine, held only by the decision port (ADR-0027)")
+                .check(CORE);
+    }
 }

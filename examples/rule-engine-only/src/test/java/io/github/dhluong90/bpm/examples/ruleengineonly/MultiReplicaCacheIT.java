@@ -39,12 +39,12 @@ class MultiReplicaCacheIT {
     static final Network NETWORK = Network.newNetwork();
     static final JsonMapper JSON = JsonMapper.builder().build();
     static final HttpClient HTTP = HttpClient.newHttpClient();
-    /** PgBouncer image of the pooler leg; override with -Dbpm.test.pgbouncer.image. */
-    static final String PGBOUNCER_IMAGE = System.getProperty("bpm.test.pgbouncer.image", "edoburu/pgbouncer:v1.26.1-p0");
+    /** PgBouncer image of the pooler leg, pinned by digest in the root POM. */
+    static final String PGBOUNCER_IMAGE = TestImages.pgbouncer();
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"))
+            new PostgreSQLContainer(TestImages.postgres())
                     .withNetwork(NETWORK).withNetworkAliases("pg");
 
     private static final AtomicInteger DATABASES = new AtomicInteger();
@@ -140,9 +140,11 @@ class MultiReplicaCacheIT {
     private static void publish(ConfigurableApplicationContext copy, byte[] yaml, int version) throws Exception {
         String path = version == 1 ? "/rule-sets" : "/rule-sets/card-fee/versions";
         assertThat(send(copy, "alice", path, yaml, "application/yaml").statusCode()).isEqualTo(201);
-        assertThat(send(copy, "alice", "/rule-sets/card-fee/versions/" + version + ":request-publish", null, null)
-                .statusCode()).isEqualTo(200);
-        assertThat(send(copy, "bob", "/rule-sets/card-fee/versions/" + version + ":approve", null, null)
+        HttpResponse<String> requested = send(copy, "alice",
+                "/rule-sets/card-fee/versions/" + version + ":request-publish", null, null);
+        assertThat(requested.statusCode()).isEqualTo(200);
+        String etag = requested.headers().firstValue("ETag").orElseThrow();
+        assertThat(send(copy, "bob", "/rule-sets/card-fee/versions/" + version + ":approve", null, null, etag)
                 .statusCode()).isEqualTo(200);
     }
 
@@ -180,12 +182,20 @@ class MultiReplicaCacheIT {
 
     private static HttpResponse<String> send(ConfigurableApplicationContext copy, String user, String path,
             byte[] body, String contentType) throws Exception {
+        return send(copy, user, path, body, contentType, null);
+    }
+
+    private static HttpResponse<String> send(ConfigurableApplicationContext copy, String user, String path,
+            byte[] body, String contentType, String ifMatch) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
                         + copy.getEnvironment().getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", TestTokens.bearer(user))
                 .POST(body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
         if (contentType != null) {
             request.header("Content-Type", contentType);
+        }
+        if (ifMatch != null) {
+            request.header("If-Match", ifMatch);
         }
         return HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }

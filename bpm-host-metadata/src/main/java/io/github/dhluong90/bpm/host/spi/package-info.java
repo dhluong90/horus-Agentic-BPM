@@ -4,6 +4,8 @@
  * <ul>
  *   <li>{@link io.github.dhluong90.bpm.host.spi.ModuleDescriptor}: each engine starter contributes one; hosts do not
  *       implement it.
+ *   <li>{@link io.github.dhluong90.bpm.host.spi.ModuleTenantSettings}: an engine starter may contribute settings that
+ *       depend on the caller's tenant. Engine-only and unstable until 1.0: a host bean of this type stops the host.
  *   <li>{@link io.github.dhluong90.bpm.host.spi.EngineAccess}: who is calling, in which tenant, and whether they hold
  *       a permission. Engine controllers and {@code GET /api/bpm/me} both call it. A default is registered
  *       unless the host declares its own bean.

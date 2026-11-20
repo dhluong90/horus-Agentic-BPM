@@ -9,6 +9,7 @@ Thank you for your interest. Until the first release the maintainers drive the r
 ## While you work
 - One pull request per issue, from a `feat/<module>/<issue>-<slug>` branch, with Conventional Commits (`feat(rule-engine): add collect hit policy (#12)`).
 - Tests are required and named by the specification id they prove (`<module>/docs/SPEC.md`), for example `RLE_003_collect_hit_policy_aggregates_matched_rules`. `python3 tools/spec-coverage.py` checks this; statements not delivered yet are listed in `<module>/docs/spec-pending.txt`.
+- An engine database migration takes the next number above the highest of that engine on `main` when it merges; a migration on `main` is never edited. `python3 tools/check-migration-order.py` checks this. See "Database migrations" on the wiki page.
 - No reflection, scripting engines or I/O in rule expressions or definitions. Such pull requests are declined.
 - Third-party dependencies must be Apache 2.0, MIT or BSD licensed. `mvn -B verify` fails on any other licence; `tools/scan-dependencies.sh` fails on a high or critical vulnerability. See "Dependency checks" on the wiki page.
 

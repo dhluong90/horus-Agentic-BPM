@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.rules.internal.json;
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
+import io.github.dhluong90.bpm.rules.api.MaskingKey;
 import io.github.dhluong90.bpm.rules.api.Money;
 import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.SourceFormat;
@@ -86,21 +87,68 @@ public final class EngineValues {
 
     /**
      * Converts the declared inputs to the JSON object written to the decision log. Undeclared keys are
-     * dropped, never logged (data minimisation); declared inputs with {@code mask: true} are replaced.
+     * dropped, never logged (data minimisation); a masked input with a value is replaced by its keyed
+     * fingerprint (RLE-012). A null value stays null: there is nothing to hide, and an auditor sees it was missing.
      *
      * @param input the inputs as supplied
      * @param declared the rule set's input clauses
+     * @param maskByDefault whether inputs that declare no {@code mask} are masked
+     * @param key the tenant's masking key; required when an input with a value is masked
      * @return the object
+     * @throws IllegalStateException when an input must be masked and there is no key; callers check first
      */
-    public static ObjectNode loggedInputs(DecisionInput input, List<InputClause> declared) {
+    public static ObjectNode loggedInputs(DecisionInput input, List<InputClause> declared, boolean maskByDefault,
+            MaskingKey key) {
         ObjectNode node = EngineJson.NODES.objectNode();
         for (InputClause clause : declared) {
             if (input.values().containsKey(clause.name())) {
                 Object v = input.get(clause.name());
-                node.set(clause.name(), clause.masked() && v != null ? EngineJson.NODES.stringNode("masked") : value(v));
+                if (v != null && clause.masked(maskByDefault)) {
+                    if (key == null) {
+                        throw new IllegalStateException("No masking key for a masked input");
+                    }
+                    node.put(clause.name(), fingerprint(key, v));
+                } else {
+                    node.set(clause.name(), value(v));
+                }
             }
         }
         return node;
+    }
+
+    /**
+     * Returns the keyed fingerprint of one input value. The fingerprinted text is the value's plain form, so an
+     * auditor can compute it outside the engine: a string as it is (the fingerprint of a national id is the
+     * HMAC-SHA256 of its UTF-8 bytes); a number as its decimal digits without trailing zeros ({@code 5} and
+     * {@code 5.00} are one value); money as currency, colon and minor units ({@code VND:50000000}); a boolean, date
+     * or datetime as its ISO text; a list as its canonical JSON (RFC 8785).
+     *
+     * @param key the tenant's key
+     * @param value the plain value, not null
+     * @return {@code hmac:<hex>}
+     */
+    public static String fingerprint(MaskingKey key, Object value) {
+        return key.fingerprint(plainForm(value));
+    }
+
+    private static String plainForm(Object value) {
+        return switch (value) {
+            case String text -> text;
+            case BigDecimal number -> plainNumber(number);
+            case BigInteger number -> number.toString();
+            case Long number -> number.toString();
+            case Integer number -> number.toString();
+            case Short number -> number.toString();
+            case Money money -> money.currency() + ":" + money.minorUnits();
+            case Boolean flag -> flag.toString();
+            case LocalDate date -> date.toString();
+            case Instant instant -> instant.toString();
+            default -> CanonicalJson.write(value(value));
+        };
+    }
+
+    private static String plainNumber(BigDecimal number) {
+        return number.signum() == 0 ? "0" : number.stripTrailingZeros().toPlainString();
     }
 
     /**
@@ -208,6 +256,7 @@ public final class EngineValues {
         node.set("approvedAt", value(version.approvedAt()));
         node.set("createdBy", value(version.createdBy()));
         node.put("createdAt", version.createdAt().toString());
+        node.set("retiredAt", value(version.retiredAt()));
         node.set("definition", read(version.canonicalDocument()));
         return node;
     }
@@ -237,7 +286,8 @@ public final class EngineValues {
                 text(node.get("approvedBy")),
                 instant(node.get("approvedAt")),
                 text(node.get("createdBy")),
-                Instant.parse(node.get("createdAt").stringValue()));
+                Instant.parse(node.get("createdAt").stringValue()),
+                instant(node.get("retiredAt")));
     }
 
     /**
@@ -251,7 +301,10 @@ public final class EngineValues {
         node.put("decisionId", result.decisionId());
         node.put("ruleSet", result.ruleSet());
         node.put("version", result.version());
+        node.put("evalClock", result.clock().toString());
         node.put("evaluatedAt", result.evaluatedAt().toString());
+        node.put("clockChosen", result.clockChosen());
+        node.put("pinned", result.pinned());
         switch (result.outcome()) {
             case DecisionResult.Matched matched -> {
                 node.put("outcome", "MATCHED");
@@ -305,8 +358,12 @@ public final class EngineValues {
                         node.get("error").get("detail").stringValue(), ids);
             }
         };
+        Instant evaluatedAt = Instant.parse(node.get("evaluatedAt").stringValue());
+        // Records stored before the clock was a field of its own carry only evaluatedAt, which was the clock then.
+        Instant clock = node.has("evalClock") ? Instant.parse(node.get("evalClock").stringValue()) : evaluatedAt;
+        boolean pinned = node.has("pinned") && node.get("pinned").asBoolean();
         return new DecisionResult(node.get("decisionId").stringValue(), node.get("ruleSet").stringValue(),
-                node.get("version").asInt(), Instant.parse(node.get("evaluatedAt").stringValue()), outcome);
+                node.get("version").asInt(), clock, evaluatedAt, pinned, outcome);
     }
 
     /**
