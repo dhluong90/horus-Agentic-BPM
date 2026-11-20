@@ -3,7 +3,6 @@
 # Remove the line in the pull request that adds the test. Format: <ID> <milestone>, the milestone as in SPEC.md.
 
 RLE-004 M1
-RLE-007 M1
 RLE-008 M1
 RLE-010 M1
 RLE-012 M1
@@ -16,8 +15,6 @@ RLE-022 M1
 RLE-023 M1
 RLE-026 M1
 RLE-027 M1
-# RLE-028: the equal-hash half is tested (#233); the diff endpoint arrives with #165.
-RLE-028 M1
 RLE-029 M1
 RLE-030 M1
 RLE-031 M1
@@ -26,7 +23,4 @@ RLE-032 M1
 RLE-033 M1
 RLE-034 M1
 RLE-035 M1
-# RLE-036: the 500 INTERNAL_ERROR half is tested (#147, UnexpectedErrorProblemTest); every code of the matrix is not.
-RLE-036 M1
 RLE-038 M3
-RLE-046 M1

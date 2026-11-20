@@ -28,8 +28,8 @@ The REST layer checks one permission string per endpoint with `@PreAuthorize`; t
 
 | Engine | Permissions | Reference |
 |---|---|---|
-| Rule Engine | `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read` | [[Rule Engine Configuration]] |
-| Process Engine | `processes:read`, `processes:deploy`, `processes:start`, `tasks:work`, `tasks:manage`, `incidents:manage`, `migrations:manage`, `calendars:manage` | [[Process Engine Overview]] |
+| Rule Engine | `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read`, `rules:pin` (0.2.0; held by no role by default) | [[Rule Engine Configuration]] |
+| Process Engine | `processes:read`, `processes:deploy`, `processes:author`, `processes:approve`, `processes:start`, `processes:cancel`, `processes:task:work`, `processes:task:manage`, `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage` | [[Process Engine Overview]] |
 
 ## Maker-checker in the service layer
 
@@ -46,7 +46,7 @@ The REST layer checks one permission string per endpoint with `@PreAuthorize`; t
 
 ## No code execution
 
-Expressions are parsed by a hand-written recursive-descent parser into a sealed, typed tree; there is no scripting engine, reflection, class loading or deserialisation of arbitrary types (`TR-SEC-01`, ADR-0003). Host-registered pure functions are the only extension point and are listed in the cockpit. Regex matching is bounded by input length (4 096 characters) and time (50 ms); nested quantifiers are rejected at publish time (`TR-SEC-02`, `RLE-007`).
+Expressions are parsed by a hand-written recursive-descent parser into a sealed, typed tree; there is no scripting engine, reflection, class loading or deserialisation of arbitrary types (`TR-SEC-01`, ADR-0003). Host-registered pure functions are the only extension point and are listed in the cockpit. Regex matching is bounded by a deterministic read budget (`evaluation.regex-max-reads`, 1 000 000 characters read), input length (`evaluation.regex-max-input-length`, 4 096 characters) and time (`evaluation.regex-timeout-ms`, 50 ms, the backstop): the matcher reads its text through a counting, deadline-checking view, so a runaway pattern stops on the calling thread and fails one decision with `REGEX_TIMEOUT` instead of holding the thread and its connection. Back-references, look-around, inline flags and possessive quantifiers are refused at import, and deep backtracking that would overflow the stack fails the decision with `REGEX_TOO_DEEP` (`TR-SEC-02`, `RLE-007`).
 
 ## Data protection
 
@@ -62,10 +62,21 @@ Expressions are parsed by a hand-written recursive-descent parser into a sealed,
 
 | Shape | Headers set by `cockpit-spring-boot-starter` |
 |---|---|
-| Embedded at `horus.bpm.cockpit.path` | `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. The host may frame the cockpit in its own admin UI on the same origin; no other site can. Assets are served only to authenticated sessions. `Cache-Control: no-store` on engine API responses is tracked separately (see the cockpit page) |
+| Embedded at `horus.bpm.cockpit.path` | `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. The host may frame the cockpit in its own admin UI on the same origin; no other site can. Assets are served only to authenticated sessions. Engine API responses are covered by the next section |
 | Standalone | The host sets `rest.cors.allowed-origins` to the exact cockpit origin, and allows the request headers `Authorization`, `Accept`, `X-Requested-With`, `X-Tenant-Id`, `If-None-Match`, `If-Match` and `Idempotency-Key`; credentials via bearer token, not cookies; `connect-src` on the cockpit side lists the host URLs |
 
 The cockpit holds no secrets and no state (ADR-0005). It never marks an approval, a task completion or an incident retry as done before the API returns `200` or `201`.
+
+## Caching of engine responses
+
+Every response under `/api/bpm/**` carries `Cache-Control: no-store`, so rule sets, decisions and personal data are never kept in a shared browser cache or an intermediate proxy (`TR-SEC-09`). The rule comes from the host metadata module that every engine starter brings, so it holds for the embedded and the standalone cockpit alike, and the host configures nothing.
+
+| Path | `Cache-Control` |
+|---|---|
+| `/api/bpm/rules/**`, `/api/bpm/processes/**` and any other path under `/api/bpm/**`: success, problem and `304` answers | `no-store` |
+| `/api/bpm/meta` | `private, max-age=60` (errors: `no-store`) |
+| `/api/bpm/me` | `private, no-cache`, so a revoked role is never shown from cache (errors: `no-store`) |
+| Host endpoints outside `/api/bpm/**` | Unchanged: the host's own policy |
 
 ## Threat model (STRIDE)
 
@@ -73,7 +84,7 @@ The cockpit holds no secrets and no state (ADR-0005). It never marks an approval
 |---|---|---|---|---|
 | Spoofing | Tenant boundary | Caller sends `tenantId: "tenant-b"` in the body, or forges `X-Tenant-Id` from outside the gateway | Body tenant ignored; no header-based resolver ships; the tenant comes from the authenticated principal; `X-Tenant-Id` only switches to a tenant in the caller's allowed list | `RLE-011`, `RLE-037`; REST test with forged body and header |
 | Spoofing | Approvals | Compromised author token approves its own version | Service-layer identity check plus distinct permission | `RLE-009` at service and REST level |
-| Tampering | Rule definitions | Expression such as `T(java.lang.Runtime).getRuntime()` or a regex bomb in a draft | Closed grammar, no reflection; bounded regex; publish-time rejection | `RLE-004`, `RLE-007`; ArchUnit on `javax.script`, `java.lang.reflect.Method` |
+| Tampering | Rule definitions | Expression such as `T(java.lang.Runtime).getRuntime()` or a regex bomb in a draft | Closed grammar, no reflection; regex bounded in length and time at evaluation, back-references and look-around refused at import | `RLE-004`, `RLE-007`; ArchUnit on `javax.script`, `java.lang.reflect.Method` |
 | Tampering | Task state | Two completions of one task, or a replayed approval | `lock_version` predicate; status guard in the same `UPDATE` | `PRE-003`; concurrency test with two threads |
 | Tampering | Idempotency | Replay of a key with a changed payload to smuggle a different start | `request_hash` compared; `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` | `RLE-014`, `TR-IDEM-05` |
 | Repudiation | Decisions and process history | Operator claims a decision never happened or was different | Append-only rows with version, clock, caller, correlation id; no update path | `TR-OBS-01`; SQL capture test shows only `INSERT` |
@@ -81,7 +92,7 @@ The cockpit holds no secrets and no state (ADR-0005). It never marks an approval
 | Information disclosure | Personal data in logs | National id readable in `rle_decision` or the cockpit | Keyed HMAC masking; cockpit renders `*** (hmac)` | `RLE-012`; UI test |
 | Information disclosure | Cross-tenant reads | Guessable ULID of another tenant's decision | Every query filters `tenant_id`; `404` for other tenants | `RLE-011`; two-tenant integration test |
 | Information disclosure | Error bodies | Stack trace reveals class names and SQL | Problem Details only; `INTERNAL_ERROR` with `correlationId` | WebMvc test on an injected failure |
-| Denial of service | Evaluation threads | Adversarial regex input stalls a request thread | 50 ms bounded matcher, 4 096-character input limit | `RLE-007` |
+| Denial of service | Evaluation threads | Adversarial regex input stalls a request thread | 50 ms bounded matcher (`REGEX_TIMEOUT`), 4 096-character input limit (`REGEX_INPUT_TOO_LONG`), both host settings that can only be tightened | `RLE-007` |
 | Denial of service | Connection pool | 20 slow agent calls inside transactions exhaust a 20-connection pool | Async Wait-State: no connection during adapter calls (ADR-0008) | `PRE-009`: 10 concurrent 2 s calls on a 2-connection pool |
 | Denial of service | Batch endpoint | 1 000 000-item batch | `evaluation.max-batch` 1 000; `limit` max 200 | REST tests |
 | Denial of service | Scheduler | Poison job retried forever | `max_attempts` then incident; lease prevents hot loops | `PRE-011` |

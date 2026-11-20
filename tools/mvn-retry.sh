@@ -17,7 +17,9 @@
 #          compile error) ends the script at once with Maven's exit status. Before a retry the remembered
 #          "not found" markers (*.lastUpdated) are removed and the retry runs with -U, after 60 s, then 120 s
 #          (MVN_RETRY_WAIT=<seconds> changes the 60).
-#          Every retry is announced as a GitHub warning, and a final resolution failure as an error.
+#          In GitHub Actions (GITHUB_ACTIONS=true) every retry is announced as a workflow warning and a final
+#          resolution failure as an error. Elsewhere, for example inside docker build, where workflow
+#          commands do not reach the job summary, both are plain lines starting "mvn-retry:".
 # Exit:    Maven's exit status of the last attempt.
 
 set -uo pipefail
@@ -40,6 +42,15 @@ log="$(mktemp)"
 trap 'status=$?; rm -f "$log"; exit $status' EXIT
 repository="${HOME}/.m2/repository"
 
+# announce warning|error TEXT: a workflow command in GitHub Actions, a plain line anywhere else.
+announce() {
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    echo "::$1 title=Maven Central download failed::$2"
+  else
+    echo "mvn-retry: $1: $2"
+  fi
+}
+
 for attempt in 1 2 3; do
   update=()
   [[ "$attempt" == 1 ]] || update=(-U)
@@ -51,11 +62,11 @@ for attempt in 1 2 3; do
   fi
   missing="$(grep -E '^\[ERROR\]' "$log" | grep -oE 'Could not (find|transfer) artifact [^ ]+' | sed -E 's/^Could not (find|transfer) artifact //' | sort -u | paste -sd ' ' -)"
   if [[ "$attempt" == 3 ]]; then
-    echo "::error title=Maven Central download failed::Maven Central did not deliver ${missing:-an artifact} in 3 attempts (#171)."
+    announce error "Maven Central did not deliver ${missing:-an artifact} in 3 attempts (#171)."
     exit "$status"
   fi
   wait_seconds=$((attempt * retry_wait))
-  echo "::warning title=Maven Central download failed::Attempt ${attempt} of 3: ${missing:-an artifact} not delivered. Retrying with -U in ${wait_seconds} s (#171)."
+  announce warning "Attempt ${attempt} of 3: ${missing:-an artifact} not delivered. Retrying with -U in ${wait_seconds} s (#171)."
   find "$repository" -name '*.lastUpdated' -delete 2>/dev/null || true
   sleep "$wait_seconds"
 done

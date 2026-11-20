@@ -55,7 +55,7 @@ class HostMetadataIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @DynamicPropertySource
     static void databaseAndTokenValidation(DynamicPropertyRegistry registry) throws Exception {
@@ -133,6 +133,29 @@ class HostMetadataIT {
 
         assertThat(response.statusCode()).isEqualTo(403);
         assertThat(JSON.readTree(response.body()).path("code").asString()).isEqualTo("TENANT_NOT_ALLOWED");
+    }
+
+    @Test
+    void TR_SEC_09_rule_engine_answers_are_no_store_on_success_and_on_every_problem() throws Exception {
+        String lan = token("lan", "bank-a", "PRICING_AUTHOR", AUDIENCE);
+        String teller = token("tuan", "bank-a", "TELLER", AUDIENCE);
+
+        // When the rule engine answers with success, a not-found problem, a permission problem and a sign-in problem
+        HttpResponse<String> listed = get("/api/bpm/rules/v1/rule-sets", lan);
+        HttpResponse<String> notFound = get("/api/bpm/rules/v1/rule-sets/no-such-rule-set", lan);
+        HttpResponse<String> denied = get("/api/bpm/rules/v1/rule-sets", teller);
+        HttpResponse<String> unauthenticated = get("/api/bpm/rules/v1/rule-sets", "");
+
+        // Then every one of them tells browsers and proxies not to store it
+        List<HttpResponse<String>> answers = List.of(listed, notFound, denied, unauthenticated);
+        assertThat(answers).extracting(HttpResponse::statusCode).containsExactly(200, 404, 403, 401);
+        for (HttpResponse<String> response : answers) {
+            assertThat(response.headers().allValues("Cache-Control")).as(response.uri() + " " + response.statusCode())
+                    .containsExactly("no-store");
+        }
+
+        // And the metadata endpoint keeps its own private caching
+        assertThat(get("/api/bpm/meta", lan).headers().firstValue("Cache-Control")).hasValue("private, max-age=60");
     }
 
     @Test

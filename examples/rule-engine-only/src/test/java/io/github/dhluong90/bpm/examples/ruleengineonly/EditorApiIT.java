@@ -45,8 +45,10 @@ class EditorApiIT {
 
     static final List<String> AUTHOR_APPROVER = List.of("rules:read", "rules:author", "rules:approve", "rules:evaluate");
     static final List<String> APPROVER = List.of("rules:read", "rules:approve", "rules:evaluate");
+    static final List<String> AUTHOR = List.of("rules:read", "rules:author");
     static final Map<String, List<String>> PERMISSIONS = Map.of(
-            "lan", AUTHOR_APPROVER, "minh", APPROVER, "dan", List.of("rules:read"), "teller", List.of("rules:evaluate"));
+            "lan", AUTHOR_APPROVER, "minh", APPROVER, "dan", List.of("rules:read"), "teller", List.of("rules:evaluate"),
+            "alice", AUTHOR, "bob", APPROVER, "carol", AUTHOR);
 
     @TestConfiguration(proxyBeanMethods = false)
     static class FixedHostClock {
@@ -58,7 +60,7 @@ class EditorApiIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @org.springframework.test.context.DynamicPropertySource
     static void database(org.springframework.test.context.DynamicPropertyRegistry registry) {
@@ -190,6 +192,32 @@ class EditorApiIT {
                 .path("allowedActions").toString()).isEqualTo("[\"request-publish\"]");
     }
 
+    /** PD-089 over HTTP: the requester who also holds rules:approve cannot reject their own request and is pointed to :withdraw. */
+    @Test
+    void RLE_025_a_requester_who_rejects_their_own_request_is_pointed_to_withdraw() throws Exception {
+        // Given fx-margin v1 pending, requested by lan, who holds rules:author and rules:approve
+        String t = "bank-self-reject";
+        send(t, "lan", "POST", "/rule-sets", cardFee("fx-margin"), "application/yaml", null, null);
+        Reply pending = send(t, "lan", "POST", "/rule-sets/fx-margin/versions/1:request-publish", null, null, null, null);
+        long before = rows(t);
+
+        // When lan rejects it with a reason and the current If-Match
+        Reply selfReject = send(t, "lan", "POST", "/rule-sets/fx-margin/versions/1:reject",
+                "{\"reason\":\"Wrong margin table attached\"}".getBytes(StandardCharsets.UTF_8), "application/json",
+                "k-sr", pending.etag());
+
+        // Then 403 SELF_APPROVAL_FORBIDDEN whose detail names :withdraw, and nothing changed
+        assertProblem(selfReject, 403, "SELF_APPROVAL_FORBIDDEN");
+        assertThat(selfReject.json().path("detail").asString()).contains(":withdraw");
+        assertThat(rows(t)).isEqualTo(before);
+        assertThat(send(t, "dan", "GET", "/rule-sets/fx-margin/versions/1", null, null, null, null).json().path("status")
+                .asString()).isEqualTo("PENDING_APPROVAL");
+        // and the action it names works for lan
+        Reply withdrawn = send(t, "lan", "POST", "/rule-sets/fx-margin/versions/1:withdraw", null, null, "k-sw", pending.etag());
+        assertThat(withdrawn.status()).as(withdrawn.body()).isEqualTo(200);
+        assertThat(withdrawn.json().path("status").asString()).isEqualTo("DRAFT");
+    }
+
     @Test
     void RLE_025_reject_failure_cases_change_nothing() throws Exception {
         String t = "bank-reject-fail";
@@ -267,7 +295,7 @@ class EditorApiIT {
         send(t, "lan", "POST", "/rule-sets/card-fee/versions/2:request-publish", null, null, null, null);
         send(t, "lan", "POST", "/rule-sets/card-fee/versions", cardFee("card-fee"), "application/yaml", null, null);
 
-        assertThat(actions(t, "lan", 2)).isEqualTo("[]");
+        assertThat(actions(t, "lan", 2)).isEqualTo("[\"withdraw\"]");
         assertThat(actions(t, "minh", 2)).isEqualTo("[\"approve\",\"reject\"]");
         assertThat(actions(t, "dan", 2)).isEqualTo("[]");
         assertThat(actions(t, "lan", 3)).isEqualTo("[\"request-publish\"]");
@@ -278,6 +306,69 @@ class EditorApiIT {
         // the hint does not replace the check
         assertProblem(send(t, "lan", "POST", "/rule-sets/card-fee/versions/2:approve", null, null, null, null),
                 403, "SELF_APPROVAL_FORBIDDEN");
+    }
+
+    @Test
+    void RLE_046_requester_withdraws_own_pending_request_to_draft() throws Exception {
+        // Given card-fee v1 published, v2 pending, requested by alice (rules:author only)
+        String t = "bank-withdraw";
+        publish(t, "card-fee");
+        send(t, "alice", "POST", "/rule-sets/card-fee/versions", cardFee("card-fee"), "application/yaml", null, null);
+        Reply pending = send(t, "alice", "POST", "/rule-sets/card-fee/versions/2:request-publish", null, null, null, null);
+        String path = "/rule-sets/card-fee/versions/2:withdraw";
+        byte[] reason = "{\"reason\":\"Wrong fee for GOLD\"}".getBytes(StandardCharsets.UTF_8);
+        assertThat(actions(t, "alice", 2)).isEqualTo("[\"withdraw\"]");
+        assertThat(actions(t, "bob", 2)).isEqualTo("[\"approve\",\"reject\"]");
+        assertThat(actions(t, "carol", 2)).isEqualTo("[]");
+        long before = rows(t);
+
+        // Failure cases change nothing: bob and carol are not the requester, the headers are required,
+        // the lock is stale, v1 is published, the reason is too long, the body is too large
+        assertProblem(send(t, "bob", "POST", path, reason, "application/json", "k-b", pending.etag()), 403, "PERMISSION_DENIED");
+        assertProblem(send(t, "carol", "POST", path, reason, "application/json", "k-c", pending.etag()), 403, "PERMISSION_DENIED");
+        assertProblem(send(t, "alice", "POST", path, reason, "application/json", "k-301", null), 428, "PRECONDITION_REQUIRED");
+        assertProblem(send(t, "alice", "POST", path, reason, "application/json", null, pending.etag()), 400, "INPUT_INVALID");
+        assertProblem(send(t, "alice", "POST", path, reason, "application/json", "k-s", "\"0\""), 409, "VERSION_CONFLICT");
+        assertProblem(send(t, "alice", "POST", "/rule-sets/card-fee/versions/1:withdraw", null, null, "k-p", "\"2\""),
+                409, "INVALID_STATE");
+        assertProblem(send(t, "alice", "POST", path, ("{\"reason\":\"" + "x".repeat(2001) + "\"}").getBytes(StandardCharsets.UTF_8),
+                "application/json", "k-l", pending.etag()), 400, "INPUT_INVALID");
+        assertProblem(send(t, "alice", "POST", path, ("{\"reason\":\"" + "x".repeat(16_385) + "\"}").getBytes(StandardCharsets.UTF_8),
+                "application/json", "k-x", pending.etag()), 413, "PAYLOAD_TOO_LARGE");
+        assertProblem(send("bank-withdraw-b", "alice", "POST", path, reason, "application/json", "k-o", pending.etag()),
+                404, "RULE_SET_NOT_FOUND");
+        // a caller without rules:author is refused on the permission before the size is looked at
+        assertProblem(send(t, "dan", "POST", path, ("{\"reason\":\"" + "x".repeat(16_385) + "\"}").getBytes(StandardCharsets.UTF_8),
+                "application/json", "k-d", pending.etag()), 403, "PERMISSION_DENIED");
+        assertThat(rows(t)).isEqualTo(before);
+
+        // When alice withdraws with k-301, then replays it
+        Reply withdrawn = send(t, "alice", "POST", path, reason, "application/json", "k-301", pending.etag());
+        Reply replay = send(t, "alice", "POST", path, reason, "application/json", "k-301", pending.etag());
+
+        // Then 200, a draft with the request cleared, a new ETag, and the same body on replay
+        assertThat(withdrawn.status()).as(withdrawn.body()).isEqualTo(200);
+        assertThat(withdrawn.json().path("status").asString()).isEqualTo("DRAFT");
+        assertThat(withdrawn.json().path("requestedBy").isNull()).isTrue();
+        assertThat(withdrawn.json().path("allowedActions").toString()).isEqualTo("[\"request-publish\"]");
+        assertThat(withdrawn.etag()).isNotEqualTo(pending.etag());
+        assertThat(replay.status()).isEqualTo(200);
+        assertThat(replay.body()).isEqualTo(withdrawn.body());
+        // and one WITHDRAWN history entry, one withdrawn event, no rejected event
+        JsonNode history = send(t, "dan", "GET", "/rule-sets/card-fee/versions/2/history", null, null, null, null).json();
+        JsonNode last = history.path("data").get(history.path("data").size() - 1);
+        assertThat(last.path("action").asString()).isEqualTo("WITHDRAWN");
+        assertThat(last.path("actor").asString()).isEqualTo("alice");
+        assertThat(last.path("reason").asString()).isEqualTo("Wrong fee for GOLD");
+        assertThat(jdbc.sql("SELECT payload->>'eventType' FROM rle_decision_outbox WHERE tenant_id = :t "
+                + "AND payload->>'eventType' IN ('rules.version.withdrawn.v1', 'rules.version.rejected.v1')")
+                .param("t", t).query(String.class).list()).containsExactly("rules.version.withdrawn.v1");
+        // and v1 is still in effect
+        assertThat(send(t, "dan", "GET", "/rule-sets/card-fee", null, null, null, null).json().path("publishedVersion")
+                .asInt()).isEqualTo(1);
+        // and the same key with another reason is a key reuse mismatch
+        assertProblem(send(t, "alice", "POST", path, "{}".getBytes(StandardCharsets.UTF_8), "application/json", "k-301",
+                pending.etag()), 422, "IDEMPOTENCY_KEY_REUSE_MISMATCH");
     }
 
     @Test
@@ -298,7 +389,7 @@ class EditorApiIT {
                 413, "PAYLOAD_TOO_LARGE");
         // a chunked body without Content-Length is cut off as well
         HttpResponse<String> chunked = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets/card-fee/versions/2:reject"))
-                .header("Authorization", TestTokens.bearerFor("minh", t, APPROVER))
+                .header("Authorization", TestTokens.bearerFor("minh", t, APPROVER)).header("If-Match", "\"1\"")
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofInputStream(() -> new java.io.ByteArrayInputStream(command))).build(),
                 HttpResponse.BodyHandlers.ofString());
@@ -422,8 +513,11 @@ class EditorApiIT {
         if (idempotencyKey != null) {
             request.header("Idempotency-Key", idempotencyKey);
         }
-        if (ifMatch != null) {
-            request.header("If-Match", ifMatch);
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        String lock = ifMatch == null && path.matches(".*:(approve|reject)$") ? "\"1\"" : ifMatch;
+        if (lock != null) {
+            request.header("If-Match", lock);
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""),

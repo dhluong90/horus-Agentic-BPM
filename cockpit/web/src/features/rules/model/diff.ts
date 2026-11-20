@@ -1,9 +1,9 @@
 import type { Rule } from '../../../api/rules/schemas';
 
 /*
- * Row diff of two versions, matched by rule id, never by position (the same rules as rule-engine DESIGN
- * section 4.5). Interim: the engine's GET .../diff is not in this release's API, so the cockpit compares
- * the two canonical definitions it already read. Replace with the engine's diff when it ships.
+ * Row diff of the draft being edited against the version it started from, matched by rule id, never by
+ * position (the same rules as rule-engine DESIGN section 4.5). Only for unsaved edits, which the engine has
+ * not stored yet; stored versions are compared by the engine's GET .../diff (versionDiff.ts).
  */
 
 export type RowChange = 'ADDED' | 'REMOVED' | 'CHANGED' | 'MOVED' | 'UNCHANGED';
