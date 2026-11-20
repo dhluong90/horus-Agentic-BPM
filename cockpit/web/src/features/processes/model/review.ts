@@ -41,13 +41,6 @@ export function isMasked(value: unknown): boolean {
   return value === MASK || (typeof value === 'string' && FINGERPRINT.test(value));
 }
 
-/** The start of a keyed fingerprint, enough to compare two values by eye: `hmac:k2026:9f4a…`. Never the plain value. */
-export function fingerprintHint(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const match = FINGERPRINT.exec(value);
-  return match ? `hmac:${match[1] ?? ''}:${(match[2] ?? '').slice(0, 4)}…` : undefined;
-}
-
 export function containsMasked(value: unknown): boolean {
   if (isMasked(value)) return true;
   if (Array.isArray(value)) return value.some(containsMasked);
@@ -157,4 +150,25 @@ export function violationsByField(texts: readonly string[]): { byField: Record<s
     else other.push(text);
   }
   return { byField, other };
+}
+
+/**
+ * A field name of the agent's inputs or answer in words: `declaredMonthlyIncome` reads "Declared monthly income",
+ * `applicationId` "Application ID". The engine sends field names only, so the words are the name's own.
+ */
+export function fieldLabel(name: string): string {
+  const words = name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[\s_.-]+/)
+    .filter((word) => word !== '')
+    .map((word) => (/^id$/i.test(word) ? 'ID' : /^[A-Z0-9]{2,}$/.test(word) ? word : word.toLowerCase()));
+  if (words.length === 0) return name;
+  const [first = '', ...rest] = words;
+  return [first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(' ');
+}
+
+/** A short form of a long reference, enough to tell two apart by eye: its last four characters after an ellipsis. */
+export function shortReference(value: string): string {
+  return value.length <= 8 ? value : `…${value.slice(-4)}`;
 }

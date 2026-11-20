@@ -42,10 +42,10 @@ export function useDefinitions(pageLimit: number) {
   });
 }
 
-export function useDefinitionVersion(key: string, version: number) {
+export function useDefinitionVersion(key: string, version: number, enabled = true) {
   const { client } = useProcessesSession();
   const keys = useKeys();
-  return useQuery({ queryKey: keys.version(key, version), queryFn: ({ signal }) => client.getVersion(key, version, signal), staleTime: 60_000 });
+  return useQuery({ queryKey: keys.version(key, version), queryFn: ({ signal }) => client.getVersion(key, version, signal), staleTime: 60_000, enabled });
 }
 
 /** The version's graph, read from its BPMN export. A version is immutable, so its graph never goes stale. */

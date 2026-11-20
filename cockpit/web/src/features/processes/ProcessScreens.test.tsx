@@ -30,6 +30,10 @@ describe('CKP-069 and CKP-070 definition diagram', () => {
     expect(within(diagram).getByRole('img', { name: 'Assess documents, Agent task' })).toBeInTheDocument();
     expect(within(diagram).getByRole('img', { name: 'Capture application, Person task' })).toBeInTheDocument();
     expect(within(diagram).getByRole('img', { name: 'Credit decision, Decision' })).toBeInTheDocument();
+    // The breadcrumb names the process, not its key.
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(within(crumbs).getByText('Loan origination')).toBeInTheDocument();
+    expect(within(crumbs).queryByText('loan-origination')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('tab', { name: 'Steps (13)' }));
     const steps = within(screen.getByRole('list', { name: 'Steps in flow order' })).getAllByRole('listitem');
@@ -42,10 +46,13 @@ describe('CKP-069 and CKP-070 definition diagram', () => {
     open('#/processes/loan-origination/3');
 
     const diagram = await screen.findByRole('group', { name: /Diagram of Loan origination/ });
-    const generic = within(diagram).getByRole('img', { name: 'No documents in 2 days, boundaryEvent:timer' });
+    const generic = within(diagram).getByRole('img', { name: 'No documents in 2 days, Timer' });
     expect(generic).toHaveClass('dg-node--generic');
     expect(generic).toHaveAttribute('data-type', 'boundaryEvent:timer');
-    expect(generic.querySelector('.dg-node__type')).toHaveTextContent(/^boundaryEvent:timer$/);
+    // Named in words with the timer icon, never by the key the engine sent; the whole name is drawn, wrapped.
+    expect(generic.querySelector('.dg-node__type')).toHaveTextContent(/^Timer$/);
+    expect(generic.querySelector('.dg-node__name')).toHaveTextContent('No documents in 2 days');
+    expect(diagram).not.toHaveTextContent(/boundaryEvent/);
     // The rest of the diagram is intact.
     expect(within(diagram).getByRole('img', { name: 'Remind applicant, Service task' })).toBeInTheDocument();
   });
@@ -74,12 +81,18 @@ describe('CKP-007 agent task inspector', () => {
     setScenario('processes-reviewer');
     open(`#/tasks/${REVIEW_TASK_ID}`);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Assess documents: review' })).toBeInTheDocument();
-    // Masked inputs stay masked: the fingerprint's start only, never a value.
+    expect(await screen.findByRole('heading', { level: 1, name: "Review the agent's answer" })).toBeInTheDocument();
+    expect(screen.getByText('Step Assess documents')).toBeInTheDocument();
+    expect(await screen.findByText('Loan origination, version 3')).toBeInTheDocument();
+    // Masked inputs stay masked: one chip and a copy action, never the value or the fingerprint as text.
     const inputs = screen.getByRole('article', { name: 'What the agent received' });
     expect(within(inputs).getByText('Masked')).toBeInTheDocument();
-    expect(within(inputs).getByText('hmac:k2026:9f4a…')).toBeInTheDocument();
-    expect(within(inputs).queryByText(/9f4a1c7e2b8d4f60/)).not.toBeInTheDocument();
+    expect(within(inputs).getByRole('button', { name: 'Copy reference' })).toBeInTheDocument();
+    expect(inputs).not.toHaveTextContent(/hmac|9f4a/);
+    // Field names read as words.
+    expect(within(inputs).getByText('Declared monthly income')).toBeInTheDocument();
+    expect(within(inputs).getByText('National ID')).toBeInTheDocument();
+    expect(within(inputs).queryByText('declaredMonthlyIncome')).not.toBeInTheDocument();
     expect(within(inputs).getByText('850,000,000 VND')).toBeInTheDocument();
     // The schema verdict, the structured answer and the guardrail rule.
     const answer = screen.getByRole('article', { name: 'Agent answer' });
@@ -89,18 +102,20 @@ describe('CKP-007 agent task inspector', () => {
     expect(within(why).getByText('A guardrail rule refused the answer.')).toBeInTheDocument();
     expect(within(why).getByText('Rule R2')).toBeInTheDocument();
     expect(within(why).getByText('Declared income is 38% above the income on the salary slips')).toBeInTheDocument();
+    expect(within(why).getByText('Process Engine (loans-7f9c)')).toBeInTheDocument();
+    expect(within(why).getByText('…R2X7')).toHaveAttribute('title', '01JD4G2DEC1S10N0000000R2X7');
 
     // Take the review, then override with a reason.
     await userEvent.click(within(dock()).getByRole('button', { name: 'Start review' }));
     await userEvent.click(await within(dock()).findByRole('button', { name: 'Override' }));
     const editor = screen.getByRole('article', { name: 'Your answer' });
-    await userEvent.clear(within(editor).getByLabelText('recommendation'));
-    await userEvent.type(within(editor).getByLabelText('recommendation'), 'REFER');
-    await userEvent.clear(within(editor).getByLabelText('riskScore'));
-    await userEvent.type(within(editor).getByLabelText('riskScore'), '72');
+    await userEvent.clear(within(editor).getByLabelText('Recommendation'));
+    await userEvent.type(within(editor).getByLabelText('Recommendation'), 'REFER');
+    await userEvent.clear(within(editor).getByLabelText('Risk score'));
+    await userEvent.type(within(editor).getByLabelText('Risk score'), '72');
     const changes = within(dock()).getByRole('list', { name: 'Your changes' });
-    expect(changes).toHaveTextContent('riskScore38 → changed to72');
-    expect(changes).toHaveTextContent('recommendationAPPROVE → changed toREFER');
+    expect(changes).toHaveTextContent('Risk score38 → changed to72');
+    expect(changes).toHaveTextContent('RecommendationAPPROVE → changed toREFER');
 
     await userEvent.click(within(dock()).getByRole('button', { name: 'Record override' }));
     expect(within(dock()).getByText('Give a reason.')).toBeInTheDocument();
@@ -134,8 +149,12 @@ describe('CKP-007 agent task inspector', () => {
     setScenario('processes-starter');
     open(`#/tasks/${REVIEW_TASK_ID}`);
 
-    expect(await within(await screen.findByRole('region', { name: 'Your decision' })).findByText('You started this case, so another person must decide it.')).toBeInTheDocument();
-    expect(within(dock()).queryByRole('button', { name: 'Start review' })).not.toBeInTheDocument();
+    const line = await within(await screen.findByRole('region', { name: 'Your decision' })).findByText('You started this case, so someone else decides.');
+    // The action stays in its place, disabled, and says why.
+    const start = within(dock()).getByRole('button', { name: 'Start review' });
+    expect(start).toBeDisabled();
+    expect(start).toHaveAccessibleDescription('You started this case, so someone else decides.');
+    expect(line).toHaveAttribute('id', start.getAttribute('aria-describedby'));
     expect(within(dock()).queryByRole('button', { name: 'Approve answer' })).not.toBeInTheDocument();
   });
 
@@ -144,8 +163,9 @@ describe('CKP-007 agent task inspector', () => {
     resetProcessEngine({ reportedBy: 'hoa' });
     open(`#/tasks/${REVIEW_TASK_ID}`);
 
-    expect(await within(await screen.findByRole('region', { name: 'Your decision' })).findByText('You reported this answer, so another person must decide it.')).toBeInTheDocument();
-    expect(within(dock()).queryByRole('button', { name: 'Start review' })).not.toBeInTheDocument();
+    expect(await within(await screen.findByRole('region', { name: 'Your decision' })).findByText('You reported this answer, so someone else decides.')).toBeInTheDocument();
+    expect(within(dock()).getByRole('button', { name: 'Start review' })).toBeDisabled();
+    expect(within(dock()).getByRole('button', { name: 'Start review' })).toHaveAccessibleDescription('You reported this answer, so someone else decides.');
   });
 
   it('CKP_007_a_masked_answer_cannot_be_approved_as_is_and_the_override_needs_the_masked_value', async () => {
@@ -153,14 +173,18 @@ describe('CKP-007 agent task inspector', () => {
     open(`#/tasks/${MASKED_TASK_ID}`);
 
     const region = await screen.findByRole('region', { name: 'Your decision' });
-    expect(await within(region).findByText(/cannot be approved as is/)).toBeInTheDocument();
-    expect(within(region).getByRole('button', { name: 'Approve answer' })).toBeDisabled();
-    expect(within(screen.getByRole('article', { name: 'Agent answer' })).getByText('Masked')).toBeInTheDocument();
+    // The review opens on the override, with one line saying why Approve is not offered.
+    expect(await within(region).findByText('Part of the answer is masked, so only an override is possible.')).toBeInTheDocument();
+    const approve = within(region).getByRole('button', { name: 'Approve' });
+    expect(approve).toBeDisabled();
+    expect(approve).toHaveAccessibleDescription('Part of the answer is masked, so only an override is possible.');
+    expect(within(region).getByRole('button', { name: 'Override' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(region).queryByRole('button', { name: 'Approve answer' })).not.toBeInTheDocument();
+    expect(within(region).getByRole('button', { name: 'Record override' })).toBeEnabled();
 
-    await userEvent.click(within(region).getByRole('button', { name: 'Override' }));
     const editor = screen.getByRole('article', { name: 'Your answer' });
-    expect(within(editor).getByLabelText('summary')).toHaveValue('');
-    expect(within(editor).getByLabelText('summary')).toHaveAttribute('placeholder', 'Masked. Type your value');
+    expect(within(editor).getByLabelText('Summary')).toHaveValue('');
+    expect(within(editor).getByLabelText('Summary')).toHaveAttribute('placeholder', 'Masked. Type your value');
     await userEvent.type(within(dock()).getByLabelText('Reason'), 'Checked');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Record override' }));
     expect(within(editor).getByText('Masked values are never shown. Type the value you decide.')).toBeInTheDocument();
@@ -174,14 +198,14 @@ describe('CKP-007 agent task inspector', () => {
     await userEvent.click(await within(await screen.findByRole('region', { name: 'Your decision' })).findByRole('button', { name: 'Start review' }));
     await userEvent.click(await within(dock()).findByRole('button', { name: 'Override' }));
     const editor = screen.getByRole('article', { name: 'Your answer' });
-    await userEvent.clear(within(editor).getByLabelText('riskScore'));
-    await userEvent.type(within(editor).getByLabelText('riskScore'), '140');
+    await userEvent.clear(within(editor).getByLabelText('Risk score'));
+    await userEvent.type(within(editor).getByLabelText('Risk score'), '140');
     await userEvent.type(within(dock()).getByLabelText('Reason'), 'High risk');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Record override' }));
 
     expect(await within(dock()).findByText('The engine refused your answer: it does not meet the output schema.')).toBeInTheDocument();
     await waitFor(() => { expect(within(editor).getByText('must be between 0 and 100')).toBeInTheDocument(); });
-    expect(within(editor).getByLabelText('riskScore')).toHaveAttribute('aria-invalid', 'true');
+    expect(within(editor).getByLabelText('Risk score')).toHaveAttribute('aria-invalid', 'true');
   });
 
   it('CKP_007_a_task_without_an_agent_answer_says_so', async () => {

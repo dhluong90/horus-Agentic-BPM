@@ -249,7 +249,7 @@ describe('menu', () => {
     mockHost.use(http.get('*/api/bpm/meta', () => HttpResponse.json({ ...metaRulesOnly, modules: [...metaRulesOnly.modules, { module: 'processes', engineVersion: '0.1.0', apiVersion: 'v1', features: [] }] })));
     open('#/processes');
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Processes Preview' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Processes' })).toBeInTheDocument();
     // Lan holds no processes permission: the page says so in one line instead of an empty list.
     expect(screen.getByText(/Your permissions show no process definitions here/)).toBeInTheDocument();
     expect(screen.queryByText(/is installed on this service/)).not.toBeInTheDocument();

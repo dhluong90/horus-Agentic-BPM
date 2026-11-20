@@ -34,7 +34,7 @@ export function ProcessesPage({ pageLimit }: { pageLimit: number }) {
   const { can } = useProcessesSession();
   return (
     <section className="workspace" aria-labelledby="processes-title">
-      <PageHead id="processes-title" title={t('processes.title')} subtitle={t('processes.subtitle')} preview />
+      <PageHead id="processes-title" title={t('processes.title')} subtitle={t('processes.subtitle')} />
       <article className="card card--table" aria-labelledby="processes-title">
         {can('processes:read') ? <DefinitionTable pageLimit={pageLimit} /> : <div className="card__pad"><EmptyState icon="processes" text={t('processes.noRead')} /></div>}
       </article>

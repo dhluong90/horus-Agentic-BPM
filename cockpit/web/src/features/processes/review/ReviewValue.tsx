@@ -1,19 +1,20 @@
 import { useI18n } from '../../../i18n/I18nProvider';
 import { formatMoney } from '../../rules/model/money';
-import { fingerprintHint, isMasked, isMoney } from '../model/review';
+import { CopyButton } from '../../../components/CopyButton';
+import { isMasked, isMoney } from '../model/review';
 
 /**
  * One value of the agent's inputs or answer, in words: money with the language's separators and its minor units,
- * a masked value as "Masked" with at most the start of its keyed fingerprint, never raw JSON.
+ * a masked value as one "Masked" chip, never raw JSON. A keyed fingerprint is never shown; where `copyable`, a
+ * "Copy reference" action copies it, so two masked values can be compared outside the screen.
  */
-export function ReviewValue({ value }: { value: unknown }) {
+export function ReviewValue({ value, copyable = false }: { value: unknown; copyable?: boolean }) {
   const { t, locale } = useI18n();
   if (isMasked(value)) {
-    const hint = fingerprintHint(value);
     return (
       <span className="masked">
         <span className="masked__tag"><span aria-hidden="true">◍</span> {t('review.masked')}</span>
-        {hint !== undefined ? <span className="mono masked__hint" title={t('review.fingerprint')}>{hint}</span> : null}
+        {copyable && value !== '***' ? <CopyButton value={String(value)} label={t('review.copyRef')} iconOnly /> : null}
       </span>
     );
   }

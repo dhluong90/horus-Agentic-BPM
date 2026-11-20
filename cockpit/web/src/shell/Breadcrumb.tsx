@@ -18,6 +18,8 @@ export function Breadcrumb() {
   const crumbs = trail(route, t);
   const last = crumbs.at(-1);
   if (override !== undefined && route.name === 'rule-set' && last) crumbs[crumbs.length - 1] = { label: override };
+  // A process is named by its display name, which only the page knows; until it loads, the crumb waits rather than show the key.
+  if (route.name === 'process') crumbs.splice(1, 1, ...(override !== undefined ? [{ label: override }] : []));
   if (crumbs.length === 0) return null;
   return (
     <nav aria-label={t('header.breadcrumb')} className="crumbs">

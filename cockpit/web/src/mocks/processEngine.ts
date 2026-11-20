@@ -1,4 +1,7 @@
-import { DEMO_DEFINITIONS, FORM_TASK_ID, INSTANCE_ID, MASKED_TASK_ID, REVIEW_CONTEXT, REVIEW_TASK_ID, type DemoDefinition } from './processDemo';
+import {
+  DEMO_DEFINITIONS, FORM_TASK_ID, FORM_TASK_NAME, INSTANCE_ID, MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_CONTEXT, REVIEW_TASK_ID, REVIEW_TASK_NAME,
+  VI_DEMO_DEFINITIONS, VI_REVIEW_CONTEXT, type DemoDefinition,
+} from './processDemo';
 
 /*
  * An in-memory Process Engine for the dev server, Vitest and Playwright, in the response shapes of
@@ -52,17 +55,21 @@ export interface ProcessSeed {
   definitions?: readonly DemoDefinition[];
   startedBy?: string;
   reportedBy?: string;
+  /** The tenant's language of the demo data: names, reasons and answer words. */
+  locale?: 'en' | 'vi';
 }
 
 export function createFakeProcessEngine(seed: ProcessSeed = {}) {
-  const definitions = seed.definitions ?? DEMO_DEFINITIONS;
+  const locale = seed.locale ?? 'en';
+  const definitions = seed.definitions ?? (locale === 'vi' ? VI_DEMO_DEFINITIONS : DEMO_DEFINITIONS);
   const startedBy = seed.startedBy ?? 'lan';
-  const review = { ...REVIEW_CONTEXT, ...(seed.reportedBy !== undefined ? { reportedBy: seed.reportedBy } : {}) };
+  const review = { ...(locale === 'vi' ? VI_REVIEW_CONTEXT : REVIEW_CONTEXT), ...(seed.reportedBy !== undefined ? { reportedBy: seed.reportedBy } : {}) };
+  const recommendations: readonly string[] = RECOMMENDATIONS[locale];
   const tasks = new Map<string, StoredTask>([
-    [REVIEW_TASK_ID, { id: REVIEW_TASK_ID, name: 'Assess documents: review', nodeId: 'assess-documents', status: 'OPEN', lockVersion: 0, claimedBy: null, claimedAt: null, completedBy: null, completedAt: null, review }],
-    [MASKED_TASK_ID, { id: MASKED_TASK_ID, name: 'Assess documents: review', nodeId: 'assess-documents', status: 'CLAIMED', lockVersion: 1, claimedBy: 'hoa', claimedAt: NOW, completedBy: null, completedAt: null,
+    [REVIEW_TASK_ID, { id: REVIEW_TASK_ID, name: REVIEW_TASK_NAME[locale], nodeId: 'assess-documents', status: 'OPEN', lockVersion: 0, claimedBy: null, claimedAt: null, completedBy: null, completedAt: null, review }],
+    [MASKED_TASK_ID, { id: MASKED_TASK_ID, name: REVIEW_TASK_NAME[locale], nodeId: 'assess-documents', status: 'CLAIMED', lockVersion: 1, claimedBy: 'hoa', claimedAt: NOW, completedBy: null, completedAt: null,
       review: { ...review, output: { ...review.output, summary: '***' }, outputFields: 4 } }],
-    [FORM_TASK_ID, { id: FORM_TASK_ID, name: 'Capture application', nodeId: 'capture', status: 'OPEN', lockVersion: 0, claimedBy: null, claimedAt: null, completedBy: null, completedAt: null, review: undefined }],
+    [FORM_TASK_ID, { id: FORM_TASK_ID, name: FORM_TASK_NAME[locale], nodeId: 'capture', status: 'OPEN', lockVersion: 0, claimedBy: null, claimedAt: null, completedBy: null, completedAt: null, review: undefined }],
   ]);
   const overrides: RecordedOverride[] = [];
   const requests: { method: string; path: string; headers: Readonly<Record<string, string>>; body: string }[] = [];
@@ -101,7 +108,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     const score = result['riskScore'];
     if (typeof score !== 'number' || !Number.isInteger(score)) out.push('$.riskScore: expected integer');
     else if (score < 0 || score > 100) out.push('$.riskScore: must be between 0 and 100');
-    if (!['APPROVE', 'REFER', 'DECLINE'].includes(String(result['recommendation']))) out.push('$.recommendation: must be one of APPROVE, REFER, DECLINE');
+    if (!recommendations.includes(String(result['recommendation']))) out.push(`$.recommendation: must be one of ${recommendations.join(', ')}`);
     if (typeof result['incomeVerified'] !== 'boolean') out.push('$.incomeVerified: expected boolean');
     for (const [key, value] of Object.entries(result)) if (value === '***') out.push(`$.${key}: masked value`);
     return out;

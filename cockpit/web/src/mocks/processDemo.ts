@@ -134,3 +134,65 @@ export const REVIEW_CONTEXT = {
   attemptId: '4S2Q8M0Z7XK1D9V3B6N5R2T8WA',
   reportedBy: 'engine:loans-7f9c',
 } as const;
+
+/*
+ * The same demo as a Vietnamese tenant authors it: process, step and flow names, the guardrail's reasons and the
+ * answer's words are the tenant's data, so a Vietnamese bank sees them in Vietnamese. Field names stay as the
+ * agent's output schema declares them.
+ */
+const VI_NAMES: Readonly<Record<string, string>> = {
+  'Loan origination': 'Khởi tạo khoản vay',
+  'Application received': 'Nhận hồ sơ vay',
+  'Capture application': 'Nhập hồ sơ vay',
+  'No documents in 2 days': 'Chưa có chứng từ sau 2 ngày',
+  'Remind applicant': 'Nhắc khách hàng',
+  'Reminder sent': 'Đã gửi lời nhắc',
+  'Assess documents': 'Thẩm định chứng từ',
+  'Credit decision': 'Quyết định tín dụng',
+  'Approved?': 'Được duyệt?',
+  'Book loan': 'Ghi sổ khoản vay',
+  'Send offer': 'Gửi đề nghị',
+  'Loan booked': 'Đã ghi sổ',
+  'Send decline letter': 'Gửi thư từ chối',
+  Declined: 'Từ chối',
+  Approved: 'Duyệt',
+  'Customer onboarding (KYC)': 'Mở khách hàng mới (KYC)',
+  'Onboarding requested': 'Yêu cầu mở khách hàng',
+  'Checks in parallel': 'Kiểm tra song song',
+  'Screen sanctions lists': 'Sàng lọc danh sách cấm vận',
+  'Verify identity documents': 'Xác minh giấy tờ tuỳ thân',
+  'Both checks done': 'Xong cả hai kiểm tra',
+  'Rate customer risk': 'Xếp hạng rủi ro khách hàng',
+  'High risk?': 'Rủi ro cao?',
+  'Approve high-risk customer': 'Duyệt khách hàng rủi ro cao',
+  'Wait one day': 'Chờ một ngày',
+  'Open account': 'Mở tài khoản',
+  'Customer onboarded': 'Đã mở khách hàng',
+  High: 'Cao',
+  Standard: 'Thường',
+  'Card dispute': 'Khiếu nại thẻ',
+  'Dispute raised': 'Nhận khiếu nại',
+  'Review dispute': 'Xem xét khiếu nại',
+  'Raise chargeback': 'Yêu cầu hoàn tiền',
+  'Dispute closed': 'Đóng khiếu nại',
+};
+
+const viName = (name: string): string => VI_NAMES[name] ?? name;
+
+function viBpmn(bpmn: string): string {
+  return bpmn.replace(/ name="([^"]+)"/g, (whole, name: string) => (whole.includes('horus:') ? whole : ` name="${viName(name)}"`));
+}
+
+export const VI_DEMO_DEFINITIONS: readonly DemoDefinition[] = DEMO_DEFINITIONS.map((d) => ({ ...d, name: viName(d.name), bpmn: viBpmn(d.bpmn) }));
+
+export const VI_REVIEW_CONTEXT = {
+  ...REVIEW_CONTEXT,
+  reasons: ['Thu nhập kê khai cao hơn 38% so với thu nhập trên phiếu lương', 'Đề xuất Duyệt cần thu nhập được xác minh trong biên độ 20%'],
+  output: { riskScore: 38, recommendation: 'Duyệt', incomeVerified: true },
+} as const;
+
+/** The review task names, as the engine names the task after its step. */
+export const REVIEW_TASK_NAME = { en: 'Assess documents', vi: 'Thẩm định chứng từ' } as const;
+export const FORM_TASK_NAME = { en: 'Capture application', vi: 'Nhập hồ sơ vay' } as const;
+/** The answer's allowed recommendations, as the step's output schema lists them for each tenant. */
+export const RECOMMENDATIONS = { en: ['APPROVE', 'REFER', 'DECLINE'], vi: ['Duyệt', 'Xem lại', 'Từ chối'] } as const;

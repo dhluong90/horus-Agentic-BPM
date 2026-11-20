@@ -2,11 +2,11 @@
  * Colours come from tokens.css only. Violet marks agent steps and route-to-human, nothing else (styleguide 2). */
 
 /* ---------- Definition diagram ---------- */
-.card.card--diagram { padding: 12px 20px 20px; gap: 0; }
+.card.card--diagram { padding: 12px 16px 16px; gap: 0; }
 .dg { position: relative; display: flex; flex-direction: column; gap: 8px; }
 .dg__tools { align-self: flex-end; }
 .dg__frame {
-  overflow: auto; max-height: calc(100vh - var(--topbar-h) - 260px); min-height: 320px;
+  overflow: auto; min-height: 160px; max-height: max(240px, calc(100vh - var(--topbar-h) - 280px));
   border: 1px solid var(--line); border-radius: var(--radius-l);
   background-color: var(--canvas);
   background-image: radial-gradient(var(--dot) 1px, transparent 1px);
@@ -17,16 +17,11 @@
 .dg-edge path { fill: none; stroke: var(--edge); stroke-width: 1.5; }
 .dg-edge .dg-edge__default { stroke-width: 2; }
 .dg-arrow { fill: var(--edge); stroke: none; }
-.dg-edge__label-box { overflow: visible; }
-.dg-edge__label {
-  display: block; width: max-content; max-width: 120px; margin: 0 auto; padding: 1px 6px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  border-radius: var(--radius-pill); background: var(--canvas); color: var(--edge-label);
-  font: var(--type-caption); line-height: 20px;
-}
+.dg-edge__label rect { fill: var(--canvas); stroke: var(--line); stroke-width: 1; }
+.dg-edge__label text { fill: var(--edge-label); font: var(--type-caption); }
 
 .dg-node { color: var(--ink-2); outline: none; }
-.dg-node rect, .dg-node circle, .dg-node path { fill: var(--node); stroke: var(--node-stroke); stroke-width: 1.5; }
+.dg-node rect, .dg-node circle, .dg-node > path { fill: var(--node); stroke: var(--node-stroke); stroke-width: 1.5; }
 .dg-node:hover rect, .dg-node:hover circle, .dg-node:hover > path { filter: var(--node-hover); }
 .dg-node:focus-visible rect, .dg-node:focus-visible circle, .dg-node:focus-visible > path { stroke: var(--focus); stroke-width: 3; }
 .dg-node g path, .dg-node g circle, .dg-node g rect { fill: none; stroke: currentColor; filter: none; }
@@ -35,18 +30,10 @@
 .dg-node--agent rect { stroke: var(--violet); fill: var(--violet-soft); }
 .dg-node--generic rect { stroke-dasharray: 5 4; fill: var(--surface-2); }
 .dg-node__glyph { fill: var(--ink-2); font: 700 20px/1 var(--font-ui); }
-.dg-node__text { display: flex; flex-direction: column; justify-content: center; height: 100%; gap: 2px; }
-.dg-node__name {
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  color: var(--ink); font: var(--type-label); font-weight: 600; line-height: 1.35;
-}
-.dg-node__type { color: var(--muted); font: var(--type-caption); }
-.dg-node--agent .dg-node__type { color: var(--violet); }
-.dg-node__type--raw { font-family: var(--font-data); font-size: 11px; overflow-wrap: anywhere; line-height: 1.3; }
-.dg-node__caption {
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  text-align: center; color: var(--ink); font: var(--type-caption); line-height: 1.4;
-}
+.dg-node__name { fill: var(--ink); font: var(--type-label); font-weight: 600; }
+.dg-node__type { fill: var(--muted); font: var(--type-caption); }
+.dg-node--agent .dg-node__type { fill: var(--violet); }
+.dg-node__caption { fill: var(--ink); font: var(--type-caption); }
 
 .step-list { list-style: decimal; margin: 8px 0 0; padding: 0 0 0 28px; display: flex; flex-direction: column; }
 .step-list__item { display: list-item; padding: 10px 4px; border-bottom: 1px solid var(--line); }
@@ -64,6 +51,8 @@
 .review-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
 @media (max-width: 1180px) { .review-grid { grid-template-columns: minmax(0, 1fr); } }
 .review-card { max-height: calc(100vh - var(--topbar-h) - 330px); min-height: 180px; overflow: auto; }
+/* While deciding, the dock holds the reason and the change list: the cards give it the room. */
+.review:has(.review-dock__reason) .review-card { max-height: calc(100vh - var(--topbar-h) - 470px); }
 .review-card__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .review-card__note { font: var(--type-caption); }
 .review-card--guardrail { box-shadow: var(--sh-1), inset 3px 0 0 var(--violet); }
@@ -74,30 +63,46 @@
 .review-fields dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
 .review-value__text { white-space: pre-wrap; }
 
-.masked { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.masked { display: inline-flex; align-items: center; gap: 6px; }
 .masked__tag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--ink-2); font: var(--type-caption); font-weight: 600; line-height: 20px; }
-.masked__hint { color: var(--muted); font-size: 12px; }
 
 .review-why__sentence { margin: 0; color: var(--ink); font-weight: 600; }
 .rule-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .review-reasons { margin: 0; padding-left: 18px; color: var(--ink-2); display: flex; flex-direction: column; gap: 4px; }
-.review-why__facts { margin-top: 4px; }
-.review-why__ref { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.review-why__id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-why__facts { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 0; font: var(--type-label); }
+.review-why__facts > div { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; }
+.review-why__facts dt { color: var(--muted); }
+.review-why__facts dd { margin: 0; color: var(--ink); }
+.review-why__ref { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.copy-btn { white-space: nowrap; }
+.copy-btn--icon { min-height: 28px; width: 28px; padding: 0; justify-content: center; }
 
 .review-editor { display: flex; flex-direction: column; gap: 12px; }
 .review-editor__fixed { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; padding: 8px 0; }
 .review-editor .field__input { min-height: var(--target-min); }
 
-.review-dock { grid-template-columns: auto minmax(0, 1fr) auto; }
-.review-dock .seg { align-self: flex-start; }
-.review-dock .seg button { min-height: 36px; padding: 4px 14px; }
-.review-dock > .dock__note, .review-dock > .gate__reason { grid-column: 2 / -1; margin: 0; }
-.review-dock > .review-dock__hint { grid-column: auto; }
-.review-dock__error { grid-column: 1 / -1; }
+.review-dock {
+  position: sticky; bottom: 12px; z-index: 20; margin-top: 16px; padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 12px;
+  box-shadow: var(--sh-dock), var(--sh-1);
+}
+.review-dock__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; min-height: 36px; }
+.review-dock .seg button { min-height: 36px; padding: 4px 16px; }
+.review-dock .seg button:disabled { color: var(--muted); cursor: not-allowed; }
+.review-dock__row { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.review-dock__line { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink-2); line-height: 1.45; }
+.review-dock__line--blocked, .review-dock__line--masked { padding: 8px 12px; border-radius: var(--radius-m); background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); }
+.review-dock__icon { color: var(--muted); font-weight: 700; }
+.review-dock__reason { display: flex; flex-direction: column; gap: 6px; }
+.review-dock__reason textarea.field__input { width: 100%; min-height: 64px; }
+.review-dock__foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: var(--target-min); }
+.review-dock__messages { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.review-dock__messages .field__error { margin: 0; }
+.review-dock__foot .btn, .review-dock__row .btn { flex: none; min-width: 168px; }
+.review-dock__row > .review-dock__line { flex: 1 1 320px; }
+.review-dock__error { margin: 0; }
 .review-changes { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; font: var(--type-label); }
 .review-changes__field { color: var(--muted); margin-right: 6px; }
 .review-changes__from { color: var(--ink-2); text-decoration: line-through; }
 .review-changes__to { color: var(--ink); font-weight: 600; background: var(--indigo-soft); padding: 0 4px; border-radius: var(--radius-xs); }
 .review-changes__none { margin: 0; font: var(--type-label); }
-.dg-node--generic .dg-node__name { -webkit-line-clamp: 1; }

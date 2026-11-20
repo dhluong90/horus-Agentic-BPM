@@ -7,16 +7,18 @@ import { useI18n } from '../../../i18n/I18nProvider';
 import type { MessageKey } from '../../../i18n/en';
 import { formatDateTime } from '../../rules/model/dates';
 import { useProcessesSession } from '../api/processesContext';
-import { useClaimTask, useCompleteTask, useInstance, useTask } from '../api/useProcesses';
+import { useClaimTask, useCompleteTask, useDefinitionVersion, useInstance, useTask } from '../api/useProcesses';
 import {
   buildAnswer,
   changesOf,
   containsMasked,
   fieldKind,
+  fieldLabel,
   fourEyesBlock,
   initialText,
   refusalOf,
   schemaVerdict,
+  shortReference,
   violationsByField,
   type FieldProblem,
 } from '../model/review';
@@ -63,7 +65,7 @@ export function ReviewTaskPage({ taskId }: { taskId: string }) {
   if (review === undefined) {
     return (
       <section className="workspace" aria-labelledby="review-title">
-        <PageHead id="review-title" title={task.data.name ?? task.data.nodeId} subtitle={t('review.notAgentSubtitle')} />
+        <PageHead id="review-title" title={t('review.crumb')} subtitle={t('review.notAgentSubtitle')} />
         <article className="card"><EmptyState icon="processes" text={t('review.notAgent')} /></article>
       </section>
     );
@@ -72,8 +74,9 @@ export function ReviewTaskPage({ taskId }: { taskId: string }) {
 }
 
 function Review({ task, review }: { task: Task; review: ReviewContext }) {
-  const { t, locale } = useI18n();
-  const [mode, setMode] = useState<Mode>('approve');
+  const { t } = useI18n();
+  // A masked answer cannot be sent back as is, so the review opens on the override.
+  const [mode, setMode] = useState<Mode>(containsMasked(review.output) ? 'override' : 'approve');
   const [texts, setTexts] = useState<Record<string, string>>({});
   const [tried, setTried] = useState(false);
   const complete = useCompleteTask(task);
@@ -81,12 +84,8 @@ function Review({ task, review }: { task: Task; review: ReviewContext }) {
   const built = buildAnswer(review.output, texts);
   return (
     <section className="workspace review" aria-labelledby="review-title">
-      <PageHead id="review-title" title={task.name ?? task.nodeId} subtitle={t('review.subtitle')} action={<TaskStatus task={task} />} />
-      <p className="review__meta">
-        {task.businessKey ? <span>{t('review.case', { key: task.businessKey })}</span> : null}
-        <span>{t('review.process', { key: task.definitionKey, version: String(task.definitionVersion) })}</span>
-        <span>{t('review.created', { when: formatDateTime(task.createdAt, locale) ?? '' })}</span>
-      </p>
+      <PageHead id="review-title" title={t('review.title')} subtitle={t('review.subtitle')} action={<TaskStatus task={task} />} />
+      <ReviewMeta task={task} />
       <div className="review-grid">
         <article className="card review-card" aria-labelledby="review-inputs">
           <h2 id="review-inputs" className="card__title">{t('review.inputs')}</h2>
@@ -106,6 +105,22 @@ function Review({ task, review }: { task: Task; review: ReviewContext }) {
       </div>
       <ReviewDock task={task} review={review} mode={mode} onMode={setMode} built={built} complete={complete} otherViolations={serverViolations.other} tried={tried} onTry={() => { setTried(true); }} />
     </section>
+  );
+}
+
+/** Which case, step and process the review belongs to, by their names; a key is shown only when no name is known. */
+function ReviewMeta({ task }: { task: Task }) {
+  const { t, locale } = useI18n();
+  const { can } = useProcessesSession();
+  const definition = useDefinitionVersion(task.definitionKey, task.definitionVersion, can('processes:read'));
+  const processName = definition.data?.name ?? undefined;
+  return (
+    <p className="review__meta">
+      {task.businessKey ? <span>{t('review.case', { key: task.businessKey })}</span> : null}
+      {task.name ? <span>{t('review.step', { name: task.name })}</span> : null}
+      {processName !== undefined ? <span>{t('review.process', { name: processName, version: String(task.definitionVersion) })}</span> : null}
+      <span>{t('review.created', { when: formatDateTime(task.createdAt, locale) ?? '' })}</span>
+    </p>
   );
 }
 
@@ -134,8 +149,8 @@ function FieldList({ values, empty }: { values: Readonly<Record<string, unknown>
     <dl className="review-fields">
       {entries.map(([name, value]) => (
         <div key={name}>
-          <dt>{name}</dt>
-          <dd><ReviewValue value={value} /></dd>
+          <dt>{fieldLabel(name)}</dt>
+          <dd><ReviewValue value={value} copyable /></dd>
         </div>
       ))}
     </dl>
@@ -167,14 +182,26 @@ function Guardrail({ review }: { review: ReviewContext }) {
           {review.reasons.map((reason, index) => <li key={index}>{reason}</li>)}
         </ul>
       ) : null}
-      <dl className="dock__facts review-why__facts">
-        {review.reportedBy !== undefined ? <div><dt>{t('review.reportedBy')}</dt><dd>{review.reportedBy}</dd></div> : null}
+      <dl className="review-why__facts">
+        {review.reportedBy !== undefined ? <div><dt>{t('review.reportedBy')}</dt><dd>{reporterName(review.reportedBy, t)}</dd></div> : null}
         {review.guardrailDecisionId !== undefined ? (
-          <div><dt>{t('review.decisionRef')}</dt><dd className="review-why__ref"><span className="mono review-why__id" title={review.guardrailDecisionId}>{review.guardrailDecisionId}</span> <CopyButton value={review.guardrailDecisionId} /></dd></div>
+          <div>
+            <dt>{t('review.decisionRef')}</dt>
+            <dd className="review-why__ref">
+              <span className="mono" title={review.guardrailDecisionId}>{shortReference(review.guardrailDecisionId)}</span>
+              <CopyButton value={review.guardrailDecisionId} label={t('review.copyRef')} />
+            </dd>
+          </div>
         ) : null}
       </dl>
     </article>
   );
+}
+
+/** Who reported the refused answer, in words: an engine replica reads "Process Engine (loans-7f9c)". */
+function reporterName(reportedBy: string, t: (key: MessageKey, params?: Record<string, string>) => string): string {
+  const replica = /^engine:(.+)$/.exec(reportedBy);
+  return replica?.[1] !== undefined ? t('review.byEngine', { replica: replica[1] }) : reportedBy;
 }
 
 function AnswerEditor({ output, texts, onChange, problems, showAll, serverViolations }: {
@@ -200,7 +227,7 @@ function AnswerEditor({ output, texts, onChange, problems, showAll, serverViolat
         const set = (next: string) => { onChange({ ...texts, [field]: next }); };
         return (
           <div key={field} className="field review-editor__field">
-            <label className="field__label" htmlFor={id}>{field}</label>
+            <label className="field__label" htmlFor={id}>{fieldLabel(field)}</label>
             {kind === 'fixed' ? (
               <div id={id} className="review-editor__fixed"><ReviewValue value={original} /> <span className="muted">{t('review.fixed')}</span></div>
             ) : kind === 'boolean' ? (
@@ -247,16 +274,17 @@ function ReviewDock({ task, review, mode, onMode, built, complete, otherViolatio
   const masked = containsMasked(review.output);
   const changes = changesOf(review.output, built.result);
 
+  const maskedId = useId();
+  const open = task.status === 'OPEN' || task.status === 'CLAIMED';
+  const blockedLine = !open ? undefined : block === 'reported' ? t('review.dock.selfReported') : block === 'started' ? t('review.dock.selfStarted') : undefined;
   let note: string | undefined;
   if (task.status === 'COMPLETED') note = t('review.dock.completed', { who: task.completedBy ?? '', when: formatDateTime(task.completedAt, locale) ?? '' });
   else if (task.status === 'CANCELLED') note = t('review.dock.cancelled');
-  else if (block === 'reported') note = t('review.dock.selfReported');
-  else if (block === 'started') note = t('review.dock.selfStarted');
   else if (task.status === 'CLAIMED' && task.claimedBy !== userId) note = t('review.dock.claimedByOther', { who: task.claimedBy ?? '' });
   else if (task.status === 'OPEN' && !allowed.has('claim')) note = t('review.dock.notAssigned', { assignee: task.assignee });
   else if (task.status === 'CLAIMED' && !allowed.has('complete')) note = t('review.dock.cannotComplete');
 
-  const blocked = block !== undefined;
+  const deciding = blockedLine === undefined && note === undefined && task.status === 'CLAIMED';
   const reasonMissing = reason.trim() === '';
   const formProblems = mode === 'override' ? Object.keys(built.problems).length : 0;
   const approveUnavailable = mode === 'approve' && masked;
@@ -268,37 +296,47 @@ function ReviewDock({ task, review, mode, onMode, built, complete, otherViolatio
   };
 
   return (
-    <section className="card decision decision--dock review-dock" aria-labelledby="review-dock-title">
-      <h2 id="review-dock-title" className="rules-card-title">{t('review.dock.title')}</h2>
-      {note !== undefined ? (
-        <p className={blocked ? 'gate__reason' : 'dock__note'} id={noteId}>{blocked ? <span aria-hidden="true">⊘ </span> : null}{note}</p>
-      ) : task.status === 'OPEN' ? (
-        <>
-          <p className="dock__note review-dock__hint">{t('review.dock.startHint')}</p>
-          <div className="decision__actions">
-            <button type="button" className="btn btn--primary" disabled={claim.isPending} aria-busy={claim.isPending} onClick={() => { claim.mutate(); }}>
-              {claim.isPending ? t('review.dock.starting') : t('review.dock.start')}
+    <section className="card review-dock" aria-labelledby="review-dock-title">
+      <div className="review-dock__head">
+        <h2 id="review-dock-title" className="rules-card-title">{t('review.dock.title')}</h2>
+        {deciding ? (
+          <div className="seg" role="group" aria-label={t('review.dock.modeLabel')}>
+            <button type="button" className="hit" aria-pressed={mode === 'approve'} disabled={masked} aria-describedby={masked ? maskedId : undefined}
+              onClick={() => { onMode('approve'); }}>
+              {masked ? <span aria-hidden="true">◍ </span> : null}{t('review.dock.modeApprove')}
             </button>
+            <button type="button" className="hit" aria-pressed={mode === 'override'} onClick={() => { onMode('override'); }}>{t('review.dock.modeOverride')}</button>
           </div>
-        </>
+        ) : null}
+      </div>
+      {blockedLine !== undefined ? (
+        <div className="review-dock__row">
+          <p className="review-dock__line review-dock__line--blocked" id={noteId}><span className="review-dock__icon" aria-hidden="true">⊘</span>{blockedLine}</p>
+          <button type="button" className="btn btn--primary" disabled aria-describedby={noteId}>{t('review.dock.start')}</button>
+        </div>
+      ) : note !== undefined ? (
+        <p className="dock__note review-dock__line">{note}</p>
+      ) : task.status === 'OPEN' ? (
+        <div className="review-dock__row">
+          <p className="dock__note review-dock__line">{t('review.dock.startHint')}</p>
+          <button type="button" className="btn btn--primary" disabled={claim.isPending} aria-busy={claim.isPending} onClick={() => { claim.mutate(); }}>
+            {claim.isPending ? t('review.dock.starting') : t('review.dock.start')}
+          </button>
+        </div>
       ) : (
         <>
-          <div className="decision__body">
-            <div className="seg" role="group" aria-label={t('review.dock.modeLabel')}>
-              <button type="button" className="hit" aria-pressed={mode === 'approve'} onClick={() => { onMode('approve'); }}>{t('review.dock.modeApprove')}</button>
-              <button type="button" className="hit" aria-pressed={mode === 'override'} onClick={() => { onMode('override'); }}>{t('review.dock.modeOverride')}</button>
+          {masked ? <p className="review-dock__line review-dock__line--masked" id={maskedId}><span className="review-dock__icon" aria-hidden="true">◍</span>{t('review.dock.maskedApprove')}</p> : null}
+          {mode === 'override' ? <ChangeSummary changes={changes} /> : null}
+          <label className="field review-dock__reason" htmlFor={reasonId}>
+            <span className="field__label">{t('review.dock.reason')}</span>
+            <textarea id={reasonId} className="field__input" rows={2} value={reason} maxLength={2000} placeholder={t('review.dock.reasonHint')}
+              aria-invalid={tried && reasonMissing} onChange={(e) => { setReason(e.target.value); }} />
+          </label>
+          <div className="review-dock__foot">
+            <div className="review-dock__messages">
+              {tried && reasonMissing ? <p className="field__error">{t('review.dock.reasonRequired')}</p> : null}
+              {tried && nothingChanged ? <p className="field__error">{t('review.dock.nothingChanged')}</p> : null}
             </div>
-            {approveUnavailable ? <p className="gate__reason"><span aria-hidden="true">⊘ </span>{t('review.dock.maskedApprove')}</p> : null}
-            {mode === 'override' ? <ChangeSummary changes={changes} /> : null}
-            <label className="field" htmlFor={reasonId}>
-              <span className="field__label">{t('review.dock.reason')}</span>
-              <textarea id={reasonId} className="field__input" rows={1} value={reason} maxLength={2000} placeholder={t('review.dock.reasonHint')}
-                aria-invalid={tried && reasonMissing} onChange={(e) => { setReason(e.target.value); }} />
-            </label>
-            {tried && reasonMissing ? <p className="field__error">{t('review.dock.reasonRequired')}</p> : null}
-            {tried && nothingChanged ? <p className="field__error">{t('review.dock.nothingChanged')}</p> : null}
-          </div>
-          <div className="decision__actions">
             <button type="button" className={mode === 'approve' ? 'btn btn--primary btn--ok' : 'btn btn--primary'} disabled={complete.isPending || approveUnavailable}
               aria-busy={complete.isPending} onClick={submit}>
               {complete.isPending ? t('review.dock.sending') : mode === 'approve' ? t('review.dock.approve') : t('review.dock.override')}
@@ -318,7 +356,7 @@ function ChangeSummary({ changes }: { changes: ReturnType<typeof changesOf> }) {
     <ul className="review-changes" aria-label={t('review.dock.changes')}>
       {changes.map((change) => (
         <li key={change.field}>
-          <span className="review-changes__field">{change.field}</span>
+          <span className="review-changes__field">{fieldLabel(change.field)}</span>
           <span className="review-changes__from"><ReviewValue value={change.from} /></span>
           <span aria-hidden="true"> → </span><span className="sr-only">{t('review.dock.to')}</span>
           <span className="review-changes__to"><ReviewValue value={change.to} /></span>

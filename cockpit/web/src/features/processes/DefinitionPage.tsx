@@ -1,4 +1,5 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { setCrumbLabel } from '../../app/crumbs';
 import { AreaError, LoadingRows, PageHead } from '../../components/PageParts';
 import { useI18n } from '../../i18n/I18nProvider';
 import { Tabs } from '../rules/components/Tabs';
@@ -19,6 +20,11 @@ export function DefinitionPage({ definitionKey, version }: { definitionKey: stri
   const graph = useDefinitionGraph(definitionKey, version);
   const [lens, setLens] = useState<Lens>('diagram');
   const title = details.data?.name ?? definitionKey;
+  const name = details.data?.name ?? undefined;
+  useEffect(() => {
+    setCrumbLabel(name);
+    return () => { setCrumbLabel(undefined); };
+  }, [name]);
   return (
     <section className="workspace" aria-labelledby="definition-title">
       <PageHead id="definition-title" title={title} subtitle={t('definition.subtitle', { version: String(version) })}

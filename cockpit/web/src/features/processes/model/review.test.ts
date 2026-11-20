@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAnswer, changesOf, containsMasked, fingerprintHint, fourEyesBlock, isMasked, schemaVerdict, violationsByField } from './review';
+import { buildAnswer, changesOf, containsMasked, fieldLabel, fourEyesBlock, shortReference, isMasked, schemaVerdict, violationsByField } from './review';
 
 describe('CKP-007 review model', () => {
   it('CKP_007_schema_verdict_follows_the_refusal_code', () => {
@@ -9,12 +9,10 @@ describe('CKP-007 review model', () => {
     expect(schemaVerdict('SOMETHING_NEW')).toBe('unknown');
   });
 
-  it('CKP_007_masked_values_are_recognised_and_only_a_fingerprint_hint_is_shown', () => {
+  it('CKP_007_masked_values_are_recognised', () => {
     expect(isMasked('***')).toBe(true);
     expect(isMasked('hmac:k2026:9f4a1c7e2b8d')).toBe(true);
     expect(isMasked('APP-1042')).toBe(false);
-    expect(fingerprintHint('hmac:k2026:9f4a1c7e2b8d')).toBe('hmac:k2026:9f4a…');
-    expect(fingerprintHint('***')).toBeUndefined();
     expect(containsMasked({ a: [1, { b: '***' }] })).toBe(true);
   });
 
@@ -46,5 +44,16 @@ describe('CKP-007 review model', () => {
 
   it('CKP_007_engine_violations_are_placed_on_their_fields', () => {
     expect(violationsByField(['$.riskScore: expected integer', 'answer too large'])).toEqual({ byField: { riskScore: 'expected integer' }, other: ['answer too large'] });
+  });
+});
+
+describe('CKP-007 readable field names and references', () => {
+  it('CKP_007_field_names_read_as_words_and_references_are_short', () => {
+    expect(fieldLabel('declaredMonthlyIncome')).toBe('Declared monthly income');
+    expect(fieldLabel('applicationId')).toBe('Application ID');
+    expect(fieldLabel('risk_score')).toBe('Risk score');
+    expect(fieldLabel('KYCLevel')).toBe('KYC level');
+    expect(shortReference('01JD4G2DEC1S10N0000000R2X7')).toBe('…R2X7');
+    expect(shortReference('R2')).toBe('R2');
   });
 });

@@ -1,16 +1,17 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { meHoa, metaWithProcesses } from '../src/mocks/fixtures';
-import { REVIEW_TASK_ID } from '../src/mocks/processDemo';
-import { createFakeProcessEngine } from '../src/mocks/processEngine';
+import { MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_TASK_ID } from '../src/mocks/processDemo';
+import { createFakeProcessEngine, type ProcessSeed } from '../src/mocks/processEngine';
 import { createFakeEngine, demoSeed } from '../src/mocks/ruleEngine';
 import { mockHost, rememberLocale } from './mockHost';
 
 /*
  * The process screens at the two laptop sizes, in both themes and both languages (CKP-069, CKP-070, CKP-007):
- * the definition list, the loan process diagram with its generic boundary-timer node, and the review of the
- * escalated agent step before and during an override. Each run checks the fold (title and primary action visible
- * at 1440x900, no sideways scrolling) and runs axe-core. Screenshots go to e2e/screenshots/.
+ * the definition list, the loan process diagram with its boundary timer, and the review of the escalated agent
+ * step: open, overriding, blocked by four eyes (the starter, the reporter) and with a masked answer. Each run checks
+ * the fold (title and primary action visible at 1440x900, no sideways scrolling) and runs axe-core. The demo data is
+ * the tenant's, in the tenant's language. Screenshots go to e2e/screenshots/.
  */
 
 const VIEWPORTS = [
@@ -21,8 +22,8 @@ const THEMES = ['light', 'dark'] as const;
 const LOCALES = ['en', 'vi'] as const;
 type Locale = (typeof LOCALES)[number];
 
-async function mockEngines(page: Page, user = meHoa) {
-  const processes = createFakeProcessEngine();
+async function mockEngines(page: Page, seed: ProcessSeed = {}, user = meHoa) {
+  const processes = createFakeProcessEngine(seed);
   const rules = createFakeEngine(demoSeed());
   await mockHost(page, 'ready');
   await page.route('**/api/bpm/meta', (route) => route.fulfill({ json: metaWithProcesses }));
@@ -44,6 +45,8 @@ interface Screen {
   name: string;
   hash: string;
   title: Record<Locale, string | RegExp>;
+  /** The fake engine's seed beyond the language: who started the case, who reported the answer. */
+  seed?: Omit<ProcessSeed, 'locale'>;
   /** Steps after the page opens, for example taking the review and starting an override. */
   prepare?: (page: Page, locale: Locale) => Promise<void>;
   /** The element that must be visible without scrolling at 1440x900: the primary action, or the diagram. */
@@ -56,37 +59,62 @@ const T = {
   record: { en: 'Record override', vi: 'Ghi nhận sửa đổi' },
   approve: { en: 'Approve answer', vi: 'Duyệt câu trả lời' },
   reason: { en: 'Reason', vi: 'Lý do' },
+  review: { en: "Review the agent's answer", vi: 'Xem xét câu trả lời của tác tử AI' },
+  loan: { en: 'Loan origination', vi: 'Khởi tạo khoản vay' },
+  started: { en: 'You started this case, so someone else decides.', vi: 'Bạn đã khởi tạo hồ sơ này, nên người khác quyết định.' },
+  reported: { en: 'You reported this answer, so someone else decides.', vi: 'Bạn đã gửi câu trả lời này, nên người khác quyết định.' },
+  masked: { en: 'Part of the answer is masked, so only an override is possible.', vi: 'Một phần câu trả lời đã được che, nên chỉ có thể sửa.' },
 } as const;
 
 const SCREENS: readonly Screen[] = [
   {
     name: 'processes-list',
     hash: '#/processes',
-    title: { en: 'Processes Preview', vi: 'Quy trình Xem trước' },
-    focal: (page) => page.getByRole('link', { name: 'Loan origination' }),
+    title: { en: 'Processes', vi: 'Quy trình' },
+    focal: (page, locale) => page.getByRole('link', { name: T.loan[locale] }),
   },
   {
     name: 'definition-diagram',
     hash: '#/processes/loan-origination/3',
-    title: { en: 'Loan origination', vi: 'Loan origination' },
-    focal: (page) => page.locator('[data-node="no-documents"]'),
+    title: T.loan,
+    focal: (page) => page.locator('[data-node="booked"]'),
   },
   {
     name: 'review-open',
     hash: `#/tasks/${REVIEW_TASK_ID}`,
-    title: { en: 'Assess documents: review', vi: 'Assess documents: review' },
+    title: T.review,
     focal: (page, locale) => page.getByRole('button', { name: T.start[locale] }),
   },
   {
     name: 'review-override',
     hash: `#/tasks/${REVIEW_TASK_ID}`,
-    title: { en: 'Assess documents: review', vi: 'Assess documents: review' },
+    title: T.review,
     prepare: async (page, locale) => {
       await page.getByRole('button', { name: T.start[locale] }).click();
       await page.getByRole('button', { name: T.override[locale], exact: true }).click();
-      await page.getByLabel('recommendation').fill('REFER');
-      await page.getByLabel('riskScore').fill('72');
+      await page.getByLabel('Recommendation').fill(RECOMMENDATIONS[locale][1]);
+      await page.getByLabel('Risk score').fill('72');
     },
+    focal: (page, locale) => page.getByRole('button', { name: T.record[locale] }),
+  },
+  {
+    name: 'review-blocked-starter',
+    hash: `#/tasks/${REVIEW_TASK_ID}`,
+    title: T.review,
+    seed: { startedBy: 'hoa' },
+    focal: (page, locale) => page.getByText(T.started[locale]),
+  },
+  {
+    name: 'review-blocked-reporter',
+    hash: `#/tasks/${REVIEW_TASK_ID}`,
+    title: T.review,
+    seed: { reportedBy: 'hoa' },
+    focal: (page, locale) => page.getByText(T.reported[locale]),
+  },
+  {
+    name: 'review-masked',
+    hash: `#/tasks/${MASKED_TASK_ID}`,
+    title: T.review,
     focal: (page, locale) => page.getByRole('button', { name: T.record[locale] }),
   },
 ];
@@ -95,7 +123,7 @@ async function openScreen(page: Page, screen: Screen, viewport: { width: number;
   await page.setViewportSize(viewport);
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
   await rememberLocale(page, locale);
-  await mockEngines(page);
+  await mockEngines(page, { ...screen.seed, locale });
   await page.goto(`./${screen.hash}`);
   await expect(page.getByRole('heading', { level: 1, name: screen.title[locale] })).toBeVisible();
   await expect(page.locator('.skeleton')).toHaveCount(0);
@@ -141,7 +169,7 @@ test('CKP_007_an_override_is_recorded_with_its_reason_by_keyboard_alone', async 
   await page.setViewportSize({ width: 1440, height: 900 });
   const engine = await mockEngines(page);
   await page.goto(`./#/tasks/${REVIEW_TASK_ID}`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Assess documents: review' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: "Review the agent's answer" })).toBeVisible();
 
   const start = page.getByRole('button', { name: 'Start review' });
   for (let step = 0; step < 40; step += 1) {
@@ -154,7 +182,7 @@ test('CKP_007_an_override_is_recorded_with_its_reason_by_keyboard_alone', async 
 
   await page.getByRole('button', { name: 'Override', exact: true }).focus();
   await page.keyboard.press('Enter');
-  await page.getByLabel('recommendation').fill('DECLINE');
+  await page.getByLabel('Recommendation').fill('DECLINE');
   await page.getByLabel('Reason').fill('Salary slips do not support the declared income');
   await page.getByRole('button', { name: 'Record override' }).focus();
   await page.keyboard.press('Enter');
@@ -175,3 +203,74 @@ test('CKP_069_the_diagram_chunk_loads_only_when_a_diagram_opens', async ({ page 
   await expect(page.locator('[data-layout="auto"]')).toBeVisible();
   expect(scripts.slice(before).some((path) => /DefinitionDiagram/.test(path))).toBe(true);
 });
+
+for (const locale of LOCALES) {
+  const fourEyes = async (page: Page, seed: Omit<ProcessSeed, 'locale'>, line: string) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await rememberLocale(page, locale);
+    await mockEngines(page, { ...seed, locale });
+    await page.goto(`./#/tasks/${REVIEW_TASK_ID}`);
+    const dock = page.getByRole('region', { name: locale === 'en' ? 'Your decision' : 'Quyết định của bạn' });
+    const reason = dock.getByText(line);
+    await expect(reason).toBeVisible();
+    // One line: the text box is no taller than one line of body text plus its padding.
+    expect((await reason.boundingBox())?.height ?? 99).toBeLessThanOrEqual(40);
+    const start = dock.getByRole('button', { name: T.start[locale] });
+    await expect(start).toBeDisabled();
+    await expect(start).toHaveAccessibleDescription(line);
+    await expect(dock.getByRole('button', { name: T.approve[locale] })).toHaveCount(0);
+  };
+
+  test(`CKP_007_the_starter_is_told_in_one_line_why_they_cannot_decide_${locale}`, async ({ page }) => {
+    await fourEyes(page, { startedBy: 'hoa' }, T.started[locale]);
+  });
+
+  test(`CKP_007_the_reporter_is_told_in_one_line_why_they_cannot_decide_${locale}`, async ({ page }) => {
+    await fourEyes(page, { reportedBy: 'hoa' }, T.reported[locale]);
+  });
+
+  test(`CKP_007_a_masked_answer_opens_on_the_override_and_says_why_in_one_line_${locale}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await rememberLocale(page, locale);
+    await mockEngines(page, { locale });
+    await page.goto(`./#/tasks/${MASKED_TASK_ID}`);
+    const dock = page.getByRole('region', { name: locale === 'en' ? 'Your decision' : 'Quyết định của bạn' });
+    const line = dock.getByText(T.masked[locale]);
+    await expect(line).toBeVisible();
+    expect((await line.boundingBox())?.height ?? 99).toBeLessThanOrEqual(40);
+    const approve = dock.getByRole('button', { name: locale === 'en' ? 'Approve' : 'Duyệt', exact: true });
+    await expect(approve).toBeDisabled();
+    await expect(approve).toHaveAccessibleDescription(T.masked[locale]);
+    await expect(dock.getByRole('button', { name: T.override[locale], exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(dock.getByRole('button', { name: T.record[locale] })).toBeEnabled();
+    // The masked input is one chip with a copy action; no fingerprint text anywhere on the page.
+    await expect(page.locator('main')).not.toContainText(/hmac|9f4a/);
+  });
+}
+
+for (const viewport of VIEWPORTS) {
+  test(`CKP_069_diagram_text_is_at_least_12px_at_fit_and_fit_uses_the_canvas_${String(viewport.height)}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await mockEngines(page);
+    await page.goto('./#/processes/loan-origination/3');
+    const svg = page.locator('[data-layout="auto"]');
+    await expect(svg).toBeVisible();
+    const sizes = await svg.evaluate((element) => {
+      const scale = element.getBoundingClientRect().width / (element as SVGSVGElement).viewBox.baseVal.width;
+      const texts = Array.from(element.querySelectorAll('text')).filter((text) => text.textContent.trim() !== '' && !text.classList.contains('dg-node__glyph'));
+      const frame = element.parentElement as HTMLElement;
+      return {
+        smallest: Math.min(...texts.map((text) => parseFloat(getComputedStyle(text).fontSize) * scale)),
+        truncated: texts.some((text) => text.textContent.includes('…')),
+        svgWidth: element.getBoundingClientRect().width,
+        frameWidth: frame.clientWidth,
+        scrolls: frame.scrollWidth > frame.clientWidth + 1,
+      };
+    });
+    expect(sizes.smallest).toBeGreaterThanOrEqual(12);
+    expect(sizes.truncated).toBe(false);
+    // Fit fills the canvas's width, or the drawing scrolls inside it at 100 % rather than shrink its text.
+    expect(sizes.scrolls || sizes.svgWidth >= sizes.frameWidth - 24).toBe(true);
+    await expect(page.locator('[data-node="no-documents"]')).toContainText('Timer');
+  });
+}
