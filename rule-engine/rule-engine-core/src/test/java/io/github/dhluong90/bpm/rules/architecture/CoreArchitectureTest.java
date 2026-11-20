@@ -62,6 +62,17 @@ class CoreArchitectureTest {
     }
 
     @Test
+    void RLE_021_the_reference_feel_engine_is_reachable_from_tests_only() {
+        // The reference FEEL implementation is the oracle of the differential test; it never ships. The enforcer
+        // rule of the root POM refuses it, and Scala, in compile, runtime and provided scope in every module.
+        noClasses()
+                .should().dependOnClassesThat()
+                .resideInAnyPackage("org.camunda.feel..", "scala..", "fastparse..")
+                .because("the reference FEEL implementation is test scope only (RLE-021, TR-STD-02)")
+                .check(core);
+    }
+
+    @Test
     void TR_EMB_03_core_has_no_framework_or_sql_imports() {
         noClasses()
                 .should().dependOnClassesThat()
