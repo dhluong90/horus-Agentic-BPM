@@ -98,15 +98,14 @@ Every response under `/api/bpm/**` carries `Cache-Control: no-store`, so rule se
 | Denial of service | Scheduler | Poison job retried forever | `max_attempts` then incident; lease prevents hot loops | `PRE-011` |
 | Elevation of privilege | Approval endpoint | Missing `@PreAuthorize` lets an author call `:approve` | Permission per endpoint; service check independent of the controller | REST test with an author token |
 | Elevation of privilege | Time travel | Caller sets `clock` to pick a future fee version | `clock` requires `rules:simulate`; `403 CLOCK_NOT_ALLOWED` | REST test |
+| Elevation of privilege | Tenant-scoped decision entry point | A host controller passes a tenant from a path parameter to the entry point the Process Engine uses after a timer. A user of tenant A then reads tenant B's rule outputs, and a decision row is written in tenant B as `system:process-engine` | Not a bean, and `RuleEngines` is not a bean. The `EmbeddedEngineGrant` hands the entry point out once, only to the Process Engine's package-private decision port, which the Process Engine claims at start-up. Only the engine's timer path can create an engine caller. Reflection and same-named classes are out of scope | `TR-TEN-01`: `EmbeddedEngineGrantTest`, `RuleEngineAutoConfigurationTest`, `EmbeddedEntryPointIsolationIT`, ArchUnit in rule and process core |
 | Elevation of privilege | Agent output | Agent returns an output that skips approval | Guardrail rule set runs in-process after schema validation; `route-to-human` creates a task the triggering identity cannot approve | `PRE-010` |
 
 ## Residual risks
 
 Known risks that are accepted for a limited time, each with a deadline and an issue that fixes it.
 
-| Risk | Exploit scenario | Interim control | Acceptance | Fix |
-|---|---|---|---|---|
-| Host code can reach the Rule Engine's tenant-scoped decision entry point | Host code that imports `io.github.dhluong90.bpm.rules.internal.service` injects the `RuleEngines` bean and calls `forEmbeddedEngine("system:process-engine")`, or calls `RuleEngines.create(...)`. The entry point it gets accepts any tenant id with no permission check, and the decision log records the Process Engine as the caller. A host controller that passes a tenant taken from a path parameter would let a user of tenant A read tenant B's rule outputs and write a decision row in tenant B. | Hosts must not import `rules.internal..` packages. Only the Process Engine wiring calls `forEmbeddedEngine`. | Interim only: accepted by the maintainer on 2026-11-20, must be fixed before 0.2.0. No release ships with it. | [#336](https://github.com/dhluong90/horus-Agentic-BPM/issues/336) |
+None open. The tenant-scoped decision entry point that host code could reach until 0.2.0 ([#336](https://github.com/dhluong90/horus-Agentic-BPM/issues/336)) is closed. Its control is in the threat table above, under elevation of privilege.
 
 ## Supply chain
 
