@@ -2525,7 +2525,6 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 transactions.afterCommit(() -> metrics.stepApplied(commandKind, "OK", kernelTime));
                 state = t.state();
                 history.addAll(t.history());
-                publishStepsCompleted(row, state, t.history());
                 for (Effect effect : t.effects()) {
                     switch (effect) {
                         case Effect.CreateUserTask task -> newTasks.add(new TaskRow(state.tenantId(), task.taskId(),
@@ -2700,6 +2699,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 effect.getClass().getSimpleName() + " is not supported in this release");
                     }
                 }
+                // After the transition's own events (started, task created), so a consumer reads them in order.
+                publishStepsCompleted(row, state, t.history());
             }
         } catch (ExecutionException e) {
             if ("SELF_APPROVAL_FORBIDDEN".equals(e.code())) {

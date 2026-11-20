@@ -143,14 +143,20 @@ class RuleAndProcessIT {
         assertThat(instance.get("tokens")).allSatisfy(t -> assertThat(t.get("status").stringValue()).isEqualTo("COMPLETED"));
         assertThat(get("tuan", "/api/cards/applications/IT-1001").get("status").stringValue()).isEqualTo("AUTO_APPROVED");
         // The in-transaction listener's outbox rows committed with the steps; the AFTER_COMMIT listener saw them too.
+        // (one step.completed event per node as well, #86; the lifecycle events keep their order around them)
         assertThat(jdbc.sql("SELECT event_type FROM event_outbox WHERE tenant_id = 'bank-a' AND business_key = 'IT-1001' "
-                + "ORDER BY id").query(String.class).list())
+                + "AND event_type <> 'processes.step.completed.v1' ORDER BY id").query(String.class).list())
                 .containsExactly("processes.instance.started.v1", "processes.instance.completed.v1");
         assertThat(jdbc.sql("SELECT count(*) FROM event_outbox WHERE tenant_id = 'bank-a' AND business_key = 'IT-1001' "
+                + "AND event_type = 'processes.step.completed.v1'").query(Long.class).single())
+                .as("one step.completed event per completed node").isPositive();
+        assertThat(jdbc.sql("SELECT count(*) FROM event_outbox WHERE tenant_id = 'bank-a' AND business_key = 'IT-1001' "
+                + "AND event_type <> 'processes.step.completed.v1' "
                 + "AND event_id IS NOT NULL AND payload->>'instanceId' = ?").param(instance.get("id").stringValue())
                 .query(Long.class).single()).as("outbox rows carry the event id and a JSON payload").isEqualTo(2);
         assertThat(EventRecorder.EVENTS).filteredOn(e -> "IT-1001".equals(e.payload().get("businessKey")))
                 .extracting(io.github.dhluong90.bpm.process.spi.ProcessEventPublisher.Event::type)
+                .filteredOn(type -> !type.equals("processes.step.completed.v1"))
                 .containsExactly("processes.instance.started.v1", "processes.instance.completed.v1");
         String decisionId = instance.at("/variables/pricing/decisionId").stringValue();
         assertThat(jdbc.sql("SELECT rule_set_name FROM rle_decision WHERE tenant_id = 'bank-a' AND id = ?").param(decisionId)
@@ -269,7 +275,7 @@ class RuleAndProcessIT {
         String instanceId = JSON.readTree(first.body()).get("id").stringValue();
 
         assertThat(jdbc.sql("SELECT event_type FROM event_outbox WHERE tenant_id = 'bank-a' AND payload->>'instanceId' = ? "
-                + "ORDER BY id").param(instanceId).query(String.class).list())
+                + "AND event_type <> 'processes.step.completed.v1' ORDER BY id").param(instanceId).query(String.class).list())
                 .as("one started and one task-created event, not two of each")
                 .containsExactly("processes.instance.started.v1", "processes.task.created.v1");
     }
