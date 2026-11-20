@@ -196,6 +196,32 @@ A completed `serviceTask` or `agentTask` with a `compensate` handler pushes `(st
 
 `BusinessCalendar` (`add`, `isBusinessTime`) computes `due_at` from working hours, time zone and holidays per tenant (`TR-CAL-01`, `TR-CAL-02`). `MigrationService` validates a plan as a dry run, then executes in batches of 100 instances, one `pre_instance` lock at a time; it updates `pre_instance.definition_id` and every token's `definition_id` in the same transaction (`TR-MIG-01`, `TR-MIG-02`). Explicit step mappings are M3 (`TR-MIG-03`).
 
+### 4.4 Jobs and timers across replicas (`PRE-006`, `TR-PERF-05`, `TR-ASY-02`)
+
+Every replica runs one poller thread. A poll is two kinds of short transaction, and no network call happens in either:
+
+1. **Claim.** One statement selects due rows of every tenant (`DUE` with `next_fire_at <= now`, or `CLAIMED` with an expired `locked_until`) `ORDER BY next_fire_at LIMIT jobs.batch-size FOR UPDATE SKIP LOCKED`, and updates them to `CLAIMED`, `locked_by = jobs.replica-id`, `locked_until = now + lease_duration`, `attempt + 1`. It commits at once, so every replica sees the lease. Rows another replica is claiming are skipped, never waited for.
+2. **Fire, one transaction per job.** The handler locks its aggregate first (the `pre_instance` row for a timer, the same order as every user command, so the two never deadlock), then locks the job row and checks that it is still `CLAIMED` by this replica with the same `attempt` and an unexpired lease. Only then does it apply `JobDue` to the waiting token and run the synchronous steps that follow; the job becomes `DONE` in that same transaction.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P1 as Replica 1
+    participant DB as pre_timer and pre_instance
+    participant P2 as Replica 2
+    P1->>DB: claim due rows FOR UPDATE SKIP LOCKED, lease 60 s, attempt 1
+    P1--xP1: crashes before firing
+    P2->>DB: claim at T0 + 10 s
+    DB-->>P2: row skipped, lease held by replica 1
+    P2->>DB: claim at T0 + 65 s, lease expired
+    DB-->>P2: row claimed, attempt 2
+    P2->>DB: lock instance, lock job (replica 2, attempt 2), fire, DONE, commit
+    P1->>DB: restarted, fires its old claim (attempt 1)
+    DB-->>P1: claim not held, nothing written
+```
+
+Because the firing and `DONE` commit together and the attempt number fences an old claim, a timer fires at most once; because a dead replica's lease expires, it fires at least once. A failing firing rolls back and the job is released to `DUE` after `jobs.retry-backoff` times the attempt, or `FAILED` after `jobs.max-attempts`. A timer whose instance ended, or whose token moved on, is marked `DONE` without firing. A cancelled job is never fired. The poller loop never ends silently: any `Throwable` from one poll, an `Error` included, is logged once for that poll (replica and exception class, no payload) and the next poll runs after `jobs.poll-interval`; a `VirtualMachineError` is logged, marks the `processEngineJobs` health contributor `DOWN` and stops the loop, so the orchestrator restarts the host. The health details carry the replica id and the time of the last successful poll. The intermediate timer catch event of this release takes `timeDuration` (days, hours, minutes, seconds) or `timeDate` (with an offset); cycles, calendar durations, boundary timers and the rest of the event set follow with the events stream. A decision step reached right after a timer runs without a caller tenant and is refused until system-context tenancy for scheduled work lands (section 12 of the architecture overview).
+
 ## 5. Definitions: notation, hash, diff, layout, BPMN, forms, step catalogue
 
 ### 5.1 Notation and canonical model (ADR-0013, ADR-0018, `TR-DEF-01`, `TR-STD-28`)
@@ -402,6 +428,9 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `history.retention` | none; required outside `dev` | Whole months; drops whole monthly partitions of `pre_history` older than the period. Outside the `dev` profile start-up is refused until it is set, and a value below `history.retention-floor` or not in whole months is refused (PD-050). The process history ships in M2 and retention applies with the rule engine's in M3; before M3 nothing is deleted |
 | `history.retention-floor` | `P12M` | Shortest `history.retention` accepted; a host may raise it, never lower it below the engine floor (ADR-0024, `TR-EXT-05`) |
 | `jobs.timer-lease` | `60s` | Lease of timer, SLA and effective-date jobs, which make no external call (ADR-0008) |
+| `jobs.enabled`, `jobs.poll-interval`, `jobs.batch-size` | `true`, `1s`, `32` | Job poller of this replica (section 4.4): one daemon thread, polls again at once while a poll fired a job; at least one replica must poll |
+| `jobs.replica-id` | host name plus a random suffix | Name a replica claims jobs under (`pre_timer.locked_by`); must differ between running copies |
+| `jobs.max-attempts`, `jobs.retry-backoff` | `3`, `10s` | A firing that fails rolls back and is due again after the back-off times the attempt number; after the last attempt the job is `FAILED` (incidents for jobs follow with `pre_incident`) |
 | `adapters.executor-threads` | `16` | Adapter executor size per replica; a job is claimed only when a slot is free (section 4) |
 | `migration.batch-size` | `100` | Instances per migration batch, one instance lock at a time (section 4.3); may be lowered only |
 | `tokens.cleanup-after`, `tokens.cleanup-batch` | unset (keep), `10000` | When set, the scheduler deletes `pre_token` rows of instances ended longer ago, in batches; history keeps every transition (open question 11.3) |
@@ -575,11 +604,18 @@ CREATE TABLE pre_timer (
   max_attempts    INT         NOT NULL DEFAULT 3,
   attempt_id      VARCHAR(26),
   payload         JSONB       NOT NULL DEFAULT '{}',
+  created_at      TIMESTAMPTZ NOT NULL,
+  completed_at    TIMESTAMPTZ,                   -- DONE, FAILED or CANCELLED
   PRIMARY KEY (tenant_id, id),
-  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id)
+  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id),
+  FOREIGN KEY (tenant_id, definition_id) REFERENCES pre_definition (tenant_id, id),
+  CHECK (status <> 'CLAIMED' OR (locked_by IS NOT NULL AND locked_until IS NOT NULL)),
+  CHECK (job_kind = 'DEFINITION_EFFECTIVE' OR (instance_id IS NOT NULL AND token_id IS NOT NULL))
 );
 CREATE INDEX idx_pre_timer_poll
   ON pre_timer (next_fire_at, locked_until) WHERE status IN ('DUE','CLAIMED');   -- engine sweep, crosses tenants
+CREATE INDEX idx_pre_timer_instance
+  ON pre_timer (tenant_id, instance_id) WHERE status IN ('DUE','CLAIMED');
 
 CREATE TABLE pre_incident (
   tenant_id       TEXT        NOT NULL,

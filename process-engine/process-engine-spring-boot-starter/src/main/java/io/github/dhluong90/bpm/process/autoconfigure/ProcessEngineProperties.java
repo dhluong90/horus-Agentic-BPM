@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.process.autoconfigure;
 
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
+import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param idempotencyRetention how long an idempotency record answers replays
  * @param security mapping of the host's roles to engine permissions
  * @param handlers local step settings
+ * @param jobs timer and job settings
  * @param query read limits of the list endpoints
  * @param lifecycle instance lifecycle settings
  */
@@ -29,6 +31,7 @@ public record ProcessEngineProperties(
         @DefaultValue("PT24H") Duration idempotencyRetention,
         @DefaultValue Security security,
         @DefaultValue Handlers handlers,
+        @DefaultValue Jobs jobs,
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle) {
 
@@ -76,6 +79,57 @@ public record ProcessEngineProperties(
             if (slowCallWarning.isNegative() || slowCallWarning.isZero()) {
                 throw new IllegalArgumentException("horus.bpm.processes.handlers.slow-call-warning must be positive");
             }
+        }
+    }
+
+    /**
+     * Timers and other jobs in {@code pre_timer}, claimed replica-safe with {@code FOR UPDATE SKIP LOCKED} and a lease
+     * (PRE-006, DESIGN sections 4 and 6.5).
+     *
+     * @param enabled run the job poller in this replica; a host may turn it off in replicas that should serve
+     *     requests only, as long as one replica polls
+     * @param replicaId the name this replica claims jobs under; empty means the host name plus a random suffix, unique
+     *     per start
+     * @param pollInterval pause between polls when the last poll found no due job
+     * @param batchSize most jobs one poll claims
+     * @param timerLease how long a claim of a timer holds it; another replica claims it after the lease when this
+     *     replica stopped
+     * @param maxAttempts claims after which a job that keeps failing is marked {@code FAILED}
+     * @param retryBackoff a failed firing is due again after this times the attempt number
+     */
+    public record Jobs(
+            @DefaultValue("true") boolean enabled,
+            @DefaultValue("") String replicaId,
+            @DefaultValue("1s") Duration pollInterval,
+            @DefaultValue("32") int batchSize,
+            @DefaultValue("60s") Duration timerLease,
+            @DefaultValue("3") int maxAttempts,
+            @DefaultValue("10s") Duration retryBackoff) {
+
+        public Jobs {
+            if (pollInterval.compareTo(Duration.ofMillis(10)) < 0 || pollInterval.compareTo(Duration.ofMinutes(10)) > 0) {
+                throw new IllegalArgumentException("horus.bpm.processes.jobs.poll-interval must be 10ms to 10m");
+            }
+            if (batchSize < 1 || batchSize > 1_000) {
+                throw new IllegalArgumentException("horus.bpm.processes.jobs.batch-size must be 1 to 1000");
+            }
+            if (timerLease.compareTo(Duration.ofSeconds(1)) < 0) {
+                throw new IllegalArgumentException("horus.bpm.processes.jobs.timer-lease must be at least 1s");
+            }
+            if (maxAttempts < 1 || maxAttempts > 100) {
+                throw new IllegalArgumentException("horus.bpm.processes.jobs.max-attempts must be 1 to 100");
+            }
+            if (retryBackoff.isNegative() || retryBackoff.isZero()) {
+                throw new IllegalArgumentException("horus.bpm.processes.jobs.retry-backoff must be positive");
+            }
+            if (replicaId.length() > 200) {
+                throw new IllegalArgumentException("horus.bpm.processes.jobs.replica-id must be at most 200 characters");
+            }
+        }
+
+        JobSettings toSettings(String defaultReplicaId) {
+            return new JobSettings(replicaId.isBlank() ? defaultReplicaId : replicaId, timerLease, batchSize, maxAttempts,
+                    retryBackoff);
         }
     }
 

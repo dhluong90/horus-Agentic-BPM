@@ -71,24 +71,28 @@ mvn -B -pl process-engine/process-engine-test,process-engine/process-engine-post
 
 ## Timers and jobs with leases
 
-`pre_timer` holds timers, SLA escalations and async job claims. One scheduler thread per replica polls every 500 ms:
+`pre_timer` holds timers now, and SLA escalations, async step attempts and effective-date jobs later. Each replica runs one poller thread (`horus.bpm.processes.jobs.*`). The claim is one short transaction:
 
 ```sql
-WITH claimed AS (
-  SELECT id FROM pre_timer
-  WHERE status IN ('DUE', 'CLAIMED') AND next_fire_at <= now()
-    AND (locked_until IS NULL OR locked_until < now())
-  ORDER BY next_fire_at LIMIT 50 FOR UPDATE SKIP LOCKED)
-UPDATE pre_timer t SET status = 'CLAIMED', locked_by = :replica, locked_until = now() + interval '60 seconds', attempt = attempt + 1
-FROM claimed WHERE t.id = claimed.id RETURNING t.*;
+WITH due AS (
+  SELECT tenant_id, id FROM pre_timer
+  WHERE status IN ('DUE', 'CLAIMED') AND next_fire_at <= :now
+    AND (status = 'DUE' OR locked_until <= :now)
+  ORDER BY next_fire_at, id LIMIT :batchSize FOR UPDATE SKIP LOCKED)
+UPDATE pre_timer t SET status = 'CLAIMED', locked_by = :replicaId,
+       locked_until = :now + t.lease_duration, attempt = t.attempt + 1
+FROM due WHERE t.tenant_id = due.tenant_id AND t.id = due.id RETURNING t.*;
 ```
+
+Each claimed job then fires in its own transaction: the instance row is locked, then the job row, and the timer fires only if the job is still `CLAIMED` by this replica with the same attempt number. The job becomes `DONE` in the same transaction as the steps it ran.
 
 | Property | Value |
 |---|---|
-| Lease length | 60 s; a crashed replica's jobs are reclaimed after that by any other replica (`PRE-006`) |
-| Firing lag | p50 300 ms, p99 1 s at the default poll interval (target) |
-| Duplicate protection | `SKIP LOCKED` on claim; `locked_by` and `locked_until` checked again in TX2 |
-| Throughput | 100 jobs/s per replica at batch 50; scale by replicas before adding threads |
+| Lease length | `jobs.timer-lease`, 60 s; a crashed replica's timers are claimed by another replica after that (`PRE-006`) |
+| Duplicate protection | `SKIP LOCKED` on the claim; the fire and `DONE` commit together; the attempt number fences an old claim, so a replica that comes back after its lease was taken over fires nothing |
+| Failed firing | Rolled back; due again after `jobs.retry-backoff` times the attempt; `FAILED` after `jobs.max-attempts` (3) |
+| Poll cadence | `jobs.poll-interval`, 1 s when idle; at once again while polls find due jobs; `jobs.batch-size` 32 |
+| Timer events in this release | Intermediate timer catch event with `timeDuration` (for example `P3D`) or `timeDate` (for example `2027-04-01T00:00:00+07:00`); cycles and boundary timers follow |
 
 ## `parallelGateway` join without lost wakeups
 

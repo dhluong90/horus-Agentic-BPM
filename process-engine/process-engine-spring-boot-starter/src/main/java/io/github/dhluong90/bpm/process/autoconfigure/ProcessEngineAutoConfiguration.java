@@ -13,8 +13,11 @@ import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.internal.exec.BehaviorCatalog;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
+import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
+import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
+import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineSchemaMigrator;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineTransactions;
@@ -96,6 +99,80 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    JdbcJobStore processEngineJobStore(DataSource dataSource) {
+        return new JdbcJobStore(dataSource);
+    }
+
+    /** This replica's job settings; the replica id defaults to the host name plus a random suffix. */
+    @Bean
+    @ConditionalOnMissingBean
+    JobSettings processEngineJobSettings(ProcessEngineProperties properties) {
+        return properties.jobs().toSettings(defaultReplicaId());
+    }
+
+    static String defaultReplicaId() {
+        String host;
+        try {
+            host = java.net.InetAddress.getLocalHost().getHostName();
+        } catch (java.io.IOException | SecurityException e) {
+            host = "replica";
+        }
+        String suffix = Long.toString(java.util.concurrent.ThreadLocalRandom.current().nextLong() & Long.MAX_VALUE, 36);
+        String id = host + "-" + suffix;
+        return id.length() > 200 ? id.substring(id.length() - 200) : id;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    JobExecutor processEngineJobExecutor(JdbcJobStore jobs, ProcessEngineTransactions transactions,
+            ObjectProvider<Clock> clock, JobSettings settings, ProcessServices services) {
+        return new JobExecutor(jobs, transactions, clock.getIfUnique(Clock::systemUTC), settings, services.jobHandlers());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "horus.bpm.processes.jobs", name = "enabled", havingValue = "true",
+            matchIfMissing = true)
+    ProcessJobPoller processEngineJobPoller(JobExecutor executor, ProcessEngineProperties properties) {
+        return new ProcessJobPoller(executor::pollOnce, executor.replicaId(), properties.jobs().pollInterval(),
+                Clock.systemUTC());
+    }
+
+    /** Bean name of the job poller health contributor on both Spring Boot lines ({@code processEngineJobs}). */
+    static final String JOBS_HEALTH_BEAN = "processEngineJobsHealthIndicator";
+
+    /** Spring Boot 4 hosts with the health module: job poller health. */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.boot.health.contributor.HealthIndicator")
+    static class JobsHealthConfiguration {
+
+        @Bean(JOBS_HEALTH_BEAN)
+        @ConditionalOnMissingBean(name = JOBS_HEALTH_BEAN)
+        @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(ProcessJobPoller.class)
+        org.springframework.boot.health.contributor.HealthIndicator processEngineJobsHealthIndicator(
+                ProcessJobPoller poller) {
+            return new ProcessJobsHealthIndicator(poller);
+        }
+    }
+
+    /** Spring Boot 3.5 hosts with Actuator, only when the Spring Boot 4 health module is absent. */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.boot.actuate.health.HealthIndicator")
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass(
+            "org.springframework.boot.health.contributor.HealthIndicator")
+    static class JobsSpringBoot35HealthConfiguration {
+
+        @Bean(JOBS_HEALTH_BEAN)
+        @ConditionalOnMissingBean(name = JOBS_HEALTH_BEAN)
+        @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(ProcessJobPoller.class)
+        org.springframework.boot.actuate.health.HealthIndicator processEngineJobsHealthIndicator(
+                ProcessJobPoller poller) {
+            return new ProcessJobsSpringBoot35HealthIndicator(poller);
+        }
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     ProcessEventPublisher processEngineEventPublisher(ApplicationEventPublisher publisher) {
         return publisher::publishEvent;
     }
@@ -104,7 +181,7 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnMissingBean
     ProcessServices processEngineServices(ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
-            ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
+            JdbcJobStore jobs, JobSettings jobSettings, ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
         if (properties.definitions().autoApprove()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");
@@ -127,7 +204,7 @@ public class ProcessEngineAutoConfiguration {
                 new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
                         properties.handlers().slowCallWarning()), publisher,
                 properties.toSettings(), BehaviorCatalog.registry(),
-                new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES));
+                new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings);
     }
 
     /**

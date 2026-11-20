@@ -40,7 +40,8 @@ paths:
       summary: Import a BPMN 2.0 document as the next version of its process key
       description: |
         Reads the executable subset (none start and end events, local `serviceTask`, `businessRuleTask`,
-        `userTask` with `horus:resultVariable`, `exclusiveGateway` with conditions and a default flow) from a UTF-8
+        `userTask` with `horus:resultVariable`, `exclusiveGateway` with conditions and a default flow, and an
+        intermediate timer catch event with `timeDuration` or `timeDate`) from a UTF-8
         document. DTDs and entities are refused (`BPMN_UNSAFE_XML`), every element outside the subset is named with
         its id and line (`BPMN_UNSUPPORTED_ELEMENT`), and a condition in another expression language is
         `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`. The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A

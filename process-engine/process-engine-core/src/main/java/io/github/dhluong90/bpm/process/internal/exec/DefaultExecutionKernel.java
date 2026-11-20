@@ -44,6 +44,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.CompleteTask complete -> trigger(complete.tokenId(), TokenStatus.WAITING_USER, null, complete, ctx);
             case Command.AsyncResult result -> trigger(result.tokenId(), TokenStatus.WAITING_ASYNC, result.attemptId(),
                     result, ctx);
+            case Command.JobDue due -> trigger(due.tokenId(), TokenStatus.WAITING_TIMER, due.jobId(), due, ctx);
             case Command.Cancel cancel -> cancel(cancel, ctx);
             default -> throw new ExecutionException("COMMAND_NOT_SUPPORTED", null,
                     command.getClass().getSimpleName() + " is not supported in this release");

@@ -64,6 +64,8 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
+import io.github.dhluong90.bpm.process.internal.store.JobStore;
+import io.github.dhluong90.bpm.process.internal.store.JobStore.JobRow;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore.IdempotencyRecord;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore.InstanceRow;
@@ -129,6 +131,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final BehaviorRegistry behaviors;
     private final ExpressionEvaluator expressions;
     private final ProcessCompiler compiler;
+    private final JobStore jobs;
+    private final JobSettings jobSettings;
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
 
@@ -152,6 +156,31 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers, LocalServiceInvoker invoker,
             ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
             ExpressionEvaluator expressions) {
+        this(tenants, callers, clock, transactions, store, readers, invoker, publisher, settings, behaviors, expressions,
+                JobStore.NONE, JobSettings.defaults("unused"));
+    }
+
+    /**
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store storage
+     * @param readers definition readers by source format
+     * @param invoker local handlers and decisions
+     * @param publisher event publisher
+     * @param settings validated settings
+     * @param behaviors registered behaviours
+     * @param expressions expression evaluator
+     * @param jobs job storage ({@code pre_timer})
+     * @param jobSettings lease and attempts of the jobs this engine schedules
+     */
+    public ProcessServices(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers, LocalServiceInvoker invoker,
+            ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
+            ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings) {
+        this.jobs = Objects.requireNonNull(jobs);
+        this.jobSettings = Objects.requireNonNull(jobSettings);
         this.tenants = Objects.requireNonNull(tenants);
         this.callers = Objects.requireNonNull(callers);
         this.clock = Objects.requireNonNull(clock);
@@ -449,6 +478,47 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 .orElseThrow(() -> new InstanceNotFoundException("No instance " + instanceId))));
     }
 
+    // ---- jobs ---------------------------------------------------------------------------------------------
+
+    /**
+     * The job handlers of this engine, by job kind, for the {@link JobExecutor} of each replica.
+     *
+     * @return the handlers
+     */
+    public Map<String, JobHandler> jobHandlers() {
+        return Map.of(JobStore.TIMER, this::fireTimer);
+    }
+
+    /**
+     * Fires a timer inside the fire transaction: locks the instance row, then checks the claim, then delivers
+     * {@link Command.JobDue} to the waiting token. There is no caller: the tenant is the job's, and the actor is
+     * {@code system:timer}. A timer whose instance ended or whose token moved on is consumed without firing.
+     */
+    private boolean fireTimer(JobRow job, java.util.function.BooleanSupplier claimHeld) {
+        String tenant = job.tenantId();
+        InstanceRow row = store.lockInstance(tenant, job.instanceId()).orElse(null);
+        if (!claimHeld.getAsBoolean()) {
+            return false;
+        }
+        if (row == null || !"RUNNING".equals(row.status())) {
+            return true;
+        }
+        List<io.github.dhluong90.bpm.process.internal.exec.Token> tokens = store.tokens(tenant, row.id());
+        boolean waiting = tokens.stream().anyMatch(t -> t.id().equals(job.tokenId())
+                && t.status() == io.github.dhluong90.bpm.process.internal.exec.TokenStatus.WAITING_TIMER
+                && job.id().equals(t.activityInstanceId()));
+        if (!waiting) {
+            LOG.log(System.Logger.Level.DEBUG, "process.timer.obsolete tenant={0} job={1}", tenant, job.id());
+            return true;
+        }
+        StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
+        InstanceState state = new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
+                InstanceStatus.valueOf(row.status()), tokens, Values.readMap(row.variablesJson()),
+                participants(tenant, row), row.sequence());
+        run(definition, row, state, new Command.JobDue(job.id(), job.tokenId(), job.jobKind()));
+        return true;
+    }
+
     @Override
     public ProcessInstance cancel(String instanceId, long expectedLockVersion, String reason, String idempotencyKey) {
         String tenant = tenant();
@@ -734,6 +804,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         List<HistoryEntry> history = new ArrayList<>();
         List<TaskRow> newTasks = new ArrayList<>();
         List<String> cancelledTasks = new ArrayList<>();
+        List<JobRow> newJobs = new ArrayList<>();
+        List<String> cancelledJobs = new ArrayList<>();
         Deque<Command> queue = new ArrayDeque<>();
         queue.add(first);
         int applied = 0;
@@ -753,6 +825,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 state.instanceId(), task.tokenId(), definition.id(), task.nodeId(), task.name(),
                                 task.assignee(), task.fourEyes(), "OPEN", 0, null, null, null, clock.instant(), null));
                         case Effect.CancelUserTask cancel -> cancelledTasks.add(cancel.taskId());
+                        case Effect.ScheduleJob job -> newJobs.add(JobRow.due(state.tenantId(), job.jobId(),
+                                state.instanceId(), definition.id(), job.tokenId(), job.jobKind(), job.nodeId(),
+                                job.dueAt(), jobSettings.timerLease(), jobSettings.maxAttempts(),
+                                Values.write(job.payload())));
+                        case Effect.CancelJob cancel -> cancelledJobs.add(cancel.jobId());
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             if (call.kind() == ServiceKind.DECISION && !state.tenantId().equals(tenants.currentTenantId())) {
                                 // The Rule Engine resolves its tenant from the caller; it must be the instance's tenant.
@@ -808,6 +885,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String tenant = state.tenantId();
         newTasks.forEach(store::insertTask);
         cancelledTasks.forEach(id -> store.cancelTask(tenant, id));
+        newJobs.forEach(job -> jobs.insertJob(job, now));
+        cancelledJobs.forEach(id -> jobs.cancelJob(tenant, id, now));
         store.appendHistory(tenant, state.instanceId(), definition.id(), history);
     }
 
