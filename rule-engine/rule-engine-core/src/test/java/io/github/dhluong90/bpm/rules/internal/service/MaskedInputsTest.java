@@ -596,6 +596,24 @@ class MaskedInputsTest {
         assertThat(MaskingKey.of(KEY_A).sameKeyAs(MaskingKey.of(KEY_A).forTenant("bank-a"))).isFalse();
     }
 
+    @Test
+    void TR_SEC_10_key_check_value_is_the_first_8_bytes_of_the_hmac_of_the_label_and_never_the_key() throws Exception {
+        MaskingKey key = MaskingKey.of("k1", KEY_A);
+        String expected = hmacHex(KEY_A, "horus-bpm/masking/v1/kcv").substring(0, 16);
+        assertThat(key.checkValue()).isEqualTo(expected).matches("^[0-9a-f]{16}$");
+        // The id does not change it; the bytes do; a tenant subkey has a check value of its own.
+        assertThat(MaskingKey.of("k9", KEY_A).checkValue()).isEqualTo(expected);
+        assertThat(MaskingKey.of("k1", KEY_B).checkValue()).isNotEqualTo(expected);
+        assertThat(key.forTenant("bank-a").checkValue()).isNotEqualTo(expected);
+        assertThat(key.checkValue()).doesNotContain(HexFormat.of().formatHex(KEY_A).substring(0, 16));
+        // The documented vector: host key 00 01 .. 1f.
+        byte[] host = new byte[32];
+        for (int i = 0; i < 32; i++) {
+            host[i] = (byte) i;
+        }
+        assertThat(MaskingKey.of(host).checkValue()).isEqualTo("71bc8598cb47cb6d");
+    }
+
     static String hmacHex(byte[] key, String value) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
