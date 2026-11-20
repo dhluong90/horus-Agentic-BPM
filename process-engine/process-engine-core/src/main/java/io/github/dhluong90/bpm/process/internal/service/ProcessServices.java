@@ -8,6 +8,8 @@ import io.github.dhluong90.bpm.process.api.TenantNotAllowedException;
 import io.github.dhluong90.bpm.process.api.SelfApprovalForbiddenException;
 import io.github.dhluong90.bpm.process.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
+import io.github.dhluong90.bpm.process.api.DefinitionExport;
+import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.IdempotencyKeyReuseException;
@@ -108,6 +110,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final TransactionRunner transactions;
     private final ProcessStore store;
     private final Map<SourceFormat, Function<byte[], Process>> readers;
+    private final Map<SourceFormat, Function<Process, byte[]>> writers;
     private final LocalServiceInvoker invoker;
     private final ProcessEventPublisher publisher;
     private final EngineSettings settings;
@@ -136,6 +139,30 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers, LocalServiceInvoker invoker,
             ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
             ExpressionEvaluator expressions) {
+        this(tenants, callers, clock, transactions, store, readers, Map.of(), invoker, publisher, settings, behaviors,
+                expressions);
+    }
+
+    /**
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store storage
+     * @param readers definition readers by source format
+     * @param writers definition writers by export format (PRE-034)
+     * @param invoker local handlers and decisions
+     * @param publisher event publisher
+     * @param settings validated settings
+     * @param behaviors registered behaviours
+     * @param expressions expression evaluator
+     */
+    public ProcessServices(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers,
+            Map<SourceFormat, Function<Process, byte[]>> writers, LocalServiceInvoker invoker,
+            ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
+            ExpressionEvaluator expressions) {
+        this.writers = Map.copyOf(writers);
         this.tenants = Objects.requireNonNull(tenants);
         this.callers = Objects.requireNonNull(callers);
         this.clock = Objects.requireNonNull(clock);
@@ -207,6 +234,27 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             Map.of("definitionKey", stored.key(), "version", stored.version(), "definitionHash", hash)), null);
                     return view(stored);
                 }, Views::definitionToJson, Views::definitionFromJson));
+    }
+
+    @Override
+    public DefinitionExport exportDefinition(String key, int version, SourceFormat format) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        Function<Process, byte[]> writer = format == null ? null : writers.get(format);
+        if (writer == null) {
+            throw new InputInvalidException("Export format " + format + " is not supported; supported: "
+                    + writers.keySet().stream().map(Enum::name).sorted().toList());
+        }
+        // Read-only: no transaction is opened and nothing is written (TR-TEN-01: the query filters by tenant, so
+        // another tenant's version is not found).
+        StoredDefinition definition = key == null ? null : store.definitionVersion(tenant, key, version).orElse(null);
+        if (definition == null) {
+            throw new DefinitionNotFoundException("No definition " + key + " version " + version + " in this tenant");
+        }
+        Process process = storedProcess(definition);
+        String document = Utf8.strict(writer.apply(process));
+        return new DefinitionExport(definition.key(), definition.version(), definition.definitionHash(), format,
+                document);
     }
 
     /** Every handler a definition names must be registered, and decisions need a Rule Engine. */
@@ -476,22 +524,29 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     private Compiled compiled(StoredDefinition definition) {
         return kernels.computeIfAbsent(definition.tenantId() + "/" + definition.id(), k -> {
-            Function<byte[], Process> reader = readers.get(SourceFormat.valueOf(definition.sourceFormat()));
-            // Interim form of ADR-0026 decision 4: the version runs from its stored source, so the source must be the
-            // one that was validated and hashed at import. Any difference refuses the version.
-            byte[] source = definition.sourceDocument().getBytes(StandardCharsets.UTF_8);
-            if (!Hashes.sha256(source).equals(definition.sourceHash())) {
-                throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
-                        + ": the stored source does not match its source hash");
-            }
-            Process process = reader.apply(source);
-            if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
-                throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
-                        + ": the stored source no longer gives the recorded definition hash");
-            }
+            Process process = storedProcess(definition);
             CompiledProcess compiledProcess = compiler.compile(definition.id(), process);
             return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions));
         });
+    }
+
+    /**
+     * Interim form of ADR-0026 decision 4: a version runs and exports from its stored source, so the source must be
+     * the one that was validated and hashed at import. Any difference refuses the version.
+     */
+    private Process storedProcess(StoredDefinition definition) {
+        Function<byte[], Process> reader = readers.get(SourceFormat.valueOf(definition.sourceFormat()));
+        byte[] source = definition.sourceDocument().getBytes(StandardCharsets.UTF_8);
+        if (!Hashes.sha256(source).equals(definition.sourceHash())) {
+            throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
+                    + ": the stored source does not match its source hash");
+        }
+        Process process = reader.apply(source);
+        if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
+            throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
+                    + ": the stored source no longer gives the recorded definition hash");
+        }
+        return process;
     }
 
     private ProcessInstance read(String tenant, InstanceRow row) {

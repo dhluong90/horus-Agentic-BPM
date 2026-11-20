@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.rest;
 
+import io.github.dhluong90.bpm.process.api.DefinitionExport;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -72,6 +74,34 @@ public class ProcessController {
                 new ImportRequest(SourceFormat.BPMN_XML, body, idempotencyKey));
         return json(HttpStatus.CREATED, Views.definition(version), null,
                 BASE + "/definitions/" + version.key() + "/versions/" + version.version());
+    }
+
+    /**
+     * Exports a definition version of the caller's tenant ({@code processes:read}, PRE-034). {@code format=bpmn}
+     * returns BPMN 2.0 XML that imports back to the same {@code definitionHash}, which is also the {@code ETag}.
+     */
+    @GetMapping("/definitions/{key}/versions/{version}/export")
+    public ResponseEntity<byte[]> exportDefinition(@PathVariable("key") String key,
+            @PathVariable("version") String version, @RequestParam(value = "format", required = false) String format) {
+        if (!"bpmn".equals(format)) {
+            throw new InputInvalidException("format must be bpmn");
+        }
+        int number;
+        try {
+            number = Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException("version must be a positive whole number");
+        }
+        if (number < 1) {
+            throw new InputInvalidException("version must be a positive whole number");
+        }
+        DefinitionExport export = definitions.exportDefinition(key, number, SourceFormat.BPMN_XML);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/bpmn+xml"))
+                .header(HttpHeaders.ETAG, "\"" + export.definitionHash() + "\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + export.key() + "-v"
+                        + export.version() + ".bpmn\"")
+                .body(export.document().getBytes(StandardCharsets.UTF_8));
     }
 
     /**

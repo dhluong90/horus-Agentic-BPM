@@ -67,6 +67,48 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}/export:
+    get:
+      tags: [definitions]
+      operationId: exportDefinition
+      summary: Export a definition version as BPMN 2.0 XML
+      description: |
+        Writes the version of the caller's tenant in the executable subset with the `horus` extension attributes and
+        a generated BPMNDI layout, so it opens in BPMN modellers. Importing the document gives the same
+        `definitionHash` (PRE-034), which is also the `ETag`. The stored source is read again and must still give
+        the recorded hash (`500 DEFINITION_INTEGRITY_FAILED` otherwise). Read-only. A version of another tenant is
+        `404 DEFINITION_NOT_FOUND`, the same answer as a missing one. Permission `processes:read`.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' }
+          example: card-fee-review
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          example: 1
+        - name: format
+          in: query
+          required: true
+          schema: { type: string, enum: [bpmn] }
+      responses:
+        '200':
+          description: The BPMN document
+          headers:
+            ETag:
+              description: The `definitionHash` of the version, quoted
+              schema: { type: string }
+            Content-Disposition: { schema: { type: string }, example: 'attachment; filename="card-fee-review-v1.bpmn"' }
+          content:
+            application/bpmn+xml:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /instances:
     post:
       tags: [instances]
@@ -322,7 +364,7 @@ components:
         code:
           type: string
           enum: [INPUT_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED, SELF_APPROVAL_FORBIDDEN,
-            TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, INSTANCE_NOT_FOUND, TASK_NOT_FOUND, INVALID_STATE,
+            TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND, TASK_NOT_FOUND, INVALID_STATE,
             VERSION_CONFLICT, IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
             BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, PRECONDITION_REQUIRED,
             DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]

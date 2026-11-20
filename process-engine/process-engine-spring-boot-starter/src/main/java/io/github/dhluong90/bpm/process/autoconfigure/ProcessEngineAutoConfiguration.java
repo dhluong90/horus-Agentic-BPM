@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.TaskService;
 import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnReader;
+import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.internal.exec.BehaviorCatalog;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
@@ -123,6 +124,7 @@ public class ProcessEngineAutoConfiguration {
                 Limits.DEFAULTS.maxTextChars(), Limits.DEFAULTS.maxAttributeChars()));
         return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
+                Map.of(SourceFormat.BPMN_XML, new SubsetBpmnWriter()::write),
                 new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
                         properties.handlers().slowCallWarning()), publisher,
                 properties.toSettings(), BehaviorCatalog.registry(),

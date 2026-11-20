@@ -278,6 +278,68 @@ class RuleAndProcessQaIT {
         assertThat(instance2.at("/tasks/0/name").stringValue()).isEqualTo("Officer reviews the fee (v2)");
     }
 
+    // ---- BPMN export (PRE-034) ------------------------------------------------------------------------------
+
+    @Test
+    @Order(30)
+    void PRE_034_bpmn_export_imports_back_to_the_same_definition_hash() throws Exception {
+        int latest = jdbc.sql("SELECT max(version_num) FROM pre_definition WHERE tenant_id = 'bank-a' "
+                + "AND key_name = 'card-fee-review'").query(Integer.class).single();
+        String hash = jdbc.sql("SELECT definition_hash FROM pre_definition WHERE tenant_id = 'bank-a' "
+                + "AND key_name = 'card-fee-review' AND version_num = ?").param(latest).query(String.class).single();
+        long rowsBefore = definitionRows();
+
+        // When the version is exported and the document imported again
+        HttpResponse<String> exported = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port
+                + "/api/bpm/processes/v1/definitions/card-fee-review/versions/" + latest + "/export?format=bpmn"))
+                .header("Authorization", basic("lan")).GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(exported.statusCode()).as(exported.body()).isEqualTo(200);
+        assertThat(exported.headers().firstValue("Content-Type")).hasValueSatisfying(
+                v -> assertThat(v).startsWith("application/bpmn+xml"));
+        assertThat(exported.headers().firstValue("ETag")).contains("\"" + hash + "\"");
+        assertThat(exported.body()).contains("<bpmndi:BPMNDiagram").contains("horus:handler=\"cardProfiles.load\"");
+        HttpResponse<String> imported = send("lan", "POST", "/api/bpm/processes/v1/definitions", exported.body(), null,
+                null, "application/bpmn+xml");
+
+        // Then the import finds the same definition: same hash, same version, no new row
+        assertThat(imported.statusCode()).as(imported.body()).isEqualTo(201);
+        JsonNode version = JSON.readTree(imported.body());
+        assertThat(version.get("definitionHash").stringValue()).isEqualTo(hash);
+        assertThat(version.get("version").intValue()).isEqualTo(latest);
+        assertThat(definitionRows()).isEqualTo(rowsBefore);
+    }
+
+    @Test
+    @Order(31)
+    void PRE_034_another_tenants_version_is_not_found_and_nothing_is_written() throws Exception {
+        // Given bank-b holds card-fee-review v99, which bank-a does not have
+        jdbc.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
+                + "definition_hash, source_format, source_document, source_hash, node_count, source, effective_from, "
+                + "created_by, created_at, approved_by, approved_at) "
+                + "SELECT 'bank-b', '01JDBANKB00000000000000000', key_name, 99, status, name, definition_json, "
+                + "definition_hash, source_format, source_document, source_hash, node_count, source, effective_from, "
+                + "created_by, created_at, approved_by, approved_at FROM pre_definition "
+                + "WHERE tenant_id = 'bank-a' AND key_name = 'card-fee-review' AND version_num = 1").update();
+        long rowsBefore = definitionRows();
+        long outboxBefore = jdbc.sql("SELECT count(*) FROM event_outbox").query(Long.class).single();
+
+        // When a bank-a user asks for v99
+        HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port
+                + "/api/bpm/processes/v1/definitions/card-fee-review/versions/99/export?format=bpmn"))
+                .header("Authorization", basic("lan")).GET().build(), HttpResponse.BodyHandlers.ofString());
+
+        // Then it is not found, nothing of bank-b is disclosed and nothing is written
+        assertThat(answer.statusCode()).as(answer.body()).isEqualTo(404);
+        assertThat(JSON.readTree(answer.body()).get("code").stringValue()).isEqualTo("DEFINITION_NOT_FOUND");
+        assertThat(answer.body()).doesNotContain("bank-b").doesNotContain("<bpmn:");
+        assertThat(definitionRows()).isEqualTo(rowsBefore);
+        assertThat(jdbc.sql("SELECT count(*) FROM event_outbox").query(Long.class).single()).isEqualTo(outboxBefore);
+    }
+
+    private long definitionRows() {
+        return jdbc.sql("SELECT count(*) FROM pre_definition").query(Long.class).single();
+    }
+
     // ---- helpers ------------------------------------------------------------------------------------------
 
     private String openTask(String applicationId) throws Exception {

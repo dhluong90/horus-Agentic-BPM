@@ -42,6 +42,9 @@ public interface ProcessStore {
 
     Optional<StoredDefinition> definition(String tenant, String id);
 
+    /** The version {@code version} of {@code key} in the tenant. */
+    Optional<StoredDefinition> definitionVersion(String tenant, String key, int version);
+
     void insertDefinition(StoredDefinition definition);
 
     /**

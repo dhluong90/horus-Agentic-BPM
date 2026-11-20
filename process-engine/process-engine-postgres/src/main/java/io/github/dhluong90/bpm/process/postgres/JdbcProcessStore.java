@@ -59,6 +59,13 @@ public final class JdbcProcessStore implements ProcessStore {
     }
 
     @Override
+    public Optional<StoredDefinition> definitionVersion(String tenant, String key, int version) {
+        return jdbc.sql("SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE tenant_id = ? AND key_name = ? "
+                        + "AND version_num = ?")
+                .params(tenant, key, version).query(JdbcProcessStore::definition).optional();
+    }
+
+    @Override
     public void insertDefinition(StoredDefinition d) {
         jdbc.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
                         + "definition_hash, source_format, source_document, source_hash, node_count, source, effective_from, "
