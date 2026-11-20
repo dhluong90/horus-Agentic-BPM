@@ -218,7 +218,7 @@ curl -s -b cookies -o /dev/null -w '%{http_code} %{content_type}\n' 127.0.0.1:80
 
 ## 6. Run the smoke test
 
-[`deploy/smoke-test.sh`](../deploy/smoke-test.sh) runs steps 2 to 5 and exits non-zero on the first failure. CI runs it on every pull request that changes the deployment files. On a host built from an older commit without the rule lifecycle endpoints or the cockpit, the test reports those steps as `SKIP` instead of failing.
+[`deploy/smoke-test.sh`](../deploy/smoke-test.sh) runs steps 2 to 5 and exits non-zero on the first failure. CI runs it on every push to main, on release tags, nightly and on request. On a host built from an older commit without the rule lifecycle endpoints or the cockpit, the test reports those steps as `SKIP` instead of failing.
 
 ```bash
 deploy/smoke-test.sh

@@ -1,29 +1,16 @@
 name: Deploy
 
 # Builds the example host image and runs the docker compose smoke test (docs/DEPLOYING.md), then the
-# image gates: no secrets in the layers, no high or critical vulnerability. Runs only when the
-# deployment files or the example hosts change; the CI workflow covers the engines.
+# image gates: no secrets in the layers, no high or critical vulnerability. Runs on every push to main, on release tags, nightly and on request;
+# the CI workflow covers the engines.
 on:
-  pull_request:
-    paths:
-      - "deploy/**"
-      - "docker-compose.yml"
-      - ".dockerignore"
-      - ".env.example"
-      - "docs/DEPLOYING.md"
-      - "examples/**"
-      - ".github/workflows/deploy.yml"
   push:
     branches: [main]
-    paths:
-      - "deploy/**"
-      - "docker-compose.yml"
-      - ".dockerignore"
-      - ".env.example"
-      - "docs/DEPLOYING.md"
-      - "examples/**"
-      - ".github/workflows/deploy.yml"
+    tags: ["v*"]
   workflow_dispatch:
+  # Nightly, so a vulnerability published against the base image fails main within a day.
+  schedule:
+    - cron: "30 2 * * *"
 
 # Actions are pinned by commit SHA; the comment names the release. Update both together.
 permissions:
