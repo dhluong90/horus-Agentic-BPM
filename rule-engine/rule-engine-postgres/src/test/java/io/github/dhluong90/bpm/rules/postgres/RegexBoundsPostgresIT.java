@@ -99,9 +99,9 @@ class RegexBoundsPostgresIT {
     void publish(String tenant) {
         caller.as(tenant, "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(REFERENCE_CHECK.getBytes(StandardCharsets.UTF_8)));
-        engines.versionService().requestPublish("reference-check", 1, WriteOptions.none());
+        long lock = engines.versionService().requestPublish("reference-check", 1, WriteOptions.none()).lockVersion();
         caller.as(tenant, "bob");
-        engines.versionService().approve("reference-check", 1, WriteOptions.none());
+        engines.versionService().approve("reference-check", 1, new WriteOptions(null, lock, null));
     }
 
     private static DataSource freshDatabase() {
