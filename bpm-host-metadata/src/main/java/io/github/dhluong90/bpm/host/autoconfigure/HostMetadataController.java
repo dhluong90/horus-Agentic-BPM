@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException;
 import io.github.dhluong90.bpm.host.spi.EngineCaller;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
+import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -11,9 +12,14 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -26,8 +32,11 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>Both need an authenticated caller and no other permission. Responses follow
  * {@code cockpit/api/schema/bpm-meta.v1.schema.json} and {@code bpm-me.v1.schema.json} field for field,
- * carry a weak {@code ETag} and answer {@code 304} to a matching {@code If-None-Match}. {@code /meta}, the
- * same for every caller of the host, is {@code private, max-age=60}; {@code /me}, which carries the
+ * carry a weak {@code ETag} and answer {@code 304} to a matching {@code If-None-Match}. {@code /meta} is
+ * {@code private, max-age=60}; when an engine contributes {@link ModuleTenantSettings}, its settings follow the
+ * caller's tenant, so {@code /meta} is then {@code private, no-cache} like {@code /me} and varies by the caller's
+ * credentials. A contributor that throws or returns a value of another type is left out of the response and
+ * logged, so it never breaks {@code /meta} for anyone. {@code /me}, which carries the
  * caller's permissions, is {@code private, no-cache}, so a revoked role or a sign-out on a shared machine
  * is never served from the browser cache without asking the host. Bodies are built as ordered maps and
  * written by the host's own JSON converter, so absent optional fields are omitted rather than written as
@@ -42,25 +51,78 @@ import org.springframework.web.bind.annotation.RestController;
 final class HostMetadataController {
 
     static final String META_CACHE_CONTROL = "private, max-age=60";
+    /** {@code /meta} with settings of the caller's tenant: as {@code /me}, so a sign-out is never served from cache. */
+    static final String META_TENANT_CACHE_CONTROL = "private, no-cache";
     static final String ME_CACHE_CONTROL = "private, no-cache";
+    /** Package of the engines; only their starters may contribute {@link ModuleTenantSettings} before 1.0. */
+    static final String ENGINE_PACKAGE = "io.github.dhluong90.bpm.";
+    private static final Log LOG = LogFactory.getLog(HostMetadataController.class);
+    /** Contributors already reported at ERROR; later failures of the same kind go to DEBUG, so polling never floods. */
+    private final Set<String> reported = ConcurrentHashMap.newKeySet();
     /** ADR-0015: the largest page any engine list endpoint returns. */
     static final int MAX_PAGE_SIZE = 200;
 
     private final List<ModuleDescriptor> modules;
+    private final List<ModuleTenantSettings> tenantSettings;
     private final HostMetadataProperties properties;
     private final EngineAccess access;
     /** {@code /me} depends on the caller's credentials and on the switch request header. */
     static final String[] ME_VARY = {HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE, DefaultEngineAccess.TENANT_SWITCH_HEADER};
+    /**
+     * {@code /meta} with settings of the caller's tenant: the tenant comes from the credentials, and from the switch
+     * header once tenant switching is offered, so the response varies by the same headers as {@code /me}.
+     */
+    static final String[] META_VARY = {HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE,
+        DefaultEngineAccess.TENANT_SWITCH_HEADER};
 
     HostMetadataController(List<ModuleDescriptor> modules, HostMetadataProperties properties, EngineAccess access) {
+        this(modules, List.of(), properties, access);
+    }
+
+    HostMetadataController(List<ModuleDescriptor> modules, List<ModuleTenantSettings> tenantSettings,
+            HostMetadataProperties properties, EngineAccess access) {
         this.modules = List.copyOf(modules);
+        this.tenantSettings = List.copyOf(tenantSettings);
         this.properties = properties;
         this.access = access;
+        checkTenantSettings(this.modules, this.tenantSettings);
+    }
+
+    /**
+     * Stops the host when a tenant settings bean does not come from an engine starter, names a module without an
+     * entry, repeats a name, or reuses the name of a fixed setting, so a response never holds two values for one
+     * name and a host never builds on the unstable SPI.
+     */
+    static void checkTenantSettings(List<ModuleDescriptor> modules, List<ModuleTenantSettings> tenantSettings) {
+        Map<String, Set<String>> taken = new LinkedHashMap<>();
+        modules.forEach(module -> taken.put(module.module(), new HashSet<>(module.settings().keySet())));
+        for (ModuleTenantSettings contributor : tenantSettings) {
+            if (!contributor.getClass().getName().startsWith(ENGINE_PACKAGE)) {
+                throw new IllegalStateException("ModuleTenantSettings bean " + contributor.getClass().getName()
+                        + " is refused: this interface is for the engine starters only and may change before 1.0."
+                        + " Remove the bean; a host publishes its own information outside /api/bpm/meta.");
+            }
+            Set<String> names = taken.get(contributor.module());
+            if (names == null) {
+                throw new IllegalStateException("Tenant settings for module '" + contributor.module()
+                        + "', which has no engine entry. Installed modules: " + taken.keySet());
+            }
+            if (contributor.names().isEmpty()) {
+                throw new IllegalStateException("Tenant settings for module '" + contributor.module()
+                        + "' declare no setting name.");
+            }
+            for (String name : contributor.names()) {
+                if (name == null || name.isBlank() || !names.add(name)) {
+                    throw new IllegalStateException("Tenant setting '" + name + "' of module '" + contributor.module()
+                            + "' is blank or already a setting of that module.");
+                }
+            }
+        }
     }
 
     @GetMapping("/meta")
     ResponseEntity<Map<String, Object>> meta(HttpServletRequest request) {
-        access.currentCaller();
+        EngineCaller caller = access.currentCaller();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("schemaVersion", 1);
         if (properties.hostId() != null) {
@@ -73,15 +135,71 @@ final class HostMetadataController {
             entry.put("engineVersion", module.engineVersion());
             entry.put("apiVersion", module.apiVersion());
             entry.put("features", module.features());
-            if (!module.settings().isEmpty()) {
-                entry.put("settings", module.settings());
+            Map<String, Object> settings = settings(module, caller.tenant());
+            if (!settings.isEmpty()) {
+                entry.put("settings", settings);
             }
             entries.add(entry);
         }
         body.put("modules", entries);
         body.put("tenancy", Map.of("switching", false));
         body.put("limits", Map.of("maxPageSize", MAX_PAGE_SIZE));
-        return cacheable(request, body, META_CACHE_CONTROL, new String[0]);
+        return tenantSettings.isEmpty() ? cacheable(request, body, META_CACHE_CONTROL, new String[0])
+                : cacheable(request, body, META_TENANT_CACHE_CONTROL, META_VARY);
+    }
+
+    /**
+     * The module's fixed settings, then the declared tenant settings of the caller's tenant. A contributor that
+     * throws, or returns a value that is not a boolean, an integer or a string for a declared name, is left out
+     * whole and logged with its class, the module and the name, never the value; the other contributors and the
+     * fixed settings are still published.
+     */
+    private Map<String, Object> settings(ModuleDescriptor module, String tenant) {
+        Map<String, Object> settings = new LinkedHashMap<>(module.settings());
+        for (ModuleTenantSettings contributor : tenantSettings) {
+            if (!contributor.module().equals(module.module())) {
+                continue;
+            }
+            Map<String, Object> values;
+            try {
+                values = contributor.settings(tenant);
+            } catch (RuntimeException e) {
+                report(contributor, "threw " + e.getClass().getName(), e);
+                continue;
+            }
+            Map<String, Object> accepted = new LinkedHashMap<>();
+            String unsupported = null;
+            for (String name : contributor.names()) {
+                Object value = values == null ? null : values.get(name);
+                if (value == null) {
+                    continue;
+                }
+                if (value instanceof Boolean || value instanceof Integer || value instanceof Long
+                        || value instanceof String) {
+                    accepted.put(name, value);
+                } else {
+                    unsupported = "returned a " + value.getClass().getName() + " for '" + name
+                            + "', which is not a boolean, an integer or a string";
+                    break;
+                }
+            }
+            if (unsupported != null) {
+                report(contributor, unsupported, null);
+                continue;
+            }
+            settings.putAll(accepted);
+        }
+        return settings;
+    }
+
+    private void report(ModuleTenantSettings contributor, String problem, RuntimeException cause) {
+        String message = "Tenant settings " + contributor.getClass().getName() + " of module '" + contributor.module()
+                + "' " + problem + "; its settings are left out of /api/bpm/meta.";
+        if (reported.add(contributor.getClass().getName() + " " + problem)) {
+            LOG.error(message, cause);
+        } else if (LOG.isDebugEnabled()) {
+            LOG.debug(message, cause);
+        }
     }
 
     @GetMapping("/me")
