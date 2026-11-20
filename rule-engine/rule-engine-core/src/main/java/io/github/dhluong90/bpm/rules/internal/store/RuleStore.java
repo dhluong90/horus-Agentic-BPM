@@ -69,6 +69,16 @@ public interface RuleStore {
     void updateVersion(StoredVersion updated, long expectedLockVersion);
 
     /**
+     * Replaces the document of a draft (RLE-047): the content columns and the version's rule rows, when the stored
+     * row is still a {@code DRAFT} at {@code expectedLockVersion}.
+     *
+     * @param updated the new state, from {@link StoredVersion#replaced}
+     * @param expectedLockVersion the lock version the change was based on
+     * @throws io.github.dhluong90.bpm.rules.api.VersionConflictException when the row changed meanwhile
+     */
+    void replaceDraft(StoredVersion updated, long expectedLockVersion);
+
+    /**
      * Finds the published version effective at an instant: the latest {@code effectiveFrom} at or before it.
      *
      * @param tenantId the tenant
@@ -144,4 +154,12 @@ public interface RuleStore {
      * @return the key, or empty
      */
     Optional<byte[]> findEngineKey(String name);
+
+    /**
+     * Lists the declared inputs of every version that is not retired, in every tenant. Engine-internal, used once at
+     * start-up outside any request; never exposed to a caller.
+     *
+     * @return the inputs, by tenant, rule set and version
+     */
+    List<VersionInputs> liveVersionInputs();
 }

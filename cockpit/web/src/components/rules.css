@@ -121,7 +121,9 @@
 .change-mark--removed { background: var(--diff-del); color: var(--bad); }
 .diff-row--added > * { background: var(--diff-add); }
 .diff-row--removed > * { background: var(--diff-del); }
-.diff-row--removed td { color: var(--ink-2); text-decoration: line-through; }
+/* A removed row strikes nothing: strike-through means only "replaced by the value on the right". The Removed
+ * label, the tint and "Removed in version 2" carry it. */
+.diff-row--removed td { color: var(--ink-2); }
 .diff-row--unchanged > * { color: var(--ink-2); }
 .diff-td--mod { background: var(--diff-mod); }
 .diff-cell { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
@@ -418,3 +420,46 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .amount__input { min-height: 36px; align-self: stretch; }
 .amount__code { margin-right: 8px; }
 .list-note { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+
+/* Side-by-side version diff (CKP-002): the base version and the proposed version in one table, one rule id per
+ * line. The diff takes the full width; the four-eyes decision docks at the bottom of the screen. */
+.workbench--wide { grid-template-columns: minmax(0, 1fr); }
+.dt--sbs th, .dt--sbs td { padding: 10px 10px; }
+.dt--sbs .sbs__versions th { vertical-align: top; padding-top: 12px; padding-bottom: 8px; }
+.dt--sbs .dt__groups th { padding-bottom: 0; }
+.dt--sbs thead tr:last-child th { padding-top: 6px; }
+.sbs__side { white-space: normal; text-align: left; }
+.sbs__side--next { box-shadow: inset 0 3px 0 var(--accent-fill); }
+.sbs__title { display: block; color: var(--ink); font: 600 14px/1.4 var(--font-ui); }
+.sbs__meta { display: block; color: var(--ink-2); font: 500 13px/1.45 var(--font-ui); }
+.sbs__hash { display: block; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.45; }
+.dt--sbs .sbs__start--base { border-left: 1px solid var(--line); }
+.dt--sbs .sbs__start--next { border-left: 2px solid var(--line-strong); }
+.dt--sbs .dt__groups .dt__group--then { border-left: 1px solid var(--line-strong); }
+.sbs__absent { color: var(--muted); font-size: 13px; }
+.diff-row--removed td.sbs__absent { text-decoration: none; color: var(--bad); font-weight: 600; }
+.diff-row--added td.sbs__absent { color: var(--ok); font-weight: 600; }
+.diff-td--old { background: var(--diff-mod); color: var(--ink-2); }
+.diff-td--old .cell-values, .diff-td--old .cell-output { text-decoration: line-through; }
+.changes__notes { margin: 0; padding: 0 20px 14px 38px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+
+/* The four-eyes decision, docked: title, comment and actions on one band at the bottom of the viewport. */
+.decision__body, .decision__actions { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.decision--dock {
+  position: sticky; bottom: 12px; z-index: 20; margin-top: 16px; padding: 12px 20px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 24px; row-gap: 8px;
+  box-shadow: var(--sh-dock), var(--sh-1);
+}
+.decision--dock .rules-card-title { margin: 0; white-space: nowrap; }
+.decision--dock .decision__body { gap: 6px; }
+.decision--dock .field { gap: 4px; }
+.decision--dock textarea.field__input { min-height: var(--target-min); resize: vertical; }
+.decision--dock .decision__actions { gap: 4px; align-items: flex-end; }
+.decision--dock .dock__hint { margin: 0; text-align: right; }
+.decision--dock .gate__reason { margin: 0; }
+.decision--dock > .notice, .decision--dock > .dock__note { grid-column: 2 / -1; }
+@media (max-width: 1180px) {
+  .decision--dock { grid-template-columns: minmax(0, 1fr); }
+  .decision--dock .decision__actions { align-items: flex-start; }
+  .decision--dock > .notice, .decision--dock > .dock__note { grid-column: auto; }
+}

@@ -4,8 +4,8 @@ import { toHostError } from '../../api/hostError';
 import type { Rule, RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useRulesSession } from './api/rulesContext';
-import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersions } from './api/useRules';
-import { DecisionCard, DetailsPanel, DraftsOffNote, EditDock, HeaderActions, type Action } from './components/ActionDock';
+import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
+import { DecisionCard, DetailsPanel, DraftsOffNote, EditDock, HeaderActions, type Action, type Review } from './components/ActionDock';
 import { ChangesView } from './components/ChangesView';
 import { DecisionTable } from './components/DecisionTable';
 import { DraftChanges } from './components/DraftChanges';
@@ -67,13 +67,26 @@ function Inspector({ version, onMatched }: { version: RuleSetVersion; onMatched:
   );
 }
 
-/** The diff reads the base version in full only when the Changes view is open. */
+/**
+ * The approver's comparison. The engine computes the diff (RLE-028); both versions are read in full so every
+ * row shows beside its counterpart. Nothing is fetched until the Changes view is open.
+ */
 function ChangesLens({ version, base }: { version: RuleSetVersion; base: VersionSummary | undefined }) {
   const { t } = useI18n();
   const baseVersion = useVersion(version.ruleSet, base?.version);
-  if (base && baseVersion.isPending) return <p className="empty" role="status">{t('ruleSets.loading')}</p>;
+  const diff = useVersionDiff(version, base?.version);
+  if (!base) {
+    return (
+      <div className="changes">
+        <p className="changes__summary"><strong>{t('changes.first')}</strong></p>
+        <DecisionTable definition={version.definition} version={version.version} matched={new Set()} />
+      </div>
+    );
+  }
   if (baseVersion.isError) return <ProblemNotice error={baseVersion.error} />;
-  return <ChangesView definition={version.definition} base={baseVersion.data?.definition} baseVersion={base?.version} baseInEffect={base?.status === 'PUBLISHED'} />;
+  if (diff.isError) return <ProblemNotice error={diff.error} />;
+  if (baseVersion.isPending || diff.isPending) return <p className="empty" role="status">{t('ruleSets.loading')}</p>;
+  return <ChangesView diff={diff.data} base={baseVersion.data} next={version} />;
 }
 
 function LensContent({ lens, version, base, matched }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string> }) {
@@ -96,9 +109,12 @@ interface WorkbenchProps {
   navigate: Navigate;
   say: (text: string) => void;
   importVersion: Action<RuleDocument>;
+  /** The content hash of this version when the user opened it; a different current hash means it changed under them. */
+  openedHash: string;
+  onReviewAgain: () => void;
 }
 
-function Workbench({ version, versions, lens, navigate, say, importVersion }: WorkbenchProps) {
+function Workbench({ version, versions, lens, navigate, say, importVersion, openedHash, onReviewAgain }: WorkbenchProps) {
   const { t, locale } = useI18n();
   const { can } = useRulesSession();
   const [editing, setEditing] = useState(false);
@@ -131,6 +147,20 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
     save.start({ contentType: 'application/yaml', text: JSON.stringify(document, null, 2) });
   };
   const tabLens: 'table' | 'changes' | 'history' = lens === 'source' ? 'table' : lens;
+  // Two versions side by side need the full width: one view at a time, and the decision docks below the diff.
+  const comparing = !editing && lens === 'changes';
+  // Approve only what is on screen: the diff shown must be of this version's content, and the content must be what
+  // the user opened. The same query as the Changes view, so nothing is fetched twice.
+  const diff = useVersionDiff(version, comparing && version.status === 'PENDING_APPROVAL' ? base?.version : undefined);
+  let review: Review = 'ok';
+  if (openedHash !== version.canonicalHash || (diff.data !== undefined && diff.data.canonicalHash !== version.canonicalHash)) review = 'changed';
+  else if (diff.isFetching) review = 'checking';
+  const decision = (docked: boolean) => (
+    <DecisionCard version={version} docked={docked} review={review} onReload={() => { window.location.reload(); }}
+      onReviewAgain={() => { onReviewAgain(); go({ lens: 'changes' }); }}
+      approve={{ start: (comment) => { approve.start({ version, comment }); }, isPending: approve.isPending, error: approve.error }}
+      reject={{ start: (reason) => { reject.start({ version, reason }); }, isPending: reject.isPending, error: reject.error }} />
+  );
   // The breadcrumb names what is on screen: "New draft" while editing, "Version N draft" for a draft.
   const crumb = editing ? t('crumb.newDraft') : version.status === 'DRAFT' ? t('crumb.versionDraft', { version: String(version.version) }) : undefined;
   useEffect(() => {
@@ -192,15 +222,11 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
           </div>
         ) : null}
       </div>
-      <div className={editing ? 'workbench workbench--editing' : 'workbench'}>
+      <div className={editing ? 'workbench workbench--editing' : comparing ? 'workbench workbench--wide' : 'workbench'}>
         {main}
-        <aside className="workbench__side">
+        {comparing ? null : <aside className="workbench__side">
           {editing ? <DraftChanges definition={version.definition} base={version.definition.rules} next={draftRules} /> : null}
-          {!editing && version.status === 'PENDING_APPROVAL' ? (
-            <DecisionCard version={version} onReload={() => { window.location.reload(); }}
-              approve={{ start: (comment) => { approve.start({ version, comment }); }, isPending: approve.isPending, error: approve.error }}
-              reject={{ start: (reason) => { reject.start({ version, reason }); }, isPending: reject.isPending, error: reject.error }} />
-          ) : null}
+          {!editing && version.status === 'PENDING_APPROVAL' ? decision(false) : null}
           {!editing ? (
             <Inspector version={version} onMatched={(ids) => {
               setMatched(new Set(ids));
@@ -208,8 +234,9 @@ function Workbench({ version, versions, lens, navigate, say, importVersion }: Wo
               if (lens !== 'table' && ids.length > 0) go({ lens: 'table' });
             }} />
           ) : null}
-        </aside>
+        </aside>}
       </div>
+      {comparing && version.status === 'PENDING_APPROVAL' ? decision(true) : null}
       {editing ? <EditDock unsaved={unsaved} toFix={errors.length} saving={save.isPending} onSave={saveDraft} onDiscard={() => { reset(false); }}
         onViewChanges={() => {
           const card = window.document.getElementById('draft-changes');
@@ -224,6 +251,8 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
   const { t } = useI18n();
   const versions = useVersions(name);
   const [toast, setToast] = useState<string | undefined>(undefined);
+  // The content hash of each version as the user first saw it on this page (four eyes: approve what you reviewed).
+  const [opened, setOpened] = useState<Readonly<Record<number, string>>>({});
   const closeToast = useCallback(() => { setToast(undefined); }, []);
   // Import of the next version from a file (CKP-030); it stays available when cockpit drafts are off (PD-075).
   const importVersion = useSaveDraft(name, (created) => {
@@ -256,6 +285,8 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
   if (version.isError) return frame(<ProblemNotice error={version.error} />);
   const current = version.data;
   const activeLens = lens ?? (current.status === 'PENDING_APPROVAL' ? 'changes' : 'table');
+  const openedHash = opened[current.version];
+  if (openedHash === undefined) setOpened({ ...opened, [current.version]: current.canonicalHash });
 
   return (
     <section className="workspace rs" aria-labelledby="rule-set-title">
@@ -263,6 +294,8 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
         key={`${name}-${String(current.version)}-${String(current.lockVersion)}`}
         version={current}
         versions={versions.data}
+        openedHash={openedHash ?? current.canonicalHash}
+        onReviewAgain={() => { setOpened({ ...opened, [current.version]: current.canonicalHash }); }}
         lens={activeLens}
         navigate={navigate}
         say={(text) => { setToast(text); }}

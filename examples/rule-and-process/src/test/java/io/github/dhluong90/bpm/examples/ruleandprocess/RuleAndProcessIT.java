@@ -58,7 +58,7 @@ class RuleAndProcessIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
@@ -127,7 +127,7 @@ class RuleAndProcessIT {
                 + "WHERE tenant_id = 'bank-a' AND key_name = 'card-fee-review'").query(String.class).list())
                 .containsExactly("1 ACTIVE BPMN_XML STARTUP");
         assertThat(jdbc.sql("SELECT version FROM pre_schema_history WHERE success ORDER BY installed_rank")
-                .query(String.class).list()).containsExactly("0", "1", "2");
+                .query(String.class).list()).containsExactly("0", "1", "2", "3", "4", "6");
         assertThat(jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE script LIKE '%pre_%'").query(Long.class)
                 .single()).isZero();
     }
@@ -171,7 +171,8 @@ class RuleAndProcessIT {
         String complete = "/api/bpm/processes/v1/tasks/" + task.get("id").stringValue() + ":complete";
 
         assertThat(send("tuan", complete, "{\"result\":{\"approved\":true}}", "\"0\"").statusCode()).isEqualTo(403);
-        JsonNode done = post("an", complete, "{\"result\":{\"approved\":true}}", 200, "\"0\"");
+        claim("an", task.get("id").stringValue(), "\"0\"", 200);
+        JsonNode done = post("an", complete, "{\"result\":{\"approved\":true}}", 200, "\"1\"");
 
         assertThat(done.get("status").stringValue()).isEqualTo("COMPLETED");
         assertThat(done.at("/tasks/0/completedBy").stringValue()).isEqualTo("an");
@@ -183,9 +184,11 @@ class RuleAndProcessIT {
         JsonNode submitted = post("tuan", "/api/cards/applications", "{\"applicationId\":\"IT-1003\",\"customerId\":\"C-003\"}", 201);
         JsonNode instance = get("an", "/api/bpm/processes/v1/instances/" + submitted.get("instanceId").stringValue());
         String complete = "/api/bpm/processes/v1/tasks/" + instance.at("/tasks/0/id").stringValue() + ":complete";
+        // The claim moves the task to lock version 1; operator A completes at "1", operator B still holds "1".
+        claim("an", instance.at("/tasks/0/id").stringValue(), "\"0\"", 200);
 
-        post("an", complete, "{\"result\":{\"approved\":false}}", 200, "\"0\"");
-        HttpResponse<String> second = send("an", complete, "{\"result\":{\"approved\":true}}", "\"0\"");
+        post("an", complete, "{\"result\":{\"approved\":false}}", 200, "\"1\"");
+        HttpResponse<String> second = send("hoa", complete, "{\"result\":{\"approved\":true}}", "\"1\"");
 
         assertThat(second.statusCode()).isEqualTo(409);
         assertThat(JSON.readTree(second.body()).get("code").stringValue()).isEqualTo("VERSION_CONFLICT");
@@ -227,6 +230,7 @@ class RuleAndProcessIT {
             assertThatThrownBy(() -> processes.instance(instanceId)).isInstanceOf(InstanceNotFoundException.class);
             assertThatThrownBy(() -> tasks.complete(taskId, Map.of("approved", true), 0L, "k-iso"))
                     .isInstanceOf(TaskNotFoundException.class);
+            assertThatThrownBy(() -> tasks.claim(taskId, 0L, "k-iso-claim")).isInstanceOf(TaskNotFoundException.class);
             return null;
         });
         as("teller-b", List.of("ROLE_TELLER", "TENANT_bank-b"), () -> {
@@ -284,13 +288,14 @@ class RuleAndProcessIT {
         // REST: the supervisor hoa holds both roles; she submits, then may not review her own application.
         JsonNode submitted = post("hoa", "/api/cards/applications", "{\"applicationId\":\"IT-5001\",\"customerId\":\"C-002\"}", 201);
         JsonNode instance = get("hoa", "/api/bpm/processes/v1/instances/" + submitted.get("instanceId").stringValue());
-        String complete = "/api/bpm/processes/v1/tasks/" + instance.at("/tasks/0/id").stringValue() + ":complete";
-        HttpResponse<String> own = send("hoa", complete, "{\"result\":{\"approved\":true}}", "\"0\"");
-        assertThat(own.statusCode()).isEqualTo(403);
+        String taskId = instance.at("/tasks/0/id").stringValue();
+        String complete = "/api/bpm/processes/v1/tasks/" + taskId + ":complete";
+        HttpResponse<String> own = claim("hoa", taskId, "\"0\"", 403);
         assertThat(JSON.readTree(own.body()).get("code").stringValue()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
         assertThat(get("an", "/api/bpm/processes/v1/instances/" + submitted.get("instanceId").stringValue())
                 .at("/tasks/0/status").stringValue()).isEqualTo("OPEN");
-        post("an", complete, "{\"result\":{\"approved\":true}}", 200, "\"0\"");
+        claim("an", taskId, "\"0\"", 200);
+        post("an", complete, "{\"result\":{\"approved\":true}}", 200, "\"1\"");
 
         // Java API: the same rule holds without REST.
         ProcessInstance started = as("supervisor", List.of("ROLE_TELLER", "ROLE_CARD_OFFICER"), () -> {
@@ -300,7 +305,7 @@ class RuleAndProcessIT {
                     .withVariables(Map.of("applicationId", "IT-5002", "customerId", "C-002")));
         });
         as("supervisor", List.of("ROLE_TELLER", "ROLE_CARD_OFFICER"), () -> {
-            assertThatThrownBy(() -> tasks.complete(started.openTasks().get(0).id(), Map.of("approved", true), 0L, "k-own"))
+            assertThatThrownBy(() -> tasks.claim(started.openTasks().get(0).id(), 0L, "k-own"))
                     .isInstanceOf(io.github.dhluong90.bpm.process.api.SelfApprovalForbiddenException.class);
             return null;
         });
@@ -419,13 +424,26 @@ class RuleAndProcessIT {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body));
-        if (ifMatch != null) {
-            request.header("If-Match", ifMatch);
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        String lock = ifMatch == null && path.matches(".*:(approve|reject)$") ? "\"1\"" : ifMatch;
+        if (lock != null) {
+            request.header("If-Match", lock);
         }
         if (path.endsWith(":complete")) {
             request.header("Idempotency-Key", "it-" + java.util.UUID.randomUUID());
         }
         return HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> claim(String user, String taskId, String ifMatch, int expected) throws Exception {
+        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port
+                        + "/api/bpm/processes/v1/tasks/" + taskId + ":claim"))
+                .header("Authorization", basic(user)).header("If-Match", ifMatch)
+                .header("Idempotency-Key", "it-claim-" + java.util.UUID.randomUUID())
+                .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(expected);
+        return response;
     }
 
     private JsonNode get(String user, String path) throws Exception {

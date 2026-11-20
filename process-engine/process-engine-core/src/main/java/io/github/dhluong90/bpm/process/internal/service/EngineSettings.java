@@ -12,9 +12,13 @@ import java.util.Objects;
  * @param maxBytes {@code definitions.max-bytes}, at most {@link EngineDefaults#MAX_BYTES}
  * @param idempotencyRetention {@code idempotency.retention}
  * @param slowCallWarning {@code handlers.slow-call-warning}: local steps and event listeners slower than this are logged
+ * @param maxPageSize {@code query.max-page-size}, 1 to {@link EngineDefaults#MAX_PAGE_SIZE}
+ * @param maxRange {@code query.max-range}: longest start-time range of a list, at most {@link EngineDefaults#MAX_RANGE}
+ * @param reasonMaxLength {@code lifecycle.reason-max-length}: longest cancellation reason, 1 to
+ *     {@link EngineDefaults#MAX_REASON_LENGTH}
  */
 public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
-        Duration slowCallWarning) {
+        Duration slowCallWarning, int maxPageSize, Duration maxRange, int reasonMaxLength) {
 
     public EngineSettings {
         if (maxNodes < 2 || maxNodes > EngineDefaults.MAX_NODES) {
@@ -30,6 +34,31 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
         if (slowCallWarning == null) {
             slowCallWarning = EngineDefaults.SLOW_CALL_WARNING;
         }
+        if (maxPageSize < 1 || maxPageSize > EngineDefaults.MAX_PAGE_SIZE) {
+            throw new IllegalArgumentException("query.max-page-size must be 1 to " + EngineDefaults.MAX_PAGE_SIZE);
+        }
+        Objects.requireNonNull(maxRange, "maxRange must not be null");
+        if (maxRange.isNegative() || maxRange.isZero() || maxRange.compareTo(EngineDefaults.MAX_RANGE) > 0) {
+            throw new IllegalArgumentException("query.max-range must be positive and at most " + EngineDefaults.MAX_RANGE);
+        }
+        if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.MAX_REASON_LENGTH) {
+            throw new IllegalArgumentException("lifecycle.reason-max-length must be 1 to " + EngineDefaults.MAX_REASON_LENGTH);
+        }
+    }
+
+    /**
+     * Settings with the default query limits.
+     *
+     * @param definitionsAutoApprove see the record
+     * @param maxNodes see the record
+     * @param maxBytes see the record
+     * @param idempotencyRetention see the record
+     * @param slowCallWarning see the record
+     */
+    public EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
+            Duration slowCallWarning) {
+        this(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning,
+                EngineDefaults.MAX_PAGE_SIZE, EngineDefaults.MAX_RANGE, EngineDefaults.MAX_REASON_LENGTH);
     }
 
     /** @return the engine defaults, auto-approve off */
