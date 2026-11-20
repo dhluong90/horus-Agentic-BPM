@@ -69,6 +69,7 @@ Each claimed job then fires in its own transaction: the instance row is locked, 
 | Duplicate protection | `SKIP LOCKED` on the claim; the fire and `DONE` commit together; the attempt number fences an old claim, so a replica that comes back after its lease was taken over fires nothing |
 | Failed firing | Rolled back; due again after `jobs.retry-backoff` times the attempt; `FAILED` after `jobs.max-attempts` (3) |
 | Poll cadence | `jobs.poll-interval`, 1 s when idle; at once again while polls find due jobs; `jobs.batch-size` 32 |
+| Decision after a timer | No one is signed in when a timer fires. A `decision` step that follows runs in the tenant of the stored instance row, as `system:process-engine`, never in the tenant the poller thread's security context resolves; a rule set that exists only in another tenant fails the step closed and the firing rolls back (`PRE-055`, `PRE-056`) |
 | Timer events in this release | Intermediate timer catch event with `timeDuration` (for example `P3D`) or `timeDate` (for example `2027-04-01T00:00:00+07:00`); cycles and boundary timers follow |
 
 ## `parallelGateway` join without lost wakeups

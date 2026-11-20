@@ -33,7 +33,12 @@ public interface RuleEngine {
   DecisionResult evaluate(DecisionRequest request);                            // tenant, clock, correlation id, caller, idempotency key
   <T> T evaluateAs(String ruleSet, DecisionInput input, Class<T> outputType);  // map outputs onto a record
 }
+
+public interface TenantScopedRuleEngine {   // implemented by the default engine
+  DecisionResult evaluate(String tenantId, String systemCallerId, DecisionRequest request);
+}
 ```
+`TenantScopedRuleEngine` is for an embedded engine acting on its own stored work with no caller signed in, for example the Process Engine pricing a step after a timer. The tenant is the one that engine read from its own stored row, and the caller is a `system:` identity such as `system:process-engine`, written to the decision log. A blank tenant or a caller without the `system:` prefix is refused. Host code never passes a tenant from a request; there is no REST endpoint for it.
 ```java
 DecisionResult r = rules.evaluate("card-fee", DecisionInput.of("tier", "GOLD", "balance", Money.ofMinor("VND", 60_000_000), "txCount", 3));
 r.ruleSet();            // "card-fee"
