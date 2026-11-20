@@ -101,11 +101,15 @@ Every response under `/api/bpm/**` carries `Cache-Control: no-store`, so rule se
 | Elevation of privilege | Tenant-scoped decision entry point | A host controller passes a tenant from a path parameter to the entry point the Process Engine uses after a timer. A user of tenant A then reads tenant B's rule outputs, and a decision row is written in tenant B as `system:process-engine` | The entry point is not a bean, `RuleEngines` is not a bean, and building a `RuleEngines` hands out no grant. The `EmbeddedEngineGrant` hands the entry point out once, only to the process starter's package-private decision port, checked by class identity. The Process Engine claims it at start-up, and any identity left unclaimed is closed when start-up finishes. The grant is registered only with the Process Engine on the class path. The engine packages are sealed, so a host class in a split package is refused by the JVM. The grant is registered, and a claim accepted, only when the decision port's class is in a sealed package of a jar whose `Implementation-Version` equals the Rule Engine's; a same-named class from a class directory, an unsealed jar or a jar of another version gets no grant, and the host keeps running without it. A Rule Engine opens at most one grant, and the opener is not public. Only the engine's timer path can create an engine caller. Out of scope: reflection | `TR-TEN-01`: `EmbeddedEngineGrantTest`, `EmbeddedEngineClaimantVerificationTest`, `RuleEngineAutoConfigurationTest`, `EmbeddedEntryPointIsolationIT` (split-package attacker), `SealedPackagesFatJarIT`, ArchUnit in rule and process core |
 | Elevation of privilege | Agent output | Agent returns an output that skips approval | Guardrail rule set runs in-process after schema validation; `route-to-human` creates a task the triggering identity cannot approve | `PRE-010` |
 
+## Security boundary
+
+Malicious code running inside the same JVM is outside the engines' security boundary. This covers reflection that overrides access checks, forged jars or packages stamped with the engine's version, and custom class loaders. Such code could equally read any private field of the engine, so no in-process control can stop it. Hosts control what runs in their process, for example with signed jars and dependency review. The engines' controls target host code that uses their public API or imports their internal packages by convenience or by mistake. Accepted by the maintainer on 2026-11-20.
+
 ## Residual risks
 
 Known risks that are accepted for a limited time, each with a deadline and an issue that fixes it.
 
-None open. The tenant-scoped decision entry point that host code could reach until 0.2.0 ([#336](https://github.com/dhluong90/horus-Agentic-BPM/issues/336)) is closed. Its control is in the threat table above, under elevation of privilege.
+None open. The tenant-scoped decision entry point that host code could reach until 0.2.0 ([#336](https://github.com/dhluong90/horus-Agentic-BPM/issues/336)) is fixed by [#355](https://github.com/dhluong90/horus-Agentic-BPM/pull/355) and [#361](https://github.com/dhluong90/horus-Agentic-BPM/pull/361) and closed. Its control is in the threat table above, under elevation of privilege.
 
 ## Supply chain
 
