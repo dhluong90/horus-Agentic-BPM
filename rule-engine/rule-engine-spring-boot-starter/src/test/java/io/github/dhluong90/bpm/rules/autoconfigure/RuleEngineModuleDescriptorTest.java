@@ -56,13 +56,15 @@ class RuleEngineModuleDescriptorTest {
     @Test
     void PD_094_cockpit_drafts_setting_is_published_false_by_default_and_true_when_the_host_sets_it() {
         runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                .containsEntry("authoring.cockpit-drafts", false));
+                .containsEntry("authoring.cockpit-drafts", false)
+                .containsEntry("lifecycle.acknowledge-warnings", "UNMASKED_PERSONAL_DATA"));
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=true")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
                         .containsEntry("authoring.cockpit-drafts", true));
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=false")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                        .containsEntry("authoring.cockpit-drafts", false));
+                        .containsEntry("authoring.cockpit-drafts", false)
+                .containsEntry("lifecycle.acknowledge-warnings", "UNMASKED_PERSONAL_DATA"));
     }
 
     @Test
@@ -88,7 +90,8 @@ class RuleEngineModuleDescriptorTest {
                 .containsExactly(Map.entry("authoring.cockpit-drafts", false),
                         Map.entry("lifecycle.approver-must-differ-from", "makers"),
                         Map.entry("lifecycle.retire-approval", "single"),
-                        Map.entry("lifecycle.retire-last-version", "confirm")));
+                        Map.entry("lifecycle.retire-last-version", "confirm"),
+                        Map.entry("lifecycle.acknowledge-warnings", "UNMASKED_PERSONAL_DATA")));
         runner.withPropertyValues("horus.bpm.lifecycle.retire-approval=single")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
                         .containsEntry("lifecycle.retire-approval", "single"));

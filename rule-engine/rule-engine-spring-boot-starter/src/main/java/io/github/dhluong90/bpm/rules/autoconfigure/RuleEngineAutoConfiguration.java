@@ -124,7 +124,8 @@ public class RuleEngineAutoConfiguration {
             org.springframework.core.env.Environment environment) {
         return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts(),
                 properties.toSettings(environment).retireApproval(),
-                properties.toSettings(environment).retireLastVersion());
+                properties.toSettings(environment).retireLastVersion(),
+                properties.toSettings(environment).acknowledgeWarnings());
     }
 
     /**

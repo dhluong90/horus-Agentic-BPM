@@ -19,7 +19,9 @@
     "canonicalHash",
     "effectiveFrom",
     "requestedBy",
-    "approvedBy"
+    "approvedBy",
+    "acknowledgedWarnings",
+    "maskedByDefaultInputs"
   ],
   "additionalProperties": true,
   "properties": {
@@ -93,6 +95,38 @@
     "approvedBy": {
       "description": "Who approved it; always equal to actor, and never the requester or the author (four eyes).",
       "type": "string"
+    },
+    "acknowledgedWarnings": {
+      "description": "The { code, input } pairs the approver accepted on the record (PD-104, RLE-053): exactly the pairs that needed an acknowledgement at approval, empty when none did.",
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": [
+          "code",
+          "input"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "UNMASKED_PERSONAL_DATA"
+            ]
+          },
+          "input": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      }
+    },
+    "maskedByDefaultInputs": {
+      "description": "Inputs that declare no mask and were masked only by the tenant's decision-log.mask-default at approval, sorted; empty when none. They needed no acknowledgement, and would reach the decision log in plain text if the default were later turned off (PD-104).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "examples": [
@@ -111,7 +145,14 @@
       "canonicalHash": "3f1c9a5e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d",
       "effectiveFrom": "2027-01-01T00:00:00Z",
       "requestedBy": "lan",
-      "approvedBy": "minh"
+      "approvedBy": "minh",
+      "acknowledgedWarnings": [
+        {
+          "code": "UNMASKED_PERSONAL_DATA",
+          "input": "nationalId"
+        }
+      ],
+      "maskedByDefaultInputs": []
     }
   ]
 }

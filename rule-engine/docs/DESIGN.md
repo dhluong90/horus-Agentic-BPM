@@ -668,6 +668,12 @@ CREATE TABLE rle_engine_key (
   created_at  TIMESTAMPTZ NOT NULL
 );
 
+-- Acknowledged warnings on approval (V15, RLE-053, PD-104), on rle_version_history: written on every APPROVED row,
+-- null on other actions (CHECK rle_version_history_ack_on_approval) and always a JSON array (rle_version_history_ack_arrays).
+--   acknowledged_warnings     JSONB  -- [{ "code": "UNMASKED_PERSONAL_DATA", "input": "nationalId" }], [] when nothing needed it
+--   masked_by_default_inputs  JSONB  -- inputs masked by the tenant's decision-log.mask-default, not by declaration
+-- The append-only triggers of V4 keep both unchangeable once written.
+
 -- The value of a setting each tenant last started with (V14, RLE-052): today decision-log.mask-default, so a change
 -- is logged at start-up with the old and new value (section 4.4). Written at start-up only, never read by a request.
 CREATE TABLE rle_setting_seen (
