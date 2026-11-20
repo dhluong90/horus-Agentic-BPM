@@ -17,6 +17,8 @@
 /tools/test_check_image_pins.py  @dhluong90
 /tools/architecture/          @dhluong90
 /tools/scan-dependencies.sh     @dhluong90
+/tools/mvn-retry.sh             @dhluong90
+/tools/test-mvn-retry.sh        @dhluong90
 /tools/spec-coverage.py         @dhluong90
 /tools/spec-coverage.ini        @dhluong90
 /tools/test_spec_coverage.py    @dhluong90

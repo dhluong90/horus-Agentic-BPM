@@ -314,6 +314,18 @@ The build stage resolves Maven dependencies in a layer of their own, before the 
 
 The Deploy workflow keeps the layers between runs in the GitHub Actions cache (`docker/build-push-action`, `cache-from` and `cache-to` of type `gha`). Its log shows the dependency layer as `CACHED` after a source-only change, and the step summary prints a content digest of `/app`: the SHA-256 of every file and of every entry inside each jar (the engine jars carry their build time in zip timestamps, so their bytes always differ). A manual run with the `no-cache` input builds with no layer cache, for comparison with a cached build of the same commit. The release workflow builds no image.
 
+### Maven Central during the build
+
+The Maven build stage resolves dependencies from Maven Central, from the dependency layer when it has them (see [Build cache](#build-cache)). Two layers absorb Maven Central's faults:
+
+| Fault | Handled by | What the build log shows |
+|---|---|---|
+| Dropped connection, 429 or 5xx | The resolver retries up to 5 times, honouring `Retry-After` ([`.mvn/maven.config`](../.mvn/maven.config)) | Nothing unless every retry fails |
+| A false 404 for an artifact that exists, or a 429 that outlasts the resolver's retries | [`tools/mvn-retry.sh`](../tools/mvn-retry.sh) runs Maven again with `-U` after removing the `*.lastUpdated` markers, at most 3 attempts, after 60 then 120 seconds | `mvn-retry: warning: Attempt 1 of 3: <artifact> not delivered. Retrying with -U in 60 s` |
+| A compile error, an enforcer rule, or any failure that is not a resolution failure | Not retried | Maven's own error, once |
+
+The build argument `MVN_RETRY_WAIT` sets the first wait in seconds (default 60), for example `docker build --build-arg MVN_RETRY_WAIT=10 ...`. After three failed attempts the log ends with `mvn-retry: error: Maven Central did not deliver <artifact> in 3 attempts`; run the build again later.
+
 ### Updating the JRE
 
 The build checks the JRE archive twice in a throwaway stage, so `gnupg` never reaches the runtime image:
@@ -402,6 +414,7 @@ The host refuses to start with an issuer and no audience, and refuses the `dev` 
 | `bind source path does not exist: .../secrets/db_password` | The secret files were not created | `deploy/create-secrets.sh`, then start again |
 | `Bind for 127.0.0.1:8080 failed: port is already allocated` | Another process uses 8080 | Set `HORUS_HTTP_PORT=18080` in `.env` and use that port in the commands |
 | Host restarts; log shows `password authentication failed for user "horus"` | A database password changed after the database was created, or the volume is from a version of this guide before the `horus` role or the secret files existed | Write the old password into `secrets/db_password`, or `docker compose down -v` and start again |
+| Build fails with `mvn-retry: error: Maven Central did not deliver ...` | Maven Central did not deliver an artifact in 3 attempts | Run `docker compose build` again later; see [Maven Central during the build](#maven-central-during-the-build) |
 | Sign-in redirects to `/login?error` | Wrong demo password, or the host is not on the `dev` profile | `grep SPRING_PROFILES_ACTIVE .env`; the password is in `secrets/demo_password` |
 | `No pinned Temurin JRE for <arch>` during the build | The build was asked for an architecture other than `linux/amd64` or `linux/arm64` | Build on an x64 or ARM64 machine, or add `--platform linux/amd64` to `docker build` |
 | `docker compose up --wait` reports `host` unhealthy | The host did not start | `docker compose logs host` shows the reason, usually the database or a configuration check |

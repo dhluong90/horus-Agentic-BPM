@@ -41,8 +41,13 @@ RUN set -eu; \
 
 # Stage 2: build the example host and the engine modules it needs.
 # Maven 3.9.16 (the line CI uses), Eclipse Temurin JDK 21.
+# Maven runs through tools/mvn-retry.sh, as in CI: a run that failed only because Maven Central did not
+# deliver an artifact (a false 404, or a 429 after the resolver's own retries in .mvn/maven.config) runs
+# again with -U, at most 3 attempts, after MVN_RETRY_WAIT then twice that many seconds. Any other failure
+# ends the build at once. Retries are plain "mvn-retry: warning: ... Retrying" lines in the build log.
 FROM --platform=$BUILDPLATFORM maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS build
 ARG EXAMPLE
+ARG MVN_RETRY_WAIT=60
 WORKDIR /src
 # Dependency layer: the real package lifecycle of the example host and the modules it needs, run on the
 # POMs alone, puts every dependency and plugin the build uses into /root/.m2/repository in this layer.
@@ -52,12 +57,13 @@ WORKDIR /src
 COPY --from=poms /poms/ ./
 COPY .mvn/ .mvn/
 COPY LICENSE COMMERCIAL-LICENSE.md ./
+COPY tools/mvn-retry.sh tools/mvn-retry.sh
 RUN set -eu; \
     test -f "examples/${EXAMPLE}/pom.xml" || { echo "examples/${EXAMPLE} is not an example host" >&2; exit 1; }; \
-    mvn -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests \
+    bash tools/mvn-retry.sh -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests \
       -Dcockpit.bundle.skip=true -Dspring-boot.repackage.skip=true; \
     boot="$(mvn -B -ntp -q -N help:evaluate -Dexpression=spring-boot.version -DforceStdout)"; \
-    mvn -B -ntp -q -N dependency:get -Dartifact="org.springframework.boot:spring-boot-configuration-processor:${boot}"; \
+    bash tools/mvn-retry.sh -B -ntp -q -N dependency:get -Dartifact="org.springframework.boot:spring-boot-configuration-processor:${boot}"; \
     find . -name target -type d -prune -exec rm -rf {} +
 COPY . .
 COPY --from=cockpit /out/dist/ /tmp/cockpit-dist/
@@ -69,7 +75,7 @@ RUN set -eu; \
       rm -rf cockpit/web/dist && mkdir -p cockpit/web/dist && cp -R /tmp/cockpit-dist/. cockpit/web/dist/; \
       skip_cockpit=false; \
     fi; \
-    mvn -B -pl "examples/${EXAMPLE}" -am package -DskipTests -Dcockpit.bundle.skip="${skip_cockpit}" \
+    bash tools/mvn-retry.sh -B -pl "examples/${EXAMPLE}" -am package -DskipTests -Dcockpit.bundle.skip="${skip_cockpit}" \
       > /tmp/build.log 2>&1 || { grep -v '^\[INFO\] Download' /tmp/build.log; exit 1; }; \
     grep -v '^\[INFO\] Download' /tmp/build.log; \
     echo "Maven downloads in this step, beyond the dependency layer: $(grep -c '^\[INFO\] Downloaded from' /tmp/build.log || true)"; \
