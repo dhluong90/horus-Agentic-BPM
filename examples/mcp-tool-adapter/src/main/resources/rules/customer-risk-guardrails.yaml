@@ -1,0 +1,21 @@
+# Guardrails on the risk service's answer (#99): band D never moves an application on unchecked.
+schemaVersion: 1
+ruleSet: customer-risk-guardrails
+description: Guardrails on the customer risk answer
+hitPolicy: first
+
+inputs:
+  - { name: riskBand, type: string }
+  - { name: score,    type: integer }
+
+outputs:
+  - { name: allow,   type: boolean }
+  - { name: reasons, type: string }
+
+rules:
+  - id: R1                  # the highest band goes to a risk reviewer
+    when: { riskBand: "== 'D'" }
+    then: { allow: "false", reasons: "'HIGH_RISK_BAND'" }
+  - id: R9
+    when: {}
+    then: { allow: "true", reasons: "''" }

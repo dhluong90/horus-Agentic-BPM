@@ -5,5 +5,6 @@ Minimal Spring Boot host services that embed the engines. Each one is built and 
 | Example | Shows | Status |
 |---|---|---|
 | [`rule-engine-only/`](rule-engine-only/README.md) | A host with its own tables and Flyway history that adds the Rule Engine starter and one configuration block | Available |
+| [`mcp-tool-adapter/`](mcp-tool-adapter/README.md) | An agent step that calls one tool of a Model Context Protocol server through `AgentAdapter`, keyed by the job id, with a small demo server | Available |
 | `process-engine-only/` | The Process Engine without the Rule Engine | Added with the first Process Engine feature |
 | `both/` | Both engines in one host, sharing its database and transactions | Added with the first Process Engine feature |
