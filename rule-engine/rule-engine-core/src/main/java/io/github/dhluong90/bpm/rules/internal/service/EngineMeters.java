@@ -5,8 +5,8 @@ import io.github.dhluong90.bpm.rules.api.HorusBpmException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.regex.Pattern;
 
 /**
  * What the engine measures, without a metrics library (DESIGN section 4.8, TR-OBS-02): one record per evaluation call
@@ -23,8 +23,18 @@ public final class EngineMeters {
     /** The {@code code} of an evaluation that failed with an unexpected exception. */
     public static final String INTERNAL_ERROR_CODE = "INTERNAL_ERROR";
 
-    /** An engine error code: upper case letters, digits and underscores, as every code of the REST contract. */
-    private static final Pattern CODE = Pattern.compile("[A-Z][A-Z0-9_]{0,47}");
+    /**
+     * Every error code the engine reports, as listed by the {@code Problem.code} enum of the REST contract. A tag value
+     * is one of these or {@link #OTHER_CODE}, so a host exception that merely looks like a code cannot add a series.
+     */
+    static final Set<String> KNOWN_CODES = Set.of(
+            "INPUT_INVALID", "QUERY_INVALID", "UNAUTHENTICATED", "PERMISSION_DENIED", "TENANT_NOT_ALLOWED",
+            "SELF_APPROVAL_FORBIDDEN", "RULE_SET_NOT_FOUND", "VERSION_NOT_FOUND", "NO_EFFECTIVE_VERSION",
+            "DECISION_NOT_FOUND", "VERSION_CONFLICT", "INVALID_STATE", "IDEMPOTENCY_IN_FLIGHT", "RULE_SET_EXISTS",
+            "VALIDATION_FAILED", "IDEMPOTENCY_KEY_REUSE_MISMATCH", "EVALUATION_ERROR", "UNIQUE_HIT_VIOLATION",
+            "PAYLOAD_TOO_LARGE", "PRECONDITION_REQUIRED", INTERNAL_ERROR_CODE, "SCHEMA_NOT_READY",
+            "DRAFT_AUTHORING_DISABLED", "RATE_LIMITED", "CLOCK_NOT_ALLOWED", "REPLAY_NOT_POSSIBLE",
+            "LAST_VERSION_IN_EFFECT", "WARNINGS_NOT_ACKNOWLEDGED", "AUTHOR_UNKNOWN");
 
     /** How one evaluation call ended. */
     public enum Outcome {
@@ -124,12 +134,13 @@ public final class EngineMeters {
     }
 
     /**
-     * Keeps a code only when it has the form of an engine error code, so a tag never carries free text.
+     * Keeps a code only when it is one of the engine's error codes, so a tag never carries free text or an unbounded
+     * set of values.
      *
      * @param code the code
      * @return the code, or {@link #OTHER_CODE}
      */
     static String code(String code) {
-        return code != null && CODE.matcher(code).matches() ? code : OTHER_CODE;
+        return code != null && KNOWN_CODES.contains(code) ? code : OTHER_CODE;
     }
 }

@@ -8,15 +8,21 @@ import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
 import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.store.TransactionRunner;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 
 /**
  * The evaluation and retirement records of DESIGN section 4.8 (TR-OBS-02) on the in-memory stores: one record per
@@ -184,6 +190,25 @@ class EngineMetersTest {
         assertThat(EngineMeters.code("Customer 079090001234 not found")).isEqualTo(EngineMeters.OTHER_CODE);
         assertThat(EngineMeters.code("A".repeat(49))).isEqualTo(EngineMeters.OTHER_CODE);
         assertThat(EngineMeters.code(null)).isEqualTo(EngineMeters.OTHER_CODE);
+    }
+
+    @Test
+    void TR_OBS_02_error_code_tags_come_from_an_allow_list_of_the_contracts_codes() throws Exception {
+        // Given the Problem.code enum of the REST contract
+        JsonNode spec = EngineJson.YAML.readTree(Files.readAllBytes(Path.of("../api/openapi.yaml")));
+        Set<String> contract = new TreeSet<>();
+        spec.at("/components/schemas/Problem/properties/code/enum").forEach(code -> contract.add(code.asString()));
+
+        // When / Then: the allow-list is exactly the contract's codes, and each keeps its value as a tag
+        assertThat(contract).isNotEmpty();
+        assertThat(new TreeSet<>(EngineMeters.KNOWN_CODES)).isEqualTo(contract);
+        assertThat(contract).allSatisfy(code -> assertThat(EngineMeters.code(code)).isEqualTo(code));
+
+        // And a host code that only looks like an engine code becomes OTHER, as does free text
+        assertThat(EngineMeters.code("CUSTOMER_NOT_FOUND")).isEqualTo(EngineMeters.OTHER_CODE);
+        assertThat(EngineMeters.code("ACCOUNT_079090001234_FROZEN")).isEqualTo(EngineMeters.OTHER_CODE);
+        assertThat(EngineMeters.code("rule_set_not_found")).isEqualTo(EngineMeters.OTHER_CODE);
+        assertThat(EngineMeters.code("RULE_SET_NOT_FOUND ")).isEqualTo(EngineMeters.OTHER_CODE);
     }
 
     @Test
