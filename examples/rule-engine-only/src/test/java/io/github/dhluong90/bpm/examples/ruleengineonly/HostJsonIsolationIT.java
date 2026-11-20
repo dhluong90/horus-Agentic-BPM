@@ -55,7 +55,7 @@ class HostJsonIsolationIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     // Plain properties, not @ServiceConnection: the same test runs on both Spring Boot lines (TR-EMB-02).
     @DynamicPropertySource
@@ -90,8 +90,8 @@ class HostJsonIsolationIT {
         Reply imported = send("alice", "POST", "/api/bpm/rules/v1/rule-sets", resource("/rules/card-fee.yaml"), "application/yaml");
         assertThat(send("alice", "POST", "/api/bpm/rules/v1/rule-sets/card-fee/versions/1:request-publish", null, null).status())
                 .isEqualTo(200);
-        assertThat(send("bob", "POST", "/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve", null, null).status())
-                .isEqualTo(200);
+        assertThat(send("bob", "POST", "/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve", null, null, "\"1\"")
+                .status()).isEqualTo(200);
 
         // When a Gold customer with 5 transactions is evaluated
         Reply decision = send("teller", "POST", "/api/bpm/rules/v1/decisions/card-fee:evaluate",
@@ -138,12 +138,20 @@ class HostJsonIsolationIT {
     }
 
     Reply send(String user, String method, String path, byte[] body, String contentType) throws Exception {
+        return send(user, method, path, body, contentType, null);
+    }
+
+    Reply send(String user, String method, String path, byte[] body, String contentType, String ifMatch)
+            throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(
                         URI.create("http://localhost:" + environment.getProperty("local.server.port") + path))
                 .header("Authorization", TestTokens.bearer(user))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
         if (contentType != null) {
             request.header("Content-Type", contentType);
+        }
+        if (ifMatch != null) {
+            request.header("If-Match", ifMatch);
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.body());

@@ -142,6 +142,10 @@ class RuleLifecycleIT {
                     ? request.header("Content-Type", "application/yaml")
                             .POST(HttpRequest.BodyPublishers.ofByteArray(renamed("card-fee-corr")))
                     : request.POST(HttpRequest.BodyPublishers.noBody());
+            if (step[1].endsWith(":approve")) {
+                // The approver names the lock version reviewed: the version is at 1 after the request.
+                request = request.header("If-Match", "\"1\"");
+            }
             assertThat(HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString()).statusCode()).isBetween(200, 201);
         }
         assertThat(jdbc.sql("""

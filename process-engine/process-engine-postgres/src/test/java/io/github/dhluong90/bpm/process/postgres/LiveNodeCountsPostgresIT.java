@@ -42,7 +42,7 @@ class LiveNodeCountsPostgresIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant T0 = Instant.parse("2026-11-20T09:30:00Z");
     static final String KEY = "kyc-onboarding";

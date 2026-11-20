@@ -363,7 +363,7 @@ class RuleEnginePostgresIT {
         engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()).withCorrelationId("req-import-1"));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none().withCorrelationId("req-request-1"));
         caller.as("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
 
         // The approval passed no correlation id, so its event starts its own chain: correlationId = eventId.
         assertThat(JdbcClient.create(db).sql("""

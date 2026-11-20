@@ -48,7 +48,7 @@ class LiveNodeCountsIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
