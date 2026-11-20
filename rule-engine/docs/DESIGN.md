@@ -641,10 +641,16 @@ ALTER TABLE rle_decision ATTACH PARTITION rle_decision_2027_01
 CREATE INDEX idx_rle_decision_lookup
   ON rle_decision (tenant_id, rule_set_name, created_at DESC, outcome);
 
--- Migration V20 (RLE-070): the search by the host's case reference, led by tenant, partial on a set reference.
-CREATE INDEX idx_rle_decision_correlation
-  ON rle_decision (tenant_id, correlation_id, created_at DESC, id DESC)
+-- Migration V20 (RLE-070, #379): the search by the host's case reference, led by tenant, partial on a set reference.
+-- A Java migration outside a transaction, so no partition is locked against writes (TR-OPS-02): the parent index is
+-- created ON ONLY (instant, invalid), then each partition, the default one included, gets its index built
+-- CONCURRENTLY and attached; the parent turns valid when the last one is attached. Attached partitions are skipped
+-- and an invalid leftover is rebuilt, so a re-run is safe. Later partitions inherit the index at ATTACH.
+CREATE INDEX IF NOT EXISTS idx_rle_decision_correlation
+  ON ONLY rle_decision (tenant_id, correlation_id, created_at DESC, id DESC)
   WHERE correlation_id IS NOT NULL;
+-- per partition p: CREATE INDEX CONCURRENTLY IF NOT EXISTS p_correlation_idx ON p (same columns and predicate);
+--                  ALTER INDEX idx_rle_decision_correlation ATTACH PARTITION p_correlation_idx;
 
 CREATE TABLE rle_decision_outbox (
   tenant_id       TEXT        NOT NULL,
@@ -706,6 +712,9 @@ CREATE TABLE rle_masking_key_check (
   PRIMARY KEY (tenant_id, key_id)
 );
 ```
+
+Migrations must run on a direct database connection, not through PgBouncer or another pooler in transaction mode (the one exception to `TR-OPS-05`, which covers the running engine): the migrator takes Flyway's migration lock as a session advisory lock (`flyway.postgresql.transactional.lock=false`), because a `CONCURRENTLY` build such as V20 waits for every open transaction and would otherwise wait on Flyway's own lock transaction. The lock still lets one replica migrate at a time; V1 to V19 still run each in its own transaction. During a long V20 build on a large decision log, a replica waiting for the lock can run out of Flyway's lock retries (50, one second apart), fail to start and be restarted by its orchestrator; it starts normally once the build ends. On large logs, run the migration from one replica or a job before rolling out the others.
+
 
 Partition maintenance (`TR-OPS-04`, `RLE-017`):
 
