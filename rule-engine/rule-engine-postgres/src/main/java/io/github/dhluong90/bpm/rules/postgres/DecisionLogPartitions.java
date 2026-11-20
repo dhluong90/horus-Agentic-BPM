@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.postgres;
 
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -19,9 +20,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * instant the caller passes, normally the host's {@code Clock}, never from the database clock, so the
  * result is deterministic under a fixed clock.
  *
- * <p>This is the start-up step only: it creates the current and the next month. Scheduled creation
- * up to {@code decision-log.partitions-ahead}, retention by dropping whole partitions and the
- * {@code horus_rle_partition_default_rows} gauge are RLE-017 (milestone M1).
+ * <p>{@link #ensureAhead} is the maintenance step (RLE-017): the starter runs it at start-up and daily, and it
+ * creates every month from the current one up to {@code now + decision-log.partitions-ahead}, and always the next
+ * month. {@link #defaultRows()} feeds the {@code horus_rle_partition_default_rows} gauge. Retention by dropping whole
+ * partitions arrives with its own slice; nothing here drops a partition or deletes a row by date (TR-OBS-01).
  *
  * <p>Each partition is created standalone with a CHECK constraint and then attached, so
  * {@code ATTACH} skips the validation scan and takes {@code SHARE UPDATE EXCLUSIVE} on the parent.
@@ -78,19 +80,74 @@ public final class DecisionLogPartitions {
      * @return the names of the partitions this call created, in month order; empty when both existed
      */
     public List<String> ensureCurrentAndNextMonth(Instant now) {
-        YearMonth current = monthOf(Objects.requireNonNull(now, "now must not be null"));
+        return ensureAhead(now, Duration.ZERO);
+    }
+
+    /**
+     * Creates the missing partitions of every month from the month of {@code now} to the month of
+     * {@code now + ahead}, and of the next month in any case. Rows of a created month that sit in the default
+     * partition move into it before {@code ATTACH}. Safe to run on several replicas at once: one runs at a time
+     * under a transaction-scoped advisory lock, and the others find the months present (TR-OPS-05).
+     *
+     * @param now the current instant from the host's clock
+     * @param ahead how far ahead to create months, {@code decision-log.partitions-ahead}; zero or positive
+     * @return the names of the partitions this call created, in month order; empty when all existed
+     * @throws org.springframework.dao.DataAccessException when the lock or a DDL statement waits longer than
+     *     {@code lock_timeout} (5 s); nothing is created and the next run retries
+     */
+    public List<String> ensureAhead(Instant now, Duration ahead) {
+        Objects.requireNonNull(now, "now must not be null");
+        if (ahead == null || ahead.isNegative()) {
+            throw new IllegalArgumentException("ahead must be zero or positive, was " + ahead);
+        }
+        List<YearMonth> months = months(now, ahead);
         return transactions.inNewTransaction(status -> {
             jdbc.sql("SET LOCAL lock_timeout = '5s'").update();
             jdbc.sql("SELECT pg_advisory_xact_lock(:key)").param("key", ADVISORY_LOCK_KEY)
                     .query((rs, rowNum) -> rowNum).list();
             List<String> created = new ArrayList<>();
-            for (YearMonth month : List.of(current, current.plusMonths(1))) {
+            for (YearMonth month : months) {
                 if (!exists(month)) {
                     create(month);
                     created.add(partitionName(month));
                 }
             }
             return List.copyOf(created);
+        });
+    }
+
+    /**
+     * Returns the months {@link #ensureAhead} keeps present: the month of {@code now}, the next month, and every
+     * month up to the month of {@code now + ahead}.
+     *
+     * @param now the current instant
+     * @param ahead how far ahead
+     * @return the months in order
+     */
+    public static List<YearMonth> months(Instant now, Duration ahead) {
+        YearMonth current = monthOf(now);
+        YearMonth last = monthOf(now.plus(ahead));
+        if (last.isBefore(current.plusMonths(1))) {
+            last = current.plusMonths(1);
+        }
+        List<YearMonth> months = new ArrayList<>();
+        for (YearMonth month = current; !month.isAfter(last); month = month.plusMonths(1)) {
+            months.add(month);
+        }
+        return List.copyOf(months);
+    }
+
+    /**
+     * Counts the rows in the default partition {@code rle_decision_default}, which should stay empty: a row there
+     * fell outside every monthly partition. Read-only, in a transaction of its own, bounded by a 2 s statement
+     * timeout.
+     *
+     * @return the number of rows
+     */
+    public long defaultRows() {
+        return transactions.inNewTransaction(status -> {
+            jdbc.sql("SET LOCAL statement_timeout = '2s'").update();
+            return jdbc.sql("SELECT count(*) FROM rle_decision_default").query(Long.class).single();
         });
     }
 
