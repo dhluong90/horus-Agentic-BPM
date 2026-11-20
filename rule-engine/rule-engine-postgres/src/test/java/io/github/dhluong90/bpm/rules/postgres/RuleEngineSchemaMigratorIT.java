@@ -145,7 +145,7 @@ class RuleEngineSchemaMigratorIT {
         assertThat(second.migrationsExecuted()).isZero();
         assertThat(migrator.currentVersion()).contains("19");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
-                .isEqualTo(13L);
+                .isEqualTo(15L);
     }
 
     @Test
@@ -277,7 +277,7 @@ class RuleEngineSchemaMigratorIT {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 13));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 15));
         assertThat(migrator.status().isCurrent()).isFalse();
 
         migrator.migrate();

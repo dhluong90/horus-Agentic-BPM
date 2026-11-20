@@ -118,6 +118,20 @@ public interface JobStore {
     List<JobRow> claimDueAsync(String replicaId, Instant now, int limit);
 
     /**
+     * Claims due async step jobs of one kind, the same way as {@link #claimDueAsync(String, Instant, int)}. The async
+     * executor claims each kind separately, up to the free slots of that kind's runner, so a backlog of one kind
+     * never takes the claims or the slots of another (#363).
+     *
+     * @param replicaId the claiming replica
+     * @param now the claim time
+     * @param jobKind an async kind, {@link #ASYNC_SERVICE} or {@link #ASYNC_AGENT}
+     * @param limit at most this many rows
+     * @return the claimed rows, oldest due first
+     * @throws IllegalArgumentException when the kind is not an async kind
+     */
+    List<JobRow> claimDueAsync(String replicaId, Instant now, String jobKind, int limit);
+
+    /**
      * Locks a job row ({@code FOR UPDATE}) whatever its status, for the result transaction of an async step, which
      * decides from the status, attempt and lease whether the result is current.
      *
@@ -168,6 +182,23 @@ public interface JobStore {
      */
     boolean release(String tenant, String id, String replicaId, int attempt, Instant retryAt, boolean failed,
             Instant now);
+
+    /** Payload key that counts the schema retries a job has had ({@link #retrySchema}). */
+    String SCHEMA_RETRIES = "schemaRetries";
+
+    /**
+     * Gives a held claim back after a result that broke its output schema (#363): {@code DUE} again at
+     * {@code retryAt}, one more allowed attempt, so a schema retry does not use up an attempt meant for technical
+     * failures, and the payload's {@value #SCHEMA_RETRIES} counter one higher.
+     *
+     * @param tenant tenant
+     * @param id job id
+     * @param replicaId the holding replica
+     * @param attempt the attempt of that claim
+     * @param retryAt next due time
+     * @return true when the claim was still held
+     */
+    boolean retrySchema(String tenant, String id, String replicaId, int attempt, Instant retryAt);
 
     /**
      * Cancels an open job ({@code DUE} or {@code CLAIMED}); a fire transaction that holds the claim then finds it
@@ -245,6 +276,11 @@ public interface JobStore {
         }
 
         @Override
+        public List<JobRow> claimDueAsync(String replicaId, Instant now, String jobKind, int limit) {
+            return List.of();
+        }
+
+        @Override
         public Optional<JobRow> lockJob(String tenant, String id) {
             return Optional.empty();
         }
@@ -262,6 +298,11 @@ public interface JobStore {
         @Override
         public boolean release(String tenant, String id, String replicaId, int attempt, Instant retryAt, boolean failed,
                 Instant now) {
+            return false;
+        }
+
+        @Override
+        public boolean retrySchema(String tenant, String id, String replicaId, int attempt, Instant retryAt) {
             return false;
         }
 

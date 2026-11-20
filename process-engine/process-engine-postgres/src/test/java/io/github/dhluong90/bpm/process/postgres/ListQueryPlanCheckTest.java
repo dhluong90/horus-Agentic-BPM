@@ -135,6 +135,8 @@ class ListQueryPlanCheckTest {
         samples.put("definition-keys-after", List.of(T, "bank-a", "card-dispute", 50));
         samples.put("claim-timers", List.of(T, T, 20, "replica-1", T));
         samples.put("claim-async-steps", List.of(T, T, 20, "replica-1", T));
+        samples.put("claim-async-kind", List.of(T, T, "ASYNC_SERVICE", 20, "replica-1", T));
+        samples.put("instance-history-actors", List.of("bank-a", INSTANCE, "NODE_ENTERED"));
         samples.put("instances-1", List.of("bank-a", "RUNNING", 50));
         samples.put("instances-3-key-range-after", List.of("bank-a", "RUNNING", "COMPLETED", "FAILED", "loan-origination",
                 from, T, T, INSTANCE, 50));
@@ -157,6 +159,25 @@ class ListQueryPlanCheckTest {
         assertThat(violations).as("list queries whose plan is not bounded").isEmpty();
         assertThat(samples.keySet()).as("sample parameters of queries no longer registered")
                 .containsExactlyInAnyOrderElementsOf(ProcessListQueries.all().stream().map(ListQuery::name).toList());
+    }
+
+    @Test
+    void PRE_036_the_claim_of_one_async_kind_reads_the_V9_kind_index() {
+        // Given 1,000 due ASYNC_SERVICE steps of bank-a among 2,000 due jobs, and the async-service runner's poll
+        List<Object> params = ProcessListQueries.claimParams(ProcessListQueries.ClaimKinds.ONE_KIND, "ASYNC_SERVICE",
+                T, 20, "replica-1");
+
+        // When the check reads its plan
+        JsonNode plan = plan(ProcessListQueries.CLAIM_ASYNC_KIND, params);
+        List<JsonNode> nodes = new ArrayList<>();
+        collect(plan, nodes);
+
+        // Then the kind is an index condition of idx_pre_timer_poll_kind (V9), so another kind's backlog is not read
+        assertThat(violations(ProcessListQueries.CLAIM_ASYNC_KIND, plan)).isEmpty();
+        assertThat(nodes).anySatisfy(n -> {
+            assertThat(n.path("Index Name").asString("")).isEqualTo("idx_pre_timer_poll_kind");
+            assertThat(n.path("Index Cond").asString("")).contains("job_kind");
+        });
     }
 
     @Test

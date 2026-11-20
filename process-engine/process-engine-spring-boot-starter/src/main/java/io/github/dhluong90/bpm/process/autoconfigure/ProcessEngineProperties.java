@@ -26,6 +26,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param lifecycle definition and instance lifecycle settings
  * @param stats live count settings
  * @param adapters remote step settings (Async Wait-State, ADR-0008)
+ * @param runners per async job kind, the settings of its runner (#363); unset values fall back to {@code adapters.*}
+ *     and {@code jobs.*}
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -40,7 +42,8 @@ public record ProcessEngineProperties(
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle,
         @DefaultValue Stats stats,
-        @DefaultValue Adapters adapters) {
+        @DefaultValue Adapters adapters,
+        @DefaultValue Runners runners) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -205,8 +208,75 @@ public record ProcessEngineProperties(
         Map<String, java.util.Set<String>> roles = new java.util.LinkedHashMap<>();
         (adapters.completerRoles() == null ? Map.<String, List<String>>of() : adapters.completerRoles())
                 .forEach((adapter, names) -> roles.put(adapter, java.util.Set.copyOf(names == null ? List.of() : names)));
+        Map<String, io.github.dhluong90.bpm.process.internal.service.RunnerSettings.Overrides> kinds =
+                new java.util.LinkedHashMap<>();
+        kinds.put(io.github.dhluong90.bpm.process.internal.store.JobStore.ASYNC_SERVICE,
+                runners.asyncService().toOverrides());
+        kinds.put(io.github.dhluong90.bpm.process.internal.store.JobStore.ASYNC_AGENT,
+                runners.asyncAgent().toOverrides());
         return new io.github.dhluong90.bpm.process.internal.service.AsyncSettings(jobs.leaseMargin(),
-                adapters.defaultTimeout(), adapters.executorThreads(), roles);
+                adapters.defaultTimeout(), adapters.executorThreads(), roles, kinds);
+    }
+
+    /**
+     * One runner per async job kind (#363, DESIGN sections 4 and 6.5). Each kind has its own slots and its own claim,
+     * so a backlog of one kind never delays another. Timers keep {@code jobs.*}.
+     *
+     * @param asyncService the runner of remote service steps ({@code serviceTask horus:mode="remote"})
+     * @param asyncAgent the runner of agent steps
+     */
+    public record Runners(@DefaultValue Runner asyncService, @DefaultValue Runner asyncAgent) {
+    }
+
+    /**
+     * The settings of one runner. Every value is optional; an unset value falls back to the engine-wide key, so a
+     * host that sets nothing runs every kind as before #363.
+     *
+     * @param slots calls of this kind in flight per replica, 1 to 1000; falls back to {@code adapters.executor-threads}
+     * @param defaultTimeout timeout of a step of this kind that declares none; falls back to
+     *     {@code adapters.default-timeout}
+     * @param maxAttempts claims after which a failing job of this kind is {@code FAILED}, 1 to 100; falls back to
+     *     {@code jobs.max-attempts}
+     * @param retryBackoff a failed attempt of this kind is due again after this times the attempt number; falls back
+     *     to {@code jobs.retry-backoff}
+     * @param guardBudget longest time the output-schema and guardrail check of a result may take in the result
+     *     transaction, at most 10s; a slower check refuses the result (fails closed). Default 500ms
+     * @param schemaRetries how often a result that breaks its output schema gets a fresh attempt before it is refused
+     *     with {@code AGENT_SCHEMA_INVALID} and goes to review or fails, 0 to 5; counted apart from
+     *     {@code max-attempts}. Default 1 for agent steps and 0 for remote service steps
+     */
+    public record Runner(Integer slots, Duration defaultTimeout, Integer maxAttempts, Duration retryBackoff,
+            Duration guardBudget, Integer schemaRetries) {
+
+        public Runner {
+            if (slots != null && (slots < 1 || slots > 1_000)) {
+                throw new IllegalArgumentException("horus.bpm.processes.runners.<kind>.slots must be 1 to 1000");
+            }
+            if (defaultTimeout != null && (defaultTimeout.isNegative() || defaultTimeout.isZero())) {
+                throw new IllegalArgumentException("horus.bpm.processes.runners.<kind>.default-timeout must be positive");
+            }
+            if (maxAttempts != null && (maxAttempts < 1 || maxAttempts > 100)) {
+                throw new IllegalArgumentException("horus.bpm.processes.runners.<kind>.max-attempts must be 1 to 100");
+            }
+            if (retryBackoff != null && (retryBackoff.isNegative() || retryBackoff.isZero())) {
+                throw new IllegalArgumentException("horus.bpm.processes.runners.<kind>.retry-backoff must be positive");
+            }
+            if (guardBudget != null && (guardBudget.isNegative() || guardBudget.isZero()
+                    || guardBudget.compareTo(Duration.ofSeconds(10)) > 0)) {
+                throw new IllegalArgumentException(
+                        "horus.bpm.processes.runners.<kind>.guard-budget must be positive and at most 10s");
+            }
+            if (schemaRetries != null && (schemaRetries < 0
+                    || schemaRetries > io.github.dhluong90.bpm.process.internal.service.RunnerSettings.MAX_SCHEMA_RETRIES)) {
+                throw new IllegalArgumentException("horus.bpm.processes.runners.<kind>.schema-retries must be 0 to "
+                        + io.github.dhluong90.bpm.process.internal.service.RunnerSettings.MAX_SCHEMA_RETRIES);
+            }
+        }
+
+        io.github.dhluong90.bpm.process.internal.service.RunnerSettings.Overrides toOverrides() {
+            return new io.github.dhluong90.bpm.process.internal.service.RunnerSettings.Overrides(slots, defaultTimeout,
+                    maxAttempts, retryBackoff, guardBudget, schemaRetries);
+        }
     }
 
     /**

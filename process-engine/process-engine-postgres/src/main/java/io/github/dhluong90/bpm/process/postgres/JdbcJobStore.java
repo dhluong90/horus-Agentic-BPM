@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.process.postgres;
 
 import io.github.dhluong90.bpm.process.internal.store.JobStore;
+import io.github.dhluong90.bpm.process.postgres.ProcessListQueries.ClaimKinds;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -46,12 +47,21 @@ public final class JdbcJobStore implements JobStore {
 
     @Override
     public List<JobRow> claimDue(String replicaId, Instant now, int limit) {
-        return claim(false, replicaId, now, limit);
+        return claim(ClaimKinds.TIMERS, null, replicaId, now, limit);
     }
 
     @Override
     public List<JobRow> claimDueAsync(String replicaId, Instant now, int limit) {
-        return limit < 1 ? List.of() : claim(true, replicaId, now, limit);
+        return limit < 1 ? List.of() : claim(ClaimKinds.ASYNC, null, replicaId, now, limit);
+    }
+
+    @Override
+    public List<JobRow> claimDueAsync(String replicaId, Instant now, String jobKind, int limit) {
+        if (!JobStore.isAsync(jobKind)) {
+            throw new IllegalArgumentException("Not an async job kind: " + jobKind);
+        }
+        // One kind per statement, on idx_pre_timer_poll_kind (V9): a backlog of another kind is never scanned.
+        return limit < 1 ? List.of() : claim(ClaimKinds.ONE_KIND, jobKind, replicaId, now, limit);
     }
 
     @Override
@@ -60,10 +70,17 @@ public final class JdbcJobStore implements JobStore {
                 .params(tenant, id).query(JdbcJobStore::job).optional();
     }
 
-    /** One claim statement of {@link ProcessListQueries}: the remote-step kinds or every other kind. */
-    private List<JobRow> claim(boolean async, String replicaId, Instant now, int limit) {
-        return (async ? ProcessListQueries.CLAIM_ASYNC : ProcessListQueries.CLAIM_TIMERS)
-                .list(jdbc, List.of(ts(now), ts(now), limit, replicaId, ts(now)), JdbcJobStore::job)
+    /**
+     * One claim statement of {@link ProcessListQueries}: the remote-step kinds, one remote-step kind or every other
+     * kind. {@code kind} is the bind parameter of {@link ClaimKinds#ONE_KIND}, null for the others.
+     */
+    private List<JobRow> claim(ClaimKinds kinds, String kind, String replicaId, Instant now, int limit) {
+        ListQuery query = switch (kinds) {
+            case TIMERS -> ProcessListQueries.CLAIM_TIMERS;
+            case ASYNC -> ProcessListQueries.CLAIM_ASYNC;
+            case ONE_KIND -> ProcessListQueries.CLAIM_ASYNC_KIND;
+        };
+        return query.list(jdbc, ProcessListQueries.claimParams(kinds, kind, ts(now), limit, replicaId), JdbcJobStore::job)
                 .stream().sorted((a, b) -> {
                     int byDue = a.nextFireAt().compareTo(b.nextFireAt());
                     return byDue != 0 ? byDue : a.id().compareTo(b.id());
@@ -91,6 +108,16 @@ public final class JdbcJobStore implements JobStore {
                         + "completed_at = ? WHERE tenant_id = ? AND id = ? AND status = 'CLAIMED' AND locked_by = ? "
                         + "AND attempt = ?")
                 .params(failed ? "FAILED" : "DUE", ts(retryAt), failed ? ts(now) : null, tenant, id, replicaId, attempt)
+                .update() == 1;
+    }
+
+    @Override
+    public boolean retrySchema(String tenant, String id, String replicaId, int attempt, Instant retryAt) {
+        return jdbc.sql("UPDATE pre_timer SET status = 'DUE', next_fire_at = ?, locked_by = NULL, locked_until = NULL, "
+                        + "max_attempts = max_attempts + 1, payload = jsonb_set(payload, '{" + SCHEMA_RETRIES + "}', "
+                        + "to_jsonb(COALESCE((payload ->> '" + SCHEMA_RETRIES + "')::int, 0) + 1)) "
+                        + "WHERE tenant_id = ? AND id = ? AND status = 'CLAIMED' AND locked_by = ? AND attempt = ?")
+                .params(ts(retryAt), tenant, id, replicaId, attempt)
                 .update() == 1;
     }
 

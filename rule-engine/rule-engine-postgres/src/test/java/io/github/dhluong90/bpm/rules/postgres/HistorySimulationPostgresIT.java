@@ -3,13 +3,13 @@ package io.github.dhluong90.bpm.rules.postgres;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.HistorySimulation;
 import io.github.dhluong90.bpm.rules.api.HistorySimulationResult;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
-import io.github.dhluong90.bpm.rules.api.Money;
 import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;

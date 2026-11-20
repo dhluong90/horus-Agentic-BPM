@@ -107,7 +107,8 @@ class BoundedListQueriesTest {
 
         assertThat(names).doesNotHaveDuplicates().contains("live-token-counts", "lock-definition-versions",
                 "definition-history", "instance-tokens", "instance-tasks", "definition-keys", "definition-keys-after",
-                "claim-timers", "claim-async-steps", "instances-1", "instances-3-key-range-after");
+                "claim-timers", "claim-async-steps", "claim-async-kind", "instance-history-actors", "instances-1",
+                "instances-3-key-range-after");
     }
 
     /** A store method as someone might write it: a GROUP BY over every history row of a tenant, read in full. */

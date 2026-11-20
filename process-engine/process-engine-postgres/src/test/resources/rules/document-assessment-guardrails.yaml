@@ -1,0 +1,26 @@
+# Guardrails on the document assessor's answer (PRE-010, #52): a high risk score never advances unchecked. The same
+# rules as agent-output-guardrails.yaml, with the assessor's free-text summary declared as an input no rule reads.
+schemaVersion: 1
+ruleSet: agent-output-guardrails
+description: Guardrails on the document assessment of a loan application
+hitPolicy: first
+
+inputs:
+  - { name: riskScore,      type: integer }
+  - { name: recommendation, type: string }
+  - { name: summary,        type: string }
+
+outputs:
+  - { name: allow,   type: boolean }
+  - { name: reasons, type: string }
+
+rules:
+  - id: R1                  # a decline never needs a second look
+    when: { recommendation: "== 'DECLINE'" }
+    then: { allow: "true", reasons: "''" }
+  - id: R2
+    when: { riskScore: ">= 70" }
+    then: { allow: "false", reasons: "'HIGH_RISK_SCORE'" }
+  - id: R3
+    when: {}
+    then: { allow: "true", reasons: "''" }

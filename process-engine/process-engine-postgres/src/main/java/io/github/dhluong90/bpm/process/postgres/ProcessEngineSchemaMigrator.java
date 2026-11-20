@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.postgres;
 
+import java.util.Map;
 import java.util.Objects;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
@@ -36,8 +37,16 @@ public final class ProcessEngineSchemaMigrator {
         return current == null || current.getVersion() == null ? null : current.getVersion().getVersion();
     }
 
+    /**
+     * The migration lock is a session advisory lock, not a transactional one. A script that runs outside a
+     * transaction ({@code CREATE INDEX CONCURRENTLY}, TR-OPS-01) waits for every open transaction to end, so with a
+     * transactional lock it would wait on Flyway's own lock transaction until {@code lock_timeout}.
+     */
+    static final Map<String, String> LOCKING = Map.of("flyway.postgresql.transactional.lock", "false");
+
     private Flyway flyway() {
         return Flyway.configure(ProcessEngineSchemaMigrator.class.getClassLoader())
+                .configuration(LOCKING)
                 .dataSource(dataSource)
                 .table(HISTORY_TABLE)
                 .locations(MIGRATION_LOCATION)

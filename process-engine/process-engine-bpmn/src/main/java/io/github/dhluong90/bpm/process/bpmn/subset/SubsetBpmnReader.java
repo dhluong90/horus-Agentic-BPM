@@ -37,6 +37,10 @@ import io.github.dhluong90.bpm.process.internal.model.foreign.ForeignFragment;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.HorusExtension;
+import io.github.dhluong90.bpm.process.internal.json.CanonicalJson;
+import io.github.dhluong90.bpm.process.internal.json.EngineJson;
+import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
@@ -56,7 +60,9 @@ import javax.xml.stream.XMLStreamReader;
 
 /**
  * Reads the executable BPMN subset of the first release into the semantic model: none {@code startEvent} and
- * {@code endEvent}, {@code serviceTask} ({@code horus:handler}), {@code businessRuleTask} ({@code horus:ruleSet}),
+ * {@code endEvent}, {@code serviceTask} ({@code horus:handler}, or {@code horus:type="agentTask"} with
+ * {@code horus:agent}, {@code <horus:outputSchema>} and {@code <horus:guardrail>}), {@code businessRuleTask}
+ * ({@code horus:ruleSet}),
  * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} with {@code default}, {@code parallelGateway},
  * an intermediate timer catch event with {@code timeDuration} or {@code timeDate}, and
  * {@code sequenceFlow} with an optional {@code conditionExpression} in {@code urn:horus-bpm:expr:v1}. Inputs are
@@ -84,6 +90,9 @@ public final class SubsetBpmnReader {
     private static final String HORUS = BpmnNamespaces.HORUS;
     private static final Pattern KEY = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     private static final Pattern ASSIGNEE = Pattern.compile("^(user|role|group):[A-Za-z0-9_.@-]{1,100}$");
+    private static final Pattern RULE_SET = Pattern.compile("^[a-z][a-z0-9]*([.-][a-z0-9]+)*$");
+    /** The {@code horus:type} of an agent step. */
+    static final String AGENT_TASK = "agentTask";
     private static final Set<String> IGNORED_CHILDREN = Set.of("incoming", "outgoing", "documentation");
     /** Where a group carries the label of the category value it refers to; the process model has no root elements. */
     static final QName CATEGORY_VALUE_LABEL = new QName(BpmnNamespaces.BPMN, "categoryValue");
@@ -488,8 +497,11 @@ public final class SubsetBpmnReader {
             String type = horus("type");
             String name = attr("name");
             String result = horus("resultVariable");
+            if (AGENT_TASK.equals(type)) {
+                return agentTask(id, line, name, result, handler, mode);
+            }
             if (type != null) {
-                unsupported("serviceTask horus:type=\"" + type + "\"", id, "the next sprint (agentTask)");
+                unsupported("serviceTask horus:type=\"" + type + "\"", id, "a later stage (only agentTask is a type)");
             }
             String timeoutText = horus("timeout");
             if (mode != null && !"local".equals(mode) && !"remote".equals(mode)) {
@@ -527,6 +539,155 @@ public final class SubsetBpmnReader {
             ext.addAll(children.horus());
             return new ServiceTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, null,
                     info(ext, children.foreign()));
+        }
+
+        /**
+         * A {@code serviceTask} with {@code horus:type="agentTask"} (#52): the agent adapter, an optional timeout, the
+         * bounded inputs, the output schema as a JSON object and the guardrail. The guard spec is checked here, so an
+         * invalid one never becomes a draft; each fault is one {@code GUARD_SPEC_INVALID} problem naming the step.
+         */
+        private FlowElement agentTask(String id, int line, String name, String result, String handler, String mode)
+                throws XMLStreamException {
+            String agent = horus("agent");
+            String timeoutText = horus("timeout");
+            if (handler != null || mode != null) {
+                invalid.add(new DefinitionProblem("AGENT_TASK_INVALID", "An agentTask names its adapter with "
+                        + "horus:agent; horus:handler and horus:mode do not apply", "serviceTask", safe(id), line));
+            }
+            if (agent == null) {
+                invalid.add(new DefinitionProblem("AGENT_MISSING", "An agentTask needs horus:agent", "serviceTask",
+                        safe(id), line));
+            }
+            java.time.Duration timeout = timeoutText == null ? null : positiveDuration(timeoutText);
+            if (timeoutText != null && timeout == null) {
+                invalid.add(new DefinitionProblem("TIMEOUT_INVALID", "horus:timeout must be a positive ISO-8601"
+                        + " duration, for example PT30S", "serviceTask", safe(id), line));
+            }
+            AgentParts parts = new AgentParts();
+            List<HorusExtension> horusParts = new ArrayList<>();
+            List<ForeignFragment> foreign = new ArrayList<>();
+            while (nextChild()) {
+                String ns = xml.getNamespaceURI();
+                String local = xml.getLocalName();
+                if (BPMN.equals(ns) && IGNORED_CHILDREN.contains(local)) {
+                    skip();
+                } else if (BPMN.equals(ns) && "extensionElements".equals(local)) {
+                    extensions("serviceTask", id, true, horusParts, foreign, parts);
+                } else if (BPMN.equals(ns)) {
+                    unsupported("serviceTask child " + local, id, LATER.getOrDefault(local, "S1"));
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            String schema = parts.schema(id, line);
+            GuardrailSpec guardrail = parts.guardrail(id, line);
+            List<HorusExtension> ext = new ArrayList<>();
+            ext.add(new AgentTaskSpec(agent, schema, timeout));
+            if (guardrail != null) {
+                ext.add(guardrail);
+            }
+            if (result != null) {
+                ext.add(new ResultVariable(result));
+            }
+            ext.addAll(horusParts);
+            return new ServiceTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, null,
+                    info(ext, foreign));
+        }
+
+        /** The agent parts of one step's {@code extensionElements}, checked once the step has been read. */
+        private final class AgentParts {
+            private String schemaText;
+            private int schemaCount;
+            private Map<String, String> guardrail;
+            private int guardrailCount;
+            private int guardrailLine;
+
+            void schemaText(String text) {
+                schemaCount++;
+                schemaText = text;
+            }
+
+            void guardrail(Map<String, String> attributes, int at) {
+                guardrailCount++;
+                guardrail = attributes;
+                guardrailLine = at;
+            }
+
+            /** @return the schema as canonical JSON text, or null when it is missing or not a JSON object */
+            String schema(String id, int line) {
+                if (schemaCount == 0 || schemaText == null || schemaText.isBlank()) {
+                    problem("An agentTask needs a <horus:outputSchema> element holding a JSON object", id, line);
+                    return null;
+                }
+                if (schemaCount > 1) {
+                    problem("An agentTask has one <horus:outputSchema>", id, line);
+                }
+                tools.jackson.databind.JsonNode node;
+                try {
+                    node = EngineJson.JSON.readTree(schemaText.strip());
+                } catch (RuntimeException e) {
+                    // Never echo the text: the problem names the step and the rule only.
+                    problem("horus:outputSchema is not valid JSON", id, line);
+                    return null;
+                }
+                if (node == null || !node.isObject()) {
+                    problem("horus:outputSchema must be a JSON object", id, line);
+                    return null;
+                }
+                return CanonicalJson.write(node);
+            }
+
+            /** @return the guardrail, or null when it is missing or invalid */
+            GuardrailSpec guardrail(String id, int line) {
+                if (guardrailCount == 0) {
+                    problem("An agentTask needs a <horus:guardrail decision=\"...\"> element", id, line);
+                    return null;
+                }
+                int at = guardrailLine;
+                if (guardrailCount > 1) {
+                    problem("An agentTask has one <horus:guardrail>", id, at);
+                }
+                boolean ok = true;
+                String decision = guardrail.get("decision");
+                if (decision == null || !RULE_SET.matcher(decision).matches()) {
+                    problem("horus:guardrail needs decision, the guardrail rule set's name (kebab-case)", id, at);
+                    ok = false;
+                }
+                String onViolation = guardrail.getOrDefault("onViolation", GuardrailSpec.ROUTE_TO_HUMAN);
+                String reviewer = guardrail.get("reviewer");
+                if (!GuardrailSpec.ROUTE_TO_HUMAN.equals(onViolation) && !GuardrailSpec.FAIL.equals(onViolation)) {
+                    problem("horus:guardrail onViolation is route-to-human or fail", id, at);
+                    ok = false;
+                } else if (GuardrailSpec.ROUTE_TO_HUMAN.equals(onViolation)
+                        && (reviewer == null || !ASSIGNEE.matcher(reviewer).matches())) {
+                    problem("horus:guardrail with onViolation route-to-human needs reviewer as user:<id>, role:<role>"
+                            + " or group:<group>", id, at);
+                    ok = false;
+                } else if (GuardrailSpec.FAIL.equals(onViolation) && reviewer != null) {
+                    problem("horus:guardrail reviewer applies to onViolation route-to-human only", id, at);
+                    ok = false;
+                }
+                String fourEyes = guardrail.get("fourEyes");
+                if (fourEyes != null && !"true".equals(fourEyes)) {
+                    problem("horus:guardrail fourEyes cannot be switched off: a review is always four-eyes", id, at);
+                    ok = false;
+                }
+                return ok ? new GuardrailSpec(decision, onViolation, reviewer) : null;
+            }
+
+            private void problem(String message, String id, int at) {
+                invalid.add(new DefinitionProblem("GUARD_SPEC_INVALID", message, "serviceTask", safe(id), at));
+            }
+        }
+
+        private java.time.Duration positiveDuration(String text) {
+            try {
+                java.time.Duration value = java.time.Duration.parse(text.strip());
+                return value.isNegative() || value.isZero() ? null : value;
+            } catch (java.time.format.DateTimeParseException e) {
+                return null;
+            }
         }
 
         private FlowElement businessRuleTask() throws XMLStreamException {
@@ -637,9 +798,29 @@ public final class SubsetBpmnReader {
 
         private void extensions(String element, String id, boolean inputs, List<HorusExtension> horus,
                 List<ForeignFragment> foreign) throws XMLStreamException {
+            extensions(element, id, inputs, horus, foreign, null);
+        }
+
+        private void extensions(String element, String id, boolean inputs, List<HorusExtension> horus,
+                List<ForeignFragment> foreign, AgentParts agent) throws XMLStreamException {
             Set<String> names = new HashSet<>();
             while (nextChild()) {
                 String ns = xml.getNamespaceURI();
+                if (agent != null && HORUS.equals(ns) && "outputSchema".equals(xml.getLocalName())) {
+                    agent.schemaText(text());
+                    continue;
+                }
+                if (agent != null && HORUS.equals(ns) && "guardrail".equals(xml.getLocalName())) {
+                    Map<String, String> attributes = new HashMap<>();
+                    for (String a : List.of("decision", "onViolation", "reviewer", "fourEyes")) {
+                        if (attr(a) != null) {
+                            attributes.put(a, attr(a));
+                        }
+                    }
+                    agent.guardrail(attributes, line());
+                    skip();
+                    continue;
+                }
                 if (HORUS.equals(ns) && "input".equals(xml.getLocalName()) && inputs) {
                     String inputName = attr("name");
                     String value = xml.getAttributeValue(null, "value");

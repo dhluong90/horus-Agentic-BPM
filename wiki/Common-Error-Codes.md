@@ -208,7 +208,7 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `422`. An `agentTask` names a guardrail rule set that does not meet the contract: hit policy `first` or `unique`, output `allow: boolean`, optional `reasons: list<string>`. Checked at import, at request-approval and at approval. `detail` names the step id and the failed check.
 
 ### FORM_VALIDATION_FAILED
-`422`. A task completion does not match the task's form schema. The body carries a JSON Pointer to each failing field, for example `/reason`. Correct the field and complete again.
+`422`. A task completion does not match the task's form schema. The body carries a JSON Pointer to each failing field, for example `/reason`. Correct the field and complete again. Since 0.2.0 the review task of a refused agent result checks the reviewer's answer against the step's output schema; its body carries `violations`, each a path and a rule such as `$.riskScore: expected integer`, and the task stays claimed.
 
 ### LAYOUT_INVALID
 `422`. A layout save names a node id that is not in the definition, or exceeds 256 KB. Remove the unknown node or reduce the layout. Layout saves need no approval.

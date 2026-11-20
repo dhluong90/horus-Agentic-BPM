@@ -31,7 +31,7 @@ final class ProcessListQueries {
 
     static final String TASK_COLUMNS = "tenant_id, id, instance_id, token_id, definition_id, node_id, name, "
             + "assignee_user, assignee_role, assignee_group, four_eyes, status, lock_version, claimed_by, claimed_at, "
-            + "completed_by, created_at, completed_at";
+            + "completed_by, created_at, completed_at, review::text AS review";
 
     /** Live tokens per node of one definition version (PRE-028). */
     static final ListQuery LIVE_COUNTS = new ListQuery("live-token-counts",
@@ -68,10 +68,18 @@ final class ProcessListQueries {
     static final ListQuery DEFINITION_KEYS = definitionKeys(false);
     /** A later page of definition keys, after the last key of the previous page. */
     static final ListQuery DEFINITION_KEYS_AFTER = definitionKeys(true);
+    /** The distinct actors of one event type in the history of one instance, such as the makers of a step. */
+    static final ListQuery HISTORY_ACTORS = new ListQuery("instance-history-actors",
+            new Bound.ParentKey("instance_id", "the actors in the history of one instance, at most one per event"),
+            "SELECT DISTINCT actor_id FROM pre_history WHERE tenant_id = ? AND instance_id = ? AND event_type = ? "
+                    + "AND actor_id IS NOT NULL");
+
     /** Due timers, for every tenant: the poll of each replica. */
-    static final ListQuery CLAIM_TIMERS = claim(false);
+    static final ListQuery CLAIM_TIMERS = claim(ClaimKinds.TIMERS);
     /** Due remote steps, for every tenant: the poll of the async runner. */
-    static final ListQuery CLAIM_ASYNC = claim(true);
+    static final ListQuery CLAIM_ASYNC = claim(ClaimKinds.ASYNC);
+    /** Due remote steps of one kind, for every tenant: the poll of that kind's runner, on the V9 index. */
+    static final ListQuery CLAIM_ASYNC_KIND = claim(ClaimKinds.ONE_KIND);
 
     private ProcessListQueries() {
     }
@@ -79,7 +87,7 @@ final class ProcessListQueries {
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
         return List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS, DEFINITION_KEYS,
-                DEFINITION_KEYS_AFTER, CLAIM_TIMERS, CLAIM_ASYNC,
+                DEFINITION_KEYS_AFTER, HISTORY_ACTORS, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 instances(1, false, false, false, false),
                 instances(3, true, true, true, true));
     }
@@ -147,19 +155,68 @@ final class ProcessListQueries {
     }
 
     /**
-     * One claim statement: a {@code FOR UPDATE SKIP LOCKED} select of due rows and the update that leases them.
-     * {@code async} picks the remote-step kinds or every other kind; never caller text. Parameters: now, now, limit,
-     * replica id, now.
+     * The job kinds a claim statement takes, as a constant predicate on {@code job_kind}; never caller text.
+     * {@link #ONE_KIND} is the only one with a bind parameter, the kind itself.
      */
-    private static ListQuery claim(boolean async) {
-        return new ListQuery(async ? "claim-async-steps" : "claim-timers",
-                new Bound.Page("earliest due first on idx_pre_timer_poll, at most one poll batch"),
+    enum ClaimKinds {
+        /** Every kind but the remote steps, on {@code idx_pre_timer_poll}. */
+        TIMERS("claim-timers", "job_kind NOT IN " + asyncKinds(), "idx_pre_timer_poll"),
+        /** Both remote-step kinds, on {@code idx_pre_timer_poll}. */
+        ASYNC("claim-async-steps", "job_kind IN " + asyncKinds(), "idx_pre_timer_poll"),
+        /** One remote-step kind, bound as a parameter, on {@code idx_pre_timer_poll_kind} (V9). */
+        ONE_KIND("claim-async-kind", "job_kind = ?", "idx_pre_timer_poll_kind (V9)");
+
+        private final String queryName;
+        private final String predicate;
+        private final String index;
+
+        ClaimKinds(String queryName, String predicate, String index) {
+            this.queryName = queryName;
+            this.predicate = predicate;
+            this.index = index;
+        }
+
+        /** Whether the statement binds the kind after the two due-time parameters. */
+        boolean bindsKind() {
+            return this == ONE_KIND;
+        }
+
+        private static String asyncKinds() {
+            return "('" + JobStore.ASYNC_SERVICE + "','" + JobStore.ASYNC_AGENT + "')";
+        }
+    }
+
+    /**
+     * The parameters of a claim statement, in placeholder order: now, now, [kind], limit, replica id, now.
+     *
+     * @param kinds the claim statement
+     * @param kind the job kind, required for {@link ClaimKinds#ONE_KIND} and refused otherwise
+     */
+    static List<Object> claimParams(ClaimKinds kinds, String kind, Object now, int limit, String replicaId) {
+        if (kinds.bindsKind() != (kind != null)) {
+            throw new IllegalArgumentException("Claim " + kinds.queryName + (kinds.bindsKind()
+                    ? " needs a job kind" : " takes no job kind"));
+        }
+        List<Object> params = new ArrayList<>(List.of(now, now));
+        if (kind != null) {
+            params.add(kind);
+        }
+        params.addAll(List.of(limit, replicaId, now));
+        return params;
+    }
+
+    /**
+     * One claim statement: a {@code FOR UPDATE SKIP LOCKED} select of due rows and the update that leases them.
+     * Parameters: see {@link #claimParams}.
+     */
+    private static ListQuery claim(ClaimKinds kinds) {
+        return new ListQuery(kinds.queryName,
+                new Bound.Page("earliest due first on " + kinds.index + ", at most one poll batch"),
                 "WITH due AS ("
                         + "SELECT tenant_id, id FROM pre_timer "
                         + "WHERE status IN ('DUE','CLAIMED') AND next_fire_at <= ? "
                         + "AND (status = 'DUE' OR locked_until <= ?) "
-                        + "AND job_kind " + (async ? "IN" : "NOT IN")
-                        + " ('" + JobStore.ASYNC_SERVICE + "','" + JobStore.ASYNC_AGENT + "') "
+                        + "AND " + kinds.predicate + " "
                         + "ORDER BY next_fire_at, id LIMIT ? FOR UPDATE SKIP LOCKED) "
                         + "UPDATE pre_timer t SET status = 'CLAIMED', locked_by = ?, "
                         + "locked_until = ?::timestamptz + t.lease_duration, attempt = t.attempt + 1 "
