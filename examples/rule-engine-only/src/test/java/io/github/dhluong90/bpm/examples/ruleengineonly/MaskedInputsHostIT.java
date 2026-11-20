@@ -225,8 +225,7 @@ class MaskedInputsHostIT {
             // Host keys are recorded once, under '*', each with its check value, never the key.
             assertThat(jdbc.sql("SELECT tenant_id || ' ' || key_id || ' ' || check_value FROM rle_masking_key_check"
                     + " ORDER BY key_id").query(String.class).list()).containsExactly(
-                    "* k1 " + hmacHex(K32, "horus-bpm/masking/v1/kcv").substring(0, 16),
-                    "* k2 " + hmacHex(k2, "horus-bpm/masking/v1/kcv").substring(0, 16));
+                    "* k1 " + checkValue(K32), "* k2 " + checkValue(k2));
         }
 
         // Retired: k1 no longer listed, so it is no longer searched.
@@ -237,12 +236,31 @@ class MaskedInputsHostIT {
                     .satisfies(item -> assertThat(item.path("decisionId").asString()).isEqualTo(after));
         }
 
+        // bank-a moves off the host key to a key of its own, a1: it writes under a1 and still finds its k2 rows.
+        byte[] a1 = filled(32, 'a');
+        String a1Base64 = Base64.getEncoder().encodeToString(a1);
+        try (ConfigurableApplicationContext host = start(db, KEY_SETTING + "=" + k2Base64, KEY_SETTING + "-id=k2",
+                "horus.bpm.rules.masking.tenants.bank-a.hmac-key=" + a1Base64,
+                "horus.bpm.rules.masking.tenants.bank-a.hmac-key-id=a1")) {
+            int port = port(host);
+            String own = send(port, TestTokens.bearer("teller"), "POST", "/decisions/minor-review:evaluate",
+                    "{\"inputs\": {\"nationalId\": \"" + NATIONAL_ID + "\", \"age\": 40}}", "application/json")
+                    .json().path("decisionId").asString();
+            assertThat(host.getBean(JdbcClient.class)
+                    .sql("SELECT masked_inputs ->> 'nationalId' FROM rle_decision WHERE id = :id")
+                    .param("id", own).query(String.class).single()).isEqualTo("hmac:a1:" + hmacHex(a1, NATIONAL_ID));
+            Reply found = send(port, auditor, "POST", "/decisions:find-by-masked-input", search, "application/json");
+            List<String> ids = new ArrayList<>();
+            found.json().path("data").forEach(item -> ids.add(item.path("decisionId").asString()));
+            assertThat(ids).containsExactlyInAnyOrder(after, own);
+        }
+
         // TR-SEC-10: id k1 back with different key bytes stops start-up, naming the id, never the key.
         String other = Base64.getEncoder().encodeToString(filled(32, 'o'));
         assertThatThrownBy(() -> start(db, KEY_SETTING + "=" + other).close())
                 .satisfies(e -> assertThat(rootMessage(e)).contains("host masking key id k1", "check value")
                         .doesNotContain(other, K32_BASE64));
-        assertThat(output.getAll()).doesNotContain(K32_BASE64, K32_HEX, k2Base64, other, NATIONAL_ID);
+        assertThat(output.getAll()).doesNotContain(K32_BASE64, K32_HEX, k2Base64, a1Base64, other, NATIONAL_ID);
     }
 
     @Test
@@ -311,6 +329,19 @@ class MaskedInputsHostIT {
         expand.update(("horus-bpm/masking/v1/tenant/" + tenant).getBytes(StandardCharsets.UTF_8));
         expand.update((byte) 1);
         return expand.doFinal();
+    }
+
+    /** The key check value: HKDF-SHA256 with info "horus-bpm/masking/v1/kcv", then the HMAC of nothing, 8 bytes. */
+    static String checkValue(byte[] key) throws Exception {
+        Mac extract = Mac.getInstance("HmacSHA256");
+        extract.init(new SecretKeySpec(new byte[32], "HmacSHA256"));
+        Mac expand = Mac.getInstance("HmacSHA256");
+        expand.init(new SecretKeySpec(extract.doFinal(key), "HmacSHA256"));
+        expand.update("horus-bpm/masking/v1/kcv".getBytes(StandardCharsets.UTF_8));
+        expand.update((byte) 1);
+        Mac check = Mac.getInstance("HmacSHA256");
+        check.init(new SecretKeySpec(expand.doFinal(), "HmacSHA256"));
+        return HexFormat.of().formatHex(check.doFinal(new byte[0])).substring(0, 16);
     }
 
     static String hmacHex(byte[] key, String value) throws Exception {
