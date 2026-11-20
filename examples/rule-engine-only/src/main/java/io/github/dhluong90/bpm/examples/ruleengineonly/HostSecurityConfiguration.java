@@ -1,7 +1,7 @@
 package io.github.dhluong90.bpm.examples.ruleengineonly;
 
-import io.github.dhluong90.bpm.host.autoconfigure.BpmProblemAccessDeniedHandler;
-import io.github.dhluong90.bpm.host.autoconfigure.BpmProblemAuthenticationEntryPoint;
+import io.github.dhluong90.bpm.host.security.BpmProblemAccessDeniedHandler;
+import io.github.dhluong90.bpm.host.security.BpmProblemAuthenticationEntryPoint;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.ArrayList;
@@ -76,10 +76,12 @@ class HostSecurityConfiguration {
     private static final String JWT = "spring.security.oauth2.resourceserver.jwt.";
 
     @Bean
-    SecurityFilterChain hostSecurity(HttpSecurity http, ObjectProvider<JwtDecoder> jwtDecoder, Environment environment) {
+    SecurityFilterChain hostSecurity(HttpSecurity http, ObjectProvider<JwtDecoder> jwtDecoder, Environment environment,
+            BpmProblemAuthenticationEntryPoint problemEntryPoint, BpmProblemAccessDeniedHandler problemAccessDenied) {
         requireAudience(environment);
         RequestMatcher engineApi = PathPatternRequestMatcher.withDefaults().matcher("/api/bpm/**");
-        BpmProblemAuthenticationEntryPoint problemEntryPoint = new BpmProblemAuthenticationEntryPoint();
+        // The engine module's beans, built from horus.bpm.security.challenge, so the chain and the engine endpoints
+        // send the same challenge.
         http.authorizeHttpRequests(requests -> requests
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // The sign-in page with any query (?lang=vi, ?error, ?logout), and its own styles and script.
@@ -98,7 +100,7 @@ class HostSecurityConfiguration {
                 .requestCache(cache -> cache.requestCache(pagesOnly(engineApi)))
                 .exceptionHandling(exceptions -> exceptions
                         .defaultAuthenticationEntryPointFor(problemEntryPoint, engineApi)
-                        .defaultAccessDeniedHandlerFor(new BpmProblemAccessDeniedHandler(), engineApi));
+                        .defaultAccessDeniedHandlerFor(problemAccessDenied, engineApi));
         if (environment.matchesProfiles(DEV_PROFILE)) {
             // Local development only: the curl walkthrough of the README signs the demo users in with Basic
             // credentials. Each call carries its credentials and no cookie, so CSRF does not apply to it.

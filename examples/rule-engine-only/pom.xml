@@ -77,6 +77,12 @@
       <artifactId>testcontainers-junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- HostImportsTest: the sample host imports only the engines' public packages. -->
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>

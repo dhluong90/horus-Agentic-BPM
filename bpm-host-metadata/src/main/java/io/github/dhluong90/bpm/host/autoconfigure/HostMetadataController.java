@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.host.autoconfigure;
 
+import io.github.dhluong90.bpm.host.internal.CorrelationIds;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException;
 import io.github.dhluong90.bpm.host.spi.EngineCaller;
@@ -59,8 +60,6 @@ final class HostMetadataController {
     private static final Log LOG = LogFactory.getLog(HostMetadataController.class);
     /** Contributors already reported at ERROR; later failures of the same kind go to DEBUG, so polling never floods. */
     private final Set<String> reported = ConcurrentHashMap.newKeySet();
-    /** ADR-0015: the largest page any engine list endpoint returns. */
-    static final int MAX_PAGE_SIZE = 200;
 
     private final List<ModuleDescriptor> modules;
     private final List<ModuleTenantSettings> tenantSettings;
@@ -143,7 +142,7 @@ final class HostMetadataController {
         }
         body.put("modules", entries);
         body.put("tenancy", Map.of("switching", false));
-        body.put("limits", Map.of("maxPageSize", MAX_PAGE_SIZE));
+        body.put("limits", Map.of("maxPageSize", properties.limits().maxPageSize()));
         return tenantSettings.isEmpty() ? cacheable(request, body, META_CACHE_CONTROL, new String[0])
                 : cacheable(request, body, META_TENANT_CACHE_CONTROL, META_VARY);
     }
