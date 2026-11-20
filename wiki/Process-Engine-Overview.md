@@ -96,6 +96,22 @@ FROM claimed WHERE t.id = claimed.id RETURNING t.*;
 
 When two branches finish on two replicas at the same instant, each transaction locks the parent `pre_instance` row `FOR UPDATE` before it marks its token `JOINED` and counts the remaining tokens under the same scope token (the instance, or the enclosing `saga` block). The lock serialises the two counts, so exactly one transaction sees zero remaining and creates the single outgoing token (`PRE-005`, `TR-ASY-03`). The lock is per instance and held for about 2 ms, so it never contends across instances.
 
+| Rule | Behaviour |
+|---|---|
+| Fork | A parallel gateway with one incoming flow sends a token down every outgoing flow, one `FLOW` token per flow, all under the scope token of the arriving token |
+| Join | With several incoming flows, each arriving token becomes `JOINED`. The arrival that brings the `JOINED` tokens on the gateway, under the same scope token, to the number of incoming flows marks them `COMPLETED` and creates one new token that leaves the gateway (and forks again if the gateway has several outgoing flows) |
+| Scope | Tokens of another scope token are never counted (`PRE-044`), so two instances, or a `saga` block and its parent, never complete each other's join |
+| Conditions | A condition on an outgoing flow of a parallel gateway is refused at import (`CONDITION_ON_PARALLEL_FLOW`); use an exclusive gateway to choose |
+| Audit | `pre_history` records `TOKEN_JOINED` per arrival with the count, and `NODE_COMPLETED` once, by the identity whose completion fired the join |
+| Modelling | The join counts arrivals, as BPMN engines usually do. If a forked branch ends at an end event instead of reaching the join, the join never fires and the instance ends with that end event; model every forked branch back into the join |
+
+The race is proven with two engine instances on two connection pools against one PostgreSQL: the two checks of a loan application are completed at the same moment, one on each, 1,000 times, and every run ends with exactly one token at `underwrite`. Removing the row lock makes the first run fail. The test runs with:
+
+```
+mvn -B -pl process-engine/process-engine-test,process-engine/process-engine-postgres -am verify \
+  -Dtest='ParallelGatewayTest' -Dit.test='ParallelJoinPostgresIT' -Dsurefire.failIfNoSpecifiedTests=false
+```
+
 ## Idempotency and business keys
 
 ![Idempotent start and complete](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/idempotent-start-complete.svg)
