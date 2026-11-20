@@ -102,6 +102,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     static final String PERMISSION_READ = "processes:read";
     static final String PERMISSION_TASK_WORK = "processes:task:work";
     static final String DEV_APPROVER = "system:dev-auto-approve";
+    static final String TIMER_ACTOR = "system:timer";
     private static final System.Logger LOG = System.getLogger(ProcessServices.class.getName());
 
     private final TenantResolver tenants;
@@ -121,6 +122,29 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
 
     private record Compiled(CompiledProcess process, ExecutionKernel kernel) {
+    }
+
+    /**
+     * Who one run acts for. A method parameter, never a thread-local, so it cannot outlive the transaction or leak
+     * to another call, and never built from request data.
+     */
+    private sealed interface RunAs {
+
+        /** A caller's request: the tenant and the caller come from the host's security context. */
+        RunAs REQUEST = new CallerRequest();
+
+        /** The caller's request. */
+        record CallerRequest() implements RunAs {
+        }
+
+        /**
+         * Engine-owned work with no caller, built only by the job handlers of this class.
+         *
+         * @param tenantId the tenant of the job row this work fires
+         * @param actor the engine actor, for example {@code system:timer}
+         */
+        record EngineWork(String tenantId, String actor) implements RunAs {
+        }
     }
 
     /**
@@ -301,7 +325,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         request.businessKey()).orElseThrow()), false);
             }
             InstanceState state = InstanceState.created(instanceId, tenant, definition.id(), request.businessKey());
-            run(definition, row, state, new Command.Start(request.variables(), caller));
+            run(definition, row, state, new Command.Start(request.variables(), caller), RunAs.REQUEST);
             return new Started(read(tenant, store.findInstance(tenant, instanceId).orElseThrow()), true);
         }, Views::startedToJson, Views::startedFromJson));
     }
@@ -327,8 +351,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     /**
      * Fires a timer inside the fire transaction: locks the instance row, then checks the claim, then delivers
-     * {@link Command.JobDue} to the waiting token. There is no caller: the tenant is the job's, and the actor is
-     * {@code system:timer}. A timer whose instance ended or whose token moved on is consumed without firing.
+     * {@link Command.JobDue} to the waiting token. There is no caller: the run acts for the job's tenant as
+     * {@code system:timer}, and a decision step that follows is evaluated in the instance's tenant as the engine
+     * (ADR-0027). A timer whose instance ended or whose token moved on is consumed without firing.
      */
     private boolean fireTimer(JobRow job, java.util.function.BooleanSupplier claimHeld) {
         String tenant = job.tenantId();
@@ -348,10 +373,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return true;
         }
         StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
-        InstanceState state = new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
+        // The instance's tenant is the stored row's; the job's tenant is what this firing is allowed to act for.
+        InstanceState state = new InstanceState(row.id(), row.tenantId(), row.definitionId(), row.businessKey(),
                 InstanceStatus.valueOf(row.status()), tokens, Values.readMap(row.variablesJson()),
                 participants(tenant, row), row.sequence());
-        run(definition, row, state, new Command.JobDue(job.id(), job.tokenId(), job.jobKind()));
+        run(definition, row, state, new Command.JobDue(job.id(), job.tokenId(), job.jobKind()),
+                new RunAs.EngineWork(tenant, TIMER_ACTOR));
         return true;
     }
 
@@ -394,7 +421,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             InstanceState state = new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
                     InstanceStatus.valueOf(row.status()), store.tokens(tenant, row.id()), Values.readMap(row.variablesJson()),
                     participants, row.sequence());
-            run(definition, row, state, new Command.CompleteTask(taskId, task.tokenId(), values, caller));
+            run(definition, row, state, new Command.CompleteTask(taskId, task.tokenId(), values, caller), RunAs.REQUEST);
             return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
         }, Views::instanceToJson, Views::instanceFromJson));
     }
@@ -461,7 +488,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     // ---- shell --------------------------------------------------------------------------------------------
 
-    private void run(StoredDefinition definition, InstanceRow row, InstanceState initial, Command first) {
+    private void run(StoredDefinition definition, InstanceRow row, InstanceState initial, Command first, RunAs as) {
         Compiled compiled = compiled(definition);
         InstanceState state = initial;
         List<HistoryEntry> history = new ArrayList<>();
@@ -494,11 +521,23 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 Values.write(job.payload())));
                         case Effect.CancelJob cancel -> cancelledJobs.add(cancel.jobId());
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
-                            if (call.kind() == ServiceKind.DECISION && !state.tenantId().equals(tenants.currentTenantId())) {
-                                // The Rule Engine resolves its tenant from the caller; it must be the instance's tenant.
-                                throw new TenantNotAllowedException("The caller's tenant is not the instance's tenant");
+                            DecisionCaller decisionCaller = switch (as) {
+                                case RunAs.CallerRequest r -> new DecisionCaller.Request();
+                                case RunAs.EngineWork w -> new DecisionCaller.Engine(w.actor());
+                            };
+                            if (call.kind() == ServiceKind.DECISION) {
+                                // A request evaluates as its caller, so the caller's tenant must be the instance's.
+                                // Engine work has no caller: the tenant it fires for must be the instance's.
+                                String allowed = switch (as) {
+                                    case RunAs.CallerRequest r -> tenants.currentTenantId();
+                                    case RunAs.EngineWork w -> w.tenantId();
+                                };
+                                if (!state.tenantId().equals(allowed)) {
+                                    throw new TenantNotAllowedException("The caller's tenant is not the instance's tenant");
+                                }
                             }
-                            var result = invoker.invoke(state.tenantId(), state.instanceId(), state.businessKey(), call);
+                            var result = invoker.invoke(state.tenantId(), state.instanceId(), state.businessKey(), call,
+                                    decisionCaller);
                             if (call.kind() == ServiceKind.DECISION
                                     && result instanceof io.github.dhluong90.bpm.process.internal.exec.StepResult.Completed c) {
                                 history.add(new HistoryEntry("DECISION_EVALUATED", call.nodeId(), call.tokenId(),

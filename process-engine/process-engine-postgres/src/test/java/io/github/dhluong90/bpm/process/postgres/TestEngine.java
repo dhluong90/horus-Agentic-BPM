@@ -66,14 +66,46 @@ final class TestEngine {
         }
     }
 
+    /** The Rule Engine's view of the security context, which tests set to whatever the thread would hold. */
+    static final class RuleIdentity implements io.github.dhluong90.bpm.rules.spi.TenantResolver,
+            io.github.dhluong90.bpm.rules.spi.CallerResolver {
+        volatile String tenant;
+        volatile String caller;
+
+        @Override
+        public String currentTenantId() {
+            return tenant;
+        }
+
+        @Override
+        public String currentCallerId() {
+            return caller;
+        }
+
+        @Override
+        public Set<String> currentPermissions() {
+            return caller == null ? Set.of() : Set.of("rules:author", "rules:approve", "rules:evaluate", "rules:read");
+        }
+
+        RuleIdentity as(String tenantId, String callerId) {
+            tenant = tenantId;
+            caller = callerId;
+            return this;
+        }
+    }
+
     final ProcessServices services;
     final JobExecutor jobs;
     final Identity identity = new Identity();
+    final RuleIdentity ruleIdentity = new RuleIdentity();
+    /** The Rule Engine of this replica on the same database and transaction manager, or null without one. */
+    final io.github.dhluong90.bpm.rules.internal.service.RuleEngines rules;
     final List<ProcessEventPublisher.Event> events = new CopyOnWriteArrayList<>();
 
     private TestEngine(Builder b) {
         DataSource ds = dataSource();
-        ProcessEngineTransactions tx = new ProcessEngineTransactions(new DataSourceTransactionManager(ds));
+        DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
+        ProcessEngineTransactions tx = new ProcessEngineTransactions(transactionManager);
         JdbcJobStore jobStore = new JdbcJobStore(ds);
         SubsetBpmnReader reader = new SubsetBpmnReader(Limits.DEFAULTS);
         JobSettings jobSettings = JobSettings.defaults(b.replicaId).withTimerLease(b.lease);
@@ -83,10 +115,20 @@ final class TestEngine {
                 EngineDefaults.IDEMPOTENCY_RETENTION, EngineDefaults.SLOW_CALL_WARNING);
         Identity id = identity;
         ProcessEventPublisher publisher = b.publisher != null ? b.publisher : events::add;
+        if (b.withRuleEngine) {
+            migrateRuleEngine(ds, transactionManager, b.clock.instant());
+            this.rules = io.github.dhluong90.bpm.rules.postgres.PostgresRuleEngines.create(ds,
+                    new io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions(transactionManager), ruleIdentity,
+                    ruleIdentity, b.clock, io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults());
+        } else {
+            this.rules = null;
+        }
+        Optional<io.github.dhluong90.bpm.rules.api.RuleEngine> ruleEngine = b.ruleEngine != null ? Optional.of(b.ruleEngine)
+                : Optional.ofNullable(rules).map(io.github.dhluong90.bpm.rules.internal.service.RuleEngines::ruleEngine);
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, new JdbcProcessStore(ds),
                 Map.of(SourceFormat.BPMN_XML, reader::read),
                 new LocalServiceInvoker(b.handlers.stream().collect(Collectors.toMap(ServiceTaskHandler::name, h -> h)),
-                        Optional.empty(), Duration.ofSeconds(5)),
+                        ruleEngine, Duration.ofSeconds(5)),
                 publisher, settings, BehaviorCatalog.registry(), new V1ExpressionEvaluator(100), jobStore, jobSettings);
         this.jobs = new JobExecutor(jobStore, tx, b.clock, jobSettings, services.jobHandlers());
     }
@@ -104,6 +146,8 @@ final class TestEngine {
         private boolean autoApprove = true;
         private List<ServiceTaskHandler> handlers = List.of();
         private ProcessEventPublisher publisher;
+        private boolean withRuleEngine;
+        private io.github.dhluong90.bpm.rules.api.RuleEngine ruleEngine;
 
         private Builder(String replicaId, TestClock clock) {
             this.replicaId = replicaId;
@@ -140,6 +184,18 @@ final class TestEngine {
             return this;
         }
 
+        /** Adds the real Rule Engine on the same database, joined to the engine's transactions. */
+        Builder withRuleEngine() {
+            withRuleEngine = true;
+            return this;
+        }
+
+        /** Uses a host-provided Rule Engine instead of the real one. */
+        Builder ruleEngine(io.github.dhluong90.bpm.rules.api.RuleEngine value) {
+            ruleEngine = value;
+            return this;
+        }
+
         TestEngine build() {
             return new TestEngine(this);
         }
@@ -157,6 +213,20 @@ final class TestEngine {
             dataSource = ds;
         }
         return dataSource;
+    }
+
+    private static boolean ruleEngineMigrated;
+
+    /** Migrates the Rule Engine's tables once, and makes sure the decision log has partitions around {@code now}. */
+    private static synchronized void migrateRuleEngine(DataSource ds, DataSourceTransactionManager transactionManager,
+            java.time.Instant now) {
+        if (!ruleEngineMigrated) {
+            new io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator(ds).migrate();
+            ruleEngineMigrated = true;
+        }
+        new io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions(ds,
+                new io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions(transactionManager))
+                .ensureCurrentAndNextMonth(now);
     }
 
     static JdbcClient jdbc() {

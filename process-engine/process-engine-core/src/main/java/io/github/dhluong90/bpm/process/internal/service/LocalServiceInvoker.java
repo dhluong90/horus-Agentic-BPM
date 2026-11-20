@@ -1,9 +1,5 @@
 package io.github.dhluong90.bpm.process.internal.service;
 
-import io.github.dhluong90.bpm.rules.api.DecisionInput;
-import io.github.dhluong90.bpm.rules.api.DecisionRequest;
-import io.github.dhluong90.bpm.rules.api.DecisionResult;
-import io.github.dhluong90.bpm.rules.api.HorusBpmException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.process.internal.exec.Effect;
 import io.github.dhluong90.bpm.process.internal.exec.StepResult;
@@ -15,16 +11,17 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Local handlers by name, and decisions through {@link RuleEngine#evaluate}; both inside the current transaction.
- * A decision's id is added to the output as {@code decisionId}, so the instance links to the decision log. A
- * decision with no matching row or an evaluation error fails the step (fail closed).
+ * Local handlers by name, and decisions through a {@link DecisionPort} over the {@link RuleEngine}; both inside the
+ * current transaction. A decision always gets the instance's tenant explicitly (ADR-0027). A decision's id is added
+ * to the output as {@code decisionId}, so the instance links to the decision log. A decision with no matching row or
+ * an evaluation error fails the step (fail closed).
  */
 public final class LocalServiceInvoker implements ServiceInvoker {
 
     private static final System.Logger LOG = System.getLogger(LocalServiceInvoker.class.getName());
 
     private final Map<String, ServiceTaskHandler> handlers;
-    private final Optional<RuleEngine> ruleEngine;
+    private final Optional<DecisionPort> decisions;
     private final long slowCallNanos;
 
     /**
@@ -35,7 +32,7 @@ public final class LocalServiceInvoker implements ServiceInvoker {
     public LocalServiceInvoker(Map<String, ServiceTaskHandler> handlers, Optional<RuleEngine> ruleEngine,
             java.time.Duration slowCallWarning) {
         this.handlers = Map.copyOf(handlers);
-        this.ruleEngine = ruleEngine;
+        this.decisions = ruleEngine.map(RuleEngineDecisionPort::new);
         this.slowCallNanos = slowCallWarning.toNanos();
     }
 
@@ -46,16 +43,17 @@ public final class LocalServiceInvoker implements ServiceInvoker {
 
     /** @return whether a Rule Engine is present */
     public boolean hasRuleEngine() {
-        return ruleEngine.isPresent();
+        return decisions.isPresent();
     }
 
     @Override
-    public StepResult invoke(String tenantId, String instanceId, String businessKey, Effect.InvokeService call) {
+    public StepResult invoke(String tenantId, String instanceId, String businessKey, Effect.InvokeService call,
+            DecisionCaller caller) {
         long started = System.nanoTime();
         try {
             return switch (call.kind()) {
                 case HANDLER -> handler(tenantId, instanceId, businessKey, call);
-                case DECISION -> decision(instanceId, call);
+                case DECISION -> decision(tenantId, instanceId, call, caller);
                 default -> new StepResult.Failed("NOT_SUPPORTED", call.kind() + " invocations are not supported yet",
                         false);
             };
@@ -94,28 +92,19 @@ public final class LocalServiceInvoker implements ServiceInvoker {
         };
     }
 
-    private StepResult decision(String instanceId, Effect.InvokeService call) {
-        if (ruleEngine.isEmpty()) {
+    private StepResult decision(String tenantId, String instanceId, Effect.InvokeService call, DecisionCaller caller) {
+        if (decisions.isEmpty()) {
             return new StepResult.Failed("RULE_ENGINE_MISSING", "The host has no Rule Engine", false);
         }
-        DecisionResult result;
-        try {
-            result = ruleEngine.get().evaluate(DecisionRequest.of(call.target(), DecisionInput.of(call.inputs()))
-                    .withCorrelationId(instanceId));
-        } catch (HorusBpmException e) {
-            // Rule set missing, no effective version, wrong input type, caller without rules:evaluate: fail closed.
-            return new StepResult.Failed(e.code(), e.getMessage(), false);
-        }
-        return switch (result.outcome()) {
-            case DecisionResult.Matched m -> {
+        return switch (decisions.get().evaluate(tenantId, caller, call.target(), call.inputs(), instanceId)) {
+            case DecisionOutcome.Matched m -> {
                 Map<String, Object> output = new LinkedHashMap<>(m.outputs());
-                output.put("decisionId", result.decisionId());
+                output.put("decisionId", m.decisionId());
                 yield new StepResult.Completed(output);
             }
-            case DecisionResult.NoMatch n -> new StepResult.Failed("DECISION_NO_MATCH", "Rule set " + call.target()
-                    + " matched no row (decision " + result.decisionId() + ")", false);
-            case DecisionResult.Failed f -> new StepResult.Failed(f.code(), f.detail() + " (decision "
-                    + result.decisionId() + ")", false);
+            case DecisionOutcome.NoMatch n -> new StepResult.Failed("DECISION_NO_MATCH", "Rule set " + call.target()
+                    + " matched no row (decision " + n.decisionId() + ")", false);
+            case DecisionOutcome.Failed f -> new StepResult.Failed(f.code(), f.detail(), false);
         };
     }
 }
