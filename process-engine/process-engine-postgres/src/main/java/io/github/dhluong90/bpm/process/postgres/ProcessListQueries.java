@@ -31,7 +31,7 @@ final class ProcessListQueries {
 
     static final String TASK_COLUMNS = "tenant_id, id, instance_id, token_id, definition_id, node_id, name, "
             + "assignee_user, assignee_role, assignee_group, four_eyes, status, lock_version, claimed_by, claimed_at, "
-            + "completed_by, created_at, completed_at";
+            + "completed_by, created_at, completed_at, review::text AS review";
 
     /** Live tokens per node of one definition version (PRE-028). */
     static final ListQuery LIVE_COUNTS = new ListQuery("live-token-counts",
@@ -68,10 +68,84 @@ final class ProcessListQueries {
     static final ListQuery DEFINITION_KEYS = definitionKeys(false);
     /** A later page of definition keys, after the last key of the previous page. */
     static final ListQuery DEFINITION_KEYS_AFTER = definitionKeys(true);
+    /** The distinct actors of one event type in the history of one instance, such as the makers of a step. */
+    static final ListQuery HISTORY_ACTORS = new ListQuery("instance-history-actors",
+            new Bound.ParentKey("instance_id", "the actors in the history of one instance, at most one per event"),
+            "SELECT DISTINCT actor_id FROM pre_history WHERE tenant_id = ? AND instance_id = ? AND event_type = ? "
+                    + "AND actor_id IS NOT NULL");
+
+    /** The open incidents of one instance, on {@code idx_pre_incident_instance} (V13). */
+    static final ListQuery OPEN_INCIDENTS = new ListQuery("instance-open-incidents",
+            new Bound.ParentKey("instance_id", "the open incidents of one instance, at most one per waiting step"),
+            "SELECT tenant_id, id, instance_id, definition_id, token_id, node_id, error_code, cause_summary, "
+                    + "retry_count, status, lock_version, created_at, resolved_at FROM pre_incident "
+                    + "WHERE tenant_id = ? AND instance_id = ? AND status = 'OPEN' ORDER BY created_at, id");
+
+    /**
+     * The step results agent steps read as memory (#101), on the primary key of {@code pre_step_result} (V14). The
+     * agent step's declared memory lists the source steps; the instance list registers one and three of them.
+     */
+    static ListQuery stepResults(int nodes) {
+        if (nodes < 1) {
+            throw new IllegalArgumentException("The step results of at least one node");
+        }
+        return new ListQuery("instance-step-results-" + nodes,
+                new Bound.ParentKey("instance_id", "the results of the steps one agent step declares as memory"),
+                "SELECT node_id, result_json::text AS result FROM pre_step_result WHERE tenant_id = ? AND "
+                        + "instance_id = ? AND node_id IN (" + String.join(", ", java.util.Collections.nCopies(nodes, "?"))
+                        + ")");
+    }
+
+    /**
+     * The recorded answers of one agent step in a period, oldest first (#98): the primary key range of
+     * {@code pre_history} on {@code (tenant_id, occurred_at)} with a period of at most {@code query.max-range}, keyset
+     * on {@code (occurred_at, id)}. Parameters: tenant, key, node, from, to, [after at, after id], limit.
+     */
+    static ListQuery replayAnswers(boolean after) {
+        return new ListQuery(after ? "replay-answers-after" : "replay-answers",
+                new Bound.Page("oldest first on the pre_history primary key, inside a period of at most query.max-range"),
+                "SELECT h.occurred_at, h.id, h.instance_id, h.event_type, h.attempt_id, h.details::text AS details, "
+                        + "j.payload::text AS payload FROM pre_history h "
+                        + "JOIN pre_definition d ON d.tenant_id = h.tenant_id AND d.id = h.definition_id "
+                        + "LEFT JOIN pre_timer j ON j.tenant_id = h.tenant_id AND j.id = h.details->>'jobId' "
+                        + "AND j.job_kind = 'ASYNC_AGENT' "
+                        + "WHERE h.tenant_id = ? AND d.key_name = ? AND h.node_id = ? "
+                        + "AND h.event_type IN ('ASYNC_RESULT_ACCEPTED','ASYNC_RESULT_REFUSED') "
+                        + "AND h.details->'outputFields' IS NOT NULL AND h.occurred_at >= ? AND h.occurred_at < ? "
+                        + (after ? "AND (h.occurred_at, h.id) > (?, ?) " : "")
+                        + "ORDER BY h.occurred_at, h.id LIMIT ?");
+    }
+
+    /** The first page of recorded answers of one agent step. */
+    static final ListQuery REPLAY_ANSWERS = replayAnswers(false);
+    /** A later page of recorded answers. */
+    static final ListQuery REPLAY_ANSWERS_AFTER = replayAnswers(true);
+
+    /**
+     * The reviewer overrides among the answers of one replay page (#98), through {@code idx_pre_history_instance}:
+     * the instances of that page only.
+     */
+    static final ListQuery REPLAY_OVERRIDES = new ListQuery("replay-overrides",
+            new Bound.ParentKey("instance_id", "the instances of one page of recorded answers"),
+            "SELECT details->>'refusedAttemptId' AS attempt_id FROM pre_history WHERE tenant_id = ? "
+                    + "AND instance_id = ANY (?) AND event_type = 'HUMAN_OVERRIDE' "
+                    + "AND details->>'refusedAttemptId' = ANY (?) AND EXISTS (SELECT 1 FROM jsonb_each(details->'changes') c "
+                    + "WHERE c.value->>'from' IS DISTINCT FROM '***')");
+
+    /** One page of the cases of a replay run, on the primary key of {@code pre_agent_replay_case} (V17). */
+    static final ListQuery REPLAY_CASES = new ListQuery("replay-cases",
+            new Bound.Page("by seq on the (tenant_id, replay_id, seq) primary key"),
+            "SELECT seq, attempt_id, instance_id, recorded_at, recorded_outcome, candidate_outcome, change, "
+                    + "recorded_rule_ids::text AS recorded_rule_ids, candidate_rule_ids::text AS candidate_rule_ids, "
+                    + "code, overridden, masked_fields FROM pre_agent_replay_case "
+                    + "WHERE tenant_id = ? AND replay_id = ? AND seq > ? ORDER BY seq LIMIT ?");
+
     /** Due timers, for every tenant: the poll of each replica. */
-    static final ListQuery CLAIM_TIMERS = claim(false);
+    static final ListQuery CLAIM_TIMERS = claim(ClaimKinds.TIMERS);
     /** Due remote steps, for every tenant: the poll of the async runner. */
-    static final ListQuery CLAIM_ASYNC = claim(true);
+    static final ListQuery CLAIM_ASYNC = claim(ClaimKinds.ASYNC);
+    /** Due remote steps of one kind, for every tenant: the poll of that kind's runner, on the V9 index. */
+    static final ListQuery CLAIM_ASYNC_KIND = claim(ClaimKinds.ONE_KIND);
 
     private ProcessListQueries() {
     }
@@ -79,7 +153,8 @@ final class ProcessListQueries {
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
         return List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS, DEFINITION_KEYS,
-                DEFINITION_KEYS_AFTER, CLAIM_TIMERS, CLAIM_ASYNC,
+                DEFINITION_KEYS_AFTER, HISTORY_ACTORS, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND, OPEN_INCIDENTS,
+                stepResults(1), stepResults(3), REPLAY_ANSWERS, REPLAY_ANSWERS_AFTER, REPLAY_OVERRIDES, REPLAY_CASES,
                 instances(1, false, false, false, false),
                 instances(3, true, true, true, true));
     }
@@ -147,19 +222,68 @@ final class ProcessListQueries {
     }
 
     /**
-     * One claim statement: a {@code FOR UPDATE SKIP LOCKED} select of due rows and the update that leases them.
-     * {@code async} picks the remote-step kinds or every other kind; never caller text. Parameters: now, now, limit,
-     * replica id, now.
+     * The job kinds a claim statement takes, as a constant predicate on {@code job_kind}; never caller text.
+     * {@link #ONE_KIND} is the only one with a bind parameter, the kind itself.
      */
-    private static ListQuery claim(boolean async) {
-        return new ListQuery(async ? "claim-async-steps" : "claim-timers",
-                new Bound.Page("earliest due first on idx_pre_timer_poll, at most one poll batch"),
+    enum ClaimKinds {
+        /** Every kind but the remote steps, on {@code idx_pre_timer_poll}. */
+        TIMERS("claim-timers", "job_kind NOT IN " + asyncKinds(), "idx_pre_timer_poll"),
+        /** Both remote-step kinds, on {@code idx_pre_timer_poll}. */
+        ASYNC("claim-async-steps", "job_kind IN " + asyncKinds(), "idx_pre_timer_poll"),
+        /** One remote-step kind, bound as a parameter, on {@code idx_pre_timer_poll_kind} (V9). */
+        ONE_KIND("claim-async-kind", "job_kind = ?", "idx_pre_timer_poll_kind (V9)");
+
+        private final String queryName;
+        private final String predicate;
+        private final String index;
+
+        ClaimKinds(String queryName, String predicate, String index) {
+            this.queryName = queryName;
+            this.predicate = predicate;
+            this.index = index;
+        }
+
+        /** Whether the statement binds the kind after the two due-time parameters. */
+        boolean bindsKind() {
+            return this == ONE_KIND;
+        }
+
+        private static String asyncKinds() {
+            return "('" + JobStore.ASYNC_SERVICE + "','" + JobStore.ASYNC_AGENT + "')";
+        }
+    }
+
+    /**
+     * The parameters of a claim statement, in placeholder order: now, now, [kind], limit, replica id, now.
+     *
+     * @param kinds the claim statement
+     * @param kind the job kind, required for {@link ClaimKinds#ONE_KIND} and refused otherwise
+     */
+    static List<Object> claimParams(ClaimKinds kinds, String kind, Object now, int limit, String replicaId) {
+        if (kinds.bindsKind() != (kind != null)) {
+            throw new IllegalArgumentException("Claim " + kinds.queryName + (kinds.bindsKind()
+                    ? " needs a job kind" : " takes no job kind"));
+        }
+        List<Object> params = new ArrayList<>(List.of(now, now));
+        if (kind != null) {
+            params.add(kind);
+        }
+        params.addAll(List.of(limit, replicaId, now));
+        return params;
+    }
+
+    /**
+     * One claim statement: a {@code FOR UPDATE SKIP LOCKED} select of due rows and the update that leases them.
+     * Parameters: see {@link #claimParams}.
+     */
+    private static ListQuery claim(ClaimKinds kinds) {
+        return new ListQuery(kinds.queryName,
+                new Bound.Page("earliest due first on " + kinds.index + ", at most one poll batch"),
                 "WITH due AS ("
                         + "SELECT tenant_id, id FROM pre_timer "
                         + "WHERE status IN ('DUE','CLAIMED') AND next_fire_at <= ? "
                         + "AND (status = 'DUE' OR locked_until <= ?) "
-                        + "AND job_kind " + (async ? "IN" : "NOT IN")
-                        + " ('" + JobStore.ASYNC_SERVICE + "','" + JobStore.ASYNC_AGENT + "') "
+                        + "AND " + kinds.predicate + " "
                         + "ORDER BY next_fire_at, id LIMIT ? FOR UPDATE SKIP LOCKED) "
                         + "UPDATE pre_timer t SET status = 'CLAIMED', locked_by = ?, "
                         + "locked_until = ?::timestamptz + t.lease_duration, attempt = t.attempt + 1 "

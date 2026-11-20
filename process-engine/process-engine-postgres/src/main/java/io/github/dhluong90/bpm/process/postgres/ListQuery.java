@@ -38,9 +38,9 @@ record ListQuery(String name, Bound bound, String sql) {
             }
             case Bound.ParentKey parent -> {
                 String text = sql.toLowerCase(Locale.ROOT);
-                if (!text.contains("tenant_id = ?") || !Pattern.compile("\\b" + parent.column() + " = \\?").matcher(text).find()) {
+                if (!text.contains("tenant_id = ?") || !Pattern.compile("\\b" + parent.column() + " = (any \\()?\\?").matcher(text).find()) {
                     throw new IllegalArgumentException("List query " + name + " declares the parent key "
-                            + parent.column() + " but does not filter tenant_id = ? and " + parent.column() + " = ?: " + sql);
+                            + parent.column() + " but does not filter tenant_id = ? and " + parent.column() + " = ? (or = ANY (?)): " + sql);
                 }
             }
         }

@@ -371,12 +371,8 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         Map<String, String> results = new java.util.LinkedHashMap<>();
         List<Object> params = new ArrayList<>(List.of(tenant, instanceId));
         params.addAll(nodeIds);
-        String marks = String.join(", ", java.util.Collections.nCopies(nodeIds.size(), "?"));
-        jdbc.sql("SELECT node_id, result_json::text AS result FROM pre_step_result WHERE tenant_id = ? AND "
-                        + "instance_id = ? AND node_id IN (" + marks + ")")
-                .params(params)
-                .query((rs, n) -> results.put(rs.getString("node_id"), rs.getString("result")))
-                .list();
+        ProcessListQueries.stepResults(nodeIds.size()).list(jdbc, params,
+                (rs, n) -> results.put(rs.getString("node_id"), rs.getString("result")));
         return results;
     }
 
@@ -393,16 +389,12 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     @Override
     public List<IncidentRow> openIncidents(String tenant, String instanceId) {
-        return jdbc.sql("SELECT tenant_id, id, instance_id, definition_id, token_id, node_id, error_code, cause_summary, "
-                        + "retry_count, status, lock_version, created_at, resolved_at FROM pre_incident "
-                        + "WHERE tenant_id = ? AND instance_id = ? AND status = 'OPEN' ORDER BY created_at, id")
-                .params(tenant, instanceId)
-                .query((rs, n) -> new IncidentRow(rs.getString("tenant_id"), rs.getString("id"),
+        return ProcessListQueries.OPEN_INCIDENTS.list(jdbc, List.of(tenant, instanceId),
+                (rs, n) -> new IncidentRow(rs.getString("tenant_id"), rs.getString("id"),
                         rs.getString("instance_id"), rs.getString("definition_id"), rs.getString("token_id"),
                         rs.getString("node_id"), rs.getString("error_code"), rs.getString("cause_summary"),
                         rs.getInt("retry_count"), rs.getString("status"), rs.getLong("lock_version"),
-                        instant(rs, "created_at"), instant(rs, "resolved_at")))
-                .list();
+                        instant(rs, "created_at"), instant(rs, "resolved_at")));
     }
 
     @Override
