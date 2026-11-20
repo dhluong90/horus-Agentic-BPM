@@ -129,7 +129,7 @@ class MaskedInputsHostIT {
                 assertThat(settings.path("masking.hmac-key").asString()).isEqualTo("set");
                 assertThat(settings.path("masking.hmac-key-id").asString()).isEqualTo("k1");
                 assertThat(settings.path("masking.hmac-key-check").asString()).isEqualTo(
-                        hmacHex(tenantSubkey(K32, tenant[0]), "horus-bpm/masking/v1/kcv").substring(0, 16));
+                        checkValue(tenantSubkey(K32, tenant[0])));
             }
 
             // Tenant isolation: another tenant's auditor neither reads nor finds bank-a's decision.
@@ -255,6 +255,19 @@ class MaskedInputsHostIT {
         expand.update(("horus-bpm/masking/v1/tenant/" + tenant).getBytes(StandardCharsets.UTF_8));
         expand.update((byte) 1);
         return expand.doFinal();
+    }
+
+    /** The key check value: HKDF-SHA256 with info "horus-bpm/masking/v1/kcv", then the HMAC of nothing, 8 bytes. */
+    static String checkValue(byte[] key) throws Exception {
+        Mac extract = Mac.getInstance("HmacSHA256");
+        extract.init(new SecretKeySpec(new byte[32], "HmacSHA256"));
+        Mac expand = Mac.getInstance("HmacSHA256");
+        expand.init(new SecretKeySpec(extract.doFinal(key), "HmacSHA256"));
+        expand.update("horus-bpm/masking/v1/kcv".getBytes(StandardCharsets.UTF_8));
+        expand.update((byte) 1);
+        Mac check = Mac.getInstance("HmacSHA256");
+        check.init(new SecretKeySpec(expand.doFinal(), "HmacSHA256"));
+        return HexFormat.of().formatHex(check.doFinal(new byte[0])).substring(0, 16);
     }
 
     static String hmacHex(byte[] key, String value) throws Exception {

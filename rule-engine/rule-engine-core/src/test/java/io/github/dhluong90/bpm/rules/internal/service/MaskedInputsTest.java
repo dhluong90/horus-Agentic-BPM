@@ -597,21 +597,38 @@ class MaskedInputsTest {
     }
 
     @Test
-    void TR_SEC_10_key_check_value_is_the_first_8_bytes_of_the_hmac_of_the_label_and_never_the_key() throws Exception {
+    void TR_SEC_10_key_check_value_comes_from_a_key_derived_for_it_alone_and_never_the_key() throws Exception {
         MaskingKey key = MaskingKey.of("k1", KEY_A);
-        String expected = hmacHex(KEY_A, "horus-bpm/masking/v1/kcv").substring(0, 16);
+        String expected = kcvHex(KEY_A);
         assertThat(key.checkValue()).isEqualTo(expected).matches("^[0-9a-f]{16}$");
         // The id does not change it; the bytes do; a tenant subkey has a check value of its own.
         assertThat(MaskingKey.of("k9", KEY_A).checkValue()).isEqualTo(expected);
         assertThat(MaskingKey.of("k1", KEY_B).checkValue()).isNotEqualTo(expected);
         assertThat(key.forTenant("bank-a").checkValue()).isNotEqualTo(expected);
         assertThat(key.checkValue()).doesNotContain(HexFormat.of().formatHex(KEY_A).substring(0, 16));
+        // A separate domain: the token of an input whose value is the derivation label is not the check value.
+        assertThat(key.fingerprint(MaskingKey.CHECK_VALUE_INFO)).doesNotContain(expected);
+        assertThat(hmacHex(KEY_A, MaskingKey.CHECK_VALUE_INFO)).doesNotStartWith(expected);
         // The documented vector: host key 00 01 .. 1f.
         byte[] host = new byte[32];
         for (int i = 0; i < 32; i++) {
             host[i] = (byte) i;
         }
-        assertThat(MaskingKey.of(host).checkValue()).isEqualTo("71bc8598cb47cb6d");
+        assertThat(MaskingKey.of(host).checkValue()).isEqualTo("471be5b6391b902f");
+    }
+
+    /** The check value computed here, apart from MaskingKey: HKDF-SHA256 with the kcv info, then HMAC of nothing. */
+    static String kcvHex(byte[] key) throws Exception {
+        Mac extract = Mac.getInstance("HmacSHA256");
+        extract.init(new SecretKeySpec(new byte[32], "HmacSHA256"));
+        byte[] prk = extract.doFinal(key);
+        Mac expand = Mac.getInstance("HmacSHA256");
+        expand.init(new SecretKeySpec(prk, "HmacSHA256"));
+        expand.update("horus-bpm/masking/v1/kcv".getBytes(StandardCharsets.UTF_8));
+        expand.update((byte) 1);
+        Mac check = Mac.getInstance("HmacSHA256");
+        check.init(new SecretKeySpec(expand.doFinal(), "HmacSHA256"));
+        return HexFormat.of().formatHex(check.doFinal(new byte[0])).substring(0, 16);
     }
 
     static String hmacHex(byte[] key, String value) throws Exception {
