@@ -30,6 +30,9 @@ paths:
           headers:
             Cache-Control: { $ref: '#/components/headers/MetaCacheControl' }
             ETag: { $ref: '#/components/headers/ETag' }
+            Vary:
+              description: '`Authorization, Cookie, X-Tenant-Id`, only when an engine publishes settings of the caller''s tenant (the Rule Engine does from 0.2.0).'
+              schema: { type: string }
             X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
           content:
             application/json:
@@ -109,8 +112,12 @@ components:
       schema: { type: string }
   headers:
     MetaCacheControl:
-      description: '`private, max-age=60`: the same for every caller of the host.'
-      schema: { type: string, const: 'private, max-age=60' }
+      description: |
+        `private, max-age=60` when the body is the same for every caller of the host. `private, no-cache`
+        when an engine publishes settings of the caller's tenant (the Rule Engine does from 0.2.0), as for
+        `/me`: the browser revalidates with `If-None-Match` every time, so a sign-out on a shared machine is
+        never served from cache.
+      schema: { type: string, enum: ['private, max-age=60', 'private, no-cache'] }
     MeCacheControl:
       description: '`private, no-cache`: the body carries the caller''s permissions, so the browser revalidates with `If-None-Match` every time.'
       schema: { type: string, const: 'private, no-cache' }

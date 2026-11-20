@@ -97,7 +97,8 @@ class HostMetadataIT {
         assertThat(meta.headers().allValues("Vary")).isNotEmpty();
         assertThat(metaBody.path("modules").get(0).path("engineVersion").asString())
                 .isEqualTo(System.getProperty("rule-engine.version"));
-        assertThat(meta.headers().firstValue("Cache-Control")).hasValue("private, max-age=60");
+        // The Rule Engine publishes the caller's tenant's masking status, so /meta revalidates every time, as /me.
+        assertThat(meta.headers().firstValue("Cache-Control")).hasValue("private, no-cache");
         assertThat(meta.headers().firstValue("ETag")).isPresent();
 
         // And the two callers get different permission lists from their roles; /me is revalidated each time
@@ -158,8 +159,8 @@ class HostMetadataIT {
                     .containsExactly("no-store");
         }
 
-        // And the metadata endpoint keeps its own private caching
-        assertThat(get("/api/bpm/meta", lan).headers().firstValue("Cache-Control")).hasValue("private, max-age=60");
+        // And the metadata endpoint keeps its own private caching: tenant settings make it revalidate, as /me
+        assertThat(get("/api/bpm/meta", lan).headers().firstValue("Cache-Control")).hasValue("private, no-cache");
     }
 
     @Test

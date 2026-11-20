@@ -120,6 +120,61 @@ final class TestHosts {
         };
     }
 
+    /** Tenant settings that throw for bank-a. */
+    static io.github.dhluong90.bpm.host.spi.ModuleTenantSettings throwing(String name) {
+        return new io.github.dhluong90.bpm.host.spi.ModuleTenantSettings() {
+            @Override
+            public String module() {
+                return "rules";
+            }
+
+            @Override
+            public List<String> names() {
+                return List.of(name);
+            }
+
+            @Override
+            public Map<String, Object> settings(String tenantId) {
+                throw new IllegalStateException("status of " + tenantId + " is not loaded");
+            }
+        };
+    }
+
+    /** Tenant settings that return an amount, which /meta does not publish. */
+    static io.github.dhluong90.bpm.host.spi.ModuleTenantSettings mistyped(String name) {
+        return new io.github.dhluong90.bpm.host.spi.ModuleTenantSettings() {
+            @Override
+            public String module() {
+                return "rules";
+            }
+
+            @Override
+            public List<String> names() {
+                return List.of(name, name + "-label");
+            }
+
+            @Override
+            public Map<String, Object> settings(String tenantId) {
+                return Map.of(name, new java.math.BigDecimal("50000000"), name + "-label", "VND");
+            }
+        };
+    }
+
+    /** The masking status beside one contributor that throws and one that returns an unsupported type. */
+    @Configuration(proxyBeanMethods = false)
+    static class FaultyTenantSettings {
+
+        @Bean
+        io.github.dhluong90.bpm.host.spi.ModuleTenantSettings failingStatus() {
+            return throwing("limits.daily-remaining");
+        }
+
+        @Bean
+        io.github.dhluong90.bpm.host.spi.ModuleTenantSettings amountStatus() {
+            return mistyped("limits.daily-cap");
+        }
+    }
+
     /** A masking status like the Rule Engine's: bank-a has key a1, every other tenant none; one undeclared name. */
     @Configuration(proxyBeanMethods = false)
     static class MaskingStatus {

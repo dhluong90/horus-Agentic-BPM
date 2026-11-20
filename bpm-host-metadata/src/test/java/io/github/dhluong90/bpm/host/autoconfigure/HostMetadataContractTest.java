@@ -82,8 +82,12 @@ class HostMetadataContractTest {
             JsonSchemas.assertValid(entry.getValue(), new ObjectMapper().writeValueAsString(json.path("example")));
             assertThat(get.path("responses").fieldNames()).toIterable().contains("200", "304", "401", "403");
         }
-        assertThat(openapi.path("components").path("headers").path("MetaCacheControl").path("schema").path("const").asText())
-                .isEqualTo(HostMetadataController.META_CACHE_CONTROL);
+        // /meta: one minute for a body shared by every caller, revalidate every time with tenant settings.
+        List<String> metaCacheControl = new java.util.ArrayList<>();
+        openapi.path("components").path("headers").path("MetaCacheControl").path("schema").path("enum")
+                .forEach(value -> metaCacheControl.add(value.asText()));
+        assertThat(metaCacheControl).containsExactly(HostMetadataController.META_CACHE_CONTROL,
+                HostMetadataController.META_TENANT_CACHE_CONTROL);
         assertThat(openapi.path("components").path("headers").path("MeCacheControl").path("schema").path("const").asText())
                 .isEqualTo(HostMetadataController.ME_CACHE_CONTROL);
     }

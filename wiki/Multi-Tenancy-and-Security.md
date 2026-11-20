@@ -74,7 +74,7 @@ Every response under `/api/bpm/**` carries `Cache-Control: no-store`, so rule se
 | Path | `Cache-Control` |
 |---|---|
 | `/api/bpm/rules/**`, `/api/bpm/processes/**` and any other path under `/api/bpm/**`: success, problem and `304` answers | `no-store` |
-| `/api/bpm/meta` | `private, max-age=60` (errors: `no-store`) |
+| `/api/bpm/meta` | `private, max-age=60`; `private, no-cache` when an engine publishes settings of the caller's tenant, as the Rule Engine does from 0.2.0 (errors: `no-store`) |
 | `/api/bpm/me` | `private, no-cache`, so a revoked role is never shown from cache (errors: `no-store`) |
 | Host endpoints outside `/api/bpm/**` | Unchanged: the host's own policy |
 

@@ -172,7 +172,7 @@ In Cockpit 0.1 the user works with one host at a time and switches from the top 
 
 ## 6. Host metadata: `/api/bpm/meta` and `/api/bpm/me`
 
-Both endpoints are served once per host by a small shared module that both engine starters depend on, [`bpm-host-metadata`](../../bpm-host-metadata/README.md); each engine contributes its entry. The OpenAPI document is [`bpm-host-metadata/api/openapi.yaml`](../../bpm-host-metadata/api/openapi.yaml); it references the two schemas below. Both require an authenticated caller and no other permission, return an `ETag` (`304` on `If-None-Match`) and ship in M1 (X-F-22). `/meta` is `Cache-Control: private, max-age=60`; `/me` is `private, no-cache`, because it carries the caller's permissions and a revoked role must not be served from the browser cache.
+Both endpoints are served once per host by a small shared module that both engine starters depend on, [`bpm-host-metadata`](../../bpm-host-metadata/README.md); each engine contributes its entry. The OpenAPI document is [`bpm-host-metadata/api/openapi.yaml`](../../bpm-host-metadata/api/openapi.yaml); it references the two schemas below. Both require an authenticated caller and no other permission, return an `ETag` (`304` on `If-None-Match`) and ship in M1 (X-F-22). `/meta` is `Cache-Control: private, max-age=60`, or `private, no-cache` when an engine publishes settings of the caller's tenant (the Rule Engine does from 0.2.0); `/me` is `private, no-cache`, because it carries the caller's permissions and a revoked role must not be served from the browser cache.
 
 | Endpoint | Schema | Content |
 |---|---|---|

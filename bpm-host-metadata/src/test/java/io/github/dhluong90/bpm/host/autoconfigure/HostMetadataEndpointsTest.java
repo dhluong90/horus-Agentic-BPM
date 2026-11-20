@@ -33,6 +33,7 @@ import tools.jackson.databind.json.JsonMapper;
  * Callers are Lan, a pricing author at bank-a, and Minh, a pricing approver; Thu is a teller with no
  * engine permission. Tenancy cases are in {@link TenantResolutionTest}.
  */
+@org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
 class HostMetadataEndpointsTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -216,13 +217,51 @@ class HostMetadataEndpointsTest {
                     assertThat(bankB.getResponse().getContentAsString()).doesNotContain("undeclared", "a1");
                     assertThat(String.join(", ", bankA.getResponse().getHeaders("Vary")))
                             .isEqualTo("Authorization, Cookie, X-Tenant-Id");
-                    assertThat(bankA.getResponse().getHeader("Cache-Control")).isEqualTo("private, max-age=60");
+                    // Tenant data: never served from cache without asking the host, as /me.
+                    assertThat(bankA.getResponse().getHeader("Cache-Control")).isEqualTo("private, no-cache");
                     assertThat(bankA.getResponse().getHeader("ETag")).isNotEqualTo(bankB.getResponse().getHeader("ETag"));
                 });
-        // Without tenant settings /meta is the same for every caller and does not vary.
-        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).run(context ->
-                assertThat(call(TestHosts.mockMvc(context), get("/api/bpm/meta").with(lan())).getResponse()
-                        .getHeaders("Vary")).isEmpty());
+        // Without tenant settings /meta is the same for every caller, does not vary and may be cached a minute.
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).run(context -> {
+            MvcResult plain = call(TestHosts.mockMvc(context), get("/api/bpm/meta").with(lan()));
+            assertThat(plain.getResponse().getHeaders("Vary")).isEmpty();
+            assertThat(plain.getResponse().getHeader("Cache-Control")).isEqualTo("private, max-age=60");
+        });
+    }
+
+    @Test
+    void TR_EXT_08_a_failing_or_mistyped_contributor_is_left_out_and_logged_and_meta_still_answers(
+            org.springframework.boot.test.system.CapturedOutput output) {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, TestHosts.MaskingStatus.class,
+                        TestHosts.FaultyTenantSettings.class)
+                .run(context -> {
+                    MockMvc mvc = TestHosts.mockMvc(context);
+                    MvcResult first = call(mvc, get("/api/bpm/meta").with(lan()));
+                    MvcResult second = call(mvc, get("/api/bpm/meta").with(lan()));
+                    assertThat(first.getResponse().getStatus()).isEqualTo(200);
+                    assertThat(second.getResponse().getStatus()).isEqualTo(200);
+                    JsonNode settings = json(first).path("modules").get(0).path("settings");
+                    // The working contributor is published; both faulty ones are left out whole.
+                    assertThat(settings.path("masking.hmac-key").asString()).isEqualTo("set");
+                    assertThat(settings.has("limits.daily-remaining")).isFalse();
+                    assertThat(settings.has("limits.daily-cap")).isFalse();
+                    assertThat(settings.has("limits.daily-cap-label")).isFalse();
+                });
+        // Loud, once per problem, never with the value.
+        assertThat(output.getAll()).contains("of module 'rules' threw java.lang.IllegalStateException",
+                "returned a java.math.BigDecimal for 'limits.daily-cap'", "left out of /api/bpm/meta");
+        assertThat(output.getAll().split("threw java.lang.IllegalStateException", -1)).hasSize(2);
+        assertThat(output.getAll()).doesNotContain("50000000");
+    }
+
+    @Test
+    void TR_EXT_08_a_host_bean_of_the_engine_only_tenant_settings_spi_stops_the_host() {
+        var rules = TestHosts.rules(java.util.Map.of());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> HostMetadataController.checkTenantSettings(
+                        List.of(rules), List.of(new com.example.bank.BankTenantSettings())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("com.example.bank.BankTenantSettings")
+                .hasMessageContaining("engine starters only");
     }
 
     @Test
