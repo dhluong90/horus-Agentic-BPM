@@ -46,6 +46,13 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- The real Rule Engine for decision steps after a timer (PRE-055, PRE-056); tests only. -->
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>rule-engine-postgres</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
