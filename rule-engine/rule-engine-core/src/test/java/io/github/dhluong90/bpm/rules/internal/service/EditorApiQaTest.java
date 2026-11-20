@@ -68,7 +68,11 @@ class EditorApiQaTest {
                 return v;
             }
             caller.become("bank-a", "zed", Set.of(READ, APPROVE));
-            return versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
+            v = versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
+            if (status == VersionStatus.PUBLISHED) {
+                return v;
+            }
+            return versions.retire("card-fee", 1, new WriteOptions(null, null, "Promotion ended"), true);
         }
     }
 
@@ -77,7 +81,7 @@ class EditorApiQaTest {
     }
 
     static final Gen<VersionStatus> STATUS =
-            Gen.of(VersionStatus.DRAFT, VersionStatus.PENDING_APPROVAL, VersionStatus.PUBLISHED);
+            Gen.of(VersionStatus.DRAFT, VersionStatus.PENDING_APPROVAL, VersionStatus.PUBLISHED, VersionStatus.RETIRED);
 
     /** Every author, requester and caller among lan, minh and dan: 27 triples. */
     static final Gen<Actors> ACTORS = actors();
@@ -98,10 +102,10 @@ class EditorApiQaTest {
         return Gen.of(all.toArray(Actors[]::new));
     }
 
-    /** 3 statuses x 27 actor triples x 4 permission sets = 324 combinations, all walked within 400 tries. */
+    /** 4 statuses x 27 actor triples x 4 permission sets = 432 combinations, all walked within 500 tries. */
     @TestFactory
     Stream<DynamicTest> RLE_043_allowed_actions_match_what_each_command_accepts() {
-        return Property.tries(400).forAll(STATUS, ACTORS, PERMISSIONS, (status, actors, permissions) ->
+        return Property.tries(500).forAll(STATUS, ACTORS, PERMISSIONS, (status, actors, permissions) ->
                 allowedActionsMatchCommands(status, actors.author(), actors.requester(), actors.caller(), permissions));
     }
 
@@ -115,7 +119,7 @@ class EditorApiQaTest {
         // When each command is tried on a fresh copy of the same state
         List<String> accepted = new ArrayList<>();
         for (String action : List.of(VersionActions.REQUEST_PUBLISH, VersionActions.APPROVE, VersionActions.REJECT,
-                VersionActions.WITHDRAW)) {
+                VersionActions.RETIRE, VersionActions.WITHDRAW)) {
             World world = new World();
             world.build(status, author, requester);
             world.caller.become("bank-a", caller, permissions);
@@ -124,6 +128,7 @@ class EditorApiQaTest {
                     case VersionActions.REQUEST_PUBLISH -> world.versions.requestPublish("card-fee", 1, WriteOptions.none());
                     case VersionActions.APPROVE -> world.versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
                     case VersionActions.REJECT -> world.versions.reject("card-fee", 1, new WriteOptions(null, 1L, "qa"));
+                    case VersionActions.RETIRE -> world.versions.retire("card-fee", 1, new WriteOptions(null, null, "qa"), true);
                     default -> world.versions.withdraw("card-fee", 1, WriteOptions.none());
                 }
                 accepted.add(action);

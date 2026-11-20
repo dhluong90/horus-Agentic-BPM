@@ -51,7 +51,8 @@ class QueryLimitsTest {
         runner.withPropertyValues("horus.bpm.processes.lifecycle.reason-max-length=1500")
                 .run(context -> assertThat(context.getBean(ProcessEngineProperties.class).lifecycle().reasonMaxLength())
                         .isEqualTo(1500));
-        runner.run(context -> assertThat(context.getBean(ProcessEngineProperties.class).toSettings().reasonMaxLength())
+        runner.run(context -> assertThat(context.getBean(ProcessEngineProperties.class).toSettings(
+                EngineSettings.ApproverRule.MAKERS, EngineSettings.RetireLastVersionRule.CONFIRM).reasonMaxLength())
                 .isEqualTo(2000));
     }
 

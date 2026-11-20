@@ -19,7 +19,8 @@ Design preview: describes the 0.1 target.
 | `matchedRuleIds`, `outputs` | The explanation |
 | `outcome` | `ok` or an error code such as `UNIQUE_HIT_VIOLATION` |
 | `caller`, `correlationId` | From the security context and the request |
-| `clock`, `evaluatedAt`, `durationMicros` | The instant the decision reasoned about, when it ran, and how long |
+| `evalClock`, `evaluatedAt`, `durationMicros` | The instant the decision reasoned about, when it ran, and how long |
+| `clockChosen`, `pinned` | Whether the caller chose the clock (`rules:simulate`), so the decision is back-dated or forward-dated, and whether the caller named the version (`rules:pin`). The engine sets both; `GET /decisions/{id}` and the masked-input search return them |
 | async marker | Set when the entry was written in `async` mode (see below) |
 
 ## Find decisions

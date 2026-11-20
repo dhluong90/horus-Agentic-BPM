@@ -54,6 +54,8 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  4       | V4__rle_version_history_append_only.sql
 #  5       | V5__rle_engine_key.sql
 #  6       | V6__rle_version_history_draft_updated.sql
+#  10      | V10__rle_decision_pinned.sql
+#  11      | V11__rle_version_retired_at.sql
 ```
 
 ### The cursor key
@@ -268,6 +270,76 @@ public Money cardFee(String tier, int txCount) {
 }
 ```
 
+## Demo: a fee change on a date, replay and the bank's time zone
+
+`card-fee` v1 charges a default of 50,000 VND. [`rules/card-fee-december.yaml`](src/main/resources/rules/card-fee-december.yaml) is the same table with a default of 30,000 VND and `effectiveFrom: "2026-12-01T00:00:00Z"`, so it is approved now and takes over on that instant. Choosing the evaluation clock needs `rules:simulate` and replay needs `rules:log:read`, which the demo roles do not hold by default. Start the host with two extra mappings, then run steps 1 to 4 of the demo above for v1:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate,rules:simulate' \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:log:read'
+H=localhost:8080/api/bpm/rules/v1
+R=examples/rule-engine-only/src/main/resources/rules
+```
+
+1. Hoa imports the December version and requests publication, and Minh approves it. It is published but not yet in force:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' \
+     --data-binary @$R/card-fee-december.yaml
+   # 201 {"ruleSet":"card-fee","version":2,"status":"DRAFT","effectiveFrom":"2026-12-01T00:00:00Z",...}
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/2:request-publish
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:approve -H 'If-Match: "1"'
+   # 200 {"version":2,"status":"PUBLISHED","effectiveFrom":"2026-12-01T00:00:00Z",...}
+   ```
+
+2. The clock chooses the version in force. On 20 November it is v1, from 1 December v2:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"tier":"STANDARD","txCount":1},"clock":"2026-11-20T10:00:00Z"}'
+   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9","ruleSet":"card-fee","version":1,"evalClock":"2026-11-20T10:00:00Z",
+   #      "evaluatedAt":"2026-11-19T15:25:08.804765Z","clockChosen":true,"pinned":false,"outcome":"MATCHED","matchedRuleIds":["R3"],
+   #      "outputs":{"fee":{"currency":"VND","amount":50000}}}
+   curl -s -u hoa:demo-only -X POST $H/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"tier":"STANDARD","txCount":1},"clock":"2026-12-01T00:00:00Z"}'
+   # 200 {...,"version":2,"evalClock":"2026-12-01T00:00:00Z",...,"outputs":{"fee":{"currency":"VND","amount":30000}}}
+   ```
+
+   Without a `clock` the host clock is used. Tuan, who holds `rules:evaluate` only, gets `403 CLOCK_NOT_ALLOWED` when he sends one.
+
+3. Minh replays the November decision by its id, with the version, inputs and clock its row recorded. The answer is the logged one, and the decision log gains no row:
+
+   ```bash
+   curl -s -u minh:demo-only -X POST $H/decisions/01M7T6JQT4SA6RT95E8KW201Y9:replay
+   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9","version":1,"evalClock":"2026-11-20T10:00:00Z",...,
+   #      "matchedRuleIds":["R3"],"outputs":{"fee":{"currency":"VND","amount":50000}}}
+   docker exec horus-pg psql -U horus -d horus -c \
+     "SELECT version_num, eval_clock, created_at, matched_rule_ids FROM rle_decision WHERE id = '01M7T6JQT4SA6RT95E8KW201Y9'"
+   #  1 | 2026-11-20 10:00:00+00 | 2026-11-19 15:25:08.804765+00 | ["R3"]
+   curl -s -u minh:demo-only $H/decisions/01M7T6JQT4SA6RT95E8KW201Y9
+   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9",...,"evalClock":"2026-11-20T10:00:00Z",
+   #      "evaluatedAt":"2026-11-19T15:25:08.804765Z","clockChosen":true,"pinned":false,...}
+   ```
+
+   The decision-log read shows the same `evalClock`, `clockChosen` and `pinned` as the evaluation did, so a back-dated or pinned decision never reads as a normal one.
+
+   Pinning, `POST $H/decisions/card-fee/versions/1:evaluate` with the same body, gives the same answer as a new logged decision. It needs `rules:pin`, which this host grants to nobody, because a pin bypasses the version in force; no example host grants it until a process step pins a version, and `EffectiveDatesAndReplayIT` runs the call as a service identity that holds it. Hoa's pin is `403 PERMISSION_DENIED`. A retired version is refused unless `horus.bpm.rules.evaluation.pin-retired` is `true`. A pinned draft is `409 INVALID_STATE`. Tuan's replay is `403 PERMISSION_DENIED`, and an unknown id, or one of another tenant, is `404 DECISION_NOT_FOUND`.
+
+4. [`rules/same-day-cutoff.yaml`](src/main/resources/rules/same-day-cutoff.yaml) declares `timeZone: Asia/Ho_Chi_Minh`. At `2027-01-15T18:30:00Z` it is 01:30 on 16 January in Ho Chi Minh City, so a transfer dated 16 January is same-day and one dated 15 January is not. In UTC it would be the other way round. Import, request and approve it as above, then:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/decisions/same-day-cutoff:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"txDate":"2027-01-16"},"clock":"2027-01-15T18:30:00Z"}'
+   # 200 {...,"matchedRuleIds":["R1"],"outputs":{"sameDay":true}}
+   curl -s -u hoa:demo-only -X POST $H/decisions/same-day-cutoff:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"txDate":"2027-01-15"},"clock":"2027-01-15T18:30:00Z"}'
+   # 200 {...,"matchedRuleIds":["R2"],"outputs":{"sameDay":false}}
+   ```
+
+The same steps run as `EffectiveDatesAndReplayIT` against a Testcontainers database on every build.
+
 ## Demo: one error shape, and a duplicate sent while the first still runs
 
 Every Rule Engine error is an `application/problem+json` body with `code`, `detail`, `correlationId` and a `type` link to [Common Error Codes](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes). The integration test triggers each code through this host, prints one line per code, and replays the in-flight duplicate with the first request paused inside the engine:
@@ -292,6 +364,80 @@ By hand, a second request with the same `Idempotency-Key` that arrives while the
 ```
 
 Wait one second and send the same request again: once the first has finished, the answer is its `201` and body, and only one version exists.
+
+## Demo: retire a version by hand and by supersession
+
+[`rules/tet-fee-waiver.yaml`](src/main/resources/rules/tet-fee-waiver.yaml) waives the card fee during the Tet promotion. Minh, who holds `rules:approve`, ends the promotion by retiring the version with a reason. From that instant no replica serves it. Start the host on the `dev` profile as in the demo above, then:
+
+1. Hoa imports and requests the waiver, and Minh approves it. Tuan's card transaction is waived, and the version offers `retire` to Minh:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+     --data-binary @examples/rule-engine-only/src/main/resources/rules/tet-fee-waiver.yaml
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:request-publish
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:approve -H 'If-Match: "1"'
+   # 200 {"version":1,"status":"PUBLISHED","lockVersion":2,...}
+   curl -s -u tuan:demo-only -X POST $H/decisions/tet-fee-waiver:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"channel":"CARD"}}'
+   # 200 {...,"version":1,"matchedRuleIds":["R1"],"outputs":{"waiveFee":true}}
+   curl -s -u minh:demo-only $H/rule-sets/tet-fee-waiver/versions/1
+   # ETag: "2"   {"status":"PUBLISHED","allowedActions":["retire"],...}
+   ```
+
+2. Minh retires it. `If-Match` and `Idempotency-Key` are required, and so is a reason:
+
+   ```bash
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -d '{"reason":"Tet promotion ended"}'
+   # 428 {"code":"PRECONDITION_REQUIRED",...}
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -H 'If-Match: "2"' -d '{"reason":"Tet promotion ended"}'
+   # 409 {"code":"LAST_VERSION_IN_EFFECT","ruleSet":"tet-fee-waiver","version":1,"setting":"confirm","nextEffectiveFrom":null,
+   #      "detail":"tet-fee-waiver v1 is the last version in effect of rule set tet-fee-waiver; ...",...}
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -H 'If-Match: "2"' -d '{"reason":"Tet promotion ended","confirmNoVersionInEffect":true}'
+   # 200 {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T19:31:55.928264Z",...}
+   ```
+
+   The waiver is the only version in effect, so retiring it leaves none: the first call is refused until Minh confirms it (PD-101).
+
+   An empty reason is `400 INPUT_INVALID`. A caller with `rules:author` only is `403 PERMISSION_DENIED`, before the headers are read. A stale `If-Match` is `409 VERSION_CONFLICT`.
+
+3. It stops serving at once, and the history and the event record the actor, the reason and the mode:
+
+   ```bash
+   curl -s -u tuan:demo-only -X POST $H/decisions/tet-fee-waiver:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"channel":"CARD"}}'
+   # 404 {"code":"NO_EFFECTIVE_VERSION",...}
+   curl -s -u minh:demo-only $H/rule-sets/tet-fee-waiver/versions/1/history
+   # {"data":[...,{"action":"RETIRED","fromStatus":"PUBLISHED","toStatus":"RETIRED","actor":"minh",
+   #   "reason":"Tet promotion ended","supersededBy":null,"approvalMode":"single","noVersionInEffect":true,"lockVersion":3,...}]}
+   docker exec horus-pg psql -U horus -d horus -tAc "SELECT payload->>'retiredBy', payload->>'reason', \
+     payload->>'approvalMode', payload->>'noVersionInEffect' FROM rle_decision_outbox \
+     WHERE payload->>'eventType' = 'rules.version.retired.v1'"
+   # minh|Tet promotion ended|single|true
+   ```
+
+4. A newer version in effect at its approval retires the older one in the same transaction. Import [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml) twice, as v1 and v2, and approve both:
+
+   ```bash
+   curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1
+   # {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T19:32:01.858780Z",...}
+   curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1/history
+   # {"data":[...,{"action":"RETIRED","actor":"system:supersession","reason":"SUPERSEDED","supersededBy":2,"approvalMode":"system",...}]}
+   ```
+
+   A version scheduled for a later date retires its predecessor when the date comes, through the lifecycle sweep (`horus.bpm.rules.lifecycle.sweep-interval`, one minute by default). Evaluation switches at the date itself, without waiting for the sweep.
+
+5. The host shows the retirement mode in force:
+
+   ```bash
+   curl -s -u minh:demo-only localhost:8080/api/bpm/meta
+   # {...,"modules":[{"module":"rules",...,"settings":{"authoring.cockpit-drafts":true,"lifecycle.retire-approval":"single",
+   #   "lifecycle.retire-last-version":"confirm"}}],...}
+   ```
+
+The same steps run as `RetireVersionIT` against a Testcontainers database on every build.
 
 ## Demo: import a DMN decision table
 

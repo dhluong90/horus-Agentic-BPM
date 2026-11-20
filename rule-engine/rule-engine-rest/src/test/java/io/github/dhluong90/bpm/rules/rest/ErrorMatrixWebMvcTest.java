@@ -141,6 +141,10 @@ class ErrorMatrixWebMvcTest {
                         put("/api/bpm/rules/v1/rule-sets/card-fee/versions/2").contentType("application/yaml")
                                 .header("Idempotency-Key", "k-102").header("If-Match", "\"1\"").content(yaml),
                         s -> s.thrown = new DraftAuthoringDisabledException("card-fee", 2)),
+                new Case("CLOCK_NOT_ALLOWED", 403,
+                        post("/api/bpm/rules/v1/decisions/card-fee:evaluate").contentType("application/json")
+                                .content("{\"inputs\":{\"tier\":\"GOLD\",\"txCount\":5},\"clock\":\"2026-11-20T10:00:00Z\"}"),
+                        s -> s.thrown = new io.github.dhluong90.bpm.rules.api.ClockNotAllowedException()),
                 new Case("RULE_SET_NOT_FOUND", 404, get("/api/bpm/rules/v1/rule-sets/card-fee"), s -> { }),
                 new Case("VERSION_NOT_FOUND", 404, get("/api/bpm/rules/v1/rule-sets/card-fee/versions/9"), s -> { }),
                 new Case("DECISION_NOT_FOUND", 404, get("/api/bpm/rules/v1/decisions/01KDG7Z0RQ6V2Y8M1C4N5P7T9W"),
@@ -167,6 +171,15 @@ class ErrorMatrixWebMvcTest {
                 new Case("RULE_SET_EXISTS", 409,
                         post("/api/bpm/rules/v1/rule-sets").contentType("application/yaml").content(yaml),
                         s -> s.thrown = new RuleSetExistsException("card-fee")),
+                new Case("LAST_VERSION_IN_EFFECT", 409,
+                        post("/api/bpm/rules/v1/rule-sets/tet-fee-waiver/versions/1:retire")
+                                .contentType("application/json").header("If-Match", "\"2\"")
+                                .header("Idempotency-Key", "k-102").content("{\"reason\":\"Tet promotion ended\"}"),
+                        s -> {
+                            s.permissions = APPROVER;
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.LastVersionInEffectException(
+                                    "tet-fee-waiver", 1, "confirm", null, null);
+                        }),
                 new Case("PAYLOAD_TOO_LARGE", 413,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve").contentType("application/json")
                                 .header("If-Match", "\"1\"").content(new byte[16_385]),
@@ -190,6 +203,12 @@ class ErrorMatrixWebMvcTest {
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:request-publish")
                                 .header("Idempotency-Key", "k-101"),
                         s -> s.thrown = new IdempotencyKeyReuseException()),
+                new Case("REPLAY_NOT_POSSIBLE", 422, post("/api/bpm/rules/v1/decisions/01KDG7Z0RQ6V2Y8M1C4N5P7T9W:replay"),
+                        s -> {
+                            s.permissions = Set.of("rules:log:read");
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.ReplayNotPossibleException(
+                                    "01KDG7Z0RQ6V2Y8M1C4N5P7T9W", List.of("nationalId"));
+                        }),
                 new Case("EVALUATION_ERROR", 422,
                         post("/api/bpm/rules/v1/decisions/card-fee:evaluate").contentType("application/json").content(gold),
                         s -> s.outcome = new DecisionResult.Failed("EVALUATION_ERROR", "Division by zero in output fee")),

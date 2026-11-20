@@ -45,14 +45,16 @@ public class ProblemDetails {
             Map.entry("UNAUTHENTICATED", HttpStatus.UNAUTHORIZED),
             Map.entry("PERMISSION_DENIED", HttpStatus.FORBIDDEN),
             Map.entry("SELF_APPROVAL_FORBIDDEN", HttpStatus.FORBIDDEN),
+            Map.entry("CLOCK_NOT_ALLOWED", HttpStatus.FORBIDDEN),
+            Map.entry("DECISION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("RULE_SET_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("VERSION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("NO_EFFECTIVE_VERSION", HttpStatus.NOT_FOUND),
-            Map.entry("DECISION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("VERSION_CONFLICT", HttpStatus.CONFLICT),
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
+            Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
             Map.entry("PRECONDITION_REQUIRED", HttpStatus.PRECONDITION_REQUIRED),
             Map.entry("DRAFT_AUTHORING_DISABLED", HttpStatus.FORBIDDEN),
@@ -61,6 +63,7 @@ public class ProblemDetails {
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
             Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE),
+            Map.entry("REPLAY_NOT_POSSIBLE", UNPROCESSABLE),
             Map.entry("INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR),
             Map.entry("SCHEMA_NOT_READY", HttpStatus.SERVICE_UNAVAILABLE));
 
@@ -88,6 +91,13 @@ public class ProblemDetails {
                 item.put("message", v.message());
             }
             body.put("violationsTruncated", failed.truncated());
+        }
+        if (e instanceof io.github.dhluong90.bpm.rules.api.LastVersionInEffectException last) {
+            // PD-101: what a client needs to word the warning and to retry with the confirmation
+            body.put("ruleSet", last.ruleSet());
+            body.put("version", last.version());
+            body.put("setting", last.setting());
+            body.set("nextEffectiveFrom", EngineValues.value(last.nextEffectiveFrom()));
         }
         ResponseEntity<byte[]> response = response(status, body);
         if (e instanceof io.github.dhluong90.bpm.rules.api.RateLimitedException limited) {

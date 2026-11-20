@@ -29,13 +29,49 @@ import java.time.Instant;
  * @param approvalComment approval comment, or null
  * @param createdBy who imported the version (the author), or null for rows written before it was recorded
  * @param createdAt creation time
+ * @param retiredAt when it was retired, or null while it is not; selection reads it (ADR-0025 decision 3)
  */
 public record StoredVersion(
         String tenantId, String id, String ruleSetId, String ruleSet, int version, VersionStatus status,
         String hitPolicy, Instant effectiveFrom, String canonicalJson, String canonicalHash,
         SourceFormat sourceFormat, String sourceDocument, String sourceHash, long lockVersion,
         String requestedBy, Instant requestedAt, String approvedBy, Instant approvedAt, String approvalComment,
-        String createdBy, Instant createdAt) {
+        String createdBy, Instant createdAt, Instant retiredAt) {
+
+    /**
+     * Creates a row that is not retired.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param ruleSetId see the record
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param status see the record
+     * @param hitPolicy see the record
+     * @param effectiveFrom see the record
+     * @param canonicalJson see the record
+     * @param canonicalHash see the record
+     * @param sourceFormat see the record
+     * @param sourceDocument see the record
+     * @param sourceHash see the record
+     * @param lockVersion see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param approvedBy see the record
+     * @param approvedAt see the record
+     * @param approvalComment see the record
+     * @param createdBy see the record
+     * @param createdAt see the record
+     */
+    public StoredVersion(String tenantId, String id, String ruleSetId, String ruleSet, int version,
+            VersionStatus status, String hitPolicy, Instant effectiveFrom, String canonicalJson, String canonicalHash,
+            SourceFormat sourceFormat, String sourceDocument, String sourceHash, long lockVersion, String requestedBy,
+            Instant requestedAt, String approvedBy, Instant approvedAt, String approvalComment, String createdBy,
+            Instant createdAt) {
+        this(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom, canonicalJson, canonicalHash,
+                sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy, requestedAt, approvedBy, approvedAt,
+                approvalComment, createdBy, createdAt, null);
+    }
 
     /**
      * Returns the caller's view.
@@ -46,7 +82,7 @@ public record StoredVersion(
     public RuleSetVersion toView(boolean includeSource) {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalJson,
                 canonicalHash, sourceFormat, sourceHash, includeSource ? sourceDocument : null, requestedBy,
-                requestedAt, approvedBy, approvedAt, createdBy, createdAt);
+                requestedAt, approvedBy, approvedAt, createdBy, createdAt, retiredAt);
     }
 
     /**
@@ -86,6 +122,18 @@ public record StoredVersion(
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.DRAFT, hitPolicy,
                 effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
                 null, null, null, null, approvalComment, createdBy, createdAt);
+    }
+
+    /**
+     * Returns a copy moved to {@code RETIRED} from an instant on: selection stops choosing it for any later clock.
+     *
+     * @param at the transaction's clock; a retirement is never back-dated
+     * @return the new state with the lock version incremented
+     */
+    public StoredVersion retired(Instant at) {
+        return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.RETIRED, hitPolicy,
+                effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
+                requestedBy, requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, at);
     }
 
     /**
