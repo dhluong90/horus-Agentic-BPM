@@ -180,7 +180,7 @@ A version is the last in effect when, at the retirement instant, the version sel
   - When it is not the last, the flag is ignored and not stored.
 - **Concurrency.** The retire transaction locks the `rle_rule_set` row first with `SELECT ... FOR UPDATE`. It is the same row whose `cache_epoch` the transaction increments anyway. The transaction then reads the versions in effect, so two concurrent retirements of the last two versions run one after the other, and the second one sees that it is now the last. The lock is held for two indexed reads and one update, with no network call.
 - **Recorded.** The `RETIRED` history row stores `no_version_in_effect = true`, and `rules.version.retired.v1` carries `noVersionInEffect: true`. Every other manual retirement stores `false`. Supersession never leaves a gap, so it stores `false`.
-- **`four-eyes` is not available yet.** That value of either retirement setting needs four-eyes retirement (RE-F-49, M3, may move to 1.1). Until that ships, a host that sets `four-eyes` fails at start-up with a message naming the setting, so a control that would do nothing is never set silently.
+- **`four-eyes` is not available yet.** That value of either retirement setting needs four-eyes retirement (RE-F-49, M3, may move to 1.1). Until that ships in the Rule Engine, a host that runs it and sets `four-eyes` fails at start-up with a message naming the setting, so a control that would do nothing is never set silently. The shared reader in bpm-host-metadata accepts the value, because the Process Engine supports it; the Rule Engine's settings refuse it.
 
 ### 3.4 Money contract (canonical)
 

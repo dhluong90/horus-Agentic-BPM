@@ -115,18 +115,36 @@ mkdir -p "$WORK/downloads"
 while IFS= read -r file; do cp "$file" "$WORK/downloads/"; done < <(
   ARCHIVE="$WORK/good" ASSETS="$WORK/assets.txt" TAG="$TAG" COMMIT="$COMMIT" RUNNER_TEMP="$WORK/runner" \
     bash "$WORK/check.sh" > /dev/null && cat "$WORK/assets.txt")
-notes_check="$(cd "$WORK/downloads" && while read -r hash path; do name="${path##*/}"; [ -f "$name" ] && printf '%s  %s\n' "$hash" "$name"; done < SHA256SUMS | shasum -a 256 -c - 2>&1 || true)"
+notes_check="$(cd "$WORK/downloads" && while read -r hash path; do name="${path##*/}"; if [ -f "$name" ]; then printf '%s  %s\n' "$hash" "$name"; fi; done < SHA256SUMS | shasum -a 256 -c - 2>&1 || true)"
 if [[ "$(grep -c ': OK$' <<< "$notes_check")" == 5 && "$notes_check" != *FAILED* ]]; then
   echo "PASS  the release notes' check passes on the downloads (5 files OK)"
 else
   echo "FAIL  the release notes' check: $notes_check"; failures=$((failures + 1))
 fi
 echo "changed" >> "$WORK/downloads/bpm-bom-0.1.0.pom"
-notes_check="$(cd "$WORK/downloads" && while read -r hash path; do name="${path##*/}"; [ -f "$name" ] && printf '%s  %s\n' "$hash" "$name"; done < SHA256SUMS | shasum -a 256 -c - 2>&1 || true)"
+notes_check="$(cd "$WORK/downloads" && while read -r hash path; do name="${path##*/}"; if [ -f "$name" ]; then printf '%s  %s\n' "$hash" "$name"; fi; done < SHA256SUMS | shasum -a 256 -c - 2>&1 || true)"
 if [[ "$notes_check" == *"bpm-bom-0.1.0.pom: FAILED"* ]]; then
   echo "PASS  the release notes' check catches a changed download"
 else
   echo "FAIL  the release notes' check missed a changed download: $notes_check"; failures=$((failures + 1))
+fi
+
+# The exit status of the check under pipefail, as the workflow's publish step runs it, when the last
+# SHA256SUMS line names a file that is not an asset (a loop that ends on a failed `[ -f ]` would fail).
+cp "$WORK/good/BUILD-INFO.json" "$WORK/downloads/BUILD-INFO.json"
+mkdir -p "$WORK/tail"
+cp "$WORK/downloads"/* "$WORK/tail/"
+rm "$WORK/tail/bpm-bom-0.1.0.pom"
+cp "$WORK/good/maven-repo/io/github/dhluong90/bpm/bpm-bom/0.1.0/bpm-bom-0.1.0.pom" "$WORK/tail/"
+{ cat "$WORK/good/SHA256SUMS"; echo "0000000000000000000000000000000000000000000000000000000000000000  maven-repo/not-an-asset.txt"; } > "$WORK/tail/SHA256SUMS"
+fixed='while read -r hash path; do name="${path##*/}"; if [ -f "$name" ]; then printf "%s  %s\n" "$hash" "$name"; fi; done < SHA256SUMS | shasum -a 256 -c - > /dev/null'
+old='while read -r hash path; do name="${path##*/}"; [ -f "$name" ] && printf "%s  %s\n" "$hash" "$name"; done < SHA256SUMS | shasum -a 256 -c - > /dev/null'
+fixed_rc=0; (cd "$WORK/tail" && set -o pipefail && bash -c "set -o pipefail; $fixed") || fixed_rc=$?
+old_rc=0; (cd "$WORK/tail" && bash -c "set -o pipefail; $old") || old_rc=$?
+if [[ "$fixed_rc" == 0 && "$old_rc" != 0 ]]; then
+  echo "PASS  a SHA256SUMS ending with a non-asset: the check exits 0 (the earlier form exited $old_rc)"
+else
+  echo "FAIL  a SHA256SUMS ending with a non-asset: fixed form exit $fixed_rc, earlier form exit $old_rc"; failures=$((failures + 1))
 fi
 
 if (( failures > 0 )); then

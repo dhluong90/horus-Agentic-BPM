@@ -46,6 +46,8 @@ public class ProcessProblemDetails {
             Map.entry("DEFINITION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("INSTANCE_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("TASK_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("VERSION_SUPERSEDED", HttpStatus.CONFLICT),
+            Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("VERSION_CONFLICT", HttpStatus.CONFLICT),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
@@ -74,6 +76,14 @@ public class ProcessProblemDetails {
             case BpmnUnsupportedElementException u -> body.set("problems", Views.problems(u.problems()));
             case ValidationFailedException v -> body.set("problems", Views.problems(v.problems()));
             case StepFailedException s -> body.put("nodeId", s.nodeId()).put("reason", s.reason());
+            case io.github.dhluong90.bpm.process.api.LastVersionInEffectException l -> {
+                body.put("definitionKey", l.definitionKey()).put("version", l.version()).put("setting", l.setting());
+                if (l.nextEffectiveFrom() == null) {
+                    body.putNull("nextEffectiveFrom");
+                } else {
+                    body.put("nextEffectiveFrom", l.nextEffectiveFrom().toString());
+                }
+            }
             default -> { }
         }
         ResponseEntity.BodyBuilder response = ResponseEntity.status(status).contentType(PROBLEM);

@@ -68,10 +68,11 @@ class RuleEngineModuleDescriptorTest {
         runner.withPropertyValues("horus.bpm.lifecycle.retire-last-version=four-eyes")
                 .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
                         .hasMessageContaining("horus.bpm.lifecycle.retire-last-version")
-                        .hasMessageContaining("not available yet"));
+                        .hasMessageContaining("four-eyes is not built in this release"));
         runner.withPropertyValues("horus.bpm.lifecycle.retire-last-version=sometimes")
                 .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
-                        .hasMessageContaining("confirm (default) or refuse"));
+                        .hasMessageContaining("horus.bpm.lifecycle.retire-last-version")
+                        .hasMessageContaining("must be confirm (default)"));
     }
 
     @Test
@@ -87,7 +88,7 @@ class RuleEngineModuleDescriptorTest {
         runner.withPropertyValues("horus.bpm.lifecycle.retire-approval=four-eyes")
                 .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
                         .hasMessageContaining("horus.bpm.lifecycle.retire-approval")
-                        .hasMessageContaining("not available yet"));
+                        .hasMessageContaining("four-eyes arrives in M3"));
     }
 
     @Test
