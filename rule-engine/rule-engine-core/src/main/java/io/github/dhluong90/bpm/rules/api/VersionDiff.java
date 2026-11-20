@@ -21,10 +21,13 @@ import java.util.Objects;
  * @param outputs changes to the output columns
  * @param rows changed rows, by position in {@code version}, then removed rows by position in {@code base}
  * @param unchangedCount rows present in both with the same cells and not moved
+ * @param masking the masking status of every input of either version, in the order of {@code version} then the
+ *     inputs only in {@code base}, with changes marked (RLE-051, PD-099 mitigation 3)
  */
 public record VersionDiff(String ruleSet, int version, int base, String canonicalHash, String baseCanonicalHash,
         boolean sourceHashChanged, Instant effectiveFrom, Instant baseEffectiveFrom, List<FieldChange> header,
-        ColumnChanges inputs, ColumnChanges outputs, List<RowChange> rows, int unchangedCount) {
+        ColumnChanges inputs, ColumnChanges outputs, List<RowChange> rows, int unchangedCount,
+        List<InputMasking> masking) {
 
     public VersionDiff {
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
@@ -32,6 +35,80 @@ public record VersionDiff(String ruleSet, int version, int base, String canonica
         Objects.requireNonNull(inputs, "inputs must not be null");
         Objects.requireNonNull(outputs, "outputs must not be null");
         rows = List.copyOf(rows);
+        masking = masking == null ? List.of() : List.copyOf(masking);
+    }
+
+    /**
+     * Creates a diff without masking statuses.
+     *
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param base see the record
+     * @param canonicalHash see the record
+     * @param baseCanonicalHash see the record
+     * @param sourceHashChanged see the record
+     * @param effectiveFrom see the record
+     * @param baseEffectiveFrom see the record
+     * @param header see the record
+     * @param inputs see the record
+     * @param outputs see the record
+     * @param rows see the record
+     * @param unchangedCount see the record
+     */
+    public VersionDiff(String ruleSet, int version, int base, String canonicalHash, String baseCanonicalHash,
+            boolean sourceHashChanged, Instant effectiveFrom, Instant baseEffectiveFrom, List<FieldChange> header,
+            ColumnChanges inputs, ColumnChanges outputs, List<RowChange> rows, int unchangedCount) {
+        this(ruleSet, version, base, canonicalHash, baseCanonicalHash, sourceHashChanged, effectiveFrom,
+                baseEffectiveFrom, header, inputs, outputs, rows, unchangedCount, List.of());
+    }
+
+    /**
+     * Whether an input's values are masked in the decision log, and why: by its own declaration or by the tenant's
+     * {@code decision-log.mask-default} in force when the diff is read.
+     */
+    public enum Masking {
+        /** Declares {@code mask: true}. */
+        MASKED,
+        /** Declares {@code mask: false}. */
+        NOT_MASKED,
+        /** Declares no {@code mask}; the tenant masks undeclared inputs. */
+        MASKED_BY_DEFAULT,
+        /** Declares no {@code mask}; the tenant does not mask undeclared inputs. */
+        NOT_MASKED_BY_DEFAULT;
+
+        /**
+         * Tells whether values are masked.
+         *
+         * @return true for {@link #MASKED} and {@link #MASKED_BY_DEFAULT}
+         */
+        public boolean masked() {
+            return this == MASKED || this == MASKED_BY_DEFAULT;
+        }
+
+        /**
+         * Tells whether the input declares {@code mask} itself.
+         *
+         * @return true for {@link #MASKED} and {@link #NOT_MASKED}
+         */
+        public boolean declared() {
+            return this == MASKED || this == NOT_MASKED;
+        }
+    }
+
+    /**
+     * The masking status of one input in both versions.
+     *
+     * @param input the input name
+     * @param from its status in {@code base}, or null when it is only in {@code version}
+     * @param to its status in {@code version}, or null when it is only in {@code base}
+     * @param changed whether the status differs, so the approver sees "masked to not masked" before approving
+     * @param personalDataName when the input declares no {@code mask} in {@code version} and its name looks like
+     *     personal data, the configured name it matched (RLE-049); otherwise null
+     */
+    public record InputMasking(String input, Masking from, Masking to, boolean changed, String personalDataName) {
+        public InputMasking {
+            Objects.requireNonNull(input, "input must not be null");
+        }
     }
 
     /** How a row differs. */

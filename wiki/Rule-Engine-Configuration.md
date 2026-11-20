@@ -30,12 +30,18 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `decision-log.async.batch-size` | `100` | M2, may move to M3 | Outbox rows relayed per poll in `async` mode |
 | `decision-log.partitions-ahead` | `P7D` | Built (0.2) | How far ahead of the host clock monthly `rle_decision` partitions are created, at start-up and daily while the host runs; `PT0S` to `P366D`. The current and the next month always exist. See [Decision log partitions](#decision-log-partitions) |
 | `decision-log.retention` | unset; required outside `dev` from M3 | M3 | ISO 8601 period in whole months, at least `decision-log.retention-floor`, for example `P12M` or `P120M`. From M3, outside the `dev` profile, the engine refuses to start until it is set, and refuses a value below the floor or not in whole months, naming the property. The scheduler drops whole monthly partitions that end before `now() - retention`. Nothing is deleted in the `dev` profile or before M3; before M3 the property is ignored with a start-up note. No decision row is ever deleted by date |
-| `decision-log.mask-default` | `false` | Built | Mask every input that declares no `mask`; an input with `mask: false` is never masked by this default |
+| `decision-log.mask-default` | `false` | Built | Mask every input that declares no `mask`; an input with `mask: false` is never masked by this default. A change is logged at start-up, one line per tenant with the old and new value, and the value in force is shown in `/api/bpm/meta`. See [Personal data guards](#personal-data-guards) |
+| `decision-log.require-explicit-mask` | `false` | 0.2 | Strict mode: every input must declare `mask: true` or `mask: false`. An undeclared input is `422 VALIDATION_FAILED` naming it, at import, draft replacement, publication request and approval. Shown in `/api/bpm/meta`. Turn it on for production |
+| `decision-log.personal-data-names` | the built-in list | 0.2 | Input names that look like personal data, replacing the built-in list. An undeclared input that matches one gets a warning the approver sees |
+| `decision-log.additional-personal-data-names` | empty | 0.2 | More names, added to the list |
 | `masking.hmac-key` | unset | Built | Base64 key, 32 bytes or more after decoding, for HMAC-SHA256 of masked inputs, used by every tenant without its own key. Supply it from an environment variable (`HORUS_BPM_RULES_MASKING_HMAC_KEY`) or a secret store. When unset, the shared `horus.bpm.masking.hmac-key` is used. See [Masking keys](#masking-keys) |
 | `masking.hmac-key-id`, `masking.tenants.<tenant>.hmac-key-id` | `k1` | Built | Label of the key, 1 to 32 letters, digits, `_` or `-`, stored in every fingerprint as `hmac:<keyId>:<hex>`, so each row says which key made it. Not secret; change it whenever you change the key. When unset, the shared `horus.bpm.masking.hmac-key-id` is used |
 | `masking.search.max-per-minute`, `masking.tenants.<tenant>.search.max-per-minute` | `30` | Built | Masked-input searches one caller may run per minute on one replica, at least `1`; it cannot be switched off. Past it: `429 RATE_LIMITED` with `Retry-After`, and an audit entry with `outcome = RATE_LIMITED`. A value below 1 stops start-up |
 | `masking.tenants.<tenant>.hmac-key` | unset | Built | The tenant's own key, same format. A tenant with this setting never uses the host key, even when its own value is invalid |
 | `masking.tenants.<tenant>.mask-default` | `decision-log.mask-default` | Built | The masking default of one tenant |
+| `masking.tenants.<tenant>.require-explicit-mask` | `decision-log.require-explicit-mask` | 0.2 | Strict mode for one tenant |
+| `masking.tenants.<tenant>.personal-data-names` | the host's list | 0.2 | The tenant's own list, replacing the host's for that tenant only |
+| `masking.tenants.<tenant>.additional-personal-data-names` | empty | 0.2 | More names for one tenant, added to whichever list applies |
 | (key status in `/api/bpm/meta`) | | 0.2.0 | The rules settings show, for the caller's own tenant, `masking.hmac-key: set` or `unset`, and when set `masking.hmac-key-id` and `masking.hmac-key-check`, the key check value (the first 8 bytes of the HMAC-SHA256 of an empty message under `HKDF-SHA256(key, info = "horus-bpm/masking/v1/kcv")`, in hex, not secret). These describe the key the tenant writes with: its own key, or its subkey of the host key, so tenants that share the host key see different check values. For a tenant on the host key, the check value is therefore that of its subkey, not the one recorded for the host key in `rle_masking_key_check`. The key id is the same for every tenant on the host key, so those tenants can tell they share it; use an opaque host key id if that matters. The key itself is never shown. A `MaskingPolicy` bean of your own is described the same way |
 | `evaluation.max-rows` | `5000` | Built | Most rules a version may contain, checked at import (`422 VALIDATION_FAILED`). `1` to `5000`; may be lowered, never raised |
 | `evaluation.pin-retired` | `false` | 0.2 | Whether an evaluation pinned with `rules:pin` may name a `RETIRED` version. `false` answers `409 INVALID_STATE`, so a rule taken out of service never makes a new logged decision. Replay of a logged decision is not affected |
@@ -93,6 +99,36 @@ A rule set marks personal data with `mask: true`; the decision log then stores `
 export HORUS_BPM_RULES_MASKING_HMAC_KEY="$(openssl rand -base64 32)"
 ```
 
+### Personal data guards
+
+The decision log can never be edited, so an input that holds personal data and was never marked `mask: true` leaves data you cannot erase. Four guards catch it before publication (`RLE-049` to `RLE-052`):
+
+| Guard | What happens |
+|---|---|
+| Warning | An input that declares no `mask` and whose name looks like personal data gets a warning in `warnings` of the version: `{ code: UNMASKED_PERSONAL_DATA, input: nationalId, matchedName: "national id", message }`. It comes back from the import, the draft replacement and the publication request, and on every read of the version, so the approver sees it too |
+| Strict mode | With `decision-log.require-explicit-mask: true`, an input that declares no `mask` is `422 VALIDATION_FAILED`, one violation per input with `column` naming it, and nothing is stored. A draft imported, or a request made, before strict mode was turned on can be neither sent for approval nor approved until every input is declared |
+| Diff | The version diff lists every input's masking status in `masking`, and marks changes: `nationalId: MASKED to NOT_MASKED` |
+| Masking default | A change of `decision-log.mask-default` since the last start-up is one log line per tenant with the old and new value, at WARN when masking is turned off. `/api/bpm/meta` shows the masking default and strict mode in force for the caller's tenant |
+
+The built-in names cover full name, `ho ten`, `ho va ten`, national id, citizen id, `cccd`, `cmnd`, passport, `ho chieu`, phone, `so dien thoai`, `sdt`, email, address, `dia chi`, date of birth, `dob`, `ngay sinh`, account number, `so tai khoan`, `stk`, IBAN, card number, tax id, `ma so thue`, `mst`, driver licence, `giay phep lai xe`, `gplx` and `bang lai`. Names are compared as words, ignoring case, punctuation and accents, without regular expressions: `nationalId`, `national_id` and `NATIONAL_ID` match "national id", and `company` matches nothing. Only names are checked, never values.
+
+```yaml
+horus:
+  bpm:
+    rules:
+      decision-log:
+        require-explicit-mask: true              # every input must say mask: true or mask: false
+        additional-personal-data-names: ["cif", "customer ref"]
+      masking:
+        tenants:
+          sandbox:
+            require-explicit-mask: false         # a test tenant keeps warnings only
+          bank-b:
+            personal-data-names: ["customer ref"] # bank-b's own list, for bank-b only
+```
+
+The start-up record lives in `rle_setting_seen` (one row per tenant, plus one for the host default), so the runtime database user needs `SELECT`, `INSERT` and `UPDATE` on it.
+
 **Tenant subkeys.** The host key is never used directly. A tenant without its own key uses the subkey `HKDF-SHA256(IKM = host key, salt = none, info = "horus-bpm/masking/v1/tenant/" + tenantId, 32 bytes)` (RFC 5869), so two tenants that share the host key never store the same token for one value. A tenant's own key is used as it is. The key id is the host key's, and the `v1` in `info` is fixed for the `hmac:<keyId>:<hex>` format. To check an implementation of your own, use this vector:
 
 | Host key (hex) | Tenant | Value | Token |
@@ -102,7 +138,7 @@ export HORUS_BPM_RULES_MASKING_HMAC_KEY="$(openssl rand -base64 32)"
 
 The subkey of `bank-a` in that vector is `c8e45e83d5ee7574102467fccc635e7113045b1b05714cca14a9aab5f01c2ecb`. The token is the input's value fingerprinted with the tenant's key only, without the rule set or the input name, so one person has one token across a tenant's rule sets.
 
-To keep one key per tenant, either set `masking.tenants.<tenant>.hmac-key` for each tenant, or declare a `MaskingPolicy` bean that reads the tenant's key from your vault; the bean replaces every `masking.*` setting. A bean that shares one root key between tenants derives each tenant's key with `MaskingKey.forTenant(tenantId)`. The key never appears in a log line, a response, an event or a metric. Rotation is not offered by these settings yet: decisions keep the fingerprint, and the key id, of the key in force when they were made. A `MaskingPolicy` bean can already hold earlier keys in `searchKeys`, and the search fingerprints the value with each of them.
+To keep one key per tenant, either set `masking.tenants.<tenant>.hmac-key` for each tenant, or declare a `MaskingPolicy` bean that reads the tenant's key from your vault; the bean replaces every `masking.*` setting, and with it the personal-data settings: its `requireExplicitMask(tenant)` and `personalDataNames(tenant)` default to off and to the built-in list. A bean that shares one root key between tenants derives each tenant's key with `MaskingKey.forTenant(tenantId)`. The key never appears in a log line, a response, an event or a metric. Rotation is not offered by these settings yet: decisions keep the fingerprint, and the key id, of the key in force when they were made. A `MaskingPolicy` bean can already hold earlier keys in `searchKeys`, and the search fingerprints the value with each of them.
 
 ## Host-wide properties
 

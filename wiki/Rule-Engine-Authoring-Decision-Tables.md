@@ -51,6 +51,8 @@ outputs:
 | `money` | `50000000 VND` | Currency plus amount; stored in minor units; never compared across currencies |
 | `list<T>` | `['VN', 'SG']` | |
 
+Mark every input that holds personal data with `mask: true`: national ids, names, account numbers, phone numbers, email and postal addresses, dates of birth. An input with no `mask` is stored in plain text in the decision log, which can never be changed. When you forget, the import warns you if the name looks like personal data (`UNMASKED_PERSONAL_DATA`), and the approver sees the same warning. Write `mask: false` on an input that holds no personal data to say so explicitly; a bank that turns on strict mode (`decision-log.require-explicit-mask`) refuses any input that says neither. See [[Rule Engine Configuration]].
+
 Inputs are validated against their type before evaluation. A wrong type is a `400 INPUT_INVALID` over REST or a `DecisionInputException` in Java, never a silent conversion.
 
 ## 3. Write the rows

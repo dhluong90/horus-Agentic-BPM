@@ -44,7 +44,7 @@ curl -s localhost:8080/actuator/health
 docker exec horus-pg psql -U horus -d horus -c '\dt'
 # flyway_schema_history, loan_application, rle_decision (partitioned), rle_decision_YYYY_MM (this month and next),
 # rle_decision_default, rle_decision_outbox, rle_idempotency, rle_rule, rle_rule_set, rle_schema_history, rle_version,
-# rle_version_history, rle_engine_key
+# rle_version_history, rle_engine_key, rle_setting_seen
 
 docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_schema_history ORDER BY installed_rank'
 #  0       | Rule Engine baseline
@@ -56,11 +56,15 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  6       | V6__rle_version_history_draft_updated.sql
 #  10      | V10__rle_decision_pinned.sql
 #  11      | V11__rle_version_retired_at.sql
+#  12      | V12__rle_version_four_eyes_no_exemption.sql
+#  14      | V14__rle_setting_seen.sql
 ```
 
 ### The cursor key
 
 At start-up, after the migrations, the engine creates its list-cursor key in `rle_engine_key` if it is missing and reads it, so the runtime database user needs `SELECT` and `INSERT` on that table; without them start-up stops with a message naming the table. Requests only use the key in memory.
+
+The engine also records, in `rle_setting_seen`, the masking default (`decision-log.mask-default`) each tenant started with, and logs one line naming the tenant and the old and new value when it changes between start-ups. The runtime user needs `SELECT`, `INSERT` and `UPDATE` on that table.
 
 ### Protect the audit tables
 

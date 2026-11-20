@@ -75,6 +75,91 @@ class HostMetadataEndpointsTest {
         });
     }
 
+    /** The rules entry with one host setting, and a masking default that bank-b turns on (RLE-052). */
+    @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
+    static class RulesWithTenantSettings {
+
+        @org.springframework.context.annotation.Bean
+        io.github.dhluong90.bpm.host.spi.ModuleDescriptor ruleEngineModuleDescriptor() {
+            io.github.dhluong90.bpm.host.spi.ModuleDescriptor rules = TestHosts.rules(java.util.Map.of());
+            return new io.github.dhluong90.bpm.host.spi.ModuleDescriptor(rules.module(), rules.engineVersion(),
+                    rules.apiVersion(), rules.features(), java.util.Map.of("authoring.cockpit-drafts", false),
+                    rules.permissions(), rules.rolePermissions());
+        }
+
+        @org.springframework.context.annotation.Bean
+        io.github.dhluong90.bpm.host.spi.ModuleTenantSettings ruleEngineTenantSettings() {
+            return new io.github.dhluong90.bpm.host.spi.ModuleTenantSettings() {
+                @Override
+                public String module() {
+                    return "rules";
+                }
+
+                @Override
+                public List<String> names() {
+                    return List.of("decision-log.mask-default");
+                }
+
+                @Override
+                public java.util.Map<String, Object> settings(String tenantId) {
+                    return java.util.Map.of("decision-log.mask-default", tenantId.equals("bank-b"));
+                }
+            };
+        }
+    }
+
+    @Test
+    void RLE_052_meta_shows_each_caller_the_settings_in_force_for_their_own_tenant() {
+        // Given a host whose rules engine masks undeclared inputs by default for bank-b only
+        TestHosts.runner().withUserConfiguration(RulesWithTenantSettings.class).run(context -> {
+            MockMvc mvc = TestHosts.mockMvc(context);
+
+            // When lan of bank-a and binh of bank-b read /meta
+            MvcResult atBankA = call(mvc, get("/api/bpm/meta").with(lan()));
+            MvcResult atBankB = call(mvc, get("/api/bpm/meta").with(caller("binh", "bank-b", "rules:read")));
+
+            // Then each sees the host setting and the masking default in force for their tenant
+            JsonNode a = json(atBankA).path("modules").get(0).path("settings");
+            JsonNode b = json(atBankB).path("modules").get(0).path("settings");
+            assertThat(a.path("authoring.cockpit-drafts").asBoolean(true)).isFalse();
+            assertThat(a.path("decision-log.mask-default").isBoolean()).isTrue();
+            assertThat(a.path("decision-log.mask-default").asBoolean(true)).isFalse();
+            assertThat(b.path("decision-log.mask-default").asBoolean(false)).isTrue();
+            // And the two bodies differ, so their ETags do too
+            assertThat(atBankA.getResponse().getHeader("ETag")).isNotEqualTo(atBankB.getResponse().getHeader("ETag"));
+        });
+    }
+
+    @Test
+    void RLE_052_one_session_in_two_tenants_gets_two_meta_bodies_and_never_a_304_across_tenants() {
+        // Given lan holds a role in bank-a and in bank-b; bank-b masks undeclared inputs by default
+        TestHosts.runner().withUserConfiguration(RulesWithTenantSettings.class).run(context -> {
+            MockMvc mvc = TestHosts.mockMvc(context);
+
+            // When lan reads /meta in bank-a, then switches to bank-b and revalidates with bank-a's ETag
+            MvcResult inA = call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-a", "rules:read")));
+            String etagA = inA.getResponse().getHeader("ETag");
+            MvcResult inB = call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-b", "rules:read"))
+                    .header("If-None-Match", etagA));
+
+            // Then bank-b answers 200 with its own body and ETag, never 304 with bank-a's cached body
+            assertThat(inB.getResponse().getStatus()).isEqualTo(200);
+            assertThat(inB.getResponse().getHeader("ETag")).isNotEqualTo(etagA);
+            assertThat(json(inA).path("modules").get(0).path("settings").path("decision-log.mask-default")
+                    .asBoolean(true)).isFalse();
+            assertThat(json(inB).path("modules").get(0).path("settings").path("decision-log.mask-default")
+                    .asBoolean(false)).isTrue();
+            // And /meta varies like /me, so a shared or browser cache keys it by credentials and tenant header
+            for (MvcResult meta : List.of(inA, inB)) {
+                assertThat(String.join(", ", meta.getResponse().getHeaders("Vary")))
+                        .isEqualTo("Authorization, Cookie, X-Tenant-Id");
+            }
+            // And the same tenant still revalidates to 304
+            assertThat(call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-a", "rules:read"))
+                    .header("If-None-Match", etagA)).getResponse().getStatus()).isEqualTo(304);
+        });
+    }
+
     @Test
     void RLE_019_role_mapping_lists_rules_approve_and_removing_it_drops_it() {
         // Given minh holds the host role PRICING_APPROVER and rules:read, and the host maps the role

@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
+import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
 import io.github.dhluong90.bpm.rules.api.DecisionLogQuery;
 import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
@@ -75,8 +76,19 @@ class RuleEngineServicesConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngines engines, MaskingPolicy masking) {
-        return RuleEngineMaskingCheck.of(engines.maskingCheck(), masking);
+    RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngines engines, MaskingPolicy masking,
+            ObjectProvider<Clock> clock) {
+        return RuleEngineMaskingCheck.of(engines.maskingCheck(), masking, RuleEngineAutoConfiguration.engineClock(clock));
+    }
+
+    /**
+     * The masking default and strict mode in force for the caller's tenant, in the {@code rules} settings of
+     * {@code GET /api/bpm/meta} (RLE-050, RLE-052).
+     */
+    @Bean
+    @ConditionalOnMissingBean(name = "ruleEngineTenantSettings")
+    ModuleTenantSettings ruleEngineTenantSettings(MaskingPolicy masking) {
+        return RuleEngineModule.tenantSettings(masking);
     }
 
     @Bean

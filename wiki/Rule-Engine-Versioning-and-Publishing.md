@@ -22,7 +22,7 @@ Design preview: describes the 0.1 target.
 | 2. Edit the draft | alice | `PUT /api/bpm/rules/v1/rule-sets/card-fee/versions/3` with the full document | `200`; validation errors come back as `422 VALIDATION_FAILED` with row ids |
 | 3. Check it | alice | Simulate as in [[Rule Engine Simulation and Testing]] | Report of outputs per sample row |
 | 4. Request publication | alice | `POST .../versions/3:request-publish` | `200`, `"status": "PENDING_APPROVAL"`; the draft is now frozen |
-| 5. Review the diff | bob | `GET .../versions/3/diff?base=2`, or the Approvals screen in the [[Cockpit]] | Added, removed, changed and moved rows, and changed columns |
+| 5. Review the diff | bob | `GET .../versions/3/diff?base=2`, or the Approvals screen in the [[Cockpit]] | Added, removed, changed and moved rows, changed columns, each input's masking status (`nationalId: MASKED to NOT_MASKED`) and any personal-data warning |
 | 6. Approve | bob | `POST .../versions/3:approve` with `{ "comment": "Fee change agreed with product" }` | `200`, `"status": "PUBLISHED"`; event `rules.version.published` emitted |
 
 From step 6 the new version is effective immediately, unless it carries a future `effectiveFrom`. The previous version stays readable and still explains its past decisions.

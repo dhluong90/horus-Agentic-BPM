@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.rules.api.RuleSetSummary;
 import io.github.dhluong90.bpm.rules.api.VersionSummary;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -258,4 +259,23 @@ public interface RuleStore {
      * @return the inputs, by tenant, rule set and version
      */
     List<VersionInputs> liveVersionInputs();
+
+    /**
+     * Reads the value of a setting each tenant last started with (RLE-052). Engine-internal, read once at start-up
+     * outside any request.
+     *
+     * @param setting the setting name, for example {@code decision-log.mask-default}
+     * @return the recorded value by tenant
+     */
+    Map<String, String> settingsSeen(String setting);
+
+    /**
+     * Records the value of a setting a tenant started with, replacing the previous one.
+     *
+     * @param tenantId the tenant
+     * @param setting the setting name
+     * @param value the value in force
+     * @param at the start-up time
+     */
+    void recordSettingSeen(String tenantId, String setting, String value, Instant at);
 }

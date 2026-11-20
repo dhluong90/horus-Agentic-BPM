@@ -35,7 +35,7 @@ class RuleEngineMaskingStatusTest {
         runner.withPropertyValues("horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
                         "horus.bpm.rules.masking.hmac-key-id=k1")
                 .run(context -> {
-                    ModuleTenantSettings status = context.getBean(ModuleTenantSettings.class);
+                    ModuleTenantSettings status = context.getBean("ruleEngineMaskingStatus", ModuleTenantSettings.class);
                     assertThat(status.module()).isEqualTo("rules");
                     assertThat(status.names()).containsExactly("masking.hmac-key", "masking.hmac-key-id",
                             "masking.hmac-key-check");
@@ -53,7 +53,7 @@ class RuleEngineMaskingStatusTest {
 
     @Test
     void TR_EXT_08_a_host_without_a_key_shows_unset_and_no_id() {
-        runner.run(context -> assertThat(context.getBean(ModuleTenantSettings.class).settings("bank-a"))
+        runner.run(context -> assertThat(context.getBean("ruleEngineMaskingStatus", ModuleTenantSettings.class).settings("bank-a"))
                 .containsExactly(Map.entry("masking.hmac-key", "unset")));
     }
 
@@ -63,7 +63,7 @@ class RuleEngineMaskingStatusTest {
                         "horus.bpm.rules.masking.tenants.bank-b.hmac-key=" + TENANT_KEY,
                         "horus.bpm.rules.masking.tenants.bank-b.hmac-key-id=b1")
                 .run(context -> {
-                    ModuleTenantSettings status = context.getBean(ModuleTenantSettings.class);
+                    ModuleTenantSettings status = context.getBean("ruleEngineMaskingStatus", ModuleTenantSettings.class);
                     assertThat(status.settings("bank-b")).containsEntry("masking.hmac-key-id", "b1")
                             .containsEntry("masking.hmac-key-check", MaskingKey.of(TENANT_BYTES).checkValue());
                     assertThat(status.settings("bank-a")).containsEntry("masking.hmac-key-id", "k1");
@@ -76,7 +76,7 @@ class RuleEngineMaskingStatusTest {
         runner.withBean(MaskingPolicy.class, () -> tenant -> "bank-a".equals(tenant) ? Optional.of(vault)
                         : Optional.empty())
                 .run(context -> {
-                    ModuleTenantSettings status = context.getBean(ModuleTenantSettings.class);
+                    ModuleTenantSettings status = context.getBean("ruleEngineMaskingStatus", ModuleTenantSettings.class);
                     assertThat(status.settings("bank-a")).containsEntry("masking.hmac-key", "set")
                             .containsEntry("masking.hmac-key-id", "vault-7");
                     assertThat(status.settings("bank-c")).containsExactly(Map.entry("masking.hmac-key", "unset"));

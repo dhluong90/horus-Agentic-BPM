@@ -19,6 +19,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import javax.sql.DataSource;
@@ -456,6 +457,29 @@ public final class JdbcRuleStore implements RuleStore {
                 .query((rs, row) -> new VersionInputs(rs.getString("tenant_id"), rs.getString("name"),
                         rs.getInt("version_num"), rs.getString("inputs")))
                 .list();
+    }
+
+    @Override
+    public Map<String, String> settingsSeen(String setting) {
+        // Engine-internal, across tenants on purpose: read once at start-up, outside any request (RLE-052).
+        Map<String, String> seen = new java.util.TreeMap<>();
+        jdbc.sql("SELECT tenant_id, value FROM rle_setting_seen WHERE setting = :setting")
+                .param("setting", setting)
+                .query((rs, row) -> seen.put(rs.getString("tenant_id"), rs.getString("value")))
+                .list();
+        return seen;
+    }
+
+    @Override
+    public void recordSettingSeen(String tenantId, String setting, String value, Instant at) {
+        // ON CONFLICT so replicas that start together neither fail nor block one another.
+        jdbc.sql("""
+                INSERT INTO rle_setting_seen (tenant_id, setting, value, recorded_at)
+                VALUES (:tenant, :setting, :value, :at)
+                ON CONFLICT (tenant_id, setting) DO UPDATE SET value = EXCLUDED.value, recorded_at = EXCLUDED.recorded_at
+                """)
+                .param("tenant", tenantId).param("setting", setting).param("value", value)
+                .param("at", Timestamp.from(at)).update();
     }
 
     private static RuleSetSummary summary(ResultSet rs, int row) throws SQLException {

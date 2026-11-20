@@ -99,8 +99,14 @@ public record RuleEngineProperties(
      * @param maskDefault whether this tenant's inputs that declare no {@code mask} are masked; unset uses
      *     {@code decision-log.mask-default}
      * @param search the tenant's own search limit; unset uses {@code masking.search}
+     * @param requireExplicitMask strict mode for this tenant: every input must declare mask: true or mask: false;
+     *     unset uses {@code decision-log.require-explicit-mask}
+     * @param personalDataNames input names that look like personal data for this tenant, replacing the host's list;
+     *     unset uses the host's list
+     * @param additionalPersonalDataNames more names for this tenant, added to its list
      */
-    public record TenantMasking(String hmacKey, String hmacKeyId, Boolean maskDefault, Search search) {
+    public record TenantMasking(String hmacKey, String hmacKeyId, Boolean maskDefault, Search search,
+            Boolean requireExplicitMask, List<String> personalDataNames, List<String> additionalPersonalDataNames) {
 
         /** Never prints a key. */
         @Override
@@ -114,11 +120,22 @@ public record RuleEngineProperties(
      * What the decision log records, and its maintenance (RLE-017).
      *
      * @param maskDefault whether inputs that declare no {@code mask} are masked, for every tenant without its own
-     *     setting; default false. An input with {@code mask: false} is never masked by this default
+     *     setting; default false. An input with {@code mask: false} is never masked by this default. A change is
+     *     logged at start-up with the old and new value per tenant, and the value in force is shown in
+     *     {@code /api/bpm/meta}
+     * @param requireExplicitMask strict mode: every input must declare mask: true or mask: false, or the import, the
+     *     draft replacement and the publication request are refused with 422 VALIDATION_FAILED naming the input;
+     *     default false. Shown in {@code /api/bpm/meta}
+     * @param personalDataNames input names that look like personal data, replacing the built-in list (national id,
+     *     passport, phone, email, address, date of birth and account number, in English and Vietnamese). An input
+     *     that declares no mask and matches one gets a warning at import and at the publication request. Names are
+     *     compared as words, ignoring case, punctuation and accents; unset uses the built-in list
+     * @param additionalPersonalDataNames more names, added to the list
      * @param partitionsAhead how far ahead of the host clock monthly partitions are created, at start-up and daily;
      *     {@code PT0S} to {@code P366D}, default {@code P7D}. The current and the next month always exist
      */
-    public record DecisionLog(Boolean maskDefault, Duration partitionsAhead) {
+    public record DecisionLog(Boolean maskDefault, Boolean requireExplicitMask, List<String> personalDataNames,
+            List<String> additionalPersonalDataNames, Duration partitionsAhead) {
 
         /** Validates the period; an out-of-range value fails start-up naming the property. */
         public DecisionLog {
