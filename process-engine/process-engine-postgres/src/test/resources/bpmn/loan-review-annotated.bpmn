@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:modeler="http://camunda.org/schema/modeler/1.0" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="Definitions_0x7y8z9" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.28.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.6.0">
+  <bpmn:process id="loan-review" name="Loan review" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" name="Loan requested">
+      <bpmn:outgoing>Flow_1a2b3c4</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Activity_0r5s6t7" name="Credit officer reviews" horus:assignee="role:CREDIT_OFFICER" horus:resultVariable="review">
+      <bpmn:incoming>Flow_1a2b3c4</bpmn:incoming>
+      <bpmn:outgoing>Flow_0d5e6f7</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="Event_1u8v9w0" name="Loan reviewed">
+      <bpmn:incoming>Flow_0d5e6f7</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1a2b3c4" sourceRef="StartEvent_1" targetRef="Activity_0r5s6t7" />
+    <bpmn:sequenceFlow id="Flow_0d5e6f7" sourceRef="Activity_0r5s6t7" targetRef="Event_1u8v9w0" />
+    <bpmn:textAnnotation id="TextAnnotation_1g2h3j4">
+      <bpmn:text>Loans above 150,000,000 VND also need a senior officer</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_0k5l6m7" associationDirection="None" sourceRef="Activity_0r5s6t7" targetRef="TextAnnotation_1g2h3j4" />
+    <bpmn:group id="Group_1n8p9q0" categoryValueRef="CategoryValue_0r1s2t3" />
+  </bpmn:process>
+  <bpmn:category id="Category_1u4v5w6">
+    <bpmn:categoryValue id="CategoryValue_0r1s2t3" value="Credit review" />
+  </bpmn:category>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="loan-review">
+      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+        <dc:Bounds x="179" y="159" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_0r5s6t7_di" bpmnElement="Activity_0r5s6t7">
+        <dc:Bounds x="270" y="137" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_1u8v9w0_di" bpmnElement="Event_1u8v9w0">
+        <dc:Bounds x="432" y="159" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="TextAnnotation_1g2h3j4_di" bpmnElement="TextAnnotation_1g2h3j4">
+        <dc:Bounds x="370" y="40" width="180" height="55" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Group_1n8p9q0_di" bpmnElement="Group_1n8p9q0">
+        <dc:Bounds x="250" y="110" width="140" height="130" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1a2b3c4_di" bpmnElement="Flow_1a2b3c4">
+        <di:waypoint x="215" y="177" />
+        <di:waypoint x="270" y="177" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0d5e6f7_di" bpmnElement="Flow_0d5e6f7">
+        <di:waypoint x="370" y="177" />
+        <di:waypoint x="432" y="177" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_0k5l6m7_di" bpmnElement="Association_0k5l6m7">
+        <di:waypoint x="350" y="137" />
+        <di:waypoint x="410" y="95" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

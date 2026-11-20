@@ -1,15 +1,19 @@
 package io.github.dhluong90.bpm.process.bpmn.subset;
 
 import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TextAnnotation;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
@@ -38,6 +42,10 @@ import java.util.Set;
  * layout, so it opens in BPMN modellers. Layout and foreign extensions are not part of the definition, so they are not
  * carried over from the source document.
  *
+ * <p>Text annotations, associations and groups are written after the flow elements, with the categories that hold the
+ * groups' labels after the process. They are not part of the definition either, but they are what a reader of the
+ * diagram sees, so they are kept; the generated layout puts annotations and groups in a row under the flow.
+ *
  * <p>The output is deterministic: the same process gives the same bytes. Every attribute and text value is escaped,
  * including tab, line feed and carriage return, so a value reads back exactly. Stateless and thread-safe.
  */
@@ -49,6 +57,10 @@ public final class SubsetBpmnWriter {
     private static final int LEFT = 150;
     private static final int TOP = 80;
     private static final int BACK_EDGE_MARGIN = 50;
+    private static final int ARTIFACT_WIDTH = 150;
+    private static final int ANNOTATION_HEIGHT = 60;
+    private static final int GROUP_HEIGHT = 80;
+    private static final int ARTIFACT_GAP = 50;
 
     /**
      * @param process a process in the executable subset
@@ -77,8 +89,15 @@ public final class SubsetBpmnWriter {
                         + element.getClass().getSimpleName() + ") is outside the exportable subset");
             }
         }
+        process.artifacts().forEach(artifact -> artifact(xml, artifact));
         xml.line(1, "</bpmn:process>");
-        diagram(xml, process);
+        Set<String> ids = new HashSet<>();
+        process.flowElements().forEach(e -> ids.add(e.id()));
+        process.artifacts().forEach(a -> ids.add(a.id()));
+        ids.add(process.id());
+        ids.add("Definitions_" + process.id());
+        categories(xml, process, ids);
+        diagram(xml, process, ids);
         xml.line(0, "</bpmn:definitions>");
         return xml.out.toString().getBytes(StandardCharsets.UTF_8);
     }
@@ -133,6 +152,53 @@ public final class SubsetBpmnWriter {
         xml.line(2, "</" + tag + ">");
     }
 
+    private static void artifact(Xml xml, Artifact artifact) {
+        switch (artifact) {
+            case TextAnnotation note -> {
+                String start = "<bpmn:textAnnotation id=" + attr(note.id()) + optional("textFormat", note.textFormat());
+                if (note.text() == null) {
+                    xml.line(2, start + "/>");
+                } else {
+                    xml.line(2, start + ">");
+                    xml.line(3, "<bpmn:text>" + text(note.text()) + "</bpmn:text>");
+                    xml.line(2, "</bpmn:textAnnotation>");
+                }
+            }
+            case Association a -> xml.line(2, "<bpmn:association id=" + attr(a.id()) + " associationDirection=\""
+                    + switch (a.associationDirection()) {
+                        case NONE -> "None";
+                        case ONE -> "One";
+                        case BOTH -> "Both";
+                    } + "\"" + optional("sourceRef", a.sourceRef()) + optional("targetRef", a.targetRef()) + "/>");
+            case Group g -> xml.line(2, "<bpmn:group id=" + attr(g.id()) + optional("categoryValueRef",
+                    g.categoryValueRef()) + "/>");
+        }
+    }
+
+    /**
+     * One category per category id the groups name, holding each referenced value once, in document order. A group
+     * whose reference did not resolve in the source keeps the reference and gets no category, as in the source.
+     */
+    private static void categories(Xml xml, Process process, Set<String> ids) {
+        Map<String, Map<String, String>> categories = new LinkedHashMap<>();
+        Set<String> values = new HashSet<>();
+        for (Artifact artifact : process.artifacts()) {
+            String category = artifact instanceof Group g ? SubsetBpmnReader.categoryId(g) : null;
+            if (category != null && values.add(((Group) artifact).categoryValueRef())) {
+                Group g = (Group) artifact;
+                ids.add(g.categoryValueRef());
+                categories.computeIfAbsent(category, k -> new LinkedHashMap<>()).put(g.categoryValueRef(),
+                        SubsetBpmnReader.categoryValueLabel(g));
+            }
+        }
+        for (Map.Entry<String, Map<String, String>> category : categories.entrySet()) {
+            xml.line(1, "<bpmn:category id=" + attr(unique(ids, category.getKey())) + ">");
+            category.getValue().forEach((id, label) -> xml.line(2, "<bpmn:categoryValue id=" + attr(id)
+                    + optional("value", label) + "/>"));
+            xml.line(1, "</bpmn:category>");
+        }
+    }
+
     private static void sequenceFlow(Xml xml, SequenceFlow flow) {
         String start = "<bpmn:sequenceFlow id=" + attr(flow.id()) + optional("name", flow.name())
                 + optional("sourceRef", flow.sourceRef()) + optional("targetRef", flow.targetRef());
@@ -164,7 +230,7 @@ public final class SubsetBpmnWriter {
      * Columns are the shortest distance from a start event along the sequence flows; rows follow document order
      * within a column. Nodes no start event reaches go in the column after the last one.
      */
-    private static void diagram(Xml xml, Process process) {
+    private static void diagram(Xml xml, Process process, Set<String> ids) {
         List<FlowNode> nodes = process.flowElements().stream().filter(FlowNode.class::isInstance)
                 .map(FlowNode.class::cast).toList();
         List<SequenceFlow> flows = process.flowElements().stream().filter(SequenceFlow.class::isInstance)
@@ -181,11 +247,20 @@ public final class SubsetBpmnWriter {
             boxes.put(node.id(), new Box(cellX + (100 - size[0]) / 2, cellY + (80 - size[1]) / 2, size[0], size[1]));
         }
         int bottom = boxes.values().stream().mapToInt(b -> b.y() + b.height()).max().orElse(TOP);
-
-        Set<String> ids = new HashSet<>();
-        process.flowElements().forEach(e -> ids.add(e.id()));
-        ids.add(process.id());
-        ids.add("Definitions_" + process.id());
+        Map<String, Box> artifactBoxes = new LinkedHashMap<>();
+        int artifactX = LEFT;
+        for (Artifact artifact : process.artifacts()) {
+            int height = switch (artifact) {
+                case TextAnnotation t -> ANNOTATION_HEIGHT;
+                case Group g -> GROUP_HEIGHT;
+                case Association a -> 0;
+            };
+            if (height > 0) {
+                artifactBoxes.put(artifact.id(), new Box(artifactX, bottom + 2 * BACK_EDGE_MARGIN, ARTIFACT_WIDTH,
+                        height));
+                artifactX += ARTIFACT_WIDTH + ARTIFACT_GAP;
+            }
+        }
         xml.line(1, "<bpmndi:BPMNDiagram id=" + attr(unique(ids, "Diagram_" + process.id())) + ">");
         xml.line(2, "<bpmndi:BPMNPlane id=" + attr(unique(ids, "Plane_" + process.id())) + " bpmnElement="
                 + attr(process.id()) + ">");
@@ -194,6 +269,14 @@ public final class SubsetBpmnWriter {
             String marker = node instanceof ExclusiveGateway ? " isMarkerVisible=\"true\"" : "";
             xml.line(3, "<bpmndi:BPMNShape id=" + attr(unique(ids, node.id() + "_di")) + " bpmnElement="
                     + attr(node.id()) + marker + ">");
+            xml.line(4, "<dc:Bounds x=\"" + b.x() + "\" y=\"" + b.y() + "\" width=\"" + b.width() + "\" height=\""
+                    + b.height() + "\"/>");
+            xml.line(3, "</bpmndi:BPMNShape>");
+        }
+        for (Map.Entry<String, Box> shape : artifactBoxes.entrySet()) {
+            Box b = shape.getValue();
+            xml.line(3, "<bpmndi:BPMNShape id=" + attr(unique(ids, shape.getKey() + "_di")) + " bpmnElement="
+                    + attr(shape.getKey()) + ">");
             xml.line(4, "<dc:Bounds x=\"" + b.x() + "\" y=\"" + b.y() + "\" width=\"" + b.width() + "\" height=\""
                     + b.height() + "\"/>");
             xml.line(3, "</bpmndi:BPMNShape>");
@@ -209,6 +292,23 @@ public final class SubsetBpmnWriter {
             for (int[] point : waypoints(source, target, bottom + BACK_EDGE_MARGIN)) {
                 xml.line(4, "<di:waypoint x=\"" + point[0] + "\" y=\"" + point[1] + "\"/>");
             }
+            xml.line(3, "</bpmndi:BPMNEdge>");
+        }
+        // An association is drawn between the centres of its ends; one whose end has no shape (a sequence flow, for
+        // example) is kept in the process but not drawn.
+        for (Artifact artifact : process.artifacts()) {
+            if (!(artifact instanceof Association a)) {
+                continue;
+            }
+            Box source = a.sourceRef() == null ? null : boxes.getOrDefault(a.sourceRef(), artifactBoxes.get(a.sourceRef()));
+            Box target = a.targetRef() == null ? null : boxes.getOrDefault(a.targetRef(), artifactBoxes.get(a.targetRef()));
+            if (source == null || target == null) {
+                continue;
+            }
+            xml.line(3, "<bpmndi:BPMNEdge id=" + attr(unique(ids, a.id() + "_di")) + " bpmnElement=" + attr(a.id())
+                    + ">");
+            xml.line(4, "<di:waypoint x=\"" + source.centreX() + "\" y=\"" + source.centreY() + "\"/>");
+            xml.line(4, "<di:waypoint x=\"" + target.centreX() + "\" y=\"" + target.centreY() + "\"/>");
             xml.line(3, "</bpmndi:BPMNEdge>");
         }
         xml.line(2, "</bpmndi:BPMNPlane>");
