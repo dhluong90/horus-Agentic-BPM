@@ -1,0 +1,10 @@
+# Refused at import (RLE-005): one cell compares a USD amount with a VND amount.
+schemaVersion: 1
+ruleSet: mixed-currency
+hitPolicy: first
+inputs:
+  - { name: balance, type: money }
+outputs:
+  - { name: review, type: boolean }
+rules:
+  - { id: R1, when: { balance: "balance + 5 USD >= 50000000 VND" }, then: { review: true } }

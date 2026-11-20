@@ -9,6 +9,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -223,6 +225,40 @@ class RuleLifecycleFailurePathsIT {
         assertThat(jdbc.sql("SELECT outcome || ' ' || coalesce(outputs::text, 'no-outputs') || ' ' || matched_rule_ids::text "
                 + "FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id").param("id", decisionId).query(String.class).single())
                 .isEqualTo("EVALUATION_ERROR no-outputs []");
+    }
+
+    @Test
+    void RLE_005_a_currency_mismatch_between_literals_is_refused_at_import() throws Exception {
+        // Given a cell that adds 5 USD to a balance and compares it with 50,000,000 VND
+        byte[] yaml = Files.readAllBytes(Path.of("src/test/resources/rules/mixed-currency.yaml"));
+
+        // When
+        Reply reply = send("alice", "POST", "/rule-sets", yaml, "application/yaml", null);
+
+        // Then 422 VALIDATION_FAILED on R1, balance, and nothing stored
+        assertThat(reply.status()).isEqualTo(422);
+        assertThat(reply.json().path("code").asString()).isEqualTo("VALIDATION_FAILED");
+        assertThat(reply.json().path("violations").get(0).path("ruleId").asString()).isEqualTo("R1");
+        assertThat(reply.json().path("violations").get(0).path("message").asString())
+                .contains("mixes the currencies USD and VND");
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_rule_set WHERE tenant_id = 'bank-a' AND name = 'mixed-currency'")
+                .query(Long.class).single()).isZero();
+    }
+
+    @Test
+    void RLE_006_the_null_check_example_matches_the_feel_rows_over_rest() throws Exception {
+        // Given the shipped example null-check.yaml
+        publish("null-check", Files.readAllBytes(Path.of("src/main/resources/rules/null-check.yaml")));
+
+        // When income and tier are missing
+        Reply reply = evaluate("null-check", "{\"inputs\":{\"income\":null,\"tier\":null}}");
+
+        // Then R2, R3, R5 and R7 match, and the decision is logged as OK
+        assertThat(reply.status()).isEqualTo(200);
+        assertThat(reply.json().path("matchedRuleIds").toString()).isEqualTo("[\"R2\",\"R3\",\"R5\",\"R7\"]");
+        assertThat(reply.json().path("outputs").path("hit").toString()).isEqualTo("[\"R2\",\"R3\",\"R5\",\"R7\"]");
+        assertThat(jdbc.sql("SELECT outcome FROM rle_decision WHERE tenant_id = 'bank-a' AND id = :id")
+                .param("id", reply.json().path("decisionId").asString()).query(String.class).single()).isEqualTo("OK");
     }
 
     // ---------------------------------------------------------------- RLE-009, RLE-011, RLE-014

@@ -13,10 +13,11 @@ import java.util.function.ToIntFunction;
  * Hand-written lexer and recursive-descent parser of {@code urn:horus-bpm:expr:v1} (ADR-0003). No
  * reflection, no scripting; the only calls are the constant literals {@code date('...')} and
  * {@code datetime('...')}, the clock readings {@code today()} and {@code now()}, which take no argument and are
- * bound to the slots the resolver names {@code today()} and {@code now()} (-1 when it has none), and the bounded
+ * bound to the slots the resolver names {@code today()} and {@code now()} (-1 when it has none), the bounded
  * regular expression search {@code matches(text, 'pattern')}, whose pattern is a string literal compiled here,
- * once (TR-SEC-02). In a condition cell, {@code matches('pattern')} tests the cell's own input. Identifiers are
- * bound to input slots at parse time; an unknown identifier is a parse error.
+ * once (TR-SEC-02), and the closed set of pure functions {@code round} and {@code daysBetween}. In a condition
+ * cell, {@code matches('pattern')} tests the cell's own input. Identifiers are bound to input slots at parse time;
+ * an unknown identifier or function is a parse error.
  *
  * <pre>
  * or         = and { "or" and }
@@ -29,7 +30,8 @@ import java.util.function.ToIntFunction;
  * unary      = "-" unary | primary
  * primary    = number [CURRENCY] | string | "true" | "false" | "null" | identifier | "(" or ")" | list
  *            | "date" "(" string ")" | "datetime" "(" string ")" | "today" "(" ")" | "now" "(" ")"
- *            | "matches" "(" [ or "," ] string ")"
+ *            | "matches" "(" [ or "," ] string ")" | call
+ * call       = ("round" | "daysBetween") "(" or "," or ")"
  * list       = "[" [ or { "," or } ] "]"
  * </pre>
  */
@@ -40,6 +42,9 @@ public final class Parser {
 
     /** Deepest nesting accepted. */
     public static final int MAX_DEPTH = 64;
+
+    /** Largest scale of {@code round}, either way: the 34 digits of {@code DECIMAL128}. */
+    public static final int MAX_SCALE = 34;
 
     private final String source;
     private final ToIntFunction<String> slots;
@@ -241,7 +246,7 @@ public final class Parser {
                             return matches(token);
                         }
                         if (peek().kind() == Kind.LPAREN) {
-                            throw new ExpressionException("Unknown function '" + token.text() + "'", token.position());
+                            return call(token);
                         }
                         int slot = slots.applyAsInt(token.text());
                         if (slot < 0) {
@@ -283,6 +288,47 @@ public final class Parser {
             throw new ExpressionException("Invalid " + function.text() + " literal '" + argument.text() + "'",
                     argument.position());
         }
+    }
+
+    /** A call of {@code round} or {@code daysBetween}; any other name is refused. */
+    private Expr call(Token name) {
+        Expr.Function function = null;
+        for (Expr.Function candidate : Expr.Function.values()) {
+            if (candidate.text().equals(name.text())) {
+                function = candidate;
+            }
+        }
+        if (function == null) {
+            throw new ExpressionException("Unknown function '" + name.text() + "'", name.position());
+        }
+        expect(Kind.LPAREN, "(");
+        List<Expr> args = new ArrayList<>();
+        if (peek().kind() != Kind.RPAREN) {
+            do {
+                args.add(or());
+            } while (accept(Kind.COMMA));
+        }
+        expect(Kind.RPAREN, ")");
+        if (args.size() != 2) {
+            throw new ExpressionException(name.text() + " takes 2 arguments, found " + args.size(), name.position());
+        }
+        if (function == Expr.Function.ROUND && args.get(1) instanceof Expr.Literal literal
+                && literal.value() instanceof BigDecimal scale && !isScale(scale)) {
+            throw new ExpressionException("round: the scale must be a whole number from -" + MAX_SCALE + " to "
+                    + MAX_SCALE + ", found " + scale.toPlainString(), name.position());
+        }
+        return new Expr.Call(function, args);
+    }
+
+    /**
+     * Tells whether a number is a scale {@code round} accepts: a whole number within plus or minus {@value #MAX_SCALE}.
+     *
+     * @param scale the number
+     * @return true when it is
+     */
+    public static boolean isScale(BigDecimal scale) {
+        return (scale.signum() == 0 || scale.stripTrailingZeros().scale() <= 0)
+                && scale.abs().compareTo(BigDecimal.valueOf(MAX_SCALE)) <= 0;
     }
 
     /** {@code today()} or {@code now()}: no argument, bound to the clock slot the resolver gives. */
