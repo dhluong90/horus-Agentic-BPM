@@ -184,6 +184,23 @@ public interface ProcessStore {
 
     void appendHistory(String tenant, String instanceId, String definitionId, List<HistoryEntry> entries);
 
+    /**
+     * @param tenant tenant
+     * @param instanceId instance
+     * @param eventType a history event type, for example {@code ASYNC_RESULT_REFUSED}
+     * @return the distinct actors of the instance's history entries of that type
+     */
+    java.util.Set<String> historyActors(String tenant, String instanceId, String eventType);
+
+    /**
+     * @param tenant tenant
+     * @param instanceId instance
+     * @param taskId a task of the instance
+     * @return the async job whose refused result the task reviews ({@code STEP_ROUTED_TO_REVIEW}), or empty for an
+     *     ordinary user task
+     */
+    Optional<String> reviewedJob(String tenant, String instanceId, String taskId);
+
     Optional<IdempotencyRecord> idempotency(String tenant, String operation, String key, Instant now);
 
     /**

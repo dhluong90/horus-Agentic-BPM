@@ -76,6 +76,7 @@ ServiceAdapter creditBureau(BureauClient client) {
 | `horus.bpm.processes.runners.<kind>.slots` | `adapters.executor-threads` | Calls of one async kind (`async-service`, `async-agent`) in flight per copy; each kind has its own slots and claim, so one never delays the other |
 | `horus.bpm.processes.runners.<kind>.default-timeout`, `.max-attempts`, `.retry-backoff` | `adapters.default-timeout`, `jobs.max-attempts`, `jobs.retry-backoff` | Timeout, attempts and back-off of that kind |
 | `horus.bpm.processes.runners.<kind>.guard-budget` | `500ms` | Longest output-schema and guardrail check of an agent result in its result transaction; a slower check refuses the result |
+| `horus.bpm.processes.runners.<kind>.schema-retries` | `1` (agent), `0` (service) | Fresh attempts for a result that breaks its output schema before it is refused with `AGENT_SCHEMA_INVALID`; counted apart from `max-attempts`, `0` to `5` |
 | `horus.bpm.processes.adapters.completer-roles` | none | Per adapter name, the roles that may complete its steps through the completion API, for example `completer-roles: { "[creditBureau.score]": [ROLE_BUREAU_CALLBACK] }`. An adapter without an entry cannot be completed from outside; a name that is no registered adapter stops start-up |
 | `horus.bpm.processes.jobs.lease-margin` | `30s` | Added to the timeout to give the lease, so a live attempt is never taken over |
 

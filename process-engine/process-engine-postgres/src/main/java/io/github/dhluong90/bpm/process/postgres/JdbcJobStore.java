@@ -125,6 +125,16 @@ public final class JdbcJobStore implements JobStore {
     }
 
     @Override
+    public boolean retrySchema(String tenant, String id, String replicaId, int attempt, Instant retryAt) {
+        return jdbc.sql("UPDATE pre_timer SET status = 'DUE', next_fire_at = ?, locked_by = NULL, locked_until = NULL, "
+                        + "max_attempts = max_attempts + 1, payload = jsonb_set(payload, '{" + SCHEMA_RETRIES + "}', "
+                        + "to_jsonb(COALESCE((payload ->> '" + SCHEMA_RETRIES + "')::int, 0) + 1)) "
+                        + "WHERE tenant_id = ? AND id = ? AND status = 'CLAIMED' AND locked_by = ? AND attempt = ?")
+                .params(ts(retryAt), tenant, id, replicaId, attempt)
+                .update() == 1;
+    }
+
+    @Override
     public int cancelJob(String tenant, String id, Instant now) {
         return jdbc.sql("UPDATE pre_timer SET status = 'CANCELLED', completed_at = ?, locked_until = NULL "
                         + "WHERE tenant_id = ? AND id = ? AND status IN ('DUE','CLAIMED')")

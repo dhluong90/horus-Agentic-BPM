@@ -20,21 +20,26 @@ import java.util.regex.Pattern;
  *   "outputSchema": { JSON Schema subset },
  *   "decision": "agent-output-guardrails",
  *   "onViolation": "route-to-human" | "fail",
- *   "reviewer": "role:compliance-reviewer",
- *   "fourEyes": true
+ *   "reviewer": "role:compliance-reviewer"
  * }
  * </pre>
+ * A review task always follows the four-eyes rule. A spec that sets {@code fourEyes} to anything but {@code true} is
+ * malformed ({@code GUARD_SPEC_INVALID}): the payload cannot switch four-eyes off.
  * <ol>
- *   <li>The output is checked against {@code outputSchema}; a violation is a failed, retryable attempt
- *       ({@code AGENT_SCHEMA_INVALID}).</li>
+ *   <li>The output is checked against {@code outputSchema}; a violation is {@link Verdict.Invalid}, retried up to the
+ *       runner's {@code schema-retries} and then refused ({@code AGENT_SCHEMA_INVALID}).</li>
  *   <li>The guardrail rule set {@code decision} is evaluated through the in-process {@link DecisionPort}, in the
  *       instance's tenant, as the engine. Its contract: output {@code allow: boolean}, optional
  *       {@code reasons: list<string>}. {@code allow == true} accepts the result.</li>
  *   <li>Everything else refuses it and fails closed: {@code allow == false} ({@code GUARDRAIL_VIOLATION}); no match,
  *       a decision error, a missing Rule Engine, an {@code allow} that is not a boolean, an exception, or a check that
  *       took longer than the runner's {@code guard-budget} ({@code GUARDRAIL_EVALUATION_ERROR}); a missing or
- *       malformed spec ({@code GUARD_SPEC_INVALID}).</li>
+ *       malformed spec ({@code GUARD_SPEC_INVALID}). The budget is checked after the schema check, so a slow schema
+ *       check never reaches the decision, and again after the decision. An in-process decision cannot be
+ *       interrupted while it runs.</li>
  * </ol>
+ * The history keeps a refused output masked ({@link #auditOutput}): a value is kept only where the output schema
+ * declares the field and does not mark it {@code mask: true}; strings, lists, maps and nesting are bounded.
  * A refused step goes to a review task for {@code reviewer} when {@code onViolation} is {@code route-to-human} (the
  * default) and a reviewer is named; otherwise its job fails. The guard calls nothing outside the JVM.
  */
@@ -52,6 +57,14 @@ final class AgentResultGuard implements ResultGuard {
     static final int MAX_REASONS = 20;
     /** Longest reason kept, in characters. */
     static final int MAX_REASON_LENGTH = 200;
+    /** Reason of a check that overran the runner's {@code guard-budget}. */
+    static final String BUDGET_EXCEEDED = "GUARD_BUDGET_EXCEEDED";
+    /** Longest string value of a refused output kept in its history entry, in characters. */
+    static final int AUDIT_MAX_STRING = 200;
+    /** Most items of a list, or entries of a nested object, of a refused output kept in its history entry. */
+    static final int AUDIT_MAX_ITEMS = 20;
+    /** Deepest nesting of a refused output kept in its history entry; anything deeper is masked. */
+    static final int AUDIT_MAX_DEPTH = 4;
 
     private static final Pattern ASSIGNEE = Pattern.compile("^(role|user|group):[A-Za-z0-9_.@-]{1,200}$");
     private static final Pattern RULE_SET = Pattern.compile("^[a-z][a-z0-9]*([.-][a-z0-9]+)*$");
@@ -73,7 +86,7 @@ final class AgentResultGuard implements ResultGuard {
 
     /** The parsed spec; {@code route} and {@code reviewer} are always set, the rest is null when malformed. */
     private record Spec(Map<String, Object> outputSchema, String decision, Route route, String reviewer,
-            boolean fourEyes, String problem) {
+            String problem) {
     }
 
     @Override
@@ -85,30 +98,38 @@ final class AgentResultGuard implements ResultGuard {
         }
         Verdict verdict;
         try {
-            verdict = evaluate(spec, request);
+            verdict = evaluate(spec, request, started, budget);
         } catch (RuntimeException e) {
             // The class only: a message may carry output values.
             verdict = refused(spec, EVALUATION_ERROR, List.of(e.getClass().getSimpleName()), List.of(), null);
         }
-        Duration took = Duration.between(started, clock.instant());
-        if (took.compareTo(budget) > 0 && !(verdict instanceof Verdict.Invalid)) {
+        if (overran(started, budget) && !(verdict instanceof Verdict.Invalid)) {
             String decisionId = switch (verdict) {
                 case Verdict.Allow a -> a.decisionId();
                 case Verdict.Refused r -> r.decisionId();
                 case Verdict.Invalid i -> null;
             };
-            return refused(spec, EVALUATION_ERROR, List.of("GUARD_BUDGET_EXCEEDED"), List.of(), decisionId);
+            return refused(spec, EVALUATION_ERROR, List.of(BUDGET_EXCEEDED), List.of(), decisionId);
         }
         return verdict;
     }
 
-    private Verdict evaluate(Spec spec, Request request) {
+    private boolean overran(Instant started, Duration budget) {
+        return Duration.between(started, clock.instant()).compareTo(budget) > 0;
+    }
+
+    private Verdict evaluate(Spec spec, Request request, Instant started, Duration budget) {
         List<String> violations = schemas.validate(spec.outputSchema(), request.output());
         if (violations == null) {
             return refused(spec, EVALUATION_ERROR, List.of("SCHEMA_VALIDATOR_NULL"), List.of(), null);
         }
         if (!violations.isEmpty()) {
-            return new Verdict.Invalid(SCHEMA_INVALID, violations);
+            return new Verdict.Invalid(SCHEMA_INVALID, violations, refused(spec, SCHEMA_INVALID, violations, List.of(),
+                    null));
+        }
+        if (overran(started, budget)) {
+            // The schema check used the budget up: the decision is not evaluated at all.
+            return refused(spec, EVALUATION_ERROR, List.of(BUDGET_EXCEEDED), List.of(), null);
         }
         if (decisions.isEmpty()) {
             return refused(spec, EVALUATION_ERROR, List.of("RULE_ENGINE_MISSING"), List.of(), null);
@@ -133,7 +154,7 @@ final class AgentResultGuard implements ResultGuard {
 
     private static Verdict.Refused refused(Spec spec, String code, List<String> reasons, List<String> ruleIds,
             String decisionId) {
-        return new Verdict.Refused(code, reasons, ruleIds, decisionId, spec.route(), spec.reviewer(), spec.fourEyes());
+        return new Verdict.Refused(code, reasons, ruleIds, decisionId, spec.route(), spec.reviewer());
     }
 
     /**
@@ -142,28 +163,78 @@ final class AgentResultGuard implements ResultGuard {
      */
     private static Spec spec(Map<String, Object> payload) {
         if (!(payload.get("guard") instanceof Map<?, ?> guard)) {
-            return new Spec(null, null, Route.FAIL, null, true, "no guard spec");
+            return new Spec(null, null, Route.FAIL, null, "no guard spec");
         }
-        boolean fourEyes = !Boolean.FALSE.equals(guard.get("fourEyes"));
         Object onViolation = guard.get("onViolation");
         if (onViolation != null && !"fail".equals(onViolation) && !"route-to-human".equals(onViolation)) {
-            return new Spec(null, null, Route.FAIL, null, fourEyes, "onViolation must be route-to-human or fail");
+            return new Spec(null, null, Route.FAIL, null, "onViolation must be route-to-human or fail");
         }
         Object reviewerValue = guard.get("reviewer");
         if (reviewerValue != null && !(reviewerValue instanceof String r && ASSIGNEE.matcher(r).matches())) {
-            return new Spec(null, null, Route.FAIL, null, fourEyes, "reviewer must be role:, user: or group: and a name");
+            return new Spec(null, null, Route.FAIL, null, "reviewer must be role:, user: or group: and a name");
         }
         String reviewer = "fail".equals(onViolation) ? null : (String) reviewerValue;
         Route route = reviewer == null ? Route.FAIL : Route.REVIEW;
+        Object fourEyes = guard.get("fourEyes");
+        if (fourEyes != null && !Boolean.TRUE.equals(fourEyes)) {
+            // The review keeps four eyes; a spec asking for less is refused, and the reviewer still sees the result.
+            return new Spec(null, null, route, reviewer, "fourEyes cannot be switched off");
+        }
         @SuppressWarnings("unchecked")
         Map<String, Object> schema = guard.get("outputSchema") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
         if (schema == null) {
-            return new Spec(null, null, route, reviewer, fourEyes, "no outputSchema");
+            return new Spec(null, null, route, reviewer, "no outputSchema");
         }
         if (!(guard.get("decision") instanceof String decision && RULE_SET.matcher(decision).matches())) {
-            return new Spec(null, null, route, reviewer, fourEyes, "no guardrail decision");
+            return new Spec(null, null, route, reviewer, "no guardrail decision");
         }
-        return new Spec(schema, decision, route, reviewer, fourEyes, null);
+        return new Spec(schema, decision, route, reviewer, null);
+    }
+
+    /**
+     * The step's output schema from the job payload, or null when the payload has none.
+     *
+     * @param payload the job payload
+     * @return the schema
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> outputSchema(Map<String, Object> payload) {
+        return payload != null && payload.get("guard") instanceof Map<?, ?> guard
+                && guard.get("outputSchema") instanceof Map<?, ?> schema ? (Map<String, Object>) schema : null;
+    }
+
+    /**
+     * Masks a refused output for its history entry. A value is kept only where the output schema declares the field
+     * and does not mark it {@code mask: true}; an undeclared field, which the schema cannot classify, is masked.
+     * Strings are cut at {@value #AUDIT_MAX_STRING} characters, lists and nested objects at {@value #AUDIT_MAX_ITEMS}
+     * entries, and anything nested deeper than {@value #AUDIT_MAX_DEPTH} levels is masked.
+     */
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> auditOutput(Map<String, Object> payload, Map<String, Object> output) {
+        Object masked = mask(outputSchema(payload), output == null ? Map.of() : output, 0, AUDIT_MAX_FIELDS);
+        // No schema, or one that masks the whole output: field names only, every value masked.
+        return masked instanceof Map<?, ?> m ? (Map<String, Object>) m : ResultGuard.super.auditOutput(payload, output);
+    }
+
+    private static Object mask(Object schema, Object value, int depth, int maxEntries) {
+        if (!(schema instanceof Map<?, ?> node) || Boolean.TRUE.equals(node.get("mask")) || depth > AUDIT_MAX_DEPTH) {
+            return MASKED;
+        }
+        return switch (value) {
+            case Map<?, ?> map -> {
+                Map<?, ?> properties = node.get("properties") instanceof Map<?, ?> p ? p : Map.of();
+                Map<String, Object> out = new java.util.LinkedHashMap<>();
+                map.entrySet().stream().limit(maxEntries).forEach(e -> out.put(String.valueOf(e.getKey()),
+                        mask(properties.get(e.getKey()), e.getValue(), depth + 1, AUDIT_MAX_ITEMS)));
+                yield out;
+            }
+            case Collection<?> items -> items.stream().limit(AUDIT_MAX_ITEMS)
+                    .map(item -> mask(node.get("items"), item, depth + 1, AUDIT_MAX_ITEMS)).toList();
+            case String text -> text.length() > AUDIT_MAX_STRING ? text.substring(0, AUDIT_MAX_STRING) : text;
+            case null -> null;
+            default -> value;
+        };
     }
 
     private static List<String> reasons(Object value) {

@@ -353,6 +353,24 @@ final class TestEngine {
         return JdbcClient.create(dataSource());
     }
 
+    /**
+     * A new, empty schema in the shared database, for tests that run the migrations themselves.
+     *
+     * @param schema the schema name, unique per test
+     * @return a data source whose connections use only that schema
+     */
+    static DataSource emptySchema(String schema) {
+        dataSource();
+        jdbc().sql("DROP SCHEMA IF EXISTS " + schema + " CASCADE").update();
+        jdbc().sql("CREATE SCHEMA " + schema).update();
+        PGSimpleDataSource ds = new PGSimpleDataSource();
+        ds.setUrl(POSTGRES.getJdbcUrl());
+        ds.setUser(POSTGRES.getUsername());
+        ds.setPassword(POSTGRES.getPassword());
+        ds.setCurrentSchema(schema);
+        return ds;
+    }
+
     /** Empties every engine table, so a sweep across tenants sees only the current test's jobs. */
     static void reset() {
         // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary

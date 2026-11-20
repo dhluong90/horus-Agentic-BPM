@@ -241,9 +241,12 @@ public record ProcessEngineProperties(
      *     to {@code jobs.retry-backoff}
      * @param guardBudget longest time the output-schema and guardrail check of a result may take in the result
      *     transaction, at most 10s; a slower check refuses the result (fails closed). Default 500ms
+     * @param schemaRetries how often a result that breaks its output schema gets a fresh attempt before it is refused
+     *     with {@code AGENT_SCHEMA_INVALID} and goes to review or fails, 0 to 5; counted apart from
+     *     {@code max-attempts}. Default 1 for agent steps and 0 for remote service steps
      */
     public record Runner(Integer slots, Duration defaultTimeout, Integer maxAttempts, Duration retryBackoff,
-            Duration guardBudget) {
+            Duration guardBudget, Integer schemaRetries) {
 
         public Runner {
             if (slots != null && (slots < 1 || slots > 1_000)) {
@@ -263,11 +266,16 @@ public record ProcessEngineProperties(
                 throw new IllegalArgumentException(
                         "horus.bpm.processes.runners.<kind>.guard-budget must be positive and at most 10s");
             }
+            if (schemaRetries != null && (schemaRetries < 0
+                    || schemaRetries > io.github.dhluong90.bpm.process.internal.service.RunnerSettings.MAX_SCHEMA_RETRIES)) {
+                throw new IllegalArgumentException("horus.bpm.processes.runners.<kind>.schema-retries must be 0 to "
+                        + io.github.dhluong90.bpm.process.internal.service.RunnerSettings.MAX_SCHEMA_RETRIES);
+            }
         }
 
         io.github.dhluong90.bpm.process.internal.service.RunnerSettings.Overrides toOverrides() {
             return new io.github.dhluong90.bpm.process.internal.service.RunnerSettings.Overrides(slots, defaultTimeout,
-                    maxAttempts, retryBackoff, guardBudget);
+                    maxAttempts, retryBackoff, guardBudget, schemaRetries);
         }
     }
 

@@ -398,6 +398,21 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public java.util.Set<String> historyActors(String tenant, String instanceId, String eventType) {
+        return java.util.Set.copyOf(jdbc.sql("SELECT DISTINCT actor_id FROM pre_history WHERE tenant_id = ? "
+                        + "AND instance_id = ? AND event_type = ? AND actor_id IS NOT NULL")
+                .params(tenant, instanceId, eventType).query(String.class).list());
+    }
+
+    @Override
+    public Optional<String> reviewedJob(String tenant, String instanceId, String taskId) {
+        return jdbc.sql("SELECT details ->> 'attemptId' FROM pre_history WHERE tenant_id = ? AND instance_id = ? "
+                        + "AND event_type = 'STEP_ROUTED_TO_REVIEW' AND details ->> 'taskId' = ? "
+                        + "ORDER BY occurred_at DESC, id DESC LIMIT 1")
+                .params(tenant, instanceId, taskId).query(String.class).optional();
+    }
+
+    @Override
     public Optional<IdempotencyRecord> idempotency(String tenant, String operation, String key, Instant now) {
         return jdbc.sql("SELECT tenant_id, operation, idempotency_key, request_hash, response_body::text AS body, expires_at "
                         + "FROM pre_idempotency WHERE tenant_id = ? AND operation = ? AND idempotency_key = ? "

@@ -27,6 +27,27 @@ interface ResultGuard {
      */
     Verdict check(Request request, java.time.Duration budget);
 
+    /** What the history keeps of a refused output when a guard has no masking of its own: no values at all. */
+    String MASKED = "***";
+
+    /**
+     * The refused output as the immutable {@code ASYNC_RESULT_REFUSED} history may keep it (DESIGN section 4.1): the
+     * guard's masking policy applied and its size bounded. The default keeps the field names and masks every value.
+     *
+     * @param payload the job payload, with the step's guard spec
+     * @param output the refused output
+     * @return the masked output; never the raw one
+     */
+    default Map<String, Object> auditOutput(Map<String, Object> payload, Map<String, Object> output) {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        (output == null ? Map.<String, Object>of() : output).keySet().stream().limit(AUDIT_MAX_FIELDS)
+                .forEach(k -> out.put(k, MASKED));
+        return out;
+    }
+
+    /** Most top-level fields of a refused output kept in its history entry. */
+    int AUDIT_MAX_FIELDS = 50;
+
     /**
      * One completed result to check.
      *
@@ -75,14 +96,19 @@ interface ResultGuard {
         }
 
         /**
-         * The result is malformed: a failed, retryable attempt; the retry policy applies (DESIGN section 4.1 step 3).
+         * The result breaks its output schema. While the runner's {@code schema-retries} are not used up, the attempt
+         * is given back for a fresh one; after that the result is refused as {@code exhausted} (DESIGN section 4.1
+         * step 3).
          *
          * @param code for example {@code AGENT_SCHEMA_INVALID}
          * @param violations what was wrong, paths and rules only, never values
+         * @param exhausted the refusal that applies once no schema retry is left: same code, the violations as
+         *     reasons, and the step's review-or-fail route
          */
-        record Invalid(String code, List<String> violations) implements Verdict {
+        record Invalid(String code, List<String> violations, Refused exhausted) implements Verdict {
             public Invalid {
                 Objects.requireNonNull(code, "code must not be null");
+                Objects.requireNonNull(exhausted, "exhausted must not be null");
                 violations = violations == null ? List.of() : List.copyOf(violations);
             }
         }
@@ -96,11 +122,11 @@ interface ResultGuard {
          * @param decisionId the guardrail decision, or null when none was logged
          * @param route where the step goes
          * @param reviewer the assignee of the review task ({@code role:}, {@code user:} or {@code group:}); null unless
-         *     the route is {@link Route#REVIEW}
-         * @param fourEyes whether the review task follows the four-eyes rule
+         *     the route is {@link Route#REVIEW}. A review task always follows the four-eyes rule: nothing in a job
+         *     payload can switch it off
          */
         record Refused(String code, List<String> reasons, List<String> ruleIds, String decisionId, Route route,
-                String reviewer, boolean fourEyes) implements Verdict {
+                String reviewer) implements Verdict {
             public Refused {
                 Objects.requireNonNull(code, "code must not be null");
                 Objects.requireNonNull(route, "route must not be null");

@@ -29,9 +29,11 @@ public record StepCompletion(String jobId, String attemptId, Outcome outcome) {
          */
         DISCARDED,
         /**
-         * The result was checked and refused (#363): it broke the step's output schema, its guardrail said no, or the
-         * guardrail could not be evaluated. Nothing of the result was accepted. A malformed result counts as a failed
-         * attempt and the retry policy applies; a refused one sends the step to a review task or fails its job.
+         * The result was checked and refused (#363), and the refusal is final: it broke the step's output schema
+         * after its schema retries were used up, its guardrail said no, or the guardrail could not be evaluated.
+         * Nothing of the result was accepted; the refusal is recorded, and the step goes to a four-eyes review task
+         * or its job fails. A malformed result that still has a schema retry is {@link #ACCEPTED}: the attempt was
+         * recorded as failed and the step gets a fresh one.
          */
         REFUSED
     }

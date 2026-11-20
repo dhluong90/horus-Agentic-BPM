@@ -96,7 +96,8 @@ public record AsyncSettings(Duration leaseMargin, Duration defaultTimeout, int e
     /**
      * The settings of one kind's runner: what the host set under {@code runners.<kind>.*}, and for every value it
      * did not set, the engine-wide key. With nothing set, every kind gets {@code adapters.executor-threads} slots,
-     * {@code adapters.default-timeout}, {@code jobs.max-attempts} and {@code jobs.retry-backoff}, as before #363.
+     * {@code adapters.default-timeout}, {@code jobs.max-attempts} and {@code jobs.retry-backoff}, as before #363, and
+     * agent steps retry a schema violation once.
      *
      * @param jobKind an async job kind
      * @param jobs the engine-wide job settings
@@ -110,7 +111,10 @@ public record AsyncSettings(Duration leaseMargin, Duration defaultTimeout, int e
                 set.defaultTimeout() != null ? set.defaultTimeout() : defaultTimeout,
                 set.maxAttempts() != null ? set.maxAttempts() : jobs.maxAttempts(),
                 set.retryBackoff() != null ? set.retryBackoff() : jobs.retryBackoff(),
-                set.guardBudget() != null ? set.guardBudget() : RunnerSettings.DEFAULT_GUARD_BUDGET);
+                set.guardBudget() != null ? set.guardBudget() : RunnerSettings.DEFAULT_GUARD_BUDGET,
+                set.schemaRetries() != null ? set.schemaRetries()
+                        : io.github.dhluong90.bpm.process.internal.store.JobStore.ASYNC_AGENT.equals(jobKind)
+                                ? RunnerSettings.DEFAULT_AGENT_SCHEMA_RETRIES : RunnerSettings.DEFAULT_SCHEMA_RETRIES);
     }
 
     /**

@@ -568,10 +568,11 @@ paths:
 
         The result is checked in the same transaction, whichever path reports it: a result reported here passes the
         same output-schema and guardrail checks as one the engine's own executor records. An agent step's result that
-        breaks its output schema, that its guardrail refuses, or whose guardrail cannot be evaluated answers
-        `REFUSED`, and nothing of it is accepted: a malformed result is a failed attempt and the retry policy applies;
-        a refused one opens a review task for the step's reviewer or fails the job. Remote `serviceTask` results have
-        no such check.
+        breaks its output schema is never accepted: while `runners.async-agent.schema-retries` (default 1) are not
+        used up, the attempt is given back for a fresh one and the answer is `ACCEPTED`, because the step is not
+        decided yet. After that, and for a result its guardrail refuses or whose guardrail cannot be evaluated, the
+        answer is `REFUSED`: the refusal is recorded and the step goes to a four-eyes review task for the step's
+        reviewer or its job fails. `REFUSED` is always final. Remote `serviceTask` results have no such check.
       parameters:
         - name: jobId
           in: path
@@ -679,7 +680,10 @@ paths:
         `409 INVALID_STATE` (claim it first), a task claimed by someone else is `403 TASK_NOT_ASSIGNED`. The caller
         must still be the assigned user, hold the assigned role or belong to the assigned group. On a four-eyes task
         the identity that started the instance or completed an earlier task of it is refused
-        (`403 SELF_APPROVAL_FORBIDDEN`, PRE-007). A stale `If-Match` is `409 VERSION_CONFLICT` and writes nothing
+        (`403 SELF_APPROVAL_FORBIDDEN`, PRE-007). The review task of a refused async result is always four-eyes,
+        and the identity that reported the refused result is refused as well. Its result must meet the step's
+        output schema (`422 FORM_VALIDATION_FAILED` with `violations`; nothing is written and the task stays
+        claimed). A stale `If-Match` is `409 VERSION_CONFLICT` and writes nothing
         (PRE-003). The result is stored in the task's result variable. The following synchronous steps run in the
         same transaction.
       parameters:
@@ -829,7 +833,7 @@ components:
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
         `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
         `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
-        `IDEMPOTENCY_KEY_REUSE_MISMATCH` or `STEP_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
+        `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED` or `FORM_VALIDATION_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
         back), with a correlation id only.
       headers:
@@ -885,9 +889,10 @@ components:
           enum: [ACCEPTED, DUPLICATE, DISCARDED, REFUSED]
           description: |
             `ACCEPTED`: recorded. `DUPLICATE`: the attempt was already completed; nothing written. `DISCARDED`: the
-            attempt is no longer current; nothing changed in the process. `REFUSED`: the result broke the step's
-            output schema or guardrail, or the guardrail could not be evaluated; nothing of it was accepted, and the
-            refusal is recorded in the history.
+            attempt is no longer current; nothing changed in the process. `REFUSED`, always final: the result broke the
+            step's output schema after its schema retries, its guardrail refused it, or the guardrail could not be
+            evaluated; nothing of it was accepted, the refusal is recorded in the history, and the step went to review
+            or its job failed. A schema violation that still has a retry is `ACCEPTED` (a failed attempt, retried).
     Money:
       type: object
       required: [currency, amount]
@@ -1100,8 +1105,8 @@ components:
             SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND, ASYNC_STEP_NOT_FOUND,
             TASK_NOT_FOUND, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
-            BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, PRECONDITION_REQUIRED,
-            DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]
+            BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
+            PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
         problems:
@@ -1109,6 +1114,12 @@ components:
           description: Present on `VALIDATION_FAILED` and `BPMN_UNSUPPORTED_ELEMENT`
           items: { $ref: '#/components/schemas/DefinitionProblemItem' }
         nodeId: { type: string, description: Present on `STEP_FAILED` }
+        violations:
+          type: array
+          description: >-
+            Present on `FORM_VALIDATION_FAILED`: each failing path and rule, for example `$.riskScore: expected
+            integer`, never a value
+          items: { type: string }
         definitionKey: { type: string, description: Present on `LAST_VERSION_IN_EFFECT` }
         version: { type: integer, description: Present on `LAST_VERSION_IN_EFFECT` }
         setting:

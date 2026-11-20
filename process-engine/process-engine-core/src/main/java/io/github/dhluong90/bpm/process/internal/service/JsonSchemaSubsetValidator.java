@@ -14,7 +14,8 @@ import java.util.Set;
  * {@code properties}, {@code required}, {@code additionalProperties} (boolean), {@code enum}, {@code const},
  * {@code minimum}, {@code maximum}, {@code exclusiveMinimum}, {@code exclusiveMaximum}, {@code minLength},
  * {@code maxLength}, {@code items}, {@code minItems} and {@code maxItems}; {@code $schema}, {@code $id},
- * {@code title}, {@code description}, {@code default} and {@code examples} are annotations. Any other keyword, for
+ * {@code title}, {@code description}, {@code default} and {@code examples} are annotations, and so is the engine's
+ * {@code mask} ({@code true} masks the field's value in the history of a refused result). Any other keyword, for
  * example {@code pattern} or {@code $ref}, is a violation: the check fails closed rather than skip a rule it cannot
  * evaluate. Nesting deeper than {@value #MAX_DEPTH} levels is a violation. Thread-safe and stateless.
  */
@@ -29,7 +30,7 @@ public final class JsonSchemaSubsetValidator implements OutputSchemaValidator {
             "const", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "minLength", "maxLength", "items",
             "minItems", "maxItems");
     private static final Set<String> ANNOTATIONS = Set.of("$schema", "$id", "title", "description", "default",
-            "examples");
+            "examples", "mask");
     private static final Set<String> TYPES = Set.of("object", "array", "string", "number", "integer", "boolean",
             "null");
 

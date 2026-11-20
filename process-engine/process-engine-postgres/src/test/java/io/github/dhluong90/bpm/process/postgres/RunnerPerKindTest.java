@@ -244,7 +244,7 @@ class RunnerPerKindTest {
                 Thread.currentThread().interrupt();
                 return new AdapterResult.Failed("INTERRUPTED", "interrupted", true);
             }
-        }), Map.of(JobStore.ASYNC_AGENT, new RunnerSettings.Overrides(2, null, null, null, null)));
+        }), Map.of(JobStore.ASYNC_AGENT, new RunnerSettings.Overrides(2, null, null, null, null, null)));
         publishGuardrails(pod);
         deploy(pod);
         List<String> assessments = new ArrayList<>();
@@ -277,8 +277,8 @@ class RunnerPerKindTest {
         // Given remote service steps limited to 5 attempts and assessor attempts retried after 4 s
         TestEngine pod = replica(TestEngine.replica("pod-1", clock).withRuleEngine(), assessor(call ->
                 new AdapterResult.Failed("ASSESSOR_UNAVAILABLE", "503", true)), Map.of(
-                JobStore.ASYNC_SERVICE, new RunnerSettings.Overrides(null, null, 5, null, null),
-                JobStore.ASYNC_AGENT, new RunnerSettings.Overrides(null, null, null, Duration.ofSeconds(4), null)));
+                JobStore.ASYNC_SERVICE, new RunnerSettings.Overrides(null, null, 5, null, null, null),
+                JobStore.ASYNC_AGENT, new RunnerSettings.Overrides(null, null, null, Duration.ofSeconds(4), null, null)));
         deploy(pod);
         String bureauLoan = bureauCheck(pod, "LOAN-2027-0801");
         String loan = assess(pod, "LOAN-2027-0802");
@@ -316,24 +316,55 @@ class RunnerPerKindTest {
     // ---- PRE-058 output schema ------------------------------------------------------------------------------
 
     @Test
-    void PRE_058_an_answer_breaking_its_output_schema_is_refused_by_the_executor() {
-        // Given the assessor answers a risk score as text
+    void PRE_058_an_answer_breaking_its_output_schema_is_retried_once_then_refused_to_review() {
+        // Given the assessor answers a risk score as text, every time
         TestEngine pod = replica("pod-1", assessor(call -> answer("high", "APPROVE")));
         publishGuardrails(pod);
         deploy(pod);
         String loan = assess(pod, "LOAN-2027-0810");
 
-        // When the executor records its answer
-        StepCompletion.Outcome outcome = pod.async.runNow(pod.async.claim(JobStore.ASYNC_AGENT, 16).get(0)).orElseThrow();
+        // When the executor records its first answer
+        StepCompletion.Outcome first = pod.async.runNow(pod.async.claim(JobStore.ASYNC_AGENT, 16).get(0)).orElseThrow();
 
-        // Then it is refused as a failed attempt, retried with back-off, and the guardrail is not evaluated
-        assertThat(outcome).isEqualTo(StepCompletion.Outcome.REFUSED);
+        // Then it gets one fresh attempt (schema-retries 1), which does not use up an attempt for technical failures
+        assertThat(first).isEqualTo(StepCompletion.Outcome.ACCEPTED);
         nothingAccepted(pod, loan);
         assertThat(detail(loan, "ASYNC_ATTEMPT_FAILED", "errorCode")).isEqualTo("AGENT_SCHEMA_INVALID");
-        assertThat(detail(loan, "ASYNC_ATTEMPT_FAILED", "retryable")).isEqualTo("true");
-        assertThat(job(loan)).containsEntry("status", "DUE").containsEntry("attempt", 1);
+        assertThat(detail(loan, "ASYNC_ATTEMPT_FAILED", "schemaRetry")).isEqualTo("1");
+        assertThat(job(loan)).containsEntry("status", "DUE").containsEntry("attempt", 1).containsEntry("max_attempts", 4);
         assertThat(tokenOn(pod, loan)).isEqualTo("assess-documents:WAITING_ASYNC");
         assertThat(decisions(loan)).isZero();
+
+        // When the retry breaks the schema again
+        clock.advance(Duration.ofMinutes(1));
+        StepCompletion.Outcome second = pod.async.runNow(pod.async.claim(JobStore.ASYNC_AGENT, 16).get(0)).orElseThrow();
+
+        // Then it is refused with AGENT_SCHEMA_INVALID and goes to the step's reviewer; the guardrail never ran
+        assertThat(second).isEqualTo(StepCompletion.Outcome.REFUSED);
+        nothingAccepted(pod, loan);
+        assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "code")).isEqualTo("AGENT_SCHEMA_INVALID");
+        assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "reasons")).isEqualTo("[\"$.riskScore: expected integer\"]");
+        assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "route")).isEqualTo("review");
+        assertThat(tokenOn(pod, loan)).isEqualTo("assess-documents:WAITING_USER");
+        assertThat(reviewTask(loan)).containsEntry("four_eyes", true);
+        assertThat(decisions(loan)).isZero();
+    }
+
+    @Test
+    void PRE_058_with_no_schema_retries_the_first_bad_answer_is_refused() {
+        TestEngine pod = replica(TestEngine.replica("pod-1", clock).withRuleEngine(),
+                assessor(call -> answer("high", "APPROVE")),
+                Map.of(JobStore.ASYNC_AGENT, new RunnerSettings.Overrides(null, null, null, null, null, 0)));
+        publishGuardrails(pod);
+        deploy(pod);
+        String loan = assess(pod, "LOAN-2027-0812", GUARD.replace("\"route-to-human\"", "\"fail\""));
+
+        StepCompletion.Outcome outcome = pod.async.runNow(pod.async.claim(JobStore.ASYNC_AGENT, 16).get(0)).orElseThrow();
+
+        assertThat(outcome).isEqualTo(StepCompletion.Outcome.REFUSED);
+        assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "code")).isEqualTo("AGENT_SCHEMA_INVALID");
+        assertThat(job(loan)).containsEntry("status", "FAILED");
+        assertThat(history(loan, "ASYNC_ATTEMPT_FAILED")).isZero();
     }
 
     @Test
@@ -352,8 +383,9 @@ class RunnerPerKindTest {
         StepCompletion completion = pod2.services.complete(call.jobId(), call.attemptId(), call.completionToken(),
                 AdapterResult.completed(Map.of("riskScore", 140, "recommendation", "APPROVE", "comment", "ok")));
 
-        // Then the completion API refuses it the same way: nothing accepted, a failed attempt, retried later
-        assertThat(completion.outcome()).isEqualTo(StepCompletion.Outcome.REFUSED);
+        // Then the completion API treats it the same way: nothing accepted, a failed attempt, retried later. The
+        // retry is not final, so the caller reads ACCEPTED, not REFUSED
+        assertThat(completion.outcome()).isEqualTo(StepCompletion.Outcome.ACCEPTED);
         nothingAccepted(pod2, loan);
         assertThat(detail(loan, "ASYNC_ATTEMPT_FAILED", "errorCode")).isEqualTo("AGENT_SCHEMA_INVALID");
         assertThat(job(loan)).containsEntry("status", "DUE");
@@ -383,6 +415,7 @@ class RunnerPerKindTest {
         assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "route")).isEqualTo("review");
         assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "output")).isEqualTo(
                 "{\"riskScore\": 85, \"recommendation\": \"APPROVE\"}");
+        assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "outputFields")).isEqualTo("2");
         assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "guardrailDecisionId")).isEqualTo(TestEngine.jdbc()
                 .sql("SELECT id FROM rle_decision WHERE correlation_id = ?").param(loan).query(String.class).single());
         assertThat(tokenOn(pod, loan)).isEqualTo("assess-documents:WAITING_USER");
@@ -540,6 +573,8 @@ class RunnerPerKindTest {
         nothingAccepted(pod1, slowLoan);
         assertThat(detail(brokenLoan, "ASYNC_RESULT_REFUSED", "reasons")).isEqualTo("[\"IllegalStateException\"]");
         assertThat(detail(slowLoan, "ASYNC_RESULT_REFUSED", "reasons")).isEqualTo("[\"GUARD_BUDGET_EXCEEDED\"]");
+        // The schema check used the budget up, so the guardrail decision was never evaluated
+        assertThat(decisions(slowLoan)).isZero();
         assertThat(tokenOn(pod1, brokenLoan)).isEqualTo("assess-documents:WAITING_USER");
         assertThat(tokenOn(pod1, slowLoan)).isEqualTo("assess-documents:WAITING_USER");
     }
@@ -559,5 +594,108 @@ class RunnerPerKindTest {
         nothingAccepted(pod, loan);
         assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "code")).isEqualTo("GUARD_SPEC_INVALID");
         assertThat(job(loan)).containsEntry("status", "FAILED");
+    }
+
+    // ---- review fixes: maker of the review, refusal never lost, reviewer answer checked, four-eyes kept ---------
+
+    @Test
+    void PRE_059_the_caller_who_submitted_a_refused_result_cannot_approve_its_review() {
+        // Given the assessor calls back later, through an account that also holds the compliance reviewer role
+        TestEngine pod = replica("pod-1", assessor(call -> new AdapterResult.Accepted()));
+        publishGuardrails(pod);
+        deploy(pod);
+        String loan = assess(pod, "LOAN-2027-0840");
+        assertThat(pod.async.runNow(pod.async.claim(JobStore.ASYNC_AGENT, 16).get(0))).isEmpty();
+        AdapterCall call = assessorCalls.get(0);
+        pod.identity.as(tenant, "integration-svc", "processes:step:complete", "processes:task:work", "processes:read");
+        pod.identity.roles = Set.of(ASSESSOR_CALLBACK, REVIEWER_ROLE);
+
+        // When it posts a risk score of 95, which the guardrail refuses, and then tries to approve the review
+        StepCompletion completion = pod.services.complete(call.jobId(), call.attemptId(), call.completionToken(),
+                answer(95, "APPROVE"));
+        String taskId = (String) reviewTask(loan).get("id");
+
+        // Then the review is four-eyes against the submitter: claim and the action list refuse it
+        assertThat(completion.outcome()).isEqualTo(StepCompletion.Outcome.REFUSED);
+        assertThat(pod.services.task(taskId).allowedActions()).isEmpty();
+        assertThatThrownBy(() -> pod.services.claim(taskId, 0, "svc-claim-review"))
+                .isInstanceOf(SelfApprovalForbiddenException.class);
+        assertThat(reviewTask(loan)).containsEntry("status", "OPEN");
+    }
+
+    @Test
+    void PRE_059_a_refusal_whose_review_task_cannot_be_created_is_recorded_and_fails_the_job() {
+        // Given the database refuses the review task of this tenant (a broken constraint, say)
+        TestEngine pod = replica("pod-1", assessor(call -> new AdapterResult.Accepted()));
+        publishGuardrails(pod);
+        deploy(pod);
+        String loan = assess(pod, "LOAN-2027-0841");
+        assertThat(pod.async.runNow(pod.async.claim(JobStore.ASYNC_AGENT, 16).get(0))).isEmpty();
+        AdapterCall call = assessorCalls.get(0);
+        TestEngine.jdbc().sql("CREATE OR REPLACE FUNCTION test_refuse_review() RETURNS trigger LANGUAGE plpgsql AS "
+                + "$$ BEGIN RAISE EXCEPTION 'review task refused by test'; END $$").update();
+        TestEngine.jdbc().sql("CREATE TRIGGER test_refuse_review BEFORE INSERT ON pre_task FOR EACH ROW "
+                + "WHEN (NEW.tenant_id = '" + tenant + "') EXECUTE FUNCTION test_refuse_review()").update();
+        StepCompletion completion;
+        try {
+            // When the callback reports a refused answer
+            completion = pod.services.complete(call.jobId(), call.attemptId(), call.completionToken(),
+                    answer(85, "APPROVE"));
+        } finally {
+            TestEngine.jdbc().sql("DROP TRIGGER test_refuse_review ON pre_task").update();
+        }
+
+        // Then the caller reads REFUSED, the refusal is in the history, and the job failed instead of retrying
+        assertThat(completion.outcome()).isEqualTo(StepCompletion.Outcome.REFUSED);
+        nothingAccepted(pod, loan);
+        assertThat(history(loan, "ASYNC_RESULT_REFUSED")).isEqualTo(1);
+        assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "code")).isEqualTo("GUARDRAIL_VIOLATION");
+        assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "route")).isEqualTo("incident");
+        assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "routeError")).isEqualTo("STEP_RUN_FAILED");
+        assertThat(job(loan)).containsEntry("status", "FAILED");
+        assertThat(tasks(loan)).isZero();
+        assertThat(pod.services.complete(call.jobId(), call.attemptId(), call.completionToken(),
+                answer(20, "APPROVE")).outcome()).isEqualTo(StepCompletion.Outcome.DISCARDED);
+    }
+
+    @Test
+    void PRE_059_the_reviewers_answer_must_meet_the_output_schema() {
+        TestEngine pod = replica("pod-1", assessor(call -> answer(85, "APPROVE")));
+        publishGuardrails(pod);
+        deploy(pod);
+        String loan = assess(pod, "LOAN-2027-0842");
+        pod.async.runNow(pod.async.claim(JobStore.ASYNC_AGENT, 16).get(0)).orElseThrow();
+        String taskId = (String) reviewTask(loan).get("id");
+        pod.identity.as(tenant, "thu", "processes:task:work", "processes:read");
+        pod.identity.roles = Set.of(REVIEWER_ROLE);
+        TaskView claimed = pod.services.claim(taskId, 0, "thu-claim");
+
+        // When the reviewer completes with no risk score and an extra field
+        assertThatThrownBy(() -> pod.services.complete(taskId, Map.of("recommendation", "REFER", "note", "ok"),
+                claimed.lockVersion(), "thu-complete-1"))
+                .isInstanceOfSatisfying(io.github.dhluong90.bpm.process.api.FormValidationException.class, e ->
+                        assertThat(e.violations()).contains("$.note: not allowed"));
+
+        // Then nothing moved; a valid answer completes the step
+        assertThat(reviewTask(loan)).containsEntry("status", "CLAIMED");
+        assertThat(tokenOn(pod, loan)).isEqualTo("assess-documents:WAITING_USER");
+        ProcessInstance after = pod.services.complete(taskId, Map.of("riskScore", 85, "recommendation", "REFER"),
+                claimed.lockVersion(), "thu-complete-2");
+        assertThat(after.variables()).containsEntry("assessment", Map.of("riskScore", 85L, "recommendation", "REFER"));
+    }
+
+    @Test
+    void PRE_059_a_payload_cannot_switch_four_eyes_off() {
+        TestEngine pod = replica("pod-1", assessor(call -> answer(20, "APPROVE")));
+        publishGuardrails(pod);
+        deploy(pod);
+        String loan = assess(pod, "LOAN-2027-0843", GUARD.replace("\"reviewer\"", "\"fourEyes\": false, \"reviewer\""));
+
+        StepCompletion.Outcome outcome = pod.async.runNow(pod.async.claim(JobStore.ASYNC_AGENT, 16).get(0)).orElseThrow();
+
+        assertThat(outcome).isEqualTo(StepCompletion.Outcome.REFUSED);
+        nothingAccepted(pod, loan);
+        assertThat(detail(loan, "ASYNC_RESULT_REFUSED", "code")).isEqualTo("GUARD_SPEC_INVALID");
+        assertThat(reviewTask(loan)).containsEntry("four_eyes", true);
     }
 }

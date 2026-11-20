@@ -41,13 +41,15 @@ Since 0.2.0 a `serviceTask` with `horus:mode="remote"` (and an optional `horus:t
 
 Each async job kind has its own runner: remote service steps (`ASYNC_SERVICE`) and agent steps (`ASYNC_AGENT`) each get their own slots, default timeout, attempts and back-off under `horus.bpm.processes.runners.async-service.*` and `runners.async-agent.*`. Each kind is claimed separately, up to its own free slots, so five slow agent calls on two agent slots never hold up a credit bureau call. Every value you do not set falls back to `adapters.executor-threads`, `adapters.default-timeout`, `jobs.max-attempts` and `jobs.retry-backoff`; with nothing set, the engine behaves as before. Timers keep `jobs.*`.
 
-The engine checks a result where it records it, so a result sent through the completion API is checked like one from the engine's own executor. Remote service results have no check. An agent step's answer is validated against its output schema and then judged by its guardrail rule set (output `allow`, optional `reasons`), in the result transaction and in-process, within `runners.async-agent.guard-budget` (default `500ms`). The completion API answers `REFUSED` when:
+The engine checks a result where it records it, so a result sent through the completion API is checked like one from the engine's own executor. Remote service results have no check. An agent step's answer is validated against its output schema and then judged by its guardrail rule set (output `allow`, optional `reasons`), in the result transaction and in-process, within `runners.async-agent.guard-budget` (default `500ms`).
 
-- the answer breaks its schema: the attempt failed and is retried (`AGENT_SCHEMA_INVALID`);
+An answer that breaks its schema gets a fresh attempt, up to `runners.async-agent.schema-retries` (default `1`), without using up `max-attempts`; the completion API answers `ACCEPTED` for it, because the step is not decided yet. The completion API answers `REFUSED`, which is always final, when:
+
+- the answer still breaks its schema after the schema retries (`AGENT_SCHEMA_INVALID`);
 - the guardrail says `allow: false` (`GUARDRAIL_VIOLATION`);
 - the guardrail cannot decide, because the rule set is missing, nothing matched, it failed, it overran the budget or there is no Rule Engine (`GUARDRAIL_EVALUATION_ERROR`).
 
-In the last two cases nothing of the answer is accepted. The step moves to a review task for the step's reviewer, a four-eyes task the instance's starter cannot take, and the reviewer's answer completes the step. With `onViolation: fail`, or without a reviewer, the job fails instead.
+Nothing of a refused answer is accepted. The refusal is recorded in the history with the answer masked: only fields the output schema declares, and does not mark `mask: true`, keep their values. The step moves to a review task for the step's reviewer. It is always four-eyes: neither the instance's starter nor the caller who submitted the refused answer can take it, and the job payload cannot switch it off. The reviewer's answer must meet the output schema (`422 FORM_VALIDATION_FAILED`) and then completes the step. With `onViolation: fail`, or without a reviewer, the job fails instead. If the review task cannot be created, the refusal is still recorded and the job fails.
 
 ```java
 public interface ServiceAdapter {
