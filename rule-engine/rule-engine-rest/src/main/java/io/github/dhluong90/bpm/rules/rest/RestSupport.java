@@ -103,37 +103,7 @@ final class RestSupport {
     }
 
     static ObjectNode historyEntry(VersionHistoryEntry entry) {
-        ObjectNode node = EngineJson.NODES.objectNode();
-        node.put("action", entry.action().name());
-        node.set("fromStatus", EngineValues.value(entry.fromStatus() == null ? null : entry.fromStatus().name()));
-        node.put("toStatus", entry.toStatus().name());
-        node.put("actor", entry.actor());
-        node.set("reason", EngineValues.value(entry.reason()));
-        if (entry.action() == io.github.dhluong90.bpm.rules.api.LifecycleAction.RETIRED) {
-            // Only a retirement has these: by hand (approvalMode single) or superseded (system, supersededBy).
-            node.set("supersededBy", entry.supersededBy() == null
-                    ? EngineJson.NODES.nullNode() : EngineJson.NODES.numberNode(entry.supersededBy()));
-            node.set("approvalMode", EngineValues.value(entry.approvalMode()));
-            node.set("noVersionInEffect", entry.noVersionInEffect() == null
-                    ? EngineJson.NODES.nullNode() : EngineJson.NODES.booleanNode(entry.noVersionInEffect()));
-        }
-        if (entry.copiedFrom() != null) {
-            node.put("copiedFrom", entry.copiedFrom());
-        }
-        node.put("lockVersion", entry.lockVersion());
-        node.put("occurredAt", entry.occurredAt().toString());
-        if (entry.canonicalHash() != null) {
-            node.put("canonicalHash", entry.canonicalHash());
-            node.put("previousCanonicalHash", entry.previousCanonicalHash());
-        }
-        if (entry.action() == io.github.dhluong90.bpm.rules.api.LifecycleAction.APPROVED) {
-            // RLE-053: always present on an approval, empty when nothing needed an acknowledgement.
-            ArrayNode accepted = node.putArray("acknowledgedWarnings");
-            entry.acknowledgedWarnings().forEach(w -> accepted.addObject().put("code", w.code()).put("input", w.input()));
-            ArrayNode maskedByDefault = node.putArray("maskedByDefaultInputs");
-            entry.maskedByDefaultInputs().forEach(maskedByDefault::add);
-        }
-        return node;
+        return EngineValues.historyEntry(entry);
     }
 
     static <T> ObjectNode page(Page<T> page, java.util.function.Function<T, ObjectNode> item) {

@@ -85,7 +85,7 @@ class FourEyesConstraintPostgresIT {
 
         // Then: the constraint is in place and validated, and every row is kept
         assertThat(result.initialVersion()).isEqualTo("11");
-        assertThat(result.currentVersion()).isEqualTo("21");
+        assertThat(result.currentVersion()).isEqualTo("24");
         assertThat(JdbcClient.create(db).sql("""
                 SELECT convalidated FROM pg_constraint
                 WHERE conname = 'rle_version_four_eyes' AND conrelid = 'rle_version'::regclass

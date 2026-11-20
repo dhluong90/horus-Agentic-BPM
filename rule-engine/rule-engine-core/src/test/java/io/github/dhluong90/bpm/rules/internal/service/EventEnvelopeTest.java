@@ -33,7 +33,7 @@ class EventEnvelopeTest {
 
     /** Every event type with a schema file: the emitted ones, and those whose emitting features follow. */
     static final List<String> ALL_TYPES = List.of("rules.decision-log.masked-input-searched.v1",
-            "rules.decision.evaluated.v1", "rules.version.created.v1",
+            "rules.decision.evaluated.v1", "rules.evidence.exported.v1", "rules.version.created.v1",
             "rules.version.draft-updated.v1", "rules.version.publish-requested.v1", "rules.version.published.v1",
             "rules.version.rejected.v1", "rules.version.retired.v1", "rules.version.withdrawn.v1");
 

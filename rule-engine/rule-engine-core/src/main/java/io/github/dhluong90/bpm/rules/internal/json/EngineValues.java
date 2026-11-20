@@ -411,6 +411,75 @@ public final class EngineValues {
     }
 
     /**
+     * Writes one lifecycle history entry as the {@code HistoryEntry} schema of the REST contract.
+     *
+     * @param entry the entry
+     * @return the object
+     */
+    public static ObjectNode historyEntry(io.github.dhluong90.bpm.rules.api.VersionHistoryEntry entry) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("action", entry.action().name());
+        node.set("fromStatus", value(entry.fromStatus() == null ? null : entry.fromStatus().name()));
+        node.put("toStatus", entry.toStatus().name());
+        node.put("actor", entry.actor());
+        node.set("reason", value(entry.reason()));
+        if (entry.action() == io.github.dhluong90.bpm.rules.api.LifecycleAction.RETIRED) {
+            // Only a retirement has these: by hand (approvalMode single) or superseded (system, supersededBy).
+            node.set("supersededBy", entry.supersededBy() == null
+                    ? EngineJson.NODES.nullNode() : EngineJson.NODES.numberNode(entry.supersededBy()));
+            node.set("approvalMode", value(entry.approvalMode()));
+            node.set("noVersionInEffect", entry.noVersionInEffect() == null
+                    ? EngineJson.NODES.nullNode() : EngineJson.NODES.booleanNode(entry.noVersionInEffect()));
+        }
+        if (entry.copiedFrom() != null) {
+            node.put("copiedFrom", entry.copiedFrom());
+        }
+        node.put("lockVersion", entry.lockVersion());
+        node.put("occurredAt", entry.occurredAt().toString());
+        if (entry.canonicalHash() != null) {
+            node.put("canonicalHash", entry.canonicalHash());
+            node.put("previousCanonicalHash", entry.previousCanonicalHash());
+        }
+        if (entry.action() == io.github.dhluong90.bpm.rules.api.LifecycleAction.APPROVED) {
+            // RLE-053: always present on an approval, empty when nothing needed an acknowledgement.
+            ArrayNode accepted = node.putArray("acknowledgedWarnings");
+            entry.acknowledgedWarnings().forEach(w -> accepted.addObject().put("code", w.code()).put("input", w.input()));
+            ArrayNode maskedByDefault = node.putArray("maskedByDefaultInputs");
+            entry.maskedByDefaultInputs().forEach(maskedByDefault::add);
+        }
+        return node;
+    }
+
+    /**
+     * Writes one logged decision as the {@code LoggedDecision} schema of the REST contract; masked inputs stay
+     * fingerprints.
+     *
+     * @param d the decision
+     * @return the object
+     */
+    public static ObjectNode loggedDecision(io.github.dhluong90.bpm.rules.api.LoggedDecision d) {
+        ObjectNode json = EngineJson.NODES.objectNode()
+                .put("decisionId", d.decisionId())
+                .put("ruleSet", d.ruleSet())
+                .put("version", d.version())
+                .put("hitPolicy", d.hitPolicy())
+                .put("outcome", d.outcome());
+        json.put("errorCode", d.errorCode());
+        json.set("inputs", read(d.inputsJson()));
+        json.set("outputs", d.outputsJson() == null ? EngineJson.NODES.nullNode() : read(d.outputsJson()));
+        json.set("matchedRuleIds", value(d.matchedRuleIds()));
+        json.put("callerId", d.callerId());
+        json.put("onBehalfOf", d.onBehalfOf());
+        json.put("correlationId", d.correlationId());
+        json.put("evalClock", d.evalClock().toString());
+        json.put("evaluatedAt", d.evaluatedAt().toString());
+        json.put("clockChosen", d.clockChosen());
+        json.put("pinned", d.pinned());
+        json.put("durationMicros", d.durationMicros());
+        return json;
+    }
+
+    /**
      * Writes a simulation as JSON (RLE-016). It carries no generated id, so the same version, samples and clock
      * always give the same text (TR-DET-01).
      *

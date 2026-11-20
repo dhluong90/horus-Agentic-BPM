@@ -95,7 +95,7 @@ Source: [`diagrams/version-lifecycle.mmd`](diagrams/version-lifecycle.mmd).
 | `PUBLISHED`, retirement pending | `confirmRetire()` | `rules:approve`; caller is not `retire_requested_by` (`403 SELF_APPROVAL_FORBIDDEN`); `lockVersion` matches; the last-version rule is checked again, so a confirmation that would now leave no version in effect needs `confirmNoVersionInEffect: true` unless the request carried it | `RETIRED` | Same effects as the `single` row, with actor the confirmer, the requester and reason from the request, and `approval_mode = four-eyes` |
 | `PUBLISHED`, retirement pending | `cancelRetire(reason)` | `rules:approve`; reason not blank | `PUBLISHED` | Request columns cleared; history row `RETIRE_CANCELLED` |
 
-Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` for this engine and `processes` for the Process Engine. The Rule Engine emits exactly these types: `rules.version.created.v1` (a draft was imported), `rules.version.draft-updated.v1` (a draft was replaced in place, section 4.2), `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`, `rules.version.withdrawn.v1`, `rules.version.retire-requested.v1` (from M3, `four-eyes` mode), `rules.version.retired.v1` (with `approvalMode`: `single`, `four-eyes` or `system`), and `rules.decision.evaluated.v1` (off by default, `events.decision-evaluated`). A breaking payload change publishes a `.v2` type alongside `.v1`; additive fields stay in `.v1`.
+Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` for this engine and `processes` for the Process Engine. The Rule Engine emits exactly these types: `rules.version.created.v1` (a draft was imported), `rules.version.draft-updated.v1` (a draft was replaced in place, section 4.2), `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`, `rules.version.withdrawn.v1`, `rules.version.retire-requested.v1` (from M3, `four-eyes` mode), `rules.version.retired.v1` (with `approvalMode`: `single`, `four-eyes` or `system`), `rules.decision.evaluated.v1` (off by default, `events.decision-evaluated`), and `rules.evidence.exported.v1` (an evidence export, section 4.9). A breaking payload change publishes a `.v2` type alongside `.v1`; additive fields stay in `.v1`.
 
 | Event | Payload beyond the envelope (`eventId`, `eventType`, `occurredAt`, `tenantId`, `correlationId`, `causationId`, `producer`, `schemaVersion`) |
 |---|---|
@@ -108,6 +108,7 @@ Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` 
 | `rules.version.retire-requested.v1` (M3, `four-eyes` mode) | `ruleSet`, `version`, `requestedBy`, `reason`; the request instant is the envelope's `occurredAt` |
 | `rules.version.retired.v1` | `ruleSet`, `version`, `retiredBy` (`lifecycle.system-actor`, `system:supersession` by default, when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version or null), `retiredAt`, `noVersionInEffect` (PD-101, section 3.3.4), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the four-eyes requester, else null); schema `rule-engine/api/schema/rules.version.retired.v1.schema.json` |
 | `rules.decision.evaluated.v1` | `decisionId`, `ruleSet`, `version`, `outcome` (`MATCHED`, `NO_MATCH` or `FAILED`); no inputs or outputs, which stay in the decision log; schema `rule-engine/api/schema/rules.decision.evaluated.v1.schema.json` |
+| `rules.evidence.exported.v1` | `actor`, `ruleSet`, `format` (`csv` or `json`), `versions`, `decisionIds`, `contentSha256`, `bytes`; never decision inputs or outputs; not written on an idempotent replay (section 4.9, PD-116); schema `rule-engine/api/schema/rules.evidence.exported.v1.schema.json` |
 
 Envelope (0.2.0, #241). Every outbox payload carries the envelope as members next to the fields above, so the 0.1.0 fields (`eventType`, `tenantId`, `occurredAt` and, on lifecycle events, `actor`) keep their place and the additions stay within `.v1`:
 
@@ -177,6 +178,8 @@ Source: [`diagrams/retire-and-supersede.mmd`](diagrams/retire-and-supersede.mmd)
 #### 3.3.3 Lifecycle history
 
 `rle_version` holds the current state; every transition also appends one row to `rle_version_history` (section 5, migration `V3`, #147) in the transition's own transaction: `CREATED`, `REQUESTED`, `APPROVED`, `REJECTED`, `WITHDRAWN`, `RETIRED`, and `DRAFT_UPDATED` for each replacement of a draft's document (migration `V6`, with `canonical_hash` and `previous_canonical_hash`), with actor, reason or comment, the status before and after, and the `lockVersion` after; a `RETIRED` row also records `approval_mode` (`single` by hand, `system` when superseded), `no_version_in_effect` (PD-101) and, when superseded, `superseded_by`. A version rejected twice and approved on the third request keeps all three requests, both rejection reasons and the approval comment; `approval_comment` on `rle_version` is only the latest approval's copy. `GET /rule-sets/{name}/versions/{v}/history` returns the rows oldest first (`rules:read`). Migration `V3` creates the table and backfills one `CREATED` row per version that existed before it (actor `created_by`, or `system` when it was not recorded); their later transitions were not recorded and are not invented. Migration `V4` adds triggers that refuse `UPDATE`, `DELETE` and `TRUNCATE` on the table (SQLSTATE `55000`), so the trail is append-only in the database, not only by convention; hosts that separate migration and runtime roles also revoke those rights from the runtime role. During a rolling upgrade to the release with `V3`, replicas still on the old release write no history rows, so request and approval transitions made in that window are missing for good; drain lifecycle commands until every replica runs the new release if the gap matters.
+
+The rule set itself has history rows too (migration `V24`, PD-116): an evidence export appends one `EVIDENCE_EXPORTED` row with no version, no statuses and no lock version, carrying `rule_set_id`, the actor, the time and `evidence` (format, versions, decision ids, content hash, size). Checks keep the two kinds apart, so every version row still has its version, status after and lock version. The per-version history endpoint never returns rule set rows; `GET /rule-sets/{name}/history` lists them (section 4.9).
 
 #### 3.3.4 Retiring the last version in effect (PD-101, `RLE-026`)
 
@@ -319,6 +322,8 @@ Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `ru
 | `GET /rule-sets/{name}/versions` | `rules:read` | Keyset cursor by version number, newest first, same `limit`; items carry the lifecycle fields and `allowedActions`, never the definition (`RLE-040`) | `400 QUERY_INVALID`, `404 RULE_SET_NOT_FOUND` |
 | `GET /rule-sets/{name}/versions/{v}` | `rules:read` | `ETag`; `?include=source` adds `sourceFormat`, `sourceDocument` and `sourceHash` (M1, DN-01). Every version response carries `allowedActions` for the caller (`RLE-043`) | `404 VERSION_NOT_FOUND` |
 | `GET /rule-sets/{name}/versions/{v}/history` | `rules:read` | Lifecycle history rows oldest first (section 3.3.3) | `404 VERSION_NOT_FOUND` |
+| `GET /rule-sets/{name}/history` | `rules:read` | Every version newest first, signed keyset cursor by version number, same `limit`; each with its lifecycle fields and at most 100 events oldest first (`eventsTruncated`); the first page also lists at most 100 rule set events newest first (section 4.9) | `400 QUERY_INVALID`, `404 RULE_SET_NOT_FOUND` |
+| `POST /rule-sets/{name}/evidence` | `rules:read`; with `decisionIds` also `rules:log:read` | Optional `Idempotency-Key`; body `{ format, versions?, decisionIds? }` at most 16,384 bytes, at most 100 of each, at least one in all; the file, `X-Evidence-Sha256` and `Content-Digest` (section 4.9) | `400 INPUT_INVALID` (format, repeats, too many, a decision of another rule set), `403 PERMISSION_DENIED`, `404 RULE_SET_NOT_FOUND`, `404 VERSION_NOT_FOUND`, `404 DECISION_NOT_FOUND`, `413 PAYLOAD_TOO_LARGE`, `422 EVIDENCE_TOO_LARGE` |
 | `GET /rule-sets/{name}/versions/{v}/diff?base={w}` | `rules:read` | Row-level diff of two versions of one rule set (section 4.5, `RLE-028`, `RLE-048`); writes nothing | `400 INPUT_INVALID` (`base` missing or equal to `v`), `404 RULE_SET_NOT_FOUND`, `404 VERSION_NOT_FOUND` |
 | `GET /rule-sets/{name}/versions/{v}/export?format=yaml\|json` | `rules:read` | Canonical document, default `yaml` (section 4.6); `ETag: "<lockVersion>"`; writes nothing | `400 INPUT_INVALID` (other `format`), `404 VERSION_NOT_FOUND` |
 | `POST /rule-sets` (create the rule set and its version 1 from a document), `POST /rule-sets/{name}/versions` (next version from a document, or `?copyOf={v}` with no body: restore version `v` as the next draft, `RLE-062`, `RLE-063`; allowed with `authoring.cockpit-drafts` off), `PUT /rule-sets/{name}/versions/{v}` (replace a draft, `RLE-047`) | `rules:author`; on `PUT` also the draft's author | `Content-Type: application/yaml` or a DMN XML type; `Idempotency-Key` optional on `POST`; on `PUT` both `Idempotency-Key` (`400 INPUT_INVALID` without it) and `If-Match: "<lockVersion>"` (`428 PRECONDITION_REQUIRED` without it) are required; a refused document stores nothing (`RLE-033`) | `400 INPUT_INVALID` (document `ruleSet` differs from `{name}`; `copyOf` below 1 or not a number, or a body sent with it), `403 PERMISSION_DENIED` (`PUT` by another author), `404 VERSION_NOT_FOUND` (`copyOf` names no version), `403 DRAFT_AUTHORING_DISABLED` (`PUT` with `authoring.cockpit-drafts` off), `409 RULE_SET_EXISTS`, `409 INVALID_STATE` (`PUT` on a non-draft), `409 VERSION_CONFLICT`, `413 PAYLOAD_TOO_LARGE`, `422 VALIDATION_FAILED` with `violations` naming row and column, `428 PRECONDITION_REQUIRED` |
@@ -494,14 +499,58 @@ The explanation is built from the `rle_decision` row and the stored version it n
 
 | Rule | Detail |
 |---|---|
-| Contract | `matched`, `outputs` and `reasons` are the contract. Reason codes: `RULE_MATCHED`, `NO_RULE_MATCHED`, `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`, `VALUE_MISSING`, `VALUE_MASKED`, each with named parameters |
-| Language | `text` is rendered from `reasons` through a message catalogue per language, shared with the plain-language readings (CK-F-44, PD-027, PD-077): English and Vietnamese ship, `?lang=` or `Accept-Language` chooses among available catalogues, default `explain.default-language` (`en`), and a missing entry falls back to English. A host overrides or adds entries, or a whole language, by placing a catalogue resource on its classpath, with no code; a `DecisionExplainer` bean replaces the renderer entirely. `reasons` never change. The cockpit renders `reasons` with the same catalogue format and does not parse `text` |
+| Contract | `matched`, `outputs` and `reasons` are the contract. Reason codes, each with named parameters: `RULE_MATCHED` (`ruleId`, `version`), `NO_RULE_MATCHED` (`ruleSet`, `version`), `UNIQUE_HIT_VIOLATION` (`ruleIds`, `version`), `EVALUATION_ERROR` (`errorCode`, `ruleIds`, `version`), `VALUE_MISSING` and `VALUE_MASKED` (`ruleId`, `input`). `language` names the language of `text` |
+| Conditions | Per matched row: the plain cells in column order (the order of the declared inputs; the canonical document sorts cells by name), then those of its `all` and `any` groups, each with `path` (JSON Pointer into the row, `/when/any/0/tier`). `result` is `true` for a condition that had to hold; inside an `any` group it is `null`, because the log does not say which alternative held and finding out would mean evaluating again. The text words that group as "at least one of these held: ..." |
+| Row outputs | Under `first` and `unique` the decision's outputs; under `collect` the row's entry of each list output, aligned with the matched rows, while aggregated outputs (`sum`, `count`, ...) appear only in the decision's `outputs`; empty on a failed decision |
+| Language | `text` is rendered from `reasons` through a message catalogue per language, shared with the plain-language readings (CK-F-44, PD-027, PD-077): English and Vietnamese ship, `?lang=` or `Accept-Language` chooses among available catalogues, default `explain.default-language` (`en`), and a missing entry falls back to English. A host overrides or adds entries, or a whole language, with `horus-bpm/rules/explain_<language>.properties` (UTF-8, one file per language) on its class path, with no code; the starter reads them at start-up and refuses a file whose name is not `explain_<two or three lower-case letters>`, or a default language with no catalogue. A `DecisionExplainer` bean replaces the renderer entirely. Placeholders are plain `{name}` tokens, never expressions. Simple tests are worded (`>= 3` as "which is at least 3", `in [...]`, `between`, `is null`); any other test is quoted as written. Per-row templates written by authors (PD-123, RE-F-19, M3) will take precedence over the generated sentence for their row and fall back to it otherwise `reasons` never change. The cockpit renders `reasons` with the same catalogue format and does not parse `text` |
 | Numbers in `text` | Locale-neutral, as in the expression language: plain digits with no grouping, `.` as the decimal mark, money in major units with the currency code (`10000 VND`, `12.50 USD`), dates and instants in ISO 8601. Grouping such as `10,000` or `10.000` is the cockpit's job per locale. JSON fields keep canonical values (money in minor units) |
 | Masked inputs | `value` is the stored `hmac:<keyId>:<hex>`, `masked: true`, reason `VALUE_MASKED`; the plain value is never available to the engine at explain time |
 | Null inputs | `missing: true` and reason `VALUE_MISSING`; text "income has no value" |
 | No match | `matched: []`, reason `NO_RULE_MATCHED`, no outputs |
 | Failures | `UNIQUE_HIT_VIOLATION` lists every matched row (the log stores them, section 5); `EVALUATION_ERROR` names the error code and, when recorded, the row |
 | Stability | Same decision, same bytes: the version is immutable and the template is versioned with the engine; a template change ships only in a minor release and is listed in the release notes |
+
+### 4.9 Rule set history and evidence export (PD-116, #118)
+
+An auditor reads one rule set's whole history and hands over evidence that can be checked later. The engine writes the file, so it is reproducible, and the export itself is recorded, because an export of decision data is an act an auditor asks about.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Auditor (rules:read, rules:log:read)
+    participant R as RuleSetHistoryController
+    participant S as RuleSetHistoryService
+    participant D as rle_version, rle_version_history, rle_decision
+    participant O as rle_decision_outbox
+    A->>R: POST /rule-sets/card-fee/evidence {csv, versions, decisionIds}, Idempotency-Key
+    R->>R: rules:read, bounded body (16,384 bytes)
+    R->>S: exportEvidence(card-fee, request)
+    S->>S: rules:log:read when decisions are named; at most 100 of each, no repeats
+    S->>D: idempotency claim (tenant, rule-set-evidence, key)
+    alt replay with the same request
+        S-->>A: 200 the stored file, nothing written
+    end
+    S->>D: versions by number, their history, each decision by id (tenant first)
+    alt unknown version or decision, or a decision of another rule set
+        S-->>A: 404 or 400 naming it, nothing written
+    end
+    S->>S: write the file, hash its content; over 8,388,608 bytes is 422 EVIDENCE_TOO_LARGE
+    S->>D: INSERT rule set row EVIDENCE_EXPORTED (V24)
+    S->>O: INSERT rules.evidence.exported.v1
+    S->>D: record the idempotent result
+    S-->>A: 200 file, X-Evidence-Sha256, Content-Digest
+```
+
+| Rule | Detail |
+|---|---|
+| History | `GET /rule-sets/{name}/history`: one item per version, newest first, keyset-paged by version number with a signed cursor (list `rule-set-history`, scope the rule set). Each item carries status, `effectiveFrom`, `effectiveTo` (`retired_at`), `createdBy`, `requestedBy`, `approvedBy`, `approvalComment`, and `rejectedBy`, `rejectedAt` and `rejectionReason` of the latest `REJECTED` event listed, then the version's events oldest first, at most `RuleSetHistory.MAX_EVENTS_PER_VERSION` (100) with `eventsTruncated`. The events of a page come from one query over `idx_rle_version_history_version` with a window per version. The first page (no cursor) also lists the rule set's own events newest first, at most 100, through `idx_rle_version_history_rule_set` (V24) |
+| Request | `format` `csv` or `json`; `versions` at most 100 version numbers, no repeats, written ascending; `decisionIds` at most 100 ULIDs, no repeats, kept in the order sent; at least one entry in all. A decision must belong to the rule set (`400 INPUT_INVALID` naming the decision and its rule set) and to the caller's tenant (`404 DECISION_NOT_FOUND` naming it). More than 100 decisions are found with the decision search API |
+| CSV file | Header lines starting with `#`: title, rule set, tenant, exported by, exported at (engine clock), `Content SHA-256`. Then the content, RFC 4180 with CRLF: the column line `record,version,occurred_at,action,from_status,to_status,actor,reason,version_canonical_hash,decision_id,outcome,error_code,matched_rule_ids,inputs,outputs,correlation_id,eval_clock`, one `version event` line per history event and one `decision` line per decision. A cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with `'` (spreadsheet formula injection); header values have control characters replaced by spaces |
+| JSON file | `{"evidence":{ruleSet, tenantId, exportedBy, exportedAt, contentSha256},"content":{ruleSet, versions:[{version, status, canonicalHash, events}], decisions:[LoggedDecision]}}`, compact, `content` last. Numbers keep their exact text; it is not RFC 8785, which would round decimals through binary floating point |
+| Content hash | SHA-256 of the content bytes in UTF-8: in CSV everything from the column line on, in JSON the `content` value exactly as it appears in the file. It depends only on the records chosen, so the same versions and decisions give the same hash whoever exports them and whenever. `X-Evidence-Sha256` carries it; `Content-Digest` (RFC 9530) is the SHA-256 of the whole body, for checking the saved file |
+| Masking | Decisions are written as logged: masked inputs stay `hmac:<keyId>:<hex>`; the plain value is not available to the engine |
+| Record | In the export's transaction: one rule set history row `EVIDENCE_EXPORTED` (actor, time, evidence JSON) and one `rules.evidence.exported.v1` event. Every refusal happens before either is written. The idempotency record holds the whole file, so a replay returns the same bytes and writes nothing; the file limit bounds that record |
+| Limits | File at most `EngineDefaults.EVIDENCE_MAX_BYTES` (8,388,608 bytes); a chosen version with more than `EVIDENCE_MAX_EVENTS_PER_VERSION` (10,000) events is refused the same way. Both are `422 EVIDENCE_TOO_LARGE`. Not configurable (PD-116) |
 
 ### 4.8 Metrics
 
@@ -591,6 +640,17 @@ CREATE TABLE rle_version_history (
   CHECK ((action = 'DRAFT_UPDATED') = (canonical_hash IS NOT NULL AND previous_canonical_hash IS NOT NULL))  -- V6
 );
 CREATE INDEX idx_rle_version_history_version ON rle_version_history (tenant_id, version_id, occurred_at);
+-- Migration V24 (PD-116, #118): rule set rows. A Java migration outside a transaction (TR-OPS-02), every statement
+-- idempotent; the constraints are added NOT VALID and validated by separate statements.
+--   ADD COLUMN rule_set_id VARCHAR(26), FOREIGN KEY (tenant_id, rule_set_id) REFERENCES rle_rule_set (tenant_id, id)
+--   ADD COLUMN evidence JSONB                       -- { format, versions, decisionIds, contentSha256, bytes }
+--   version_id, to_status and lock_version DROP NOT NULL; action CHECK gains 'EVIDENCE_EXPORTED'
+--   CHECK rle_version_history_version_event:  version_id IS NULL OR (to_status, lock_version set, evidence null,
+--                                             action <> 'EVIDENCE_EXPORTED')
+--   CHECK rle_version_history_rule_set_event: version_id IS NOT NULL OR (action = 'EVIDENCE_EXPORTED', rule_set_id and
+--                                             an evidence object set, statuses and lock_version null)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_rle_version_history_rule_set
+  ON rle_version_history (tenant_id, rule_set_id, occurred_at DESC, id DESC) WHERE rule_set_id IS NOT NULL;
 CREATE INDEX idx_rle_version_published           -- lifecycle sweep, crosses tenants (section 3.3.2)
   ON rle_version (tenant_id, rule_set_id, version_num) WHERE status = 'PUBLISHED';
 
@@ -715,7 +775,7 @@ CREATE TABLE rle_masking_key_check (
 );
 ```
 
-Migrations must run on a direct database connection, not through PgBouncer or another pooler in transaction mode (the one exception to `TR-OPS-05`, which covers the running engine): the migrator takes Flyway's migration lock as a session advisory lock (`flyway.postgresql.transactional.lock=false`), because a `CONCURRENTLY` build such as V20 waits for every open transaction and would otherwise wait on Flyway's own lock transaction. The lock still lets one replica migrate at a time; V1 to V19 still run each in its own transaction. During a long V20 build on a large decision log, a replica waiting for the lock can run out of Flyway's lock retries (50, one second apart), fail to start and be restarted by its orchestrator; it starts normally once the build ends. On large logs, run the migration from one replica or a job before rolling out the others.
+Migrations must run on a direct database connection, not through PgBouncer or another pooler in transaction mode (the one exception to `TR-OPS-05`, which covers the running engine): the migrator takes Flyway's migration lock as a session advisory lock (`flyway.postgresql.transactional.lock=false`), because a `CONCURRENTLY` build such as V20 or V24 waits for every open transaction and would otherwise wait on Flyway's own lock transaction. The lock still lets one replica migrate at a time; V1 to V19 still run each in its own transaction. During a long V20 build on a large decision log, a replica waiting for the lock can run out of Flyway's lock retries (50, one second apart), fail to start and be restarted by its orchestrator; it starts normally once the build ends. On large logs, run the migration from one replica or a job before rolling out the others.
 
 
 Partition maintenance (`TR-OPS-04`, `RLE-017`):

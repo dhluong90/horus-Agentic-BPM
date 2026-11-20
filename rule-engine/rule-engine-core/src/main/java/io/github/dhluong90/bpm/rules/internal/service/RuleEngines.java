@@ -21,10 +21,12 @@ import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
  * @param decisionLogQuery decision log search
  * @param cache the compiled versions of this replica, shared by evaluation and approval; the host's scheduler runs
  *     {@link CompiledCache#checkEpochs()} and its notification listener calls {@link CompiledCache#evict}
+ * @param ruleSetHistory a rule set's history across its versions and the evidence export (PD-116)
  */
 public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, CursorKeys cursorKeys,
         DecisionLogService decisionLog, MaskingStartupCheck maskingCheck, LifecycleSweep lifecycleSweep,
-        DecisionLogQuery decisionLogQuery, CompiledCache cache) {
+        DecisionLogQuery decisionLogQuery, CompiledCache cache,
+        io.github.dhluong90.bpm.rules.api.RuleSetHistoryService ruleSetHistory) {
 
     /**
      * Builds the entry points with the default search bounds.
@@ -52,15 +54,32 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
      */
     public static RuleEngines create(EngineContext context, RuleStore store, DecisionLog log, EventOutbox outbox,
             DecisionQuerySettings querySettings) {
+        return create(context, store, log, outbox, querySettings, CatalogueExplainer.bundled());
+    }
+
+    /**
+     * Builds the entry points with a renderer of decision explanations (RLE-030).
+     *
+     * @param context shared engine context
+     * @param store rule set storage
+     * @param log decision log
+     * @param outbox event outbox
+     * @param querySettings bounds of decision log searches
+     * @param explainer writes the text of decision explanations
+     * @return the entry points; call {@code cursorKeys().load()} at start-up, after the migrations
+     */
+    public static RuleEngines create(EngineContext context, RuleStore store, DecisionLog log, EventOutbox outbox,
+            DecisionQuerySettings querySettings, io.github.dhluong90.bpm.rules.spi.DecisionExplainer explainer) {
+        java.util.Objects.requireNonNull(explainer, "explainer must not be null");
         CursorKeys keys = new CursorKeys(store, context.transactions(), context.clock());
         CompiledCache cache = new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions());
         Supersession supersession = new Supersession(store, outbox, context.settings());
         return new RuleEngines(new DefaultRuleEngine(context, store, log, cache),
                 new DefaultVersionService(context, store, outbox, keys, supersession, cache), keys,
-                new DefaultDecisionLogService(context, log, outbox), new MaskingStartupCheck(store, context.masking(),
+                new DefaultDecisionLogService(context, log, outbox, store, explainer), new MaskingStartupCheck(store, context.masking(),
                         context.transactions(), context.clock()),
                 new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, store, keys, querySettings),
-                cache);
+                cache, new DefaultRuleSetHistoryService(context, store, log, outbox, keys));
     }
 
     /**

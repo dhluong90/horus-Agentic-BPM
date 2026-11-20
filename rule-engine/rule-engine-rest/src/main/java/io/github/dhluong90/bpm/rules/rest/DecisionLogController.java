@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
@@ -66,6 +67,77 @@ public class DecisionLogController {
     public ResponseEntity<byte[]> get(@PathVariable("id") String id) {
         RestSupport.require(callers, "rules:log:read");
         return RestSupport.json(HttpStatus.OK, decision(decisions.get(id)));
+    }
+
+    /**
+     * {@code GET /decisions/{id}/explain}: the decision explained from its row and its stored version (RLE-030,
+     * RLE-031). {@code lang}, then {@code Accept-Language}, choose the language of {@code text}.
+     */
+    @GetMapping("/decisions/{id}/explain")
+    public ResponseEntity<byte[]> explain(
+            @PathVariable("id") String id,
+            @RequestParam(value = "lang", required = false) String lang,
+            @RequestHeader(value = HttpHeaders.ACCEPT_LANGUAGE, required = false) String acceptLanguage) {
+        RestSupport.require(callers, "rules:log:read");
+        return RestSupport.json(HttpStatus.OK, explanation(decisions.explain(id, languages(lang, acceptLanguage))));
+    }
+
+    /** The caller's languages, best first: {@code lang}, then the primary tags of {@code Accept-Language} by weight. */
+    static java.util.List<String> languages(String lang, String acceptLanguage) {
+        java.util.List<String> languages = new java.util.ArrayList<>();
+        if (lang != null && !lang.isBlank()) {
+            languages.add(lang.strip().toLowerCase(java.util.Locale.ROOT));
+        }
+        if (acceptLanguage != null && !acceptLanguage.isBlank() && acceptLanguage.length() <= 200) {
+            try {
+                for (java.util.Locale.LanguageRange range : java.util.Locale.LanguageRange.parse(acceptLanguage)) {
+                    String primary = range.getRange().split("-", 2)[0].toLowerCase(java.util.Locale.ROOT);
+                    if (range.getWeight() > 0 && !"*".equals(primary) && !languages.contains(primary)) {
+                        languages.add(primary);
+                    }
+                }
+            } catch (IllegalArgumentException malformed) {
+                // A malformed header chooses nothing; the default language applies.
+            }
+        }
+        return languages;
+    }
+
+    static ObjectNode explanation(io.github.dhluong90.bpm.rules.api.DecisionExplanation e) {
+        ObjectNode json = EngineJson.NODES.objectNode()
+                .put("decisionId", e.decisionId())
+                .put("ruleSet", e.ruleSet())
+                .put("version", e.version())
+                .put("hitPolicy", e.hitPolicy())
+                .put("outcome", e.outcome());
+        json.put("errorCode", e.errorCode());
+        json.put("clock", e.clock().toString());
+        ArrayNode matched = json.putArray("matched");
+        for (io.github.dhluong90.bpm.rules.api.DecisionExplanation.MatchedRow row : e.matched()) {
+            ObjectNode item = matched.addObject().put("ruleId", row.ruleId()).put("position", row.position());
+            ArrayNode conditions = item.putArray("conditions");
+            for (io.github.dhluong90.bpm.rules.api.DecisionExplanation.Condition c : row.conditions()) {
+                ObjectNode condition = conditions.addObject()
+                        .put("input", c.input())
+                        .put("path", c.path())
+                        .put("test", c.test());
+                condition.set("value", EngineValues.read(c.valueJson()));
+                condition.put("masked", c.masked()).put("missing", c.missing());
+                condition.set("result", c.result() == null ? EngineJson.NODES.nullNode()
+                        : EngineJson.NODES.booleanNode(c.result()));
+            }
+            item.set("outputs", EngineValues.read(row.outputsJson()));
+        }
+        json.set("outputs", e.outputsJson() == null ? EngineJson.NODES.nullNode() : EngineValues.read(e.outputsJson()));
+        ArrayNode reasons = json.putArray("reasons");
+        for (io.github.dhluong90.bpm.rules.api.DecisionExplanation.Reason r : e.reasons()) {
+            ObjectNode params = EngineJson.NODES.objectNode();
+            r.params().forEach((key, value) -> params.set(key, EngineValues.value(value)));
+            reasons.addObject().put("code", r.code()).set("params", params);
+        }
+        json.put("language", e.language());
+        json.put("text", e.text());
+        return json;
     }
 
     /**
@@ -184,24 +256,6 @@ public class DecisionLogController {
     }
 
     static ObjectNode decision(LoggedDecision d) {
-        ObjectNode json = EngineJson.NODES.objectNode()
-                .put("decisionId", d.decisionId())
-                .put("ruleSet", d.ruleSet())
-                .put("version", d.version())
-                .put("hitPolicy", d.hitPolicy())
-                .put("outcome", d.outcome());
-        json.put("errorCode", d.errorCode());
-        json.set("inputs", EngineValues.read(d.inputsJson()));
-        json.set("outputs", d.outputsJson() == null ? EngineJson.NODES.nullNode() : EngineValues.read(d.outputsJson()));
-        json.set("matchedRuleIds", EngineValues.value(d.matchedRuleIds()));
-        json.put("callerId", d.callerId());
-        json.put("onBehalfOf", d.onBehalfOf());
-        json.put("correlationId", d.correlationId());
-        json.put("evalClock", d.evalClock().toString());
-        json.put("evaluatedAt", d.evaluatedAt().toString());
-        json.put("clockChosen", d.clockChosen());
-        json.put("pinned", d.pinned());
-        json.put("durationMicros", d.durationMicros());
-        return json;
+        return EngineValues.loggedDecision(d);
     }
 }
