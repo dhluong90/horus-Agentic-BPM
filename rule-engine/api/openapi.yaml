@@ -543,7 +543,8 @@ paths:
         recomputes the `{ code, input }` pairs that need an acknowledgement: the version's warnings whose
         code is in `lifecycle.acknowledge-warnings` (default `[UNMASKED_PERSONAL_DATA]`), under the
         tenant's personal-data names and masking default in force, leaving out inputs that the tenant's
-        `decision-log.mask-default` masks. The approval is accepted only when `acknowledgedWarnings`
+        `decision-log.mask-default` masks. These are exactly the warnings the version response marks
+        `requiresAcknowledgement: true`. The approval is accepted only when `acknowledgedWarnings`
         equals that set, compared as sets (order and duplicates ignored). A missing or an extra pair is
         `409 WARNINGS_NOT_ACKNOWLEDGED`, whose `warnings` carry the full current set
         (`{ code, input, matchedName }`, empty when nothing is needed now) and whose `setting` carries
@@ -1381,7 +1382,7 @@ components:
             $ref: '#/components/schemas/VersionWarning'
     VersionWarning:
       type: object
-      required: [code, input, matchedName, message]
+      required: [code, input, matchedName, message, requiresAcknowledgement]
       properties:
         code:
           type: string
@@ -1392,11 +1393,21 @@ components:
           type: [string, 'null']
           description: The configured personal-data name the input matched, for example `national id`
         message: { type: string }
+        requiresAcknowledgement:
+          type: boolean
+          description: |
+            Whether `:approve` must list this `{ code, input }` pair in `acknowledgedWarnings`
+            (RLE-053, PD-104): the code is in `lifecycle.acknowledge-warnings` and the input is not
+            masked only by the tenant's `decision-log.mask-default`. Computed with the tenant's
+            settings at the time of the read, by the same rule the approve check applies; a client
+            shows a checkbox for exactly these warnings. A replayed response recorded before this
+            field existed reads it as `false`.
       example:
         code: UNMASKED_PERSONAL_DATA
         input: nationalId
         matchedName: national id
         message: 'Input nationalId looks like personal data (it matches "national id") but declares no mask. Its values will be stored in plain text in the decision log, which can never be changed. Declare mask: true, or mask: false if it holds no personal data.'
+        requiresAcknowledgement: true
     AllowedActions:
       type: array
       description: |

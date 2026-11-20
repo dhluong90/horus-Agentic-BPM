@@ -284,6 +284,7 @@ public final class EngineValues {
             item.put("input", warning.input());
             item.set("matchedName", value(warning.matchedName()));
             item.put("message", warning.message());
+            item.put("requiresAcknowledgement", warning.requiresAcknowledgement());
         }
         return node;
     }
@@ -323,8 +324,10 @@ public final class EngineValues {
         List<VersionWarning> result = new ArrayList<>();
         if (warnings != null) {
             for (JsonNode w : warnings) {
+                // Absent in results recorded before the engine marked warnings (RLE-053): none needed it then.
                 result.add(new VersionWarning(w.get("code").stringValue(), w.get("input").stringValue(),
-                        text(w.get("matchedName")), w.get("message").stringValue()));
+                        text(w.get("matchedName")), w.get("message").stringValue(),
+                        w.path("requiresAcknowledgement").asBoolean(false)));
             }
         }
         return result;
