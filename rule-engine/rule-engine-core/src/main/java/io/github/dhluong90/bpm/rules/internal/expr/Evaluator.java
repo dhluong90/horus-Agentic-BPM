@@ -13,13 +13,15 @@ import java.time.LocalDate;
  * and arithmetic with a null operand give null; {@code between} is {@code x >= a and x <= b}, as
  * DMN 1.5; {@code ==} and {@code !=} are two-valued; {@code in} is true when an element equals the
  * target, so a null target is in a list only when the list holds null; {@code and}, {@code or} and
- * {@code not} follow the FEEL truth tables. Mixed currencies and division by zero raise {@link EvaluationException}.
+ * {@code not} follow the FEEL truth tables. Mixed currencies and division by zero raise {@link EvaluationException}, as does
+ * a {@code matches} past one of its bounds ({@link BoundedRegex}).
  * Stateless and thread-safe.
  */
 public final class Evaluator {
 
     private final RoundingMode moneyRounding;
     private final int maxStringLength;
+    private final RegexLimits regexLimits;
 
     /**
      * Creates an evaluator with the default string bound.
@@ -37,8 +39,20 @@ public final class Evaluator {
      * @param maxStringLength the longest string {@code +} may build; longer is {@link EvaluationException}
      */
     public Evaluator(RoundingMode moneyRounding, int maxStringLength) {
+        this(moneyRounding, maxStringLength, RegexLimits.defaults());
+    }
+
+    /**
+     * Creates an evaluator with regular expression bounds.
+     *
+     * @param moneyRounding rounding of money multiplication and division
+     * @param maxStringLength the longest string {@code +} may build; longer is {@link EvaluationException}
+     * @param regexLimits the length and time bounds of {@code matches}
+     */
+    public Evaluator(RoundingMode moneyRounding, int maxStringLength, RegexLimits regexLimits) {
         this.moneyRounding = moneyRounding;
         this.maxStringLength = maxStringLength;
+        this.regexLimits = java.util.Objects.requireNonNull(regexLimits, "regexLimits must not be null");
     }
 
     /**
@@ -69,6 +83,11 @@ public final class Evaluator {
                 yield and(low, compare(Expr.BinaryOp.LE, value, evaluate(between.high(), slots)));
             }
             case Expr.IsNull isNull -> (evaluate(isNull.target(), slots) == null) != isNull.negated();
+            case Expr.Matches matches -> {
+                // FEEL: a null or non-string text gives null, which never matches.
+                Object text = evaluate(matches.target(), slots);
+                yield text instanceof String string ? BoundedRegex.find(matches.compiled(), string, regexLimits) : null;
+            }
         };
     }
 
