@@ -8,6 +8,9 @@
 /examples/pom.xml               @dhluong90
 /tools/licence-policy/          @dhluong90
 /tools/fixtures/                @dhluong90
+/tools/check-migration-order.py  @dhluong90
+/tools/test_check_migration_order.py @dhluong90
+/tools/migration-retired-versions.txt @dhluong90
 /tools/check-dependency-policy.py @dhluong90
 /tools/check-jackson-coexistence.py @dhluong90
 /tools/architecture/          @dhluong90
