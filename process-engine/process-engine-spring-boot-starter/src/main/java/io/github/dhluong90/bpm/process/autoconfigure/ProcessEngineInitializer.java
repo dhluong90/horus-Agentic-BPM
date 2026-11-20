@@ -43,6 +43,8 @@ public final class ProcessEngineInitializer implements SmartInitializingSingleto
             LOG.info("Process Engine schema at version " + migrator.currentVersion() + " (" + applied
                     + " migration(s) applied)");
         }
+        // The list cursor key, in its own short transaction outside any request (pre_engine_key, V3).
+        services.loadCursorKey();
         for (String tenant : properties.definitions().startupTenants()) {
             for (String location : properties.definitions().locations()) {
                 DefinitionVersion version = services.importAtStartup(tenant,

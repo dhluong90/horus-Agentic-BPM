@@ -39,7 +39,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class RegexBoundsPostgresIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant NOW = Instant.parse("2027-01-15T02:00:00Z");
     private static final AtomicInteger DATABASES = new AtomicInteger();
@@ -99,9 +99,9 @@ class RegexBoundsPostgresIT {
     void publish(String tenant) {
         caller.as(tenant, "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(REFERENCE_CHECK.getBytes(StandardCharsets.UTF_8)));
-        engines.versionService().requestPublish("reference-check", 1, WriteOptions.none());
+        long lock = engines.versionService().requestPublish("reference-check", 1, WriteOptions.none()).lockVersion();
         caller.as(tenant, "bob");
-        engines.versionService().approve("reference-check", 1, WriteOptions.none());
+        engines.versionService().approve("reference-check", 1, new WriteOptions(null, lock, null));
     }
 
     private static DataSource freshDatabase() {

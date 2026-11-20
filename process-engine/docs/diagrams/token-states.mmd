@@ -19,6 +19,7 @@ stateDiagram-v2
     ACTIVE --> WAITING_TIMER: timer step
     WAITING_TIMER --> ACTIVE: timer fires
     ACTIVE --> JOINED: arrives at join, instance row locked, counted per scope token
+    JOINED --> COMPLETED: set complete, one new ACTIVE token leaves the join
     ACTIVE --> COMPLETED: end of its scope
     COMPLETED --> COMPENSATED: compensation of its steps ran
     WAITING_USER --> CANCELLED: instance cancelled or migrated off the step

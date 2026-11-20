@@ -22,10 +22,13 @@ import java.time.Duration;
  * @param regexLimits {@code horus.bpm.rules.evaluation.regex-timeout-ms}, {@code regex-max-input-length},
  *     {@code regex-max-reads} and {@code regex-max-reads-per-decision} (TR-SEC-02); the length is at most
  *     {@code max-string-length}
+ * @param draftAuthoring {@code horus.bpm.rules.authoring.cockpit-drafts}: whether drafts may be replaced in place
+ *     through {@code VersionService.replaceDraft}; false (the 0.1.0 default, PD-094) refuses it with
+ *     {@code DRAFT_AUTHORING_DISABLED}
  */
 public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
         boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
-        int maxStringLength, int maxRows, RegexLimits regexLimits) {
+        int maxStringLength, int maxRows, RegexLimits regexLimits, boolean draftAuthoring) {
 
     public EngineSettings {
         if (regexLimits == null) {
@@ -75,7 +78,29 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
             int maxStringLength, int maxRows) {
         this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
                 reasonMaxLength, maxOutputBytes, maxStringLength, maxRows,
-                new RegexLimits(RegexLimits.TIMEOUT_MILLIS, Math.min(RegexLimits.MAX_INPUT_LENGTH, maxStringLength)));
+                new RegexLimits(RegexLimits.TIMEOUT_MILLIS, Math.min(RegexLimits.MAX_INPUT_LENGTH, maxStringLength)),
+                false);
+    }
+
+    /**
+     * Creates settings with draft authoring off.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     * @param queryMaxPageSize see the record
+     * @param reasonMaxLength see the record
+     * @param maxOutputBytes see the record
+     * @param maxStringLength see the record
+     * @param maxRows see the record
+     * @param regexLimits see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
+            int maxStringLength, int maxRows, RegexLimits regexLimits) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, false);
     }
 
     private static void requireLowerOnly(String property, int value, int ceiling) {
@@ -135,7 +160,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withRejectUndeclaredInputs(boolean reject) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, reject, queryMaxPageSize,
-                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits);
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring);
     }
 
     /**
@@ -151,7 +176,8 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
                 queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows,
                 regexLimits.maxInputLength() <= stringLength ? regexLimits
                         : new RegexLimits(regexLimits.timeoutMillis(), stringLength, regexLimits.maxReads(),
-                                regexLimits.maxReadsPerDecision()));
+                                regexLimits.maxReadsPerDecision()),
+                draftAuthoring);
     }
 
     /**
@@ -174,6 +200,17 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withRegexLimits(RegexLimits limits) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, limits);
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, limits, draftAuthoring);
+    }
+
+    /**
+     * Returns a copy with {@code authoring.cockpit-drafts} set.
+     *
+     * @param enabled whether drafts may be replaced in place
+     * @return the settings
+     */
+    public EngineSettings withDraftAuthoring(boolean enabled) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, enabled);
     }
 }

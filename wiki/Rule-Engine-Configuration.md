@@ -50,7 +50,7 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `idempotency.retention` | `PT24H` | Built | Lifetime of `rle_idempotency` rows, `PT1M` to `P30D`. An invalid value stops start-up |
 | `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | 0.1 (M1) | Bounds of `GET /decisions` and list reads; range and page size may be lowered, never raised |
 | `lifecycle.sweep-interval` | `PT1M` | 0.1 (M1) | How often superseded versions are marked retired; evaluation already switches at `effectiveFrom` |
-| `authoring.cockpit-drafts` | `false` | Built (published in `/meta`); refusal 0.1 (M1) | Whether the cockpit may create and edit drafts on this host; off by default in 0.1.0 (PD-094). Always published in `/api/bpm/meta` as the rules setting `authoring.cockpit-drafts`. Turn it on with `authoring.cockpit-drafts: true`, as the example host does on its `dev` profile. Import of a document, approvals and simulation are not affected. Planned for 0.1: with `false`, authors (`rules:author`) get `403 DRAFT_AUTHORING_DISABLED` when they create or edit a draft from the cockpit |
+| `authoring.cockpit-drafts` | `false` | Built (published in `/meta`); enforced on `PUT` of a draft from 0.2.0 | Whether the cockpit may create and edit drafts on this host; off by default in 0.1.0 (PD-094). Always published in `/api/bpm/meta` as the rules setting `authoring.cockpit-drafts`. Turn it on with `authoring.cockpit-drafts: true`, as the example host does on its `dev` profile. Import of a document, approvals and simulation are not affected. From 0.2.0 the engine enforces it: with `false`, replacing a draft (`PUT /rule-sets/{name}/versions/{v}`, also through the Java API) is refused with `403 DRAFT_AUTHORING_DISABLED` |
 | `readings.style` | `sentence` | 0.1 (M1) | Style of the plain-language readings of rules and of explanation `text`: `sentence` (patterns from the message catalogue) or `shorthand` (for example `tier: GOLD, PLATINUM`). If sentences miss the 8 Jan 2027 checkpoint, 0.1 accepts only `shorthand` until sentences ship. Shown in `/api/bpm/meta` as `rules.readings.style` |
 | `lifecycle.reason-required`, `lifecycle.reason-max-length` | `true`, `2000` | 0.1 (M1) | Reason on reject and retire; may be made optional for reject only |
 | `lifecycle.system-actor` | `system` | 0.1 (M1) | Actor recorded when the engine retires a superseded version |
@@ -168,7 +168,7 @@ The engine's default beans are `@ConditionalOnMissingBean`, so a host bean repla
 |---|---|
 | `rules:evaluate` | `:evaluate`, `:evaluate-batch` on published versions |
 | `rules:read` | Read rule sets, versions, diffs, exports |
-| `rules:author` | Create and edit drafts, validate, import, `:request-publish` |
+| `rules:author` | Create and edit drafts, validate, import, `:request-publish`, `:withdraw` of one's own request |
 | `rules:approve` | `:approve`, `:reject`, `:retire`. Approval by the requester is refused regardless |
 | `rules:simulate` | `:simulate`, set `clock` on `:evaluate` |
 | `rules:pin` | Evaluate one named approved version (`/versions/{v}:evaluate`). No role holds it by default; grant it only to a service identity such as the Process Engine's. A retired version is refused unless `evaluation.pin-retired` is `true` |
