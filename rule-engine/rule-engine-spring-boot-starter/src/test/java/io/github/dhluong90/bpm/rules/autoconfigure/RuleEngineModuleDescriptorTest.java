@@ -6,13 +6,19 @@ import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 
 /**
  * The rules entry the starter contributes to {@code /api/bpm/meta} and {@code /api/bpm/me} (RLE-019), and
  * the role mapping property {@code horus.bpm.rules.security.role-permissions}.
  */
+@ExtendWith(OutputCaptureExtension.class)
 class RuleEngineModuleDescriptorTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
@@ -50,13 +56,13 @@ class RuleEngineModuleDescriptorTest {
     @Test
     void PD_094_cockpit_drafts_setting_is_published_false_by_default_and_true_when_the_host_sets_it() {
         runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", false)));
+                .containsEntry("authoring.cockpit-drafts", false));
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=true")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                        .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", true)));
+                        .containsEntry("authoring.cockpit-drafts", true));
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=false")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
-                        .containsExactlyEntriesOf(Map.of("authoring.cockpit-drafts", false)));
+                        .containsEntry("authoring.cockpit-drafts", false));
     }
 
     @Test
@@ -82,5 +88,44 @@ class RuleEngineModuleDescriptorTest {
     void no_rules_entry_when_the_engine_is_disabled() {
         runner.withPropertyValues("horus.bpm.rules.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(ModuleDescriptor.class));
+    }
+
+    @Test
+    void RLE_009_meta_reports_makers_by_default_and_whatever_the_host_sets(CapturedOutput output) {
+        runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                .containsEntry("lifecycle.approver-must-differ-from", "makers"));
+        assertThat(output).doesNotContain("the Rule Engine keeps makers");
+        runner.withPropertyValues("horus.bpm.lifecycle.approver-must-differ-from=requester")
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                        .containsEntry("lifecycle.approver-must-differ-from", "makers"));
+        assertThat(output.toString().split("the Rule Engine keeps makers", -1)).hasSize(2);
+    }
+
+    @Test
+    void RLE_009_an_unknown_approver_setting_stops_start_up_naming_the_property() {
+        runner.withPropertyValues("horus.bpm.lifecycle.approver-must-differ-from=nobody")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.lifecycle.approver-must-differ-from")
+                        .hasMessageContaining("makers").hasMessageContaining("requester"));
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class HostDescriptor {
+        @Bean
+        ModuleDescriptor ruleEngineModuleDescriptor() {
+            return RuleEngineModule.descriptor(Map.of(), false);
+        }
+    }
+
+    @Test
+    void RLE_009_a_host_that_replaces_the_descriptor_still_gets_the_failure_and_the_warning(CapturedOutput output) {
+        runner.withUserConfiguration(HostDescriptor.class)
+                .withPropertyValues("horus.bpm.lifecycle.approver-must-differ-from=nobody")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.lifecycle.approver-must-differ-from"));
+        runner.withUserConfiguration(HostDescriptor.class)
+                .withPropertyValues("horus.bpm.lifecycle.approver-must-differ-from=requester")
+                .run(context -> assertThat(context).hasNotFailed());
+        assertThat(output.toString().split("the Rule Engine keeps makers", -1)).hasSize(2);
     }
 }

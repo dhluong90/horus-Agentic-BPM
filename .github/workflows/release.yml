@@ -287,7 +287,7 @@ jobs:
           Check your downloads against \`SHA256SUMS\`, in the folder that holds them:
 
           \`\`\`
-          while read -r hash path; do name="\${path##*/}"; [ -f "\$name" ] && printf '%s  %s\n' "\$hash" "\$name"; done < SHA256SUMS | shasum -a 256 -c -
+          while read -r hash path; do name="\${path##*/}"; if [ -f "\$name" ]; then printf '%s  %s\n' "\$hash" "\$name"; fi; done < SHA256SUMS | shasum -a 256 -c -
           \`\`\`
 
           Every downloaded file prints \`OK\`.
@@ -314,7 +314,7 @@ jobs:
           cmp -s "$ARCHIVE/SHA256SUMS" SHA256SUMS \
             || { echo "ERROR: the draft's SHA256SUMS differs from the checked archive's; the draft stays unpublished."; exit 1; }
           # The command the release notes give adopters, on the draft's downloads.
-          while read -r hash path; do name="${path##*/}"; [ -f "$name" ] && printf '%s  %s\n' "$hash" "$name"; done \
+          while read -r hash path; do name="${path##*/}"; if [ -f "$name" ]; then printf '%s  %s\n' "$hash" "$name"; fi; done \
             < "$ARCHIVE/SHA256SUMS" | shasum -a 256 -c - | tee "$RUNNER_TEMP/verify.log"
           checked="$(grep -c ': OK$' "$RUNNER_TEMP/verify.log")"
           [[ "$checked" == "$(( $(wc -l < "$ASSETS") - 1 ))" ]] \
