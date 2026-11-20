@@ -50,6 +50,15 @@ Lists are keyset pages:
 
 The cursor key is one random 32-byte secret per database, in `pre_engine_key`, created at start-up after the migrations. The runtime database user needs `SELECT` and `INSERT` on it.
 
+### Bounded list queries
+
+Every query of the engine store that returns more than one row is registered with its bound (`PRE-036`, ADR-0015): either a page, ordered on an index and ended by `LIMIT`, or the rows of one parent found through an index on its key, such as the tokens of one instance. The build checks this twice. An architecture test fails when a store class reads more than one row outside the registry. The query-plan check runs `EXPLAIN (FORMAT JSON)` for every registered query on a seeded PostgreSQL with sequential scans switched off, and fails on a sequential or whole-index scan of an engine table, on a page without `Limit`, or on a parent-key query whose index condition does not name its key. A `GROUP BY` over a tenant's whole `pre_history` fails both. The check runs in `mvn verify` and in its own workflow, `query-plan.yml`, on PostgreSQL 14 and 18:
+
+```bash
+mvn -B -pl process-engine/process-engine-postgres -am test \
+  -Dtest='BoundedListQueriesTest,ListQueryPlanCheckTest' -Dsurefire.failIfNoSpecifiedTests=false
+```
+
 ## Errors
 
 Every endpoint answers errors as RFC 9457 problem details with a `code`:

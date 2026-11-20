@@ -46,12 +46,12 @@ public final class JdbcJobStore implements JobStore {
 
     @Override
     public List<JobRow> claimDue(String replicaId, Instant now, int limit) {
-        return claim("NOT IN", replicaId, now, limit);
+        return claim(false, replicaId, now, limit);
     }
 
     @Override
     public List<JobRow> claimDueAsync(String replicaId, Instant now, int limit) {
-        return limit < 1 ? List.of() : claim("IN", replicaId, now, limit);
+        return limit < 1 ? List.of() : claim(true, replicaId, now, limit);
     }
 
     @Override
@@ -60,22 +60,10 @@ public final class JdbcJobStore implements JobStore {
                 .params(tenant, id).query(JdbcJobStore::job).optional();
     }
 
-    /** One claim statement; {@code kinds} is {@code IN} or {@code NOT IN} the async kinds, never caller text. */
-    private List<JobRow> claim(String kinds, String replicaId, Instant now, int limit) {
-        return jdbc.sql("WITH due AS ("
-                        + "SELECT tenant_id, id FROM pre_timer "
-                        + "WHERE status IN ('DUE','CLAIMED') AND next_fire_at <= ? "
-                        + "AND (status = 'DUE' OR locked_until <= ?) "
-                        + "AND job_kind " + kinds + " ('" + ASYNC_SERVICE + "','" + ASYNC_AGENT + "') "
-                        + "ORDER BY next_fire_at, id LIMIT ? FOR UPDATE SKIP LOCKED) "
-                        + "UPDATE pre_timer t SET status = 'CLAIMED', locked_by = ?, "
-                        + "locked_until = ?::timestamptz + t.lease_duration, attempt = t.attempt + 1 "
-                        + "FROM due WHERE t.tenant_id = due.tenant_id AND t.id = due.id "
-                        + "RETURNING t.tenant_id, t.id, t.instance_id, t.definition_id, t.token_id, t.job_kind, t.node_id, "
-                        + "t.status, t.next_fire_at, (EXTRACT(EPOCH FROM t.lease_duration) * 1000)::bigint AS lease_ms, "
-                        + "t.locked_by, t.locked_until, t.attempt, t.max_attempts, t.payload::text AS payload")
-                .params(ts(now), ts(now), limit, replicaId, ts(now))
-                .query(JdbcJobStore::job).list()
+    /** One claim statement of {@link ProcessListQueries}: the remote-step kinds or every other kind. */
+    private List<JobRow> claim(boolean async, String replicaId, Instant now, int limit) {
+        return (async ? ProcessListQueries.CLAIM_ASYNC : ProcessListQueries.CLAIM_TIMERS)
+                .list(jdbc, List.of(ts(now), ts(now), limit, replicaId, ts(now)), JdbcJobStore::job)
                 .stream().sorted((a, b) -> {
                     int byDue = a.nextFireAt().compareTo(b.nextFireAt());
                     return byDue != 0 ? byDue : a.id().compareTo(b.id());
