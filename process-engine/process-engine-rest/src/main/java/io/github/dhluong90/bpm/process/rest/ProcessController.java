@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.rest;
 
+import io.github.dhluong90.bpm.process.api.DefinitionExport;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import io.github.dhluong90.bpm.process.api.InstanceQuery;
@@ -137,6 +138,34 @@ public class ProcessController {
         InstanceQuery query = new InstanceQuery(statuses, definitionKey, instantOf("startedFrom", startedFrom),
                 instantOf("startedTo", startedTo), new PageRequest(limitOf(limit), cursor));
         return json(HttpStatus.OK, Views.page(queries.instances(query), Views::instanceSummary), null, null);
+    }
+
+    /**
+     * Exports a definition version of the caller's tenant ({@code processes:read}, PRE-034). {@code format=bpmn}
+     * returns BPMN 2.0 XML that imports back to the same {@code definitionHash}, which is also the {@code ETag}.
+     */
+    @GetMapping("/definitions/{key}/versions/{version}/export")
+    public ResponseEntity<byte[]> exportDefinition(@PathVariable("key") String key,
+            @PathVariable("version") String version, @RequestParam(value = "format", required = false) String format) {
+        if (!"bpmn".equals(format)) {
+            throw new InputInvalidException("format must be bpmn");
+        }
+        int number;
+        try {
+            number = Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException("version must be a positive whole number");
+        }
+        if (number < 1) {
+            throw new InputInvalidException("version must be a positive whole number");
+        }
+        DefinitionExport export = definitions.exportDefinition(key, number, SourceFormat.BPMN_XML);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/bpmn+xml"))
+                .header(HttpHeaders.ETAG, "\"" + export.definitionHash() + "\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + export.key() + "-v"
+                        + export.version() + ".bpmn\"")
+                .body(export.document().getBytes(StandardCharsets.UTF_8));
     }
 
     /**

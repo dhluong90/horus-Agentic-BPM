@@ -165,6 +165,43 @@ paths:
                 nodes:
                   approve: { WAITING_USER: 40 }
                   assess-documents: { WAITING_ASYNC: 7 }
+  /definitions/{key}/versions/{version}/export:
+    get:
+      tags: [definitions]
+      operationId: exportDefinition
+      summary: Export a definition version as BPMN 2.0 XML
+      description: |
+        Writes the version of the caller's tenant in the executable subset with the `horus` extension attributes and
+        a generated BPMNDI layout, so it opens in BPMN modellers. Importing the document gives the same
+        `definitionHash` (PRE-034), which is also the `ETag`. The stored source is read again and must still give
+        the recorded hash (`500 DEFINITION_INTEGRITY_FAILED` otherwise). Read-only. A version of another tenant is
+        `404 DEFINITION_NOT_FOUND`, the same answer as a missing one. Permission `processes:read`.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$', maxLength: 200 }
+          example: card-fee-review
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          example: 1
+        - name: format
+          in: query
+          required: true
+          schema: { type: string, enum: [bpmn] }
+      responses:
+        '200':
+          description: The BPMN document
+          headers:
+            ETag:
+              description: The `definitionHash` of the version, quoted
+              schema: { type: string }
+            Content-Disposition: { schema: { type: string }, example: 'attachment; filename="card-fee-review-v1.bpmn"' }
+          content:
+            application/bpmn+xml:
+              schema: { type: string }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }

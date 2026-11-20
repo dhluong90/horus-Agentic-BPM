@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
+import io.github.dhluong90.bpm.process.api.DefinitionExport;
 import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
@@ -185,6 +186,11 @@ class ProcessRestContractTest {
         @Override
         public DefinitionVersion version(String key, int version) {
             throw new DefinitionNotFoundException("No definition " + key + " v" + version);
+        }
+
+        @Override
+        public DefinitionExport exportDefinition(String key, int version, SourceFormat format) {
+            throw new DefinitionNotFoundException("No definition " + key + " version " + version + " in this tenant");
         }
     }
 

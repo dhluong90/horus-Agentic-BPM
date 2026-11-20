@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
+import io.github.dhluong90.bpm.process.api.DefinitionExport;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
@@ -287,6 +288,12 @@ class ProcessRestErrorMatrixTest {
             maybeFail();
             return new DefinitionVersion("01JD2X5K9T1Q4N8V2M7B3C6D0F", key, version, "ACTIVE", "Card fee review",
                     "a".repeat(64), SourceFormat.BPMN_XML, "b".repeat(64), 6, "minh", STARTED, STARTED, "lan", STARTED);
+        }
+
+        @Override
+        public DefinitionExport exportDefinition(String key, int version, SourceFormat format) {
+            maybeFail();
+            return new DefinitionExport(key, version, "a".repeat(64), format, "<definitions/>");
         }
 
         @Override

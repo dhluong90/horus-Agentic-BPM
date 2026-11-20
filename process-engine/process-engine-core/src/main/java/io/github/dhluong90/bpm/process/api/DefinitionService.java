@@ -1,7 +1,7 @@
 package io.github.dhluong90.bpm.process.api;
 
 /**
- * Imports process definitions. Safe for concurrent use.
+ * Imports and exports process definitions. Safe for concurrent use.
  *
  * <p>Transactions: parsing and validation run before any transaction opens; the insert joins the caller's
  * transaction when there is one. Never calls the network.
@@ -33,4 +33,20 @@ public interface DefinitionService {
      * @throws DefinitionNotFoundException when the tenant has no such version
      */
     DefinitionVersion version(String key, int version);
+
+    /**
+     * Writes a stored version of the caller's tenant as a document of the given format (PRE-034). Needs
+     * {@code processes:read}. The stored source is read again and must still give the recorded definition hash
+     * before anything is written; importing the result gives a version with the same hash. Read-only: nothing is
+     * stored and no event is published.
+     *
+     * @param key the definition key
+     * @param version the version number within the key
+     * @param format the document format; {@link SourceFormat#BPMN_XML} in this release
+     * @return the document
+     * @throws DefinitionNotFoundException when the tenant has no such version (also for another tenant's version)
+     * @throws InputInvalidException when the format cannot be exported
+     * @throws DefinitionIntegrityException when the stored source no longer gives the recorded hash
+     */
+    DefinitionExport exportDefinition(String key, int version, SourceFormat format);
 }

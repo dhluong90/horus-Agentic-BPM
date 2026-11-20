@@ -13,6 +13,7 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `POST /definitions` | `DefinitionService.importDefinition(ImportRequest)` | `processes:deploy` | Body is a BPMN 2.0 document (`application/xml`), UTF-8 only, at most 1 MB. A document identical to the latest version returns that version, also with `201` |
 | `GET /definitions` | `ProcessQueryService.definitions(PageRequest)` | `processes:read` | One item per key, ordered by key: `latestVersion`, `latestStatus`, `effectiveVersion` (the version a start uses now, or `null`), `lastChangedAt`. Since 0.2.0 |
 | `GET /definitions/{key}/versions/{version}` | `DefinitionService.version(key, version)` | `processes:read` | Status, hashes, `approvedBy`, `approvedAt`, `effectiveFrom`; no source document. `ETag` is the definition hash. This is the `Location` an import returns. `404 DEFINITION_NOT_FOUND`. Since 0.2.0 |
+| `GET /definitions/{key}/versions/{version}/export?format=bpmn` | `DefinitionService.exportDefinition(key, version, SourceFormat.BPMN_XML)` | `processes:read` | BPMN 2.0 XML (`application/bpmn+xml`) of the executable subset with a generated diagram layout. Importing it gives the same `definitionHash`, which is also the `ETag`. Read-only. A version of another tenant is `404 DEFINITION_NOT_FOUND`. Since 0.2.0 |
 | `POST /instances` | `ProcessEngine.start(StartRequest)` | `processes:start` | Needs a `businessKey` or an `Idempotency-Key` (`428` without either). `201` for a new instance, `200` when one exists for the business key |
 | `GET /instances/{id}` | `ProcessEngine.instance(id)` | `processes:read` | Execution tree (root scope token and flow tokens) and tasks; variables unmasked in 0.1.0 |
 | `GET /definitions/{key}/versions/{version}/node-stats?mode=live` | `ProcessQueryService.liveNodeCounts(key, version)` | `processes:read` | Live tokens per step and status, with `asOf` and an `ETag`; read from the live token index, never from history. Each replica caches an answer for `stats.live-cache-ttl` (5 s), or `stats.live-cache-ttl-large` (15 s) above `stats.live-cache-large-threshold` (100,000 live tokens). Only `mode=live` (`400` otherwise); a version not in the caller's tenant is `404 DEFINITION_NOT_FOUND`. Open incidents per step follow with incidents. Since 0.2.0 |
@@ -90,6 +91,28 @@ GET /api/bpm/processes/v1/definitions/card-fee-review/versions/1/node-stats?mode
 200 {"definitionKey":"card-fee-review","version":1,"mode":"live","asOf":"2026-11-20T09:30:00Z",
      "nodes":{"officer-review":{"WAITING_USER":3}}}
 ```
+
+## Export a definition as BPMN
+
+The export writes a stored version as BPMN 2.0 XML that standard modellers open, and that imports back to the same definition:
+
+```bash
+curl -u lan:$HORUS_DEMO_PASSWORD -o card-fee-review-v1.bpmn -D - \
+  "http://localhost:8080/api/bpm/processes/v1/definitions/card-fee-review/versions/1/export?format=bpmn"
+# HTTP/1.1 200, Content-Type: application/bpmn+xml, ETag: "<definitionHash of v1>"
+
+curl -u lan:$HORUS_DEMO_PASSWORD -H 'Content-Type: application/bpmn+xml' \
+  --data-binary @card-fee-review-v1.bpmn http://localhost:8080/api/bpm/processes/v1/definitions
+# 201 with version 1 and the same definitionHash: no new version is created
+```
+
+What the file holds:
+
+- The process with its steps, flows, conditions and the `horus` attributes (`horus:handler`, `horus:ruleSet`, `horus:assignee`, `horus:fourEyes`, `horus:resultVariable`, `horus:input`), with `incoming` and `outgoing` on every node. It validates against the BPMN 2.0 XSD.
+- A generated left-to-right diagram, not the layout of the file that was imported. Layout is not part of the definition hash.
+- No vendor extensions of the imported file. They are never executed and are not part of the definition.
+
+Only the executable subset the import accepts can be exported in this release. `agentTask` and `saga` steps join when the import accepts them.
 
 ## Transactions
 

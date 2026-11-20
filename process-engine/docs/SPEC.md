@@ -303,6 +303,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The exported XML validates against the BPMN 2.0 XSD; `agentTask` is a `serviceTask` with `horus:type="agentTask"`; the re-imported draft has the same `definitionHash` as the source.
 - **Example:** `export kyc-onboarding v2 -> import -> definitionHash equal`.
 - **Test ID:** `PRE_034_bpmn_export_round_trip_preserves_hash`
+- **Scope in 0.2.0:** the export covers the executable subset the reader accepts (none start and end events, `serviceTask`, `businessRuleTask`, `userTask`, `exclusiveGateway`, `sequenceFlow` with conditions). `agentTask` and `saga` steps join the round trip when the reader accepts them. The export carries a generated left-to-right BPMNDI layout, not the layout of the imported file, and no foreign extensions; neither is part of the definition hash. A version of another tenant is `404 DEFINITION_NOT_FOUND`, the same answer as a missing one, and nothing is written.
 
 ---
 
