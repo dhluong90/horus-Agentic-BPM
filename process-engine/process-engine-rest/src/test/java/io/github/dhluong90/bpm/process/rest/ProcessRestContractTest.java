@@ -5,19 +5,28 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
+import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
+import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
+import io.github.dhluong90.bpm.process.api.InstanceQuery;
+import io.github.dhluong90.bpm.process.api.InstanceSummary;
 import io.github.dhluong90.bpm.process.api.InstanceNotFoundException;
 import io.github.dhluong90.bpm.process.api.InvalidStateException;
 import io.github.dhluong90.bpm.process.api.NoEffectiveVersionException;
+import io.github.dhluong90.bpm.process.api.NodeCounts;
+import io.github.dhluong90.bpm.process.api.Page;
+import io.github.dhluong90.bpm.process.api.PageRequest;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
+import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
 import io.github.dhluong90.bpm.process.api.StepFailedException;
 import io.github.dhluong90.bpm.process.api.TaskNotFoundException;
 import io.github.dhluong90.bpm.process.api.TaskService;
+import io.github.dhluong90.bpm.process.api.TaskView;
 import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.api.VersionConflictException;
 import java.nio.file.Path;
@@ -48,7 +57,7 @@ class ProcessRestContractTest {
 
     private final FakeEngine engine = new FakeEngine();
     private final MockMvc mvc = MockMvcBuilders
-            .standaloneSetup(new ProcessController(new FakeDefinitions(), engine, engine, 1_000_000))
+            .standaloneSetup(new ProcessController(new FakeDefinitions(), engine, engine, new FakeQueries(), 1_000_000))
             .setControllerAdvice(new ProcessProblemDetails())
             .build();
 
@@ -76,6 +85,18 @@ class ProcessRestContractTest {
                 .content("{\"result\":{\"approved\":true}}"));
         assertThat(completed.getResponse().getStatus()).isEqualTo(200);
         assertThat(completed.getResponse().getContentAsString()).contains("\"status\":\"COMPLETED\"");
+    }
+
+    @Test
+    void list_and_live_count_bodies_match_the_contract() throws Exception {
+        MvcResult definitions = exchange(get(BASE + "/definitions").param("limit", "10"));
+        assertThat(definitions.getResponse().getStatus()).isEqualTo(200);
+
+        MvcResult counts = exchange(get(BASE + "/definitions/card-fee-review/versions/1/node-stats"));
+        assertThat(counts.getResponse().getStatus()).isEqualTo(200);
+        assertThat(counts.getResponse().getContentAsString()).contains("\"WAITING_USER\":3");
+
+        assertProblem(get(BASE + "/definitions/no-such-process/versions/1/node-stats"), 404, "DEFINITION_NOT_FOUND");
     }
 
     @Test
@@ -158,7 +179,34 @@ class ProcessRestContractTest {
                         DefinitionProblem.of("NO_END_EVENT", "The process has no end event", null)));
             }
             return new DefinitionVersion("01JD0000000000000000000001", "card-fee-review", 1, "DRAFT", "Card fee review",
-                    "a".repeat(64), SourceFormat.BPMN_XML, "b".repeat(64), 4, null, "user:lan", NOW);
+                    "a".repeat(64), SourceFormat.BPMN_XML, "b".repeat(64), 4, null, null, null, "user:lan", NOW);
+        }
+
+        @Override
+        public DefinitionVersion version(String key, int version) {
+            throw new DefinitionNotFoundException("No definition " + key + " v" + version);
+        }
+    }
+
+    /** One definition key with three tokens waiting at its review step. */
+    static final class FakeQueries implements ProcessQueryService {
+
+        @Override
+        public Page<DefinitionSummary> definitions(PageRequest page) {
+            return new Page<>(List.of(), null);
+        }
+
+        @Override
+        public Page<InstanceSummary> instances(InstanceQuery query) {
+            return new Page<>(List.of(), null);
+        }
+
+        @Override
+        public NodeCounts liveNodeCounts(String definitionKey, int version) {
+            if (!"card-fee-review".equals(definitionKey)) {
+                throw new DefinitionNotFoundException("No definition " + definitionKey + " version " + version);
+            }
+            return new NodeCounts(definitionKey, version, NOW, Map.of("review", Map.of("WAITING_USER", 3L)));
         }
     }
 
@@ -184,8 +232,8 @@ class ProcessRestContractTest {
                                     request.definitionKey(), "WAITING_SCOPE"),
                             new ProcessInstance.Token("01JD0000000000000000000013", "FLOW",
                                     "01JD0000000000000000000012", "review", "WAITING_USER")),
-                    List.of(new ProcessInstance.Task(TASK, "review", "Review the fee", "role:FEE_REVIEWER", "OPEN", 0,
-                            null)),
+                    List.of(new ProcessInstance.Task(TASK, "review", "Review the fee", "role:FEE_REVIEWER", "CLAIMED", 0,
+                            "user:lan", NOW, null)),
                     0, "user:lan", NOW, null);
             return current;
         }
@@ -205,7 +253,7 @@ class ProcessRestContractTest {
                 throw new TaskNotFoundException("No task " + taskId);
             }
             ProcessInstance.Task task = current.tasks().get(0);
-            if (!"OPEN".equals(task.status())) {
+            if (!"CLAIMED".equals(task.status())) {
                 throw new InvalidStateException("Task " + taskId + " is " + task.status());
             }
             if (task.lockVersion() != expectedLockVersion) {
@@ -218,9 +266,29 @@ class ProcessRestContractTest {
                     List.of(new ProcessInstance.Token("01JD0000000000000000000012", "SCOPE", null,
                             current.definitionKey(), "COMPLETED")),
                     List.of(new ProcessInstance.Task(TASK, "review", "Review the fee", "role:FEE_REVIEWER",
-                            "COMPLETED", 1, "user:minh")),
+                            "COMPLETED", 1, "user:lan", NOW, "user:lan")),
                     current.lockVersion() + 1, current.startedBy(), current.startedAt(), NOW.plusSeconds(60));
             return current;
+        }
+
+        @Override
+        public ProcessInstance cancel(String instanceId, long expectedLockVersion, String reason, String idempotencyKey) {
+            throw new UnsupportedOperationException("not used by this test");
+        }
+
+        @Override
+        public TaskView task(String taskId) {
+            throw new UnsupportedOperationException("not used by this test");
+        }
+
+        @Override
+        public TaskView claim(String taskId, long expectedLockVersion, String idempotencyKey) {
+            throw new UnsupportedOperationException("not used by this test");
+        }
+
+        @Override
+        public TaskView unclaim(String taskId, long expectedLockVersion, String idempotencyKey) {
+            throw new UnsupportedOperationException("not used by this test");
         }
     }
 }
