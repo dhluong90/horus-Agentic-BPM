@@ -147,12 +147,26 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
      * @param detail a detail without input values
      * @param matchedRuleIds for {@code UNIQUE_HIT_VIOLATION} every matched rule (two or more); for an
      *     {@code EVALUATION_ERROR} from a null under a {@code collect} aggregate, the matched rules; otherwise empty
+     * @param limit for an {@code EVALUATION_ERROR} whose detail starts with {@code EVALUATION_BUDGET_EXCEEDED}, the
+     *     limit that was reached: {@code STEPS} (the step budget, the same on every machine) or {@code TIME} (the
+     *     wall-clock backstop); otherwise null. New values may be added.
      */
-    public record Failed(String code, String detail, List<String> matchedRuleIds) implements Outcome {
+    public record Failed(String code, String detail, List<String> matchedRuleIds, String limit) implements Outcome {
         public Failed {
             Objects.requireNonNull(code, "code must not be null");
             Objects.requireNonNull(detail, "detail must not be null");
             matchedRuleIds = List.copyOf(matchedRuleIds);
+        }
+
+        /**
+         * Creates a failure that reached no evaluation limit.
+         *
+         * @param code the error code
+         * @param detail the detail
+         * @param matchedRuleIds the matched rules, see the record
+         */
+        public Failed(String code, String detail, List<String> matchedRuleIds) {
+            this(code, detail, matchedRuleIds, null);
         }
 
         /**
@@ -162,7 +176,7 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
          * @param detail the detail
          */
         public Failed(String code, String detail) {
-            this(code, detail, List.of());
+            this(code, detail, List.of(), null);
         }
     }
 }

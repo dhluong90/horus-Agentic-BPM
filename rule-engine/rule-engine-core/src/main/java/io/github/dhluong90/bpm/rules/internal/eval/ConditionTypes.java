@@ -13,7 +13,8 @@ import java.util.Locale;
  * The type floor checked at import, so a mistyped cell fails closed at import instead of never matching or
  * failing at evaluation: a condition must produce a boolean, a comparison of an input with a literal must use the
  * input's declared type, and an output cell whose type is known statically must have the output's declared type
- * (a {@code money} output written as {@code "30000"} has no currency). Full type checking is RLE-004.
+ * (a {@code money} output written as {@code "30000"} has no currency). {@link #operandProblem} checks the operands of
+ * every operator in the tree, in conditions and in output cells computed from inputs (RLE-004).
  *
  * <p>Each check returns a problem message without the rule id or column, or {@code null} when the cell passes;
  * the caller places the message on its cell.
@@ -25,6 +26,131 @@ final class ConditionTypes {
     private static final String NOT_BOOLEAN = "the condition does not produce true or false";
 
     private ConditionTypes() {
+    }
+
+    /**
+     * A type error at one node of a tree.
+     *
+     * @param message the problem, without the rule id, column or position
+     * @param node the operator or call at fault
+     */
+    record TypeProblem(String message, Expr node) {
+    }
+
+    /**
+     * RLE-004: checks the operands of every operator, function and {@code matches} in the tree, innermost first,
+     * so {@code balance + 100 > 0} with a money {@code balance} names the {@code +}. An operand whose type is not
+     * known statically ({@code null}) passes; at run time it gives null, as in FEEL.
+     *
+     * @param expr the tree
+     * @param inputs the declared inputs, by slot
+     * @return the first problem in reading order, or null
+     */
+    static TypeProblem operandProblem(Expr expr, List<InputClause> inputs) {
+        for (Expr child : children(expr)) {
+            TypeProblem problem = operandProblem(child, inputs);
+            if (problem != null) {
+                return problem;
+            }
+        }
+        String own = switch (expr) {
+            case Expr.Unary unary -> {
+                Kind operand = kindOf(unary.operand(), inputs);
+                if (!known(operand)) {
+                    yield null;
+                }
+                yield switch (unary.op()) {
+                    case NOT -> operand == Kind.BOOLEAN ? null : "not() takes true or false, not a " + name(operand);
+                    case NEGATE -> operand == Kind.NUMBER || operand == Kind.MONEY ? null
+                            : "- negates a number or money, not a " + name(operand);
+                };
+            }
+            case Expr.Binary binary -> binaryProblem(binary, inputs);
+            case Expr.InList inList -> {
+                String problem = null;
+                for (Expr element : inList.elements()) {
+                    problem = firstOf(problem, comparableProblem(inList.target(), element, inputs));
+                }
+                yield problem;
+            }
+            case Expr.Between between -> firstOf(orderedProblem(between.target(), between.low(), inputs),
+                    orderedProblem(between.target(), between.high(), inputs));
+            case Expr.Matches matches -> {
+                Kind text = kindOf(matches.target(), inputs);
+                yield !known(text) || text == Kind.STRING ? null : "matches() tests text, but it is given a " + name(text);
+            }
+            default -> null;
+        };
+        return own == null ? null : new TypeProblem(own, expr);
+    }
+
+    private static String binaryProblem(Expr.Binary binary, List<InputClause> inputs) {
+        Kind a = kindOf(binary.left(), inputs);
+        Kind b = kindOf(binary.right(), inputs);
+        return switch (binary.op()) {
+            case AND, OR -> {
+                Kind wrong = known(a) && a != Kind.BOOLEAN ? a : known(b) && b != Kind.BOOLEAN ? b : null;
+                yield wrong == null ? null : binary.op().name().toLowerCase(Locale.ROOT)
+                        + " joins true or false, not a " + name(wrong);
+            }
+            case EQ, NE -> comparableProblem(binary.left(), binary.right(), inputs);
+            case LT, LE, GT, GE -> orderedProblem(binary.left(), binary.right(), inputs);
+            case ADD, SUB, MUL, DIV -> !known(a) || !known(b) || arithmeticKind(binary.op(), a, b) != null ? null
+                    : arithmeticMessage(binary, a, b);
+        };
+    }
+
+    /** The result of arithmetic on two known kinds, or null when the language does not define it. */
+    private static Kind arithmeticKind(Expr.BinaryOp op, Kind a, Kind b) {
+        return switch (op) {
+            case ADD -> a == b && (a == Kind.NUMBER || a == Kind.MONEY || a == Kind.STRING) ? a : null;
+            case SUB -> a == b && (a == Kind.NUMBER || a == Kind.MONEY) ? a : null;
+            case MUL -> a == Kind.NUMBER && b == Kind.NUMBER ? Kind.NUMBER
+                    : (a == Kind.MONEY && b == Kind.NUMBER) || (a == Kind.NUMBER && b == Kind.MONEY) ? Kind.MONEY : null;
+            case DIV -> a == Kind.NUMBER && b == Kind.NUMBER ? Kind.NUMBER
+                    : a == Kind.MONEY && b == Kind.NUMBER ? Kind.MONEY : null;
+            default -> null;
+        };
+    }
+
+    private static String arithmeticMessage(Expr.Binary binary, Kind a, Kind b) {
+        String symbol = switch (binary.op()) {
+            case ADD -> "+";
+            case SUB -> "-";
+            case MUL -> "*";
+            default -> "/";
+        };
+        String problem = symbol + " is not defined for " + name(a) + " and " + name(b);
+        boolean addOrSubtract = binary.op() == Expr.BinaryOp.ADD || binary.op() == Expr.BinaryOp.SUB;
+        if (addOrSubtract && (a == Kind.MONEY && b == Kind.NUMBER || a == Kind.NUMBER && b == Kind.MONEY)) {
+            Expr number = a == Kind.NUMBER ? binary.left() : binary.right();
+            Expr money = a == Kind.MONEY ? binary.left() : binary.right();
+            String currency = currencyOf(money);
+            return problem + ": write the number with a currency, for example " + example(number) + " "
+                    + (currency == null ? "VND" : currency);
+        }
+        if (a == Kind.MONEY && b == Kind.MONEY) {
+            return problem + ": money is multiplied or divided by a number";
+        }
+        if (binary.op() == Expr.BinaryOp.DIV && b == Kind.MONEY) {
+            return problem + ": a number cannot be divided by money";
+        }
+        return problem;
+    }
+
+    /** {@code <}, {@code >} and {@code between}: the same type, and one that has an order. */
+    private static String orderedProblem(Expr left, Expr right, List<InputClause> inputs) {
+        String problem = comparableProblem(left, right, inputs);
+        if (problem != null) {
+            return problem;
+        }
+        Kind a = kindOf(left, inputs);
+        return a == Kind.BOOLEAN || a == Kind.LIST
+                ? "orders a " + name(a) + ": < and > compare numbers, money, text, dates and datetimes" : null;
+    }
+
+    private static boolean known(Kind kind) {
+        return kind != Kind.UNKNOWN && kind != Kind.NULL;
     }
 
     /**
@@ -182,7 +308,7 @@ final class ConditionTypes {
     /**
      * Checks an output cell against the output's declared type, where the cell's type is known without inputs.
      * A null cell is allowed (the output has no value). List outputs belong to the collect hit policy and are not
-     * checked here.
+     * checked here, nor are the cells of a {@code count}, which counts rules and never reads their values.
      *
      * @return the problem, or null
      */
@@ -192,7 +318,8 @@ final class ConditionTypes {
             return "output " + output.name() + " " + problem;
         }
         ValueType type = output.type();
-        if (type.list()) {
+        if (type.list() || output.aggregate() == OutputClause.Aggregate.COUNT) {
+            // count counts matched rules whatever their cells hold, as at evaluation
             return null;
         }
         Kind actual = kindOf(expr, inputs);
@@ -249,18 +376,9 @@ final class ConditionTypes {
             };
             case Expr.Binary binary -> switch (binary.op()) {
                 case OR, AND, EQ, NE, LT, LE, GT, GE -> Kind.BOOLEAN;
-                case ADD, SUB -> {
-                    Kind a = kindOf(binary.left(), inputs);
-                    Kind b = kindOf(binary.right(), inputs);
-                    yield a == b && (a == Kind.NUMBER || a == Kind.MONEY) ? a : Kind.UNKNOWN;
-                }
-                case MUL, DIV -> {
-                    Kind a = kindOf(binary.left(), inputs);
-                    Kind b = kindOf(binary.right(), inputs);
-                    if (a == Kind.NUMBER && b == Kind.NUMBER) {
-                        yield Kind.NUMBER;
-                    }
-                    yield a == Kind.MONEY && b == Kind.NUMBER ? Kind.MONEY : Kind.UNKNOWN;
+                case ADD, SUB, MUL, DIV -> {
+                    Kind result = arithmeticKind(binary.op(), kindOf(binary.left(), inputs), kindOf(binary.right(), inputs));
+                    yield result == null ? Kind.UNKNOWN : result;
                 }
             };
             case Expr.InList ignored -> Kind.BOOLEAN;
