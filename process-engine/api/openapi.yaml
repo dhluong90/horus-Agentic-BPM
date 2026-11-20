@@ -936,6 +936,26 @@ components:
           type: array
           description: What this caller may do now; computed per caller, never stored
           items: { type: string, enum: [claim, unclaim, complete] }
+        review:
+          $ref: '#/components/schemas/ReviewContext'
+    ReviewContext:
+      type: object
+      description: >-
+        Present only on the four-eyes review task of an agent step whose answer was refused. Why it was refused, the
+        inputs the agent saw, and the answer masked by the output schema's masking policy: a value is kept only where
+        the schema declares the field and does not mark it `mask: true`, other values are `***`, and strings, lists
+        and nesting are bounded.
+      required: [code, reasons, ruleIds, inputs, output, outputFields]
+      properties:
+        code:
+          type: string
+          description: '`GUARDRAIL_VIOLATION`, `GUARDRAIL_EVALUATION_ERROR` or `AGENT_SCHEMA_INVALID`'
+        reasons: { type: array, items: { type: string } }
+        ruleIds: { type: array, items: { type: string }, description: The matched guardrail rules }
+        guardrailDecisionId: { type: string, description: 'The guardrail decision in the Rule Engine log, when one was logged' }
+        inputs: { type: object, additionalProperties: true, description: The bounded inputs the agent received }
+        output: { type: object, additionalProperties: true, description: The refused answer, masked }
+        outputFields: { type: integer, description: Number of top-level fields in the answer }
     DefinitionSummary:
       type: object
       required: [key, latestVersion, latestStatus, lastChangedAt]

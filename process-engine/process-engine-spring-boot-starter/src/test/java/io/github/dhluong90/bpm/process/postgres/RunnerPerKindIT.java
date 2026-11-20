@@ -45,9 +45,11 @@ import org.junit.jupiter.api.Test;
  * {@code agent-output-guardrails} rule set refuses a risk score of 70 or more (R2). A refused answer goes to a
  * compliance reviewer.
  *
- * <p>The agent step type is not built yet (#52): each test parks the assessment as a remote step and turns its job
- * into a stub agent job ({@code ASYNC_AGENT}) with the guard spec in its payload, which is what the agent step will
- * write when it parks; a stub agent runner answers it. Replicas share one {@link TestClock}; no test sleeps.
+ * <p>These tests check the result transaction itself, whatever wrote the job: each parks the assessment as a remote
+ * step and turns its job into an agent job ({@code ASYNC_AGENT}) with a guard spec of its choosing, including specs the
+ * agent step never writes (none, or {@code fourEyes: false}); a stub agent runner answers it. The agent step, which
+ * writes the spec from the published definition, is covered by {@code AgentTaskIT} (#52). Replicas share one
+ * {@link TestClock}; no test sleeps.
  */
 class RunnerPerKindIT {
 
@@ -158,7 +160,7 @@ class RunnerPerKindIT {
                 TestEngine.resource("/bpmn/loan-bureau-check.bpmn"), null));
     }
 
-    /** A loan reaches the assessment; its job becomes a stub agent job with the guard spec (what #52 will write). */
+    /** A loan reaches the assessment; its job becomes an agent job with the given guard spec. */
     private static String assess(TestEngine engine, String applicationId, String guardJson) {
         String id = engine.services.start(new StartRequest("loan-document-assessment", applicationId,
                 Map.of("applicationId", applicationId), null)).id();

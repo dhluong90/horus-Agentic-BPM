@@ -200,6 +200,9 @@ public final class Views {
         o.put("createdAt", t.createdAt().toString());
         putNullable(o, "completedBy", t.completedBy());
         putNullable(o, "completedAt", t.completedAt() == null ? null : t.completedAt().toString());
+        if (t.review() != null) {
+            o.set("review", Values.toJson(t.review()));
+        }
         ArrayNode actions = o.putArray("allowedActions");
         for (String action : List.of("claim", "unclaim", "complete")) {
             if (t.allowedActions().contains(action)) {
@@ -223,7 +226,8 @@ public final class Views {
                 n.get("nodeId").stringValue(), text(n, "name"), n.get("assignee").stringValue(),
                 n.get("fourEyes").booleanValue(), n.get("status").stringValue(), n.get("lockVersion").longValue(),
                 text(n, "claimedBy"), instant(n, "claimedAt"), Instant.parse(n.get("createdAt").stringValue()),
-                text(n, "completedBy"), instant(n, "completedAt"), java.util.Set.of());
+                text(n, "completedBy"), instant(n, "completedAt"), java.util.Set.of(),
+                n.has("review") && n.get("review").isObject() ? Values.readMap(n.get("review").toString()) : null);
     }
 
     /** @param d summary @return JSON tree */

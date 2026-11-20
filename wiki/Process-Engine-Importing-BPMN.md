@@ -137,7 +137,7 @@ The answer lists every unsupported element in the file, each with its id, its li
 | Gateways | `parallelGateway`, `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
 | Events | `boundaryEvent`, `intermediateCatchEvent`, `intermediateThrowEvent`, and any start or end event with an event definition (timer, message, signal, error, terminate) |
 | Activities | `subProcess`, `transaction`, `callActivity`, `adHocSubProcess`, `task`, `scriptTask`, `manualTask`, `sendTask`, `receiveTask` |
-| Service task variants | `horus:type="agentTask"`, and `horus:mode` other than `local` |
+| Service task variants | `horus:mode` other than `local` (remote steps import since 0.2.0), and any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
 | Conditions | a `conditionExpression` in any language other than `urn:horus-bpm:expr:v1` (`BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`) |
 
@@ -159,6 +159,10 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `NOT_BPMN` | The root element must be `definitions` in `http://www.omg.org/spec/BPMN/20100524/MODEL` |
 | `NO_PROCESS` | Add a `process` element |
 | `XML_MALFORMED` | Fix the XML at the line given |
+| `AGENT_MISSING` | Add `horus:agent` to the agent step (`horus:type="agentTask"`) |
+| `AGENT_TASK_INVALID` | Remove `horus:handler` and `horus:mode` from the agent step; it names its adapter with `horus:agent` |
+| `AGENT_NOT_REGISTERED` | Register an `AgentAdapter` bean under the name in `horus:agent` |
+| `GUARD_SPEC_INVALID` | Fix the agent step's guard spec as the message says: one `<horus:outputSchema>` holding a JSON object in the supported subset, and one `<horus:guardrail>` with a kebab-case `decision`, `onViolation` `route-to-human` (with a `reviewer`) or `fail`, and no `fourEyes` other than `true` |
 
 ### An unsafe or oversized file
 

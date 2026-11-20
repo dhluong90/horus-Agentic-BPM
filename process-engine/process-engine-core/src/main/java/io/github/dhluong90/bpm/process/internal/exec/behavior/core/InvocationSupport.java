@@ -72,7 +72,8 @@ final class InvocationSupport {
         ctx.update(new Token(token.id(), token.kind(), TokenStatus.WAITING_USER, token.scopeTokenId(), token.nodeId(),
                 taskId, token.locals()));
         ctx.effect(new Effect.CreateUserTask(taskId, token.id(), node.id(), node.name(), review.assignee(),
-                review.fourEyes(), Map.of("code", review.code(), "reasons", review.reasons())));
+                review.fourEyes(), review.context() != null ? review.context()
+                        : Map.of("code", review.code(), "reasons", review.reasons())));
         ctx.history("STEP_ROUTED_TO_REVIEW", token, Map.of("taskId", taskId, "attemptId", review.attemptId(),
                 "code", review.code(), "assignee", review.assignee()));
         ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.task.created.v1", Map.of("taskId", taskId,

@@ -16,6 +16,8 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TextAnnotation;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
@@ -106,9 +108,17 @@ public final class SubsetBpmnWriter {
         String tag;
         StringBuilder attributes = new StringBuilder(" id=" + attr(node.id()) + optional("name", node.name()));
         List<InputMapping> inputs = List.of();
+        AgentTaskSpec agent = node.extensions().first(AgentTaskSpec.class).orElse(null);
+        GuardrailSpec guardrail = node.extensions().first(GuardrailSpec.class).orElse(null);
         switch (node) {
             case StartEvent s -> tag = "bpmn:startEvent";
             case EndEvent e -> tag = "bpmn:endEvent";
+            case ServiceTask t when agent != null -> {
+                tag = "bpmn:serviceTask";
+                attributes.append(" horus:type=\"agentTask\"").append(optional("horus:agent", agent.agent()))
+                        .append(optional("horus:timeout", agent.timeout() == null ? null : agent.timeout().toString()));
+                inputs = t.extensions().all(InputMapping.class);
+            }
             case ServiceTask t -> {
                 tag = "bpmn:serviceTask";
                 t.extensions().first(HandlerRef.class).ifPresent(h -> attributes.append(optional("horus:handler",
@@ -136,15 +146,23 @@ public final class SubsetBpmnWriter {
         }
         node.extensions().first(ResultVariable.class).ifPresent(r -> attributes.append(optional("horus:resultVariable",
                 r.name())));
-        if (inputs.isEmpty() && node.incoming().isEmpty() && node.outgoing().isEmpty()) {
+        if (inputs.isEmpty() && agent == null && node.incoming().isEmpty() && node.outgoing().isEmpty()) {
             xml.line(2, "<" + tag + attributes + "/>");
             return;
         }
         xml.line(2, "<" + tag + attributes + ">");
-        if (!inputs.isEmpty()) {
+        if (!inputs.isEmpty() || agent != null) {
             xml.line(3, "<bpmn:extensionElements>");
             for (InputMapping input : inputs) {
                 xml.line(4, "<horus:input name=" + attr(input.name()) + " value=" + attr(input.value()) + "/>");
+            }
+            if (agent != null && agent.outputSchema() != null) {
+                xml.line(4, "<horus:outputSchema>" + text(agent.outputSchema()) + "</horus:outputSchema>");
+            }
+            if (guardrail != null) {
+                xml.line(4, "<horus:guardrail" + optional("decision", guardrail.decision())
+                        + optional("onViolation", guardrail.onViolation()) + optional("reviewer", guardrail.reviewer())
+                        + "/>");
             }
             xml.line(3, "</bpmn:extensionElements>");
         }

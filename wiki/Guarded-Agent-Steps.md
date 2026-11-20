@@ -2,7 +2,44 @@
 
 An `agentTask` is a process step performed by an AI agent. The agent's output cannot move the process forward until it has passed two deterministic checks: a JSON Schema and a rule set that you own. When a rule fires, the step goes to a human approver or fails.
 
-Design preview: `agentTask` is planned for Process Engine 0.1 in milestone M2, target 26 March 2027. Milestone M3 (1.0, target 21 May 2027) adds adapters and planning depth. See [What ships when](#what-ships-when) and [[Feature status|Feature-Status]].
+Status: the agent step with its output schema, guardrail rule set and four-eyes review imports and runs since 0.2.0, with a stub adapter for tests and demos ([In BPMN today](#in-bpmn-today)). Per-step retry and incidents, input masking, labels and human overrides, and the deploy-time guardrail contract check follow in M2 (target 26 March 2027); milestone M3 (1.0, target 21 May 2027) adds adapters and planning depth. See [What ships when](#what-ships-when) and [[Feature status|Feature-Status]].
+
+## In BPMN today
+
+An agent step is a `serviceTask` with `horus:type="agentTask"`. The schema and the guardrail are part of the definition, so the definition hash and its approval cover them, and a change to either is a new version.
+
+```xml
+<bpmn:serviceTask id="assess-documents" name="Assess the documents" horus:type="agentTask"
+                  horus:agent="documents.assess" horus:timeout="PT30S" horus:resultVariable="assessment">
+  <bpmn:extensionElements>
+    <horus:input name="applicationId" value="${instance.applicationId}"/>
+    <horus:input name="requestedAmount" value="${instance.amount}"/>
+    <horus:outputSchema>{"type": "object", "required": ["riskScore", "recommendation"], "additionalProperties": false,
+      "properties": {"riskScore": {"type": "integer", "minimum": 0, "maximum": 100},
+                     "recommendation": {"type": "string", "enum": ["APPROVE", "REFER", "DECLINE"]},
+                     "summary": {"type": "string", "maxLength": 500, "mask": true}}}</horus:outputSchema>
+    <horus:guardrail decision="agent-output-guardrails" onViolation="route-to-human" reviewer="role:COMPLIANCE_REVIEWER"/>
+  </bpmn:extensionElements>
+</bpmn:serviceTask>
+```
+
+| Part | Rule |
+|---|---|
+| `horus:agent` | The name of an `AgentAdapter` bean in the host; an unknown name is refused at import (`AGENT_NOT_REGISTERED`) |
+| `<horus:outputSchema>` | A JSON object in the engine's JSON Schema subset (`type`, `properties`, `required`, `additionalProperties` true or false, `enum`, `const`, numeric bounds, `minLength`, `maxLength`, `items`, `minItems`, `maxItems`); `mask: true` keeps a field's value out of the history. Any other keyword is refused at import (`GUARD_SPEC_INVALID`) |
+| `<horus:guardrail>` | `decision` names the guardrail rule set. `onViolation` is `route-to-human` (the default; needs a `reviewer` as `role:`, `user:` or `group:`) or `fail`. A review is always four-eyes: `fourEyes` other than `true` is refused |
+| Host | Needs the Rule Engine; without it the import is refused with `BPMN_NOT_EXECUTABLE` |
+
+At run time the step parks an agent job, the engine calls your adapter with no transaction open, and the answer is checked in the result transaction:
+
+| Answer | Outcome |
+|---|---|
+| Meets the schema, guardrail allows | The step completes; the history records the answer masked by the schema, with the guardrail decision id and the matched rule |
+| Breaks the schema the first time | Asked again once (`runners.async-agent.schema-retries`, default 1) as a new attempt |
+| Breaks the schema again | Refused with `AGENT_SCHEMA_INVALID`, then `onViolation` |
+| Guardrail says `allow: false` | Refused with `GUARDRAIL_VIOLATION`: a four-eyes review task for the reviewer, carrying the reasons, the rule ids, the inputs and the masked answer. The starter of the instance and whoever reported the refused answer cannot take it. The reviewer's answer, checked against the schema, completes the step |
+
+Your adapter receives an `AgentInvocation`. Key the model call by `modelCallKey()` (the attempt id), so the retry after a malformed answer is a fresh generation. Key side effects outside the model by `idempotencyKey()` (the job id), which stays the same on every attempt. `StubAgentAdapter` in `process-engine-test` answers with canned outputs for tests and demos; `examples/rule-and-process` runs this step end to end (`GuardedAgentTaskIT`).
 
 ## The problem
 
