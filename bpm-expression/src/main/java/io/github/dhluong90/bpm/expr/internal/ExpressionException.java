@@ -1,4 +1,4 @@
-package io.github.dhluong90.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.expr.internal;
 
 /** An expression that cannot be parsed, with the character position of the problem. */
 public final class ExpressionException extends RuntimeException {

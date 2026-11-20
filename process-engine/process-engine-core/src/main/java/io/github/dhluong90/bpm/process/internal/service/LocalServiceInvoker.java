@@ -1,19 +1,19 @@
 package io.github.dhluong90.bpm.process.internal.service;
 
-import io.github.dhluong90.bpm.rules.api.RuleEngine;
-import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
 import io.github.dhluong90.bpm.process.internal.exec.Effect;
 import io.github.dhluong90.bpm.process.internal.exec.StepResult;
 import io.github.dhluong90.bpm.process.spi.HandlerResult;
 import io.github.dhluong90.bpm.process.spi.ServiceCall;
 import io.github.dhluong90.bpm.process.spi.ServiceTaskHandler;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
 /**
- * Local handlers by name, and decisions through a {@link DecisionPort} over the {@link RuleEngine}; both inside the
- * current transaction. A decision always gets the instance's tenant explicitly (ADR-0027). A decision's id is added
+ * Local handlers by name, and decisions through a {@link DecisionPort}; both inside the current transaction. A
+ * decision always gets the instance's tenant explicitly, the engine clock and a key derived from instance, node and
+ * attempt (ADR-0027). A decision's id is added
  * to the output as {@code decisionId}, so the instance links to the decision log. A decision with no matching row or
  * an evaluation error fails the step (fail closed).
  */
@@ -27,25 +27,14 @@ public final class LocalServiceInvoker implements ServiceInvoker {
 
     /**
      * @param handlers registered handlers by name
-     * @param ruleEngine the Rule Engine, or empty when the host has none
+     * @param decisions the decision port, or empty when the host has no decision engine; a definition with a business
+     *     rule task is then refused at activation
      * @param slowCallWarning calls longer than this are logged at WARNING ({@code handlers.slow-call-warning})
      */
-    public LocalServiceInvoker(Map<String, ServiceTaskHandler> handlers, Optional<RuleEngine> ruleEngine,
+    public LocalServiceInvoker(Map<String, ServiceTaskHandler> handlers, Optional<DecisionPort> decisions,
             java.time.Duration slowCallWarning) {
-        this(handlers, ruleEngine, Optional.empty(), slowCallWarning);
-    }
-
-    /**
-     * @param handlers registered handlers by name
-     * @param ruleEngine the Rule Engine, or empty when the host has none
-     * @param engineWork the Rule Engine's tenant-scoped entry point for this engine's identity, built by the wiring
-     *     and never a bean; empty fails a decision after a timer closed with {@code TENANT_NOT_ALLOWED}
-     * @param slowCallWarning calls longer than this are logged at WARNING ({@code handlers.slow-call-warning})
-     */
-    public LocalServiceInvoker(Map<String, ServiceTaskHandler> handlers, Optional<RuleEngine> ruleEngine,
-            Optional<TenantScopedRuleEngine> engineWork, java.time.Duration slowCallWarning) {
         this.handlers = Map.copyOf(handlers);
-        this.decisions = ruleEngine.map(engine -> new RuleEngineDecisionPort(engine, engineWork));
+        this.decisions = java.util.Objects.requireNonNull(decisions, "decisions must not be null");
         this.slowCallNanos = slowCallWarning.toNanos();
     }
 
@@ -54,19 +43,19 @@ public final class LocalServiceInvoker implements ServiceInvoker {
         return handlers.containsKey(name);
     }
 
-    /** @return whether a Rule Engine is present */
+    /** @return whether a decision engine is present */
     public boolean hasRuleEngine() {
         return decisions.isPresent();
     }
 
     @Override
     public StepResult invoke(String tenantId, String instanceId, String businessKey, Effect.InvokeService call,
-            DecisionCaller caller) {
+            DecisionCaller caller, Instant now) {
         long started = System.nanoTime();
         try {
             return switch (call.kind()) {
                 case HANDLER -> handler(tenantId, instanceId, businessKey, call);
-                case DECISION -> decision(tenantId, instanceId, call, caller);
+                case DECISION -> decision(tenantId, instanceId, call, caller, now);
                 default -> new StepResult.Failed("NOT_SUPPORTED", call.kind() + " invocations are not supported yet",
                         false);
             };
@@ -105,11 +94,15 @@ public final class LocalServiceInvoker implements ServiceInvoker {
         };
     }
 
-    private StepResult decision(String tenantId, String instanceId, Effect.InvokeService call, DecisionCaller caller) {
+    private StepResult decision(String tenantId, String instanceId, Effect.InvokeService call, DecisionCaller caller,
+            Instant now) {
         if (decisions.isEmpty()) {
-            return new StepResult.Failed("RULE_ENGINE_MISSING", "The host has no Rule Engine", false);
+            // Unreachable for an activated definition: activation refuses a business rule task without one.
+            return new StepResult.Failed("BPMN_NOT_EXECUTABLE", "The host has no decision engine", false);
         }
-        return switch (decisions.get().evaluate(tenantId, caller, call.target(), call.inputs(), instanceId)) {
+        String key = DecisionKeys.forStep(instanceId, call.nodeId(), call.attemptId());
+        return switch (decisions.get().evaluate(tenantId, caller, call.target(), call.inputs(), now, key,
+                instanceId)) {
             case DecisionOutcome.Matched m -> {
                 Map<String, Object> output = new LinkedHashMap<>(m.outputs());
                 output.put("decisionId", m.decisionId());

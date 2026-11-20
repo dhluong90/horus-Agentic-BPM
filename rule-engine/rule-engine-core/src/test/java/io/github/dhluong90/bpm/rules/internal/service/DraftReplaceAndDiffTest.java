@@ -10,7 +10,7 @@ import io.github.dhluong90.bpm.rules.api.IdempotencyKeyReuseException;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
 import io.github.dhluong90.bpm.rules.api.RuleSetVersion;

@@ -109,6 +109,8 @@ final class TestEngine {
     /** The Rule Engine of this replica on the same database and transaction manager, or null without one. */
     final io.github.dhluong90.bpm.rules.internal.service.RuleEngines rules;
     final List<ProcessEventPublisher.Event> events = new CopyOnWriteArrayList<>();
+    /** The decision port the engine of this replica calls, or empty without a Rule Engine. */
+    final Optional<io.github.dhluong90.bpm.process.internal.service.DecisionPort> decisions;
 
     private TestEngine(Builder b) {
         DataSource ds = dataSource();
@@ -133,17 +135,16 @@ final class TestEngine {
         } else {
             this.rules = null;
         }
-        Optional<io.github.dhluong90.bpm.rules.api.RuleEngine> ruleEngine = b.ruleEngine != null ? Optional.of(b.ruleEngine)
-                : Optional.ofNullable(rules).map(io.github.dhluong90.bpm.rules.internal.service.RuleEngines::ruleEngine);
         // As the starter wires it: the tenant-scoped entry point comes from RuleEngines, bound to the engine identity,
-        // and only with the real Rule Engine; a host stand-in has none.
-        Optional<io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine> engineWork = b.ruleEngine != null
-                ? Optional.empty()
-                : Optional.ofNullable(rules).map(r -> r.forEmbeddedEngine(DecisionCaller.ENGINE_IDENTITY));
+        // and only with the real Rule Engine; a host stand-in has none, so its decision steps fail closed.
+        this.decisions = b.ruleEngine != null
+                ? Optional.of(new TestDecisionPort(Optional.empty()))
+                : Optional.ofNullable(rules).map(r -> new TestDecisionPort(
+                        Optional.of(r.forEmbeddedEngine(DecisionCaller.ENGINE_IDENTITY))));
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, new JdbcProcessStore(ds),
                 Map.of(SourceFormat.BPMN_XML, reader::read),
                 new LocalServiceInvoker(b.handlers.stream().collect(Collectors.toMap(ServiceTaskHandler::name, h -> h)),
-                        ruleEngine, engineWork, Duration.ofSeconds(5)),
+                        decisions, Duration.ofSeconds(5)),
                 publisher, settings, BehaviorCatalog.registry(), new V1ExpressionEvaluator(100), jobStore, jobSettings);
         this.jobs = new JobExecutor(jobStore, tx, b.clock, jobSettings, services.jobHandlers());
     }

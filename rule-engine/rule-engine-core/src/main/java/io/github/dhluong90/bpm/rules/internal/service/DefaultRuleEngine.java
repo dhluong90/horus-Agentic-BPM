@@ -119,6 +119,23 @@ public final class DefaultRuleEngine implements RuleEngine {
      * refuses both.
      */
     DecisionResult evaluateAs(String tenant, String caller, DecisionRequest request) {
+        return evaluateAs(tenant, caller, null, null, request);
+    }
+
+    /**
+     * Evaluates for an embedded engine (ADR-0027): as {@code caller}, on behalf of {@code onBehalfOf}, at the calling
+     * engine's clock {@code engineTime}. Neither the time nor {@code onBehalfOf} is part of the request hash: a retried
+     * step comes later on the clock and must replay the logged decision, with its original evaluation time.
+     *
+     * @param tenant the tenant
+     * @param caller the caller identity written to the log
+     * @param onBehalfOf the human the caller acts for, or null
+     * @param engineTime the calling engine's clock at the step, or null for this engine's clock
+     * @param request the request, with no clock and no pinned version
+     * @return the logged result
+     */
+    DecisionResult evaluateAs(String tenant, String caller, String onBehalfOf, Instant engineTime,
+            DecisionRequest request) {
         if (request.correlationId() != null && !CorrelationIds.isValid(request.correlationId())) {
             throw new InputInvalidException("correlationId must be 1 to " + EngineDefaults.CORRELATION_ID_MAX_LENGTH
                     + " characters of A-Z, a-z, 0-9, '.', '_', ':' or '-'");
@@ -131,7 +148,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                 : Hashes.sha256Parts("evaluate", caller, request.ruleSet(), ExactForm.of(request.input()),
                         String.valueOf(request.version()), String.valueOf(request.clock()));
         return context.idempotent(tenant, "evaluate", request.idempotencyKey(), requestHash, 200,
-                () -> doEvaluate(tenant, caller, request),
+                () -> doEvaluate(tenant, caller, onBehalfOf, engineTime == null ? request : request.withClock(engineTime)),
                 result -> EngineValues.write(EngineValues.decision(result)),
                 json -> typed(tenant, EngineValues.decisionFromJson(json)));
     }
@@ -286,7 +303,7 @@ public final class DefaultRuleEngine implements RuleEngine {
         return value;
     }
 
-    private DecisionResult doEvaluate(String tenant, String caller, DecisionRequest request) {
+    private DecisionResult doEvaluate(String tenant, String caller, String onBehalfOf, DecisionRequest request) {
         Instant now = context.clock().instant();
         Instant at = request.clock() == null ? now : request.clock();
         if (!io.github.dhluong90.bpm.rules.internal.read.RuleSetReader.isRuleSetName(request.ruleSet())) {
@@ -303,7 +320,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                     entry = new CompiledCache.Entry(effective.version(), compiled(effective.version()),
                             effective.cacheEpoch(), effective.validFrom(), effective.nextEffectiveFrom());
                 } catch (IntegrityFailure failure) {
-                    return refuseTampered(tenant, caller, request, effective.version(), now, at, failure);
+                    return refuseTampered(tenant, caller, onBehalfOf, request, effective.version(), now, at, failure);
                 }
                 cache.put(entry);
             }
@@ -314,7 +331,7 @@ public final class DefaultRuleEngine implements RuleEngine {
             try {
                 rules = compiled(version);
             } catch (IntegrityFailure failure) {
-                return refuseTampered(tenant, caller, request, version, now, at, failure);
+                return refuseTampered(tenant, caller, onBehalfOf, request, version, now, at, failure);
             }
         }
         if (context.settings().rejectUndeclaredInputs()) {
@@ -327,7 +344,7 @@ public final class DefaultRuleEngine implements RuleEngine {
             System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
                     "Rule set " + version.ruleSet() + " of tenant " + tenant + " masks an input, but the tenant has no"
                             + " masking key (" + EngineDefaults.MASKING_KEY_PROPERTY + "); the decision is refused");
-            return refuse(tenant, caller, request, version, now, at, MASKING_KEY_MISSING, "No masking key is configured"
+            return refuse(tenant, caller, onBehalfOf, request, version, now, at, MASKING_KEY_MISSING, "No masking key is configured"
                     + " for this tenant, so the inputs of " + version.ruleSet() + " cannot be logged; set "
                     + EngineDefaults.MASKING_KEY_PROPERTY);
         }
@@ -336,7 +353,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                 .map(clause -> clause.name()).findFirst().orElse(null);
         if (echoed != null) {
             // Import refuses an output that reads a declared mask: true input; this covers the tenant's mask default.
-            return refuse(tenant, caller, request, version, now, at, MASKED_INPUT_IN_OUTPUT, "Input " + echoed + " of "
+            return refuse(tenant, caller, onBehalfOf, request, version, now, at, MASKED_INPUT_IN_OUTPUT, "Input " + echoed + " of "
                     + version.ruleSet() + " is masked for this tenant, but an output reads it; the decision is refused"
                     + " so the plain value is not logged");
         }
@@ -357,16 +374,16 @@ public final class DefaultRuleEngine implements RuleEngine {
                 version.hitPolicy(), errorCode == null ? "OK" : errorCode, reason,
                 EngineValues.write(EngineValues.loggedInputs(request.input(), rules.inputs(), maskByDefault, key)),
                 errorCode == null ? EngineValues.write(EngineValues.decision(result).get("outputs")) : null,
-                EngineValues.write(matched), caller, request.correlationId(), at, micros, pinned));
+                EngineValues.write(matched), caller, request.correlationId(), at, micros, pinned, onBehalfOf));
         return result;
     }
 
     /** Logs a decision on a version whose stored hash no longer matches its content, and raises the alert. */
-    private DecisionResult refuseTampered(String tenant, String caller, DecisionRequest request, StoredVersion version,
+    private DecisionResult refuseTampered(String tenant, String caller, String onBehalfOf, DecisionRequest request, StoredVersion version,
             Instant now, Instant at, IntegrityFailure failure) {
         System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
                 "ALERT rule set integrity: tenant " + tenant + ", " + failure.getMessage());
-        return refuse(tenant, caller, request, version, now, at, "EVALUATION_ERROR", failure.getMessage());
+        return refuse(tenant, caller, onBehalfOf, request, version, now, at, "EVALUATION_ERROR", failure.getMessage());
     }
 
     /**
@@ -476,13 +493,14 @@ public final class DefaultRuleEngine implements RuleEngine {
      * input: for a tampered version its masking cannot be trusted, and without a masking key the inputs could only
      * be logged in plain text. The rule set is not evaluated.
      */
-    private DecisionResult refuse(String tenant, String caller, DecisionRequest request, StoredVersion version,
+    private DecisionResult refuse(String tenant, String caller, String onBehalfOf, DecisionRequest request,
+            StoredVersion version,
             Instant now, Instant at, String errorCode, String detail) {
         DecisionResult result = new DecisionResult(Ulid.next(now), version.ruleSet(), version.version(), at, now,
                 request.version() != null, new DecisionResult.Failed("EVALUATION_ERROR", detail));
         log.append(new DecisionRecord(tenant, result.decisionId(), now, version.ruleSet(), version.version(),
                 version.hitPolicy(), "EVALUATION_ERROR", errorCode, "{}", null, "[]", caller,
-                request.correlationId(), at, 0, result.pinned()));
+                request.correlationId(), at, 0, result.pinned(), onBehalfOf));
         return result;
     }
 

@@ -4,7 +4,7 @@ import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.MaskingKey;
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.SourceFormat;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
@@ -389,6 +389,7 @@ public final class EngineValues {
         ObjectNode outputs = node.putObject("outputs");
         entry.outputs().forEach((name, v) -> outputs.set(name, value(v)));
         node.set("callerId", value(entry.callerId()));
+        node.set("onBehalfOf", value(entry.onBehalfOf()));
         node.set("correlationId", value(entry.correlationId()));
         node.put("evalClock", entry.evalClock().toString());
         node.put("evaluatedAt", entry.evaluatedAt().toString());

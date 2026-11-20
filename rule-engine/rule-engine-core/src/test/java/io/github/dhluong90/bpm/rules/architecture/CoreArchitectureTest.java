@@ -180,6 +180,8 @@ class CoreArchitectureTest {
                 .should().onlyDependOnClassesThat().resideInAnyPackage(
                         "java..", "tools.jackson..", "com.fasterxml.jackson.annotation..", "io.github.dhluong90.bpm.rules..",
                         "io.github.dhluong90.bpm.rules..",
+                        // Money, the value mapping and the horus-expr-v1 parser and evaluator (ADR-0027).
+                        "io.github.dhluong90.bpm.expr..",
                         // The YAML parser of jackson-dataformat-yaml, read directly only to refuse anchors, aliases
                         // and tags that Jackson does not report (security review of #1, finding 7).
                         "org.snakeyaml.engine..",
@@ -187,7 +189,8 @@ class CoreArchitectureTest {
                         "javax.xml", "javax.xml.stream..", "javax.xml.namespace..",
                         // JDK cryptography (HMAC-SHA256), used to sign list cursors (RLE-039, QA review of #147).
                         "javax.crypto..")
-                .because("rule-engine-core depends on the JDK and Jackson 3 only (TR-EMB-03, ADR-0021)")
+                .because("rule-engine-core depends on the JDK, Jackson 3 and bpm-expression only (TR-EMB-03, ADR-0021, "
+                        + "ADR-0027)")
                 .check(core);
     }
 

@@ -1,6 +1,6 @@
-package io.github.dhluong90.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.expr.internal;
 
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import java.math.BigDecimal;
 import java.time.DateTimeException;
 import java.time.LocalDate;
@@ -53,11 +53,11 @@ public final class Parser {
     private int index;
     private int depth;
 
-    private Parser(String source, ToIntFunction<String> slots, String column) {
+    private Parser(String source, ToIntFunction<String> slots, String column, boolean paths) {
         this.source = source;
         this.slots = slots;
         this.column = column;
-        this.tokens = lex(source);
+        this.tokens = lex(source, paths);
     }
 
     /**
@@ -83,10 +83,27 @@ public final class Parser {
      * @throws ExpressionException when the text is not a valid expression
      */
     public static Expr parse(String source, ToIntFunction<String> slots, String column) {
+        return parse(source, slots, column, false);
+    }
+
+    /**
+     * Parses an expression whose names may be dotted paths, such as {@code customer.tier}: each path is one name,
+     * resolved through {@code slots} like any other. Used for names typed only at evaluation (process variables).
+     *
+     * @param source the expression text
+     * @param slots maps a name or path to its slot index, or -1 when there is no such name
+     * @return the tree
+     * @throws ExpressionException when the text is not a valid expression
+     */
+    public static Expr parseWithPaths(String source, ToIntFunction<String> slots) {
+        return parse(source, slots, null, true);
+    }
+
+    private static Expr parse(String source, ToIntFunction<String> slots, String column, boolean paths) {
         if (source.length() > MAX_LENGTH) {
             throw new ExpressionException("Expression longer than " + MAX_LENGTH + " characters", MAX_LENGTH);
         }
-        Parser parser = new Parser(source, slots, column);
+        Parser parser = new Parser(source, slots, column, paths);
         Expr expr = parser.or();
         Token rest = parser.peek();
         if (rest.kind() != Kind.EOF) {
@@ -485,7 +502,7 @@ public final class Parser {
         return c >= '0' && c <= '9';
     }
 
-    private static List<Token> lex(String source) {
+    private static List<Token> lex(String source, boolean paths) {
         List<Token> tokens = new ArrayList<>();
         int i = 0;
         int n = source.length();
@@ -542,7 +559,9 @@ public final class Parser {
                 tokens.add(new Token(Kind.STRING, text.toString(), start));
             } else if (isAsciiLetter(c) || c == '_') {
                 int start = i;
-                while (i < n && (isAsciiLetter(source.charAt(i)) || isAsciiDigit(source.charAt(i)) || source.charAt(i) == '_')) {
+                while (i < n && (isAsciiLetter(source.charAt(i)) || isAsciiDigit(source.charAt(i)) || source.charAt(i) == '_'
+                        || (paths && source.charAt(i) == '.' && i + 1 < n
+                                && (isAsciiLetter(source.charAt(i + 1)) || source.charAt(i + 1) == '_')))) {
                     i++;
                 }
                 tokens.add(new Token(Kind.IDENT, source.substring(start, i), start));

@@ -25,7 +25,8 @@ Source: [`diagrams/components.mmd`](diagrams/components.mmd).
 
 | Module | Contents | May depend on |
 |---|---|---|
-| `rule-engine-core` | `api`, `spi` and `internal` packages: parser, type checker, compiler, evaluator, `Money`, ports | JDK and Jackson 3 in `internal` only (ADR-0021, `TR-EMB-07`) |
+| `bpm-expression` (shared with the Process Engine, ADR-0027) | `expr.api` (`Money`, the value mapping, expression exceptions), `expr.spi` (`ExpressionLanguage`, `CompiledExpression`, `TypeEnvironment`, `EvaluationContext`), `expr.internal` (the `urn:horus-bpm:expr:v1` parser, tree, evaluator and bounded regular expressions; FEEL from S1) | JDK only |
+| `rule-engine-core` | `api`, `spi` and `internal` packages: type checker, decision table compiler, lifecycle, decision log, ports | `bpm-expression`; JDK and Jackson 3 in `internal` only (ADR-0021, `TR-EMB-07`) |
 | `rule-engine-postgres` | `JdbcClient` adapters, Flyway `rle_*`, `LISTEN` and epoch sweep, partition maintenance, outbox relay | core, Spring JDBC, Flyway |
 | `rule-engine-rest` | Controllers under `/api/bpm/rules/v1`, RFC 9457 errors, idempotency filter | core, Spring WebMvc |
 | `rule-engine-test` | In-memory adapters passing the storage contract suite, `TestClock`, `@RuleSetTest`, row coverage report | core |
@@ -245,7 +246,7 @@ This section is the single statement of how money is represented; the Process En
 
 ### 3.5 Expression language SPI and value mapping (M1, DN-05)
 
-The parser and evaluator are reached through one interface, in `io.github.dhluong90.bpm.expr.api` of the `bpm-expression` library that both engines depend on (ADR-0027), so a second language (FEEL, ADR-0019) registers beside the first and the Process Engine never depends on parser classes:
+The parser and evaluator are reached through one interface, in `io.github.dhluong90.bpm.expr.spi` of the `bpm-expression` library that both engines depend on (ADR-0027), so a second language (FEEL, ADR-0019) registers beside the first and the Process Engine never depends on parser classes. A `TypeEnvironment` is either declared (a rule set's inputs: an unknown name is a compile error, and a type mismatch the type checker let through gives null, as FEEL does) or untyped (process variables: any name or dotted path such as `customer.tier`, and a value of the wrong type for an operator is an evaluation error, never a silent `false`). `today()` and `now()` read the `EvaluationContext` clock only:
 
 ```java
 public interface ExpressionLanguage {
@@ -615,6 +616,7 @@ CREATE TABLE rle_decision (
   outputs          JSONB,
   matched_rule_ids JSONB       NOT NULL,        -- every matched row, also for UNIQUE_HIT_VIOLATION; [] for no match and EVALUATION_ERROR
   caller_id        TEXT,
+  on_behalf_of     TEXT,                        -- V17: the user an embedded engine evaluated for (ADR-0027); null otherwise
   correlation_id   TEXT,
   eval_clock       TIMESTAMPTZ NOT NULL,
   duration_micros  BIGINT      NOT NULL,

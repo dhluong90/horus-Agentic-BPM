@@ -1,4 +1,4 @@
-package io.github.dhluong90.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.expr.internal;
 
 /** A deterministic evaluation failure, logged as {@code EVALUATION_ERROR}. */
 public final class EvaluationException extends RuntimeException {

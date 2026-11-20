@@ -10,7 +10,7 @@ import io.github.dhluong90.bpm.rules.api.SourceFormat;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
-import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
+import io.github.dhluong90.bpm.expr.internal.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.read.RuleSetReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;

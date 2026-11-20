@@ -43,4 +43,26 @@ public interface TenantScopedRuleEngine {
      * @throws InputInvalidException when an input has the wrong type ({@code INPUT_INVALID})
      */
     DecisionResult evaluate(String tenantId, DecisionRequest request);
+
+    /**
+     * Evaluates for a step of the calling engine (ADR-0027): in the given tenant, as {@link #engineId()}, on behalf of
+     * the human who triggered the step, at the calling engine's clock. {@code onBehalfOf} is written to the decision
+     * log beside the caller. Neither {@code onBehalfOf} nor the evaluation time is part of the idempotency check: a
+     * retried step with the same key replays the logged decision, with its original evaluation time, and writes no
+     * second row.
+     *
+     * @param tenantId the tenant, read by the calling engine from its stored aggregate; not blank
+     * @param onBehalfOf the human the engine acts for, or null for engine-owned work such as a timer
+     * @param evaluationTime the calling engine's clock at the step; it selects the version in force and feeds
+     *     {@code today()} and {@code now()}
+     * @param request the request, with no clock and no pinned version
+     * @return the logged result; on a replay of the same key and request, the original result
+     * @throws IllegalArgumentException when the tenant is blank, the evaluation time is null, or the request carries a
+     *     clock or a pinned version
+     * @throws RuleSetNotFoundException when the tenant has no such rule set ({@code RULE_SET_NOT_FOUND})
+     * @throws NoEffectiveVersionException when no published version is effective ({@code NO_EFFECTIVE_VERSION})
+     * @throws InputInvalidException when an input has the wrong type ({@code INPUT_INVALID})
+     */
+    DecisionResult evaluate(String tenantId, String onBehalfOf, java.time.Instant evaluationTime,
+            DecisionRequest request);
 }

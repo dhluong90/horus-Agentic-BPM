@@ -1472,6 +1472,12 @@ components:
           description: The outputs; empty for a failed evaluation. Money is `{currency, amount}` in minor units
           additionalProperties: true
         callerId: { type: [string, 'null'] }
+        onBehalfOf:
+          type: [string, 'null']
+          description: |
+            The user an embedded engine evaluated for: a process decision step is evaluated as
+            `system:process-engine` on behalf of the user who triggered it. Null for a decision made
+            for its caller alone, or after a timer
         correlationId: { type: [string, 'null'] }
         evalClock:
           type: string
@@ -1953,6 +1959,12 @@ components:
           type: array
           items: { type: string }
         callerId: { type: [string, 'null'] }
+        onBehalfOf:
+          type: [string, 'null']
+          description: |
+            The user an embedded engine evaluated for: a process decision step is evaluated as
+            `system:process-engine` on behalf of the user who triggered it. Null for a decision made
+            for its caller alone, or after a timer
         correlationId: { type: [string, 'null'] }
         evalClock:
           type: string

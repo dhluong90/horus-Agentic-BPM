@@ -1,4 +1,4 @@
-package io.github.dhluong90.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.expr.internal;
 
 /**
  * Bounds of one regular expression match (TR-SEC-02, RLE-007): the number of characters one match may read (the

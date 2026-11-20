@@ -10,7 +10,7 @@ import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
 import io.github.dhluong90.bpm.rules.api.LifecycleAction;
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.rules.api.Page;
 import io.github.dhluong90.bpm.rules.api.PageRequest;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;

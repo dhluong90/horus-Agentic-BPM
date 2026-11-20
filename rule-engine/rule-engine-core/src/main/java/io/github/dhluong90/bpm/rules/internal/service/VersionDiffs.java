@@ -1,6 +1,6 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.rules.api.PersonalDataNames;
 import io.github.dhluong90.bpm.rules.api.VersionDiff;
 import io.github.dhluong90.bpm.rules.api.VersionDiff.Change;
@@ -10,8 +10,8 @@ import io.github.dhluong90.bpm.rules.api.VersionDiff.FieldChange;
 import io.github.dhluong90.bpm.rules.api.VersionDiff.InputMasking;
 import io.github.dhluong90.bpm.rules.api.VersionDiff.Masking;
 import io.github.dhluong90.bpm.rules.api.VersionDiff.RowChange;
-import io.github.dhluong90.bpm.rules.internal.expr.Expr;
-import io.github.dhluong90.bpm.rules.internal.expr.Parser;
+import io.github.dhluong90.bpm.expr.internal.Expr;
+import io.github.dhluong90.bpm.expr.internal.Parser;
 import io.github.dhluong90.bpm.rules.internal.json.CanonicalJson;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
 import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;

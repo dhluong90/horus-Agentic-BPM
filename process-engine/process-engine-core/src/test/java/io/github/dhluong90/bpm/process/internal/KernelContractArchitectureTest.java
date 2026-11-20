@@ -42,10 +42,21 @@ class KernelContractArchitectureTest {
     }
 
     @Test
-    void only_the_decision_port_reaches_the_rule_engines_tenant_scoped_entry_point() {
-        noClasses().that().resideOutsideOfPackage("..process.internal.service..")
-                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules.embedded..")
-                .because("the tenant-scoped entry point is engine-to-engine, held only by the decision port (ADR-0027)")
+    void core_does_not_depend_on_the_rule_engine() {
+        noClasses().should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules..")
+                .because("decisions go through the DecisionPort, adapted in the starter (ADR-0027)")
+                .check(CORE);
+    }
+
+    @Test
+    void core_reaches_expression_internals_only_through_the_language() {
+        noClasses().should().dependOnClassesThat(com.tngtech.archunit.base.DescribedPredicate.describe(
+                        "expression internals other than the horus-expr-v1 language",
+                        (com.tngtech.archunit.core.domain.JavaClass c) ->
+                                c.getPackageName().startsWith("io.github.dhluong90.bpm.expr.internal")
+                                        && !c.getName().equals("io.github.dhluong90.bpm.expr.internal.HorusExprV1")))
+                .because("gateway conditions compile through the ExpressionLanguage SPI, never parser classes "
+                        + "(ADR-0027)")
                 .check(CORE);
     }
 }

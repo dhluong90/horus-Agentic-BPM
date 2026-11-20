@@ -19,6 +19,7 @@ Design preview: describes the 0.1 target.
 | `matchedRuleIds`, `outputs` | The explanation |
 | `outcome` | `ok` or an error code such as `UNIQUE_HIT_VIOLATION` |
 | `caller`, `correlationId` | From the security context and the request |
+| `onBehalfOf` | Set only for a process decision step (0.2.0): the step is evaluated as `system:process-engine`, and `onBehalfOf` names the user who triggered it, or is null after a timer. The task worker needs no `rules:evaluate`. A retried step replays its decision instead of writing a second row |
 | `evalClock`, `evaluatedAt`, `durationMicros` | The instant the decision reasoned about, when it ran, and how long |
 | `clockChosen`, `pinned` | Whether the caller chose the clock (`rules:simulate`), so the decision is back-dated or forward-dated, and whether the caller named the version (`rules:pin`). The engine sets both; `GET /decisions/{id}` and the masked-input search return them |
 | async marker | Set when the entry was written in `async` mode (see below) |

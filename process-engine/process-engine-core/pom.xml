@@ -12,10 +12,13 @@
   <name>HORUS Process Engine Core</name>
   <description>Framework-free BPMN semantic model and execution kernel of the Process Engine. Depends on the JDK and, inside its internal packages only, Jackson 3.</description>
   <dependencies>
-    <!-- The Rule Engine API: Money in gateway conditions. Decisions are called by the shell, never by the kernel. -->
+    <!--
+      ADR-0027: Money, the value mapping and the expression language of gateway conditions. Not the Rule Engine:
+      decisions go through the DecisionPort, which the process starter adapts when the host has a Rule Engine.
+    -->
     <dependency>
       <groupId>io.github.dhluong90.bpm</groupId>
-      <artifactId>rule-engine-core</artifactId>
+      <artifactId>bpm-expression</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>

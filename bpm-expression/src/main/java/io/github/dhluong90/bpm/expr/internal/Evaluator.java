@@ -1,6 +1,6 @@
-package io.github.dhluong90.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.expr.internal;
 
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
@@ -23,11 +23,22 @@ import java.time.temporal.ChronoUnit;
  */
 public final class Evaluator {
 
+    /**
+     * Default longest string {@code +} may build, in UTF-16 code units; the Rule Engine's
+     * {@code evaluation.string-max-length} default.
+     */
+    public static final int STRING_MAX_LENGTH = 65_536;
+
     private final RoundingMode moneyRounding;
     private final int maxStringLength;
     private final RegexLimits regexLimits;
     /** The read budget of the decision this evaluator is scoped to, or null for a shared evaluator. */
     private final DecisionReads decision;
+    /**
+     * Whether values of the wrong type for an operator fail instead of giving null. Off for rule sets, whose types are
+     * checked at publication; on for names typed only at evaluation, such as process variables (ADR-0027).
+     */
+    private final boolean strict;
 
     /**
      * Creates an evaluator with the default string bound.
@@ -35,7 +46,7 @@ public final class Evaluator {
      * @param moneyRounding rounding of money multiplication and division
      */
     public Evaluator(RoundingMode moneyRounding) {
-        this(moneyRounding, io.github.dhluong90.bpm.rules.internal.service.EngineDefaults.STRING_MAX_LENGTH);
+        this(moneyRounding, STRING_MAX_LENGTH);
     }
 
     /**
@@ -60,13 +71,26 @@ public final class Evaluator {
         this.maxStringLength = maxStringLength;
         this.regexLimits = java.util.Objects.requireNonNull(regexLimits, "regexLimits must not be null");
         this.decision = null;
+        this.strict = false;
     }
 
-    private Evaluator(Evaluator shared, DecisionReads decision) {
+    private Evaluator(Evaluator shared, DecisionReads decision, boolean strict) {
         this.moneyRounding = shared.moneyRounding;
         this.maxStringLength = shared.maxStringLength;
         this.regexLimits = shared.regexLimits;
         this.decision = decision;
+        this.strict = strict;
+    }
+
+    /**
+     * Returns an evaluator for names typed only at evaluation: an operator given non-null values of types it does not
+     * accept ({@code 'GOLD' == 5}, {@code fee > 1} with money {@code fee}, {@code 'x' and true}) fails with
+     * {@link EvaluationException} instead of giving null, so a condition never silently does not hold.
+     *
+     * @return the strict evaluator
+     */
+    public Evaluator strict() {
+        return new Evaluator(this, decision, true);
     }
 
     /**
@@ -76,7 +100,7 @@ public final class Evaluator {
      * @return an evaluator scoped to a fresh decision budget
      */
     public Evaluator forDecision() {
-        return new Evaluator(this, regexLimits.newDecision());
+        return new Evaluator(this, regexLimits.newDecision(), strict);
     }
 
     /**
@@ -92,7 +116,10 @@ public final class Evaluator {
             case Expr.Literal literal -> literal.value();
             case Expr.Var var -> slots[var.slot()];
             case Expr.Clock clock -> clockValue(clock, slots);
-            case Expr.Unary unary -> unary(unary.op(), evaluate(unary.operand(), slots));
+            case Expr.Unary unary -> {
+                Object operand = evaluate(unary.operand(), slots);
+                yield typed(unary(unary.op(), operand), operand, operand, unary.op().name().toLowerCase(java.util.Locale.ROOT));
+            }
             case Expr.Binary binary -> binary(binary, slots);
             case Expr.InList inList -> {
                 boolean found = in(evaluate(inList.target(), slots), inList, slots);
@@ -165,21 +192,27 @@ public final class Evaluator {
         Expr.BinaryOp op = binary.op();
         if (op == Expr.BinaryOp.AND) {
             Object left = evaluate(binary.left(), slots);
+            typed(null, left, "and");
             if (Boolean.FALSE.equals(left)) {
                 return false;
             }
-            return and(left, evaluate(binary.right(), slots));
+            Object right = evaluate(binary.right(), slots);
+            typed(null, right, "and");
+            return and(left, right);
         }
         if (op == Expr.BinaryOp.OR) {
             Object left = evaluate(binary.left(), slots);
+            typed(null, left, "or");
             if (Boolean.TRUE.equals(left)) {
                 return true;
             }
-            return or(left, evaluate(binary.right(), slots));
+            Object right = evaluate(binary.right(), slots);
+            typed(null, right, "or");
+            return or(left, right);
         }
         Object left = evaluate(binary.left(), slots);
         Object right = evaluate(binary.right(), slots);
-        return switch (op) {
+        Object result = switch (op) {
             case EQ -> equal(left, right);
             case NE -> {
                 Boolean equal = equal(left, right);
@@ -188,6 +221,37 @@ public final class Evaluator {
             case LT, LE, GT, GE -> compare(op, left, right);
             case ADD, SUB, MUL, DIV -> arithmetic(op, left, right);
             case AND, OR -> throw new IllegalStateException("handled above");
+        };
+        return typed(result, left, right, op.name().toLowerCase(java.util.Locale.ROOT));
+    }
+
+    /**
+     * In strict mode, a null result from two non-null operands means the operator does not accept their types: fail.
+     */
+    private Object typed(Object result, Object left, Object right, String op) {
+        if (strict && result == null && left != null && right != null) {
+            throw new EvaluationException("Operator " + op + " does not accept " + kind(left) + " and "
+                    + kind(right));
+        }
+        return result;
+    }
+
+    /** In strict mode, a logical operand must be a boolean or null. */
+    private void typed(Object ignored, Object operand, String op) {
+        if (strict && operand != null && !(operand instanceof Boolean)) {
+            throw new EvaluationException("Operator " + op + " needs booleans, got " + kind(operand));
+        }
+    }
+
+    private static String kind(Object value) {
+        return switch (value) {
+            case Money m -> "money";
+            case BigDecimal d -> "number";
+            case String s -> "text";
+            case Boolean b -> "boolean";
+            case LocalDate d -> "date";
+            case Instant i -> "datetime";
+            default -> "a " + value.getClass().getSimpleName();
         };
     }
 

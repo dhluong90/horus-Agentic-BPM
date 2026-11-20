@@ -1,7 +1,7 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.rules.internal.service.DecisionQuerySettings;
-import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
+import io.github.dhluong90.bpm.expr.internal.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import java.time.Duration;

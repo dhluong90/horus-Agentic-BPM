@@ -5,9 +5,6 @@ import io.github.dhluong90.bpm.host.autoconfigure.RetireApproval;
 import io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
-import io.github.dhluong90.bpm.rules.api.RuleEngine;
-import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
-import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
@@ -18,7 +15,7 @@ import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.internal.exec.BehaviorCatalog;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
-import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
+import io.github.dhluong90.bpm.process.internal.service.DecisionPort;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
@@ -45,6 +42,7 @@ import java.util.Optional;
 import javax.sql.DataSource;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -193,8 +191,8 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnMissingBean
     ProcessServices processEngineServices(ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
-            JdbcJobStore jobs, JobSettings jobSettings, ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
-            ObjectProvider<RuleEngines> ruleEngines, ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
+            JdbcJobStore jobs, JobSettings jobSettings, ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
+            ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -212,8 +210,7 @@ public class ProcessEngineAutoConfiguration {
         return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
                 Map.of(SourceFormat.BPMN_XML, new SubsetBpmnWriter()::write),
-                new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
-                        engineWork(ruleEngines), properties.handlers().slowCallWarning()), publisher,
+                new LocalServiceInvoker(byName, decisions(beans), properties.handlers().slowCallWarning()), publisher,
                 properties.toSettings(EngineSettings.ApproverRule.valueOf(ApproverMustDifferFrom.from(environment).name()),
                         EngineSettings.RetireLastVersionRule.valueOf(RetireLastVersion.from(environment).name())),
                 BehaviorCatalog.registry(),
@@ -258,13 +255,16 @@ public class ProcessEngineAutoConfiguration {
     }
 
     /**
-     * The Rule Engine's tenant-scoped entry point for this engine's own work, bound to {@code system:process-engine}
-     * (ADR-0027). Built here and handed only to the decision port; never registered as a bean, so no host code can
-     * inject it.
+     * The decision port over the Rule Engine when it is on the class path and the host has a {@code RuleEngine}
+     * (ADR-0027); empty otherwise, and a definition with a business rule task is then refused at activation. The Rule
+     * Engine dependency is optional: {@link RuleEngineDecisions} is loaded only once its class is known to exist.
      */
-    private static Optional<TenantScopedRuleEngine> engineWork(ObjectProvider<RuleEngines> ruleEngines) {
-        return Optional.ofNullable(ruleEngines.getIfUnique())
-                .map(engines -> engines.forEmbeddedEngine(DecisionCaller.ENGINE_IDENTITY));
+    private static Optional<DecisionPort> decisions(BeanFactory beans) {
+        ClassLoader loader = ProcessEngineAutoConfiguration.class.getClassLoader();
+        if (!org.springframework.util.ClassUtils.isPresent(RuleEngineDecisions.RULE_ENGINE_CLASS, loader)) {
+            return Optional.empty();
+        }
+        return RuleEngineDecisions.from(beans);
     }
 
     /**

@@ -119,7 +119,7 @@ package com.example.loans;
 
 import io.github.dhluong90.bpm.rules.test.RuleSetTest;
 import io.github.dhluong90.bpm.rules.test.RuleSetUnderTest;
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import org.junit.jupiter.api.Test;
 import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;

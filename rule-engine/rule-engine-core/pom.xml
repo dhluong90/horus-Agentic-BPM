@@ -15,10 +15,16 @@
   <description>Framework-free model, compiler and evaluator of the Rule Engine. Depends on the JDK and, inside its internal packages only, Jackson 3.</description>
 
   <!--
-    Jackson 3 (tools.jackson) is the only compile dependency, used in ..internal.. only (ADR-0021).
+    Jackson 3 (tools.jackson) and bpm-expression are the only compile dependencies, used in ..internal.. only (ADR-0021).
     Versions come from the Spring Boot BOM imported by the parent.
   -->
   <dependencies>
+    <!-- ADR-0027: Money, the value mapping and the horus-expr-v1 parser and evaluator. -->
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>bpm-expression</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <dependency>
       <groupId>tools.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>

@@ -1,4 +1,4 @@
-package io.github.dhluong90.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.expr.internal;
 
 import java.util.List;
 

@@ -17,6 +17,16 @@
       <artifactId>process-engine-core</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!--
+      ADR-0027: optional. With it and a RuleEngine bean, business rule tasks evaluate through the decision port;
+      without it, the Process Engine runs alone and a definition with a business rule task is refused at activation.
+    -->
+    <dependency>
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>rule-engine-core</artifactId>
+      <version>${project.version}</version>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>io.github.dhluong90.bpm</groupId>
       <artifactId>process-engine-bpmn</artifactId>
