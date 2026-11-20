@@ -99,7 +99,7 @@ curl -s -i localhost:8080/api/bpm/meta
 # {"type":"https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#unauthenticated","title":"Authentication required","status":401,"code":"UNAUTHENTICATED","detail":"Sign in, or send a token issued for this host.","instance":"/api/bpm/meta","correlationId":"01M7RR0S1MJ2AFNEK9G00A9E1N"}
 ```
 
-Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve"]`. Calls that change state with the session need the CSRF token: the host sets it in the `XSRF-TOKEN` cookie and expects it back as `X-XSRF-TOKEN`.
+Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve","rules:simulate"]`. Calls that change state with the session need the CSRF token: the host sets it in the `XSRF-TOKEN` cookie and expects it back as `X-XSRF-TOKEN`.
 
 The demo users exist only on the `dev` profile, and the host refuses to start on `dev` beside another profile (other than `test`) or with a token issuer that is not on this machine. Without `dev` the user store is empty. The host accepts bearer tokens when an issuer, JWK set or public key is configured, and then requires its own audience; token claim `roles` becomes `ROLE_*` authorities and claim `tenant_id` the tenant.
 
@@ -111,8 +111,8 @@ This walkthrough uses the demo users of the `dev` profile, in tenant `bank-a` (t
 
 | User | Roles | Engine permissions |
 |---|---|---|
-| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve` |
-| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
+| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve`, `rules:simulate` |
+| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve`, `rules:simulate` |
 | `tuan` | `TELLER` | `rules:evaluate` |
 
 One more role is mapped and given to no demo user: `PRIVACY_OPS`, with `rules:log:read` and `rules:masked:search`. It is the only role that may look decisions up by a masked value such as a national id (`POST /decisions:find-by-masked-input`), at most 30 times a minute per person (`masking.search.max-per-minute`).
@@ -254,6 +254,29 @@ H=localhost:8080/api/bpm/rules/v1
     # HTTP 422
     ```
 
+### Simulate a changed fee table before approving it
+
+Version 2 of the card fee, [`rules/card-fee-v2.yaml`](src/main/resources/rules/card-fee-v2.yaml), lowers the default fee from 50,000 VND to 30,000 VND. Before Minh approves it, he runs the five sample customers of [`rules/card-fee-samples.json`](src/main/resources/rules/card-fee-samples.json) through v2 and through v1, which is in force. Nothing is logged. After steps 1 to 6 (if a version 2 exists already, the import gets the next number; simulate that one):
+
+```bash
+curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' \
+  --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee-v2.yaml
+# 201 {"ruleSet":"card-fee","version":2,"status":"DRAFT",...}
+curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:simulate -H 'Content-Type: application/json' \
+  --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee-samples.json
+# 200 {"ruleSet":"card-fee","version":2,"status":"DRAFT","baselineVersion":1,"evaluatedAt":"...",
+#      "sampleCount":5,"changedCount":2,"results":[
+#      {"index":0,"changed":false,"simulated":{"outcome":"MATCHED","matchedRuleIds":["R1"],"outputs":{"fee":{"currency":"VND","amount":0}}},...},
+#      ...
+#      {"index":3,"changed":true,"simulated":{...,"outputs":{"fee":{"currency":"VND","amount":30000}}},
+#                                "baseline":{...,"outputs":{"fee":{"currency":"VND","amount":50000}}}},
+#      {"index":4,"changed":true,...}]}
+docker exec horus-pg psql -U horus -d horus -tc 'SELECT count(*) FROM rle_decision'
+# 1   (the decision of step 5 only)
+```
+
+The approver role has `rules:simulate` in [`application.yml`](src/main/resources/application.yml); Tuan, a teller, gets `403 PERMISSION_DENIED`. `SimulationIT` runs the same steps with bearer tokens and prints each sample with its two fees. Once Minh approves v2 (with `If-Match: "1"`), it is in force and v1 is retired as superseded: a new simulation compares with v2, and a pinned evaluate of v1 is `409 INVALID_STATE` while `evaluation.pin-retired` is off.
+
 ### Hit policies: exactly one row, or every matching row
 
 Two more rule sets ship with the example. [`loan-pricing.yaml`](src/main/resources/rules/loan-pricing.yaml) uses `hitPolicy: unique`, and its rows `R1` (score 700 or more) and `R2` (income 20,000,000 VND or more) overlap on purpose. [`risk-flags.yaml`](src/main/resources/rules/risk-flags.yaml) uses `hitPolicy: collect`: every matching row adds a flag and a penalty. Import, request and approve each one as in steps 1 to 4, then:
@@ -359,6 +382,56 @@ mvn -B -pl examples/rule-engine-only -am verify -Dtest=NONE -Dsurefire.failIfNoS
   -Dit.test=MultiReplicaCacheIT
 # [INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0 -- in ...MultiReplicaCacheIT
 ```
+
+## Demo: the decision log by month
+
+The decision log keeps one table section per calendar month, created ahead of the clock while the host runs. An auditor reads one rule set's decisions for a period of at most 31 days, 200 at a time. The demo users hold no audit permission by default, so start the host as in the walkthrough above with one more argument that gives Minh `rules:log:read`, then run steps 1 to 5 there so `card-fee` has decisions:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  --horus.bpm.rules.security.role-permissions.ROLE_PRICING_APPROVER=rules:read,rules:approve,rules:log:read
+FROM=$(date -u +%Y-%m-01T00:00:00Z)
+TO=$(date -u -v+1m +%Y-%m-01T00:00:00Z 2>/dev/null || date -u -d "$(date -u +%Y-%m-01) +1 month" +%Y-%m-01T00:00:00Z)
+```
+
+1. Minh lists this month's card fee decisions, newest first. A page holds up to 200; pass `nextCursor` back as `cursor` with the same query for the next one:
+
+   ```bash
+   curl -s -u minh:demo-only "$H/decisions?ruleSet=card-fee&from=$FROM&to=$TO"
+   # {"data":[{"decisionId":"...","ruleSet":"card-fee","version":1,"hitPolicy":"FIRST","outcome":"MATCHED",
+   #   "matchedRuleIds":["R1"],"inputs":{"tier":"GOLD","txCount":5},"outputs":{"fee":{"currency":"VND","amount":0}},
+   #   "callerId":"tuan",...}],"nextCursor":null,"hasNext":false}
+   ```
+
+2. A period longer than 31 days, or no rule set, is refused before the database is read; a teller without the permission gets `403`:
+
+   ```bash
+   curl -s -u minh:demo-only "$H/decisions?ruleSet=card-fee&from=2027-01-01T00:00:00Z&to=2027-02-02T00:00:00Z"
+   # 400 {"code":"QUERY_INVALID","detail":"from and to may be at most 31 days apart (query.max-range P31D), were PT768H",...}
+   curl -s -o /dev/null -w '%{http_code}\n' -u tuan:demo-only "$H/decisions?ruleSet=card-fee&from=$FROM&to=$TO"
+   # 403
+   ```
+
+3. The sections that exist: this month and the next one, created at start-up, plus every month up to `decision-log.partitions-ahead` (7 days) ahead. A daily run adds the next month without a restart:
+
+   ```bash
+   docker exec horus-pg psql -U horus -d horus -At -c \
+     "SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid WHERE i.inhparent = 'rle_decision'::regclass ORDER BY 1"
+   # rle_decision_2026_11
+   # rle_decision_2026_12
+   # rle_decision_default
+   ```
+
+4. The clock move, the overflow counter and the 250-decision search run as tests with a fixed clock, recorded for the sprint review. The host clock moves from 26 January to 25 February 2027 without a restart and March appears; a decision of 15 March that landed in the default section moves into March, and the gauge `horus.rle.partition.default.rows` goes from 1 to 0:
+
+   ```bash
+   mvn -B -pl examples/rule-engine-only -am verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false \
+     -Dit.test=DecisionLogSearchIT
+   # [INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- in ...DecisionLogSearchIT
+   ```
+
+   In a host with Actuator's metrics endpoint exposed, `GET /actuator/metrics/horus.rle.partition.default.rows` shows the same gauge; this example exposes only `health`.
 
 ## Demo: a fee change on a date, replay and the bank's time zone
 
@@ -676,6 +749,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `CockpitEmbeddedIT.CKP_001_*` | On the `dev` profile: form sign-in, the cockpit page and its one-host registry, then `200` from `/api/bpm/meta` and `/api/bpm/me` with the session, valid against the cockpit schemas; a call that changes data needs `X-XSRF-TOKEN` from the cookie |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
 | `MultiReplicaCacheIT.RLE_010_*`, `MultiReplicaCacheIT.TR_ASY_04_*` | Two copies of this host on one database: copy B serves `card-fee` v2 within 1 s of copy A's approval on a direct connection, and within the 5 s epoch check through PgBouncer in transaction mode (`edoburu/pgbouncer`, override with `-Dbpm.test.pgbouncer.image`) with `cache.listen-notify=false`, where no session runs `LISTEN` |
+| `DecisionLogSearchIT.RLE_029_*`, `DecisionLogSearchIT.RLE_017_*` | The decision log demo above over HTTP: 250 card-fee decisions of January 2027 in pages of 200 and 50, a 32-day range and a missing rule set refused, another tenant's own rows only, `403` without `rules:log:read`, masked inputs still hashed; the default-section gauge from 1 to 0 when the job creates March without a restart |
 | `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*`, `RLE_002_*`, `RLE_003_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.

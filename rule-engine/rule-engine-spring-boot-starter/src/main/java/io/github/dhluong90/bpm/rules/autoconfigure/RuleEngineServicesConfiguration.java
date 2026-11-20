@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
+import io.github.dhluong90.bpm.rules.api.DecisionLogQuery;
 import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
@@ -12,6 +13,7 @@ import io.github.dhluong90.bpm.rules.rest.DecisionController;
 import io.github.dhluong90.bpm.rules.rest.DecisionLogController;
 import io.github.dhluong90.bpm.rules.rest.ProblemDetails;
 import io.github.dhluong90.bpm.rules.rest.RuleSetController;
+import io.github.dhluong90.bpm.rules.rest.SimulationController;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
@@ -67,7 +69,8 @@ class RuleEngineServicesConfiguration {
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
             MaskingPolicy masking, Environment environment) {
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(environment), masking);
+                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(environment), masking,
+                properties.toQuerySettings());
     }
 
     @Bean
@@ -127,6 +130,12 @@ class RuleEngineServicesConfiguration {
         return engines.versionService();
     }
 
+    @Bean
+    @ConditionalOnMissingBean
+    DecisionLogQuery ruleEngineDecisionLogQuery(RuleEngines engines) {
+        return engines.decisionLogQuery();
+    }
+
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "org.springframework.security.core.context.SecurityContextHolder")
     static class SecurityCallerConfiguration {
@@ -174,14 +183,21 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        DecisionController ruleEngineDecisionController(RuleEngine engine, CallerResolver callers) {
-            return new DecisionController(engine, callers);
+        DecisionController ruleEngineDecisionController(RuleEngine engine, DecisionLogQuery log,
+                CallerResolver callers) {
+            return new DecisionController(engine, log, callers);
         }
 
         @Bean
         @ConditionalOnMissingBean
         DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions, CallerResolver callers) {
             return new DecisionLogController(decisions, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        SimulationController ruleEngineSimulationController(RuleEngine engine, CallerResolver callers) {
+            return new SimulationController(engine, callers);
         }
 
         @Bean

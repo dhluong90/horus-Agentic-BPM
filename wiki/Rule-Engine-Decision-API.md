@@ -96,7 +96,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions` | New draft, empty or copied from a version | `rules:author` | `Idempotency-Key` |
 | `PUT /rule-sets/{name}/versions/{v}` | Replace a draft's content in place; the draft's author only | `rules:author` | `Idempotency-Key`, `If-Match` (both required) |
 | `POST /rule-sets/{name}/versions/{v}:validate` | Parse and type-check without saving | `rules:author` | |
-| `POST /rule-sets/{name}/versions/{v}:simulate` | Evaluate a draft over sample inputs or logged decisions; writes no decision rows | `rules:simulate` | `Idempotency-Key` |
+| `POST /rule-sets/{name}/versions/{v}:simulate` | Run a version (normally a draft) over 1 to 1,000 sample inputs beside the version effective now, flagging changed outcomes; writes nothing (see [[Rule Engine Simulation and Testing]]). Replay over logged decisions is M3 | `rules:simulate` | None: nothing is written, so no `Idempotency-Key` |
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | Freeze the draft, record the requester | `rules:author` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:approve` | Publish; approver must differ from requester | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
 | `POST /rule-sets/{name}/versions/{v}:reject` | Back to draft with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
@@ -109,7 +109,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `GET /decisions/{id}` | One decision as logged, with `evalClock`, `clockChosen` and `pinned`; masked inputs are `hmac:<keyId>:<hex>`. Another tenant's decision is `404 DECISION_NOT_FOUND` | `rules:log:read` | |
 | `POST /decisions:find-by-masked-input` | Decisions of one rule set, in at most 31 days, whose masked input had a plain value. Body `{ "ruleSet", "input", "value", "from", "to", "limit" }`; the engine fingerprints `value` with your tenant's key, so the value is never stored or put in a URL. Answers `{ "data": [...], "truncated": false }`, newest first | `rules:masked:search` | `limit` 1 to 200, default 50; at most `masking.search.max-per-minute` (30) per caller per minute, then `429` with `Retry-After` |
 | `GET /decisions/{id}/explain` | Plain-language explanation | `rules:log:read` | |
-| `GET /decisions?ruleSet=&from=&to=&outcome=&matchedRuleId=&cursor=&limit=` | Decision log, newest first. `ruleSet`, `from` and `to` are required; the range is at most 31 days | `rules:log:read` | cursor pagination |
+| `GET /decisions?ruleSet=&from=&to=&cursor=&limit=` | Decision log of one rule set, newest first, `from` inclusive and `to` exclusive. `ruleSet`, `from` and `to` are required; the range is at most 31 days (`query.max-range`); a page holds up to 200 decisions (`query.max-page-size`, also the default). Masked inputs stay hashed. Built in 0.2; the `outcome` and `matchedRuleId` filters come later | `rules:log:read` | cursor pagination; the cursor is bound to the rule set and period |
 
 Permission strings match [[Rule Engine Configuration]].
 

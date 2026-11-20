@@ -80,6 +80,14 @@ public class RuleEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    RuleEnginePartitionMaintenance ruleEnginePartitionMaintenance(
+            DecisionLogPartitions partitions, RuleEngineProperties properties, ObjectProvider<Clock> clock) {
+        return new RuleEnginePartitionMaintenance(partitions, engineClock(clock),
+                properties.decisionLog().partitionsAheadOrDefault());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     RuleEngineSchemaInitializer ruleEngineSchemaInitializer(
             RuleEngineSchemaMigrator migrator,
             DecisionLogPartitions partitions,
@@ -87,9 +95,23 @@ public class RuleEngineAutoConfiguration {
             ObjectProvider<Clock> clock,
             ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys,
             ObjectProvider<RuleEngineMaskingCheck> maskingCheck,
-            ObjectProvider<RuleEngineLifecycleSweeper> sweeper) {
+            ObjectProvider<RuleEngineLifecycleSweeper> sweeper,
+            ObjectProvider<RuleEnginePartitionMaintenance> maintenance) {
         return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
-                cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable(), sweeper.getIfAvailable());
+                cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable(), sweeper.getIfAvailable(),
+                maintenance.getIfAvailable());
+    }
+
+    /** The decision log gauge, bound by the host's meter registry when Micrometer is present (DESIGN 4.8). */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.core.instrument.binder.MeterBinder")
+    static class RuleEngineMetricsConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(name = "ruleEngineMetrics")
+        RuleEngineMetrics ruleEngineMetrics(DecisionLogPartitions partitions) {
+            return new RuleEngineMetrics(partitions);
+        }
     }
 
     /**

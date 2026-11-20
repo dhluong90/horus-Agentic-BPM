@@ -117,6 +117,24 @@ public final class EngineValues {
     }
 
     /**
+     * Reads logged inputs or outputs back into engine values, as {@link #inputsFromJson} reads a request; a JSON
+     * null becomes a null value.
+     *
+     * @param json the logged JSON object, or null for none
+     * @return the values by name, in logged order
+     */
+    public static Map<String, Object> loggedValues(String json) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        if (json == null) {
+            return values;
+        }
+        for (Map.Entry<String, JsonNode> entry : read(json).properties()) {
+            values.put(entry.getKey(), fromJson(entry.getValue(), entry.getKey()));
+        }
+        return values;
+    }
+
+    /**
      * Returns the keyed fingerprint of one input value. The fingerprinted text is the value's plain form, so an
      * auditor can compute it outside the engine: a string as it is (the fingerprint of a national id is the
      * HMAC-SHA256 of its UTF-8 bytes); a number as its decimal digits without trailing zeros ({@code 5} and
@@ -316,6 +334,87 @@ public final class EngineValues {
             case DecisionResult.NoMatch noMatch -> {
                 node.put("outcome", "NO_MATCH");
                 node.put("matched", false);
+                node.set("matchedRuleIds", EngineJson.NODES.arrayNode());
+                ObjectNode outputs = node.putObject("outputs");
+                noMatch.outputs().forEach((name, v) -> outputs.set(name, value(v)));
+            }
+            case DecisionResult.Failed failed -> {
+                node.put("outcome", "FAILED");
+                node.set("matchedRuleIds", value(failed.matchedRuleIds()));
+                node.putObject("outputs");
+                node.putObject("error").put("code", failed.code()).put("detail", failed.detail());
+            }
+        }
+        return node;
+    }
+
+    /**
+     * Writes a decision log entry as the {@code DecisionLogEntry} schema of the REST contract.
+     *
+     * @param entry the entry
+     * @return the object
+     */
+    public static ObjectNode decisionLogEntry(io.github.dhluong90.bpm.rules.api.DecisionLogEntry entry) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("decisionId", entry.decisionId());
+        node.put("ruleSet", entry.ruleSet());
+        node.put("version", entry.version());
+        node.put("hitPolicy", entry.hitPolicy());
+        node.put("outcome", entry.outcome().name());
+        node.set("matchedRuleIds", value(entry.matchedRuleIds()));
+        ObjectNode inputs = node.putObject("inputs");
+        entry.inputs().forEach((name, v) -> inputs.set(name, value(v)));
+        ObjectNode outputs = node.putObject("outputs");
+        entry.outputs().forEach((name, v) -> outputs.set(name, value(v)));
+        node.set("callerId", value(entry.callerId()));
+        node.set("correlationId", value(entry.correlationId()));
+        node.put("evalClock", entry.evalClock().toString());
+        node.put("evaluatedAt", entry.evaluatedAt().toString());
+        node.put("clockChosen", entry.clockChosen());
+        node.put("pinned", entry.pinned());
+        node.put("loggedAt", entry.loggedAt().toString());
+        node.put("durationMicros", entry.durationMicros());
+        return node;
+    }
+
+    /**
+     * Writes a simulation as JSON (RLE-016). It carries no generated id, so the same version, samples and clock
+     * always give the same text (TR-DET-01).
+     *
+     * @param result the simulation
+     * @return the object
+     */
+    public static ObjectNode simulation(io.github.dhluong90.bpm.rules.api.SimulationResult result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.put("status", result.status().name());
+        node.set("baselineVersion", value(result.baselineVersion()));
+        node.put("evaluatedAt", result.evaluatedAt().toString());
+        node.put("sampleCount", result.samples().size());
+        node.put("changedCount", result.changedCount());
+        var samples = node.putArray("results");
+        for (var sample : result.samples()) {
+            ObjectNode item = samples.addObject();
+            item.put("index", sample.index());
+            item.put("changed", sample.changed());
+            item.set("simulated", outcome(sample.simulated()));
+            item.set("baseline", sample.baseline() == null ? EngineJson.NODES.nullNode() : outcome(sample.baseline()));
+        }
+        return node;
+    }
+
+    private static ObjectNode outcome(DecisionResult.Outcome outcome) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        switch (outcome) {
+            case DecisionResult.Matched matched -> {
+                node.put("outcome", "MATCHED");
+                node.set("matchedRuleIds", value(matched.ruleIds()));
+                ObjectNode outputs = node.putObject("outputs");
+                matched.outputs().forEach((name, v) -> outputs.set(name, value(v)));
+            }
+            case DecisionResult.NoMatch noMatch -> {
+                node.put("outcome", "NO_MATCH");
                 node.set("matchedRuleIds", EngineJson.NODES.arrayNode());
                 ObjectNode outputs = node.putObject("outputs");
                 noMatch.outputs().forEach((name, v) -> outputs.set(name, value(v)));

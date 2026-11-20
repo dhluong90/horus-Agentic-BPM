@@ -6,6 +6,7 @@ import io.github.dhluong90.bpm.rules.internal.store.DecisionRecord;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -15,8 +16,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * Appends to {@code rle_decision} with exactly one {@code INSERT} per decision, in the caller's
- * transaction (RLE-013, TR-EMB-04), and reads it inside one tenant: one row by id, for replay and the log read, and
- * the search by a logged input. The engine has no update or delete path on this table.
+ * transaction (RLE-013, TR-EMB-04), and reads it inside one tenant: one row by id, for replay and the log read,
+ * the search by a logged input, and the search by rule set and period (RLE-029). The engine has no update or delete
+ * path on this table.
  */
 public final class JdbcDecisionLog implements DecisionLog {
 
@@ -55,6 +57,11 @@ public final class JdbcDecisionLog implements DecisionLog {
             tenant_id, id, created_at, rule_set_name, version_num, hit_policy, outcome, error_code,
             masked_inputs::text AS inputs, outputs::text AS outputs, matched_rule_ids::text AS matched, caller_id,
             correlation_id, eval_clock, duration_micros, pinned
+            """;
+
+    private static final String SEARCH = "SELECT " + COLUMNS + """
+             FROM rle_decision
+            WHERE tenant_id = :tenant AND rule_set_name = :ruleSet AND created_at >= :from AND created_at < :to
             """;
 
     /**
@@ -101,6 +108,46 @@ public final class JdbcDecisionLog implements DecisionLog {
                 .param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
                 .param("input", input).param("texts", texts).param("limit", limit)
                 .query(JdbcDecisionLog::record).list();
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>One statement, tenant and rule set first and the period on the partition key, so PostgreSQL prunes every
+     * monthly partition outside the period and reads {@code idx_rle_decision_lookup} in at most two. The
+     * statement timeout is set for this statement only and the previous value is restored, so a host
+     * transaction the search joins keeps its own.
+     */
+    @Override
+    public List<DecisionRecord> search(String tenantId, String ruleSet, Instant from, Instant to, Position after,
+            int limit, Duration statementTimeout) {
+        String previous = jdbc.sql("SELECT current_setting('statement_timeout')").query(String.class).single();
+        jdbc.sql("SELECT set_config('statement_timeout', :timeout, true)")
+                .param("timeout", statementTimeout.toMillis() + "ms").query(String.class).single();
+        try {
+            var statement = jdbc.sql(searchSql(after != null))
+                    .param("tenant", tenantId).param("ruleSet", ruleSet)
+                    .param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
+                    .param("limit", limit);
+            if (after != null) {
+                statement = statement.param("afterAt", Timestamp.from(after.createdAt())).param("afterId", after.id());
+            }
+            return statement.query(JdbcDecisionLog::record).list();
+        } finally {
+            jdbc.sql("SELECT set_config('statement_timeout', :timeout, true)")
+                    .param("timeout", previous).query(String.class).single();
+        }
+    }
+
+    /**
+     * Returns the search statement, for the query plan check of RLE-029.
+     *
+     * @param afterPosition whether the statement continues after a keyset position
+     * @return the SQL with named parameters
+     */
+    static String searchSql(boolean afterPosition) {
+        return SEARCH + (afterPosition ? "  AND (created_at, id) < (:afterAt, :afterId)\n" : "")
+                + "ORDER BY created_at DESC, id DESC\nLIMIT :limit\n";
     }
 
     private static DecisionRecord record(ResultSet rs, int row) throws SQLException {

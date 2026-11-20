@@ -71,6 +71,14 @@ class RuleEngineSettingsTest {
     }
 
     @Test
+    void TR_EXT_03_simulation_max_inputs_may_be_lowered() {
+        runner.withPropertyValues("horus.bpm.rules.simulation.max-inputs=100")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).simulationMaxInputs()).isEqualTo(100));
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class).simulationMaxInputs())
+                .isEqualTo(EngineDefaults.SIMULATION_MAX_SAMPLES));
+    }
+
+    @Test
     void RLE_047_cockpit_drafts_setting_reaches_the_engine_and_is_off_by_default() {
         runner.run(context -> assertThat(context.getBean(EngineSettings.class).draftAuthoring()).isFalse());
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=true")
@@ -137,7 +145,9 @@ class RuleEngineSettingsTest {
         "horus.bpm.rules.evaluation.regex-max-reads=0, horus.bpm.rules.evaluation.regex-max-reads",
         "horus.bpm.rules.evaluation.regex-max-reads=1000001, horus.bpm.rules.evaluation.regex-max-reads",
         "horus.bpm.rules.evaluation.regex-max-reads-per-decision=0, horus.bpm.rules.evaluation.regex-max-reads-per-decision",
-        "horus.bpm.rules.evaluation.regex-max-reads-per-decision=5000001, horus.bpm.rules.evaluation.regex-max-reads-per-decision"
+        "horus.bpm.rules.evaluation.regex-max-reads-per-decision=5000001, horus.bpm.rules.evaluation.regex-max-reads-per-decision",
+        "horus.bpm.rules.simulation.max-inputs=0, horus.bpm.rules.simulation.max-inputs",
+        "horus.bpm.rules.simulation.max-inputs=1001, horus.bpm.rules.simulation.max-inputs"
     })
     void TR_EXT_03_an_invalid_value_fails_start_up_naming_the_property(String property, String name) {
         runner.withPropertyValues(property).run(context -> assertThat(context).hasFailed()
