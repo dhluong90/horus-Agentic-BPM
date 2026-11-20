@@ -186,19 +186,14 @@ Your compliance team reads the guardrail as a table, not as code or prompt text.
 
 ## Autonomy ladder
 
-Give an agent the least autonomy at which its mistakes are cheap, and widen it only on evidence. In HORUS, each step up the ladder is a new version of the guardrail rule set, approved by a second person.
+Give an agent the least autonomy at which its mistakes are cheap, and widen it only on evidence. In HORUS, each step up the ladder is a new version of the guardrail rule set, approved by a second person. The engine enforces no rung and no percentage; the rungs and the evaluation bar are guidance.
 
-| Rung | The agent may | The human | How to configure it | Move up when |
-|---|---|---|---|---|
-| 0. Observe | Produce output that nothing downstream uses | Does the work as before | Process design: the agent's output goes to history only, and a `userTask` decides | Output matches the human decision over at least two weeks |
-| 1. Suggest | Draft every decision | Reviews and approves every case; each edit is recorded as `human_override` | Guardrail's last row returns a violation for every case, so every step routes to a human | Reviewers accept most drafts unchanged for about four weeks, and missed problems stay below your threshold |
-| 2. Act with a risk gate | Complete low-risk cases | Handles escalations: low confidence, high value, any rule hit | Guardrail allows only cases that pass every rule; the rest route to a human | Escalation rules stable, no critical incident |
-| 3. Act and report | Complete all cases inside the schema and rules | Audits a sample and the exceptions | Guardrail allows most cases; the host samples completed steps from history for review. The engine has no built-in sampling | Failure modes known and covered by regression tests |
-| 4. End to end | Resolve cases fully inside policy | Samples for quality | As rung 3, with a smaller sample | Matches or beats the human baseline on your evaluation set |
+Before 1.0 the ceiling is rung 3 (the agent completes most cases and the host samples them). Rung 4, end to end with no sampling, is not offered.
+
+- [[Agent autonomy ladder and evaluation guide|Agent-Autonomy-Ladder-and-Eval-Guide]]: the rungs, the evidence to collect before each move, the history query for the override rate and the replay of a candidate guardrail.
+- [[Run an agent step in shadow|Agent-Shadow-Mode]]: rung 0 on the example process. The engine has no shadow switch; the guide shows the pattern and its limits.
 
 When the input changes (a new document type, a new country, a new regulation, a new model version), move down one rung until the agent is measured again.
-
-For regulated decisions, start at rung 1. Human override rate, read from history, is the first measure of whether to move up.
 
 ## Worked example: KYC document review
 
@@ -298,3 +293,4 @@ Multi-agent planning is a candidate after 1.0 ([[Roadmap]]). Dates are targets, 
 - [[Rule Engine Versioning and Publishing]]: how a guardrail change is approved
 - [[Multi-Tenancy and Security]]: four-eyes and audit controls
 - [[Concepts]]: agent task and guardrail definitions
+- [[Agent autonomy ladder and evaluation guide|Agent-Autonomy-Ladder-and-Eval-Guide]] and [[Run an agent step in shadow|Agent-Shadow-Mode]]: how much freedom to give a step, and how to measure it

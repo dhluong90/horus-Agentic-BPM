@@ -84,7 +84,7 @@ The proof is `AsyncWaitStateTest`: ten bureau calls in flight on a 2-connection 
 
 ## Guarded agent steps
 
-A `serviceTask` with `horus:type="agentTask"` asks an `AgentAdapter` bean (named by `horus:agent`) and lets its answer move the process on only after two checks in the result transaction: the step's output schema and the guardrail rule set. A refused answer opens a four-eyes review task for the named reviewer, or fails the step with `onViolation="fail"`. The guard spec lives in the definition, so the definition hash and its approval cover it; an invalid spec is refused at import with problems naming the step. See the wiki page Guarded Agent Steps and process DESIGN section 4.1.
+A `serviceTask` with `horus:type="agentTask"` asks an `AgentAdapter` bean (named by `horus:agent`) and lets its answer move the process on only after two checks in the result transaction: the step's output schema and the guardrail rule set. A refused answer opens a four-eyes review task for the named reviewer, or fails the step with `onViolation="fail"`. The guard spec lives in the definition, so the definition hash and its approval cover it; an invalid spec is refused at import with problems naming the step. See the wiki page Guarded Agent Steps and process DESIGN section 4.1. How much freedom to give a step, and how to measure it, is in the wiki pages Agent Autonomy Ladder and Eval Guide and Agent Shadow Mode.
 
 ```xml
 <bpmn:serviceTask id="assess-documents" horus:type="agentTask" horus:agent="documents.assess" horus:resultVariable="assessment">
