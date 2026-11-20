@@ -21,6 +21,10 @@ import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
 import io.github.dhluong90.bpm.process.internal.service.AsyncSettings;
 import io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor;
+import io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner;
+import io.github.dhluong90.bpm.process.internal.service.JsonSchemaSubsetValidator;
+import io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner;
+import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.spi.ServiceAdapter;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
@@ -152,8 +156,20 @@ public class ProcessEngineAutoConfiguration {
     }
 
     /**
-     * Runs remote steps outside any transaction on {@code adapters.executor-threads} daemon threads, with one daemon
-     * thread that abandons calls at their timeout. Closed with the context.
+     * The engine's default output schema check of async results, a documented JSON Schema subset that refuses any
+     * keyword it does not support (#363). A host may register its own.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    OutputSchemaValidator processEngineOutputSchemaValidator() {
+        return new JsonSchemaSubsetValidator();
+    }
+
+    /**
+     * Runs async steps outside any transaction, one runner per job kind with its own slots (#363): remote service
+     * steps today, agent steps once their runner exists (#52). The pool has as many daemon threads as all runners have
+     * slots, so no claimed call waits for a thread; one daemon thread abandons calls at their timeout. Closed with the
+     * context.
      */
     @Bean(destroyMethod = "close")
     @ConditionalOnMissingBean
@@ -161,9 +177,12 @@ public class ProcessEngineAutoConfiguration {
             ObjectProvider<Clock> clock, JobSettings settings, AsyncSettings async,
             ObjectProvider<ServiceAdapter> adapters, ProcessServices services) {
         java.util.concurrent.atomic.AtomicInteger n = new java.util.concurrent.atomic.AtomicInteger();
+        List<AsyncStepRunner> runners = List.of(new ServiceStepRunner(adaptersByName(adapters)));
+        int threads = AsyncStepExecutor.threadsNeeded(async, settings,
+                runners.stream().map(AsyncStepRunner::jobKind).toList());
         return new AsyncStepExecutor(jobs, transactions, clock.getIfUnique(Clock::systemUTC), settings, async,
-                adaptersByName(adapters),
-                services, java.util.concurrent.Executors.newFixedThreadPool(async.executorThreads(), r -> {
+                runners,
+                services, java.util.concurrent.Executors.newFixedThreadPool(threads, r -> {
                     Thread t = new Thread(r, "horus-bpm-adapter-" + n.incrementAndGet());
                     t.setDaemon(true);
                     return t;
@@ -247,7 +266,8 @@ public class ProcessEngineAutoConfiguration {
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
             JdbcJobStore jobs, JobSettings jobSettings, AsyncSettings async, ObjectProvider<ServiceAdapter> adapters,
             ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
-            ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
+            ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
+            OutputSchemaValidator outputSchemas) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -270,7 +290,7 @@ public class ProcessEngineAutoConfiguration {
                         EngineSettings.RetireLastVersionRule.valueOf(RetireLastVersion.from(environment).name())),
                 BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings, async,
-                adaptersByName(adapters).keySet());
+                adaptersByName(adapters).keySet(), outputSchemas);
     }
 
     /**

@@ -69,4 +69,39 @@ class JobPropertiesTest {
         assertThatThrownBy(() -> bind(java.util.Map.of("horus.bpm.processes.adapters.executor-threads", "0")))
                 .hasStackTraceContaining("horus.bpm.processes.adapters.executor-threads");
     }
+
+    @Test
+    void PRE_057_runners_default_to_the_engine_wide_keys_and_take_per_kind_values() {
+        io.github.dhluong90.bpm.process.internal.service.JobSettings jobs =
+                io.github.dhluong90.bpm.process.internal.service.JobSettings.defaults("pod-1");
+        io.github.dhluong90.bpm.process.internal.service.AsyncSettings none = bind(java.util.Map.of()).toAsyncSettings();
+        assertThat(none.runner("ASYNC_SERVICE", jobs))
+                .isEqualTo(new io.github.dhluong90.bpm.process.internal.service.RunnerSettings(16, Duration.ofSeconds(30),
+                        3, Duration.ofSeconds(10), Duration.ofMillis(500), 0));
+        assertThat(none.runner("ASYNC_AGENT", jobs))
+                .isEqualTo(new io.github.dhluong90.bpm.process.internal.service.RunnerSettings(16, Duration.ofSeconds(30),
+                        3, Duration.ofSeconds(10), Duration.ofMillis(500), 1));
+
+        io.github.dhluong90.bpm.process.internal.service.AsyncSettings tuned = bind(java.util.Map.of(
+                "horus.bpm.processes.adapters.executor-threads", "24",
+                "horus.bpm.processes.runners.async-agent.slots", "4",
+                "horus.bpm.processes.runners.async-agent.default-timeout", "PT2M",
+                "horus.bpm.processes.runners.async-agent.retry-backoff", "30s",
+                "horus.bpm.processes.runners.async-agent.guard-budget", "200ms",
+                "horus.bpm.processes.runners.async-agent.schema-retries", "2",
+                "horus.bpm.processes.runners.async-service.max-attempts", "5")).toAsyncSettings();
+        assertThat(tuned.runner("ASYNC_AGENT", jobs)).isEqualTo(
+                new io.github.dhluong90.bpm.process.internal.service.RunnerSettings(4, Duration.ofMinutes(2), 3,
+                        Duration.ofSeconds(30), Duration.ofMillis(200), 2));
+        assertThat(tuned.runner("ASYNC_SERVICE", jobs)).isEqualTo(
+                new io.github.dhluong90.bpm.process.internal.service.RunnerSettings(24, Duration.ofSeconds(30), 5,
+                        Duration.ofSeconds(10), Duration.ofMillis(500), 0));
+
+        assertThatThrownBy(() -> bind(java.util.Map.of("horus.bpm.processes.runners.async-agent.slots", "0")))
+                .hasStackTraceContaining("horus.bpm.processes.runners.<kind>.slots");
+        assertThatThrownBy(() -> bind(java.util.Map.of("horus.bpm.processes.runners.async-agent.guard-budget", "30s")))
+                .hasStackTraceContaining("guard-budget");
+        assertThatThrownBy(() -> bind(java.util.Map.of("horus.bpm.processes.runners.async-agent.schema-retries", "6")))
+                .hasStackTraceContaining("schema-retries");
+    }
 }

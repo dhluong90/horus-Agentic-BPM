@@ -43,11 +43,11 @@ A PRD capability row that bundles several outcomes is split into several feature
 | RE-F-12 | Inputs marked for masking are stored and shown as keyed HMAC and stay searchable by exact match | S3 | M1 | RE 7.2 Data | RLE-012 | TR-SEC-05, TR-SEC-10 | specified | | |
 | RE-F-13 | Start-up fails when a loaded definition masks a field and no key is set; the key never appears in logs or responses | S1 | M1 | RE 7.3 | | TR-SEC-10 | spec gap | RE-F-12 | |
 | RE-F-14 | Each decision is logged in the host transaction with exactly one insert and rolls back with it | S1, S3 | M1 | RE 7.2 Data | RLE-013 | TR-EMB-04, TR-PERF-03, TR-OBS-01 | specified | X-F-01 | |
-| RE-F-15 | The decision log write mode is a host setting: synchronous by default, asynchronous for high-volume hosts | S1 | M2 (cut candidate) | RE 7.3 | | TR-OBS-01 | spec gap | RE-F-14 | PD-031, PD-075 |
+| RE-F-15 | The decision log can be written outside the host transaction for high-volume hosts, only with a design that loses no committed decision in a crash | S1 | Later | RE 7.3 | | TR-OBS-01 | spec gap | RE-F-14 | PD-031, PD-075, PD-122 |
 | RE-F-16 | The decision log is range-partitioned by month from the first migration, with partitions created ahead | S1 | M1 | RE 7.3 | | TR-OPS-04 | spec gap | X-F-01 | PD-004, PD-020 |
 | RE-F-17 | An auditor finds decisions by rule set, period, outcome, rule id or output value | S3 | M1 | RE 7.3 | | TR-OBS-01 | spec gap | RE-F-14 | PD-031 |
 | RE-F-18 | A decision is explained in plain language generated from the log alone; the sentence patterns are a message catalogue per language that the host can override or extend | S3 | M1 | RE 7.3 | | TR-OBS-05 | spec gap | RE-F-14 | PD-027, PD-077 |
-| RE-F-19 | Authors write explanation templates per rule set | S2, S3 | M3 | RE 7.3, 8 | | TR-OBS-05 | spec gap | RE-F-18 | PD-027 |
+| RE-F-19 | Authors write explanation templates per row, with one sentence for no match | S2, S3 | M3 | RE 7.3, 8 | | TR-OBS-05 | spec gap | RE-F-18 | PD-027, PD-123 |
 | RE-F-20 | A host evaluates and manages rules through the Java API and `/api/bpm/rules/v1`; every mutation and evaluate accepts an idempotency key, rejects a reused key with a different body and answers an in-flight duplicate with `409` | S1 | M1 | RE 7.2 API | RLE-014 | TR-IDEM-01, TR-IDEM-05, TR-SEC-08 | specified | X-F-05 | PD-021 |
 | RE-F-21 | An author simulates a draft over sample inputs next to the effective version; nothing is logged | S2 | M1 | RE 7.2 Logic | RLE-016 | TR-OBS-01, TR-DET-01 | specified | RE-F-02 | |
 | RE-F-22 | An author replays logged decisions through a draft and sees which outcomes change; nothing is logged | S2, S3 | M3 | RE 8 | RLE-015 | TR-OBS-01 | specified | RE-F-17 | PD-018, PD-031, PD-042 |
@@ -94,7 +94,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-09 | A `decision` step evaluates a rule set in the host transaction and routes on its outputs | S1 | M2 | PE 7.4 | | TR-EMB-04 | spec gap | RE-F-01, RE-F-20 | |
 | PE-F-10 | Four-eyes: the requester or an earlier actor cannot complete an approval task | S2 | M2 | PE 7.2 Logic | PRE-007 | TR-SEC-04 | specified | PE-F-07 | |
 | PE-F-11 | SLA deadlines respect working hours, holidays and time zone per tenant and do not move when the calendar changes | S2 | M2 | PE 7.2 Logic, 7.2 API | PRE-008 | TR-CAL-01, TR-CAL-02 | specified | | |
-| PE-F-12 | A step starts a child process (`callProcess`) and waits for it | S1 | M2 (cut candidate) | PE 7.4 | | | spec gap | Design question on child compensation (gate M2 start) | PD-031 |
+| PE-F-12 | A step starts a child process (`callProcess`) and waits for it | S1 | M2 (cut candidate) | PE 7.4 | | | spec gap | PE-F-26 | PD-031, PD-127 |
 | PE-F-13 | An overdue task escalates to the configured user or role | S2 | M2 | PE 7.4 | | TR-CAL-01 | spec gap | PE-F-11 | |
 | PE-F-14 | A tenant never reads or changes another tenant's definitions, instances, tasks or history | S1 | M2 | PE 7.4 | | TR-TEN-01, TR-TEN-02, TR-SEC-03 | spec gap | | |
 | PE-F-15 | Every transition is recorded in append-only history | S2, S3 | M2 | PE 7.2 Data, 7.4 | | TR-OBS-01 | spec gap | | |
@@ -107,7 +107,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-22 | History records masked agent inputs, output, schema result, guardrail decision id, latency and any human override | S3 | M2 | PE 7.2 Data | PRE-012 | TR-AGT-02, TR-OBS-01 | specified | PE-F-15 | |
 | PE-F-23 | History records optional labels the adapter reports, with reserved keys for the model and the prompt version; the engine never acts on them | S3 | M2 | PE 7.3 | | TR-AGT-02 | spec gap | PE-F-22 | PD-014 |
 | PE-F-24 | Hosts plug agents in through the `AgentAdapter` SPI, in process or over HTTP | S1, S3 | M2 | PE 7.2 API, 8 | | TR-AGT-03 | spec gap | PE-F-16 | |
-| PE-F-25 | Operators retry or resolve an incident by API | S2 | M2 | PE 7.4 | | TR-OPS-03 | spec gap | PE-F-21 | |
+| PE-F-25 | Operators retry an incident by API; resolving it with an output or a manual undo needs a second person | S2 | M2 | PE 7.4 | | TR-OPS-03 | spec gap | PE-F-21 | PD-126 |
 | PE-F-26 | A failed saga undoes completed steps in reverse order with attempt ids; a failed or manual compensation raises an incident | S1, S2 | M2 | PE 7.2 Logic | PRE-013 | TR-COMP-01, TR-COMP-02, TR-COMP-03, TR-IDEM-04 | specified | PE-F-08 | |
 | PE-F-27 | A `saga` block scopes compensation; `throwCompensation` starts it explicitly | S1 | M2 | PE 7.4 | | TR-COMP-01 | spec gap | PE-F-26 | |
 | PE-F-28 | Hosts manage definitions, instances, task queues, incidents and history through `/api/bpm/processes/v1`; deploy creates a draft (PD-033) | S1, S2 | M2 | PE 7.2 API | | TR-SEC-08, TR-IDEM-01 | spec gap | X-F-05 | PD-033 |
@@ -119,7 +119,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-34 | An MCP tool adapter is available as an example outside the engine artifacts | S3 | M3 | PE 8 | | TR-AGT-04 | spec gap | PE-F-24 | |
 | PE-F-35 | Reference adapters for common model APIs are available in `examples/` | S3 | M3 | PE 8 | | TR-AGT-04 | spec gap | PE-F-24 | |
 | PE-F-36 | An agent receives bounded context from earlier steps as memory | S3 | M3 | PE 7.4, 8 | | | spec gap | PE-F-22 | |
-| PE-F-37 | An offline runner replays recorded agent traces and human overrides against a changed prompt or guardrail | S3 | M3 | PE 7.3, 7.4, 8 | | | spec gap | PE-F-22 | PD-014 |
+| PE-F-37 | An offline runner replays recorded agent traces and human overrides against a changed guardrail or output schema; prompt changes are replayed through a host harness | S3 | M3 | PE 7.3, 7.4, 8 | | | spec gap | PE-F-22 | PD-014, PD-128 |
 | PE-F-38 | Adopters follow the autonomy ladder (rungs 1 to 3) and eval bar to raise agent autonomy one guardrail version at a time | S3 | M2 | PE 7.3 | PRD 7.3 (guidance, no engine behaviour) | | specified | PE-F-18 | |
 | PE-F-39 | An agent selects the next step among declared steps inside a bounded block, under the same guardrails | S3 | later | PE 7.4, 8 | | | design preview | PE-F-18 | PD-028 |
 | PE-F-40 | Message events and receive and send tasks correlate messages to instances by name and key in the caller's transaction, idempotent by message id; message flows between pools run through each host's outbox | S1 | 1.2 (S2) | PE 8 | | TR-STD-13 | design preview | PE-F-58, PE-F-60 | PD-057, PD-062 |
@@ -280,11 +280,11 @@ Each cell: features (specified / spec gap / design preview). Generated from the 
 
 | Module | M0 | M1 | M2 | M3 | 1.1 (S1) | 1.2 (S2) | 1.3 (S3) | Later | Total |
 |---|---|---|---|---|---|---|---|---|---|
-| Rule Engine | 0 | 31 (17 / 14 / 0) | 3 (0 / 3 / 0) | 7 (1 / 6 / 0) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 3 (0 / 0 / 3) | 49 (18 / 23 / 8) |
+| Rule Engine | 0 | 31 (17 / 14 / 0) | 2 (0 / 2 / 0) | 7 (1 / 6 / 0) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 4 (0 / 1 / 3) | 49 (18 / 23 / 8) |
 | Process Engine | 0 | 0 | 44 (21 / 23 / 0) | 11 (0 / 11 / 0) | 5 (0 / 0 / 5) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 2 (0 / 0 / 2) | 66 (21 / 34 / 11) |
 | Cockpit | 0 | 14 (7 / 7 / 0) | 16 (4 / 12 / 0) | 10 (1 / 9 / 0) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 0 | 3 (0 / 0 / 3) | 45 (12 / 28 / 5) |
 | Cross-cutting | 3 (3 / 0 / 0) | 13 (7 / 6 / 0) | 3 (1 / 2 / 0) | 5 (1 / 4 / 0) | 2 (0 / 0 / 2) | 0 | 0 | 4 (0 / 0 / 4) | 30 (12 / 12 / 6) |
-| **All** | 3 (3 / 0 / 0) | 58 (31 / 27 / 0) | 66 (26 / 40 / 0) | 33 (3 / 30 / 0) | 11 (0 / 0 / 11) | 5 (0 / 0 / 5) | 2 (0 / 0 / 2) | 12 (0 / 0 / 12) | 190 (63 / 97 / 30) |
+| **All** | 3 (3 / 0 / 0) | 58 (31 / 27 / 0) | 65 (26 / 39 / 0) | 33 (3 / 30 / 0) | 11 (0 / 0 / 11) | 5 (0 / 0 / 5) | 2 (0 / 0 / 2) | 13 (0 / 1 / 12) | 190 (63 / 97 / 30) |
 
 ![Features per module per milestone](images/fm-features-per-module.svg)
 
@@ -315,14 +315,14 @@ The first release ships part of M1, and a first BPMN and DMN subset, early ([PD-
 
 The full BPMN 2.0 and DMN target for 22 Nov 2026 ([PD-085](decisions.md#pd-085-target-full-bpmn-20-and-dmn-by-sun-22-nov-2026)) is measured by conformance pass rates; standards-track features move into a release only when their suites pass, so the 1.1 to 1.3 columns above are unchanged.
 
-Cut candidates: 16 features (0 in M1, 6 in M2, 10 in M3).
+Cut candidates: 15 features (0 in M1, 5 in M2, 10 in M3).
 
 | Milestone | Checkpoint | Cut, in this order | Decision |
 |---|---|---|---|
 | M1 | 8 Jan 2027 | Decision log filters beyond rule set and period, then CK-F-44 sentences fall back to shorthand (partial cuts; no whole feature is on the M1 list) | PD-031, PD-043, PD-075, PD-077 |
-| M2 | 5 Mar 2027 | RE-F-15, PE-F-30, CK-F-26, PE-F-12, RE-F-26, RE-F-34 | PD-075, PD-017, PD-042, PD-043 |
+| M2 | 5 Mar 2027 | PE-F-30, CK-F-26, PE-F-12, RE-F-26, RE-F-34 | PD-017, PD-042, PD-043, PD-122 |
 | M3 | 23 Apr 2027 | CK-F-45, CK-F-18, CK-F-32, CK-F-27, PE-F-53, RE-F-30, RE-F-24, X-F-17, CK-F-38, RE-F-49 (to 1.1) | PD-056, PD-042, PD-043, PD-080 |
 
-PD-043 moved RE-F-26 from the M1 list to M2 up front, and PD-075 moved RE-F-15 to M2, so the M1 list keeps only partial cuts.
+PD-043 moved RE-F-26 from the M1 list to M2 up front, and PD-075 moved RE-F-15 to M2, so the M1 list keeps only partial cuts. PD-122 (2026-11-20) then moved RE-F-15 from the head of the M2 list to later: no decision log mode may lose a committed decision, so it returns only with a crash-safe design. M2 goes from 66 to 65 and later from 12 to 13.
 
 Use case ids (`UC-RE-nn`) are defined in [Rule Engine users and journeys](rule-engine-users-and-journeys.md).

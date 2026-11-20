@@ -90,7 +90,8 @@ final class RuleEngineDecisionPort implements DecisionPort {
             return new DecisionOutcome.Failed(e.code(), e.getMessage());
         }
         return switch (result.outcome()) {
-            case DecisionResult.Matched m -> new DecisionOutcome.Matched(result.decisionId(), m.outputs());
+            case DecisionResult.Matched m -> new DecisionOutcome.Matched(result.decisionId(), m.outputs(),
+                    result.matchedRuleIds());
             case DecisionResult.NoMatch n -> new DecisionOutcome.NoMatch(result.decisionId());
             case DecisionResult.Failed f -> new DecisionOutcome.Failed(f.code(), f.detail() + " (decision "
                     + result.decisionId() + ")");

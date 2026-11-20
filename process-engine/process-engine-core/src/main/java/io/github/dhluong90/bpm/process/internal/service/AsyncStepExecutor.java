@@ -37,7 +37,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * No thread waits for a remote side: an adapter that answers {@link AdapterResult.Accepted} frees its slot at once and
  * the step waits durably in {@code pre_timer} until the completion API reports the result or the lease ends. Every
  * claim has a new attempt id ({@link ProcessServices#attemptId}) and a new random completion token, whose hash TX1
- * stores. Thread-safe; callers must not hold a transaction.
+ * stores.
+ *
+ * <p>Each async job kind has its own runner ({@link AsyncStepRunner}) and its own lane: its own slots, timeout and
+ * retry settings ({@link AsyncSettings#runner}), and its own claim statement, which returns jobs of that kind only and
+ * at most as many as that lane has free slots. A backlog of agent jobs therefore never takes the slots or the claims
+ * of remote service jobs, and the other way round (#363). Timers are not run here: {@link JobExecutor} runs them on
+ * the poller thread with {@code jobs.*}. Thread-safe; callers must not hold a transaction.
  */
 public final class AsyncStepExecutor implements AutoCloseable {
 
@@ -49,10 +55,14 @@ public final class AsyncStepExecutor implements AutoCloseable {
     private final TransactionRunner transactions;
     private final Clock clock;
     private final JobSettings settings;
-    private final Map<String, ServiceAdapter> adapters;
+    private final Map<String, Lane> lanes;
     private final ProcessServices services;
     private final ExecutorService adapterPool;
     private final ScheduledExecutorService timeouts;
+
+    /** One job kind: its runner, its settings and its slots. */
+    private record Lane(AsyncStepRunner runner, RunnerSettings settings, Semaphore slots) {
+    }
 
     /**
      * One claimed attempt: the job row and the completion token issued with the claim, which only the adapter call
@@ -73,39 +83,93 @@ public final class AsyncStepExecutor implements AutoCloseable {
             return "Claim[job=" + job.id() + ", attempt=" + job.attempt() + ", completionToken=***]";
         }
     }
-    private final Semaphore slots;
-    private final int capacity;
+
+    /**
+     * An executor with the remote service runner only, as before #363.
+     *
+     * @param jobs job storage
+     * @param transactions transaction runner on the host's transaction manager
+     * @param clock engine clock
+     * @param settings job settings, with this replica's id
+     * @param async async settings; the slots of each kind come from {@link AsyncSettings#runner}
+     * @param adapters the host's adapters by name
+     * @param services the engine services, which record results
+     * @param adapterPool runs adapter calls; at least {@link #threadsNeeded} threads
+     * @param timeouts abandons calls at their step timeout
+     */
+    public AsyncStepExecutor(JobStore jobs, TransactionRunner transactions, Clock clock, JobSettings settings,
+            AsyncSettings async, Map<String, ServiceAdapter> adapters, ProcessServices services,
+            ExecutorService adapterPool, ScheduledExecutorService timeouts) {
+        this(jobs, transactions, clock, settings, async, List.of(new ServiceStepRunner(adapters)), services,
+                adapterPool, timeouts);
+    }
 
     /**
      * @param jobs job storage
      * @param transactions transaction runner on the host's transaction manager
      * @param clock engine clock
      * @param settings job settings, with this replica's id
-     * @param async async settings; {@code executorThreads} is the number of slots
-     * @param adapters the host's adapters by name
+     * @param async async settings; the slots of each kind come from {@link AsyncSettings#runner}
+     * @param runners one runner per async job kind; a kind without a runner is never claimed by this replica
      * @param services the engine services, which record results
-     * @param adapterPool runs adapter calls; at least {@code executorThreads} threads
+     * @param adapterPool runs adapter calls; at least {@link #threadsNeeded} threads, so no claimed call waits for a
+     *     thread while its lease runs
      * @param timeouts abandons calls at their step timeout
+     * @throws IllegalArgumentException when two runners run the same kind, or a runner's kind is not async
      */
     public AsyncStepExecutor(JobStore jobs, TransactionRunner transactions, Clock clock, JobSettings settings,
-            AsyncSettings async, Map<String, ServiceAdapter> adapters, ProcessServices services,
+            AsyncSettings async, List<? extends AsyncStepRunner> runners, ProcessServices services,
             ExecutorService adapterPool, ScheduledExecutorService timeouts) {
         this.jobs = Objects.requireNonNull(jobs, "jobs must not be null");
         this.transactions = TransactionRunner.tracked(Objects.requireNonNull(transactions,
                 "transactions must not be null"));
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
-        this.adapters = Map.copyOf(adapters);
         this.services = Objects.requireNonNull(services, "services must not be null");
         this.adapterPool = Objects.requireNonNull(adapterPool, "adapterPool must not be null");
         this.timeouts = Objects.requireNonNull(timeouts, "timeouts must not be null");
-        this.capacity = Objects.requireNonNull(async, "async must not be null").executorThreads();
-        this.slots = new Semaphore(capacity);
+        Objects.requireNonNull(async, "async must not be null");
+        Map<String, Lane> byKind = new java.util.LinkedHashMap<>();
+        for (AsyncStepRunner runner : runners) {
+            String kind = runner.jobKind();
+            if (!JobStore.isAsync(kind)) {
+                throw new IllegalArgumentException("Runner for " + kind + ", which is no async job kind");
+            }
+            RunnerSettings lane = async.runner(kind, settings);
+            if (byKind.putIfAbsent(kind, new Lane(runner, lane, new Semaphore(lane.slots()))) != null) {
+                throw new IllegalArgumentException("Two runners for job kind " + kind);
+            }
+        }
+        this.lanes = java.util.Collections.unmodifiableMap(byKind);
     }
 
-    /** @return adapter slots free now */
+    /**
+     * @param async async settings
+     * @param settings job settings
+     * @param kinds the job kinds that have a runner
+     * @return the threads an adapter pool needs so every slot of every kind can call at once
+     */
+    public static int threadsNeeded(AsyncSettings async, JobSettings settings, java.util.Collection<String> kinds) {
+        return kinds.stream().mapToInt(kind -> async.runner(kind, settings).slots()).sum();
+    }
+
+    /** @return the job kinds this executor runs, in claim order */
+    public java.util.Set<String> kinds() {
+        return lanes.keySet();
+    }
+
+    /** @return adapter slots free now, over every kind */
     public int freeSlots() {
-        return slots.availablePermits();
+        return lanes.values().stream().mapToInt(l -> l.slots().availablePermits()).sum();
+    }
+
+    /**
+     * @param jobKind an async job kind
+     * @return the slots of that kind free now; 0 for a kind without a runner
+     */
+    public int freeSlots(String jobKind) {
+        Lane lane = lanes.get(jobKind);
+        return lane == null ? 0 : lane.slots().availablePermits();
     }
 
     /**
@@ -117,44 +181,71 @@ public final class AsyncStepExecutor implements AutoCloseable {
      * @throws InterruptedException when interrupted while waiting
      */
     public boolean awaitIdle(Duration max) throws InterruptedException {
-        if (slots.tryAcquire(capacity, max.toMillis(), TimeUnit.MILLISECONDS)) {
-            slots.release(capacity);
-            return true;
+        long deadline = System.nanoTime() + max.toNanos();
+        for (Lane lane : lanes.values()) {
+            int all = lane.settings().slots();
+            long left = Math.max(0, deadline - System.nanoTime());
+            if (!lane.slots().tryAcquire(all, left, TimeUnit.NANOSECONDS)) {
+                return false;
+            }
+            lane.slots().release(all);
         }
-        return false;
+        return true;
     }
 
     /**
-     * Claims as many due async jobs as adapter slots are free and hands each to the adapter executor; returns without
-     * waiting for any call.
+     * Claims, for each job kind, as many due jobs of that kind as its runner has free slots, and hands each to the
+     * adapter executor; returns without waiting for any call.
      *
      * @return the number of attempts started
      */
     public int pollOnce() {
-        int free = Math.min(slots.availablePermits(), settings.batchSize());
-        if (free < 1) {
-            return 0;
-        }
-        List<Claim> claimed = claim(free);
         int started = 0;
-        for (Claim job : claimed) {
-            if (dispatch(job)) {
-                started++;
+        for (Map.Entry<String, Lane> lane : lanes.entrySet()) {
+            int free = Math.min(lane.getValue().slots().availablePermits(), settings.batchSize());
+            if (free < 1) {
+                continue;
+            }
+            for (Claim job : claim(lane.getKey(), free)) {
+                if (dispatch(job)) {
+                    started++;
+                }
             }
         }
         return started;
     }
 
     /**
-     * TX1 alone: claims due jobs and issues each claim its completion token. Separate so a test can stop a replica
-     * between the claim and the call, as a crash would.
+     * TX1 alone, for every kind in turn: claims due jobs and issues each claim its completion token, at most
+     * {@code limit} in total. Separate so a test can stop a replica between the claim and the call, as a crash would.
      *
      * @param limit at most this many jobs
      * @return the claimed attempts
      */
     public List<Claim> claim(int limit) {
-        return transactions.inTransaction(() -> jobs.claimDueAsync(settings.replicaId(), clock.instant(), limit)
-                .stream().map(job -> new Claim(job, services.issueCompletionToken(job))).toList());
+        List<Claim> claimed = new java.util.ArrayList<>();
+        for (String kind : lanes.keySet()) {
+            if (claimed.size() >= limit) {
+                break;
+            }
+            claimed.addAll(claim(kind, limit - claimed.size()));
+        }
+        return List.copyOf(claimed);
+    }
+
+    /**
+     * TX1 for one kind: claims due jobs of that kind only and issues each claim its completion token.
+     *
+     * @param jobKind an async job kind with a runner
+     * @param limit at most this many jobs
+     * @return the claimed attempts
+     */
+    public List<Claim> claim(String jobKind, int limit) {
+        if (!lanes.containsKey(jobKind)) {
+            return List.of();
+        }
+        return transactions.inTransaction(() -> jobs.claimDueAsync(settings.replicaId(), clock.instant(), jobKind,
+                limit).stream().map(job -> new Claim(job, services.issueCompletionToken(job))).toList());
     }
 
     /**
@@ -179,6 +270,8 @@ public final class AsyncStepExecutor implements AutoCloseable {
         if (exhausted(job)) {
             return false;
         }
+        Lane lane = lanes.get(job.jobKind());
+        Semaphore slots = lane.slots();
         if (!slots.tryAcquire()) {
             // Never happens while this is the only claimer of the slots; the lease brings the job back.
             return false;
@@ -247,12 +340,12 @@ public final class AsyncStepExecutor implements AutoCloseable {
         if (transactions.activeOnThisThread()) {
             throw new IllegalStateException("An adapter must not be called inside a transaction (ADR-0008)");
         }
+        Lane lane = lanes.get(job.jobKind());
+        if (lane == null) {
+            return new AdapterResult.Failed("RUNNER_NOT_REGISTERED", "No runner for job kind " + job.jobKind(), false);
+        }
         Map<String, Object> payload = Values.readMap(job.payloadJson());
         String target = String.valueOf(payload.get("target"));
-        ServiceAdapter adapter = adapters.get(target);
-        if (adapter == null) {
-            return new AdapterResult.Failed("ADAPTER_NOT_REGISTERED", "No ServiceAdapter named " + target, false);
-        }
         @SuppressWarnings("unchecked")
         Map<String, Object> inputs = payload.get("inputs") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
         Instant claimedAt = job.lockedUntil().minus(job.leaseDuration());
@@ -261,13 +354,13 @@ public final class AsyncStepExecutor implements AutoCloseable {
                 ProcessServices.attemptId(job.id(), job.attempt()), claim.completionToken(), job.attempt(),
                 claimedAt.plus(timeoutOf(job)), inputs);
         try {
-            AdapterResult result = adapter.execute(call);
+            AdapterResult result = lane.runner().run(target, call);
             return result == null ? new AdapterResult.Failed("ADAPTER_NULL_RESULT", "The adapter returned null", true)
                     : result;
         } catch (RuntimeException e) {
             // The class only: an adapter's message may carry personal data.
-            LOG.log(System.Logger.Level.WARNING, "process.adapter.error target={0} job={1} attempt={2} exception={3}",
-                    target, job.id(), job.attempt(), e.getClass().getName());
+            LOG.log(System.Logger.Level.WARNING, "process.adapter.error kind={0} target={1} job={2} attempt={3}"
+                    + " exception={4}", job.jobKind(), target, job.id(), job.attempt(), e.getClass().getName());
             return new AdapterResult.Failed("ADAPTER_ERROR", e.getClass().getName(), true);
         }
     }
@@ -295,9 +388,14 @@ public final class AsyncStepExecutor implements AutoCloseable {
         return true;
     }
 
-    private static Duration timeoutOf(JobRow job) {
+    /** The step timeout stored at park, or the default timeout of the job's kind. */
+    private Duration timeoutOf(JobRow job) {
         Object ms = Values.readMap(job.payloadJson()).get("timeoutMs");
-        return ms instanceof Number n ? Duration.ofMillis(n.longValue()) : AsyncSettings.DEFAULT_TIMEOUT;
+        if (ms instanceof Number n) {
+            return Duration.ofMillis(n.longValue());
+        }
+        Lane lane = lanes.get(job.jobKind());
+        return lane == null ? AsyncSettings.DEFAULT_TIMEOUT : lane.settings().defaultTimeout();
     }
 
     private static StepResult toStep(AdapterResult result) {

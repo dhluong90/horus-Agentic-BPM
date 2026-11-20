@@ -36,20 +36,47 @@ class KernelContractArchitectureTest {
 
     @Test
     void TR_ASY_01_only_the_async_executor_calls_an_adapter_and_it_opens_no_transaction_around_the_call() {
-        // The one caller of ServiceAdapter.execute is AsyncStepExecutor, which reaches the database only through
-        // TransactionRunner (claim, result) and refuses to call while a transaction is active (ADR-0008).
+        // The one caller of ServiceAdapter.execute is the remote service runner, and the one caller of a runner is
+        // AsyncStepExecutor, which reaches the database only through TransactionRunner (claim, result) and refuses to
+        // call while a transaction is active (ADR-0008, #363).
         noClasses().that().doNotHaveFullyQualifiedName(
-                        "io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor")
+                        "io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner")
                 .should(com.tngtech.archunit.lang.conditions.ArchConditions.callMethodWhere(
                         com.tngtech.archunit.base.DescribedPredicate.describe("ServiceAdapter.execute",
                                 call -> call.getTargetOwner().isAssignableTo(
                                         io.github.dhluong90.bpm.process.spi.ServiceAdapter.class)
                                         && call.getName().equals("execute"))))
                 .check(CORE);
+        noClasses().that().doNotHaveFullyQualifiedName(
+                        "io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor")
+                .should(com.tngtech.archunit.lang.conditions.ArchConditions.callMethodWhere(
+                        com.tngtech.archunit.base.DescribedPredicate.describe("AsyncStepRunner.run",
+                                call -> call.getTargetOwner().isAssignableTo(
+                                        io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner.class)
+                                        && call.getName().equals("run"))))
+                .check(CORE);
         noClasses().that().haveFullyQualifiedName("io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor")
                 .should().dependOnClassesThat().resideInAnyPackage("java.sql..", "javax.sql..")
                 .orShould().dependOnClassesThat().haveFullyQualifiedName(
                         "io.github.dhluong90.bpm.process.internal.store.ProcessStore")
+                .check(CORE);
+    }
+
+    @Test
+    void PRE_058_result_guards_evaluate_in_process_only() {
+        // The result check runs inside the result transaction with the instance row locked (#363): it may evaluate the
+        // output schema and the guardrail rule set, never call an adapter, a runner or the network.
+        noClasses().that().haveFullyQualifiedName("io.github.dhluong90.bpm.process.internal.service.AgentResultGuard")
+                .or().haveFullyQualifiedName("io.github.dhluong90.bpm.process.internal.service.ResultGuard")
+                .or().haveFullyQualifiedName(
+                        "io.github.dhluong90.bpm.process.internal.service.JsonSchemaSubsetValidator")
+                .should().dependOnClassesThat().resideInAnyPackage("java.net..", "java.net.http..", "java.io..",
+                        "java.nio.file..", "java.sql..", "javax.sql..", "java.lang.reflect..", "javax.script..")
+                .orShould().dependOnClassesThat().belongToAnyOf(io.github.dhluong90.bpm.process.spi.ServiceAdapter.class,
+                        io.github.dhluong90.bpm.process.spi.AdapterCall.class,
+                        io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner.class,
+                        io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor.class,
+                        Thread.class)
                 .check(CORE);
     }
 

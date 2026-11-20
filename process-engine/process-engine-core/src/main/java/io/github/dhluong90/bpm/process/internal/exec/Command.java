@@ -8,7 +8,7 @@ import java.util.Objects;
 /**
  * Inputs of the kernel. Each is applied under the instance row lock by the shell.
  */
-public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted {
+public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted {
 
     /**
      * Starts the instance at its none start event.
@@ -59,6 +59,29 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
             Objects.requireNonNull(tokenId, "tokenId must not be null");
             Objects.requireNonNull(attemptId, "attemptId must not be null");
             Objects.requireNonNull(result, "result must not be null");
+        }
+    }
+
+    /**
+     * The result of an async step was refused in its result transaction (#363): the step is not completed, and a
+     * person reviews it instead. The token moves from {@code WAITING_ASYNC} to {@code WAITING_USER} on the same step,
+     * with a review task; completing that task completes the step with the reviewer's result.
+     *
+     * @param tokenId the waiting token
+     * @param attemptId the attempt whose result was refused; must be the token's current attempt
+     * @param assignee the reviewer: {@code role:}, {@code user:} or {@code group:} and a name
+     * @param fourEyes whether the review task follows the four-eyes rule
+     * @param code why the result was refused, for example {@code GUARDRAIL_VIOLATION}
+     * @param reasons the guardrail's reasons
+     */
+    record RouteToReview(String tokenId, String attemptId, String assignee, boolean fourEyes, String code,
+            java.util.List<String> reasons) implements Command {
+        public RouteToReview {
+            Objects.requireNonNull(tokenId, "tokenId must not be null");
+            Objects.requireNonNull(attemptId, "attemptId must not be null");
+            Objects.requireNonNull(assignee, "assignee must not be null");
+            Objects.requireNonNull(code, "code must not be null");
+            reasons = reasons == null ? java.util.List.of() : java.util.List.copyOf(reasons);
         }
     }
 

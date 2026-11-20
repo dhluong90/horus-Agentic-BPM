@@ -88,6 +88,7 @@ import io.github.dhluong90.bpm.process.spi.ProcessEventPublisher;
 import io.github.dhluong90.bpm.process.spi.TenantResolver;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -160,6 +161,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final JobSettings jobSettings;
     private final AsyncSettings async;
     private final java.util.Set<String> adapters;
+    /** The result check of each async job kind, run in the result transaction (#363); a kind without one has none. */
+    private final Map<String, ResultGuard> guards;
+    /** Checks the reviewer's answer to the review task of a refused result against the step's output schema. */
+    private final io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas;
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
 
@@ -305,7 +310,39 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
             ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings, AsyncSettings async,
             java.util.Set<String> adapters) {
+        this(tenants, callers, clock, transactions, store, readers, writers, invoker, publisher, settings, behaviors,
+                expressions, jobs, jobSettings, async, adapters, new JsonSchemaSubsetValidator());
+    }
+
+    /**
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store storage
+     * @param readers definition readers by source format
+     * @param writers definition writers by export format (PRE-034)
+     * @param invoker local handlers and decisions
+     * @param publisher event publisher
+     * @param settings validated settings
+     * @param behaviors registered behaviours
+     * @param expressions expression evaluator
+     * @param jobs job storage ({@code pre_timer})
+     * @param jobSettings lease and attempts of the jobs this engine schedules
+     * @param async lease margin, default timeout and runner settings of async steps (ADR-0008, #363)
+     * @param adapters names of the host's {@code ServiceAdapter}s; a remote step naming another is refused at import
+     * @param outputSchemas checks async results against their output schema in the result transaction (#363)
+     */
+    public ProcessServices(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers,
+            Map<SourceFormat, Function<Process, byte[]>> writers, LocalServiceInvoker invoker,
+            ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
+            ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings, AsyncSettings async,
+            java.util.Set<String> adapters, io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas) {
         this.async = Objects.requireNonNull(async);
+        // Agent results are never accepted unchecked; remote service results keep their behaviour (#363).
+        this.outputSchemas = Objects.requireNonNull(outputSchemas, "outputSchemas must not be null");
+        this.guards = Map.of(JobStore.ASYNC_AGENT, new AgentResultGuard(outputSchemas, invoker.decisionPort(), clock));
         this.adapters = java.util.Set.copyOf(adapters);
         for (String adapter : async.completerRoles().keySet()) {
             if (!this.adapters.contains(adapter)) {
@@ -1193,14 +1230,32 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         try {
             return transactions.inTransaction(() -> recordInTransaction(tenant, jobId, attemptId, presented, result,
                     reportedBy));
+        } catch (RefusalNotRouted failed) {
+            // The review task could not be created and everything rolled back, the refusal record with it. A refused
+            // result is never retried as if nothing happened: record the refusal again and fail the job (#363).
+            return transactions.inTransaction(() -> {
+                JobRow job = jobs.lockJob(tenant, jobId).orElseThrow(() -> new AsyncStepNotFoundException(
+                        "No async step " + jobId));
+                if (!current(job, attemptId)) {
+                    return StepCompletion.Outcome.DISCARDED;
+                }
+                Instant now = clock.instant();
+                Map<String, Object> details = new LinkedHashMap<>(failed.details);
+                details.put("route", "incident");
+                details.put("routeError", failed.code);
+                store.appendHistory(tenant, job.instanceId(), job.definitionId(), List.of(new HistoryEntry(
+                        "ASYNC_RESULT_REFUSED", job.nodeId(), job.tokenId(), attemptId, reportedBy, now, details)));
+                if (!jobs.release(tenant, job.id(), job.lockedBy(), job.attempt(), job.nextFireAt(), true, now)) {
+                    throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
+                }
+                LOG.log(System.Logger.Level.WARNING, "process.async.result.refused tenant={0} job={1} attempt={2} code={3}"
+                        + " route=incident routeError={4}", tenant, job.id(), job.attempt(), details.get("code"),
+                        failed.code);
+                return StepCompletion.Outcome.REFUSED;
+            });
         } catch (AttemptRunFailed failed) {
             // The step's continuation failed and rolled back; give the attempt back as a failed one.
-            RuntimeException cause = failed.getCause() instanceof RuntimeException r ? r : failed;
-            String code = switch (cause) {
-                case StepFailedException step -> step.reason();
-                case io.github.dhluong90.bpm.process.api.ProcessException process -> process.code();
-                default -> "STEP_RUN_FAILED";
-            };
+            String code = runFailureCode(failed);
             return transactions.inTransaction(() -> {
                 JobRow job = jobs.lockJob(tenant, jobId).orElseThrow(() -> new AsyncStepNotFoundException(
                         "No async step " + jobId));
@@ -1214,12 +1269,34 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /** Wraps a failure of the run that a completed result starts, so the result transaction can give the job back. */
-    private static final class AttemptRunFailed extends RuntimeException {
+    private static class AttemptRunFailed extends RuntimeException {
         private static final long serialVersionUID = 1L;
 
         AttemptRunFailed(RuntimeException cause) {
             super(cause);
         }
+    }
+
+    /** The review task of a refused result could not be created; carries the refusal record to write again. */
+    private static final class RefusalNotRouted extends AttemptRunFailed {
+        private static final long serialVersionUID = 1L;
+        private final transient Map<String, Object> details;
+        private final String code;
+
+        RefusalNotRouted(RuntimeException cause, Map<String, Object> details) {
+            super(cause);
+            this.details = Map.copyOf(details);
+            this.code = runFailureCode(this);
+        }
+    }
+
+    private static String runFailureCode(AttemptRunFailed failed) {
+        RuntimeException cause = failed.getCause() instanceof RuntimeException r ? r : failed;
+        return switch (cause) {
+            case StepFailedException step -> step.reason();
+            case io.github.dhluong90.bpm.process.api.ProcessException process -> process.code();
+            default -> "STEP_RUN_FAILED";
+        };
     }
 
     private StepCompletion.Outcome recordInTransaction(String tenant, String jobId, String attemptId, Presented presented,
@@ -1271,14 +1348,37 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         switch (result) {
             case StepResult.Completed completed -> {
+                // The only authoritative check of a result, whichever path reported it (#363).
+                ResultGuard.Verdict verdict = guard(row, job, attemptId, completed);
+                if (verdict instanceof ResultGuard.Verdict.Invalid invalid) {
+                    int allowed = async.runner(job.jobKind(), jobSettings).schemaRetries();
+                    int used = schemaRetriesUsed(job);
+                    if (used < allowed) {
+                        // Not final: the step gets a fresh attempt, so a :complete caller reads ACCEPTED (#363).
+                        retrySchema(job, attemptId, invalid, used + 1, allowed, reportedBy);
+                        return StepCompletion.Outcome.ACCEPTED;
+                    }
+                    verdict = invalid.exhausted();
+                }
                 StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
                 InstanceState state = new InstanceState(row.id(), row.tenantId(), row.definitionId(), row.businessKey(),
                         InstanceStatus.valueOf(row.status()), tokens, Values.readMap(row.variablesJson()),
                         participants(tenant, row), row.sequence());
+                if (verdict instanceof ResultGuard.Verdict.Refused refused) {
+                    refuse(definition, row, state, job, attemptId, refused, completed, reportedBy);
+                    return StepCompletion.Outcome.REFUSED;
+                }
+                Map<String, Object> details = new LinkedHashMap<>();
+                details.put("jobId", job.id());
+                details.put("attempt", job.attempt());
+                if (verdict instanceof ResultGuard.Verdict.Allow allow && allow.decisionId() != null) {
+                    details.put("guardrailDecisionId", allow.decisionId());
+                    details.put("ruleIds", allow.ruleIds());
+                }
                 try {
                     store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry(
                             "ASYNC_RESULT_ACCEPTED", job.nodeId(), job.tokenId(), attemptId, reportedBy, clock.instant(),
-                            Map.of("jobId", job.id(), "attempt", job.attempt()))));
+                            details)));
                     run(definition, row, state, new Command.AsyncResult(job.tokenId(), job.id(), completed),
                             new RunAs.EngineWork(tenant, ASYNC_ACTOR));
                 } catch (RuntimeException e) {
@@ -1292,6 +1392,81 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             case StepResult.Failed failed -> giveBack(job, attemptId, failed.errorCode(), failed.retryable(), reportedBy);
         }
         return StepCompletion.Outcome.ACCEPTED;
+    }
+
+    /**
+     * Runs the result check of the job's kind, in the result transaction, under the runner's {@code guard-budget}.
+     * The tenant is the locked instance row's. Anything the guard throws refuses the result: the check fails closed,
+     * and the step's job fails because no reviewer can be read from a guard that broke.
+     */
+    private ResultGuard.Verdict guard(InstanceRow row, JobRow job, String attemptId, StepResult.Completed completed) {
+        ResultGuard guard = guards.getOrDefault(job.jobKind(), ResultGuard.NONE);
+        if (guard == ResultGuard.NONE) {
+            return new ResultGuard.Verdict.Allow(null, List.of());
+        }
+        try {
+            ResultGuard.Verdict verdict = guard.check(new ResultGuard.Request(row.tenantId(), row.id(), job.nodeId(),
+                    attemptId, job.jobKind(), Values.readMap(job.payloadJson()), completed.output(),
+                    new DecisionCaller.Engine(ASYNC_ACTOR)),
+                    async.runner(job.jobKind(), jobSettings).guardBudget());
+            return verdict == null ? failClosed("GUARD_NULL_VERDICT") : verdict;
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING, "process.async.guard.error tenant={0} job={1} exception={2}",
+                    row.tenantId(), job.id(), e.getClass().getName());
+            return failClosed(e.getClass().getSimpleName());
+        }
+    }
+
+    private static ResultGuard.Verdict failClosed(String reason) {
+        return new ResultGuard.Verdict.Refused(AgentResultGuard.EVALUATION_ERROR, List.of(reason), List.of(), null,
+                ResultGuard.Route.FAIL, null);
+    }
+
+    /**
+     * A refused result (#363): nothing of it is accepted. The refusal is recorded with the refused output, masked by
+     * the guard's policy and bounded (DESIGN section 4.1, for the reviewer and for offline evaluation), then the step
+     * goes to a four-eyes review task and the job is {@code DONE}, or the job is {@code FAILED} and the token stays on
+     * the step for an incident (#68). When the review task cannot be created, {@link RefusalNotRouted} makes the
+     * caller record the refusal again and fail the job: a refusal is never lost and never becomes a retry.
+     */
+    private void refuse(StoredDefinition definition, InstanceRow row, InstanceState state, JobRow job,
+            String attemptId, ResultGuard.Verdict.Refused refused, StepResult.Completed completed, String reportedBy) {
+        String tenant = row.tenantId();
+        Instant now = clock.instant();
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("jobId", job.id());
+        details.put("attempt", job.attempt());
+        details.put("code", refused.code());
+        details.put("reasons", refused.reasons());
+        details.put("ruleIds", refused.ruleIds());
+        if (refused.decisionId() != null) {
+            details.put("guardrailDecisionId", refused.decisionId());
+        }
+        details.put("route", refused.route() == ResultGuard.Route.REVIEW ? "review" : "incident");
+        Map<String, Object> output = completed.output() == null ? Map.of() : completed.output();
+        details.put("output", guards.getOrDefault(job.jobKind(), ResultGuard.NONE)
+                .auditOutput(Values.readMap(job.payloadJson()), output));
+        details.put("outputFields", output.size());
+        store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry("ASYNC_RESULT_REFUSED",
+                job.nodeId(), job.tokenId(), attemptId, reportedBy, now, details)));
+        LOG.log(System.Logger.Level.WARNING, "process.async.result.refused tenant={0} job={1} attempt={2} code={3}"
+                + " route={4}", tenant, job.id(), job.attempt(), refused.code(), details.get("route"));
+        if (refused.route() == ResultGuard.Route.REVIEW) {
+            try {
+                // Always four eyes: the reviewer is never the reporter of the result (participants) or the starter.
+                run(definition, row, state, new Command.RouteToReview(job.tokenId(), job.id(), refused.reviewer(),
+                        true, refused.code(), refused.reasons()), new RunAs.EngineWork(tenant, ASYNC_ACTOR));
+            } catch (RuntimeException e) {
+                throw new RefusalNotRouted(e, details);
+            }
+            if (!jobs.markDone(tenant, job.id(), job.lockedBy(), job.attempt(), now)) {
+                throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
+            }
+            return;
+        }
+        if (!jobs.release(tenant, job.id(), job.lockedBy(), job.attempt(), job.nextFireAt(), true, now)) {
+            throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
+        }
     }
 
     /**
@@ -1349,7 +1524,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private void giveBack(JobRow job, String attemptId, String code, boolean retryable, String reportedBy) {
         Instant now = clock.instant();
         boolean last = !retryable || job.attempt() >= job.maxAttempts();
-        Instant retryAt = now.plus(jobSettings.retryBackoff().multipliedBy(Math.max(1, job.attempt())));
+        Duration backoff = JobStore.isAsync(job.jobKind()) ? async.runner(job.jobKind(), jobSettings).retryBackoff()
+                : jobSettings.retryBackoff();
+        Instant retryAt = now.plus(backoff.multipliedBy(Math.max(1, job.attempt())));
         if (!jobs.release(job.tenantId(), job.id(), job.lockedBy(), job.attempt(), retryAt, last, now)) {
             throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
         }
@@ -1506,6 +1683,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 throw new SelfApprovalForbiddenException("The identity that started this instance or completed an earlier"
                         + " task of it cannot complete this four-eyes task");
             }
+            checkReviewResult(tenant, row, taskId, values);
             Instant now = clock.instant();
             if (store.completeTask(tenant, taskId, task.lockVersion(), caller, now) != 1) {
                 throw new VersionConflictException("Task " + taskId + " changed concurrently");
@@ -1608,7 +1786,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
     }
 
-    /** Four-eyes participants: the starter and everyone who completed a task of the instance (PRE-007). */
+    /**
+     * Four-eyes participants: the starter, everyone who completed a task of the instance (PRE-007), and everyone who
+     * reported a result the guardrail refused (#363). The reporter of a refused result is the maker of its review, so
+     * an identity that holds both the completer role and the reviewer role cannot approve its own result.
+     */
     private java.util.Set<String> participants(String tenant, InstanceRow row) {
         java.util.Set<String> out = new java.util.LinkedHashSet<>();
         if (row.startedBy() != null) {
@@ -1616,7 +1798,58 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         store.tasks(tenant, row.id()).stream().filter(t -> "COMPLETED".equals(t.status()) && t.completedBy() != null)
                 .forEach(t -> out.add(t.completedBy()));
+        out.addAll(store.historyActors(tenant, row.id(), "ASYNC_RESULT_REFUSED"));
         return out;
+    }
+
+    /** Schema retries this job has had, kept in its payload by {@link JobStore#retrySchema}. */
+    private static int schemaRetriesUsed(JobRow job) {
+        return Values.readMap(job.payloadJson()).get(JobStore.SCHEMA_RETRIES) instanceof Number n ? n.intValue() : 0;
+    }
+
+    /**
+     * Gives an attempt whose result broke its output schema back for a fresh attempt, apart from the technical-failure
+     * attempts ({@code runners.<kind>.schema-retries}, #363), and records {@code ASYNC_ATTEMPT_FAILED}.
+     */
+    private void retrySchema(JobRow job, String attemptId, ResultGuard.Verdict.Invalid invalid, int retry, int allowed,
+            String reportedBy) {
+        Instant now = clock.instant();
+        Instant retryAt = now.plus(async.runner(job.jobKind(), jobSettings).retryBackoff()
+                .multipliedBy(Math.max(1, job.attempt())));
+        if (!jobs.retrySchema(job.tenantId(), job.id(), job.lockedBy(), job.attempt(), retryAt)) {
+            throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("jobId", job.id());
+        details.put("attempt", job.attempt());
+        details.put("errorCode", invalid.code());
+        details.put("retryable", true);
+        details.put("final", false);
+        details.put("retryAt", retryAt.toString());
+        details.put("schemaRetry", retry);
+        details.put("schemaRetries", allowed);
+        details.put("violations", invalid.violations());
+        store.appendHistory(job.tenantId(), job.instanceId(), job.definitionId(), List.of(new HistoryEntry(
+                "ASYNC_ATTEMPT_FAILED", job.nodeId(), job.tokenId(), attemptId, reportedBy, now, details)));
+        LOG.log(System.Logger.Level.WARNING, "process.async.attempt.failed tenant={0} job={1} attempt={2} code={3}"
+                + " schemaRetry={4}/{5}", job.tenantId(), job.id(), job.attempt(), invalid.code(), retry, allowed);
+    }
+
+    /**
+     * The reviewer's answer to the review task of a refused async result must meet the step's output schema, like
+     * the answer it replaces (#363). Nothing is checked for an ordinary user task.
+     */
+    private void checkReviewResult(String tenant, InstanceRow row, String taskId, Map<String, Object> result) {
+        java.util.Optional<JobRow> reviewed = store.reviewedJob(tenant, row.id(), taskId).flatMap(id -> jobs.findJob(tenant, id));
+        if (reviewed.isEmpty()) {
+            return;
+        }
+        Map<String, Object> schema = AgentResultGuard.outputSchema(Values.readMap(reviewed.get().payloadJson()));
+        List<String> violations = schema == null ? List.of() : outputSchemas.validate(schema, result);
+        if (violations == null || !violations.isEmpty()) {
+            throw new io.github.dhluong90.bpm.process.api.FormValidationException("The review result breaks the step's"
+                    + " output schema", violations == null ? List.of("$: the schema check gave no answer") : violations);
+        }
     }
 
     /** Serialises request values, refusing values JSON cannot hold and anything above the size limit. */
@@ -1712,20 +1945,23 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 && call.kind() == ServiceKind.HANDLER -> {
                             // TX of the step: the token waits and a durable job is stored; nothing is called here.
                             // The job id is the kernel's attempt id, so cancelling the token cancels the job.
+                            String kind = JobStore.ASYNC_SERVICE;
+                            RunnerSettings runner = async.runner(kind, jobSettings);
+                            Duration timeout = async.timeout(kind, call.timeout(), jobSettings);
                             Map<String, Object> payload = new LinkedHashMap<>();
                             payload.put("target", call.target());
-                            payload.put("timeoutMs", async.timeout(call.timeout()).toMillis());
+                            payload.put("timeoutMs", timeout.toMillis());
                             if (state.businessKey() != null) {
                                 payload.put("businessKey", state.businessKey());
                             }
                             payload.put("inputs", call.inputs());
+                            Duration lease = timeout.plus(async.leaseMargin());
                             newJobs.add(JobRow.due(state.tenantId(), call.attemptId(), state.instanceId(),
-                                    definition.id(), call.tokenId(), JobStore.ASYNC_SERVICE, call.nodeId(),
-                                    clock.instant(), async.lease(call.timeout()), jobSettings.maxAttempts(),
-                                    Values.write(payload)));
+                                    definition.id(), call.tokenId(), kind, call.nodeId(),
+                                    clock.instant(), lease, runner.maxAttempts(), Values.write(payload)));
                             history.add(new HistoryEntry("ASYNC_STEP_SCHEDULED", call.nodeId(), call.tokenId(),
                                     call.attemptId(), null, clock.instant(), Map.of("jobId", call.attemptId(),
-                                    "target", call.target(), "leaseMs", async.lease(call.timeout()).toMillis())));
+                                    "target", call.target(), "leaseMs", lease.toMillis())));
                         }
                         case Effect.EmitEvent event -> {
                             Map<String, Object> payload = new LinkedHashMap<>(event.payload());
