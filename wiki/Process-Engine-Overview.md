@@ -183,12 +183,15 @@ The engine never embeds a model and never calls the network itself (`TR-AGT-03`,
 | Permission | Grants |
 |---|---|
 | `processes:read` | Read definitions, instances, tokens, history |
-| `processes:deploy` | Deploy definition versions |
-| `processes:start` | Start and cancel instances |
-| `tasks:work` | Claim, complete and delegate tasks in the caller's own queues |
-| `tasks:manage` | Reassign any task, recompute SLAs |
-| `incidents:manage` | Retry and resolve incidents |
-| `migrations:manage` | Create, validate and execute migration plans |
-| `calendars:manage` | Edit business calendars and holidays |
+| `processes:deploy` | Import a complete definition as a draft |
+| `processes:author` | Create and edit drafts, request approval |
+| `processes:approve` | Approve, reject and retire versions; a retirement needs a reason, and the last version in effect needs a confirmation (PD-101, PD-102) |
+| `processes:start` | Start instances |
+| `processes:cancel` | Cancel a running instance, with a reason (PD-103) |
+| `processes:task:work` | Claim, complete and delegate tasks in the caller's own queues |
+| `processes:task:manage` | Reassign any task, recompute SLAs |
+| `processes:incident:manage` | Retry and resolve incidents |
+| `processes:migration:manage` | Create, validate and execute migration plans |
+| `processes:calendar:manage` | Edit business calendars and holidays |
 
 Four-eyes is enforced in `TaskService`: a task with `fourEyes: true` rejects completion by any identity listed in `forbidden_users` with `403 SELF_APPROVAL_FORBIDDEN`, whatever the caller's permissions (`PRE-007`). See [[Multi Tenancy and Security]].

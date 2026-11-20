@@ -497,6 +497,75 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `alice withdraws her pending v2 -> DRAFT, WITHDRAWN, v1 still active; alice rejects her own -> 403, use withdraw`.
 - **Test ID:** `PRE_052_requester_withdraws_own_pending_definition_to_draft`
 
+### PRE-053 Retiring a definition version stops new starts, never running instances, and the last version needs a confirmation
+- **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-101, PD-102
+- **Milestone:** M2
+- **Given:**
+  - Tenant `bank-a`, at `2027-04-20T09:00:00Z`.
+  - `loan-review` v1 is `ACTIVE`, effective since `2027-01-10`, and three instances run on it, one waiting at the user task `credit-check`.
+  - v2 is `ACTIVE`, with `effective_from = 2027-05-01T00:00:00Z` and a `DEFINITION_EFFECTIVE` job due then.
+  - `bob` holds `processes:approve`; `lan` holds `processes:author` and `processes:start`.
+  - `lifecycle.retire-approval` is `single` and `lifecycle.retire-last-version` is `confirm`, the defaults.
+- **When:**
+  1. `bob` sends `POST /api/bpm/processes/v1/definitions/loan-review/versions/2:retire` with `Idempotency-Key`, `If-Match` and `{ "reason": "pricing step points at the wrong rule set" }`.
+  2. He then retires v1 with `{ "reason": "flawed credit routing" }`.
+  3. He retires v1 again with `"confirmNoVersionInEffect": true` added.
+  4. The task at `credit-check` is completed.
+  5. `lan` starts `loan-review`.
+  6. The clock passes `2027-05-01T00:00:00Z`.
+  - **Failure cases:**
+    - `lan` retires v1;
+    - `bob` retires v1 with a blank reason;
+    - on a host with `lifecycle.retire-last-version: refuse`, the confirmed retire.
+- **Then:**
+  - **Step 1** returns `200`. v2 is `RETIRED`, and its job is `CANCELLED` in the same transaction. The history row `RETIRED` and `processes.definition.retired.v1` carry the reason, `approvalMode: single` and `noVersionInEffect: false`, because v1 is still in effect.
+  - **Step 2** returns `409 LAST_VERSION_IN_EFFECT` with `definitionKey: loan-review`, `version: 1`, `setting: confirm` and `nextEffectiveFrom: null`. Nothing changes.
+  - **Step 3** returns `200`. v1 is `RETIRED`, and the history row and the event carry `noVersionInEffect: true`.
+  - **Steps 4 and 5.** The three running instances stay on v1, and the task completion advances its instance. The start returns `404 NO_EFFECTIVE_VERSION`.
+  - **Step 6.** On `2027-05-01` nothing is retired or started by the cancelled job.
+  - **Replay.** A replay of any of the calls returns the same answer and writes nothing.
+  - **Failure cases:**
+    - `lan` gets `403 PERMISSION_DENIED`;
+    - the blank reason gets `400 INPUT_INVALID`;
+    - under `refuse`, the confirmed retire gets `409 LAST_VERSION_IN_EFFECT` with `setting: refuse`.
+    - None of them changes anything.
+- **Example:** `retire v2 (future) -> RETIRED, job cancelled; retire v1 -> 409 LAST_VERSION_IN_EFFECT; with confirmation -> RETIRED, noVersionInEffect true; running instances continue; new start -> 404`.
+- **Test ID:** `PRE_053_retire_stops_new_starts_keeps_running_instances_and_confirms_last_version`
+
+### PRE-054 Cancelling an instance needs processes:cancel and a reason
+- **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-103
+- **Milestone:** M2
+- **Given:**
+  - Tenant `bank-a`. Instance `I7` of `loan-review` is `RUNNING`, with `lockVersion 4` and an open task at `credit-check`.
+  - `lan` holds `processes:start` and `processes:read`.
+  - `minh` holds `processes:cancel` and `processes:read`.
+- **When:**
+  1. `lan` sends `POST /api/bpm/processes/v1/instances/I7:cancel` with `Idempotency-Key`, `If-Match: "4"` and `{ "reason": "duplicate application" }`.
+  2. `minh` sends the same request.
+  3. Both call `GET /api/bpm/me`.
+  - **Failure cases** for `minh`:
+    - a blank reason;
+    - a reason of 2,001 characters;
+    - a stale `If-Match`;
+    - a cancel of a `COMPLETED` instance.
+- **Then:**
+  - **Step 1.** `lan` gets `403 PERMISSION_DENIED`, and `I7` is unchanged.
+  - **Step 2.** `minh` gets `200`:
+    - `I7` is `CANCELLED`;
+    - its token and its task are `CANCELLED` in the same transaction;
+    - one history row `INSTANCE_ENDED` records actor `minh`, the reason and `CANCELLED`;
+    - one `processes.instance.cancelled.v1` carries `cancelledBy: minh` and the reason;
+    - no compensation handler is called.
+  - **Replay.** A replay returns the same answer and writes nothing.
+  - **Step 3.** `/api/bpm/me` lists `processes:cancel` for `minh` and not for `lan`.
+  - **Failure cases:**
+    - the two bad reasons get `400 INPUT_INVALID`;
+    - the stale `If-Match` gets `409 VERSION_CONFLICT`;
+    - the completed instance gets `409 INVALID_STATE`.
+    - None of them changes anything.
+- **Example:** `lan (processes:start) cancels I7 -> 403; minh (processes:cancel) cancels with reason -> CANCELLED, task CANCELLED, cancelled event with reason`.
+- **Test ID:** `PRE_054_cancel_needs_processes_cancel_and_a_reason`
+
 ### PRE-055 A decision step after a timer runs in the instance's tenant, as the engine, with no caller
 - **Traces to:** `TR-TEN-01`, `TR-SEC-03`, ADR-0027
 - **Milestone:** M2
