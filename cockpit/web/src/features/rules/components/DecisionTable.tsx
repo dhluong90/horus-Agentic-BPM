@@ -1,10 +1,11 @@
+import type { ReactNode } from 'react';
 import type { RuleSetDefinition } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { columnLabel, readCondition, readOutput } from '../model/reading';
 import { CellValue } from './CellValue';
 
 /** Column headers shared by the table, the editor and the diff: two groups, When and Then. */
-export function TableHead({ definition, extra }: { definition: RuleSetDefinition; extra?: string }) {
+export function TableHead({ definition, extra, inputNote }: { definition: RuleSetDefinition; extra?: string; inputNote?: (input: string) => ReactNode }) {
   const { t } = useI18n();
   return (
     <thead>
@@ -16,7 +17,10 @@ export function TableHead({ definition, extra }: { definition: RuleSetDefinition
       </tr>
       <tr>
         {definition.inputs.map((input) => (
-          <th key={`in-${input.name}`} scope="col">{columnLabel(input.name, input.description)}</th>
+          <th key={`in-${input.name}`} scope="col">
+            {columnLabel(input.name, input.description)}
+            {inputNote?.(input.name)}
+          </th>
         ))}
         {definition.outputs.map((output, index) => (
           <th key={`out-${output.name}`} scope="col" className={index === 0 ? 'dt__first-then' : undefined}>

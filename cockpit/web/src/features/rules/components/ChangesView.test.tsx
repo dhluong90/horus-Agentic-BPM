@@ -26,14 +26,14 @@ const proposed: RuleSetDefinition = {
 function version(n: number, status: RuleSetVersion['status'], def: RuleSetDefinition, effectiveFrom: string | null): RuleSetVersion {
   return {
     ruleSet: 'card-fee', version: n, status, hitPolicy: 'FIRST', effectiveFrom, lockVersion: 1, canonicalHash: String(n).repeat(64), sourceFormat: 'YAML', sourceHash: 'e'.repeat(64),
-    requestedBy: 'lan', requestedAt: '2026-11-18T08:30:00Z', approvedBy: null, approvedAt: null, createdBy: 'lan', createdAt: '2026-11-18T08:00:00Z', allowedActions: [], definition: def,
+    requestedBy: 'lan', requestedAt: '2026-11-18T08:30:00Z', approvedBy: null, approvedAt: null, createdBy: 'lan', createdAt: '2026-11-18T08:00:00Z', allowedActions: [], definition: def, warnings: [],
   };
 }
 
 const none = { added: [], removed: [], changed: [], reordered: false };
 const diff: VersionDiff = {
   ruleSet: 'card-fee', version: 2, base: 1, canonicalHash: '4be1d7a0c35e'.padEnd(64, '0'), baseCanonicalHash: '9c07e5d3b1a9'.padEnd(64, '0'), sourceHashChanged: true,
-  effectiveFrom: { from: '2026-11-01T03:00:00Z', to: null }, header: [], inputs: none, outputs: none,
+  effectiveFrom: { from: '2026-11-01T03:00:00Z', to: null }, header: [], inputs: none, outputs: none, masking: [],
   rows: [
     { ruleId: 'R6', change: 'ADDED', position: 2 },
     { ruleId: 'R3', change: 'CHANGED', position: 3, basePosition: 2, moved: false, fields: [{ path: '/then/fee', from: { currency: 'VND', amount: 30000 }, to: { currency: 'VND', amount: 35000 }, nonAscii: false }] },

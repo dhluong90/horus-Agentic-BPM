@@ -10,6 +10,7 @@ import {
   type DecisionResult,
   type HistoryEntry,
   type Page,
+  type AcknowledgedWarning,
   type RuleSetSummary,
   type RuleSetVersion,
   type VersionSummary,
@@ -59,8 +60,8 @@ export interface RulesClient {
   importVersion(name: string, document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** requestPublish */
   requestPublish(name: string, version: number, lockVersion: number, idempotencyKey: string): Promise<RuleSetVersion>;
-  /** approve */
-  approve(name: string, version: number, lockVersion: number, comment: string | undefined, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** approve; `acknowledgedWarnings` are the exact { code, input } pairs the approver accepted (PD-104, RLE-053) */
+  approve(name: string, version: number, lockVersion: number, comment: string | undefined, idempotencyKey: string, acknowledgedWarnings?: readonly AcknowledgedWarning[]): Promise<RuleSetVersion>;
   /** evaluate: runs the version in effect at the host clock and logs one decision */
   evaluate(ruleSet: string, inputs: Readonly<Record<string, unknown>>, idempotencyKey: string): Promise<DecisionResult>;
 }
@@ -155,13 +156,18 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
       );
       return answer.data;
     },
-    async approve(name, version, lockVersion, comment, idempotencyKey) {
+    async approve(name, version, lockVersion, comment, idempotencyKey, acknowledgedWarnings = []) {
+      // Members are sent only when they carry something, so an approval without either has no body, as before.
+      const payload = {
+        ...(comment !== undefined && comment !== '' ? { comment } : {}),
+        ...(acknowledgedWarnings.length > 0 ? { acknowledgedWarnings } : {}),
+      };
       const answer = await call(
         {
           method: 'POST',
           path: `${versionPath(name, version)}:approve`,
           headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
-          ...(comment !== undefined && comment !== '' ? { body: { contentType: 'application/json', text: JSON.stringify({ comment }) } } : {}),
+          ...(Object.keys(payload).length > 0 ? { body: { contentType: 'application/json', text: JSON.stringify(payload) } } : {}),
         },
         ruleSetVersion,
       );

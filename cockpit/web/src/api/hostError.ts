@@ -19,6 +19,8 @@ export type HostError =
       detail: string | undefined;
       /** Located validation problems of a 422 VALIDATION_FAILED; absent for every other problem. */
       violations?: readonly Violation[];
+      /** Members beyond the standard ones that a screen may read (for example `warnings` of a 409); absent when none. */
+      members?: Readonly<Record<string, unknown>>;
     }
   | { kind: 'signed-out' }
   | { kind: 'unreachable' }
@@ -78,8 +80,11 @@ export async function readProblem(response: Response): Promise<HostError> {
     const read = violation.safeParse(item);
     return read.success ? [{ ruleId: read.data.ruleId ?? null, column: read.data.column ?? null, message: read.data.message }] : [];
   });
+  const STANDARD = new Set(['type', 'title', 'status', 'detail', 'violations', 'code', 'correlationId', 'instance']);
+  const extra = Object.fromEntries(Object.entries(parsed.data).filter(([key]) => !STANDARD.has(key)));
   return {
     ...(violations.length > 0 ? { violations } : {}),
+    ...(Object.keys(extra).length > 0 ? { members: extra } : {}),
     kind: 'problem',
     status: response.status,
     code: parsed.data.code,

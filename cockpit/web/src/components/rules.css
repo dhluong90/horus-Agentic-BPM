@@ -463,3 +463,16 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
   .decision--dock .decision__actions { align-items: flex-start; }
   .decision--dock > .notice, .decision--dock > .dock__note { grid-column: auto; }
 }
+
+/* Personal data without a masking rule (RLE-049, PD-104): in the decision, on the styleguide's warning tokens.
+ * The lines, the closing sentence and the acceptance share one left edge, under the title's text. */
+.pii-warning { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: var(--radius-m); background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-fill); font-size: 13px; line-height: 1.45; --pii-indent: 1.35em; }
+.pii-warning__title { margin: 0; font-weight: 650; }
+.pii-warning__icon { display: inline-block; width: calc(var(--pii-indent) - 0.3em); }
+.pii-warning__list { margin: 0; padding: 0 0 0 var(--pii-indent); list-style: none; }
+.pii-warning__why { margin: 0; padding-left: var(--pii-indent); }
+.pii-warning__needed { font-weight: 650; }
+.pii-warning__accept { display: flex; align-items: center; gap: 8px; min-height: var(--target-min); padding-left: calc(var(--pii-indent) - 0.15em); color: var(--ink); font-weight: 600; cursor: pointer; }
+.pii-warning__accept input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--accent-fill); }
+/* The amber marker on a condition header whose masking changed to not masked; the sentence is above the table. */
+.masking-flag { color: var(--warn-fill); font-size: 11px; cursor: help; }

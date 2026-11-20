@@ -13,6 +13,7 @@ import { DraftEditor } from './components/DraftEditor';
 import { HistoryList } from './components/HistoryList';
 import { useFilePicker } from './components/ImportFileButton';
 import { MenuButton } from './components/MenuButton';
+import { PersonalDataWarnings } from './components/PersonalDataWarnings';
 import { ProblemNotice } from './components/ProblemNotice';
 import { SourceView } from './components/SourceView';
 import { StatusBadge } from './components/StatusBadge';
@@ -126,6 +127,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
   });
   const requestPublish = useRequestPublish((updated) => { say(t('dock.requested', { version: String(updated.version) })); });
   const approve = useApprove((updated) => { say(t('dock.approved', { version: String(updated.version) })); });
+
   const reject = useReject((updated) => { say(t('dock.rejected', { version: String(updated.version) })); });
   const picker = useFilePicker((document) => { importVersion.start(document); });
   const errors = placeErrors(save.error ? toHostError(save.error) : undefined);
@@ -158,7 +160,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
   const decision = (docked: boolean) => (
     <DecisionCard version={version} docked={docked} review={review} onReload={() => { window.location.reload(); }}
       onReviewAgain={() => { onReviewAgain(); go({ lens: 'changes' }); }}
-      approve={{ start: (comment) => { approve.start({ version, comment }); }, isPending: approve.isPending, error: approve.error }}
+      approve={{ start: ({ comment, acknowledgedWarnings }) => { approve.start({ version, comment, acknowledgedWarnings }); }, isPending: approve.isPending, error: approve.error }}
       reject={{ start: (reason) => { reject.start({ version, reason }); }, isPending: reject.isPending, error: reject.error }} />
   );
   // The breadcrumb names what is on screen: "New draft" while editing, "Version N draft" for a draft.
@@ -227,6 +229,13 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
         {comparing ? null : <aside className="workbench__side">
           {editing ? <DraftChanges definition={version.definition} base={version.definition.rules} next={draftRules} /> : null}
           {!editing && version.status === 'PENDING_APPROVAL' ? decision(false) : null}
+          {!editing && version.status === 'DRAFT' && version.warnings.length > 0 ? (
+            // The author sees what the approver will see, before requesting publication.
+            <section aria-labelledby="draft-pii-title">
+              <h2 id="draft-pii-title" className="sr-only">{t('pii.title')}</h2>
+              <PersonalDataWarnings warnings={version.warnings} definition={version.definition} />
+            </section>
+          ) : null}
           {!editing ? (
             <Inspector version={version} onMatched={(ids) => {
               setMatched(new Set(ids));

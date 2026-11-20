@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { scenarioPermissions, scenarioResponses, scenarioUser, type MockResponse, type Scenario } from './fixtures';
-import { createFakeEngine, demoSeed } from './ruleEngine';
+import { createFakeEngine, demoSeed, type StoredVersion } from './ruleEngine';
 
 function reply(response: MockResponse) {
   const headers: Record<string, string> = { 'Content-Type': response.contentType };
@@ -10,9 +10,9 @@ function reply(response: MockResponse) {
 
 let engine = createFakeEngine(demoSeed());
 
-/** A fresh mock Rule Engine with the demo data, for test isolation. */
-export function resetRuleEngine(): void {
-  engine = createFakeEngine(demoSeed());
+/** A fresh mock Rule Engine with the demo data, or the given versions, for test isolation. */
+export function resetRuleEngine(seed: StoredVersion[] = demoSeed()): void {
+  engine = createFakeEngine(seed);
 }
 
 /** MSW handlers of the mock host. Paths match any origin, so they serve the embedded (same-origin) case. */

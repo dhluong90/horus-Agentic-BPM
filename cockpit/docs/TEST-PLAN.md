@@ -50,6 +50,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-034 | `CKP_034_sla_breach_filter_uses_task_deadlines` | Playwright, network capture | M2 | `TR-CAL-01`, `TR-PERF-07` | Planned |
 | CKP-035 | `CKP_035_diagram_step_list_and_text_states` | Playwright keyboard and axe-core, both themes | M2 | `TR-UI-03` | Planned |
 | CKP-036 | `CKP_036_canvas_exemption_names_import_path` | Playwright with screen-reader assertions | M3 | `TR-UI-03`, `TR-DEF-04` | Planned |
+| CKP-037 | `CKP_037_*` (`cockpit/web/e2e/personal-data.spec.ts`, `cockpit/web/src/features/rules/PersonalData.test.tsx`, `cockpit/web/src/features/rules/model/masking.test.ts`) | Playwright at 1440x900 and 1440x1200, light and dark, English and Vietnamese, axe-core; Vitest with the fake engine | M1 | `TR-UI-02`, `TR-UI-03`, `TR-UI-04` | Automated |
 
 ## Known gaps
 | Gap | Plan |

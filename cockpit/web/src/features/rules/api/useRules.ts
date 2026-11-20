@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
 import { allVersions } from '../../../api/rules/catalogue';
 import type { RuleDocument } from '../../../api/rules/rulesClient';
-import type { DecisionResult, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
+import type { AcknowledgedWarning, DecisionResult, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
 
 /*
@@ -157,7 +157,9 @@ export function useApprove(onDone: (version: RuleSetVersion) => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
-    ({ version, comment }: { version: VersionSummary; comment: string }, key) => client.approve(version.ruleSet, version.version, version.lockVersion, comment, key),
+    // Never retried on a refusal: a 409 WARNINGS_NOT_ACKNOWLEDGED goes back to the approver (PD-104).
+    ({ version, comment, acknowledgedWarnings = [] }: { version: VersionSummary; comment: string; acknowledgedWarnings?: readonly AcknowledgedWarning[] }, key) =>
+      client.approve(version.ruleSet, version.version, version.lockVersion, comment, key, acknowledgedWarnings),
     async (version) => {
       await refresh();
       onDone(version);

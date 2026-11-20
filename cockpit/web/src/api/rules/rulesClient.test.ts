@@ -50,6 +50,17 @@ describe('rules client', () => {
     document.cookie = 'XSRF-TOKEN=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   });
 
+  it('CKP_037_the_diff_is_read_with_its_base_and_its_masking_column', async () => {
+    const { sent, fetchImpl } = engineFetch();
+    const diff = await createRulesClient('', fetchImpl).diffVersions('card-fee', 2, 1);
+    expect(sent[0]?.url).toBe('/api/bpm/rules/v1/rule-sets/card-fee/versions/2/diff?base=1');
+    expect(diff.masking.map((item) => [item.input, item.from, item.to, item.changed])).toEqual([
+      ['tier', 'NOT_MASKED_BY_DEFAULT', 'NOT_MASKED_BY_DEFAULT', false],
+      ['balance', 'NOT_MASKED_BY_DEFAULT', 'NOT_MASKED_BY_DEFAULT', false],
+      ['txCount', 'NOT_MASKED_BY_DEFAULT', 'NOT_MASKED_BY_DEFAULT', false],
+    ]);
+  });
+
   it('TR_UI_02_refusals_arrive_as_typed_problems_with_code_and_correlation_id', async () => {
     // Lan wrote and requested card-fee v2; even holding rules:approve she cannot approve it.
     const { fetchImpl } = engineFetch('lan', ['rules:read', 'rules:author', 'rules:approve']);

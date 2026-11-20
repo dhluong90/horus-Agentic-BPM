@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { BpmMeV1 } from '../api/generated/bpm-me.v1';
 import type { BpmMetaV1 } from '../api/generated/bpm-meta.v1';
 import type { RegistryHost } from '../app/config/registry';
@@ -9,7 +9,7 @@ import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
 import { DecisionsPage } from '../features/decisions/DecisionsPage';
 import { HomePage } from '../features/home/HomePage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
-import { RulesProvider } from '../features/rules/api/rulesContext';
+import { DEFAULT_ACKNOWLEDGE_WARNINGS, RulesProvider } from '../features/rules/api/rulesContext';
 import { RulesArea } from '../features/rules/RulesArea';
 import { useI18n } from '../i18n/I18nProvider';
 import { PeopleProvider } from '../app/people';
@@ -29,6 +29,22 @@ export function cockpitDraftsOn(meta: BpmMetaV1): boolean {
   return value === true || value === 'true';
 }
 
+/**
+ * The host's lifecycle.acknowledge-warnings setting (PD-104): the warning codes an approver must accept before
+ * Approve, as a comma-separated list in the rules module of /meta. Absent means the engine's default.
+ */
+export function acknowledgeWarningsOf(meta: BpmMetaV1): readonly string[] {
+  const value = meta.modules.find((module) => module.module === 'rules')?.settings?.['lifecycle.acknowledge-warnings'];
+  if (typeof value !== 'string') return DEFAULT_ACKNOWLEDGE_WARNINGS;
+  return value.split(',').map((code) => code.trim()).filter((code) => code !== '');
+}
+
+/** The tenant's decision-log.mask-default from the rules module of /meta (RLE-052); off when absent. */
+export function maskDefaultOf(meta: BpmMetaV1): boolean {
+  const value = meta.modules.find((module) => module.module === 'rules')?.settings?.['decision-log.mask-default'];
+  return value === true || value === 'true';
+}
+
 export interface FrameProps {
   host: RegistryHost;
   meta: BpmMetaV1;
@@ -38,8 +54,11 @@ export interface FrameProps {
 
 /** The signed-in cockpit: the menu of the areas this user may use and the current area beside it. */
 export function AppFrame({ host, meta, me, fetchImpl }: FrameProps) {
+  // Kept stable while the setting is unchanged, so the rules session is not rebuilt on every render.
+  const codes = acknowledgeWarningsOf(meta).join(',');
+  const acknowledgeWarnings = useMemo(() => (codes === '' ? [] : codes.split(',')), [codes]);
   return (
-    <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} fetchImpl={fetchImpl}>
+    <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} acknowledgeWarnings={acknowledgeWarnings} maskDefault={maskDefaultOf(meta)} fetchImpl={fetchImpl}>
       <PeopleProvider me={me.user}>
         <Frame meta={meta} me={me} />
       </PeopleProvider>

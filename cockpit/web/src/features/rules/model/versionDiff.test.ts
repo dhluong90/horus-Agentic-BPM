@@ -8,7 +8,7 @@ const none = { added: [], removed: [], changed: [], reordered: false };
 function diffOf(rows: VersionDiff['rows'], extra: Partial<VersionDiff> = {}): VersionDiff {
   return {
     ruleSet: 'card-fee', version: 2, base: 1, canonicalHash: 'a'.repeat(64), baseCanonicalHash: 'b'.repeat(64), sourceHashChanged: true,
-    effectiveFrom: { from: '2026-11-01T03:00:00Z', to: null }, header: [], inputs: none, outputs: none, rows, unchangedCount: 0, ...extra,
+    effectiveFrom: { from: '2026-11-01T03:00:00Z', to: null }, header: [], inputs: none, outputs: none, rows, unchangedCount: 0, masking: [], ...extra,
   };
 }
 

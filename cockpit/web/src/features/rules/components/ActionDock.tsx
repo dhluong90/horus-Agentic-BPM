@@ -1,8 +1,10 @@
 import { useId, useState } from 'react';
-import type { RuleSetVersion } from '../../../api/rules/schemas';
+import { readPendingWarnings, type AcknowledgedWarning, type RuleSetVersion } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { useRulesSession } from '../api/rulesContext';
 import { formatDateTime } from '../model/dates';
+import { toHostError } from '../../../api/hostError';
+import { PersonalDataWarnings } from './PersonalDataWarnings';
 import { ProblemNotice } from './ProblemNotice';
 
 export interface Action<TArgs = void> {
@@ -65,24 +67,56 @@ function TakesEffect({ effectiveFrom }: { effectiveFrom: string | null | undefin
  * engine's answer, shown with its code behind Details. Docked, it sits at the bottom of the screen under the
  * side-by-side diff, so Approve stays in view while the approver reads what changed.
  */
+/** What Approve sends: the comment, and the exact { code, input } pairs the approver accepted (PD-104, RLE-053). */
+export interface ApproveArgs { comment: string; acknowledgedWarnings: AcknowledgedWarning[] }
+
+/** Warning codes that need no acceptance when the tenant masks undeclared inputs by default (RLE-053). */
+const SETTLED_BY_MASK_DEFAULT: ReadonlySet<string> = new Set(['UNMASKED_PERSONAL_DATA']);
+
+/**
+ * The set the engine needs accepted, from a 409 WARNINGS_NOT_ACKNOWLEDGED (its `warnings`, possibly empty);
+ * undefined when the error is not that refusal.
+ */
+function refusedSet(error: unknown): AcknowledgedWarning[] | undefined {
+  if (error === undefined || error === null) return undefined;
+  const hostError = toHostError(error);
+  if (hostError.kind !== 'problem' || hostError.code !== 'WARNINGS_NOT_ACKNOWLEDGED') return undefined;
+  return readPendingWarnings(hostError.members?.['warnings']) ?? [];
+}
+
 export function DecisionCard({ version, approve, reject, onReload, docked = false, review = 'ok', onReviewAgain }: {
-  version: RuleSetVersion; approve: Action<string>; reject: Action<string>; onReload: () => void; docked?: boolean; review?: Review; onReviewAgain?: () => void;
+  version: RuleSetVersion; approve: Action<ApproveArgs>; reject: Action<string>; onReload: () => void; docked?: boolean; review?: Review; onReviewAgain?: () => void;
 }) {
   const { t } = useI18n();
-  const { userId } = useRulesSession();
+  const { userId, acknowledgeWarnings, maskDefault } = useRulesSession();
   const [text, setText] = useState('');
+  // The tick remembers the refusal on screen when it was given: a new refusal clears it, so the approver reads the
+  // warnings again (the version is read again with them) and ticks again.
+  const [tick, setTick] = useState<{ on: boolean; refusal: unknown }>({ on: false, refusal: undefined });
+  const acceptId = useId();
+  // What needs accepting: after a refusal, exactly the set the engine returned; otherwise the warnings whose code the
+  // host lists (lifecycle.acknowledge-warnings), except an undeclared input the tenant's default masks (RLE-053).
+  const refusal = refusedSet(approve.error);
+  const refused = refusal !== undefined;
+  const toAccept: AcknowledgedWarning[] = refusal ?? version.warnings
+    .filter((w) => acknowledgeWarnings.includes(w.code) && !(maskDefault && SETTLED_BY_MASK_DEFAULT.has(w.code)))
+    .map(({ code, input }) => ({ code, input }));
+  const shown = refusal !== undefined && refusal.length > 0 ? refusal : version.warnings;
+  const accepted = tick.on && (!refused || tick.refusal === approve.error);
+  const setAccepted = (on: boolean) => { setTick({ on, refusal: refused ? approve.error : undefined }); };
   const textId = useId();
   const reasonId = useId();
   const hintId = useId();
   const allowed = new Set(version.allowedActions);
   const self = version.requestedBy === userId ? 'dock.selfRequested' : version.createdBy === userId ? 'dock.selfAuthored' : undefined;
   const mayApprove = allowed.has('approve') && self === undefined;
-  const canApprove = mayApprove && review === 'ok';
+  const needsAcceptance = mayApprove && toAccept.length > 0 && !accepted;
+  const canApprove = mayApprove && review === 'ok' && !needsAcceptance;
   // PD-089: a requester never rejects their own request; withdrawing is its own action (:withdraw).
   const canReject = allowed.has('reject') && self === undefined;
   const error: unknown = approve.error ?? reject.error;
   // A disabled Approve says why; while the current diff loads it is only busy for a moment.
-  const unavailable = canApprove || (mayApprove && review === 'checking') ? undefined : self ?? (mayApprove ? 'decision.changed' : 'dock.approveUnavailable');
+  const unavailable = canApprove || needsAcceptance || (mayApprove && review === 'checking') ? undefined : self ?? (mayApprove ? 'decision.changed' : 'dock.approveUnavailable');
   const busy = approve.isPending || reject.isPending;
   return (
     <section className={docked ? 'card decision decision--dock' : 'card decision'} aria-labelledby="decision-title">
@@ -92,6 +126,8 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
       ) : (
         <>
           <div className="decision__body">
+            <PersonalDataWarnings warnings={shown} definition={version.definition}
+              acceptance={mayApprove && toAccept.length > 0 ? { checked: accepted, onChange: setAccepted, needed: refused && !accepted, id: acceptId, inputs: [...new Set(toAccept.map((w) => w.input))] } : undefined} />
             {unavailable !== undefined ? (
               <p className="gate__reason">
                 <span aria-hidden="true">⊘</span> <span id={reasonId}>{t(unavailable, { version: String(version.version) })}</span>
@@ -111,7 +147,8 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
           <div className="decision__actions">
             <div className="gate__buttons">
               <button type="button" className="btn btn--primary btn--ok" disabled={!canApprove || busy} aria-busy={approve.isPending || review === 'checking'}
-                {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : {})} onClick={() => { approve.start(text.trim()); }}>
+                {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : needsAcceptance ? { 'aria-describedby': acceptId } : {})}
+                onClick={() => { approve.start({ comment: text.trim(), acknowledgedWarnings: accepted ? toAccept : [] }); }}>
                 <span aria-hidden="true">✓</span> {approve.isPending ? t('dock.approving') : t('dock.approve')}
               </button>
               {canReject ? (
@@ -126,7 +163,7 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
           </div>
         </>
       )}
-      {error !== undefined && error !== null ? <ProblemNotice error={error} onReload={onReload} /> : null}
+      {error !== undefined && error !== null && !(refused && error === approve.error) ? <ProblemNotice error={error} onReload={onReload} /> : null}
     </section>
   );
 }

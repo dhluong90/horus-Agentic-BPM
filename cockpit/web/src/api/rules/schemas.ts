@@ -123,6 +123,43 @@ export const historyEntry = z
 export type HistoryEntry = z.infer<typeof historyEntry>;
 export const versionHistory = z.object({ data: z.array(historyEntry) }).loose();
 
+/** Warning codes this cockpit shows. A warning with another code, from a newer engine, is dropped. */
+export const WARNING_CODES = ['UNMASKED_PERSONAL_DATA'] as const;
+export type WarningCode = (typeof WARNING_CODES)[number];
+
+const anyWarning = z.object({ code: z.string(), input: z.string(), matchedName: z.string().nullable().optional(), message: z.string() }).loose();
+export interface VersionWarning { code: WarningCode; input: string; matchedName: string | null; message: string }
+
+/** One warning the approver accepts, as the exact pair shown on screen (PD-104, RLE-053). */
+export interface AcknowledgedWarning { code: WarningCode; input: string }
+
+const pendingWarning = z.object({ code: z.string(), input: z.string() }).loose();
+
+/**
+ * The `warnings` of a 409 WARNINGS_NOT_ACKNOWLEDGED: the full set the engine now needs accepted, read entry by
+ * entry; an entry with a code this cockpit cannot show is dropped. Undefined when the member is missing.
+ */
+export function readPendingWarnings(value: unknown): AcknowledgedWarning[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap((item): AcknowledgedWarning[] => {
+    const parsed = pendingWarning.safeParse(item);
+    return parsed.success && (WARNING_CODES as readonly string[]).includes(parsed.data.code) ? [{ code: parsed.data.code as WarningCode, input: parsed.data.input }] : [];
+  });
+}
+
+/**
+ * What the author and the approver should see before publication (RLE-049). Engines before 0.2.0 send no
+ * `warnings`: none. A warning this cockpit cannot read is dropped, never fatal.
+ */
+const versionWarnings = z
+  .array(z.unknown())
+  .default([])
+  .transform((items) => items.flatMap((item): VersionWarning[] => {
+    const parsed = anyWarning.safeParse(item);
+    if (!parsed.success || !(WARNING_CODES as readonly string[]).includes(parsed.data.code)) return [];
+    return [{ code: parsed.data.code as WarningCode, input: parsed.data.input, matchedName: parsed.data.matchedName ?? null, message: parsed.data.message }];
+  }));
+
 export const ruleSetVersion = z
   .object({
     ...lifecycle,
@@ -130,9 +167,38 @@ export const ruleSetVersion = z
     sourceHash: z.string(),
     sourceDocument: z.string().optional(),
     definition: ruleSetDefinition,
+    warnings: versionWarnings,
   })
   .loose();
 export type RuleSetVersion = z.infer<typeof ruleSetVersion>;
+
+/** An input's masking in one version (RLE-051): declared, or decided by the tenant's masking default. */
+export const MASKING_STATUSES = ['MASKED', 'NOT_MASKED', 'MASKED_BY_DEFAULT', 'NOT_MASKED_BY_DEFAULT'] as const;
+export type MaskingStatus = (typeof MASKING_STATUSES)[number];
+
+export const inputMasking = z
+  .object({
+    input: z.string(),
+    from: z.enum(MASKING_STATUSES).nullable(),
+    to: z.enum(MASKING_STATUSES).nullable(),
+    changed: z.boolean(),
+    personalDataName: z.string().nullable().optional(),
+  })
+  .loose();
+export type InputMasking = z.infer<typeof inputMasking>;
+
+/**
+ * The masking column, read entry by entry: an entry this cockpit cannot read (a status from a newer engine, a
+ * missing member) is dropped, and the other inputs keep their marks.
+ */
+const maskingColumn = z
+  .array(z.unknown())
+  .default([])
+  .transform((items) => items.flatMap((item): InputMasking[] => {
+    const parsed = inputMasking.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  }));
+
 
 export const decisionResult = z
   .object({
@@ -196,6 +262,8 @@ export const versionDiff = z
     outputs: columnChanges,
     rows: z.array(rowChange),
     unchangedCount: z.number().int().min(0),
+    /** Each input's masking in both versions (RLE-051); engines before 0.2.0 send none. */
+    masking: maskingColumn,
   })
   .loose();
 export type VersionDiff = z.infer<typeof versionDiff>;

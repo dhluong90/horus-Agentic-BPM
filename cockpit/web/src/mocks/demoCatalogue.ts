@@ -47,3 +47,43 @@ export function demoCatalogue(): StoredVersion[] {
     published(loan, 1, '2026-10-28'),
   ];
 }
+
+/** Customer screening at onboarding: inputs that hold personal data, so the masking guards have something to show. */
+function screening(inputs: Definition['inputs']): Definition {
+  return {
+    schemaVersion: 1,
+    ruleSet: 'customer-screening',
+    description: 'Onboarding screening by segment',
+    hitPolicy: 'first',
+    inputs,
+    outputs: [{ name: 'check', type: 'string' }],
+    rules: [
+      { id: 'S1', when: { segment: "== 'PRIVATE'" }, then: { check: "'ENHANCED'" } },
+      { id: 'S2', when: {}, then: { check: "'STANDARD'" } },
+    ],
+  };
+}
+
+/**
+ * The personal-data demo (RLE-049, RLE-051): customer-screening v1 masks the national ID and the phone number;
+ * v2, sent by another author, drops the national ID's mask and adds an email column without one. An approver
+ * sees two warnings beside Approve and "Masked → Not masked by default" in the diff.
+ */
+export function personalDataDemo(): StoredVersion[] {
+  const v1 = screening([
+    { name: 'nationalId', type: 'string', mask: true, description: 'National ID' },
+    { name: 'phoneNumber', type: 'string', mask: true, description: 'Phone number' },
+    segment,
+  ]);
+  const v2 = screening([
+    { name: 'nationalId', type: 'string', description: 'National ID' },
+    { name: 'phoneNumber', type: 'string', mask: true, description: 'Phone number' },
+    { name: 'email', type: 'string', description: 'Email' },
+    segment,
+  ]);
+  return [
+    ...demoSeed(),
+    published(v1, 1, '2026-10-02'),
+    version(v2, { version: 2, status: 'PENDING_APPROVAL', lockVersion: 1, createdBy: 'hoa', createdAt: '2026-11-19T02:00:00Z', requestedBy: 'hoa', requestedAt: '2026-11-19T02:20:00Z', approvedBy: null, approvedAt: null }),
+  ];
+}
