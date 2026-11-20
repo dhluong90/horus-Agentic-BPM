@@ -328,6 +328,26 @@ class ProcessServicesQaTest {
         }
 
         @Override
+        public List<StoredDefinition> lockDefinitions(String tenant, String key) {
+            return definitions.stream().filter(d -> d.key().equals(key)).toList();
+        }
+
+        @Override
+        public int updateDefinition(StoredDefinition updated) {
+            definitions.replaceAll(d -> d.id().equals(updated.id()) ? updated : d);
+            return 1;
+        }
+
+        @Override
+        public void appendDefinitionHistory(DefinitionHistoryRow row) {
+        }
+
+        @Override
+        public List<DefinitionHistoryRow> definitionHistory(String tenant, String definitionId) {
+            return List.of();
+        }
+
+        @Override
         public boolean insertInstance(InstanceRow row) {
             instances.put(row.id(), row);
             return true;

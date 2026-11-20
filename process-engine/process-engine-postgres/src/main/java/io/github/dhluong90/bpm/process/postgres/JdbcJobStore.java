@@ -97,6 +97,14 @@ public final class JdbcJobStore implements JobStore {
     }
 
     @Override
+    public int cancelDefinitionJobs(String tenant, String definitionId, Instant now) {
+        return jdbc.sql("UPDATE pre_timer SET status = 'CANCELLED', completed_at = ?, locked_until = NULL "
+                        + "WHERE tenant_id = ? AND definition_id = ? AND job_kind = 'DEFINITION_EFFECTIVE' "
+                        + "AND status IN ('DUE','CLAIMED')")
+                .params(ts(now), tenant, definitionId).update();
+    }
+
+    @Override
     public Optional<JobRow> findJob(String tenant, String id) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM pre_timer WHERE tenant_id = ? AND id = ?")
                 .params(tenant, id).query(JdbcJobStore::job).optional();

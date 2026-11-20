@@ -39,6 +39,8 @@ horus:
       security:
         role-permissions:
           ROLE_PROCESS_DEPLOYER: [processes:deploy, processes:read]
+          # Approves process definition versions requested by someone else (four eyes).
+          ROLE_PROCESS_APPROVER: [processes:approve, processes:read]
           ROLE_TELLER: [processes:start, processes:read]
           ROLE_CARD_OFFICER: [processes:read, processes:task:work]
           # Cancelling an application's process is its own permission (PD-103); starting does not grant it.

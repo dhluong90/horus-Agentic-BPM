@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Customer onboarding: a KYC officer reviews the identity documents before the account is opened. Version 2 of the
+     tests adds a name change only; any change in content makes a new version. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_kyc-onboarding"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="kyc-onboarding" name="KYC onboarding" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:userTask id="review-documents" name="Review identity documents" horus:assignee="role:KYC_OFFICER" horus:resultVariable="review"/>
+    <bpmn:endEvent id="end" name="Account opened"/>
+    <bpmn:sequenceFlow id="start__review" sourceRef="start" targetRef="review-documents"/>
+    <bpmn:sequenceFlow id="review__end" sourceRef="review-documents" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -47,6 +47,12 @@ final class TestEngine {
         volatile String caller = "pipeline";
         volatile Set<String> permissions = Set.of("processes:deploy", "processes:start", "processes:read",
                 "processes:task:work");
+        volatile Set<String> roles = Set.of();
+
+        @Override
+        public Set<String> currentRoles() {
+            return roles;
+        }
 
         @Override
         public String currentCallerId() {
@@ -62,6 +68,7 @@ final class TestEngine {
             tenant = tenantId;
             caller = callerId;
             permissions = Set.of(perms);
+            roles = Set.of();
             return this;
         }
     }
@@ -80,7 +87,9 @@ final class TestEngine {
         jobSettings = new JobSettings(jobSettings.replicaId(), jobSettings.timerLease(), b.batchSize,
                 jobSettings.maxAttempts(), b.retryBackoff);
         EngineSettings settings = new EngineSettings(b.autoApprove, EngineDefaults.MAX_NODES, EngineDefaults.MAX_BYTES,
-                EngineDefaults.IDEMPOTENCY_RETENTION, EngineDefaults.SLOW_CALL_WARNING);
+                EngineDefaults.IDEMPOTENCY_RETENTION, EngineDefaults.SLOW_CALL_WARNING, EngineDefaults.MAX_PAGE_SIZE,
+                EngineDefaults.MAX_RANGE, EngineDefaults.MAX_REASON_LENGTH, b.makerChecker, b.approverRule,
+                b.retireLastVersion);
         Identity id = identity;
         ProcessEventPublisher publisher = b.publisher != null ? b.publisher : events::add;
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, new JdbcProcessStore(ds),
@@ -102,6 +111,9 @@ final class TestEngine {
         private int batchSize = 32;
         private Duration retryBackoff = Duration.ofSeconds(10);
         private boolean autoApprove = true;
+        private boolean makerChecker = true;
+        private EngineSettings.ApproverRule approverRule = EngineSettings.ApproverRule.MAKERS;
+        private EngineSettings.RetireLastVersionRule retireLastVersion = EngineSettings.RetireLastVersionRule.CONFIRM;
         private List<ServiceTaskHandler> handlers = List.of();
         private ProcessEventPublisher publisher;
 
@@ -127,6 +139,21 @@ final class TestEngine {
 
         Builder autoApprove(boolean value) {
             autoApprove = value;
+            return this;
+        }
+
+        Builder retireLastVersion(EngineSettings.RetireLastVersionRule value) {
+            retireLastVersion = value;
+            return this;
+        }
+
+        Builder approverRule(EngineSettings.ApproverRule value) {
+            approverRule = value;
+            return this;
+        }
+
+        Builder makerChecker(boolean value) {
+            makerChecker = value;
             return this;
         }
 
@@ -165,8 +192,12 @@ final class TestEngine {
 
     /** Empties every engine table, so a sweep across tenants sees only the current test's jobs. */
     static void reset() {
-        jdbc().sql("TRUNCATE pre_timer, pre_history, pre_task, pre_token, pre_instance, pre_idempotency, pre_definition "
-                + "CASCADE").update();
+        // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary
+        // triggers off for this one statement batch, on one connection.
+        jdbc().sql("SET session_replication_role = replica; "
+                + "TRUNCATE pre_timer, pre_history, pre_task, pre_token, pre_instance, pre_idempotency, "
+                + "pre_definition_history, pre_definition CASCADE; "
+                + "SET session_replication_role = origin").update();
     }
 
     static byte[] resource(String path) {
