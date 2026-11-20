@@ -25,7 +25,7 @@ import org.flywaydb.core.api.migration.Context;
  *       rows only, which serves {@code GET /rule-sets/{name}/history}.</li>
  * </ul>
  *
- * <p>Numbered V24: V21 to V23 are taken by migrations not yet on main, and main's last Rule Engine migration is V20.
+ * <p>Numbered V24: V21 is taken by a migration not yet on main, and main's last Rule Engine migration is V20.
  *
  * <p>Locks and order. The index is built CONCURRENTLY (TR-OPS-02), which cannot run inside a transaction, so this
  * migration runs outside one ({@link #canExecuteInTransaction()} is false) and each statement commits alone, as V20

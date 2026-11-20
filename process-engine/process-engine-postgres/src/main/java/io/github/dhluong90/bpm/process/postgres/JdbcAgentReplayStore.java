@@ -32,7 +32,7 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
     private static final String RUN_COLUMNS = "tenant_id, id, status, definition_key, node_id, period_from, period_to, "
             + "candidate_rule_set, candidate_version, candidate_schema::text AS candidate_schema, idempotency_key, "
             + "request_hash, cursor_at, cursor_id, cases, unchanged, newly_allowed, newly_refused, newly_reviewed, "
-            + "overridden, not_replayed, with_masked_fields, failure_code, created_by, created_at, completed_at, "
+            + "overridden, not_replayed, with_masked_fields, masked_input_required, failure_code, created_by, created_at, completed_at, "
             + "expires_at";
 
     /** The recorded answers of one agent step: the result rows of its jobs, which carry the answer's output. */
@@ -153,10 +153,10 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
             AgentReplayRun.Summary s, Instant completedAt) {
         jdbc.sql("UPDATE pre_agent_replay SET status = ?, cursor_at = ?, cursor_id = ?, cases = ?, unchanged = ?, "
                         + "newly_allowed = ?, newly_refused = ?, newly_reviewed = ?, overridden = ?, not_replayed = ?, "
-                        + "with_masked_fields = ?, completed_at = ? WHERE tenant_id = ? AND id = ?")
+                        + "with_masked_fields = ?, masked_input_required = ?, completed_at = ? WHERE tenant_id = ? AND id = ?")
                 .params(status, ts(cursorAt), cursorId, s.cases(), s.unchanged(), s.newlyAllowed(), s.newlyRefused(),
                         s.newlyRoutedToReview(), s.overriddenByReviewer(), s.notReplayed(), s.withMaskedFields(),
-                        ts(completedAt), tenant, runId)
+                        s.maskedInputRequired(), ts(completedAt), tenant, runId)
                 .update();
     }
 
@@ -196,7 +196,8 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
     private static StoredRun run(ResultSet rs, int n) throws SQLException {
         AgentReplayRun.Summary summary = new AgentReplayRun.Summary(rs.getInt("cases"), rs.getInt("unchanged"),
                 rs.getInt("newly_allowed"), rs.getInt("newly_refused"), rs.getInt("newly_reviewed"),
-                rs.getInt("overridden"), rs.getInt("not_replayed"), rs.getInt("with_masked_fields"));
+                rs.getInt("overridden"), rs.getInt("not_replayed"), rs.getInt("with_masked_fields"),
+                rs.getInt("masked_input_required"));
         String schema = rs.getString("candidate_schema");
         AgentReplayRun view = new AgentReplayRun(rs.getString("id"), rs.getString("status"),
                 rs.getString("definition_key"), rs.getString("node_id"), rs.getDate("period_from").toLocalDate(),

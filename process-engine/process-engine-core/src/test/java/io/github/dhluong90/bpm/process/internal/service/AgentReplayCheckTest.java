@@ -161,7 +161,177 @@ class AgentReplayCheckTest {
         AgentReplayRun.Summary summary = AgentReplays.add(AgentReplayRun.Summary.EMPTY, lines);
 
         // Then an override counts only where the candidate would let the corrected answer through
-        assertThat(summary).isEqualTo(new AgentReplayRun.Summary(6, 1, 2, 1, 1, 1, 1, 3));
+        assertThat(summary).isEqualTo(new AgentReplayRun.Summary(6, 1, 2, 1, 1, 1, 1, 3, 0));
+    }
+
+    /** A port whose candidate rule set declares the three schema fields and reads only the named ones. */
+    private DecisionPort candidateReading(String... reads) {
+        return new DecisionPort() {
+            @Override
+            public DecisionOutcome evaluate(String tenantId, DecisionCaller caller, String decisionRef,
+                    Map<String, Object> inputs, Instant evaluationTime, String idempotencyKey, String correlationId) {
+                throw new AssertionError("a replay never evaluates for real");
+            }
+
+            @Override
+            public DecisionSignature signature(String tenantId, String decisionRef, int version) {
+                return new DecisionSignature.Found(decisionRef, version, "FIRST",
+                        Map.of("documentType", "string", "confidence", "decimal", "summary", "string"),
+                        Map.of("allow", "boolean"), false, java.util.Set.of(reads));
+            }
+
+            @Override
+            public List<DecisionOutcome> simulate(String tenantId, String decisionRef, int version,
+                    List<SimulatedCase> cases) {
+                simulated.addAll(cases);
+                return cases.stream().<DecisionOutcome>map(c -> new DecisionOutcome.Matched(null,
+                        Map.of("allow", true), List.of("R9"))).toList();
+            }
+        };
+    }
+
+    @Test
+    void PRE_092_a_candidate_rule_that_reads_a_masked_field_is_not_replayed_and_never_unchanged() {
+        // Given an allowed answer with the summary masked, and a candidate whose rule R7 reads the summary
+        AgentReplayCheck reads = new AgentReplayCheck(new JsonSchemaSubsetValidator(), candidateReading("confidence",
+                "summary"), "kyc-document-guardrails", 4, null);
+
+        // When it is checked
+        AgentReplayCase line = reads.check("bank-a", accepted("0.95", Map.of("guard", guard("route-to-human"))), false);
+
+        // Then it is not replayed, says why, and nothing was evaluated
+        assertThat(line.change()).isEqualTo("NOT_REPLAYED");
+        assertThat(line.candidateOutcome()).isEqualTo("NOT_REPLAYED");
+        assertThat(line.code()).isEqualTo("MASKED_INPUT_REQUIRED");
+        assertThat(line.maskedFields()).isEqualTo(1);
+        assertThat(line.candidateRuleIds()).isEmpty();
+        assertThat(simulated).isEmpty();
+    }
+
+    @Test
+    void PRE_092_a_declared_input_no_rule_reads_does_not_stop_the_replay() {
+        // Given the summary is declared by the candidate rule set but only the confidence is read
+        AgentReplayCheck declaredOnly = new AgentReplayCheck(new JsonSchemaSubsetValidator(),
+                candidateReading("confidence"), "kyc-document-guardrails", 4, null);
+
+        // When the answer with the masked summary is checked
+        AgentReplayCase line = declaredOnly.check("bank-a", accepted("0.95", Map.of("guard", guard("fail"))), false);
+
+        // Then it is replayed as before
+        assertThat(line.change()).isEqualTo("UNCHANGED");
+        assertThat(line.code()).isNull();
+        assertThat(line.maskedFields()).isEqualTo(1);
+    }
+
+    @Test
+    void PRE_092_a_candidate_schema_that_tests_the_value_of_a_masked_field_is_not_replayed() {
+        // Given a candidate schema that newly requires the summary to be 20 characters, which history cannot show
+        Map<String, Object> strict = new LinkedHashMap<>(SCHEMA);
+        strict.put("properties", Map.of("documentType", Map.of("type", "string"), "confidence",
+                Map.of("type", "number"), "summary", Map.of("type", "string", "mask", true, "minLength", 20)));
+
+        // When an answer with the summary masked is checked, and one against a schema with only the type
+        AgentReplayCase tested = check(strict).check("bank-a", accepted("0.95",
+                Map.of("guard", guard("route-to-human"))), false);
+        AgentReplayCase typeOnly = check(null).check("bank-a", accepted("0.95",
+                Map.of("guard", guard("route-to-human"))), false);
+
+        // Then the first is MASKED_INPUT_REQUIRED, and the second, whose recorded schema is unchanged, is replayed
+        assertThat(tested.change()).isEqualTo("NOT_REPLAYED");
+        assertThat(tested.code()).isEqualTo("MASKED_INPUT_REQUIRED");
+        assertThat(typeOnly.change()).isEqualTo("UNCHANGED");
+    }
+
+    @Test
+    void PRE_092_a_type_change_on_a_masked_field_is_not_replayed() {
+        // Given a candidate schema that changes only the type of the masked summary
+        Map<String, Object> retyped = new LinkedHashMap<>(SCHEMA);
+        retyped.put("properties", Map.of("documentType", Map.of("type", "string"), "confidence",
+                Map.of("type", "number"), "summary", Map.of("type", "integer", "mask", true)));
+
+        // When an allowed answer is checked
+        AgentReplayCase line = check(retyped).check("bank-a", accepted("0.95",
+                Map.of("guard", guard("route-to-human"))), false);
+
+        // Then the check never saw the summary's type, so the line is not replayed
+        assertThat(line.change()).isEqualTo("NOT_REPLAYED");
+        assertThat(line.code()).isEqualTo("MASKED_INPUT_REQUIRED");
+    }
+
+    @Test
+    void PRE_092_a_combinator_or_pattern_rule_that_could_match_a_masked_field_is_not_replayed() {
+        // Given candidate schemas that add allOf, patternProperties and propertyNames rules without touching properties
+        for (Map.Entry<String, Object> rule : Map.<String, Object>of(
+                "allOf", List.of(Map.of("properties", Map.of("summary", Map.of("minLength", 20)))),
+                "patternProperties", Map.of("^sum.*", Map.of("minLength", 20)),
+                "propertyNames", Map.of("maxLength", 12)).entrySet()) {
+            Map<String, Object> candidateSchema = new LinkedHashMap<>(SCHEMA);
+            candidateSchema.put(rule.getKey(), rule.getValue());
+
+            // When an allowed answer with the masked summary is checked
+            AgentReplayCase line = check(candidateSchema).check("bank-a", accepted("0.95",
+                    Map.of("guard", guard("route-to-human"))), false);
+
+            // Then it is not replayed
+            assertThat(line.code()).as(rule.getKey()).isEqualTo("MASKED_INPUT_REQUIRED");
+            assertThat(line.change()).as(rule.getKey()).isEqualTo("NOT_REPLAYED");
+        }
+    }
+
+    @Test
+    void PRE_092_an_answer_the_recorded_schema_refused_is_not_replayed_with_masked_fields() {
+        // Given an answer recorded as refused by the schema (a summary too long), with the summary masked in history
+        RecordedAnswer answer = new RecordedAnswer(NOV_3, "01H0000000000000000000000D", "I-4", "ASYNC_RESULT_REFUSED",
+                "A-4", Map.of("route", "review", "code", "AGENT_SCHEMA_INVALID", "output", Map.of("documentType",
+                        "PASSPORT", "confidence", new BigDecimal("0.95"), "summary", "***")),
+                Map.of("guard", guard("route-to-human")));
+
+        // When it is checked against the same schema, with and without a candidate schema
+        AgentReplayCase same = check(null).check("bank-a", answer, false);
+        AgentReplayCase candidateSchema = check(SCHEMA).check("bank-a", answer, false);
+
+        // Then it is not NEWLY_ALLOWED: the refusing field is unknown, so the line is not replayed
+        assertThat(List.of(same, candidateSchema)).allSatisfy(line -> {
+            assertThat(line.change()).isEqualTo("NOT_REPLAYED");
+            assertThat(line.code()).isEqualTo("MASKED_INPUT_REQUIRED");
+        });
+        assertThat(simulated).isEmpty();
+    }
+
+    @Test
+    void PRE_092_an_answer_with_nothing_masked_is_replayed_whatever_the_candidate_reads() {
+        // Given a candidate that reads the summary and an answer whose summary was kept in plain text
+        Map<String, Object> plain = new LinkedHashMap<>(Map.of("documentType", "PASSPORT", "confidence",
+                new BigDecimal("0.95"), "summary", "Passport of the applicant"));
+        RecordedAnswer answer = new RecordedAnswer(NOV_3, "01H0000000000000000000000C", "I-3", "ASYNC_RESULT_ACCEPTED",
+                "A-3", Map.of("ruleIds", List.of("R9"), "output", plain), Map.of("guard", guard("fail")));
+        AgentReplayCheck reads = new AgentReplayCheck(new JsonSchemaSubsetValidator(), candidateReading("summary"),
+                "kyc-document-guardrails", 4, null);
+
+        // When it is checked
+        AgentReplayCase line = reads.check("bank-a", answer, false);
+
+        // Then it is replayed
+        assertThat(line.change()).isEqualTo("UNCHANGED");
+        assertThat(line.maskedFields()).isZero();
+    }
+
+    @Test
+    void PRE_092_the_summary_counts_masked_input_lines_apart_from_other_lines_not_replayed() {
+        // Given one line not replayed for a missing guard spec and two for a masked input
+        List<AgentReplayCase> lines = List.of(
+                new AgentReplayCase("A", "I", NOV_3, "ALLOWED", "NOT_REPLAYED", "NOT_REPLAYED", List.of(), List.of(),
+                        "GUARD_SPEC_INVALID", false, 0),
+                new AgentReplayCase("B", "I", NOV_3, "ALLOWED", "NOT_REPLAYED", "NOT_REPLAYED", List.of(), List.of(),
+                        "MASKED_INPUT_REQUIRED", false, 1),
+                new AgentReplayCase("C", "I", NOV_3, "REVIEW", "NOT_REPLAYED", "NOT_REPLAYED", List.of(), List.of(),
+                        "MASKED_INPUT_REQUIRED", true, 2));
+
+        // When they are added
+        AgentReplayRun.Summary summary = AgentReplays.add(AgentReplayRun.Summary.EMPTY, lines);
+
+        // Then each reason has its own count, and no line is unchanged
+        assertThat(summary).isEqualTo(new AgentReplayRun.Summary(3, 0, 0, 0, 0, 0, 1, 2, 2));
     }
 
     @Test

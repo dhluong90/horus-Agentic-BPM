@@ -1296,8 +1296,9 @@ components:
             newlyRefused: { type: integer }
             newlyRoutedToReview: { type: integer }
             overriddenByReviewer: { type: integer, description: Newly allowed cases whose answer a reviewer corrected }
-            notReplayed: { type: integer }
+            notReplayed: { type: integer, description: Cases not replayed for another reason, such as GUARD_SPEC_INVALID; masked-input cases are counted apart }
             withMaskedFields: { type: integer, description: Cases with a masked field, left out of the check }
+            maskedInputRequired: { type: integer, description: Cases not replayed because the candidate guardrail or schema needs the value of a masked field (MASKED_INPUT_REQUIRED) }
         failureCode: { type: [string, 'null'] }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
@@ -1315,7 +1316,7 @@ components:
         change: { type: string, enum: [UNCHANGED, NEWLY_ALLOWED, NEWLY_REFUSED, NEWLY_ROUTED_TO_REVIEW, NOT_REPLAYED] }
         recordedRuleIds: { type: array, items: { type: string } }
         candidateRuleIds: { type: array, items: { type: string } }
-        code: { type: [string, 'null'], description: 'The candidate refusal code, or GUARD_SPEC_INVALID when not replayed' }
+        code: { type: [string, 'null'], description: 'The candidate refusal code; when not replayed, GUARD_SPEC_INVALID, or MASKED_INPUT_REQUIRED when the candidate guardrail or schema needs a field history keeps only masked' }
         flags: { type: array, items: { type: string, enum: [OVERRIDDEN_BY_REVIEWER] } }
         maskedFields: { type: integer }
     AgentReplayCasePage:
