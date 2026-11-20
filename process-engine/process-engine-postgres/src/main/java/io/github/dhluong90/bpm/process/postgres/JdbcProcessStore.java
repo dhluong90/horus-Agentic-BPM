@@ -65,7 +65,8 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     private static final String DEFINITION_COLUMNS = "tenant_id, id, key_name, version_num, status, name, "
             + "definition_json::text AS definition_json, definition_hash, source_format, source_document, source_hash, "
-            + "node_count, source, effective_from, created_by, created_at, approved_by, approved_at";
+            + "node_count, source, effective_from, created_by, created_at, approved_by, approved_at, lock_version, "
+            + "requested_by, requested_at, decision_comment, retired_by, retired_at, superseded_by";
 
     @Override
     public Optional<StoredDefinition> latestDefinition(String tenant, String key) {
@@ -137,7 +138,49 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 rs.getString("definition_hash"), rs.getString("source_format"), rs.getString("source_document"),
                 rs.getString("source_hash"), rs.getInt("node_count"), rs.getString("source"),
                 instant(rs, "effective_from"), rs.getString("created_by"), instant(rs, "created_at"),
-                rs.getString("approved_by"), instant(rs, "approved_at"));
+                rs.getString("approved_by"), instant(rs, "approved_at"), rs.getLong("lock_version"),
+                rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("decision_comment"),
+                rs.getString("retired_by"), instant(rs, "retired_at"), (Integer) rs.getObject("superseded_by"));
+    }
+
+    @Override
+    public List<StoredDefinition> lockDefinitions(String tenant, String key) {
+        return jdbc.sql("SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE tenant_id = ? AND key_name = ? "
+                        + "ORDER BY version_num FOR UPDATE")
+                .params(tenant, key).query(JdbcProcessStore::definition).list();
+    }
+
+    @Override
+    public int updateDefinition(StoredDefinition d) {
+        return jdbc.sql("UPDATE pre_definition SET status = ?, effective_from = ?, approved_by = ?, approved_at = ?, "
+                        + "requested_by = ?, requested_at = ?, decision_comment = ?, retired_by = ?, retired_at = ?, "
+                        + "superseded_by = ?, lock_version = ? WHERE tenant_id = ? AND id = ? AND lock_version = ?")
+                .params(d.status(), ts(d.effectiveFrom()), d.approvedBy(), ts(d.approvedAt()), d.requestedBy(),
+                        ts(d.requestedAt()), d.decisionComment(), d.retiredBy(), ts(d.retiredAt()), d.supersededBy(),
+                        d.lockVersion(), d.tenantId(), d.id(), d.lockVersion() - 1)
+                .update();
+    }
+
+    @Override
+    public void appendDefinitionHistory(DefinitionHistoryRow r) {
+        jdbc.sql("INSERT INTO pre_definition_history (tenant_id, id, definition_id, action, from_status, to_status, "
+                        + "actor_id, comment, details, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)")
+                .params(r.tenantId(), r.id(), r.definitionId(), r.action(), r.fromStatus(), r.toStatus(), r.actorId(),
+                        r.comment(), r.detailsJson(), ts(r.occurredAt()))
+                .update();
+    }
+
+    @Override
+    public List<DefinitionHistoryRow> definitionHistory(String tenant, String definitionId) {
+        return jdbc.sql("SELECT tenant_id, id, definition_id, action, from_status, to_status, actor_id, comment, "
+                        + "details::text AS details, occurred_at FROM pre_definition_history "
+                        + "WHERE tenant_id = ? AND definition_id = ? ORDER BY occurred_at, id")
+                .params(tenant, definitionId)
+                .query((rs, row) -> new DefinitionHistoryRow(rs.getString("tenant_id"), rs.getString("id"),
+                        rs.getString("definition_id"), rs.getString("action"), rs.getString("from_status"),
+                        rs.getString("to_status"), rs.getString("actor_id"), rs.getString("comment"),
+                        rs.getString("details"), instant(rs, "occurred_at")))
+                .list();
     }
 
     // ---- instances ----------------------------------------------------------------------------------------

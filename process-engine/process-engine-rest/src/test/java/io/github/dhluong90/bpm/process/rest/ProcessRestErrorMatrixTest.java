@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
 import io.github.dhluong90.bpm.process.api.DefinitionExport;
+import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
@@ -287,7 +289,48 @@ class ProcessRestErrorMatrixTest {
         public DefinitionVersion version(String key, int version) {
             maybeFail();
             return new DefinitionVersion("01JD2X5K9T1Q4N8V2M7B3C6D0F", key, version, "ACTIVE", "Card fee review",
-                    "a".repeat(64), SourceFormat.BPMN_XML, "b".repeat(64), 6, "minh", STARTED, STARTED, "lan", STARTED);
+                    "a".repeat(64), SourceFormat.BPMN_XML, "b".repeat(64), 6, "minh", "lan", STARTED, "IMPORT", 3, STARTED,
+                    "lan", STARTED, STARTED, null, null, null, null);
+        }
+
+        @Override
+        public DefinitionVersion requestApproval(DefinitionRef ref, long expectedLockVersion, Instant effectiveFrom,
+                String idempotencyKey) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment,
+                String idempotencyKey) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason,
+                String idempotencyKey) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, String reason,
+                boolean confirmNoVersionInEffect, String idempotencyKey) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public java.util.Optional<DefinitionVersion> find(DefinitionRef ref) {
+            maybeFail();
+            return java.util.Optional.of(version(ref.key(), ref.version()));
+        }
+
+        @Override
+        public List<DefinitionHistoryEntry> history(DefinitionRef ref) {
+            maybeFail();
+            throw new UnsupportedOperationException();
         }
 
         @Override

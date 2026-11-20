@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
 import io.github.dhluong90.bpm.process.api.DefinitionExport;
+import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
+import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
@@ -36,6 +38,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -180,7 +183,7 @@ class ProcessRestContractTest {
                         DefinitionProblem.of("NO_END_EVENT", "The process has no end event", null)));
             }
             return new DefinitionVersion("01JD0000000000000000000001", "card-fee-review", 1, "DRAFT", "Card fee review",
-                    "a".repeat(64), SourceFormat.BPMN_XML, "b".repeat(64), 4, null, null, null, "user:lan", NOW);
+                    "a".repeat(64), SourceFormat.BPMN_XML, "b".repeat(64), 4, null, "user:lan", NOW, null, 0, null, null, null, null, null, null, null, null);
         }
 
         @Override
@@ -191,6 +194,40 @@ class ProcessRestContractTest {
         @Override
         public DefinitionExport exportDefinition(String key, int version, SourceFormat format) {
             throw new DefinitionNotFoundException("No definition " + key + " version " + version + " in this tenant");
+        }
+
+        @Override
+        public DefinitionVersion requestApproval(DefinitionRef ref, long expectedLockVersion, Instant effectiveFrom,
+                String idempotencyKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment,
+                String idempotencyKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason,
+                String idempotencyKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, String reason,
+                boolean confirmNoVersionInEffect, String idempotencyKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<DefinitionVersion> find(DefinitionRef ref) {
+            return Optional.empty();
+        }
+
+        @Override
+        public List<DefinitionHistoryEntry> history(DefinitionRef ref) {
+            throw new UnsupportedOperationException();
         }
     }
 

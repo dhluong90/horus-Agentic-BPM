@@ -32,7 +32,16 @@ class NormalFormTest {
     }
 
     static Stream<Golden> golden() {
-        String text = new String(DmnRuleSetTest.resource("/rules/normal-form.v1.txt"), StandardCharsets.UTF_8);
+        return golden("/rules/normal-form.v1.txt");
+    }
+
+    /** The clock readings, added in 0.2.0 in a file of their own so the 0.1.0 golden file stays as frozen (#22). */
+    static Stream<Golden> goldenClock() {
+        return golden("/rules/normal-form.v1.clock.txt");
+    }
+
+    static Stream<Golden> golden(String resource) {
+        String text = new String(DmnRuleSetTest.resource(resource), StandardCharsets.UTF_8);
         List<Golden> rows = new ArrayList<>();
         String[] lines = text.split("\n");
         for (int i = 0; i < lines.length; i++) {
@@ -43,6 +52,12 @@ class NormalFormTest {
             rows.add(new Golden(i + 1, f[0].strip(), f[1].strip(), f[2].strip(), f[3].strip()));
         }
         return rows.stream();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("goldenClock")
+    void RLE_022_the_v1_printer_keeps_clock_readings_as_written(Golden row) {
+        RLE_045_the_v1_printer_is_frozen_by_the_golden_file(row);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -227,6 +242,15 @@ class NormalFormTest {
      * for a new production is allowed within schema version 1 (architect ruling on #252, ADR-0026 decision 3).
      */
     static final String GOLDEN_V1_SHA256 = "ba6c05f2dd2ab459709727745e4a0e917dc64c7746c115708ae2bf6d1b6f9deb";
+
+    @Test
+    void RLE_022_the_clock_golden_file_is_pinned() throws Exception {
+        byte[] golden = DmnRuleSetTest.resource("/rules/normal-form.v1.clock.txt");
+        String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(golden));
+        assertThat(sha).isEqualTo(GOLDEN_V1_CLOCK_SHA256);
+    }
+
+    static final String GOLDEN_V1_CLOCK_SHA256 = "022393f7ebf2c722a65e3da335a124591162b72373dd20df5e559b27378beed2";
 
     // ------------------------------------------------------------------ helpers
 

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
+import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.DecisionSearchResult;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
@@ -163,6 +164,52 @@ class MaskedInputsTest {
         assertThat(read.toString()).doesNotContain(NATIONAL_ID);
         assertThat(read.matchedRuleIds()).containsExactly("R1");
         assertThat(read.outcome()).isEqualTo("OK");
+    }
+
+    @Test
+    void RLE_008_pinned_and_chosen_clock_decisions_show_their_marks_in_the_log_read_and_the_masked_search() {
+        // Given minor-review in force from 1 Jan 2027, and three decisions on 15 Jan for the same national id:
+        // one at the host clock, one back-dated to 10 Jan (rules:simulate) and one pinned to version 1 (rules:pin)
+        RuleEngines engines = engines(MaskingPolicy.withKey(MaskingKey.of(KEY_A)));
+        publish(engines, "bank-a", MINOR_REVIEW.replace("hitPolicy: first",
+                "effectiveFrom: \"2027-01-01T00:00:00Z\"\nhitPolicy: first"), "minor-review");
+        DecisionInput minor = DecisionInput.of(Map.of("nationalId", NATIONAL_ID, "age", 16));
+        Instant tenthOfJanuary = Instant.parse("2027-01-10T09:00:00Z");
+        String normal = evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16))
+                .decisionId();
+        caller.become("bank-a", "pricing", Set.of("rules:evaluate", "rules:simulate"));
+        String backDated = engines.ruleEngine().evaluate(DecisionRequest.of("minor-review", minor)
+                .withClock(tenthOfJanuary)).decisionId();
+        caller.become("bank-a", "pricing", Set.of("rules:pin"));
+        String pinned = engines.ruleEngine().evaluate(DecisionRequest.of("minor-review", minor).withVersion(1))
+                .decisionId();
+
+        // When the auditor reads each decision back, and finds them by the plain national id
+        caller.become("bank-a", "auditor", AUDIT);
+        LoggedDecision readNormal = engines.decisionLog().get(normal);
+        LoggedDecision readBackDated = engines.decisionLog().get(backDated);
+        LoggedDecision readPinned = engines.decisionLog().get(pinned);
+        Map<String, LoggedDecision> found = new java.util.HashMap<>();
+        engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)).items()
+                .forEach(d -> found.put(d.decisionId(), d));
+
+        // Then the back-dated one shows its clock, the pinned one its pin, and the normal one neither
+        assertThat(readNormal.clockChosen()).isFalse();
+        assertThat(readNormal.pinned()).isFalse();
+        assertThat(readNormal.evalClock()).isEqualTo(NOW).isEqualTo(readNormal.evaluatedAt());
+        assertThat(readBackDated.clockChosen()).isTrue();
+        assertThat(readBackDated.pinned()).isFalse();
+        assertThat(readBackDated.evalClock()).isEqualTo(tenthOfJanuary);
+        assertThat(readBackDated.evaluatedAt()).isEqualTo(NOW);
+        assertThat(readPinned.pinned()).isTrue();
+        assertThat(readPinned.clockChosen()).isFalse();
+        assertThat(found).containsOnlyKeys(normal, backDated, pinned);
+        for (LoggedDecision read : List.of(readNormal, readBackDated, readPinned)) {
+            LoggedDecision searched = found.get(read.decisionId());
+            assertThat(searched.evalClock()).isEqualTo(read.evalClock());
+            assertThat(searched.clockChosen()).isEqualTo(read.clockChosen());
+            assertThat(searched.pinned()).isEqualTo(read.pinned());
+        }
     }
 
     @Test

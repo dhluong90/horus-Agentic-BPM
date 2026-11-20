@@ -120,8 +120,8 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     public Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at) {
         return versions.stream()
                 .filter(v -> v.tenantId().equals(tenantId) && v.ruleSet().equals(ruleSet)
-                        && v.status() == VersionStatus.PUBLISHED && !v.effectiveFrom().isAfter(at))
-                .max(Comparator.comparing(StoredVersion::effectiveFrom).thenComparing(StoredVersion::version));
+                        && v.approvedAt() != null && !v.effectiveFrom().isAfter(at))
+                .max(Comparator.comparing(StoredVersion::version));
     }
 
     @Override

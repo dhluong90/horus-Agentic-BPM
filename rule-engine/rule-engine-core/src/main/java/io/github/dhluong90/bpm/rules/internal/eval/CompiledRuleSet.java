@@ -57,12 +57,14 @@ public final class CompiledRuleSet {
     /** Shared and immutable; each evaluation runs on a copy scoped to its own regex read budget. */
     private final Evaluator shared;
     private final int maxOutputBytes;
+    private final java.time.ZoneId timeZone;
     private final Set<String> inputsInOutputs;
 
     private CompiledRuleSet(Definitions model, List<CompiledRule> rules, int maxOutputBytes, int maxStringLength,
             RegexLimits regexLimits) {
         DecisionTable table = model.decision().table();
         this.name = model.name();
+        this.timeZone = model.timeZone();
         this.hitPolicy = table.hitPolicy();
         this.inputs = table.inputs();
         this.outputs = table.outputs();
@@ -117,6 +119,9 @@ public final class CompiledRuleSet {
         for (int i = 0; i < table.inputs().size(); i++) {
             slots.put(table.inputs().get(i).name(), i);
         }
+        // The frame is the inputs, then today() and now() (DESIGN 3.2): bound once here, read without a lookup.
+        slots.put(Expr.ClockFunction.TODAY.slotName(), table.inputs().size());
+        slots.put(Expr.ClockFunction.NOW.slotName(), table.inputs().size() + 1);
         Problems problems = new Problems(MAX_VIOLATIONS);
         Map<String, Expr> defaults = new LinkedHashMap<>();
         for (OutputClause output : table.outputs()) {
@@ -179,26 +184,73 @@ public final class CompiledRuleSet {
     }
 
     /**
-     * Evaluates the table. Input type errors throw; evaluation errors are returned as {@code Failed}.
+     * Returns the output clauses, in declaration order.
+     *
+     * @return the outputs
+     */
+    public List<OutputClause> outputs() {
+        return outputs;
+    }
+
+    /**
+     * Returns the zone of {@code today()}, the rule set's {@code timeZone} (UTC when the document names none).
+     *
+     * @return the zone
+     */
+    public java.time.ZoneId timeZone() {
+        return timeZone;
+    }
+
+    /**
+     * Evaluates the table without a clock: a rule that reads {@code today()} or {@code now()} fails with
+     * {@code EVALUATION_ERROR}. The engine always passes the decision's clock (see {@link #evaluate(DecisionInput,
+     * Instant)}); this form is for tables that do not read the clock.
      *
      * @param input the inputs
      * @return the outcome
      * @throws InputInvalidException when an input does not match its declared type
      */
     public DecisionResult.Outcome evaluate(DecisionInput input) {
-        return evaluateWithReason(input).outcome();
+        return evaluate(input, null);
     }
 
     /**
-     * Evaluates the table and tells why a failed evaluation failed, for the decision row's {@code error_code}.
+     * Evaluates the table at a clock. Input type errors throw; evaluation errors are returned as {@code Failed}.
+     * {@code today()} is the clock's date in {@link #timeZone()} and {@code now()} the clock itself, so the same
+     * version, inputs and clock always give the same outcome (TR-DET-01).
      *
      * @param input the inputs
+     * @param clock the instant the decision reasons about, or null for none
+     * @return the outcome
+     * @throws InputInvalidException when an input does not match its declared type
+     */
+    public DecisionResult.Outcome evaluate(DecisionInput input, Instant clock) {
+        return evaluateWithReason(input, clock).outcome();
+    }
+
+    /**
+     * Evaluates the table without a clock and tells why a failed evaluation failed.
+     *
+     * @param input the inputs
+     * @return the outcome, and the reason of an {@code EVALUATION_ERROR} that has one, else null
+     * @throws InputInvalidException when an input does not match its declared type
+     */
+    public Evaluation evaluateWithReason(DecisionInput input) {
+        return evaluateWithReason(input, null);
+    }
+
+    /**
+     * Evaluates the table at a clock and tells why a failed evaluation failed, for the decision row's
+     * {@code error_code}.
+     *
+     * @param input the inputs
+     * @param clock the instant the decision reasons about, or null for none
      * @return the outcome, and the reason of an {@code EVALUATION_ERROR} that has one (for example
      *     {@code REGEX_TIMEOUT}), else null
      * @throws InputInvalidException when an input does not match its declared type
      */
-    public Evaluation evaluateWithReason(DecisionInput input) {
-        Object[] slots = bind(input);
+    public Evaluation evaluateWithReason(DecisionInput input, Instant clock) {
+        Object[] slots = bind(input, clock);
         // One read budget for every matches() of this decision (evaluation.regex-max-reads-per-decision, RLE-007).
         Evaluator decision = shared.forDecision();
         try {
@@ -374,16 +426,21 @@ public final class CompiledRuleSet {
     }
 
     /**
-     * Binds inputs to slots, converting them to evaluation types.
+     * Binds inputs to slots, converting them to evaluation types, then {@code today()} and {@code now()}.
      *
      * @param input the inputs
-     * @return the slot array
+     * @param clock the evaluation clock, or null for none
+     * @return the slot array: the inputs in declaration order, then today and now
      */
-    Object[] bind(DecisionInput input) {
-        Object[] slots = new Object[inputs.size()];
+    Object[] bind(DecisionInput input, Instant clock) {
+        Object[] slots = new Object[inputs.size() + 2];
         for (int i = 0; i < inputs.size(); i++) {
             InputClause clause = inputs.get(i);
             slots[i] = normalize(input.get(clause.name()), clause.type(), clause.name());
+        }
+        if (clock != null) {
+            slots[inputs.size()] = LocalDate.ofInstant(clock, timeZone);
+            slots[inputs.size() + 1] = clock;
         }
         return slots;
     }
@@ -590,6 +647,7 @@ public final class CompiledRuleSet {
             }
             case Expr.IsNull isNull -> collectInputs(isNull.target(), names);
             case Expr.Matches matches -> collectInputs(matches.target(), names);
+            case Expr.Clock ignored -> { }   // the clock is not an input
         }
     }
 

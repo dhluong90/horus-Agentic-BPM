@@ -76,6 +76,48 @@ public sealed interface Expr {
     }
 
     /**
+     * {@code today()} or {@code now()}: the evaluation clock, never the system time (TR-DET-01). The compiler binds
+     * both to slots after the inputs, filled for each evaluation from the decision's clock in the rule set's
+     * {@code timeZone}; a parse without a clock (printing, translation) leaves the slot at -1.
+     *
+     * @param function which reading of the clock
+     * @param slot the frame slot holding the value, or -1 when the tree is not bound to a clock
+     */
+    record Clock(ClockFunction function, int slot) implements Expr {
+    }
+
+    /** The clock functions: {@code today()} is a {@code date}, {@code now()} a {@code datetime}. */
+    enum ClockFunction {
+        TODAY("today"),
+        NOW("now");
+
+        private final String text;
+
+        ClockFunction(String text) {
+            this.text = text;
+        }
+
+        /**
+         * Returns the function name as written, without parentheses.
+         *
+         * @return {@code today} or {@code now}
+         */
+        public String text() {
+            return text;
+        }
+
+        /**
+         * Returns the name a slot resolver answers with the frame slot of this function, for example
+         * {@code today()}. No input can have it: input names hold no parentheses.
+         *
+         * @return the slot name
+         */
+        public String slotName() {
+            return text + "()";
+        }
+    }
+
+    /**
      * {@code matches(text, 'pattern')}: an unanchored search of a regular expression, bounded in input length and
      * time (TR-SEC-02). The pattern is a string literal, checked and compiled once at import.
      *

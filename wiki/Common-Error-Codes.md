@@ -46,6 +46,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [IDEMPOTENCY_KEY_REUSE_MISMATCH](#idempotency_key_reuse_mismatch) | both | M1 |
 | 422 | [UNIQUE_HIT_VIOLATION](#unique_hit_violation) | rules | M1 |
 | 422 | [EVALUATION_ERROR](#evaluation_error) | rules | M1 |
+| 422 | [REPLAY_NOT_POSSIBLE](#replay_not_possible) | rules | M1 (0.2.0) |
 | 422 | [BATCH_TOO_LARGE](#batch_too_large) | rules | M1 |
 | 422 | [DEFINITION_TOO_LARGE](#definition_too_large) | processes | M2 |
 | 422 | [GUARDRAIL_CONTRACT_INVALID](#guardrail_contract_invalid) | processes | M2 |
@@ -136,7 +137,7 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 ## Rule Engine
 
 ### CLOCK_NOT_ALLOWED
-`403`. `clock` is set on `:evaluate` without `rules:simulate`. Drop `clock`, or use an identity with `rules:simulate`.
+`403`. `clock` is set on `:evaluate` or `/versions/{v}:evaluate` without `rules:simulate`. A chosen instant reaches versions and dates the caller would not get at the host clock. Drop `clock`, or use an identity with `rules:simulate`. Nothing is logged.
 
 ### RULE_SET_NOT_FOUND
 `404`. No rule set of that name in the caller's tenant. Another tenant's rule set also answers `404`, so names do not leak.
@@ -145,13 +146,16 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 `404`. The rule set has no version with that number.
 
 ### DECISION_NOT_FOUND
-`404`. Unknown decision id, or a decision of another tenant.
+`404`. Unknown decision id, or a decision of another tenant, on `GET /decisions/{id}` or `POST /decisions/{id}:replay`. Ids of other tenants answer the same, so they do not leak.
 
 ### RULE_SET_EXISTS
 `409`. `POST /rule-sets` with a name already used in this tenant. Add a version to the existing rule set instead.
 
 ### UNIQUE_HIT_VIOLATION
 `422`. A `unique` table matched several rows for these inputs (`TR-DET-04`). Zero matches is not this error: it is no match, as with `first`. This is an authoring defect in the published rule set, so retrying never helps (ADR-0010). The decision is still logged with this outcome. Remove the overlap, or switch to `first` if order is intended. The problem body carries `decisionId` and `matchedRuleIds`, for example `"matchedRuleIds": ["R1", "R2"]`; it never carries partial outputs.
+
+### REPLAY_NOT_POSSIBLE
+`422`. `POST /decisions/{id}:replay` for a decision that used a masked input (`mask: true`) with a value. The decision log keeps such a value only as `masked`, so the decision cannot be evaluated again. `detail` names the inputs, never their values. Explain the decision from its log entry instead. Nothing is written.
 
 ### EVALUATION_ERROR
 `422`. Evaluation failed: `detail` names `CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT` or `FUNCTION_ERROR`. The decision is logged with this outcome. When the rule set masks an input and the tenant has no masking key, the decision is refused without being evaluated: the row has `error_code = MASKING_KEY_MISSING` and no inputs, and `detail` names `horus.bpm.rules.masking.hmac-key`. When an output reads an input that the tenant's masking default masks, the decision is refused the same way with `error_code = MASKED_INPUT_IN_OUTPUT`; an output that reads an input declared `mask: true` is refused at import instead.

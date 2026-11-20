@@ -21,8 +21,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param security mapping of the host's roles to engine permissions
  * @param handlers local step settings
  * @param jobs timer and job settings
+ * @param makerChecker four eyes on definition approval
  * @param query read limits of the list endpoints
- * @param lifecycle instance lifecycle settings
+ * @param lifecycle definition and instance lifecycle settings
  * @param stats live count settings
  */
 @ConfigurationProperties("horus.bpm.processes")
@@ -34,6 +35,7 @@ public record ProcessEngineProperties(
         @DefaultValue Security security,
         @DefaultValue Handlers handlers,
         @DefaultValue Jobs jobs,
+        @DefaultValue MakerChecker makerChecker,
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle,
         @DefaultValue Stats stats) {
@@ -81,6 +83,32 @@ public record ProcessEngineProperties(
         public Handlers {
             if (slowCallWarning.isNegative() || slowCallWarning.isZero()) {
                 throw new IllegalArgumentException("horus.bpm.processes.handlers.slow-call-warning must be positive");
+            }
+        }
+    }
+
+    /**
+     * @param enabled the requester of a definition version can never approve it; {@code false} is accepted on the
+     *     {@code dev} profile only (TR-SEC-11, PRE-022), and a self-approval is then recorded as
+     *     {@code system:dev-auto-approve}
+     */
+    public record MakerChecker(@DefaultValue("true") boolean enabled) {
+    }
+
+    /**
+     * Definition lifecycle settings. Whom the approver must differ from is not here: it is the shared host setting
+     * {@code horus.bpm.lifecycle.approver-must-differ-from} (PD-096), read for both engines by
+     * {@code ApproverMustDifferFrom} in the host module.
+     *
+     * @param reasonMaxLength longest reason or approval comment, which land in the immutable history, and longest
+     *     cancellation reason; 2,000 by default, may be lowered, never raised (PD-103)
+     */
+    public record Lifecycle(@DefaultValue("2000") int reasonMaxLength) {
+
+        public Lifecycle {
+            if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.MAX_REASON_LENGTH) {
+                throw new IllegalArgumentException("horus.bpm.processes.lifecycle.reason-max-length must be 1 to "
+                        + EngineDefaults.MAX_REASON_LENGTH + " (it may be lowered, never raised, PD-103)");
             }
         }
     }
@@ -154,18 +182,6 @@ public record ProcessEngineProperties(
     }
 
     /**
-     * @param reasonMaxLength longest reason a cancellation accepts (PD-103); may be lowered, never raised
-     */
-    public record Lifecycle(@DefaultValue("2000") int reasonMaxLength) {
-        public Lifecycle {
-            if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.MAX_REASON_LENGTH) {
-                throw new IllegalArgumentException("horus.bpm.processes.lifecycle.reason-max-length must be 1 to "
-                        + EngineDefaults.MAX_REASON_LENGTH + " (it may be lowered, never raised)");
-            }
-        }
-    }
-
-    /**
      * @param liveCacheTtl how long a replica answers live counts per node from its cache
      * @param liveCacheTtlLarge the cache time when the last count exceeded {@code live-cache-large-threshold}
      * @param liveCacheLargeThreshold live tokens of one definition version above which {@code live-cache-ttl-large}
@@ -197,9 +213,10 @@ public record ProcessEngineProperties(
     public record Security(@DefaultValue Map<String, List<String>> rolePermissions) {
     }
 
-    EngineSettings toSettings() {
+    EngineSettings toSettings(EngineSettings.ApproverRule approverRule,
+            EngineSettings.RetireLastVersionRule retireLastVersion) {
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
                 idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange(),
-                lifecycle.reasonMaxLength());
+                lifecycle.reasonMaxLength(), makerChecker.enabled(), approverRule, retireLastVersion);
     }
 }

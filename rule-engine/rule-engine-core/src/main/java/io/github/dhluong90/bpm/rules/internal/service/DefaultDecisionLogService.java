@@ -216,6 +216,6 @@ public final class DefaultDecisionLogService implements DecisionLogService {
         ids.forEach(id -> matched.add(id.stringValue()));
         return new LoggedDecision(row.id(), row.ruleSet(), row.version(), row.hitPolicy(), row.outcome(),
                 row.errorCode(), row.maskedInputsJson(), row.outputsJson(), matched, row.callerId(),
-                row.correlationId(), row.createdAt(), row.durationMicros());
+                row.correlationId(), row.evalClock(), row.createdAt(), row.durationMicros(), row.pinned());
     }
 }

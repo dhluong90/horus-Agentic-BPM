@@ -31,7 +31,7 @@ class RuleEngineModuleDescriptorTest {
             assertThat(rules.features()).isEmpty();
             assertThat(rules.permissions()).containsExactly(
                     "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read",
-                    "rules:masked:search");
+                    "rules:masked:search", "rules:pin");
             assertThat(rules.rolePermissions()).isEmpty();
         });
     }

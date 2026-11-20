@@ -36,6 +36,7 @@ final class ConditionTypes {
         return switch (expr) {
             case Expr.Literal literal -> literal.value() instanceof Boolean ? null : NOT_BOOLEAN;
             case Expr.Var var -> kindOf(var, inputs) == Kind.BOOLEAN ? null : NOT_BOOLEAN;
+            case Expr.Clock ignored -> NOT_BOOLEAN;
             case Expr.Unary unary -> unary.op() == Expr.UnaryOp.NOT ? conditionProblem(unary.operand(), inputs) : NOT_BOOLEAN;
             case Expr.Binary binary -> switch (binary.op()) {
                 case AND, OR -> firstOf(conditionProblem(binary.left(), inputs), conditionProblem(binary.right(), inputs));
@@ -112,6 +113,7 @@ final class ConditionTypes {
                 case java.time.Instant ignored -> Kind.DATETIME;
                 default -> Kind.UNKNOWN;
             };
+            case Expr.Clock clock -> clock.function() == Expr.ClockFunction.TODAY ? Kind.DATE : Kind.DATETIME;
             case Expr.Var var -> {
                 ValueType type = inputs.get(var.slot()).type();
                 yield type.list() ? Kind.LIST : kindOf(type);
