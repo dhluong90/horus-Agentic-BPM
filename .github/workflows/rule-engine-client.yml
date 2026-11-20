@@ -1,0 +1,95 @@
+name: Rule Engine client
+
+# TR-API-06: rule-engine/api/openapi.yaml must produce a working client. Generates a Java client with
+# OpenAPI Generator and compiles it; the job fails when generation (including the generator's own
+# validation of the document) or compilation fails. The client is not published.
+# A separate workflow from ci.yml, so it runs only when the API description changes.
+on:
+  pull_request:
+    paths:
+      - rule-engine/api/openapi.yaml
+      - .github/workflows/rule-engine-client.yml
+  push:
+    branches: [main]
+    paths:
+      - rule-engine/api/openapi.yaml
+      - .github/workflows/rule-engine-client.yml
+  workflow_dispatch:
+
+# Actions are pinned by commit SHA; the comment names the release. Update both together.
+permissions:
+  contents: read
+
+concurrency:
+  group: rule-engine-client-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: Generate and compile the Java client of the Rule Engine API
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # OpenAPI Generator, resolved from Maven Central through Maven, so .mvn/maven.config's
+      # --strict-checksums applies to the download. Update deliberately; a new release can change output.
+      GENERATOR_VERSION: "7.27.0"
+      CLIENT_DIR: ${{ github.workspace }}/target/rule-engine-client
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-client-${{ env.GENERATOR_VERSION }}-${{ hashFiles('rule-engine/api/openapi.yaml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-client-${{ env.GENERATOR_VERSION }}-
+            maven-${{ runner.os }}-client-
+
+      - name: Fetch OpenAPI Generator ${{ env.GENERATOR_VERSION }}
+        run: |
+          tools/mvn-retry.sh -B -ntp -N org.apache.maven.plugins:maven-dependency-plugin:3.11.0:copy \
+            -Dartifact="org.openapitools:openapi-generator-cli:${GENERATOR_VERSION}" \
+            -DoutputDirectory="$RUNNER_TEMP" -Dmdep.stripVersion=true
+
+      - name: Generate the Java client from rule-engine/api/openapi.yaml
+        run: |
+          set -o pipefail
+          if ! java -jar "$RUNNER_TEMP/openapi-generator-cli.jar" generate \
+              -i rule-engine/api/openapi.yaml -g java --library native -o "$CLIENT_DIR" \
+              --additional-properties=groupId=io.github.dhluong90.bpm,artifactId=rule-engine-client,hideGenerationTimestamp=true \
+              --additional-properties=invokerPackage=io.github.dhluong90.bpm.rules.client \
+              --additional-properties=apiPackage=io.github.dhluong90.bpm.rules.client.api \
+              --additional-properties=modelPackage=io.github.dhluong90.bpm.rules.client.model \
+              2>&1 | tee "$RUNNER_TEMP/generate.log"; then
+            message="$(grep -E 'Exception|attribute|unexpected|is missing|error' "$RUNNER_TEMP/generate.log" | head -n 5 | tr '\n' ' ')"
+            echo "::error file=rule-engine/api/openapi.yaml,title=Client generation failed::${message:-see the step log}"
+            exit 1
+          fi
+
+      - name: Compile the generated client
+        run: |
+          set -o pipefail
+          if ! tools/mvn-retry.sh -B -ntp -f "$CLIENT_DIR/pom.xml" -Dmaven.javadoc.skip=true compile 2>&1 \
+              | tee "$RUNNER_TEMP/compile.log"; then
+            message="$(grep -E '^\[ERROR\]' "$RUNNER_TEMP/compile.log" | head -n 5 | tr '\n' ' ')"
+            echo "::error file=rule-engine/api/openapi.yaml,title=Generated client does not compile::${message:-see the step log}"
+            exit 1
+          fi
+
+      - name: Upload the generation and compile logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rule-engine-client-logs
+          path: |
+            ${{ runner.temp }}/generate.log
+            ${{ runner.temp }}/compile.log
+          if-no-files-found: ignore
+          retention-days: 14
