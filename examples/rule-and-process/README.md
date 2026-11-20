@@ -70,7 +70,7 @@ docker run -d --name horus-pe-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
 
 mvn -B -pl examples/rule-and-process -am package -DskipTests      # from the repository root
 SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=demo-pass HORUS_DB_PASSWORD=change-me \
-  java -jar examples/rule-and-process/target/example-rule-and-process-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-and-process/target/example-rule-and-process-0.1.0.jar
 ```
 
 | Variable | Default | Meaning |

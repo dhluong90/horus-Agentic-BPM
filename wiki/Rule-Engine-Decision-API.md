@@ -2,7 +2,7 @@
 
 Reference for the two Rule Engine surfaces: the in-process Java API and the optional REST API under `/api/bpm/rules/v1` that the cockpit and remote callers use. _Design preview: the contract is reviewed here before the code exists._
 
-## Available in 0.1.0-SNAPSHOT
+## Available in 0.1.0
 
 These operations are built and tested; their contract file is [`rule-engine/api/openapi.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/rule-engine/api/openapi.yaml). Everything else on this page is still a design preview.
 
