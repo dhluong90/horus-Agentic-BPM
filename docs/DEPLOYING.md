@@ -173,7 +173,7 @@ H=127.0.0.1:8080/api/bpm/rules/v1
 3. Hoa tries to approve her own request and is refused (maker-checker):
 
    ```bash
-   curl -s -K "$C/hoa" -X POST $H/rule-sets/card-fee/versions/1:approve
+   curl -s -K "$C/hoa" -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
    ```
 
    ```
@@ -183,7 +183,7 @@ H=127.0.0.1:8080/api/bpm/rules/v1
 4. Minh approves. The version is published:
 
    ```bash
-   curl -s -K "$C/minh" -X POST $H/rule-sets/card-fee/versions/1:approve \
+   curl -s -K "$C/minh" -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"' \
      -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
    ```
 

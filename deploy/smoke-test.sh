@@ -99,12 +99,13 @@ else
     [[ "$status" == 200 ]] || fail "request publication as hoa: expected 200, got $status: $(cat "$WORK/body")"
     pass "request publication as hoa: 200 $(grep -o '"status":"[A-Z_]*"' "$WORK/body" | head -n 1)"
 
-    status="$(call POST "$RULES/rule-sets/card-fee/versions/1:approve" -K "$WORK/hoa.curlrc")"
+    # An approval names the lock version it was decided on; v1 was just requested, so it is at lock version 1.
+    status="$(call POST "$RULES/rule-sets/card-fee/versions/1:approve" -K "$WORK/hoa.curlrc" -H 'If-Match: "1"')"
     [[ "$status" == 403 && "$(cat "$WORK/body")" == *SELF_APPROVAL_FORBIDDEN* ]] \
       || fail "self-approval as hoa: expected 403 SELF_APPROVAL_FORBIDDEN, got $status: $(cat "$WORK/body")"
     pass "self-approval as hoa refused: 403 $(grep -o '"code":"[A-Z_]*"' "$WORK/body" | head -n 1)"
 
-    status="$(call POST "$RULES/rule-sets/card-fee/versions/1:approve" -K "$WORK/minh.curlrc" \
+    status="$(call POST "$RULES/rule-sets/card-fee/versions/1:approve" -K "$WORK/minh.curlrc" -H 'If-Match: "1"' \
       -H 'Content-Type: application/json' -d '{"comment":"Smoke test"}')"
     [[ "$status" == 200 ]] || fail "approve as minh: expected 200, got $status: $(cat "$WORK/body")"
     pass "approve as minh: 200 $(grep -o '"status":"[A-Z_]*"' "$WORK/body" | head -n 1)"

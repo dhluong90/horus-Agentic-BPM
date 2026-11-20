@@ -27,7 +27,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 403 | [TENANT_NOT_ALLOWED](#tenant_not_allowed) | both | M1 on `/api/bpm/meta` and `/api/bpm/me` (switching off); M2 everywhere |
 | 403 | [SELF_APPROVAL_FORBIDDEN](#self_approval_forbidden) | both | M1 |
 | 403 | [CLOCK_NOT_ALLOWED](#clock_not_allowed) | rules | M1 |
-| 403 | [DRAFT_AUTHORING_DISABLED](#draft_authoring_disabled) | processes | M2 |
+| 403 | [DRAFT_AUTHORING_DISABLED](#draft_authoring_disabled) | both | rules from 0.2.0 (`PUT` of a draft); processes M2 |
 | 404 | [NO_EFFECTIVE_VERSION](#no_effective_version) | both | M1 |
 | 404 | [RULE_SET_NOT_FOUND](#rule_set_not_found) | rules | M1 |
 | 404 | [VERSION_NOT_FOUND](#version_not_found) | rules | M1 |
@@ -53,6 +53,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [LAYOUT_INVALID](#layout_invalid) | processes | M3 |
 | 422 | [BPMN_UNSUPPORTED_ELEMENT](#bpmn_unsupported_element) | processes | M3 |
 | 422 | [BPMN_UNSAFE_XML](#bpmn_unsafe_xml) | processes | M3 |
+| 428 | [PRECONDITION_REQUIRED](#precondition_required) | rules | M1 |
 | 429 | [RATE_LIMITED](#rate_limited) | both | M1 |
 | 500 | [INTERNAL_ERROR](#internal_error) | both | M1 |
 | 503 | [SCHEMA_NOT_READY](#schema_not_ready) | rules | M1 |
@@ -81,7 +82,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `422`. The `Idempotency-Key` was used before with a different request body. Use a new key for a new request.
 
 ### VERSION_CONFLICT
-`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again.
+`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again. A client that receives `409 VERSION_CONFLICT` on `:approve` or `:reject` must show the approver the current version (its content and diff) again and let them decide; it must never retry automatically with the new `ETag`, because that would approve content nobody reviewed.
 
 ### INVALID_STATE
 `409`. The action does not fit the current state, for example `:approve` on a `DRAFT`. Follow the lifecycle order.
@@ -96,6 +97,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 ### SELF_APPROVAL_FORBIDDEN
 `403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve.
+
+### PRECONDITION_REQUIRED
+`428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft, `:approve` or `:reject`. An approval must name the lock version of the content the approver reviewed. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
 
 ### NO_EFFECTIVE_VERSION
 `404`. No approved version is effective at the clock: nothing is published or active yet, the effective date is in the future, the last version was retired, or the request names a tenant with no version. Publish or approve a version, or check the tenant.
@@ -121,7 +125,7 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 `409`. Processes only. An older pending version cannot be approved because a version with a higher number is already `ACTIVE` (ADR-0012). Create a new draft from the effective version and request approval again.
 
 ### DRAFT_AUTHORING_DISABLED
-`403`. Processes only. The host sets `horus.bpm.processes.authoring.cockpit-drafts: false`, so creating or editing drafts through the `processes:author` endpoints is refused. Imports with `processes:deploy`, approvals and layout saves still work. Change the definition in Git and let the release pipeline import it.
+`403`. The host keeps definition changes in its release pipeline. Rules: `horus.bpm.rules.authoring.cockpit-drafts` is `false` (the 0.1.0 default, PD-094), so `PUT /rule-sets/{name}/versions/{v}` is refused; importing a document as a new version, approvals and simulation still work. Processes: `horus.bpm.processes.authoring.cockpit-drafts: false` refuses creating or editing drafts through the `processes:author` endpoints; imports with `processes:deploy`, approvals and layout saves still work. Change the definition in Git and let the release pipeline import it.
 
 ## Rule Engine
 

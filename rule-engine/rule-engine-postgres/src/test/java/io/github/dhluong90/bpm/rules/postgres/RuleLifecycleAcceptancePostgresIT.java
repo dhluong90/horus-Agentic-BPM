@@ -216,7 +216,7 @@ class RuleLifecycleAcceptancePostgresIT {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.as(tenant, tenant + "-checker");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
     }
 
     private long count(String table) {

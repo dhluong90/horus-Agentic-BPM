@@ -181,9 +181,9 @@ curl -s -u lan:$P -H 'Content-Type: application/yaml' --data-binary @/tmp/card-f
 # {"ruleSet":"card-fee","version":2,"status":"DRAFT","createdBy":"lan",...}
 curl -s -u lan:$P -X POST $R/versions/2:request-publish
 # {"version":2,"status":"PENDING_APPROVAL","requestedBy":"lan",...}
-curl -s -u lan:$P -X POST $R/versions/2:approve
+curl -s -u lan:$P -X POST $R/versions/2:approve -H 'If-Match: "1"'
 # {"status":403,"code":"PERMISSION_DENIED","detail":"The caller lacks permission rules:approve",...}
-curl -s -u minh:$P -X POST $R/versions/2:approve
+curl -s -u minh:$P -X POST $R/versions/2:approve -H 'If-Match: "1"'
 # {"version":2,"status":"PUBLISHED","requestedBy":"lan","approvedBy":"minh",...}
 
 curl -s -u tuan:$P -H 'Content-Type: application/json' \

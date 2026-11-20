@@ -53,6 +53,7 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  3       | V3__rle_version_history.sql
 #  4       | V4__rle_version_history_append_only.sql
 #  5       | V5__rle_engine_key.sql
+#  6       | V6__rle_version_history_draft_updated.sql
 ```
 
 ### The cursor key
@@ -141,14 +142,14 @@ H=localhost:8080/api/bpm/rules/v1
 3. Hoa tries to approve her own request and is refused:
 
    ```bash
-   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
    # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
    ```
 
-4. Minh approves; the version is published and takes effect now:
+4. Minh approves; the version is published and takes effect now. `If-Match` names the lock version he reviewed (the `ETag` of the version he read); without it the answer is `428 PRECONDITION_REQUIRED`, and if the version changed since, `409 VERSION_CONFLICT`:
 
    ```bash
-   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve \
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"' \
      -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
    # 200 {"status":"PUBLISHED","requestedBy":"hoa","approvedBy":"minh",...}
    ```
@@ -199,6 +200,18 @@ H=localhost:8080/api/bpm/rules/v1
     curl -s -u hoa:demo-only $H/rule-sets/card-fee/versions/2/history
     # {"data":[{"action":"CREATED",...},{"action":"REQUESTED",...},
     #          {"action":"REJECTED","actor":"minh","reason":"R2 waiver needs pricing committee minutes",...}]}
+    ```
+
+    Hoa, the author, fixes the draft in place instead of importing a v3 (the `dev` profile turns `authoring.cockpit-drafts` on; with it off the answer is `403 DRAFT_AUTHORING_DISABLED`). Both headers are required, and only the draft's author may replace it. Minh then compares v2 with the version in effect; the engine computes the diff, so the approver sees exactly what is hashed:
+
+    ```bash
+    sed 's/"10000 VND"/"5000 VND"/' examples/rule-engine-only/src/main/resources/rules/card-fee.yaml |
+      curl -s -u hoa:demo-only -X PUT $H/rule-sets/card-fee/versions/2 -H 'Content-Type: application/yaml' \
+        -H 'Idempotency-Key: demo-replace-1' -H 'If-Match: "2"' --data-binary @-
+    # 200 {"version":2,"status":"DRAFT","lockVersion":3,"canonicalHash":"...",...}   ETag: "3"
+    curl -s -u minh:demo-only "$H/rule-sets/card-fee/versions/2/diff?base=1"
+    # {"ruleSet":"card-fee","version":2,"base":1,...,"rows":[{"ruleId":"R2","change":"CHANGED","position":2,
+    #   "basePosition":2,"moved":false,"fields":[{"path":"/then/fee","from":{...},"to":{...},"nonAscii":false}]}],...}
     ```
 
 11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them:
@@ -271,7 +284,7 @@ curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -H 'Content-Type: applicati
 
 curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:request-publish
-curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -X POST \
+curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -H 'If-Match: "1"' -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve
 # {"ruleSet":"card-fee","version":1,"status":"PUBLISHED",...,"requestedBy":"lan",...,"approvedBy":"minh",...}
 

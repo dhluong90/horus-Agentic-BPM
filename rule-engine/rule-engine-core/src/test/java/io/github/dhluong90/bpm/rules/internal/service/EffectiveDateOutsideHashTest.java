@@ -64,7 +64,7 @@ class EffectiveDateOutsideHashTest {
         RuleSetVersion v1 = versions.importRuleSet(ImportRequest.yaml(cardFee("tariff 2026", "2026-11-01T00:00:00Z")));
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "minh", APPROVER);
-        RuleSetVersion published = versions.approve("card-fee", 1, WriteOptions.none());
+        RuleSetVersion published = versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
         assertThat(v1.canonicalHash()).isEqualTo(H1);
         assertThat(published.effectiveFrom()).isEqualTo(Instant.parse("2026-11-01T00:00:00Z"));
 
