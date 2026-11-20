@@ -25,7 +25,7 @@ sequenceDiagram
 
 ## Run locally
 
-Needs JDK 21 or later and Docker.
+Needs JDK 21 or later and Docker. To run the host as a container beside PostgreSQL instead, with one command, see [docs/DEPLOYING.md](../../docs/DEPLOYING.md); its image build reuses a dependency layer until a `pom.xml` changes.
 
 ```bash
 docker run -d --name horus-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
@@ -53,6 +53,7 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  3       | V3__rle_version_history.sql
 #  4       | V4__rle_version_history_append_only.sql
 #  5       | V5__rle_engine_key.sql
+#  6       | V6__rle_version_history_draft_updated.sql
 ```
 
 ### The cursor key
@@ -143,14 +144,14 @@ H=localhost:8080/api/bpm/rules/v1
 3. Hoa tries to approve her own request and is refused:
 
    ```bash
-   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
    # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
    ```
 
-4. Minh approves; the version is published and takes effect now:
+4. Minh approves; the version is published and takes effect now. `If-Match` names the lock version he reviewed (the `ETag` of the version he read); without it the answer is `428 PRECONDITION_REQUIRED`, and if the version changed since, `409 VERSION_CONFLICT`:
 
    ```bash
-   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve \
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"' \
      -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
    # 200 {"status":"PUBLISHED","requestedBy":"hoa","approvedBy":"minh",...}
    ```
@@ -201,6 +202,18 @@ H=localhost:8080/api/bpm/rules/v1
     curl -s -u hoa:demo-only $H/rule-sets/card-fee/versions/2/history
     # {"data":[{"action":"CREATED",...},{"action":"REQUESTED",...},
     #          {"action":"REJECTED","actor":"minh","reason":"R2 waiver needs pricing committee minutes",...}]}
+    ```
+
+    Hoa, the author, fixes the draft in place instead of importing a v3 (the `dev` profile turns `authoring.cockpit-drafts` on; with it off the answer is `403 DRAFT_AUTHORING_DISABLED`). Both headers are required, and only the draft's author may replace it. Minh then compares v2 with the version in effect; the engine computes the diff, so the approver sees exactly what is hashed:
+
+    ```bash
+    sed 's/"10000 VND"/"5000 VND"/' examples/rule-engine-only/src/main/resources/rules/card-fee.yaml |
+      curl -s -u hoa:demo-only -X PUT $H/rule-sets/card-fee/versions/2 -H 'Content-Type: application/yaml' \
+        -H 'Idempotency-Key: demo-replace-1' -H 'If-Match: "2"' --data-binary @-
+    # 200 {"version":2,"status":"DRAFT","lockVersion":3,"canonicalHash":"...",...}   ETag: "3"
+    curl -s -u minh:demo-only "$H/rule-sets/card-fee/versions/2/diff?base=1"
+    # {"ruleSet":"card-fee","version":2,"base":1,...,"rows":[{"ruleId":"R2","change":"CHANGED","position":2,
+    #   "basePosition":2,"moved":false,"fields":[{"path":"/then/fee","from":{...},"to":{...},"nonAscii":false}]}],...}
     ```
 
 11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them:
@@ -255,6 +268,31 @@ public Money cardFee(String tier, int txCount) {
 }
 ```
 
+## Demo: one error shape, and a duplicate sent while the first still runs
+
+Every Rule Engine error is an `application/problem+json` body with `code`, `detail`, `correlationId` and a `type` link to [Common Error Codes](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes). The integration test triggers each code through this host, prints one line per code, and replays the in-flight duplicate with the first request paused inside the engine:
+
+```bash
+mvn -B -pl examples/rule-engine-only -am verify -Dit.test=ErrorsAndDuplicatesIT -Dtest=NoSuchTest \
+  -Dsurefire.failIfNoSpecifiedTests=false -Dfailsafe.failIfNoSpecifiedTests=false -Dcockpit.bundle.skip=true
+# RLE-036 error matrix over the example host
+#   INPUT_INVALID                   expected 400 got 400  application/problem+json  correlationId=01M9...
+#   ...
+#   UNIQUE_HIT_VIOLATION            expected 422 got 422  application/problem+json  correlationId=01M9...
+# Tests run: 3, Failures: 0, Errors: 0, Skipped: 0
+```
+
+By hand, a second request with the same `Idempotency-Key` that arrives while the first is still running is answered at once:
+
+```bash
+# HTTP/1.1 409
+# Retry-After: 1
+# Content-Type: application/problem+json
+# {"type":"https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#idempotency_in_flight","title":"Conflict","status":409,"code":"IDEMPOTENCY_IN_FLIGHT","detail":"A request with the same idempotency key is still running","correlationId":"01M9..."}
+```
+
+Wait one second and send the same request again: once the first has finished, the answer is its `201` and body, and only one version exists.
+
 ## Demo: import a DMN decision table
 
 A `.dmn` file goes through the same import endpoint as YAML, with `Content-Type: application/xml` (or `text/xml`, `application/dmn+xml`). It becomes a `DRAFT` that a second person approves before it evaluates. The sample is a hand-written table in the style a common DMN modeller writes: [`card-fee-modeller.dmn`](src/test/resources/rules/dmn/card-fee-modeller.dmn).
@@ -273,7 +311,7 @@ curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -H 'Content-Type: applicati
 
 curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:request-publish
-curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -X POST \
+curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -H 'If-Match: "1"' -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve
 # {"ruleSet":"card-fee","version":1,"status":"PUBLISHED",...,"requestedBy":"lan",...,"approvedBy":"minh",...}
 
@@ -305,6 +343,8 @@ Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES` | none | Audience this host requires in every token, for example `rule-engine-only`. Required whenever an issuer, JWK set or public key is set: without it the host does not start (TR-SEC-12) |
 | `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the two demo users. Never in a shared environment |
 | `HORUS_DEMO_PASSWORD` | none | Password of the demo users `lan` and `minh` on the `dev` profile. Without it nobody can sign in |
+
+The two passwords can also come as files: with `SPRING_CONFIG_IMPORT=configtree:/run/secrets/`, a file `/run/secrets/HORUS_DB_PASSWORD` or `/run/secrets/HORUS_DEMO_PASSWORD` sets the property of the same name. The docker compose deployment does this, so no password is in the container environment ([docs/DEPLOYING.md](../../docs/DEPLOYING.md#configuration)).
 
 ## Open the cockpit
 
@@ -357,7 +397,7 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choos
 4. As `minh`, open version 2: Changes lists the added and changed rows with the same labels and amounts as the table. Write a reason and choose **Reject**: version 2 goes back to `lan` as a draft, and **History** under the approval dock shows who rejected it and why. As `lan`, **Request publish** again; as `minh`, approve it.
 5. As either user, use **Try it**: tier `GOLD` matches R1 and the table marks the row.
 
-To bring in a file prepared elsewhere, open the rule set and choose **Import new version**: the file becomes the next draft. Only a person other than the author and the requester can approve or reject a version; a requester withdraws through the engine's withdraw action once it ships. A host that keeps rule changes in Git sets `horus.bpm.rules.authoring.cockpit-drafts: false`; the cockpit then hides New draft and Edit draft and keeps Import new version.
+To bring in a file prepared elsewhere, open the rule set and choose **Import new version**: the file becomes the next draft. Only a person other than the author and the requester can approve or reject a version; a requester takes their own pending request back with `POST /api/bpm/rules/v1/rule-sets/{name}/versions/{v}:withdraw` (headers `Idempotency-Key` and `If-Match` with the version's `ETag`, optional body `{ "reason": "..." }`); the version returns to draft and nothing is published. A host that keeps rule changes in Git sets `horus.bpm.rules.authoring.cockpit-drafts: false`; the cockpit then hides New draft and Edit draft and keeps Import new version.
 
 A save creates a new draft version each time, because the engine has no endpoint to replace a draft yet (issue #165). A `.json` file is sent as YAML text (JSON is valid YAML), because this engine release imports YAML only.
 
@@ -378,7 +418,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 
 ## Run in CI
 
-`.github/workflows/ci.yml` runs these tests on every pull request on Java 21 and 25, Spring Boot 4.x and 3.5.x, and PostgreSQL 14 and 18 (see [Technical Requirements](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Technical-Requirements) on the wiki). In this module, Surefire runs `HostSecurityConfigurationTest` (start-up guards) and Failsafe runs five Testcontainers suites on the image in `bpm.test.postgres.image` (`postgres:16-alpine` locally). On Spring Boot 3.5 the host uses `spring-boot-starter-web` and `flyway-core` (profile `host-spring-boot-3.5`); the code is the same. To run that leg locally: `mvn -B install -DskipTests`, then `mvn -B -Dspring-boot.line=3.5 surefire:test failsafe:integration-test failsafe:verify`. `RuleEngineOnlyHostIT` fixes the host's clock at 26 January 2027.
+`.github/workflows/ci.yml` runs these tests on every pull request on Java 21 and 25, Spring Boot 4.x and 3.5.x, and PostgreSQL 14 and 18 (see [Technical Requirements](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Technical-Requirements) on the wiki). In this module, Surefire runs `HostSecurityConfigurationTest` (start-up guards) and Failsafe runs five Testcontainers suites on the image in `bpm.test.postgres.image` (PostgreSQL 16 locally, pinned by digest in the root `pom.xml`; CI pins 14 and 18 the same way). On Spring Boot 3.5 the host uses `spring-boot-starter-web` and `flyway-core` (profile `host-spring-boot-3.5`); the code is the same. To run that leg locally: `mvn -B install -DskipTests`, then `mvn -B -Dspring-boot.line=3.5 surefire:test failsafe:integration-test failsafe:verify`. `RuleEngineOnlyHostIT` fixes the host's clock at 26 January 2027.
 
 | Test | Proves |
 |---|---|

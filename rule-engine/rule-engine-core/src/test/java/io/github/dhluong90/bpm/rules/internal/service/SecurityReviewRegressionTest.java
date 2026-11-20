@@ -64,7 +64,7 @@ class SecurityReviewRegressionTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml.getBytes(StandardCharsets.UTF_8)));
         engines.versionService().requestPublish(name, 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve(name, 1, WriteOptions.none());
+        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
     }
 
     // Finding 1 (blocking): permissions are checked in the services, not only over REST.
@@ -75,7 +75,7 @@ class SecurityReviewRegressionTest {
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "teller", EVALUATE_ONLY);
 
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(PermissionDeniedException.class)
                 .extracting(e -> ((PermissionDeniedException) e).code()).isEqualTo("PERMISSION_DENIED");
         caller.become("bank-a", "bob");
@@ -197,11 +197,11 @@ class SecurityReviewRegressionTest {
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "alice");
 
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
         assertThat(engines.versionService().find("card-fee", 1, false).orElseThrow().createdBy()).isEqualTo("alice");
         caller.become("bank-a", "carol");
-        assertThat(engines.versionService().approve("card-fee", 1, WriteOptions.none()).status())
+        assertThat(engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)).status())
                 .isEqualTo(VersionStatus.PUBLISHED);
     }
 
@@ -212,10 +212,10 @@ class SecurityReviewRegressionTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.idempotencyKey("k-approve"));
+        engines.versionService().approve("card-fee", 1, new WriteOptions("k-approve", 1L, null));
 
         caller.become("bank-a", "alice");
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, WriteOptions.idempotencyKey("k-approve")))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions("k-approve", 1L, null)))
                 .isInstanceOf(IdempotencyKeyReuseException.class);
 
         caller.become("bank-a", "teller-1", EVALUATE_ONLY);

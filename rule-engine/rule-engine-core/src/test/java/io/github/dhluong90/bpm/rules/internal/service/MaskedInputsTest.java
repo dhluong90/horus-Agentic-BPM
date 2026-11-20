@@ -130,9 +130,9 @@ class MaskedInputsTest {
     void publish(RuleEngines engines, String tenant, String yaml, String name) {
         caller.become(tenant, "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml.getBytes(StandardCharsets.UTF_8)));
-        engines.versionService().requestPublish(name, 1, WriteOptions.none());
+        long lock = engines.versionService().requestPublish(name, 1, WriteOptions.none()).lockVersion();
         caller.become(tenant, "bob");
-        engines.versionService().approve(name, 1, WriteOptions.none());
+        engines.versionService().approve(name, 1, new WriteOptions(null, lock, null));
     }
 
     DecisionResult evaluate(RuleEngines engines, String tenant, String ruleSet, Map<String, Object> inputs) {
