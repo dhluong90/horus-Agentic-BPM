@@ -1,2 +1,2 @@
-com.horus.bpm.host.autoconfigure.EngineAccessAutoConfiguration
-com.horus.bpm.host.autoconfigure.HostMetadataAutoConfiguration
+io.github.dhluong90.bpm.host.autoconfigure.EngineAccessAutoConfiguration
+io.github.dhluong90.bpm.host.autoconfigure.HostMetadataAutoConfiguration

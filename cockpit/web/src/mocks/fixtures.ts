@@ -15,7 +15,8 @@ export const registryEmbedded = {
 export const metaRulesOnly: BpmMetaV1 = {
   schemaVersion: 1,
   hostId: 'loans',
-  modules: [{ module: 'rules', engineVersion: '0.1.0', apiVersion: 'v1', features: [] }],
+  // Like the example host: cockpit draft editing turned on (PD-094 makes it off when the setting is missing).
+  modules: [{ module: 'rules', engineVersion: '0.1.0', apiVersion: 'v1', features: [], settings: { 'authoring.cockpit-drafts': true } }],
   tenancy: { switching: false },
   limits: { maxPageSize: 200 },
 };
@@ -35,6 +36,9 @@ export const meMinh: BpmMeV1 = {
   permissions: ['rules:read', 'rules:approve', 'rules:log:read'],
   roles: ['PRICING_APPROVER'],
 };
+
+/** A permission name from a newer host that does not match this cockpit's pattern (a hyphen in the action). */
+export const UNREADABLE_PERMISSION = 'rules:log:search-masked';
 
 const ERROR_TYPE = 'https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#';
 
@@ -71,7 +75,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'me-unknown-permission'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -96,6 +100,13 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       return { ...ok, me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }) };
     case 'rules-approver':
       return { ...ok, me: json({ ...meMinh, permissions: [...meMinh.permissions, 'rules:evaluate'] }) };
+    case 'rules-author-drafts-default':
+      // A host that does not report authoring.cockpit-drafts at all: off by default in 0.1.0 (PD-094).
+      return {
+        ...ok,
+        meta: json({ ...metaRulesOnly, modules: [{ module: 'rules', engineVersion: '0.1.0', apiVersion: 'v1', features: [] }] }),
+        me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }),
+      };
     case 'rules-author-drafts-off':
       return {
         ...ok,
@@ -117,6 +128,9 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
     }
     case 'me-unauthenticated':
       return { ...ok, meta: problem(problemUnauthenticated), me: problem(problemUnauthenticated) };
+    case 'me-unknown-permission':
+      // A newer host lists a permission name this cockpit cannot read; the cockpit drops it and signs Lan in.
+      return { ...ok, me: json({ ...meLan, permissions: [...meLan.permissions, UNREADABLE_PERMISSION] }) };
     case 'me-bad-shape':
       return { ...ok, me: json({ schemaVersion: 1, user: { id: '' }, permissions: [] }) };
     case 'meta-not-found':

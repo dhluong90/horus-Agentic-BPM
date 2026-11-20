@@ -9,9 +9,9 @@
     The groupId is set here once; the value is still open (rule-engine/docs/DESIGN.md, open question 7.2).
     Hosts never inherit from this POM: they import bpm-bom, which pins engine modules only.
   -->
-  <groupId>com.horus.bpm</groupId>
+  <groupId>io.github.dhluong90.bpm</groupId>
   <artifactId>bpm-parent</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.2.0-SNAPSHOT</version>
   <packaging>pom</packaging>
 
   <name>HORUS Agentic BPM</name>
@@ -45,6 +45,7 @@
     <module>bpm-bom</module>
     <module>bpm-host-metadata</module>
     <module>rule-engine</module>
+    <module>process-engine</module>
     <module>cockpit</module>
     <module>examples</module>
   </modules>
@@ -77,8 +78,18 @@
       manages; tools/check-jackson-coexistence.py fails the 3.5 legs when they differ.
     -->
     <jackson-3.version>3.1.7</jackson-3.version>
-    <!-- PostgreSQL image of the Testcontainers tests; the CI matrix sets 14 and the newest release. -->
-    <bpm.test.postgres.image>postgres:16-alpine</bpm.test.postgres.image>
+    <!--
+      Container images the tests start, pinned by digest (PD-100); tests read them through TestImages and
+      name no image themselves. Testcontainers 2 refuses a tag and a digest together, so the value is
+      <name>@sha256:<digest> and the comment names the tag and the version the digest resolved to. Update
+      digest and comment together (wiki Contributing, Dependency checks, test container images). The CI matrix
+      sets the PostgreSQL image per leg (14, 16 and 18), also pinned; tools/check-image-pins.py refuses
+      an image reference without a digest.
+    -->
+    <!-- postgres:16-alpine, PostgreSQL 16.16, resolved 20 Nov 2026 (the image docker-compose.yml pins). -->
+    <bpm.test.postgres.image>postgres@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857</bpm.test.postgres.image>
+    <!-- edoburu/pgbouncer:v1.26.1-p0, resolved 20 Nov 2026. -->
+    <bpm.test.pgbouncer.image>edoburu/pgbouncer@sha256:488422e38cff912895d0d65d8963fcd306e6ac589a724398b6eb8e294e94d624</bpm.test.pgbouncer.image>
     <!-- JUnit tags of tests that apply to one Spring Boot line only; the 3.5 profile swaps the value. -->
     <excludedGroups>spring-boot-3.5-only</excludedGroups>
     <archunit.version>1.5.1</archunit.version>
@@ -96,6 +107,11 @@
     <maven-clean-plugin.version>3.5.0</maven-clean-plugin.version>
     <license-maven-plugin.version>2.9.0</license-maven-plugin.version>
     <cyclonedx-maven-plugin.version>2.9.3</cyclonedx-maven-plugin.version>
+    <!-- Run from the command line, not bound to a phase (deploy/docker/Dockerfile, CI, release scripts). -->
+    <maven-dependency-plugin.version>3.11.0</maven-dependency-plugin.version>
+    <maven-help-plugin.version>3.6.0</maven-help-plugin.version>
+    <!-- Bound by Maven to pom-packaged modules; pinned at the version Maven 3.9 already uses. -->
+    <maven-site-plugin.version>3.12.1</maven-site-plugin.version>
 
     <!-- Root of the reactor, for files every jar carries (LICENSE, COMMERCIAL-LICENSE.md). -->
     <bpm.root>${maven.multiModuleProjectDirectory}</bpm.root>
@@ -155,6 +171,7 @@
           <configuration>
             <systemPropertyVariables>
               <bpm.test.postgres.image>${bpm.test.postgres.image}</bpm.test.postgres.image>
+              <bpm.test.pgbouncer.image>${bpm.test.pgbouncer.image}</bpm.test.pgbouncer.image>
               <bpm.root>${bpm.root}</bpm.root>
             </systemPropertyVariables>
           </configuration>
@@ -168,6 +185,7 @@
             <classesDirectory>${project.build.outputDirectory}</classesDirectory>
             <systemPropertyVariables>
               <bpm.test.postgres.image>${bpm.test.postgres.image}</bpm.test.postgres.image>
+              <bpm.test.pgbouncer.image>${bpm.test.pgbouncer.image}</bpm.test.pgbouncer.image>
               <bpm.root>${bpm.root}</bpm.root>
             </systemPropertyVariables>
           </configuration>
@@ -279,6 +297,25 @@
           <artifactId>cyclonedx-maven-plugin</artifactId>
           <version>${cyclonedx-maven-plugin.version}</version>
         </plugin>
+        <!--
+          Pinned so that a goal called by prefix (mvn help:evaluate, mvn dependency:get, as the image build
+          does) resolves the same plugin code every time; requirePluginVersions below checks both.
+        -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-dependency-plugin</artifactId>
+          <version>${maven-dependency-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-help-plugin</artifactId>
+          <version>${maven-help-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-site-plugin</artifactId>
+          <version>${maven-site-plugin.version}</version>
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -318,7 +355,7 @@
             <configuration>
               <skipAddThirdParty>${maven.deploy.skip}</skipAddThirdParty>
               <excludedScopes>test,system</excludedScopes>
-              <excludedGroups>com\.horus\.bpm</excludedGroups>
+              <excludedGroups>io\.github\.dhluong90\.bpm</excludedGroups>
               <failOnMissing>true</failOnMissing>
               <failOnBlacklist>true</failOnBlacklist>
               <includedLicenses>${bpm.licence-policy}/allowed-licences.txt</includedLicenses>
@@ -401,6 +438,19 @@
                 </requireProperty>
                 <dependencyConvergence/>
                 <banDuplicatePomDependencyVersions/>
+                <!--
+                  Every plugin of the build lifecycle up to deploy, and the two goals the image build calls
+                  by prefix, must have a version from this POM: an unpinned plugin would let a cached and an
+                  uncached build run different code. The site lifecycle itself is not used, so it is not checked.
+                -->
+                <requirePluginVersions>
+                  <phases>clean,deploy</phases>
+                  <additionalPlugins>
+                    <additionalPlugin>org.apache.maven.plugins:maven-dependency-plugin</additionalPlugin>
+                    <additionalPlugin>org.apache.maven.plugins:maven-help-plugin</additionalPlugin>
+                  </additionalPlugins>
+                  <message>Pin every Maven plugin in pluginManagement of the parent POM (reproducible builds, deploy/docker/Dockerfile).</message>
+                </requirePluginVersions>
                 <!-- TR-LIC-01: a system-scope jar would bypass the licence gate and the SBOM. -->
                 <bannedDependencies>
                   <searchTransitive>true</searchTransitive>

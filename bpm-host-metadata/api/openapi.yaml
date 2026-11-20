@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: HORUS Agentic BPM host contract
-  version: 1.0.0
+  version: 1.1.0
   summary: What a host's engines are, and who the caller is.
   description: |
     Every host that embeds an engine serves these two endpoints once, whatever engines it runs
@@ -47,7 +47,7 @@ paths:
                 limits: { maxPageSize: 200 }
         '304': { $ref: '#/components/responses/NotModified' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/TenantNotAllowed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/bpm/me:
     get:
       operationId: getCurrentCaller
@@ -79,7 +79,7 @@ paths:
                 groups: []
         '304': { $ref: '#/components/responses/NotModified' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/TenantNotAllowed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 components:
   securitySchemes:
     bearer:
@@ -144,11 +144,36 @@ components:
             detail: Sign in, or send a token issued for this host.
             instance: /api/bpm/me
             correlationId: 01KAF3N8Q4V6W2Y9Z0A1B2C3D4
-    TenantNotAllowed:
-      description: '`TENANT_NOT_ALLOWED`: `X-Tenant-Id` names a tenant other than the principal''s, or the tenant is outside the allowed format.'
+    Forbidden:
+      description: |
+        `TENANT_NOT_ALLOWED`: `X-Tenant-Id` names a tenant other than the principal's, or the tenant is
+        outside the allowed format.
+        `PERMISSION_DENIED`: the caller's id starts with `system:`, the prefix the engines reserve for the
+        actions they record themselves. The match is exact and case-sensitive, so `systems-admin` is an
+        ordinary caller. The body names neither the id nor the rule; the host writes a
+        `caller.reserved.refused` security log entry with the same `correlationId`.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+          examples:
+            tenantNotAllowed:
+              value:
+                type: https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#tenant_not_allowed
+                title: Tenant not allowed
+                status: 403
+                code: TENANT_NOT_ALLOWED
+                detail: The request names a tenant the caller is not signed in for, and tenant switching is off.
+                instance: /api/bpm/me
+                correlationId: 01KAF3N8Q4V6W2Y9Z0A1B2C3D5
+            reservedIdentity:
+              value:
+                type: https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#permission_denied
+                title: Permission denied
+                status: 403
+                code: PERMISSION_DENIED
+                detail: The caller lacks the permission this endpoint checks.
+                instance: /api/bpm/me
+                correlationId: 01KAF3N8Q4V6W2Y9Z0A1B2C3D6
   schemas:
     Problem:
       description: RFC 9457 problem details with the engine contract's `code` and `correlationId` (ADR-0010).

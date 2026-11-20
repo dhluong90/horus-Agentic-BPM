@@ -3,12 +3,12 @@ package io.github.dhluong90.bpm.rules.internal.dmn.ruleset;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.SourceFormat;
-import com.horus.bpm.rules.api.ValidationFailedException;
-import com.horus.bpm.rules.internal.eval.CompiledRuleSet;
-import com.horus.bpm.rules.internal.json.EngineJson;
-import com.horus.bpm.rules.internal.read.ParsedRuleSet;
-import com.horus.bpm.rules.internal.read.RuleSetReader;
+import io.github.dhluong90.bpm.rules.api.SourceFormat;
+import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
+import io.github.dhluong90.bpm.rules.internal.read.ParsedRuleSet;
+import io.github.dhluong90.bpm.rules.internal.read.RuleSetReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -221,7 +221,12 @@ class NormalFormTest {
         assertThat(sha).isEqualTo(GOLDEN_V1_SHA256);
     }
 
-    static final String GOLDEN_V1_SHA256 = "dc44beae55cd278fe820d7c9e22def959b854655946bbfa4711387ca6f7eb40f";
+    /**
+     * The pin of the schema version 1 golden file. Changed in 0.2.0 (#20) only by appending the three rows of
+     * {@code matches}, a production the 0.1.0 parser refused, so no stored 0.1.0 rule set contains one: appending rows
+     * for a new production is allowed within schema version 1 (architect ruling on #252, ADR-0026 decision 3).
+     */
+    static final String GOLDEN_V1_SHA256 = "ba6c05f2dd2ab459709727745e4a0e917dc64c7746c115708ae2bf6d1b6f9deb";
 
     // ------------------------------------------------------------------ helpers
 
