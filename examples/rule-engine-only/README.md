@@ -303,6 +303,8 @@ Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..
 | `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the two demo users. Never in a shared environment |
 | `HORUS_DEMO_PASSWORD` | none | Password of the demo users `lan` and `minh` on the `dev` profile. Without it nobody can sign in |
 
+The two passwords can also come as files: with `SPRING_CONFIG_IMPORT=configtree:/run/secrets/`, a file `/run/secrets/HORUS_DB_PASSWORD` or `/run/secrets/HORUS_DEMO_PASSWORD` sets the property of the same name. The docker compose deployment does this, so no password is in the container environment ([docs/DEPLOYING.md](../../docs/DEPLOYING.md#configuration)).
+
 ## Open the cockpit
 
 The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`), on the `dev` profile with the demo users. Build the cockpit bundle before packaging:
