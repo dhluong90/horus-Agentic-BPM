@@ -31,16 +31,16 @@ class RuleEngineLifecycleSweeperTest {
         } finally {
             sweeper.destroy();
         }
-        int stopped = runs.get();
-        Thread.sleep(100);
-        assertThat(runs.get()).as("no run after destroy").isLessThanOrEqualTo(stopped + 1);
+        // The executor is shut down and its thread has ended, so no run can start after destroy.
+        assertThat(sweeper.awaitStopped(Duration.ofSeconds(5))).as("no run after destroy").isTrue();
     }
 
     @Test
-    void RLE_027_run_once_returns_what_this_replica_retired() {
+    void RLE_027_run_once_returns_what_this_replica_retired() throws Exception {
         RuleEngineLifecycleSweeper sweeper = new RuleEngineLifecycleSweeper(() -> 2, Duration.ofMinutes(1));
 
         assertThat(sweeper.runOnce()).isEqualTo(2);
         sweeper.destroy(); // never started: nothing to stop
+        assertThat(sweeper.awaitStopped(Duration.ZERO)).isTrue();
     }
 }

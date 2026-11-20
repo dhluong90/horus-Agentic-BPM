@@ -65,6 +65,22 @@ public final class RuleEngineLifecycleSweeper implements DisposableBean {
         }
     }
 
+    /**
+     * Waits until the sweep thread has ended after {@link #destroy()}; true at once when the sweep never started.
+     *
+     * @param timeout the longest wait
+     * @return true when no run can start any more
+     * @throws InterruptedException when interrupted while waiting
+     */
+    boolean awaitStopped(Duration timeout) throws InterruptedException {
+        ScheduledExecutorService current;
+        synchronized (this) {
+            current = scheduler;
+        }
+        return current == null
+                || current.isShutdown() && current.awaitTermination(timeout.toMillis(), TimeUnit.MILLISECONDS);
+    }
+
     @Override
     public synchronized void destroy() {
         if (scheduler != null) {
