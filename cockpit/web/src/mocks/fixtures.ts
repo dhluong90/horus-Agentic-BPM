@@ -67,6 +67,15 @@ export const meMinh: BpmMeV1 = {
   roles: ['PRICING_APPROVER'],
 };
 
+/** An auditor: reads rule sets and the decision log, exports evidence; neither authors nor approves. */
+export const meHa: BpmMeV1 = {
+  schemaVersion: 1,
+  user: { id: 'ha', displayName: 'Phạm Thu Hà' },
+  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  permissions: ['rules:read', 'rules:log:read'],
+  roles: ['INTERNAL_AUDITOR'],
+};
+
 /** A permission name from a newer host that does not match this cockpit's pattern (a hyphen in the action). */
 export const UNREADABLE_PERMISSION = 'rules:log:search-masked';
 
@@ -105,7 +114,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'rules-auditor', 'rules-auditor-no-log'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -145,6 +154,11 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       };
     case 'rules-reader':
       return { ...ok, me: json(meDan) };
+    case 'rules-auditor':
+      return { ...ok, me: json(meHa) };
+    case 'rules-auditor-no-log':
+      // The auditor without the decision log: history and versions-only evidence (CKP-073).
+      return { ...ok, me: json({ ...meHa, permissions: ['rules:read'] }) };
     case 'rules-author-approver':
       return { ...ok, me: json({ ...meLan, permissions: ['rules:read', 'rules:author', 'rules:approve', 'rules:evaluate'] }) };
     case 'me-forbidden':
@@ -213,6 +227,7 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
 /** The signed-in user of a scenario, for the mock Rule Engine's four-eyes check. */
 export function scenarioUser(scenario: Scenario): string {
   if (scenario === 'rules-reader') return meDan.user.id;
+  if (scenario === 'rules-auditor' || scenario === 'rules-auditor-no-log') return meHa.user.id;
   return scenario === 'ready-approver' || scenario === 'rules-approver' ? meMinh.user.id : meLan.user.id;
 }
 

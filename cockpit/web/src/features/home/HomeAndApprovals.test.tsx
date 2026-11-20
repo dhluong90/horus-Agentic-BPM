@@ -254,7 +254,8 @@ describe('menu', () => {
     expect(screen.getByRole('link', { name: 'How to import a BPMN file' })).toHaveAttribute('href', expect.stringContaining('Process-Engine-Importing-BPMN'));
     expect(screen.queryByText(/is installed on this service/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('link', { name: 'Decisions' }));
-    expect(await screen.findByText('Decision history comes in 0.2.0.')).toBeInTheDocument();
+    // Lan may not read the decision log: the page says so in one line and asks for nothing.
+    expect(await screen.findByText('Reading decisions needs permission to read the decision log.')).toBeInTheDocument();
   });
 });
 
@@ -276,8 +277,8 @@ describe('security (review lows)', () => {
     mockHost.events.on('request:start', record);
     open('#/decisions');
 
-    expect(await screen.findByText('Decision history comes in 0.2.0.')).toBeInTheDocument();
-    // Only the shell's own calls: registry, /meta, /me and the rule lists behind the Approvals count.
+    expect(await screen.findByText('Choose a rule set or a case reference, and a month.')).toBeInTheDocument();
+    // Nothing is searched before the user asks. Only the shell's own calls: registry, /meta, /me and the rule lists behind the Approvals count.
     expect(calls.filter((path) => /decision/i.test(path))).toEqual([]);
     expect(calls.every((path) => path.endsWith('/cockpit-hosts.json') || path === '/api/bpm/meta' || path === '/api/bpm/me' || path.startsWith('/api/bpm/rules/v1/rule-sets'))).toBe(true);
     mockHost.events.removeListener('request:start', record);

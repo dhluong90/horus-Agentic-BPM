@@ -85,7 +85,7 @@ export function useSource(name: string, version: number, enabled: boolean) {
  * same request repeated (a double click after a fast answer, a retry after a timeout) reuses its
  * Idempotency-Key, so the engine replays the first answer instead of creating a second version.
  */
-function useSingleFlight<TArgs, TResult>(run: (args: TArgs, key: string) => Promise<TResult>, onSuccess: (result: TResult) => Promise<void> | void) {
+export function useSingleFlight<TArgs, TResult>(run: (args: TArgs, key: string) => Promise<TResult>, onSuccess: (result: TResult) => Promise<void> | void) {
   const running = useRef(false);
   const last = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
   const mutation = useMutation({

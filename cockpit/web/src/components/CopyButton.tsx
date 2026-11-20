@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useI18n } from '../i18n/I18nProvider';
 
-export function CopyButton({ value }: { value: string }) {
+/** Copies a reference in full. `label` names what is copied when it is not a support reference (for example a SHA-256). */
+export function CopyButton({ value, label, copiedLabel }: { value: string; label?: string | undefined; copiedLabel?: string | undefined }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -15,10 +16,10 @@ export function CopyButton({ value }: { value: string }) {
   return (
     <>
       <button type="button" className="btn btn--quiet btn--small hit" onClick={() => void copy()}>
-        {t('action.copyReference')}
+        {label ?? t('action.copyReference')}
       </button>
       <span className="sr-only" role="status" aria-live="polite">
-        {copied ? t('action.referenceCopied') : ''}
+        {copied ? (copiedLabel ?? t('action.referenceCopied')) : ''}
       </span>
     </>
   );

@@ -18,7 +18,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-002 | `CKP_002_*` (`ChangesView.test.tsx`, `versionDiff.test.ts`, `RuleScreens.test.tsx`, `e2e/version-diff.spec.ts`) | Vitest, Testing Library, Playwright, axe-core | M1 | `TR-UI-02` | Automated. The engine's diff (`RLE-028`) through the mock engine in the engine's response shape; side-by-side rows, effective dates, `nonAscii` marks, header and column notes, a refused diff, EN and VI, Approve above the fold at 1440x900 and 1440x1200 in both themes. Review demo data (`src/mocks/reviewDemo.ts`): a 20-row diff with the decision pinned and the last row above it, and a hit-policy change, an added column and a look-alike character. Stale-diff guard: Approve off when the diff is of other content (Vitest) and when the version changes under the reader, then enabled with the new lock version after review (Playwright) |
 | CKP-003 | `CKP_003_maker_checker_ui_blocks_requester_self_approval` | Playwright | M1 | `TR-SEC-04`, `TR-UI-02` | Planned |
 | CKP-004 | `CKP_004_simulation_displays_outcome_changes_safely` | Playwright | M1 | `TR-UI-02` | Planned |
-| CKP-005 | `CKP_005_decision_log_masks_pii_and_highlights_matched_row` | Testing Library | M1 | `TR-SEC-05`, `TR-OBS-05` | Planned |
+| CKP-005 | `CKP_005_decision_log_masks_pii_and_highlights_matched_row` (`cockpit/web/src/features/decisions/Decisions.test.tsx`) | Vitest, Testing Library, the fake engine | M1 | `TR-SEC-05`, `TR-OBS-05` | Automated |
 | CKP-006 | `CKP_006_grid_editor_shows_row_validation_errors` | Playwright | M2 | `TR-DET-02`, `TR-UI-02` | Planned |
 | CKP-007 | `CKP_007_agent_task_inspector_shows_guardrail_and_override_controls` | Testing Library | M2 | `TR-AGT-01`, `TR-AGT-02` | Planned |
 | CKP-008 | `CKP_008_incident_queue_retries_and_updates_status` | Playwright | M2 | `TR-OPS-03` | Planned |
@@ -51,6 +51,11 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-035 | `CKP_035_diagram_step_list_and_text_states` | Playwright keyboard and axe-core, both themes | M2 | `TR-UI-03` | Planned |
 | CKP-036 | `CKP_036_canvas_exemption_names_import_path` | Playwright with screen-reader assertions | M3 | `TR-UI-03`, `TR-DEF-04` | Planned |
 | CKP-037 | `CKP_037_*` (`cockpit/web/e2e/personal-data.spec.ts`, `cockpit/web/src/features/rules/PersonalData.test.tsx`, `cockpit/web/src/features/rules/model/masking.test.ts`) | Playwright at 1440x900 and 1440x1200, light and dark, English and Vietnamese, axe-core; Vitest with the fake engine | M1 | `TR-UI-02`, `TR-UI-03`, `TR-UI-04` | Automated |
+| CKP-071 | `CKP_071_*` (`cockpit/web/src/features/decisions/Decisions.test.tsx`, `cockpit/web/src/app/route.test.ts`, `cockpit/web/e2e/audit.spec.ts`) | Vitest with the fake engine and network capture; Playwright | M1 | `TR-OBS-05`, `TR-UI-02`, `TR-UI-04`, `RLE-029` | Automated |
+| CKP-072 | `CKP_072_*` (`cockpit/web/src/features/decisions/Decisions.test.tsx`, `cockpit/web/src/features/decisions/model/references.test.ts`, `cockpit/web/e2e/audit.spec.ts`) | Vitest, Playwright at 1440x900 and 1440x1200, light and dark, English and Vietnamese, axe-core | M1 | `TR-SEC-05`, `TR-OBS-05`, `TR-UI-04`, `RLE-030`, `RLE-031` | Automated |
+| CKP-073 | `CKP_073_*` (`cockpit/web/src/features/rules/HistoryAndEvidence.test.tsx`, `cockpit/web/e2e/audit.spec.ts`) | Vitest, Playwright at 1440x900 and 1440x1200, light and dark, English and Vietnamese, axe-core | M3 | `TR-OBS-01`, `TR-UI-02`, `TR-UI-04` | Automated |
+| CKP-074 | `CKP_074_*` (`cockpit/web/src/features/rules/HistoryAndEvidence.test.tsx`, `cockpit/web/src/api/rules/rulesClient.test.ts`, `cockpit/web/e2e/audit.spec.ts`) | Vitest with network capture, Playwright with the download | M3 | `TR-SEC-05`, `TR-OBS-01`, `TR-IDEM-01` | Automated |
+| CKP-075 | `CKP_075_*` (`cockpit/web/src/features/rules/HistoryAndEvidence.test.tsx`, `cockpit/web/e2e/audit.spec.ts`) | Vitest, Playwright | M3 | `TR-SEC-05`, `TR-UI-02`, `TR-UI-04` | Automated |
 
 ## Known gaps
 | Gap | Plan |

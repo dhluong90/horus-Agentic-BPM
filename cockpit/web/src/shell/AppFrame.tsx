@@ -6,6 +6,7 @@ import { availableAreas, landingArea, landingNote } from '../app/navigation';
 import { areaOf, areaRoute, formatRoute, useRoute, type Area, type Route } from '../app/route';
 import { EmptyState, PageHead } from '../components/PageParts';
 import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
+import { DecisionPage } from '../features/decisions/DecisionPage';
 import { DecisionsPage } from '../features/decisions/DecisionsPage';
 import { HomePage } from '../features/home/HomePage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
@@ -79,7 +80,9 @@ function AreaContent({ route, meta, me, areas }: { route: Route; meta: BpmMetaV1
     case 'approvals':
       return <ApprovalsPage pageLimit={pageLimit} />;
     case 'decisions':
-      return <DecisionsPage rulesAvailable={areas.includes('rules')} />;
+      return <DecisionsPage query={route.query ?? {}} pageLimit={pageLimit} />;
+    case 'decision':
+      return <DecisionPage decisionId={route.decisionId} />;
     case 'processes':
       return <ProcessesPage />;
   }

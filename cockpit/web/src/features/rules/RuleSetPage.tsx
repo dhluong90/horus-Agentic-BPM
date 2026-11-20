@@ -11,7 +11,8 @@ import { ChangesView } from './components/ChangesView';
 import { DecisionTable } from './components/DecisionTable';
 import { DraftChanges } from './components/DraftChanges';
 import { DraftEditor } from './components/DraftEditor';
-import { HistoryList } from './components/HistoryList';
+import { EvidenceExport } from './components/EvidenceExport';
+import { RuleSetHistoryView } from './components/RuleSetHistoryView';
 import { useFilePicker } from './components/ImportFileButton';
 import { MenuButton } from './components/MenuButton';
 import { PersonalDataWarnings } from './components/PersonalDataWarnings';
@@ -99,7 +100,7 @@ function LensContent({ lens, version, base, matched }: { lens: Lens; version: Ru
     case 'changes':
       return <ChangesLens version={version} base={base} />;
     case 'history':
-      return <HistoryList ruleSet={version.ruleSet} version={version.version} />;
+      return <RuleSetHistoryView ruleSet={version.ruleSet} openVersion={version.version} />;
     case 'source':
       return <SourceView version={version} />;
   }
@@ -267,7 +268,8 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
               <PersonalDataWarnings warnings={version.warnings} definition={version.definition} />
             </section>
           ) : null}
-          {!editing ? (
+          {!editing && lens === 'history' ? <EvidenceExport ruleSet={version.ruleSet} versions={versions} /> : null}
+          {!editing && lens !== 'history' ? (
             <Inspector version={version} importedFrom={importedFrom[version.version]} onMatched={(ids) => {
               setMatched(new Set(ids));
               // The matched row is marked in the table, so the table is what the user sees next.
