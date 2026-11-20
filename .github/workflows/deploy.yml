@@ -60,7 +60,7 @@ jobs:
       GRYPE_VERSION: "0.122.1"
       GRYPE_SHA256: ${{ matrix.grype-sha256 }}
       ARCH: ${{ matrix.arch }}
-      IMAGE: horus-bpm/rule-engine-only:local
+      IMAGE: horus-bpm/rule-engine-only:local # pin-exempt: built in this job from deploy/docker/Dockerfile
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
