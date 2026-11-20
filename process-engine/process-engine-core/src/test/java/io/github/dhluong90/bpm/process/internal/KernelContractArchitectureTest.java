@@ -56,8 +56,10 @@ class KernelContractArchitectureTest {
                                         io.github.dhluong90.bpm.process.spi.AgentAdapter.class)
                                         && call.getName().equals("execute"))))
                 .check(CORE);
+        // The runner interface's own overload with the job payload delegates to the plain one; nothing else calls it.
         noClasses().that().doNotHaveFullyQualifiedName(
                         "io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor")
+                .and().doNotHaveFullyQualifiedName("io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner")
                 .should(com.tngtech.archunit.lang.conditions.ArchConditions.callMethodWhere(
                         com.tngtech.archunit.base.DescribedPredicate.describe("AsyncStepRunner.run",
                                 call -> call.getTargetOwner().isAssignableTo(

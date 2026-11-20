@@ -149,6 +149,11 @@ class ProcessRestContractTest {
         MvcResult invalid = assertProblem(post(BASE + "/definitions").contentType("application/xml")
                 .content("<invalid/>"), 422, "VALIDATION_FAILED");
         assertThat(invalid.getResponse().getContentAsString()).contains("\"problems\":[");
+        // 422 (PRE-016): an agent step whose guardrail rule set breaks the contract, naming the step and the check.
+        MvcResult guardrail = assertProblem(post(BASE + "/definitions").contentType("application/xml")
+                .content("<guardrail-broken/>"), 422, "GUARDRAIL_CONTRACT_INVALID");
+        assertThat(guardrail.getResponse().getContentAsString()).contains("\"elementId\":\"assess-documents\"")
+                .contains("declares no output allow: boolean");
         // 409: a stale task lock version.
         exchange(post(BASE + "/instances").contentType(MediaType.APPLICATION_JSON).header("Idempotency-Key", "s-4")
                 .content("{\"definitionKey\":\"card-fee-review\"}"));
@@ -177,6 +182,12 @@ class ProcessRestContractTest {
 
         @Override
         public DefinitionVersion importDefinition(ImportRequest request) {
+            if (new String(request.source()).contains("<guardrail-broken/>")) {
+                throw new io.github.dhluong90.bpm.process.api.GuardrailContractInvalidException(List.of(
+                        new DefinitionProblem("GUARDRAIL_CONTRACT_INVALID", "guardrail rule set "
+                                + "agent-output-guardrails v1 declares no output allow: boolean (outputs decision: "
+                                + "string)", "ServiceTask", "assess-documents", 0)));
+            }
             if (new String(request.source()).contains("<invalid/>")) {
                 throw new ValidationFailedException(List.of(
                         new DefinitionProblem("NO_START_EVENT", "The process has no start event", "process", "p1", 3),

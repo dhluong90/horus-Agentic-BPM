@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.zaxxer.hikari.HikariDataSource;
 import io.github.dhluong90.bpm.process.api.AsyncStepNotFoundException;
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
+import io.github.dhluong90.bpm.process.api.DefinitionVersion;
+import io.github.dhluong90.bpm.process.api.GuardrailContractInvalidException;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SelfApprovalForbiddenException;
@@ -231,11 +233,195 @@ class AgentTaskIT {
         assertThat(definitions(tenant)).isZero();
     }
 
+    // ---- PRE-016 the guardrail rule set's contract at import and approval ------------------------------------
+
+    /** Case B: the rule set decides with {@code decision: string} and declares no {@code allow}. */
+    private static final String DECIDES_WITHOUT_ALLOW = """
+            schemaVersion: 1
+            ruleSet: agent-output-guardrails
+            description: Guardrails that name a decision instead of allow
+            hitPolicy: first
+            inputs:
+              - { name: riskScore, type: integer }
+            outputs:
+              - { name: decision, type: string }
+            rules:
+              - id: R1
+                when: { riskScore: ">= 70" }
+                then: { decision: "'REFER'" }
+              - id: R2
+                when: {}
+                then: { decision: "'OK'" }
+            """;
+
+    /**
+     * Case C: every matching row answers ({@code collect}). The Rule Engine itself makes a collected output a list, so
+     * {@code allow} is {@code list<boolean>} here; both the hit policy and the type break the contract.
+     */
+    private static final String COLLECTS = """
+            schemaVersion: 1
+            ruleSet: agent-output-guardrails
+            description: Guardrails that collect every matching row
+            hitPolicy: collect
+            inputs:
+              - { name: riskScore, type: integer }
+            outputs:
+              - { name: allow, type: list<boolean> }
+            rules:
+              - id: R1
+                when: { riskScore: ">= 70" }
+                then: { allow: "false" }
+              - id: R2
+                when: {}
+                then: { allow: "true" }
+            """;
+
+    /** A rule set that reads an input the agent's answer never carries. */
+    private static final String READS_INCOME = """
+            schemaVersion: 1
+            ruleSet: agent-output-guardrails
+            description: Guardrails that read the applicant's income
+            hitPolicy: unique
+            inputs:
+              - { name: riskScore, type: integer }
+              - { name: monthlyIncome, type: decimal }
+            outputs:
+              - { name: allow, type: boolean }
+              - { name: reasons, type: string }
+            rules:
+              - id: R1
+                when: { monthlyIncome: "< 10000000" }
+                then: { allow: "false", reasons: "'LOW_INCOME'" }
+              - id: R2
+                when: { monthlyIncome: ">= 10000000" }
+                then: { allow: "true", reasons: "''" }
+            """;
+
+    private TestEngine draftReplica() {
+        TestEngine engine = TestEngine.replica("pod-1", clock).autoApprove(false).withRuleEngine()
+                .decisionPort(StarterDecisionPorts::over).async(settings()).agents(assessor(answer(20, "APPROVE")))
+                .build();
+        engines.add(engine);
+        pipeline(engine);
+        return engine;
+    }
+
+    /** Publishes a version of a guardrail rule set in a tenant, with a second person approving it. */
+    private void publish(TestEngine engine, String inTenant, String yaml) {
+        engine.ruleIdentity.as(inTenant, "lan");
+        io.github.dhluong90.bpm.rules.api.ImportRequest source = io.github.dhluong90.bpm.rules.api.ImportRequest.yaml(
+                yaml.getBytes(StandardCharsets.UTF_8));
+        int version = engine.rules.versionService().findRuleSet("agent-output-guardrails").isPresent()
+                ? engine.rules.versionService().importVersion("agent-output-guardrails", source).version()
+                : engine.rules.versionService().importRuleSet(source).version();
+        long requested = engine.rules.versionService().requestPublish("agent-output-guardrails", version,
+                WriteOptions.none()).lockVersion();
+        engine.ruleIdentity.as(inTenant, "minh");
+        engine.rules.versionService().approve("agent-output-guardrails", version,
+                new WriteOptions(null, requested, null));
+        engine.ruleIdentity.as(null, null);
+    }
+
+    private static String guardrailYaml() {
+        return new String(TestEngine.resource("/rules/document-assessment-guardrails.yaml"), StandardCharsets.UTF_8);
+    }
+
+    private static void refusedNaming(org.assertj.core.api.ThrowableAssert.ThrowingCallable call, String check) {
+        assertThatThrownBy(call).isInstanceOfSatisfying(GuardrailContractInvalidException.class, e -> {
+            assertThat(e.code()).isEqualTo("GUARDRAIL_CONTRACT_INVALID");
+            assertThat(e.problems()).extracting(DefinitionProblem::code, DefinitionProblem::elementId)
+                    .containsOnly(org.assertj.core.groups.Tuple.tuple("GUARDRAIL_CONTRACT_INVALID",
+                            "assess-documents"));
+            assertThat(e.getMessage()).contains("step assess-documents").contains(check)
+                    .doesNotContain("maxLength").doesNotContain("\"type\"");
+        });
+    }
+
+    @Test
+    void PRE_016_deploy_rejects_guardrail_rule_set_breaking_contract() {
+        // Case D: no rule set of that name in the tenant
+        TestEngine pod = draftReplica();
+        refusedNaming(() -> deploy(pod), "agent-output-guardrails does not exist in this tenant");
+        assertThat(definitions(tenant)).isZero();
+
+        // Case B: outputs [decision: string], no allow
+        publish(pod, tenant, DECIDES_WITHOUT_ALLOW);
+        refusedNaming(() -> deploy(pod), "declares no output allow: boolean (outputs decision: string)");
+        assertThat(definitions(tenant)).isZero();
+
+        // Case C: allow: boolean under hit policy collect
+        publish(pod, tenant, COLLECTS);
+        refusedNaming(() -> deploy(pod), "has hit policy collect; a guardrail needs first or unique");
+        assertThat(definitions(tenant)).isZero();
+
+        // A rule set that reads monthlyIncome, which the agent's answer never carries
+        publish(pod, tenant, READS_INCOME);
+        refusedNaming(() -> deploy(pod), "reads input monthlyIncome, which horus:outputSchema does not declare");
+        assertThat(definitions(tenant)).isZero();
+
+        // Case A: allow: boolean and reasons under hit policy first, inputs the schema declares: a draft
+        publish(pod, tenant, guardrailYaml());
+        pod.identity.as(tenant, "pipeline", "processes:deploy", "processes:read");
+        DefinitionVersion draft = pod.services.importDefinition(new ImportRequest(SourceFormat.BPMN_XML,
+                TestEngine.resource(DEFINITION), null));
+        assertThat(draft.status()).isEqualTo("DRAFT");
+        assertThat(definitions(tenant)).isOne();
+    }
+
+    @Test
+    void PRE_016_another_tenants_guardrail_rule_set_does_not_meet_the_contract_and_nothing_is_written() {
+        // Given the guardrail rule set published in bank-other only
+        TestEngine pod = draftReplica();
+        String other = tenant + "-other";
+        publish(pod, other, guardrailYaml());
+
+        // When this tenant deploys, then the other tenant's rule set is never seen
+        refusedNaming(() -> deploy(pod), "does not exist in this tenant");
+        assertThat(definitions(tenant)).isZero();
+        assertThat(definitions(other)).isZero();
+    }
+
+    @Test
+    void PRE_016_the_contract_is_checked_again_at_request_approval_and_at_approval() {
+        TestEngine pod = draftReplica();
+        publish(pod, tenant, guardrailYaml());
+        DefinitionVersion draft = pod.services.importDefinition(new ImportRequest(SourceFormat.BPMN_XML,
+                TestEngine.resource(DEFINITION), null));
+
+        // When a collect version of the rule set takes effect, then the draft cannot go to approval
+        publish(pod, tenant, COLLECTS);
+        pod.identity.as(tenant, "lan", "processes:author", "processes:read");
+        refusedNaming(() -> pod.services.requestApproval(draft.ref(), draft.lockVersion(), null, null),
+                "has hit policy collect");
+        assertThat(pod.services.find(draft.ref()).orElseThrow().status()).isEqualTo("DRAFT");
+
+        // Given a compliant version again, the request goes through
+        publish(pod, tenant, guardrailYaml());
+        DefinitionVersion pending = pod.services.requestApproval(draft.ref(), draft.lockVersion(), null, null);
+        assertThat(pending.status()).isEqualTo("PENDING_APPROVAL");
+
+        // When the rule set loses allow before the approver acts, then approval is refused and nothing changes
+        publish(pod, tenant, DECIDES_WITHOUT_ALLOW);
+        pod.identity.as(tenant, "minh", "processes:approve", "processes:read");
+        refusedNaming(() -> pod.services.approve(draft.ref(), pending.lockVersion(), "ok", null),
+                "declares no output allow");
+        DefinitionVersion after = pod.services.find(draft.ref()).orElseThrow();
+        assertThat(after.status()).isEqualTo("PENDING_APPROVAL");
+        assertThat(after.lockVersion()).isEqualTo(pending.lockVersion());
+
+        // And with the compliant rule set back in effect, the second person approves
+        publish(pod, tenant, guardrailYaml());
+        pod.identity.as(tenant, "minh", "processes:approve", "processes:read");
+        assertThat(pod.services.approve(draft.ref(), pending.lockVersion(), "ok", null).status())
+                .isEqualTo("ACTIVE");
+    }
+
     // ---- PRE-062 park, run, keys ------------------------------------------------------------------------------
 
     @Test
     void PRE_062_an_agent_step_parks_an_agent_job_with_the_guard_spec_of_the_published_version() {
         TestEngine pod = replica("pod-1", assessor(answer(20, "APPROVE")));
+        publishGuardrails(pod);
         deploy(pod);
 
         String loan = apply(pod, "LOAN-2027-0901");

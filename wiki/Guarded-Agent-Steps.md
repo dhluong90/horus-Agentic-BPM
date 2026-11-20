@@ -39,7 +39,11 @@ At run time the step parks an agent job, the engine calls your adapter with no t
 | Breaks the schema again | Refused with `AGENT_SCHEMA_INVALID`, then `onViolation` |
 | Guardrail says `allow: false` | Refused with `GUARDRAIL_VIOLATION`: a four-eyes review task for the reviewer, carrying the reasons, the rule ids, the inputs and the masked answer. The starter of the instance and whoever reported the refused answer cannot take it. The reviewer's answer, checked against the schema, completes the step |
 
-Your adapter receives an `AgentInvocation`. Key the model call by `modelCallKey()` (the attempt id), so the retry after a malformed answer is a fresh generation. Key side effects outside the model by `idempotencyKey()` (the job id), which stays the same on every attempt. `StubAgentAdapter` in `process-engine-test` answers with canned outputs for tests and demos; `examples/rule-and-process` runs this step end to end (`GuardedAgentTaskIT`).
+Your adapter receives an `AgentInvocation`. Key the model call by `modelCallKey()` (the attempt id), so the retry after a malformed answer is a fresh generation. Key side effects outside the model by `idempotencyKey()` (the job id), which stays the same on every attempt. `outputSchema()` is the step's output schema without the `mask` annotations: pass it to your model's structured-output option to avoid most schema failures. The engine still checks every answer against the full schema, and your adapter never sees the guardrail.
+
+Return the answer with `AdapterResult.completed(output, labels)` to say how it was produced: `model`, `promptVersion`, `usage.inputTokens` and `usage.outputTokens` are reserved label keys, and you may add your own. Labels never carry personal data and the engine takes no decision from them.
+
+The engine builds `AgentInvocation` and may add components in a minor release, so read it through its accessors. In tests, build one with `AgentInvocations.builder()` (and a service call with `AdapterCalls.builder()`) from `process-engine-test`. `StubAgentAdapter` in `process-engine-test` answers with canned outputs for tests and demos; `examples/rule-and-process` runs this step end to end (`GuardedAgentTaskIT`).
 
 ## The problem
 
@@ -92,7 +96,7 @@ The engine's share of an agent step is the two short transactions, about 10 ms i
 
 ### A guardrail is an ordinary rule set
 
-The guardrail is a Rule Engine rule set with hit policy `first` or `unique`. It must declare the output `allow` (boolean) and may declare `reasons` (list of strings); the engine reads no other output. Deploying a process definition whose guardrail rule set is missing or breaks this contract fails with `422 GUARDRAIL_CONTRACT_INVALID`. At run time the check fails closed: a decision error counts as `allow: false` with reason `GUARDRAIL_EVALUATION_ERROR` and follows `onViolation`.
+The guardrail is a Rule Engine rule set with hit policy `first` or `unique`. It must declare the output `allow` (boolean) and may declare `reasons` (a string); the engine reads no other output. Its inputs are fields of the agent's answer, so each must be declared in the step's `outputSchema` with a compatible type. Deploying a process definition whose guardrail rule set is missing in your tenant, has no version in effect or breaks this contract fails with `422 GUARDRAIL_CONTRACT_INVALID`, naming the step and the failed check, and nothing is written. The same check runs when approval is requested and at approval, so a guardrail changed after import is caught before the process goes live. Publish the guardrail rule set before you deploy the process. At run time the check fails closed: a decision error counts as `allow: false` with reason `GUARDRAIL_EVALUATION_ERROR` and follows `onViolation`.
 
 Because it is a rule set, it has everything a rule set has:
 

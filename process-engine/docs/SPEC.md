@@ -164,9 +164,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-016 Deploy rejects an `agentTask` whose guardrail rule set breaks the guardrail contract
 - **Traces to:** `TR-AGT-01`
 - **Milestone:** M2
-- **Given:** Definition `kyc-onboarding` v1 with `agentTask` `assess-documents` and `guardrails.decision: agent-output-guardrails`. Case A: the rule set's effective version declares outputs `allow: boolean` and `reasons: list<string>` with `hitPolicy: first`. Case B: it declares `decision: string` and no `allow`. Case C: it declares `allow: boolean` with `hitPolicy: collect`. Case D: no rule set of that name exists in the tenant.
+- **Given:** Definition `kyc-onboarding` v1 with `agentTask` `assess-documents` and `guardrails.decision: agent-output-guardrails`. Case A: the rule set's effective version declares outputs `allow: boolean` and `reasons: list<string>` with `hitPolicy: first`. Case B: it declares `decision: string` and no `allow`. Case C: it has `hitPolicy: collect` (the Rule Engine makes a collected output a list, so `allow` is `list<boolean>`). Case D: no rule set of that name exists in the tenant.
 - **When:** Caller posts the definition to `POST /api/bpm/processes/v1/definitions`.
-- **Then:** Case A creates a draft (`201`, `status: DRAFT`). Cases B, C and D return `422 GUARDRAIL_CONTRACT_INVALID` naming the step id and the failed check; no `pre_definition` row is written. The same check runs again at `:request-approval` and `:approve`.
+- **Then:** Case A creates a draft (`201`, `status: DRAFT`). Cases B, C and D return `422 GUARDRAIL_CONTRACT_INVALID` naming the step id and the failed check; no `pre_definition` row is written. A rule set that reads an input the step's `outputSchema` does not declare, or declares with an incompatible type, is refused the same way, and so is a rule set published only in another tenant. The same check runs again at `:request-approval` and `:approve`, against the version in effect then; a refusal leaves the version's status and lock version unchanged.
 - **Example:** `outputs [decision: string] -> 422 GUARDRAIL_CONTRACT_INVALID at step assess-documents`.
 - **Test ID:** `PRE_016_deploy_rejects_guardrail_rule_set_breaking_contract`
 
