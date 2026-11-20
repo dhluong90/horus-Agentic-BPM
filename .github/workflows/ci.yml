@@ -365,3 +365,35 @@ jobs:
             cockpit/web/test-results/
           if-no-files-found: ignore
           retention-days: 14
+
+  migration-order:
+    # #296: the engines run Flyway with out-of-order migrations off, so an engine migration numbered at or
+    # below the highest on main, a reused or retired number, or an edited released migration would stop
+    # an adopter's host from starting. Reads git history only; no build.
+    name: Migration order
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          # Full history, so the merge base of the change and main is known.
+          fetch-depth: 0
+
+      - name: Tests of the check (fixture repositories)
+        run: python3 tools/test_check_migration_order.py -v
+
+      # A pull request is compared with main as fetched now, not as it was when the branch started. A push
+      # to main is compared with the commit before the push, which catches a pull request that sat green
+      # while another migration merged. Any other run compares main with itself.
+      - name: Engine migrations in order
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base=origin/main
+          if [ "$EVENT" = push ] && [ -n "$BEFORE" ] && ! echo "$BEFORE" | grep -qE '^0+$'; then
+            base="$BEFORE"
+          fi
+          echo "Comparing HEAD with $base"
+          python3 tools/check-migration-order.py --base "$base" --head HEAD
