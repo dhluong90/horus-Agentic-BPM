@@ -6,7 +6,8 @@ info:
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
     export, replace a draft, diff two versions, request publication, approve, reject, withdraw, retire, history,
-    simulate a version over sample inputs, evaluate (at the host clock, at a chosen clock, or pinned to a version),
+    simulate a version over sample inputs or over the logged decisions of a period, evaluate (at the host clock, at a
+    chosen clock, or pinned to a version),
     replay of a logged decision, and decision-log reads (one decision, one rule set's decisions in a period, and the
     search by a masked input's plain value).
     The remaining endpoints of
@@ -796,6 +797,83 @@ paths:
                     changed: true
                     simulated: { outcome: MATCHED, matchedRuleIds: [R3], outputs: { fee: { currency: VND, amount: 30000 } } }
                     baseline: { outcome: MATCHED, matchedRuleIds: [R3], outputs: { fee: { currency: VND, amount: 50000 } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:simulate-history:
+    post:
+      tags: [rule-sets]
+      operationId: simulateHistory
+      summary: Replay logged decisions of a period through a version, without logging anything
+      description: |
+        Permissions `rules:simulate` and `rules:log:read`, both checked before the body is read: the
+        answer is built from logged inputs (`RLE-015`). Reads the caller's tenant's decisions of the
+        rule set made in `[from, to)`, newest first, at most `limit` of them, and evaluates each one
+        twice at its logged clock: with the version it was made with, loaded by number as
+        `POST /decisions/{decisionId}:replay` does, and with this version (normally a `DRAFT`, or a
+        version `PENDING_APPROVAL` an approver is looking at). `changed` follows the rule of
+        `:simulate`: the outcome kind, an output value or the failure code differs. A decision whose
+        masked input had a value is not replayable: it is listed with `maskedInputs` naming the inputs,
+        never their values, and the run goes on. All the decisions of one run share one regular
+        expression read budget (`evaluation.regex-max-reads-per-request`); once it is spent, later
+        items fail with `REGEX_TIMEOUT: not evaluated`.
+
+        The period is at most `query.max-range` (31 days) and the run at most `simulation.max-inputs`
+        (1,000) decisions; both may be lowered by the host. Outside them is `400 QUERY_INVALID`.
+        `truncated` is true when the period held more decisions than were replayed. Writes nothing (no
+        decision row, no idempotency record, no event), so it takes no `Idempotency-Key`. A version of
+        another tenant is `404 VERSION_NOT_FOUND` and no decision is read. The response holds no logged
+        input. Members other than `from`, `to` and `limit` are ignored, including `tenantId`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HistorySimulationRequest'
+            example:
+              from: '2026-11-01T00:00:00Z'
+              to: '2026-12-01T00:00:00Z'
+              limit: 100
+      responses:
+        '200':
+          description: One item per logged decision, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistorySimulationResult'
+              example:
+                ruleSet: card-fee
+                version: 2
+                status: DRAFT
+                from: '2026-11-01T00:00:00Z'
+                to: '2026-12-01T00:00:00Z'
+                decisionCount: 2
+                replayedCount: 1
+                changedCount: 1
+                notReplayableCount: 1
+                truncated: false
+                results:
+                  - decisionId: 01KB2R6Q3C0000000000000001
+                    loggedVersion: 1
+                    evalClock: '2026-11-29T22:00:00Z'
+                    changed: true
+                    maskedInputs: []
+                    simulated: { outcome: MATCHED, matchedRuleIds: [R2], outputs: { fee: { currency: VND, amount: 30000 } } }
+                    logged: { outcome: MATCHED, matchedRuleIds: [R2], outputs: { fee: { currency: VND, amount: 50000 } } }
+                  - decisionId: 01KB2R6Q3C0000000000000000
+                    loggedVersion: 1
+                    evalClock: '2026-11-29T15:00:00Z'
+                    changed: false
+                    maskedInputs: [nationalId]
+                    simulated: null
+                    logged: null
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -1911,6 +1989,83 @@ components:
         simulated:
           $ref: '#/components/schemas/SimulatedOutcome'
         baseline:
+          oneOf:
+            - $ref: '#/components/schemas/SimulatedOutcome'
+            - type: 'null'
+    HistorySimulationRequest:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          format: date-time
+          description: First instant of the period, inclusive, ISO 8601
+        to:
+          type: string
+          format: date-time
+          description: End of the period, exclusive; after `from` and at most `query.max-range` (31 days) later
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: The most decisions to replay, newest first, 1 to `simulation.max-inputs`; default that maximum
+    HistorySimulationResult:
+      type: object
+      required: [ruleSet, version, status, from, to, decisionCount, replayedCount, changedCount, notReplayableCount,
+        truncated, results]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        status:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        decisionCount:
+          type: integer
+          description: How many logged decisions were read, the length of `results`
+        replayedCount:
+          type: integer
+          description: How many were evaluated through both versions
+        changedCount:
+          type: integer
+          description: How many results have `changed` set
+        notReplayableCount:
+          type: integer
+          description: How many had a masked input with a value, which the log holds only as a fingerprint
+        truncated:
+          type: boolean
+          description: True when the period held more decisions than `limit`; the newest were replayed
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistorySimulatedDecision'
+    HistorySimulatedDecision:
+      type: object
+      required: [decisionId, loggedVersion, evalClock, changed, maskedInputs, simulated, logged]
+      properties:
+        decisionId: { type: string }
+        loggedVersion:
+          type: integer
+          description: The version the decision was made with
+        evalClock:
+          type: string
+          format: date-time
+          description: The logged clock both versions were evaluated at
+        changed:
+          type: boolean
+          description: The outcome kind, an output value or the failure code differs; false when not replayable
+        maskedInputs:
+          type: array
+          items: { type: string }
+          description: Masked inputs that had a value, by name only; empty when the decision was replayed
+        simulated:
+          description: What this version decides; null when the decision is not replayable
+          oneOf:
+            - $ref: '#/components/schemas/SimulatedOutcome'
+            - type: 'null'
+        logged:
+          description: What the logged version decides again, which is what was decided; null when not replayable
           oneOf:
             - $ref: '#/components/schemas/SimulatedOutcome'
             - type: 'null'
