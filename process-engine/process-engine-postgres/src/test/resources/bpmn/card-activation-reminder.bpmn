@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A debit card was issued and not activated: three days later the customer gets a reminder and the contact centre
+     a follow-up call. The reminder must be sent once, whichever copy of the host fires the timer. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_card-activation-reminder"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="card-activation-reminder" name="Card activation reminder" isExecutable="true">
+    <bpmn:startEvent id="start" name="Card issued"/>
+    <bpmn:intermediateCatchEvent id="wait-activation" name="Three days without activation">
+      <bpmn:timerEventDefinition id="wait-activation-timer">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">P3D</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:serviceTask id="send-reminder" name="Send activation reminder" horus:handler="cardReminders.send" horus:resultVariable="reminder">
+      <bpmn:extensionElements>
+        <horus:input name="cardId" value="${instance.cardId}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="call-customer" name="Call the customer" horus:assignee="role:CONTACT_CENTRE" horus:resultVariable="call"/>
+    <bpmn:endEvent id="end" name="Followed up"/>
+    <bpmn:sequenceFlow id="start__wait" sourceRef="start" targetRef="wait-activation"/>
+    <bpmn:sequenceFlow id="wait__remind" sourceRef="wait-activation" targetRef="send-reminder"/>
+    <bpmn:sequenceFlow id="remind__call" sourceRef="send-reminder" targetRef="call-customer"/>
+    <bpmn:sequenceFlow id="call__end" sourceRef="call-customer" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

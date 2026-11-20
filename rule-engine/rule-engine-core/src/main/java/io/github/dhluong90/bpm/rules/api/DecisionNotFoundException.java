@@ -1,9 +1,6 @@
 package io.github.dhluong90.bpm.rules.api;
 
-/**
- * {@code 404 DECISION_NOT_FOUND}: no logged decision with that id in the caller's tenant. A decision of another
- * tenant answers the same, so ids do not leak.
- */
+/** No decision with this id in the caller's tenant ({@code 404 DECISION_NOT_FOUND}). */
 public final class DecisionNotFoundException extends HorusBpmException {
 
     private static final long serialVersionUID = 1L;
@@ -11,9 +8,9 @@ public final class DecisionNotFoundException extends HorusBpmException {
     /**
      * Creates the exception.
      *
-     * @param decisionId the requested id
+     * @param decisionId the id asked for
      */
     public DecisionNotFoundException(String decisionId) {
-        super("DECISION_NOT_FOUND", "No decision " + decisionId);
+        super("DECISION_NOT_FOUND", "Decision " + decisionId + " not found");
     }
 }

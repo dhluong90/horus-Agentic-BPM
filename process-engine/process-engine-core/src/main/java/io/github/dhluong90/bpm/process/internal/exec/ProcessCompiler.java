@@ -26,9 +26,9 @@ import java.util.stream.Collectors;
 /**
  * Validates a process as an executable graph and compiles it: one none start event, at least one end event, flows
  * between existing nodes, every node reachable from the start and able to reach an end, default flows that are
- * outgoing flows of their gateway, conditions on every non-default flow of a diverging exclusive gateway, a
- * registered behaviour for every node and its event definition ({@code BPMN_NOT_EXECUTABLE}), a result variable on
- * every user task, and every compile step of the registry.
+ * outgoing flows of their gateway, conditions on every non-default flow of a diverging exclusive gateway and on no
+ * outgoing flow of a parallel gateway, a registered behaviour for every node and its event definition
+ * ({@code BPMN_NOT_EXECUTABLE}), a result variable on every user task, and every compile step of the registry.
  */
 public final class ProcessCompiler {
 
@@ -111,7 +111,9 @@ public final class ProcessCompiler {
                 }
                 if (out.size() > 1) {
                     for (SequenceFlow f : out) {
-                        if (!f.id().equals(gateway.defaultFlow()) && f.conditionExpression() == null) {
+                        // A condition with no text is no condition: the kernel must never evaluate an empty one.
+                        if (!f.id().equals(gateway.defaultFlow()) && (f.conditionExpression() == null
+                                || f.conditionExpression().text() == null)) {
                             problems.add(DefinitionProblem.of("CONDITION_MISSING", "Every non-default outgoing flow of"
                                     + " a diverging exclusive gateway needs a condition", f.id()));
                         }
@@ -121,6 +123,13 @@ public final class ProcessCompiler {
             if (node instanceof UserTask task && task.extensions().first(ResultVariable.class).isEmpty()) {
                 problems.add(DefinitionProblem.of("RESULT_VARIABLE_REQUIRED", "A userTask needs horus:resultVariable, so"
                         + " a completion result can never overwrite other process variables", node.id()));
+            }
+            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway) {
+                // BPMN ignores conditions on a parallel gateway's outgoing flows; refusing them avoids a silent surprise.
+                out.stream().filter(f -> f.conditionExpression() != null)
+                        .forEach(f -> problems.add(DefinitionProblem.of("CONDITION_ON_PARALLEL_FLOW", "A parallel"
+                                + " gateway takes every outgoing flow; remove the condition or use an exclusive gateway",
+                                f.id())));
             }
             if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event) {
                 // A process carries no shared definitions, so every reference is unresolved here.

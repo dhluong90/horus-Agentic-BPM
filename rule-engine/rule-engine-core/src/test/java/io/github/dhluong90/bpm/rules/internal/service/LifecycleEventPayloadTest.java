@@ -88,9 +88,9 @@ class LifecycleEventPayloadTest {
         // When minh approves both on 15 Dec
         clock.set(DEC_15);
         caller.become("bank-a", "minh", Set.of("rules:read", "rules:approve"));
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
         JsonNode atApproval = lastEvent("rules.version.published.v1");
-        versions.approve("fx-margin", 1, WriteOptions.none());
+        versions.approve("fx-margin", 1, new WriteOptions(null, 1L, null));
         JsonNode scheduled = lastEvent("rules.version.published.v1");
 
         // Then the event names what was approved, from when, and both people of the four eyes
@@ -137,7 +137,7 @@ class LifecycleEventPayloadTest {
             }
             if (!types.isEmpty()) {
                 String actual = value.isNull() ? "null" : value.isString() ? "string" : value.isIntegralNumber() ? "integer"
-                        : value.isBoolean() ? "boolean" : value.isObject() ? "object" : "other";
+                        : value.isBoolean() ? "boolean" : value.isObject() ? "object" : value.isArray() ? "array" : "other";
                 assertThat(types).as("%s of %s", property.getKey(), schemaFile).contains(actual);
             }
             if (rule.has("pattern") && value.isString()) {

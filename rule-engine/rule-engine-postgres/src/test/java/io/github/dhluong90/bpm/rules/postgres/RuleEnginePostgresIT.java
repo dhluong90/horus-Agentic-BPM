@@ -58,7 +58,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class RuleEnginePostgresIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant NOW = Instant.parse("2026-12-15T02:00:00Z");
     private static final AtomicInteger DATABASES = new AtomicInteger();
@@ -221,12 +221,12 @@ class RuleEnginePostgresIT {
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
 
         // When / Then
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
         assertThat(engines.versionService().find("card-fee", 1, false).orElseThrow().status())
                 .isEqualTo(VersionStatus.PENDING_APPROVAL);
         caller.as("bank-a", "bob");
-        assertThat(engines.versionService().approve("card-fee", 1, WriteOptions.none()).status())
+        assertThat(engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)).status())
                 .isEqualTo(VersionStatus.PUBLISHED);
     }
 
@@ -300,7 +300,7 @@ class RuleEnginePostgresIT {
         engines.versionService().importRuleSet(ImportRequest.yaml(dated));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.as("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
 
         // Then the row holds the date, canonical_json does not, and the hash is the undated card-fee hash
         JdbcClient sql = JdbcClient.create(db);
@@ -340,7 +340,7 @@ class RuleEnginePostgresIT {
         String hash = engines.versionService().importRuleSet(ImportRequest.yaml(cardFee())).canonicalHash();
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.as("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
 
         JdbcClient sql = JdbcClient.create(db);
         assertThat(sql.sql("""
@@ -361,7 +361,7 @@ class RuleEnginePostgresIT {
         engines.versionService().importRuleSet(ImportRequest.yaml(resource(resource)));
         engines.versionService().requestPublish(name, 1, WriteOptions.none());
         caller.as("bank-a", "bob");
-        engines.versionService().approve(name, 1, WriteOptions.none());
+        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
     }
 
     private void publishCardFee() {
@@ -369,7 +369,7 @@ class RuleEnginePostgresIT {
         engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.as("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
     }
 
     private long decisionRows() {

@@ -80,7 +80,7 @@ class EffectiveDatesAndReplayIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @org.springframework.test.context.DynamicPropertySource
     static void database(org.springframework.test.context.DynamicPropertyRegistry registry) {
@@ -125,11 +125,13 @@ class EffectiveDatesAndReplayIT {
     void publish(String tenant, String ruleSet, byte[] document, int version, Instant approvedAt) throws Exception {
         String path = version == 1 ? "/rule-sets" : "/rule-sets/" + ruleSet + "/versions";
         assertThat(send(tenant, "lan", path, document, "application/yaml").status()).isEqualTo(201);
-        assertThat(send(tenant, "lan", "/rule-sets/" + ruleSet + "/versions/" + version + ":request-publish", null, null)
-                .status()).isEqualTo(200);
+        Reply requested = send(tenant, "lan", "/rule-sets/" + ruleSet + "/versions/" + version + ":request-publish",
+                null, null);
+        assertThat(requested.status()).isEqualTo(200);
         clock.set(approvedAt);
-        assertThat(send(tenant, "minh", "/rule-sets/" + ruleSet + "/versions/" + version + ":approve", null, null)
-                .status()).isEqualTo(200);
+        // An approval names the lock version it was decided on (If-Match).
+        assertThat(send("POST", tenant, "minh", "/rule-sets/" + ruleSet + "/versions/" + version + ":approve", null, null,
+                "\"" + requested.json().path("lockVersion").asLong() + "\"").status()).isEqualTo(200);
     }
 
     @Test
@@ -186,6 +188,42 @@ class EffectiveDatesAndReplayIT {
         Reply hostClock = send(t, "teller", "/decisions/card-fee:evaluate", body(STANDARD + "}"), "application/json");
         assertThat(hostClock.json().path("version").asInt()).isEqualTo(2);
         assertThat(hostClock.json().path("clockChosen").asBoolean()).isFalse();
+    }
+
+    @Test
+    void RLE_008_pinned_and_chosen_clock_decisions_are_marked_when_the_log_is_read() throws Exception {
+        // Given card-fee v1 from 1 Nov, and on 26 Nov three decisions: at the host clock, back-dated to 20 Nov, and
+        // pinned to version 1
+        String t = "bank-replay-log";
+        clock.set(Instant.parse("2026-10-20T00:00:00Z"));
+        publish(t, "card-fee", cardFee("2026-11-01T00:00:00Z", 50_000), 1, Instant.parse("2026-10-20T00:00:00Z"));
+        clock.set(Instant.parse("2026-11-26T09:00:00Z"));
+        String normal = send(t, "teller", "/decisions/card-fee:evaluate", body(STANDARD + "}"), "application/json")
+                .json().path("decisionId").asString();
+        String backDated = send(t, "pricing", "/decisions/card-fee:evaluate",
+                body(STANDARD + ",\"clock\":\"2026-11-20T10:00:00Z\"}"), "application/json").json().path("decisionId")
+                .asString();
+        String pinned = send(t, "pricing", "/decisions/card-fee/versions/1:evaluate", body(STANDARD + "}"),
+                "application/json").json().path("decisionId").asString();
+
+        // When the auditor reads each one through GET /decisions/{id}
+        Reply readNormal = send("GET", t, "thu", "/decisions/" + normal, null, null, null);
+        Reply readBackDated = send("GET", t, "thu", "/decisions/" + backDated, null, null, null);
+        Reply readPinned = send("GET", t, "thu", "/decisions/" + pinned, null, null, null);
+
+        // Then each read says which kind of decision it was
+        for (Reply read : List.of(readNormal, readBackDated, readPinned)) {
+            assertThat(read.status()).as(read.body()).isEqualTo(200);
+            assertThat(read.json().path("evaluatedAt").asString()).isEqualTo("2026-11-26T09:00:00Z");
+        }
+        assertThat(readNormal.json().path("evalClock").asString()).isEqualTo("2026-11-26T09:00:00Z");
+        assertThat(readNormal.json().path("clockChosen").asBoolean()).isFalse();
+        assertThat(readNormal.json().path("pinned").asBoolean()).isFalse();
+        assertThat(readBackDated.json().path("evalClock").asString()).isEqualTo("2026-11-20T10:00:00Z");
+        assertThat(readBackDated.json().path("clockChosen").asBoolean()).as("back-dated decision is flagged").isTrue();
+        assertThat(readBackDated.json().path("pinned").asBoolean()).isFalse();
+        assertThat(readPinned.json().path("pinned").asBoolean()).as("pinned decision is flagged").isTrue();
+        assertThat(readPinned.json().path("clockChosen").asBoolean()).isFalse();
     }
 
     @Test
@@ -273,12 +311,21 @@ class EffectiveDatesAndReplayIT {
     }
 
     Reply send(String tenant, String user, String path, byte[] body, String contentType) throws Exception {
+        return send("POST", tenant, user, path, body, contentType, null);
+    }
+
+    Reply send(String method, String tenant, String user, String path, byte[] body, String contentType, String ifMatch)
+            throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
                         + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", TestTokens.bearerFor(user, tenant, PERMISSIONS.get(user)))
-                .POST(body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
+                .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofByteArray(body));
         if (contentType != null) {
             request.header("Content-Type", contentType);
+        }
+        if (ifMatch != null) {
+            request.header("If-Match", ifMatch);
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""), response.body());

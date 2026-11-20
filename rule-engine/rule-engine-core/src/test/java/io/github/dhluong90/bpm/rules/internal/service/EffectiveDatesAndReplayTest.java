@@ -67,7 +67,11 @@ class EffectiveDatesAndReplayTest {
     final InMemoryStores stores = new InMemoryStores();
     final TestCaller caller = new TestCaller("bank-a", "lan");
     final RuleEngines engines = RuleEngines.create(
-            new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults()), stores, stores, stores);
+            new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults(),
+                    // A masked input is logged as its keyed fingerprint, so the tenant needs a key (RLE-012).
+                    io.github.dhluong90.bpm.rules.spi.MaskingPolicy.withKey(io.github.dhluong90.bpm.rules.api.MaskingKey
+                            .of("replay-test-key-of-32-bytes-long".getBytes(StandardCharsets.UTF_8)))),
+            stores, stores, stores);
     final VersionService versions = engines.versionService();
     final RuleEngine engine = engines.ruleEngine();
 
@@ -111,10 +115,10 @@ class EffectiveDatesAndReplayTest {
         int number = versions.findRuleSet(ruleSet).isPresent()
                 ? versions.importVersion(ruleSet, ImportRequest.yaml(document)).version()
                 : versions.importRuleSet(ImportRequest.yaml(document)).version();
-        versions.requestPublish(ruleSet, number, WriteOptions.none());
+        long lock = versions.requestPublish(ruleSet, number, WriteOptions.none()).lockVersion();
         clock.set(approvedAt);
         caller.become("bank-a", "minh", APPROVER);
-        versions.approve(ruleSet, number, WriteOptions.none());
+        versions.approve(ruleSet, number, new WriteOptions(null, lock, null));
     }
 
     /** v1 from 1 Nov at 50,000 VND, approved 20 Oct; v2 from 1 Dec at 30,000 VND, approved 25 Nov. */
@@ -227,9 +231,9 @@ class EffectiveDatesAndReplayTest {
         givenTheTwoCardFees();
         caller.become("bank-b", "lan", AUTHOR);
         versions.importRuleSet(ImportRequest.yaml(cardFee("2026-11-01T00:00:00Z", "45000 VND")));
-        versions.requestPublish("card-fee", 1, WriteOptions.none());
+        long lock = versions.requestPublish("card-fee", 1, WriteOptions.none()).lockVersion();
         caller.become("bank-b", "minh", APPROVER);
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, lock, null));
         caller.become("bank-b", "pricing", PRICING);
         String bankB = engine.evaluate(DecisionRequest.of("card-fee", STANDARD).withClock(NOV_20)).decisionId();
         int rows = stores.decisions.size();

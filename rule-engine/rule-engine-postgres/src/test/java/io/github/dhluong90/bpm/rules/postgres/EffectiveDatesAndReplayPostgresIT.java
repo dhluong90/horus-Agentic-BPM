@@ -42,7 +42,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class EffectiveDatesAndReplayPostgresIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant NOV_20 = Instant.parse("2026-11-20T10:00:00Z");
     static final Instant DEC_01 = Instant.parse("2026-12-01T00:00:00Z");
@@ -105,10 +105,10 @@ class EffectiveDatesAndReplayPostgresIT {
         int number = podA.versionService().findRuleSet("card-fee").isPresent()
                 ? podA.versionService().importVersion("card-fee", ImportRequest.yaml(document)).version()
                 : podA.versionService().importRuleSet(ImportRequest.yaml(document)).version();
-        podA.versionService().requestPublish("card-fee", number, WriteOptions.none());
+        long lock = podA.versionService().requestPublish("card-fee", number, WriteOptions.none()).lockVersion();
         clock.set(approvedAt);
         caller.as(tenant, "minh", APPROVER);
-        podA.versionService().approve("card-fee", number, WriteOptions.none());
+        podA.versionService().approve("card-fee", number, new WriteOptions(null, lock, null));
     }
 
     static final DecisionInput STANDARD = DecisionInput.of(Map.of("tier", "STANDARD",
@@ -165,6 +165,16 @@ class EffectiveDatesAndReplayPostgresIT {
         assertThat(pinnedReplay.pinned()).isTrue();
         assertThat(pinnedReplay.clockChosen()).isTrue();
         assertThat(replayed.pinned()).isFalse();
+        // and the decision-log read of the other pod shows the same marks, so neither looks like a normal decision
+        io.github.dhluong90.bpm.rules.api.LoggedDecision readPinned = podB.decisionLog().get(pinned.decisionId());
+        io.github.dhluong90.bpm.rules.api.LoggedDecision readNovember = podB.decisionLog().get(november.decisionId());
+        assertThat(readPinned.pinned()).isTrue();
+        assertThat(readPinned.clockChosen()).isTrue();
+        assertThat(readPinned.evalClock()).isEqualTo(NOV_20);
+        assertThat(readPinned.evaluatedAt()).isEqualTo(DEC_05);
+        assertThat(readNovember.pinned()).isFalse();
+        assertThat(readNovember.clockChosen()).isTrue();
+        assertThat(readNovember.evalClock()).isEqualTo(NOV_20);
         assertThat(count("rle_decision_outbox")).isEqualTo(count("rle_version") * 3); // lifecycle events only
     }
 
@@ -206,7 +216,7 @@ class EffectiveDatesAndReplayPostgresIT {
         DecisionResult november = podA.ruleEngine().evaluate(DecisionRequest.of("card-fee", STANDARD).withClock(NOV_20));
         caller.as("bank-a", "lan", AUTHOR);
         podA.versionService().importVersion("card-fee", ImportRequest.yaml(cardFee("2026-11-02T00:00:00Z", "10000 VND")));
-        podA.versionService().requestPublish("card-fee", 2, WriteOptions.none());
+        long lock = podA.versionService().requestPublish("card-fee", 2, WriteOptions.none()).lockVersion();
         clock.set(DEC_05);
 
         // When pod A approves v2 (in force at once) while pod B replays the November decision twenty times
@@ -216,7 +226,7 @@ class EffectiveDatesAndReplayPostgresIT {
             Future<?> approve = pool.submit(() -> {
                 caller.asThread("bank-a", "minh", APPROVER);
                 together.await();
-                podA.versionService().approve("card-fee", 2, WriteOptions.none());
+                podA.versionService().approve("card-fee", 2, new WriteOptions(null, lock, null));
                 return null;
             });
             Future<List<DecisionResult>> replay = pool.submit(() -> {
@@ -262,9 +272,10 @@ class EffectiveDatesAndReplayPostgresIT {
             int number = podA.versionService().findRuleSet("same-day-cutoff").isPresent()
                     ? podA.versionService().importVersion("same-day-cutoff", ImportRequest.yaml(document)).version()
                     : podA.versionService().importRuleSet(ImportRequest.yaml(document)).version();
-            podA.versionService().requestPublish("same-day-cutoff", number, WriteOptions.none());
+            long lock = podA.versionService().requestPublish("same-day-cutoff", number, WriteOptions.none())
+                    .lockVersion();
             caller.as("bank-a", "minh", APPROVER);
-            podA.versionService().approve("same-day-cutoff", number, WriteOptions.none());
+            podA.versionService().approve("same-day-cutoff", number, new WriteOptions(null, lock, null));
         }
         caller.as("bank-a", "pricing", PRICING);
         Instant at = Instant.parse("2027-01-15T18:30:00Z");

@@ -9,6 +9,7 @@ import io.github.dhluong90.bpm.rules.api.UnauthenticatedException;
 import io.github.dhluong90.bpm.rules.internal.store.IdempotencyStore;
 import io.github.dhluong90.bpm.rules.internal.store.TransactionRunner;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
+import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
 import java.time.Clock;
 import java.util.Objects;
@@ -24,10 +25,11 @@ import java.util.function.Supplier;
  * @param transactions joins or opens a transaction
  * @param idempotency idempotency records
  * @param settings validated engine settings
+ * @param masking the masking key and default per tenant (RLE-012)
  */
 public record EngineContext(
         TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
-        IdempotencyStore idempotency, EngineSettings settings) {
+        IdempotencyStore idempotency, EngineSettings settings, MaskingPolicy masking) {
 
     /** Longest idempotency key accepted. */
     static final int MAX_KEY_LENGTH = 200;
@@ -39,6 +41,22 @@ public record EngineContext(
         Objects.requireNonNull(transactions, "transactions must not be null");
         Objects.requireNonNull(idempotency, "idempotency must not be null");
         Objects.requireNonNull(settings, "settings must not be null");
+        Objects.requireNonNull(masking, "masking must not be null");
+    }
+
+    /**
+     * Creates a context with no masking key: a decision that would mask an input fails closed.
+     *
+     * @param tenants see the record
+     * @param callers see the record
+     * @param clock see the record
+     * @param transactions see the record
+     * @param idempotency see the record
+     * @param settings see the record
+     */
+    public EngineContext(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            IdempotencyStore idempotency, EngineSettings settings) {
+        this(tenants, callers, clock, transactions, idempotency, settings, MaskingPolicy.none());
     }
 
     String tenant() {

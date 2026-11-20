@@ -19,6 +19,9 @@ public final class VersionActions {
     /** {@code :reject}. */
     public static final String REJECT = "reject";
 
+    /** {@code :withdraw}: the requester takes their own publication request back (PD-089). */
+    public static final String WITHDRAW = "withdraw";
+
     private VersionActions() {
     }
 
@@ -30,7 +33,8 @@ public final class VersionActions {
      * @param requestedBy the publication requester, or null
      * @param caller the caller's id
      * @param permissions the caller's {@code rules:*} permissions
-     * @return the actions in a fixed order: {@code request-publish}, {@code approve}, {@code reject}
+     * @return the actions in a fixed order: {@code request-publish}, {@code approve}, {@code reject},
+     *     {@code withdraw}
      */
     public static List<String> allowed(VersionStatus status, String createdBy, String requestedBy, String caller,
             Set<String> permissions) {
@@ -44,11 +48,14 @@ public final class VersionActions {
             case PENDING_APPROVAL -> {
                 if (permissions.contains(Permissions.APPROVE) && caller != null && !caller.equals(requestedBy)) {
                     // Four eyes: neither the requester nor the author may approve. The requester may not reject
-                    // either; they take the request back with :withdraw (PD-089), which arrives with RLE-046.
+                    // either; they take the request back with :withdraw (PD-089).
                     if (!caller.equals(createdBy)) {
                         actions.add(APPROVE);
                     }
                     actions.add(REJECT);
+                }
+                if (permissions.contains(Permissions.AUTHOR) && caller != null && caller.equals(requestedBy)) {
+                    actions.add(WITHDRAW);
                 }
             }
             case PUBLISHED, RETIRED -> {
@@ -61,7 +68,7 @@ public final class VersionActions {
     /** The permission strings of ADR-0010 that decide lifecycle actions. */
     public static final class Permissions {
 
-        /** Import and request publication. */
+        /** Import, request publication and withdraw one's own request. */
         public static final String AUTHOR = "rules:author";
 
         /** Approve and reject. */
