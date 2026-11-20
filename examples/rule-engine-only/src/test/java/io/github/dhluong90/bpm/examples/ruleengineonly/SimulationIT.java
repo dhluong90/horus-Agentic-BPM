@@ -141,7 +141,9 @@ class SimulationIT {
         assertThat(refused.status()).isEqualTo(403);
         assertThat(refused.contentType()).startsWith("application/problem+json");
         assertThat(refused.json().path("code").asString()).isEqualTo("PERMISSION_DENIED");
-        assertThat(refused.body()).doesNotContain("R3", "30000", "50000");
+        // The random correlation id may contain "R3", so it is left out of the check.
+        assertThat(refused.body().replace(refused.json().path("correlationId").asString(), ""))
+                .doesNotContain("R3", "30000", "50000");
         assertThat(decisionRows()).isEqualTo(decisions);
     }
 
