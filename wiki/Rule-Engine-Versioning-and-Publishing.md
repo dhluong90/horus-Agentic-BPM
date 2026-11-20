@@ -29,6 +29,8 @@ From step 6 the new version is effective immediately, unless it carries a future
 
 To reject instead of approve: `POST .../versions/3:reject` with `{ "reason": "..." }`; the reason is required. The version returns to draft and the reason stays in its history (`GET .../versions/3/history`). The requester cannot reject their own request (`403 SELF_APPROVAL_FORBIDDEN`); they take it back with `:withdraw`, so the history keeps "the author took it back" apart from "an approver refused it" (PD-089).
 
+To take back your own request: `POST .../versions/3:withdraw` with `Idempotency-Key`, `If-Match` set to the version's `ETag`, and optionally `{ "reason": "Wrong fee for GOLD" }`. Only the person who requested publication can withdraw, and they need `rules:author`; anyone else, an approver included, gets `403 PERMISSION_DENIED`. The version returns to draft, nothing is published, the version in effect does not change, and the history shows `WITHDRAWN` with who and why. Edit the draft and request publication again to start a new approval. In the cockpit the requester sees Withdraw on their own pending version and never Approve or Reject.
+
 ## Schedule a change for a date
 
 Set `effectiveFrom` in the document, or in the `:request-publish` body, before requesting publication:

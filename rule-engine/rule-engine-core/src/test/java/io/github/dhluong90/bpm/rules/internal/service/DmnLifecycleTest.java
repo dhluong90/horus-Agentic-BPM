@@ -52,12 +52,12 @@ class DmnLifecycleTest {
         assertThat(stored.sourceFormat()).isEqualTo(SourceFormat.DMN_XML);
         assertThat(stored.sourceDocument().getBytes(StandardCharsets.UTF_8)).isEqualTo(file);
         assertThat(stored.sourceHash()).isEqualTo(Hashes.sha256(file));
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
 
         // When bob approves and a teller evaluates RLE-001's inputs
         caller.become("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
         caller.become("bank-a", "teller-01");
         DecisionResult result = engines.ruleEngine().evaluate("card-fee", DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5)));
 
@@ -149,7 +149,7 @@ class DmnLifecycleTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
         var stored = stores.versions.getFirst();
         stores.versions.set(0, new io.github.dhluong90.bpm.rules.internal.store.StoredVersion(stored.tenantId(), stored.id(),
                 stored.ruleSetId(), stored.ruleSet(), stored.version(), stored.status(), stored.hitPolicy(),

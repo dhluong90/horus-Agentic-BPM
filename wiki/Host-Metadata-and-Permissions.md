@@ -66,7 +66,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
   "schemaVersion": 1,
   "hostId": "rule-engine-only",
   "modules": [
-    { "module": "rules", "engineVersion": "0.1.0-SNAPSHOT", "apiVersion": "v1", "features": [] }
+    { "module": "rules", "engineVersion": "0.1.0", "apiVersion": "v1", "features": [] }
   ],
   "tenancy": { "switching": false },
   "limits": { "maxPageSize": 200 }
@@ -123,7 +123,7 @@ horus.bpm.rules.security.role-permissions:
   ROLE_PRICING_APPROVER: [rules:read, rules:approve]
 ```
 
-Only the permissions of the engines installed in the host are ever listed: `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read` for the Rule Engine. A misspelt authority (`rules:delete`), a process permission on a host without the Process Engine, or an OAuth2 scope never appears. A role mapping that grants an unknown permission, such as `rules:aprove`, stops the host at start-up with a message naming it.
+Only the permissions of the engines installed in the host are ever listed: `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read` and `rules:pin` for the Rule Engine, and the `processes:*` permissions of [[Process Engine Overview]], `processes:cancel` included, for the Process Engine. A misspelt authority (`rules:delete`), a process permission on a host without the Process Engine, or an OAuth2 scope never appears. A role mapping that grants an unknown permission, such as `rules:aprove`, stops the host at start-up with a message naming it.
 
 `/me` and the engine endpoints apply the mapping in one place, described next.
 

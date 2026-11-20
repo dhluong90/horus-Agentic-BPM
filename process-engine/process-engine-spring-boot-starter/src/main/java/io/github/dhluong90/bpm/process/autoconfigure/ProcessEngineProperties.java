@@ -20,6 +20,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param security mapping of the host's roles to engine permissions
  * @param handlers local step settings
  * @param jobs timer and job settings
+ * @param query read limits of the list endpoints
+ * @param lifecycle instance lifecycle settings
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -29,7 +31,9 @@ public record ProcessEngineProperties(
         @DefaultValue("PT24H") Duration idempotencyRetention,
         @DefaultValue Security security,
         @DefaultValue Handlers handlers,
-        @DefaultValue Jobs jobs) {
+        @DefaultValue Jobs jobs,
+        @DefaultValue Query query,
+        @DefaultValue Lifecycle lifecycle) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -130,6 +134,35 @@ public record ProcessEngineProperties(
     }
 
     /**
+     * @param maxPageSize most items per list page; may be lowered, never raised
+     * @param maxRange longest start-time range of a list query; may be lowered, never raised
+     */
+    public record Query(@DefaultValue("200") int maxPageSize, @DefaultValue("P31D") Duration maxRange) {
+        public Query {
+            if (maxPageSize < 1 || maxPageSize > EngineDefaults.MAX_PAGE_SIZE) {
+                throw new IllegalArgumentException("horus.bpm.processes.query.max-page-size must be 1 to "
+                        + EngineDefaults.MAX_PAGE_SIZE + " (it may be lowered, never raised)");
+            }
+            if (maxRange.isNegative() || maxRange.isZero() || maxRange.compareTo(EngineDefaults.MAX_RANGE) > 0) {
+                throw new IllegalArgumentException("horus.bpm.processes.query.max-range must be positive and at most "
+                        + EngineDefaults.MAX_RANGE + " (it may be lowered, never raised)");
+            }
+        }
+    }
+
+    /**
+     * @param reasonMaxLength longest reason a cancellation accepts (PD-103); may be lowered, never raised
+     */
+    public record Lifecycle(@DefaultValue("2000") int reasonMaxLength) {
+        public Lifecycle {
+            if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.MAX_REASON_LENGTH) {
+                throw new IllegalArgumentException("horus.bpm.processes.lifecycle.reason-max-length must be 1 to "
+                        + EngineDefaults.MAX_REASON_LENGTH + " (it may be lowered, never raised)");
+            }
+        }
+    }
+
+    /**
      * @param rolePermissions host authority (for example {@code ROLE_CARD_OFFICER}) to engine permissions
      */
     public record Security(@DefaultValue Map<String, List<String>> rolePermissions) {
@@ -137,6 +170,7 @@ public record ProcessEngineProperties(
 
     EngineSettings toSettings() {
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
-                idempotencyRetention, handlers.slowCallWarning());
+                idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange(),
+                lifecycle.reasonMaxLength());
     }
 }
