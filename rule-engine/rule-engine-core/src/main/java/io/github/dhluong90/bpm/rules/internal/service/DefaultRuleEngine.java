@@ -94,6 +94,15 @@ public final class DefaultRuleEngine implements RuleEngine {
             // A chosen instant reaches versions and dates the caller would not get at the host clock (DESIGN 4.2).
             throw new ClockNotAllowedException();
         }
+        return evaluateAs(tenant, caller, request);
+    }
+
+    /**
+     * Evaluates in an explicit tenant as an explicit caller; only {@link EngineScopedRuleEngine} calls it, with a
+     * registered engine identity. The pin and clock checks above belong to a caller; the engine-scoped entry point
+     * refuses both.
+     */
+    DecisionResult evaluateAs(String tenant, String caller, DecisionRequest request) {
         if (request.correlationId() != null && !CorrelationIds.isValid(request.correlationId())) {
             throw new InputInvalidException("correlationId must be 1 to " + EngineDefaults.CORRELATION_ID_MAX_LENGTH
                     + " characters of A-Z, a-z, 0-9, '.', '_', ':' or '-'");

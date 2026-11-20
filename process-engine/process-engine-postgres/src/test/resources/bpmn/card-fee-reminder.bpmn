@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A card fee is overdue: after three days the reminder fee is priced by the bank's own card-reminder-fee rule set,
+     and the collections team gets a task to collect it. The timer fires with no one signed in, so the decision runs
+     for the instance's tenant as the engine. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_card-fee-reminder"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="card-fee-reminder" name="Card fee reminder" isExecutable="true">
+    <bpmn:startEvent id="start" name="Fee overdue"/>
+    <bpmn:intermediateCatchEvent id="wait-three-days" name="Three days overdue">
+      <bpmn:timerEventDefinition id="wait-three-days-timer">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">P3D</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:businessRuleTask id="price-reminder" name="Price the reminder fee" horus:ruleSet="card-reminder-fee" horus:resultVariable="pricing">
+      <bpmn:extensionElements>
+        <horus:input name="tier" value="${instance.tier}"/>
+      </bpmn:extensionElements>
+    </bpmn:businessRuleTask>
+    <bpmn:userTask id="collect-fee" name="Collect the reminder fee" horus:assignee="role:COLLECTIONS" horus:resultVariable="collection"/>
+    <bpmn:endEvent id="end" name="Fee collected"/>
+    <bpmn:sequenceFlow id="start__wait" sourceRef="start" targetRef="wait-three-days"/>
+    <bpmn:sequenceFlow id="wait__price" sourceRef="wait-three-days" targetRef="price-reminder"/>
+    <bpmn:sequenceFlow id="price__collect" sourceRef="price-reminder" targetRef="collect-fee"/>
+    <bpmn:sequenceFlow id="collect__end" sourceRef="collect-fee" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

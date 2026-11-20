@@ -1,5 +1,7 @@
 package io.github.dhluong90.bpm.process.internal.service;
 
+import io.github.dhluong90.bpm.process.api.ProcessException;
+import io.github.dhluong90.bpm.process.api.StepFailedException;
 import io.github.dhluong90.bpm.process.internal.store.JobStore;
 import io.github.dhluong90.bpm.process.internal.store.JobStore.JobRow;
 import io.github.dhluong90.bpm.process.internal.store.TransactionRunner;
@@ -126,9 +128,15 @@ public final class JobExecutor {
             Instant retryAt = now.plus(settings.retryBackoff().multipliedBy(Math.max(1, job.attempt())));
             boolean released = transactions.inTransaction(() -> jobs.release(job.tenantId(), job.id(),
                     settings.replicaId(), job.attempt(), retryAt, failed, now));
+            // The error code only, never the message: a handler's or a decision's text may carry personal data.
+            String reason = switch (e) {
+                case StepFailedException step -> step.reason();
+                case ProcessException process -> process.code();
+                default -> "-";
+            };
             LOG.log(System.Logger.Level.WARNING, "process.job.fire.failed tenant={0} job={1} kind={2} attempt={3} "
-                    + "released={4} failed={5} exception={6}", job.tenantId(), job.id(), job.jobKind(), job.attempt(),
-                    released, failed, e.getClass().getName());
+                    + "released={4} failed={5} exception={6} reason={7}", job.tenantId(), job.id(), job.jobKind(),
+                    job.attempt(), released, failed, e.getClass().getName(), reason);
             return false;
         }
     }
