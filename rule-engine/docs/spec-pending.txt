@@ -13,7 +13,6 @@ RLE-017 M1
 RLE-018 M2
 RLE-021 M1
 RLE-022 M1
-RLE-023 M1
 RLE-026 M1
 RLE-027 M1
 # RLE-028: the equal-hash half is tested (#233); the diff endpoint arrives with #165.
