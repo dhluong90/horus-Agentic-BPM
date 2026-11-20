@@ -14,6 +14,8 @@
 /tools/check-dependency-policy.py @dhluong90
 /tools/check-jackson-coexistence.py @dhluong90
 /tools/check-image-pins.py       @dhluong90
+/tools/check-test-oracle.py      @dhluong90
+/tools/test_check_test_oracle.py @dhluong90
 /tools/test_check_image_pins.py  @dhluong90
 /tools/architecture/          @dhluong90
 /tools/scan-dependencies.sh     @dhluong90
