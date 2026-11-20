@@ -69,4 +69,38 @@ public final class Ulid {
         }
         return new String(out);
     }
+
+    /**
+     * Tells whether a text is a ULID as this class writes them: 26 characters of the Crockford base 32 alphabet in
+     * upper case, the first one at most {@code 7} so the 48-bit time fits.
+     *
+     * @param text the text, possibly null
+     * @return true for a well-formed ULID
+     */
+    public static boolean isValid(String text) {
+        if (text == null || text.length() != 26 || text.charAt(0) > '7') {
+            return false;
+        }
+        for (int i = 0; i < 26; i++) {
+            if (java.util.Arrays.binarySearch(ALPHABET, text.charAt(i)) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Returns the millisecond a well-formed ULID starts with. For an id of this class it is at or after the instant it
+     * was created for, and equal to it unless the clock went back within the process.
+     *
+     * @param ulid a ULID that {@link #isValid(String)} accepts
+     * @return the instant of its first 48 bits
+     */
+    public static Instant timeOf(String ulid) {
+        long time = 0;
+        for (int i = 0; i < 10; i++) {
+            time = (time << 5) | java.util.Arrays.binarySearch(ALPHABET, ulid.charAt(i));
+        }
+        return Instant.ofEpochMilli(time);
+    }
 }

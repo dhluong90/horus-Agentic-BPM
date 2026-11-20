@@ -137,7 +137,10 @@ public class DecisionLogController {
         json.set("matchedRuleIds", EngineValues.value(d.matchedRuleIds()));
         json.put("callerId", d.callerId());
         json.put("correlationId", d.correlationId());
+        json.put("evalClock", d.evalClock().toString());
         json.put("evaluatedAt", d.evaluatedAt().toString());
+        json.put("clockChosen", d.clockChosen());
+        json.put("pinned", d.pinned());
         json.put("durationMicros", d.durationMicros());
         return json;
     }

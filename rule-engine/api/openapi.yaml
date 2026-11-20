@@ -6,7 +6,8 @@ info:
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
     export, replace a draft, diff two versions, request publication, approve, reject, withdraw, history,
-    evaluate, and decision-log reads (one decision, and the search by a masked input's plain value).
+    evaluate (at the host clock, at a chosen clock, or pinned to a version), replay of a logged decision,
+    and decision-log reads (one decision, and the search by a masked input's plain value).
     The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
@@ -628,13 +629,19 @@ paths:
     post:
       tags: [decisions]
       operationId: evaluate
-      summary: Evaluate the version effective at the host clock and log one decision
+      summary: Evaluate the version in force at the clock and log one decision
       description: |
-        Permission `rules:evaluate`. Writes exactly one `rle_decision` row in the request's
-        transaction. A failed evaluation (`EVALUATION_ERROR`, or `UNIQUE_HIT_VIOLATION` when a
-        `unique` table matches several rules; no match is outcome `NO_MATCH`) is logged and answered `422` with the
-        `decisionId` and `matchedRuleIds`, never with partial outputs. Members other than `inputs` are ignored, including `tenantId`. A body over
-        1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
+        Permission `rules:evaluate`; a request that sets `clock` also needs `rules:simulate`, otherwise
+        `403 CLOCK_NOT_ALLOWED`. The clock defaults to the host clock. It selects the version in force
+        (the highest approved version whose `effectiveFrom` is at or before the clock; DESIGN 3.3.1) and
+        feeds `today()` and `now()`, which read it in the rule set's `timeZone`.
+
+        Writes exactly one `rle_decision` row in the request's transaction, with the version and the
+        clock, so the decision replays (`POST /decisions/{decisionId}:replay`). A failed evaluation
+        (`EVALUATION_ERROR`, or `UNIQUE_HIT_VIOLATION` when a `unique` table matches several rules; no
+        match is outcome `NO_MATCH`) is logged and answered `422` with the `decisionId` and
+        `matchedRuleIds`, never with partial outputs. Members other than `inputs` and `clock` are
+        ignored, including `tenantId`. A body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - name: ruleSet
           in: path
@@ -642,11 +649,7 @@ paths:
           schema:
             type: string
         - $ref: '#/components/parameters/IdempotencyKey'
-        - name: X-Correlation-Id
-          in: header
-          required: false
-          schema:
-            type: string
+        - $ref: '#/components/parameters/CorrelationId'
       requestBody:
         required: true
         content:
@@ -668,7 +671,10 @@ paths:
                 decisionId: 01KDG7Z0RQ6V2Y8M1C4N5P7T9W
                 ruleSet: card-fee
                 version: 1
+                evalClock: '2026-12-15T02:00:00Z'
                 evaluatedAt: '2026-12-15T02:00:00Z'
+                clockChosen: false
+                pinned: false
                 outcome: MATCHED
                 matchedRuleIds: [R1]
                 outputs:
@@ -681,13 +687,126 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /decisions/{ruleSet}/versions/{version}:evaluate:
+    post:
+      tags: [decisions]
+      operationId: evaluateVersion
+      summary: Evaluate one approved version, at the host clock or a chosen clock, and log one decision
+      description: |
+        Pins the version instead of selecting it, for example to show what version 1 gave on a past
+        date. A pin bypasses the selection of the version in force, so its permission is `rules:pin`
+        (`403 PERMISSION_DENIED`), not `rules:evaluate`; no role holds `rules:pin` by default. Setting `clock`
+        also needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`). The version must be `PUBLISHED`; a
+        `RETIRED` version is `409 INVALID_STATE` unless the host sets
+        `horus.bpm.rules.evaluation.pin-retired: true` (replay of its logged decisions is not
+        affected). A `DRAFT` or `PENDING_APPROVAL`
+        version is `409 INVALID_STATE`, because it would put an unapproved rule in the decision log;
+        simulate it with `:simulate`, which writes no decision row. Writes one `rle_decision` row with
+        the version and the clock, as `:evaluate` does, with the same `422` answers and body limit.
+      parameters:
+        - name: ruleSet
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateRequest'
+            example:
+              inputs:
+                tier: STANDARD
+                txCount: 1
+              clock: '2026-11-20T10:00:00Z'
+      responses:
+        '200':
+          description: The logged decision of the pinned version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionResult'
+              example:
+                decisionId: 01KCS3W1DQ0M8V6T2B9R5N7K4E
+                ruleSet: card-fee
+                version: 1
+                evalClock: '2026-11-20T10:00:00Z'
+                evaluatedAt: '2026-12-05T08:00:00Z'
+                clockChosen: true
+                pinned: true
+                outcome: MATCHED
+                matchedRuleIds: [R3]
+                outputs:
+                  fee: { currency: VND, amount: 50000 }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /decisions/{decisionId}:replay:
+    post:
+      tags: [decisions]
+      operationId: replayDecision
+      summary: Re-evaluate a logged decision with its recorded version, inputs and clock
+      description: |
+        Permission `rules:log:read`, because the answer is built from logged inputs. Reads the
+        decision row of the caller's tenant, loads the version it names (never selecting, so a
+        version superseded or retired since still replays) and evaluates the logged inputs at the
+        logged clock, in the version's own `timeZone`. The result carries the logged `decisionId`
+        and `evalClock`; the same version, outputs and `matchedRuleIds` as the logged decision prove that
+        the decision is reproducible (`TR-DET-05`). Writes nothing: no decision row, no event. No
+        request body.
+
+        An unknown id, or a decision of another tenant, is `404 DECISION_NOT_FOUND`. A decision whose
+        logged inputs include a masked value (`mask: true`, stored only as `masked`) cannot be
+        re-evaluated and is `422 REPLAY_NOT_POSSIBLE`, naming the inputs and never their values. A
+        logged failure replays as the same `422` problem as at evaluation, with the logged `decisionId`.
+      parameters:
+        - name: decisionId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+      responses:
+        '200':
+          description: The re-evaluated decision, identical to the logged one
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionResult'
+              example:
+                decisionId: 01KCS3W1DQ0M8V6T2B9R5N7K4E
+                ruleSet: card-fee
+                version: 1
+                evalClock: '2026-11-20T10:00:00Z'
+                evaluatedAt: '2026-11-20T10:00:00Z'
+                clockChosen: false
+                pinned: false
+                outcome: MATCHED
+                matchedRuleIds: [R3]
+                outputs:
+                  fee: { currency: VND, amount: 50000 }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /decisions/{id}:
     get:
       tags: [decisions]
       operationId: getDecision
       summary: Read one logged decision of the caller's tenant
       description: |
-        Permission `rules:log:read`. Returns the `rle_decision` row as stored. An input declared
+        Permission `rules:log:read`. Returns the `rle_decision` row as stored, with `evalClock`,
+        `clockChosen` and `pinned`, so a back-dated or pinned decision never reads as a normal one. An input declared
         `mask: true` (or masked by the host's or tenant's `decision-log.mask-default`) appears as
         `hmac:<keyId>:<hex>`, the HMAC-SHA256 of its plain value under the tenant's masking key; the plain
         value is not available anywhere after evaluation (RLE-012). A decision of another tenant is
@@ -720,7 +839,10 @@ paths:
                 matchedRuleIds: [R1]
                 callerId: teller
                 correlationId: 7f3c2a10-5b2e-4f7a-9c1d-2e6b8a4d0f13
+                evalClock: '2027-01-15T02:00:00Z'
                 evaluatedAt: '2027-01-15T02:00:00Z'
+                clockChosen: false
+                pinned: false
                 durationMicros: 41
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -807,6 +929,13 @@ components:
         type: string
         minLength: 1
         maxLength: 200
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Written to the decision row; generated when absent
+      schema:
+        type: string
     Limit:
       name: limit
       in: query
@@ -892,7 +1021,8 @@ components:
         `WWW-Authenticate` challenge (the host's `horus.bpm.security.challenge`, `Bearer` by default, with
         `error="invalid_token"` when no tenant could be resolved for the caller). `403` is
         `PERMISSION_DENIED` when the caller lacks the endpoint's permission (or, on `:withdraw`, is not the
-        requester), `SELF_APPROVAL_FORBIDDEN` for a maker approving or rejecting their own version, `DRAFT_AUTHORING_DISABLED` when the host turned draft editing off, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
+        requester), `CLOCK_NOT_ALLOWED` for a chosen `clock` without `rules:simulate`,
+        `SELF_APPROVAL_FORBIDDEN` for a maker approving or rejecting their own version, `DRAFT_AUTHORING_DISABLED` when the host turned draft editing off, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
         another tenant than the caller's while tenant switching is off, or the principal's tenant attribute
         contradicts the resolved tenant (RLE-018, RLE-037). `428 PRECONDITION_REQUIRED` is a command
         that must be conditional sent without `If-Match`. `500 INTERNAL_ERROR` carries only a
@@ -1214,14 +1344,38 @@ components:
           type: object
           description: Input values by name; money as `Money`
           additionalProperties: true
+        clock:
+          type: string
+          format: date-time
+          description: |
+            The instant the decision reasons about, ISO 8601 with `Z` or an offset, for example
+            `2026-11-20T10:00:00Z`. Selects the version in force and feeds `today()` and `now()`.
+            Needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`); default the host clock.
     DecisionResult:
       type: object
-      required: [decisionId, ruleSet, version, evaluatedAt, outcome, matchedRuleIds, outputs]
+      required: [decisionId, ruleSet, version, evalClock, evaluatedAt, clockChosen, pinned, outcome, matchedRuleIds, outputs]
       properties:
         decisionId: { type: string }
         ruleSet: { type: string }
         version: { type: integer }
-        evaluatedAt: { type: string, format: date-time }
+        evalClock:
+          type: string
+          format: date-time
+          description: The instant the decision reasoned about, the request's `clock` or the host clock; logged as `eval_clock` and used again by replay
+        evaluatedAt:
+          type: string
+          format: date-time
+          description: When the evaluation ran; equals `evalClock` unless a clock was chosen
+        clockChosen:
+          type: boolean
+          description: |
+            True when the caller chose the clock, so the decision is back-dated or forward-dated. The
+            decision row records it the same way, as an `eval_clock` different from `created_at`.
+        pinned:
+          type: boolean
+          description: |
+            True when the caller named the version (`rules:pin`) instead of the clock selecting the
+            version in force. Set by the engine and stored on the decision row; never read from a request.
         outcome:
           type: string
           enum: [MATCHED, NO_MATCH]
@@ -1237,7 +1391,8 @@ components:
           additionalProperties: true
     LoggedDecision:
       type: object
-      required: [decisionId, ruleSet, version, hitPolicy, outcome, inputs, matchedRuleIds, evaluatedAt, durationMicros]
+      required: [decisionId, ruleSet, version, hitPolicy, outcome, inputs, matchedRuleIds, evalClock, evaluatedAt,
+        clockChosen, pinned, durationMicros]
       properties:
         decisionId: { type: string }
         ruleSet: { type: string }
@@ -1268,7 +1423,24 @@ components:
           items: { type: string }
         callerId: { type: [string, 'null'] }
         correlationId: { type: [string, 'null'] }
-        evaluatedAt: { type: string, format: date-time }
+        evalClock:
+          type: string
+          format: date-time
+          description: The instant the decision reasoned about (`eval_clock`), the request's `clock` or the host clock
+        evaluatedAt:
+          type: string
+          format: date-time
+          description: When the decision ran (`created_at`)
+        clockChosen:
+          type: boolean
+          description: |
+            True when the caller chose the clock, so the decision is back-dated or forward-dated:
+            `evalClock` differs from `evaluatedAt`. Derived from two server-set timestamps.
+        pinned:
+          type: boolean
+          description: |
+            True when the caller named the version (`rules:pin`) instead of the engine selecting the
+            version in force. Set by the engine on the decision row; never read from a request.
         durationMicros: { type: integer, format: int64 }
     MaskedInputSearch:
       type: object
@@ -1307,7 +1479,7 @@ components:
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
             IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
-            DRAFT_AUTHORING_DISABLED, RATE_LIMITED]
+            DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE]
         detail: { type: string }
         correlationId: { type: string }
         violations:

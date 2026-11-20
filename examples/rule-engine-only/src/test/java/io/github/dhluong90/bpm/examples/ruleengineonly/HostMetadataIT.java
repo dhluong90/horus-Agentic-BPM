@@ -91,6 +91,8 @@ class HostMetadataIT {
         // PD-094: off by default; this profile (no dev) leaves it unset, so the engine publishes false.
         assertThat(metaBody.path("modules").get(0).path("settings").path("authoring.cockpit-drafts").isBoolean()).isTrue();
         assertThat(metaBody.path("modules").get(0).path("settings").path("authoring.cockpit-drafts").asBoolean()).isFalse();
+        assertThat(metaBody.path("modules").get(0).path("settings").path("lifecycle.approver-must-differ-from").asString())
+                .isEqualTo("makers");
         // TR-EXT-08: this host configures no masking key, so the caller's tenant shows unset and no key id.
         assertThat(metaBody.path("modules").get(0).path("settings").path("masking.hmac-key").asString()).isEqualTo("unset");
         assertThat(metaBody.path("modules").get(0).path("settings").has("masking.hmac-key-id")).isFalse();

@@ -33,11 +33,11 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-015 | `PRE_015_migration_execute_isolates_instance_failure` | Fault injection, 250 instances | M2 | `TR-MIG-02` | Planned |
 | PRE-016 | `PRE_016_deploy_rejects_guardrail_rule_set_breaking_contract` | WebMvc | M2 | `TR-AGT-01` | Planned |
 | PRE-017 | `PRE_017_async_lease_is_timeout_plus_margin` | Two-replica fault injection | M2 | `TR-AGT-03`, `TR-PERF-05` | Planned |
-| PRE-018 | `PRE_018_import_creates_draft_not_active_version` | WebMvc, integration | M2 | `TR-DEF-03`, `TR-DEF-04` | Planned |
-| PRE-019 | `PRE_019_no_maker_of_a_definition_version_can_approve` | Service, WebMvc, start-up log capture | M2 | `TR-SEC-04`, `TR-DEF-03` | Planned |
-| PRE-020 | `PRE_020_effective_date_switches_version_and_retires_previous` | Integration, TestClock | M2 | `TR-DEF-03`, `TR-DET-01` | Planned |
-| PRE-021 | `PRE_021_reject_returns_draft_and_superseded_approval_refused` | WebMvc | M2 | `TR-DEF-03` | Planned |
-| PRE-022 | `PRE_022_dev_only_relaxations_refused_outside_dev` | Starter boot tests | M2 | `TR-SEC-11` | Planned |
+| PRE-018 | `PRE_018_import_creates_draft_not_active_version` | Testcontainers service test, REST integration (`DefinitionLifecycleIT`) | M2 | `TR-DEF-03`, `TR-DEF-04` | Done |
+| PRE-019 | `PRE_019_no_maker_of_a_definition_version_can_approve`, `PRE_019_the_requester_rule_lets_the_importer_approve_records_it_and_still_refuses_the_requester`, `PRE_019_shared_approver_setting_is_published_in_meta_for_the_process_module`, `PRE_019_start_up_logs_one_warn_for_the_requester_relaxation_and_none_for_makers`, `PRE_019_the_table_refuses_an_approver_equal_to_the_requester` | Java API and REST, table `CHECK`, `/api/bpm/meta`, start-up log capture | M2 | `TR-SEC-04`, `TR-DEF-03` | Done |
+| PRE-020 | `PRE_020_effective_date_switches_version_and_retires_previous` | Testcontainers, TestClock, effective-date job on two replicas | M2 | `TR-DEF-03`, `TR-DET-01` | Done |
+| PRE-021 | `PRE_021_reject_returns_draft_and_superseded_approval_refused` | Java API and REST | M2 | `TR-DEF-03` | Done |
+| PRE-022 | `PRE_022_dev_only_relaxations_refused_outside_dev`, `PRE_022_dev_only_relaxations_refused_outside_dev_for_each_start_up`, `PRE_022_dev_auto_approval_activates_imports_and_retires_the_previous_version` | Starter guard tests (cases a to e), service test (case c) | M2 | `TR-SEC-11` | Done |
 | PRE-023 | `PRE_023_cockpit_drafts_setting_blocks_authoring_only` | WebMvc | M2 | `TR-DEF-04` | Planned |
 | PRE-024 | `PRE_024_content_hash_excludes_diagram_and_matches_git` | Unit, RFC 8785 vectors, CI hash script | M2 | `TR-DEF-04`, `TR-DEF-02` | Planned |
 | PRE-025 | `PRE_025_graph_diff_reports_nodes_and_edges` | Unit | M2 | `TR-DEF-03` | Planned |
@@ -52,7 +52,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-034 | `PRE_034_bpmn_export_round_trip_preserves_hash` | Round trip over examples, XSD validation | M3 (cut candidate) | `TR-DEF-01` | Planned |
 | PRE-035 | `PRE_035_definition_size_limits_enforced` | WebMvc | M2 | `TR-DEF-05` | Planned |
 | PRE-036 | `PRE_036_list_queries_pass_query_plan_check` | Query-plan check on a seeded database | M2 | `TR-PERF-07` | Planned |
-| PRE-037 | `PRE_037_definition_events_published_in_transaction` | Integration, rollback | M2 | `TR-OBS-04`, `TR-OBS-06` | Planned |
+| PRE-037 | `PRE_037_definition_events_published_in_transaction`, `PRE_037_a_publisher_that_throws_rolls_the_approval_back` | Testcontainers, rollback | M2 | `TR-OBS-04`, `TR-OBS-06` | Done |
 | PRE-038 | `PRE_038_tenant_header_accepted_only_within_allowed_tenants` | WebMvc, log capture | M2 | `TR-SEC-03`, `TR-TEN-01` | Planned |
 | PRE-039 | `PRE_039_import_keeps_source_document_and_fixed_hash` | Integration, WebMvc | M2 | `TR-STD-01`, `TR-STD-03` | Planned |
 | PRE-040 | `PRE_040_business_error_result_opens_incident` | Integration | M2 | `TR-OPS-03`, `TR-IDEM-04` | Planned |
