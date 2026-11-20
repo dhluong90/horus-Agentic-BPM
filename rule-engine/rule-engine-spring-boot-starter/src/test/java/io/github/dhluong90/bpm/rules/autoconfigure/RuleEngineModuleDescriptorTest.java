@@ -7,10 +7,12 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.springframework.boot.test.system.CapturedOutput;
-import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 
 /**
  * The rules entry the starter contributes to {@code /api/bpm/meta} and {@code /api/bpm/me} (RLE-019), and
@@ -93,5 +95,25 @@ class RuleEngineModuleDescriptorTest {
                 .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
                         .hasMessageContaining("horus.bpm.lifecycle.approver-must-differ-from")
                         .hasMessageContaining("makers").hasMessageContaining("requester"));
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class HostDescriptor {
+        @Bean
+        ModuleDescriptor ruleEngineModuleDescriptor() {
+            return RuleEngineModule.descriptor(Map.of(), false);
+        }
+    }
+
+    @Test
+    void RLE_009_a_host_that_replaces_the_descriptor_still_gets_the_failure_and_the_warning(CapturedOutput output) {
+        runner.withUserConfiguration(HostDescriptor.class)
+                .withPropertyValues("horus.bpm.lifecycle.approver-must-differ-from=nobody")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.lifecycle.approver-must-differ-from"));
+        runner.withUserConfiguration(HostDescriptor.class)
+                .withPropertyValues("horus.bpm.lifecycle.approver-must-differ-from=requester")
+                .run(context -> assertThat(context).hasNotFailed());
+        assertThat(output.toString().split("the Rule Engine keeps makers", -1)).hasSize(2);
     }
 }
