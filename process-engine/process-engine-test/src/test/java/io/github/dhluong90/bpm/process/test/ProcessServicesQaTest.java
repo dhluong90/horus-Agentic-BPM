@@ -587,6 +587,16 @@ class ProcessServicesQaTest {
         }
 
         @Override
+        public void recordStepResult(ProcessStore.StepResultRow row) {
+        }
+
+        @Override
+        public Map<String, String> stepResults(String tenant, String instanceId,
+                java.util.Collection<String> nodeIds) {
+            return Map.of();
+        }
+
+        @Override
         public List<ProcessStore.IncidentRow> openIncidents(String tenant, String instanceId) {
             return List.of();
         }

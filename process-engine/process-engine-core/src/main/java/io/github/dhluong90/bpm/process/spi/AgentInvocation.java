@@ -32,6 +32,11 @@ import java.util.Objects;
  * informative: the engine still checks every answer against the full schema in the result transaction. The guardrail
  * rule set is never passed to the adapter.
  *
+ * <p>Memory: {@link #memory()} holds the facts the step declares from earlier agent steps of the same instance
+ * ({@code <horus:memory>}, #101): per entry name, only the listed fields of that step's recorded result. The engine
+ * resolves it once, when the step is reached, so every attempt of the step receives the same memory. It is data for
+ * the model, never instructions to the engine.
+ *
  * @param tenantId the instance's tenant
  * @param instanceId the instance id
  * @param nodeId the step id
@@ -45,10 +50,12 @@ import java.util.Objects;
  * @param inputs the resolved {@code horus:input} values
  * @param outputSchema the step's output schema as a JSON object without {@code mask} annotations, deeply read-only;
  *     empty when the engine has none to give
+ * @param memory the declared fields of earlier agent steps' recorded results, by entry name, deeply read-only; empty
+ *     when the step declares no memory
  */
 public record AgentInvocation(String tenantId, String instanceId, String nodeId, String businessKey, String jobId,
         String attemptId, String completionToken, int attempt, Instant deadline, Map<String, Object> inputs,
-        Map<String, Object> outputSchema) {
+        Map<String, Object> outputSchema, Map<String, Object> memory) {
 
     /** The engine's annotation that masks a field's value in history; never shown to the adapter. */
     private static final String MASK = "mask";
@@ -61,6 +68,29 @@ public record AgentInvocation(String tenantId, String instanceId, String nodeId,
         Objects.requireNonNull(deadline, "deadline must not be null");
         inputs = Collections.unmodifiableMap(new LinkedHashMap<>(inputs == null ? Map.of() : inputs));
         outputSchema = withoutMask(outputSchema == null ? Map.of() : outputSchema);
+        memory = readOnly(memory == null ? Map.of() : memory);
+    }
+
+    /**
+     * The form without memory, as built before #101; kept so existing callers compile.
+     *
+     * @param tenantId see the record
+     * @param instanceId see the record
+     * @param nodeId see the record
+     * @param businessKey see the record
+     * @param jobId see the record
+     * @param attemptId see the record
+     * @param completionToken see the record
+     * @param attempt see the record
+     * @param deadline see the record
+     * @param inputs see the record
+     * @param outputSchema see the record
+     */
+    public AgentInvocation(String tenantId, String instanceId, String nodeId, String businessKey, String jobId,
+            String attemptId, String completionToken, int attempt, Instant deadline, Map<String, Object> inputs,
+            Map<String, Object> outputSchema) {
+        this(tenantId, instanceId, nodeId, businessKey, jobId, attemptId, completionToken, attempt, deadline, inputs,
+                outputSchema, Map.of());
     }
 
     /**
@@ -80,7 +110,7 @@ public record AgentInvocation(String tenantId, String instanceId, String nodeId,
     public AgentInvocation(String tenantId, String instanceId, String nodeId, String businessKey, String jobId,
             String attemptId, String completionToken, int attempt, Instant deadline, Map<String, Object> inputs) {
         this(tenantId, instanceId, nodeId, businessKey, jobId, attemptId, completionToken, attempt, deadline, inputs,
-                Map.of());
+                Map.of(), Map.of());
     }
 
     /** A deep, read-only copy of a schema node with every {@code mask} key removed. */
@@ -92,6 +122,25 @@ public record AgentInvocation(String tenantId, String instanceId, String nodeId,
             }
         });
         return Collections.unmodifiableMap(copy);
+    }
+
+    /** A deep, read-only copy of a map, kept as it is. */
+    private static Map<String, Object> readOnly(Map<?, ?> map) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        map.forEach((key, value) -> copy.put(String.valueOf(key), readOnlyValue(value)));
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static Object readOnlyValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return readOnly(map);
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list.size());
+            list.forEach(item -> copy.add(readOnlyValue(item)));
+            return Collections.unmodifiableList(copy);
+        }
+        return value;
     }
 
     private static Object copyValue(Object value) {
@@ -129,6 +178,6 @@ public record AgentInvocation(String tenantId, String instanceId, String nodeId,
     public String toString() {
         return "AgentInvocation[tenantId=" + tenantId + ", instanceId=" + instanceId + ", nodeId=" + nodeId + ", jobId="
                 + jobId + ", attemptId=" + attemptId + ", completionToken=***, attempt=" + attempt + ", deadline="
-                + deadline + ", inputs=" + inputs.keySet() + "]";
+                + deadline + ", inputs=" + inputs.keySet() + ", memory=" + memory.keySet() + "]";
     }
 }

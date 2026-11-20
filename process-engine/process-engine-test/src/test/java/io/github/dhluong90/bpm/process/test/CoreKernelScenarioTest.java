@@ -57,6 +57,31 @@ class CoreKernelScenarioTest {
     }
 
     @Test
+    void PRE_040_a_business_error_keeps_the_token_on_the_step_and_asks_for_an_incident() {
+        // Given the card profile handler finds the customer's daily limit reached
+        CompiledProcess compiled = new ProcessCompiler(BehaviorCatalog.registry(), 500).compile("D1", cardFeeReview());
+        ScenarioRunner run = ScenarioRunner.of(new DefaultExecutionKernel(compiled, BehaviorCatalog.registry(),
+                new V1ExpressionEvaluator(100)), INSTANCE, "bank-a", "D1", clock)
+                .onInvoke("cardProfiles.load", in -> new StepResult.BusinessError("LIMIT_EXCEEDED",
+                        "Daily limit reached"));
+
+        // When an instance reaches the step
+        run.start(Map.of("customerId", "C-040"));
+
+        // Then the token waits on the step, the kernel asks for one incident with the business code only, and no
+        // later step ran and no result was recorded
+        run.assertTokenAt("load-profile", TokenStatus.WAITING_ASYNC);
+        assertThat(run.state().status()).isEqualTo(InstanceStatus.RUNNING);
+        assertThat(run.effects()).filteredOn(Effect.RaiseIncident.class::isInstance).singleElement()
+                .isEqualTo(new Effect.RaiseIncident(run.state().tokens().stream()
+                        .filter(t -> "load-profile".equals(t.nodeId())).findFirst().orElseThrow().id(),
+                        "load-profile", "UNHANDLED_BUSINESS_ERROR", "LIMIT_EXCEEDED"));
+        assertThat(run.effects()).filteredOn(Effect.RecordResult.class::isInstance).isEmpty();
+        assertThat(run.effects()).filteredOn(Effect.InvokeService.class::isInstance).hasSize(1);
+        assertThat(run.effects().toString()).doesNotContain("Daily limit reached");
+    }
+
+    @Test
     void gold_customer_with_zero_fee_is_approved_automatically() {
         ScenarioRunner run = runner(Money.ofMinor("VND", 0)).start(Map.of("customerId", "C-001"));
 

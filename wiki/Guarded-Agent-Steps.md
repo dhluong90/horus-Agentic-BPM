@@ -64,6 +64,10 @@ An attempt with no answer within `horus:timeout` fails with `AGENT_TIMEOUT` and 
 
 A schema failure has its own retry, `runners.async-agent.schema-retries` (default 1), so `max` is kept for timeouts and other failures.
 
+A business error (`AdapterResult.BusinessError`) is final: the job fails on that attempt with no retry, and the incident's `error_code` is `UNHANDLED_BUSINESS_ERROR`, with the business code in the cause, in `INCIDENT_RAISED` and in the event (`businessCode`). The adapter's message is never stored.
+
+An answer that arrives too late changes nothing. This covers an attempt whose lease ended, an attempt another attempt took over, a step that already completed, and a job that failed with an incident. Every such report gets `DISCARDED`. It writes no history row, runs no guardrail decision, opens no task and leaves an open incident open. Reporting it again gives the same answer. For a job that was cancelled with its instance, one `LATE_RESULT_DISCARDED` entry records the attempt.
+
 ### History and overrides
 
 Each answer leaves one history row, `ASYNC_RESULT_ACCEPTED` or `ASYNC_RESULT_REFUSED`, with:
@@ -76,7 +80,30 @@ Each answer leaves one history row, `ASYNC_RESULT_ACCEPTED` or `ASYNC_RESULT_REF
 | `latencyMs` | From the claim to the result |
 | `labels` | What the agent reported about its answer, such as `model`, `promptVersion`, `usage.inputTokens` and `usage.outputTokens`, as the adapter returned them with `AdapterResult.completed(output, labels)`; the engine never acts on them. At most `agents.labels.max-count` (16) labels, keys up to 64 and values up to 256 characters; above that the attempt fails with `AGENT_LABELS_INVALID` and is retried |
 
+A step that declares memory also has `memory` in these rows: the facts the agent received from earlier steps, with masked fields as keyed fingerprints (see [Memory from earlier steps](#memory-from-earlier-steps)).
+
 When a reviewer completes the review task of a refused answer, history records `HUMAN_OVERRIDE`: the reviewer, who reported the refused answer and which attempt, the refusal code, the guardrail decision id, the reason (`reason` in the completion body), the reviewer's answer masked the same way, and `changes` with `from` and `to` for each field the reviewer changed. The reviewer's answer must meet the output schema, and the review is always four-eyes.
+
+### Memory from earlier steps
+
+An agent step can receive a small, declared set of facts from earlier agent steps of the same case, instead of the whole case:
+
+```xml
+<horus:memory from="extract-id" fields="fullName,dob" as="applicant"/>
+<horus:memory from="screen-sanctions" fields="hits" as="screening" required="false"/>
+```
+
+The adapter reads them with `invocation.memory()`, for example `{ applicant: { fullName, dob }, screening: { hits: 0 } }`.
+
+The rules:
+- **Declared fields only.** Only the listed fields go out. A field path may be nested (`document.issuer`, at most four levels), and wildcards are refused.
+- **Earlier agent steps only.** `from` must be an agent step that is upstream of this step and whose output schema declares the fields.
+- **The recorded result.** The source is the step's recorded result: the accepted answer, or the reviewer's answer after a refusal. A refused answer never enters memory.
+- **Resolved once.** The engine resolves memory when the step is reached, inside that transaction, and stores it with the job. Every attempt, including a retry after a timeout, sends the same facts. The model call is still keyed by the attempt id and side effects by the job id.
+- **Masked fields need a declaration.** A field the source schema marks `mask: true` is refused at import unless the entry says `includeMasked="true"`. The flag is part of the definition, so the diff and the second person's approval show it. The agent then receives the plain value, and history keeps only its keyed fingerprint.
+- **Bounded.** `agents.memory.max-entries` (16) caps the entries per step and is checked at import. `agents.memory.max-bytes` (16 KiB of canonical JSON) caps the size and is checked when the step is reached. Both may be lowered, never raised.
+- **Failures stop the step before any call.** A larger memory fails the step with `AGENT_MEMORY_TOO_LARGE`. A `required` entry (the default) whose step has no recorded result, for example because the case took another branch, fails it with `AGENT_MEMORY_MISSING`. Either failure is not retryable and opens an incident, and the adapter is never called. With `required="false"` the entry is left out and listed under `memoryMissing` in history.
+- **Same case, same tenant.** Memory reads only the recorded results of its own instance, in the instance's tenant. There is no memory across cases or customers, and no long-term or vector store.
 
 ## The problem
 

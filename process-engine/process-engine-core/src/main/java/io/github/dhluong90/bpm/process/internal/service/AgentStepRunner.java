@@ -42,7 +42,7 @@ public final class AgentStepRunner implements AsyncStepRunner {
         if (agent == null) {
             return new AdapterResult.Failed("AGENT_NOT_REGISTERED", "No AgentAdapter named " + target, false);
         }
-        return agent.execute(invocation(call, outputSchema(payload)));
+        return agent.execute(invocation(call, outputSchema(payload), memory(payload)));
     }
 
     /**
@@ -51,9 +51,28 @@ public final class AgentStepRunner implements AsyncStepRunner {
      * @return the agent's view of it; the invocation removes the {@code mask} annotations
      */
     static AgentInvocation invocation(AdapterCall call, Map<String, Object> outputSchema) {
+        return invocation(call, outputSchema, Map.of());
+    }
+
+    /**
+     * @param call the executor's call for this attempt
+     * @param outputSchema the step's output schema, or empty
+     * @param memory the memory resolved when the step parked (#101), the same for every attempt, or empty
+     * @return the agent's view of it
+     */
+    static AgentInvocation invocation(AdapterCall call, Map<String, Object> outputSchema, Map<String, Object> memory) {
         return new AgentInvocation(call.tenantId(), call.instanceId(), call.nodeId(), call.businessKey(), call.jobId(),
                 call.attemptId(), call.completionToken(), call.attempt(), call.deadline(), call.inputs(),
-                outputSchema);
+                outputSchema, memory);
+    }
+
+    /** The memory stored in the job payload when the step parked; never the audit copy. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> memory(Map<String, Object> payload) {
+        if (payload != null && payload.get(ProcessServices.MEMORY) instanceof Map<?, ?> memory) {
+            return (Map<String, Object>) memory;
+        }
+        return Map.of();
     }
 
     @SuppressWarnings("unchecked")

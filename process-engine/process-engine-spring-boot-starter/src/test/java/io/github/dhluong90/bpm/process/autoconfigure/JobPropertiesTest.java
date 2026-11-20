@@ -71,6 +71,28 @@ class JobPropertiesTest {
     }
 
     @Test
+    void PRE_101_memory_limits_may_be_lowered_never_raised() {
+        // Given no setting, then lowered values, then values above the engine's bounds
+        io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits defaults =
+                bind(java.util.Map.of()).agents().memory().toLimits();
+        io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits lowered = bind(java.util.Map.of(
+                "horus.bpm.processes.agents.memory.max-entries", "4",
+                "horus.bpm.processes.agents.memory.max-bytes", "2048")).agents().memory().toLimits();
+
+        // Then the defaults are 16 entries and 16 KiB, lowered values are kept, and raised ones fail start-up
+        assertThat(defaults.maxEntries()).isEqualTo(16);
+        assertThat(defaults.maxBytes()).isEqualTo(16_384);
+        assertThat(lowered.maxEntries()).isEqualTo(4);
+        assertThat(lowered.maxBytes()).isEqualTo(2_048);
+        assertThatThrownBy(() -> bind(java.util.Map.of("horus.bpm.processes.agents.memory.max-entries", "17")))
+                .hasStackTraceContaining("agents.memory.max-entries").hasStackTraceContaining("never raised");
+        assertThatThrownBy(() -> bind(java.util.Map.of("horus.bpm.processes.agents.memory.max-bytes", "16385")))
+                .hasStackTraceContaining("agents.memory.max-bytes");
+        assertThatThrownBy(() -> bind(java.util.Map.of("horus.bpm.processes.agents.memory.max-bytes", "0")))
+                .hasStackTraceContaining("agents.memory.max-bytes");
+    }
+
+    @Test
     void PRE_057_runners_default_to_the_engine_wide_keys_and_take_per_kind_values() {
         io.github.dhluong90.bpm.process.internal.service.JobSettings jobs =
                 io.github.dhluong90.bpm.process.internal.service.JobSettings.defaults("pod-1");

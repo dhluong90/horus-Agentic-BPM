@@ -6,7 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.zaxxer.hikari.HikariDataSource;
 import io.github.dhluong90.bpm.process.api.AsyncStepNotFoundException;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
+import io.github.dhluong90.bpm.process.api.Incident;
 import io.github.dhluong90.bpm.process.api.InputInvalidException;
+import io.github.dhluong90.bpm.process.api.InstanceNotFoundException;
 import io.github.dhluong90.bpm.process.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
@@ -18,6 +20,9 @@ import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor.Claim;
 import io.github.dhluong90.bpm.process.spi.AdapterCall;
 import io.github.dhluong90.bpm.process.spi.AdapterResult;
+import io.github.dhluong90.bpm.process.spi.HandlerResult;
+import io.github.dhluong90.bpm.process.spi.ServiceCall;
+import io.github.dhluong90.bpm.process.spi.ServiceTaskHandler;
 import io.github.dhluong90.bpm.process.spi.ServiceAdapter;
 import io.github.dhluong90.bpm.process.test.TestClock;
 import java.nio.charset.StandardCharsets;
@@ -448,6 +453,224 @@ class AsyncWaitStateTest {
                 + "event_type = 'ASYNC_ATTEMPT_FAILED'").param(loan).query(String.class).single())
                 .isEqualTo(AsyncStepExecutor.TIMEOUT);
         assertThat(pod1.async.freeSlots()).isEqualTo(2);
+    }
+
+    // ---- PRE-040, PRE-111, PRE-113: business errors (#55) -------------------------------------------------------
+
+    /**
+     * A loan disbursement: the request is recorded, then the daily limit is checked by a local handler, then an
+     * officer disburses. Both handlers run inside the step transaction.
+     */
+    private static final String DISBURSEMENT = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="Definitions_loan-disbursement"
+                              targetNamespace="urn:horus-bpm:examples" expressionLanguage="urn:horus-bpm:expr:v1">
+              <bpmn:process id="loan-disbursement" name="Loan disbursement" isExecutable="true">
+                <bpmn:startEvent id="start"/>
+                <bpmn:serviceTask id="record-request" horus:handler="disbursements.record" horus:resultVariable="request">
+                  <bpmn:extensionElements>
+                    <horus:input name="amount" value="${instance.amount}"/>
+                  </bpmn:extensionElements>
+                </bpmn:serviceTask>
+                <bpmn:serviceTask id="check-limit" horus:handler="limits.check" horus:resultVariable="limit">
+                  <bpmn:extensionElements>
+                    <horus:input name="accountId" value="${instance.accountId}"/>
+                    <horus:input name="amount" value="${instance.amount}"/>
+                  </bpmn:extensionElements>
+                </bpmn:serviceTask>
+                <bpmn:userTask id="disburse" horus:assignee="role:LOAN_OFFICER" horus:resultVariable="disbursal"/>
+                <bpmn:endEvent id="end"/>
+                <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="record-request"/>
+                <bpmn:sequenceFlow id="f2" sourceRef="record-request" targetRef="check-limit"/>
+                <bpmn:sequenceFlow id="f3" sourceRef="check-limit" targetRef="disburse"/>
+                <bpmn:sequenceFlow id="f4" sourceRef="disburse" targetRef="end"/>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+    private static ServiceTaskHandler handler(String name, java.util.function.Function<ServiceCall, HandlerResult> body) {
+        return new ServiceTaskHandler() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public HandlerResult handle(ServiceCall call) {
+                return body.apply(call);
+            }
+        };
+    }
+
+    private final AtomicInteger limitChecks = new AtomicInteger();
+
+    /** A replica with the disbursement handlers: the limit check reports the daily limit reached. */
+    private TestEngine disbursements() {
+        TestEngine engine = track(TestEngine.replica("pod-1", clock).async(SCOPED).adapters(bureau(call ->
+                new AdapterResult.Accepted()), sanctions()).handlers(
+                handler("disbursements.record", call -> HandlerResult.completed(Map.of("recordedAmount",
+                        call.inputs().get("amount")))),
+                handler("limits.check", call -> {
+                    limitChecks.incrementAndGet();
+                    return new HandlerResult.BusinessError("LIMIT_EXCEEDED", "Daily limit reached for account "
+                            + call.inputs().get("accountId"));
+                })).build());
+        engine.services.importDefinition(new ImportRequest(SourceFormat.BPMN_XML,
+                DISBURSEMENT.strip().getBytes(StandardCharsets.UTF_8), null));
+        return engine;
+    }
+
+    private static List<String> textsOf(String instanceId) {
+        return TestEngine.jdbc().sql("SELECT details::text FROM pre_history WHERE instance_id = ? UNION ALL "
+                + "SELECT cause_summary FROM pre_incident WHERE instance_id = ?").params(instanceId, instanceId)
+                .query(String.class).list();
+    }
+
+    private static Map<String, Object> incidentDetails(String instanceId) {
+        return io.github.dhluong90.bpm.process.internal.json.Values.readMap(TestEngine.jdbc().sql("SELECT details::text "
+                + "FROM pre_history WHERE instance_id = ? AND event_type = 'INCIDENT_RAISED'").param(instanceId)
+                .query(String.class).single());
+    }
+
+    @Test
+    void PRE_040_business_error_result_opens_incident() {
+        // Given loan-disbursement, whose local step check-limit answers BusinessError(LIMIT_EXCEEDED)
+        TestEngine pod = disbursements();
+
+        // When an instance reaches check-limit at its start
+        ProcessInstance loan = pod.services.start(new StartRequest("loan-disbursement", "DISB-2027-0040",
+                Map.of("accountId", "ACC-0001", "amount", 50_000_000), null));
+
+        // Then the start succeeds, the step transaction committed one incident with the business code in its cause, and
+        // the token waits on check-limit with the earlier step's result kept
+        assertThat(loan.status()).isEqualTo("RUNNING");
+        assertThat(tokenOn(pod, loan.id())).isEqualTo("check-limit:WAITING_ASYNC");
+        assertThat(pod.services.instance(loan.id()).variables()).containsKey("request").doesNotContainKey("limit");
+        List<Incident> incidents = pod.services.openIncidents(loan.id());
+        assertThat(incidents).singleElement().satisfies(i -> {
+            assertThat(i.errorCode()).isEqualTo("UNHANDLED_BUSINESS_ERROR");
+            assertThat(i.causeSummary()).contains("LIMIT_EXCEEDED");
+            assertThat(i.nodeId()).isEqualTo("check-limit");
+            assertThat(i.retryCount()).isZero();
+            assertThat(i.status()).isEqualTo("OPEN");
+        });
+        assertThat(incidentDetails(loan.id())).containsEntry("errorCode", "UNHANDLED_BUSINESS_ERROR")
+                .containsEntry("businessCode", "LIMIT_EXCEEDED").doesNotContainKey("jobId");
+        assertThat(pod.events).filteredOn(e -> e.type().equals("processes.incident.raised.v1")).singleElement()
+                .satisfies(e -> assertThat(e.payload()).containsEntry("businessCode", "LIMIT_EXCEEDED")
+                        .containsEntry("errorCode", "UNHANDLED_BUSINESS_ERROR").containsEntry("nodeId", "check-limit"));
+        // And nothing is retried: no job exists, and polling runs the handler no more
+        assertThat(TestEngine.jdbc().sql("SELECT count(*) FROM pre_timer WHERE instance_id = ?").param(loan.id())
+                .query(Integer.class).single()).isZero();
+        clock.advance(Duration.ofMinutes(10));
+        pod.jobs.pollOnce();
+        pod.async.pollOnce();
+        assertThat(limitChecks).hasValue(1);
+        // And the handler's message never reached history or the incident
+        assertThat(textsOf(loan.id())).noneMatch(t -> t.contains("Daily limit") || t.contains("ACC-0001"));
+    }
+
+    @Test
+    void PRE_111_a_business_error_fails_the_job_at_once_and_opens_one_incident() {
+        // Given the bureau answers that it has no file for the applicant, on attempt 1 of 3
+        TestEngine pod = replica("pod-1", bureau(call -> new AdapterResult.BusinessError("APPLICANT_UNKNOWN",
+                "no file at the bureau for " + call.inputs().get("nationalId"))));
+        deploy(pod);
+        String loan = apply(pod, "LOAN-2027-1111").id();
+
+        // When the executor records the answer
+        assertThat(pod.async.runNow(pod.async.claim(16).get(0))).contains(StepCompletion.Outcome.ACCEPTED);
+
+        // Then the job failed on its first attempt, one incident is open with the business code, and nothing is due
+        assertThat(job(loan)).containsEntry("status", "FAILED").containsEntry("attempt", 1);
+        assertThat(TestEngine.jdbc().sql("SELECT details->>'errorCode' || ' retryable=' || (details->>'retryable') || "
+                + "' final=' || (details->>'final') FROM pre_history WHERE instance_id = ? AND event_type = "
+                + "'ASYNC_ATTEMPT_FAILED'").param(loan).query(String.class).single())
+                .isEqualTo("APPLICANT_UNKNOWN retryable=false final=true");
+        assertThat(pod.services.openIncidents(loan)).singleElement().satisfies(i -> {
+            assertThat(i.errorCode()).isEqualTo("UNHANDLED_BUSINESS_ERROR");
+            assertThat(i.retryCount()).isZero();
+            assertThat(i.causeSummary()).contains("APPLICANT_UNKNOWN");
+        });
+        assertThat(incidentDetails(loan)).containsEntry("businessCode", "APPLICANT_UNKNOWN");
+        assertThat(pod.events).filteredOn(e -> e.type().equals("processes.incident.raised.v1")).singleElement()
+                .satisfies(e -> assertThat(e.payload()).containsEntry("businessCode", "APPLICANT_UNKNOWN"));
+        assertThat(tokenOn(pod, loan)).isEqualTo("bureau-score:WAITING_ASYNC");
+        clock.advance(Duration.ofMinutes(10));
+        assertThat(pod.async.claim(16)).isEmpty();
+        assertThat(calls).hasSize(1);
+        // And neither the adapter's message nor the national id was stored
+        assertThat(textsOf(loan)).noneMatch(t -> t.contains("no file") || t.contains("079088001234"));
+        assertThat(pod.events.toString()).doesNotContain("079088001234");
+    }
+
+    @Test
+    void PRE_111_a_business_error_reported_through_the_completion_api_is_final_and_its_repeat_writes_nothing() {
+        // Given the bureau hands the call off
+        TestEngine pod = replica("pod-1", bureau(call -> new AdapterResult.Accepted()));
+        deploy(pod);
+        String loan = apply(pod, "LOAN-2027-1112").id();
+        Claim claimed = pod.async.claim(16).get(0);
+        pod.async.runNow(claimed);
+        String attemptId = calls.get(0).attemptId();
+        String token = calls.get(0).completionToken();
+        pod.identity.as("bank-a", "bureau-callback", "processes:step:complete", "processes:read").roles =
+                java.util.Set.of(BUREAU_CALLBACK);
+        AdapterResult unknown = new AdapterResult.BusinessError("APPLICANT_UNKNOWN", "no file at the bureau");
+
+        // When its callback reports the business error, then repeats it
+        StepCompletion first = pod.services.complete(claimed.job().id(), attemptId, token, unknown);
+        int afterFirst = history(loan);
+        StepCompletion repeat = pod.services.complete(claimed.job().id(), attemptId, token, unknown);
+
+        // Then the first is final: the job failed and one incident is open; the repeat is discarded and writes nothing
+        assertThat(first.outcome()).isEqualTo(StepCompletion.Outcome.ACCEPTED);
+        assertThat(repeat.outcome()).isEqualTo(StepCompletion.Outcome.DISCARDED);
+        assertThat(job(loan)).containsEntry("status", "FAILED").containsEntry("attempt", 1);
+        assertThat(pod.services.openIncidents(loan)).singleElement()
+                .satisfies(i -> assertThat(i.errorCode()).isEqualTo("UNHANDLED_BUSINESS_ERROR"));
+        assertThat(history(loan)).isEqualTo(afterFirst);
+        assertThat(TestEngine.jdbc().sql("SELECT actor_id FROM pre_history WHERE instance_id = ? AND event_type = "
+                + "'ASYNC_ATTEMPT_FAILED'").param(loan).query(String.class).single()).isEqualTo("bureau-callback");
+    }
+
+    @Test
+    void PRE_113_another_tenant_cannot_report_a_late_result_or_read_a_business_error_incident() {
+        // Given bank-a's disbursement with a business error incident, and a loan whose bureau call was handed off and
+        // then cancelled
+        TestEngine pod = disbursements();
+        pod.identity.permissions = java.util.Set.of("processes:deploy", "processes:start", "processes:read",
+                "processes:cancel", "processes:step:complete");
+        deploy(pod);
+        String disbursement = pod.services.start(new StartRequest("loan-disbursement", "DISB-2027-0113",
+                Map.of("accountId", "ACC-0113", "amount", 10_000_000), null)).id();
+        String loan = apply(pod, "LOAN-2027-1113").id();
+        Claim claimed = pod.async.claim(16).get(0);
+        pod.async.runNow(claimed);
+        String attemptId = calls.get(0).attemptId();
+        String token = calls.get(0).completionToken();
+        pod.services.cancel(loan, pod.services.instance(loan).lockVersion(), "Applicant withdrew", "cancel-1113");
+        int loanHistory = history(loan);
+        int disbursementHistory = history(disbursement);
+
+        // When bank-b's client reports a result for the cancelled step and reads the disbursement's incidents
+        pod.identity.as("bank-b", "partner-b", "processes:step:complete", "processes:read").roles =
+                java.util.Set.of(BUREAU_CALLBACK);
+
+        // Then both are not found, and nothing is written
+        assertThatThrownBy(() -> pod.services.complete(claimed.job().id(), attemptId, token, score(800)))
+                .isInstanceOf(AsyncStepNotFoundException.class)
+                .extracting(e -> ((AsyncStepNotFoundException) e).code()).isEqualTo("ASYNC_STEP_NOT_FOUND");
+        assertThatThrownBy(() -> pod.services.openIncidents(disbursement))
+                .isInstanceOf(InstanceNotFoundException.class);
+        assertThat(history(loan)).isEqualTo(loanHistory);
+        assertThat(history(loan, "LATE_RESULT_DISCARDED")).isZero();
+        assertThat(history(disbursement)).isEqualTo(disbursementHistory);
+        assertThat(job(loan)).containsEntry("status", "CANCELLED");
+        pod.identity.as("bank-a", "pipeline", "processes:read");
+        assertThat(pod.services.openIncidents(disbursement)).singleElement()
+                .satisfies(i -> assertThat(i.status()).isEqualTo("OPEN"));
     }
 
     // ---- PRE-041 ----------------------------------------------------------------------------------------------

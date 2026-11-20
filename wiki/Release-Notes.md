@@ -30,6 +30,14 @@ New in the same artifact: `expr.spi.ExpressionLanguage`, `CompiledExpression`, `
 
 A business rule task is evaluated as the engine identity `system:process-engine`, on behalf of the user who triggered the step (none after a timer), in the instance's tenant, at the engine clock of the step, with an idempotency key derived from the instance, the step and the attempt. The task worker needs no `rules:evaluate`. A retried step replays the logged decision and writes no second row. The decision log shows the user as `onBehalfOf` (Java `DecisionLogEntry` and `LoggedDecision`, and the REST decision log). Migration `V17__rle_decision_on_behalf_of` adds the nullable column `rle_decision.on_behalf_of`.
 
+### Business errors, late results and agent memory
+
+**Behaviour change:** a local handler's business error no longer fails the call with `STEP_FAILED`. The call succeeds, the step waits, and an incident `UNHANDLED_BUSINESS_ERROR` opens with the business code (#55). An agent or remote step's business error fails its job on the first attempt.
+
+A result that arrives after its attempt timed out, after another attempt took over, after the step completed or after the job failed is discarded, writes nothing and never reopens the step.
+
+An agent step can declare `<horus:memory>` to receive declared fields of earlier agent steps' results in the same instance (#101). Process Engine migration `V14__pre_step_result` adds one table. New settings: `agents.memory.max-entries` (16) and `agents.memory.max-bytes` (16384). `AgentInvocation` gains the `memory()` component.
+
 ## 0.1.0
 
 The first release: the Rule Engine with four-eyes publication, the embedded cockpit to edit and approve rules, and an example host that starts with one command. It is a 0.x release, so it makes no compatibility promise; 1.0 is the release with a frozen API.

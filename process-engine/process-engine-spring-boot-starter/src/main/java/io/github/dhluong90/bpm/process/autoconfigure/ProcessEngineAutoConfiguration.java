@@ -320,7 +320,7 @@ public class ProcessEngineAutoConfiguration {
                 BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings, async,
                 adaptersByName(adapters).keySet(), agentsByName(agents).keySet(), outputSchemas, inputMasker,
-                properties.agents().labels().toLimits());
+                properties.agents().labels().toLimits(), properties.agents().memory().toLimits());
     }
 
     /**

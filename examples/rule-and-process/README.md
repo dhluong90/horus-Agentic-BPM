@@ -32,7 +32,7 @@ What the host adds:
 
 ## One transaction per call
 
-Every step up to the first wait state runs in the caller's transaction: the host's insert, the profile query, the rule evaluation and its `rle_decision` row, the engine's `pre_*` rows. If any step fails, all of it rolls back.
+Every step up to the first wait state runs in the caller's transaction: the host's insert, the profile query, the rule evaluation and its `rle_decision` row, the engine's `pre_*` rows. If any step fails, all of it rolls back. A handler's business error is not a failure: the step waits with an incident, and the work before it commits.
 
 ```mermaid
 sequenceDiagram
@@ -205,15 +205,16 @@ curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "2"' -H 'Ide
 # {"status":409,"code":"INVALID_STATE","detail":"Instance 01M7S2Q4B1XWJ3T7N9D2E5K8H0 is CANCELLED",...}
 ```
 
-An unknown customer fails the first step, and the host's row rolls back with the engine's:
+For an unknown customer, the first step's handler answers with a business error. The application is saved, and the instance waits on that step with an incident for an operator. The incident keeps the business code but not the handler's message:
 
 ```bash
 curl -s -u tuan:$P -H 'Content-Type: application/json' \
   -d '{"applicationId":"APP-1099","customerId":"C-404"}' localhost:8080/api/cards/applications
-# {"status":422,"code":"STEP_FAILED","detail":"Step load-profile failed (UNHANDLED_BUSINESS_ERROR): CUSTOMER_NOT_FOUND: No customer C-404 in this tenant","nodeId":"load-profile","reason":"UNHANDLED_BUSINESS_ERROR"}
+# {"applicationId":"APP-1099","instanceId":"01M7...","instanceStatus":"RUNNING"}
 
 docker exec horus-pe-pg psql -U horus -d horus -tAc \
-  "SELECT count(*) FROM card_application WHERE application_id='APP-1099'"   # 0
+  "SELECT error_code, cause_summary FROM pre_incident WHERE status='OPEN'"
+# UNHANDLED_BUSINESS_ERROR|Business error CUSTOMER_NOT_FOUND has no path in the process
 ```
 
 ## Change the fee in the cockpit, then run the process

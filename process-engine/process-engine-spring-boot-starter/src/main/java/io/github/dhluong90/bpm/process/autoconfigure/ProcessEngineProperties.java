@@ -221,11 +221,38 @@ public record ProcessEngineProperties(
     }
 
     /**
-     * Agent step settings (#59, DESIGN section 4.1).
+     * Agent step settings (#59, #101, DESIGN section 4.1).
      *
      * @param labels bounds of the labels an agent reports with its answer
+     * @param memory bounds of the memory an agent step receives from earlier steps
      */
-    public record Agents(@DefaultValue Labels labels) {
+    public record Agents(@DefaultValue Labels labels, @DefaultValue Memory memory) {
+    }
+
+    /**
+     * Bounds of the memory an agent step receives from earlier agent steps of the same instance
+     * ({@code <horus:memory>}, #101). They may be lowered, never raised.
+     *
+     * @param maxEntries memory entries per agent step, 0 to 16, checked at import; 0 refuses every step that declares
+     *     memory
+     * @param maxBytes bytes of the resolved memory as canonical JSON, 1 to 16384, checked when the step is reached; a
+     *     larger memory fails the step with {@code AGENT_MEMORY_TOO_LARGE} before any call
+     */
+    public record Memory(@DefaultValue("16") int maxEntries, @DefaultValue("16384") int maxBytes) {
+
+        public Memory {
+            try {
+                new io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits(maxEntries, maxBytes);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("horus.bpm.processes." + e.getMessage()
+                        + " (it may be lowered, never raised)", e);
+            }
+        }
+
+        /** @return the validated bounds */
+        io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits toLimits() {
+            return new io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits(maxEntries, maxBytes);
+        }
     }
 
     /**
