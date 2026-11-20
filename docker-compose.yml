@@ -1,10 +1,13 @@
 # LOCAL EVALUATION ONLY, NOT A PRODUCTION DEPLOYMENT: demo users, plain HTTP, one instance, no backups.
 # One-command local deployment: PostgreSQL 16 and one example host. Guide: docs/DEPLOYING.md.
 #
-#   cp .env.example .env      # then set the three passwords
+#   cp .env.example .env      # settings, no secrets
+#   deploy/create-secrets.sh  # the three passwords, as files in secrets/
 #   docker compose up --build --wait
 #
-# Every secret comes from .env, which git ignores; compose stops with a message when one is missing.
+# Every password reaches the containers as a file mounted under /run/secrets, never as an environment
+# variable, so docker inspect and /proc/<pid>/environ show none. git and the build context ignore secrets/;
+# when a file is missing, compose stops before any container starts and names the file.
 # PostgreSQL publishes no port: only the example host reaches it, on the compose network.
 # The host connects as "horus", a role without superuser rights that owns the database horus and runs
 # the migrations; the superuser "postgres" is used only by the init script (deploy/postgres/initdb).
@@ -18,9 +21,11 @@ services:
     environment:
       POSTGRES_DB: horus
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${HORUS_DB_ADMIN_PASSWORD:?set HORUS_DB_ADMIN_PASSWORD in .env (see .env.example)}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_admin_password
+    secrets:
+      - db_admin_password
       # Read by deploy/postgres/initdb/10-application-role.sh on the first start only.
-      HORUS_DB_PASSWORD: ${HORUS_DB_PASSWORD:?set HORUS_DB_PASSWORD in .env (see .env.example)}
+      - db_password
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
@@ -62,11 +67,17 @@ services:
     environment:
       HORUS_DB_URL: jdbc:postgresql://postgres:5432/horus
       HORUS_DB_USERNAME: horus
-      HORUS_DB_PASSWORD: ${HORUS_DB_PASSWORD:?set HORUS_DB_PASSWORD in .env (see .env.example)}
+      # Spring Boot reads each file under /run/secrets as a property named after the file, so
+      # ${HORUS_DB_PASSWORD} and ${HORUS_DEMO_PASSWORD} resolve from the mounted secrets.
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
       # "dev" turns on the demo users for a local walkthrough; leave it empty anywhere shared.
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
-      HORUS_DEMO_PASSWORD: ${HORUS_DEMO_PASSWORD:-}
       # Bearer tokens: set the issuer and audience in docker-compose.override.yml (docs/DEPLOYING.md).
+    secrets:
+      - source: db_password
+        target: HORUS_DB_PASSWORD
+      - source: demo_password
+        target: HORUS_DEMO_PASSWORD
     ports:
       # Bound to this machine only. Change the left side in .env when 8080 is taken.
       - "127.0.0.1:${HORUS_HTTP_PORT:-8080}:8080"
@@ -87,3 +98,12 @@ services:
 
 volumes:
   pgdata:
+
+# Created by deploy/create-secrets.sh; see docs/DEPLOYING.md to bring your own values.
+secrets:
+  db_admin_password:
+    file: ./secrets/db_admin_password
+  db_password:
+    file: ./secrets/db_password
+  demo_password:
+    file: ./secrets/demo_password

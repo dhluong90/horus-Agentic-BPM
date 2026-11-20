@@ -6,7 +6,7 @@ stateDiagram-v2
   PENDING_APPROVAL --> DRAFT: reject with reason
   PENDING_APPROVAL --> ACTIVE: approve by another identity
   DRAFT --> ACTIVE: dev profile auto-approve only
-  ACTIVE --> RETIRED: newer version effective, or retire
+  ACTIVE --> RETIRED: newer version effective, or retire with reason (last version needs confirmation)
   DRAFT --> RETIRED: withdraw
   RETIRED --> [*]
   classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F

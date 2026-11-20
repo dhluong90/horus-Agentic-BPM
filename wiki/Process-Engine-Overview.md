@@ -46,6 +46,29 @@ public interface AgentAdapter {
 }
 ```
 
+## `exclusiveGateway` routing: exactly one branch
+
+![Exclusive gateway routing](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/exclusive-gateway-routing.svg)
+
+An exclusive gateway takes exactly one outgoing flow, and the same one every time for the same variables (`PRE-004`, `TR-DET-01`).
+
+| Rule | Behaviour |
+|---|---|
+| Order | Conditions are tested in document order; the first `true` wins and later ones are not evaluated |
+| Default | Taken only when no condition is `true`; a default flow carries no condition (`DEFAULT_FLOW_HAS_CONDITION` at import) |
+| Missing condition | Every non-default outgoing flow of a diverging gateway needs a condition with text (`CONDITION_MISSING` at import) |
+| Null | A comparison with a missing variable is null, which does not hold, so routing moves on to the next flow or the default |
+| Type error | Text against a number, or money of two currencies, is `CONDITION_ERROR`, never a silent `false` |
+| No path | No `true` condition and no default fails the step with `422 STEP_FAILED`, reason `NO_PATH`. No instance, token, task, history or idempotency row is kept, so the caller can correct the data and retry with the same key |
+| Audit | `pre_history` records `NODE_COMPLETED` on the gateway with the flow taken |
+
+Example: with `amount >= 100000000 VND` to `senior-approval` and the default to `auto-approve`, 150,000,000 VND activates only `senior-approval` and 99,999,999 VND only `auto-approve`. The cases run with:
+
+```
+mvn -B -pl process-engine/process-engine-test,process-engine/process-engine-postgres -am verify \
+  -Dtest='ExclusiveGatewayTest' -Dit.test='ExclusiveGatewayPostgresIT' -Dsurefire.failIfNoSpecifiedTests=false
+```
+
 ## Timers and jobs with leases
 
 `pre_timer` holds timers, SLA escalations and async job claims. One scheduler thread per replica polls every 500 ms:
@@ -178,12 +201,15 @@ The engine never embeds a model and never calls the network itself (`TR-AGT-03`,
 | Permission | Grants |
 |---|---|
 | `processes:read` | Read definitions, instances, tokens, history |
-| `processes:deploy` | Deploy definition versions |
-| `processes:start` | Start and cancel instances |
-| `tasks:work` | Claim, complete and delegate tasks in the caller's own queues |
-| `tasks:manage` | Reassign any task, recompute SLAs |
-| `incidents:manage` | Retry and resolve incidents |
-| `migrations:manage` | Create, validate and execute migration plans |
-| `calendars:manage` | Edit business calendars and holidays |
+| `processes:deploy` | Import a complete definition as a draft |
+| `processes:author` | Create and edit drafts, request approval |
+| `processes:approve` | Approve, reject and retire versions; a retirement needs a reason, and the last version in effect needs a confirmation (PD-101, PD-102) |
+| `processes:start` | Start instances |
+| `processes:cancel` | Cancel a running instance, with a reason (PD-103) |
+| `processes:task:work` | Claim, complete and delegate tasks in the caller's own queues |
+| `processes:task:manage` | Reassign any task, recompute SLAs |
+| `processes:incident:manage` | Retry and resolve incidents |
+| `processes:migration:manage` | Create, validate and execute migration plans |
+| `processes:calendar:manage` | Edit business calendars and holidays |
 
 Four-eyes is enforced in `TaskService`: a task with `fourEyes: true` rejects completion by any identity listed in `forbidden_users` with `403 SELF_APPROVAL_FORBIDDEN`, whatever the caller's permissions (`PRE-007`). See [[Multi Tenancy and Security]].

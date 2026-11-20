@@ -1,0 +1,8 @@
+flowchart LR
+  T["1. Token arrives at the exclusive gateway"] -->|"2. test conditions in document order"| C{"First condition<br/>that is true?"}
+  C -->|"3. found"| F["Take that flow only<br/>later conditions not evaluated"]
+  C -->|"4. none true"| D{"Default flow?"}
+  D -->|"5. yes"| DF["Take the default flow"]
+  D -->|"6. no"| NP["422 STEP_FAILED, reason NO_PATH<br/>the whole call rolls back"]
+  F --> H["7. pre_history: NODE_COMPLETED<br/>with the flow taken"]
+  DF --> H
