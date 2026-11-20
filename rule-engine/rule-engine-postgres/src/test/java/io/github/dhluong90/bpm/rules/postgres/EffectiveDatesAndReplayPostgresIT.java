@@ -8,7 +8,7 @@ import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;

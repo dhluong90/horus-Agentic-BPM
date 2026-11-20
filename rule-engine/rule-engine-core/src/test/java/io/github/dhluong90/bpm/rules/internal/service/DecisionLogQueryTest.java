@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.dhluong90.bpm.rules.api.DecisionLogEntry;
 import io.github.dhluong90.bpm.rules.api.DecisionSearch;
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.rules.api.Page;
 import io.github.dhluong90.bpm.rules.api.PageRequest;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;

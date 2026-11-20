@@ -46,7 +46,7 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <!-- The real Rule Engine for decision steps after a timer (PRE-055, PRE-056); tests only. -->
+      <!-- The real Rule Engine for the harness's withRuleEngine(), used by the process starter's decision tests; tests only. -->
       <groupId>io.github.dhluong90.bpm</groupId>
       <artifactId>rule-engine-postgres</artifactId>
       <version>${project.version}</version>
@@ -89,6 +89,23 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
+      </plugin>
+      <!--
+        The test harness (TestEngine, fixtures) as a test-jar, so that the process starter's tests run the decision
+        steps on PostgreSQL with the starter's own decision port, the registered claimant of the Rule Engine's grant
+        (ADR-0027, #336). Never deployed to hosts: test classifier only.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>test-harness</id>
+            <goals>
+              <goal>test-jar</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

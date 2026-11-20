@@ -1,18 +1,20 @@
 package io.github.dhluong90.bpm.process.internal.expr;
 
+import io.github.dhluong90.bpm.expr.internal.HorusExprV1;
 import io.github.dhluong90.bpm.process.internal.exec.ExecutionException;
 import io.github.dhluong90.bpm.process.internal.exec.ExpressionEvaluator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * {@code urn:horus-bpm:expr:v1} conditions through {@link Condition}, with parsed conditions cached by text. Other
- * languages are refused. Replaced by a lookup of the rule side's {@code ExpressionLanguage} SPI when it lands.
+ * {@code urn:horus-bpm:expr:v1} conditions through {@link Condition}, which compiles them with the
+ * {@code ExpressionLanguage} SPI of {@code bpm-expression} (ADR-0027), with compiled conditions cached by text. Other
+ * languages are refused.
  */
 public final class V1ExpressionEvaluator implements ExpressionEvaluator {
 
     /** The language id this evaluator accepts. */
-    public static final String LANGUAGE = "urn:horus-bpm:expr:v1";
+    public static final String LANGUAGE = HorusExprV1.ID;
 
     private final Map<String, Condition> cache = new ConcurrentHashMap<>();
     private final int maxCacheEntries;

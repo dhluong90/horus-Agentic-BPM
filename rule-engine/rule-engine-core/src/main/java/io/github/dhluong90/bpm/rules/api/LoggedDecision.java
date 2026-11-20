@@ -26,10 +26,39 @@ import java.util.Objects;
  * @param durationMicros evaluation time in microseconds
  * @param pinned true when the caller named the version ({@code rules:pin}) instead of the engine selecting the
  *     version in force; set by the engine, never by a request
+ * @param onBehalfOf the human an embedded engine evaluated for, for example the user who completed the task before a
+ *     process decision step; null for a decision made for its caller alone or after a timer (ADR-0027)
  */
 public record LoggedDecision(String decisionId, String ruleSet, int version, String hitPolicy, String outcome,
         String errorCode, String inputsJson, String outputsJson, List<String> matchedRuleIds, String callerId,
-        String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned) {
+        String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned,
+        String onBehalfOf) {
+
+    /**
+     * A decision made for its caller alone, with no {@code onBehalfOf}.
+     *
+     * @param decisionId see the record
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param hitPolicy see the record
+     * @param outcome see the record
+     * @param errorCode see the record
+     * @param inputsJson see the record
+     * @param outputsJson see the record
+     * @param matchedRuleIds see the record
+     * @param callerId see the record
+     * @param correlationId see the record
+     * @param evalClock see the record
+     * @param evaluatedAt see the record
+     * @param durationMicros see the record
+     * @param pinned see the record
+     */
+    public LoggedDecision(String decisionId, String ruleSet, int version, String hitPolicy, String outcome,
+            String errorCode, String inputsJson, String outputsJson, List<String> matchedRuleIds, String callerId,
+            String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned) {
+        this(decisionId, ruleSet, version, hitPolicy, outcome, errorCode, inputsJson, outputsJson, matchedRuleIds,
+                callerId, correlationId, evalClock, evaluatedAt, durationMicros, pinned, null);
+    }
 
     public LoggedDecision {
         Objects.requireNonNull(decisionId, "decisionId must not be null");

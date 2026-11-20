@@ -61,25 +61,21 @@ class KernelContractArchitectureTest {
     }
 
     @Test
-    void only_the_decision_port_reaches_the_rule_engines_tenant_scoped_entry_point() {
-        noClasses().that().resideOutsideOfPackage("..process.internal.service..")
-                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules.embedded..")
-                .because("the tenant-scoped entry point is engine-to-engine, held only by the decision port (ADR-0027)")
+    void core_does_not_depend_on_the_rule_engine() {
+        noClasses().should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules..")
+                .because("decisions go through the DecisionPort, adapted in the starter (ADR-0027)")
                 .check(CORE);
     }
 
     @Test
-    void TR_TEN_01_only_the_decision_port_claims_and_holds_the_tenant_scoped_entry_point() {
-        noClasses().that().doNotHaveFullyQualifiedName(DECISION_PORT)
-                .should().callMethod(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class, "claim",
-                        String.class, Object.class)
-                .orShould().dependOnClassesThat().haveFullyQualifiedName(
-                        "io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine")
-                .because("the Rule Engine hands the entry point to the decision port only, once (#336)")
-                .check(CORE);
-        com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes()
-                .that().haveFullyQualifiedName(DECISION_PORT).should().notBePublic()
-                .because("host code cannot create the registered claimant (#336)")
+    void core_reaches_expression_internals_only_through_the_language() {
+        noClasses().should().dependOnClassesThat(com.tngtech.archunit.base.DescribedPredicate.describe(
+                        "expression internals other than the horus-expr-v1 language",
+                        (com.tngtech.archunit.core.domain.JavaClass c) ->
+                                c.getPackageName().startsWith("io.github.dhluong90.bpm.expr.internal")
+                                        && !c.getName().equals("io.github.dhluong90.bpm.expr.internal.HorusExprV1")))
+                .because("gateway conditions compile through the ExpressionLanguage SPI, never parser classes "
+                        + "(ADR-0027)")
                 .check(CORE);
     }
 
@@ -99,6 +95,4 @@ class KernelContractArchitectureTest {
                 .because("host code holding a ServiceInvoker cannot ask for engine work (#336)")
                 .check(CORE);
     }
-
-    private static final String DECISION_PORT = "io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort";
 }

@@ -244,21 +244,18 @@ class RuleAndProcessIT {
     }
 
     @Test
-    void a_decision_the_caller_may_not_evaluate_fails_closed_at_the_business_rule_task() {
-        StepFailedException failure = as("starter-without-rules", List.of("processes:start"), () -> {
-            try {
+    void PRE_046_a_decision_step_runs_as_the_engine_on_behalf_of_a_caller_without_rules_evaluate() {
+        // Given a caller of bank-a who may start processes and holds no rules permission (ADR-0027)
+        ProcessInstance started = as("starter-without-rules", List.of("processes:start"), () ->
                 processes.start(StartRequest.of("card-fee-review").withBusinessKey("IT-3001")
-                        .withVariables(Map.of("applicationId", "IT-3001", "customerId", "C-001")));
-                return null;
-            } catch (StepFailedException e) {
-                return e;
-            }
-        });
-        assertThat(failure).isNotNull();
-        assertThat(failure.nodeId()).isEqualTo("price-card");
-        assertThat(failure.reason()).isEqualTo("PERMISSION_DENIED");
-        assertThat(jdbc.sql("SELECT count(*) FROM pre_instance WHERE business_key = 'IT-3001'").query(Long.class)
-                .single()).isZero();
+                        .withVariables(Map.of("applicationId", "IT-3001", "customerId", "C-002"))));
+
+        // Then the business rule task was evaluated through the starter's decision port: in bank-a, as the engine,
+        // on behalf of the caller, who needs no rules:evaluate; the charged fee now waits for a card officer
+        assertThat(started.status()).isEqualTo("RUNNING");
+        assertThat(jdbc.sql("SELECT tenant_id || ' ' || caller_id || ' ' || on_behalf_of FROM rle_decision "
+                + "WHERE correlation_id = ?").param(started.id()).query(String.class).single())
+                .isEqualTo("bank-a system:process-engine starter-without-rules");
     }
 
     @Test

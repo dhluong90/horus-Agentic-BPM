@@ -9,7 +9,7 @@ import java.util.Optional;
  * package-private: the only route to it is {@link RuleEngines#openEmbeddedEngineGrant()}, which opens at most one grant
  * per Rule Engine, and {@link RuleEngines#create} never opens one.
  *
- * <p>A grant is useful only to its registered claimant, the Process Engine's decision port, and only when that class is
+ * <p>A grant is useful only to its registered claimant, the process starter's decision port, and only when that class is
  * in a sealed package of a jar with this Rule Engine's {@code Implementation-Version}.
  */
 public final class EmbeddedEngineGrants {

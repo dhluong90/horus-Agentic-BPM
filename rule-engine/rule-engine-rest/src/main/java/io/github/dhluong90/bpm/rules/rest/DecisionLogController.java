@@ -136,6 +136,7 @@ public class DecisionLogController {
         json.set("outputs", d.outputsJson() == null ? EngineJson.NODES.nullNode() : EngineValues.read(d.outputsJson()));
         json.set("matchedRuleIds", EngineValues.value(d.matchedRuleIds()));
         json.put("callerId", d.callerId());
+        json.put("onBehalfOf", d.onBehalfOf());
         json.put("correlationId", d.correlationId());
         json.put("evalClock", d.evalClock().toString());
         json.put("evaluatedAt", d.evaluatedAt().toString());

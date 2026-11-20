@@ -65,7 +65,7 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
 
     /**
      * Opens the grant of the tenant-scoped entry point over this Rule Engine, once (ADR-0027, #336). The Rule Engine
-     * starter calls it; {@link #create} never does. The grant is useful only to the Process Engine's decision port.
+     * starter calls it; {@link #create} never does. The grant is useful only to the process starter's decision port.
      *
      * @return the grant
      * @throws IllegalStateException when this Rule Engine already has a grant, or is not the default engine

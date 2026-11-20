@@ -41,18 +41,23 @@ public interface RuleEngine {
 public interface TenantScopedRuleEngine {
   String engineId();                                                 // system:process-engine, fixed when built
   DecisionResult evaluate(String tenantId, DecisionRequest request);
+  DecisionResult evaluate(String tenantId, String onBehalfOf, Instant evaluationTime, DecisionRequest request);
+}
+public interface EmbeddedEngineGrant {                               // a bean, but it refuses hosts
+  TenantScopedRuleEngine claim(String engineId, Object claimant);    // once, by the registered claimant only
+  boolean isClaimed(String engineId);
 }
 public interface EmbeddedEngineGrant {                               // a bean, but it refuses hosts
   TenantScopedRuleEngine claim(String engineId, Object claimant);    // once, by the registered claimant only
   boolean isClaimed(String engineId);
 }
 ```
-`TenantScopedRuleEngine` is for an embedded engine acting on its own stored work with no caller signed in, for example the Process Engine pricing a step after a timer. The tenant is the one the engine read from its own stored row; a blank tenant is refused. The caller written to the decision log is the engine identity, fixed when the object is built. There is no REST endpoint for it.
+`TenantScopedRuleEngine` is for an embedded engine acting on its own stored work: the Process Engine evaluates every business rule task through it, after a timer or inside a user's request. The tenant is the one the engine read from its own stored row; a blank tenant is refused. The caller written to the decision log is the engine identity, fixed when the object is built, and `onBehalfOf` names the user the step ran for (null after a timer). The evaluation time is the engine's clock at the step; a retried step with the same idempotency key replays its decision. There is no REST endpoint for it.
 
 **Hosts have no way to reach this entry point.**
 - It is never a bean, and the `RuleEngine` bean does not implement it. `RuleEngines`, the engine's internals, is not a bean either, and building a `RuleEngines` hands out no grant.
-- The only route to it is `EmbeddedEngineGrant.claim`. That method hands the entry point out once per engine identity, and only to the claimant registered for it. For `system:process-engine`, that is the Process Engine's decision port. The claimant is checked by class identity, so a class with the same name from another class loader is refused. Its package must also be sealed, and its jar's `Implementation-Version` must equal the Rule Engine's; otherwise the starter registers no grant and the host keeps running without it.
-- The decision port and the engine caller (`DecisionCaller.Engine`) are package-private. Their packages, and the Rule Engine's internal and engine-to-engine packages, are **sealed** in the engine jars. A host class placed in one of those packages is refused by the JVM with a "sealing violation", on a plain class path and inside a Spring Boot executable jar.
+- The only route to it is `EmbeddedEngineGrant.claim`. That method hands the entry point out once per engine identity, and only to the claimant registered for it. For `system:process-engine`, that is the decision port of the process starter (`io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort`). The claimant is checked by class identity, so a class with the same name from another class loader is refused. Its package must also be sealed, and its jar's `Implementation-Version` must equal the Rule Engine's; otherwise the starter registers no grant and the host keeps running without it.
+- The decision port and the engine caller (`DecisionCaller.Engine`) are package-private. Their packages (in the process starter and the Process Engine core jars), and the Rule Engine's internal and engine-to-engine packages, are **sealed** in the engine jars. A host class placed in one of those packages is refused by the JVM with a "sealing violation", on a plain class path and inside a Spring Boot executable jar.
 - The grant bean exists only when the Process Engine is on the class path. The Process Engine claims the entry point while its beans are created, and start-up fails if it could not. When start-up finishes, the Rule Engine starter closes every identity still unclaimed, for good.
 - Host code that injects the grant and claims is refused with a `SecurityException`. A host that opens a grant over a Rule Engine it built itself cannot claim it either, because it cannot create the claimant. A Rule Engine opens one grant at most.
 

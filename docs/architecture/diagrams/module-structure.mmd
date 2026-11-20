@@ -5,7 +5,7 @@ flowchart TB
     RR["rule-engine-rest"]
     RP["rule-engine-postgres"]
     RT["rule-engine-test"]
-    RC["rule-engine-core<br/>Java 21 + Jackson 3 only"]
+    RC["rule-engine-core<br/>Java 21 + Jackson 3 + bpm-expression"]
     RS --> RR
     RS --> RP
     RS --> RC
@@ -19,7 +19,7 @@ flowchart TB
     PR["process-engine-rest"]
     PP["process-engine-postgres"]
     PT["process-engine-test"]
-    PC["process-engine-core<br/>Java 21 + Jackson 3 only"]
+    PC["process-engine-core<br/>Java 21 + Jackson 3 + bpm-expression"]
     PS --> PR
     PS --> PP
     PS --> PC
@@ -27,7 +27,10 @@ flowchart TB
     PP --> PC
     PT --> PC
   end
-  PC -.->|"RuleEngine interface only"| RC
+  EX["bpm-expression<br/>Money, value mapping, expression language<br/>JDK only"]
+  RC --> EX
+  PC --> EX
+  PS -.->|"decision port adapter, optional"| RC
   CK["cockpit<br/>static assets"] -.->|"REST contract only"| RR
   CK -.->|"REST contract only"| PR
   CKS["cockpit-spring-boot-starter"] --> CK
@@ -39,7 +42,7 @@ flowchart TB
   classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
   classDef external fill:#F3E5F5,stroke:#6A1B9A,color:#16231F
   classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
-  class RC,PC,RP,PP engine
+  class RC,PC,RP,PP,EX engine
   class RS,PS,RR,PR,RT,PT,CKS host
   class CK client
   class BOM obs

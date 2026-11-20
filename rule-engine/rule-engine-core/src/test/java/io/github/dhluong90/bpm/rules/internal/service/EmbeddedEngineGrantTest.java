@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
  */
 class EmbeddedEngineGrantTest {
 
-    /** Stands in for the Process Engine's decision port, registered as the claimant of the grant under test. */
+    /** Stands in for the process starter's decision port, registered as the claimant of the grant under test. */
     static final class RegisteredClaimant {
     }
 
@@ -49,7 +49,7 @@ class EmbeddedEngineGrantTest {
     @Test
     void TR_TEN_01_the_registered_claimant_is_the_process_engines_decision_port() {
         assertThat(EmbeddedEngineGrant.REGISTERED_CLAIMANTS).containsExactly(Map.entry("system:process-engine",
-                "io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort"));
+                "io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort"));
         assertThat(TenantScopedRuleEngine.REGISTERED_ENGINE_IDS).containsExactly("system:process-engine");
     }
 

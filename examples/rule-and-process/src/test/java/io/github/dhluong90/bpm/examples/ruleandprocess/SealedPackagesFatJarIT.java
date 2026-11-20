@@ -13,7 +13,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * TR-TEN-01 in the repackaged sample host (#336): Spring Boot's launcher keeps the engine packages sealed inside the
- * nested jars. Engine classes load; a class of the host's in {@code process.internal.service} is refused.
+ * nested jars. Engine classes load; a class of the host's in {@code process.internal.service}, or in the process starter's
+ * {@code process.autoconfigure} beside the decision port, is refused.
  */
 class SealedPackagesFatJarIT {
 
@@ -32,9 +33,12 @@ class SealedPackagesFatJarIT {
                 "org.springframework.boot.loader.launch.PropertiesLauncher"));
 
         // Then the engine loads from its sealed nested jars, and the attacker is refused
-        assertThat(output).contains("ENGINE_LOADED processSealed=true rulesSealed=true");
-        assertThat(output).contains("ATTACKER_REFUSED").contains("sealing violation");
-        assertThat(output).doesNotContain("ATTACKER_LOADED").doesNotContain("ENGINE_FAILED");
+        assertThat(output).contains("ENGINE_LOADED processSealed=true rulesSealed=true starterSealed=true");
+        assertThat(output).contains("\nATTACKER_REFUSED").contains("sealing violation");
+        // The decision port, the registered claimant, is sealed in the process starter's jar (ADR-0027)
+        assertThat(output).contains("CLAIMANT_ATTACKER_REFUSED");
+        assertThat(output).doesNotContain("ATTACKER_LOADED").doesNotContain("ENGINE_FAILED")
+                .doesNotContain("ATTACKER_OTHER");
     }
 
     private static String run(List<String> command) throws IOException, InterruptedException {

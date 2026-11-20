@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A card officer reviews a card fee waiver request; when the review is completed, the fee is priced by the bank's
+     own rule set. The decision runs inside the officer's request, as the engine on behalf of the officer. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_card-fee-review"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="card-fee-review" name="Card fee review" isExecutable="true">
+    <bpmn:startEvent id="start" name="Waiver requested"/>
+    <bpmn:userTask id="review" name="Review the waiver request" horus:assignee="role:CARD_OFFICER" horus:resultVariable="review"/>
+    <bpmn:businessRuleTask id="price" name="Price the card fee" horus:ruleSet="card-reminder-fee" horus:resultVariable="pricing">
+      <bpmn:extensionElements>
+        <horus:input name="tier" value="${instance.tier}"/>
+      </bpmn:extensionElements>
+    </bpmn:businessRuleTask>
+    <bpmn:endEvent id="end" name="Fee priced"/>
+    <bpmn:sequenceFlow id="start__review" sourceRef="start" targetRef="review"/>
+    <bpmn:sequenceFlow id="review__price" sourceRef="review" targetRef="price"/>
+    <bpmn:sequenceFlow id="price__end" sourceRef="price" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

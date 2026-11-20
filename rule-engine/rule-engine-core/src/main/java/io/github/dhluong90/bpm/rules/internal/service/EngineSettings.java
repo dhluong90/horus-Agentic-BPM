@@ -1,7 +1,7 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
-import io.github.dhluong90.bpm.rules.internal.expr.EvaluationLimits;
-import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
+import io.github.dhluong90.bpm.expr.internal.EvaluationLimits;
+import io.github.dhluong90.bpm.expr.internal.RegexLimits;
 import java.time.Duration;
 import java.util.List;
 

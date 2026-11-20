@@ -351,7 +351,7 @@ final class Feel {
                         BigDecimal value = new BigDecimal(amount.text);
                         // Stored at the currency scale, as Money prints it, so export and import again keep the hash.
                         try {
-                            io.github.dhluong90.bpm.rules.api.Money money = io.github.dhluong90.bpm.rules.api.Money.ofMajor(currency.text,
+                            io.github.dhluong90.bpm.expr.api.Money money = io.github.dhluong90.bpm.expr.api.Money.ofMajor(currency.text,
                                     (negative ? value.negate() : value).toPlainString());
                             return new Value.Money(money.toMajor(), currency.text);
                         } catch (IllegalArgumentException | ArithmeticException e) {

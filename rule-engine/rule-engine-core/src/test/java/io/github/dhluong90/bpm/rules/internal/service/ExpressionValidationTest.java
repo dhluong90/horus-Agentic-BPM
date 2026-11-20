@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.rules.api.SourceFormat;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.api.VersionService;
@@ -15,8 +15,8 @@ import io.github.dhluong90.bpm.rules.api.VersionStatus;
 import io.github.dhluong90.bpm.rules.api.Violation;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
-import io.github.dhluong90.bpm.rules.internal.expr.EvaluationLimits;
-import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
+import io.github.dhluong90.bpm.expr.internal.EvaluationLimits;
+import io.github.dhluong90.bpm.expr.internal.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.read.RuleSetReader;
 import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
 import java.nio.charset.StandardCharsets;
@@ -422,7 +422,7 @@ class ExpressionValidationTest {
     void TR_SEC_01_a_2000_term_chain_is_refused_without_building_the_tree() {
         // The 4,096-character cell of the security review: about 2,000 levels before this limit
         String chain = "creditScore" + "+creditScore".repeat(300) + " > 0";
-        assertThat(chain.length()).isLessThanOrEqualTo(io.github.dhluong90.bpm.rules.internal.expr.Parser.MAX_LENGTH);
+        assertThat(chain.length()).isLessThanOrEqualTo(io.github.dhluong90.bpm.expr.internal.Parser.MAX_LENGTH);
 
         Violation v = refusedAtImport(row("R1", "creditScore: \"" + chain + "\"", "0 VND"));
 
