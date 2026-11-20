@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
 import { allVersions } from '../../../api/rules/catalogue';
-import type { RuleDocument } from '../../../api/rules/rulesClient';
+import type { ExportedFile, ExportFormat, RuleDocument } from '../../../api/rules/rulesClient';
 import type { AcknowledgedWarning, DecisionResult, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
 
@@ -177,6 +177,28 @@ export function useReject(onDone: (version: RuleSetVersion) => void) {
       onDone(version);
     },
   );
+}
+
+/**
+ * Exports one version as a file (exportVersion). A read: no Idempotency-Key, nothing cached, and a second
+ * click while the first download runs is ignored.
+ */
+export function useExportVersion(onDone: (exported: ExportedFile) => void) {
+  const { client } = useRulesSession();
+  const running = useRef(false);
+  const mutation = useMutation({
+    mutationFn: ({ name, version, format }: { name: string; version: number; format: ExportFormat }) => client.exportVersion(name, version, format),
+    onSuccess: onDone,
+    onSettled: () => {
+      running.current = false;
+    },
+  });
+  const start = (args: { name: string; version: number; format: ExportFormat }) => {
+    if (running.current) return;
+    running.current = true;
+    mutation.mutate(args);
+  };
+  return { ...mutation, start };
 }
 
 export function useEvaluate(ruleSet: string, onDone: (result: DecisionResult) => void) {

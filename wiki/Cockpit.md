@@ -28,7 +28,7 @@ Add the starter next to the engine starter:
 
 The starter serves the cockpit at `/bpm/cockpit` behind your service's own sign-in. It adds no authentication of its own: protect the path with your Spring Security configuration as you do any other page. As a second line, the starter answers `401` with no file to a request that reaches it without a signed-in user.
 
-Open `http://localhost:8080/bpm/cockpit` and sign in. Expected in Cockpit 0.1 (first build): the header shows your service, your tenant and your name; the page lists the engines the service runs and what you may do. The Rule sets screen follows in the next build.
+Open `http://localhost:8080/bpm/cockpit` and sign in. Expected in Cockpit 0.1 (first build): the header shows your service, your tenant and your name; the page lists the engines the service runs and what you may do. Rules lists the rule sets of your tenant.
 
 ```mermaid
 sequenceDiagram
@@ -138,6 +138,16 @@ In Cockpit 0.1 you work with one host at a time and switch between hosts from th
 | Copy a rule set to another tenant | Editor | Export it under one tenant, then import the file under the other tenant | A new draft in the other tenant; the two copies then change independently |
 
 Authoring in 0.1 is by cell and row editing in the cockpit, a CSV round trip, or YAML or JSON import; see [[Rule Engine Authoring Decision Tables]]. Creating a new rule set is done by import.
+
+### Import and export a file
+
+| Action | Where | Who | What happens |
+|---|---|---|---|
+| Import a new rule set | Rules, **Import rule set** | `rules:author` | A YAML, JSON or DMN file becomes version 1, as a draft (`POST /rule-sets`) |
+| Import the next version | A rule set, **Import new version** | `rules:author` | The file becomes the next draft version and opens (`POST /rule-sets/{name}/versions`). The message "Draft version N created" appears only after the engine answers `201` |
+| Export a version | A rule set, **Export**, then **As JSON** or **As DMN decision table** | `rules:read` | The browser saves `<name>-v<version>.json` or `.dmn`, byte for byte as the engine sent it (`GET .../export?format=json` or `dmn`). The JSON file imports back with the same content hash |
+
+Every import carries an `Idempotency-Key`, so a double click creates one version. A file the engine refuses creates nothing: the cockpit says "Import refused. Nothing was saved." and names the file, the row, the column and the reason, for example "card-fee-bad.yaml, row R4, column Balance: compares a money amount with a plain number". A version imported on the page shows "Imported by lan from card-fee-v3.yaml" in its details. An export the engine refuses, such as a DMN export of a version with no decision table form, is shown the same way. YAML export arrives when the engine offers it. Import and export stay available when the host turns cockpit editing off.
 
 Readings are plain-language sentences by default. The host can choose the shorthand style instead, and can override or extend the sentence patterns per language. If the 8 Jan 2027 checkpoint fails, Cockpit 0.1 ships the shorthand style only and sentences follow in 0.2.
 

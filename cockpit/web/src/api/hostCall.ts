@@ -30,12 +30,31 @@ export function csrfToken(cookie: string = typeof document === 'undefined' ? '' 
   return undefined;
 }
 
-/**
- * One call to the host on the same origin with the host's session. A redirect means the session ended; an
- * error answer becomes a typed problem; a body that does not match its schema is an error, never shown partially.
- */
-export async function callHost<T>(fetchImpl: Fetch, baseUrl: string, request: HostRequest, schema: z.ZodType<T>): Promise<HostAnswer<T>> {
-  const headers: Record<string, string> = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...request.headers };
+/** A file the host answered with: the bytes as received and the file name it suggested. */
+export interface HostFile {
+  file: Blob;
+  fileName: string | undefined;
+}
+
+/** The file name of an `attachment` Content-Disposition (RFC 6266): `filename*` when present, else `filename`. */
+export function attachmentName(disposition: string | null): string | undefined {
+  if (disposition === null) return undefined;
+  const extended = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(disposition);
+  if (extended?.[1] !== undefined) {
+    try {
+      return decodeURIComponent(extended[1].trim());
+    } catch {
+      return undefined;
+    }
+  }
+  const plain = /filename\s*=\s*(?:"([^"]*)"|([^;\s]+))/.exec(disposition);
+  const name = plain?.[1] ?? plain?.[2];
+  return name === undefined || name === '' ? undefined : name;
+}
+
+/** Sends one request; a redirect or an error answer is thrown as a typed problem, anything else is returned unread. */
+async function send(fetchImpl: Fetch, baseUrl: string, request: HostRequest, accept: string): Promise<Response> {
+  const headers: Record<string, string> = { Accept: accept, 'X-Requested-With': 'XMLHttpRequest', ...request.headers };
   if (request.body) headers['Content-Type'] = request.body.contentType;
   if (request.method !== 'GET') {
     const token = csrfToken();
@@ -59,6 +78,15 @@ export async function callHost<T>(fetchImpl: Fetch, baseUrl: string, request: Ho
     throw new HostCallError({ kind: 'signed-out' });
   }
   if (!response.ok) throw new HostCallError(await readProblem(response));
+  return response;
+}
+
+/**
+ * One call to the host on the same origin with the host's session. A redirect means the session ended; an
+ * error answer becomes a typed problem; a body that does not match its schema is an error, never shown partially.
+ */
+export async function callHost<T>(fetchImpl: Fetch, baseUrl: string, request: HostRequest, schema: z.ZodType<T>): Promise<HostAnswer<T>> {
+  const response = await send(fetchImpl, baseUrl, request, 'application/json');
   const correlationId = response.headers.get('X-Correlation-Id') ?? undefined;
   let body: unknown;
   try {
@@ -69,4 +97,10 @@ export async function callHost<T>(fetchImpl: Fetch, baseUrl: string, request: Ho
   const parsed = schema.safeParse(body);
   if (!parsed.success) throw new HostCallError({ kind: 'unexpected-response', status: response.status, correlationId });
   return { status: response.status, etag: response.headers.get('ETag') ?? undefined, data: parsed.data };
+}
+
+/** A GET whose answer is a file: the bytes are kept exactly as the host sent them, never parsed or re-encoded. */
+export async function downloadFromHost(fetchImpl: Fetch, baseUrl: string, request: HostRequest, accept: string): Promise<HostFile> {
+  const response = await send(fetchImpl, baseUrl, request, `${accept}, application/problem+json`);
+  return { file: await response.blob(), fileName: attachmentName(response.headers.get('Content-Disposition')) };
 }

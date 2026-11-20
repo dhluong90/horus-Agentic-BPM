@@ -4,8 +4,9 @@ import { toHostError } from '../../api/hostError';
 import type { Rule, RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useRulesSession } from './api/rulesContext';
-import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
-import { DecisionCard, DetailsPanel, DraftsOffNote, EditDock, HeaderActions, type Action, type Review } from './components/ActionDock';
+import { useApprove, useExportVersion, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
+import { saveFile } from '../../app/saveFile';
+import { DecisionCard, DetailsPanel, DraftsOffNote, EditDock, HeaderActions, type Review } from './components/ActionDock';
 import { ChangesView } from './components/ChangesView';
 import { DecisionTable } from './components/DecisionTable';
 import { DraftChanges } from './components/DraftChanges';
@@ -25,6 +26,7 @@ import { formatDateTime } from './model/dates';
 import { draftReducer, initialDraft } from './model/draft';
 import { placeErrors } from './model/engineErrors';
 import { toDocument, toRows } from './model/table';
+import { columnLabel } from './model/reading';
 import { formatRoute, type Lens, type Route } from '../../app/route';
 import type { RuleDocument } from '../../api/rules/rulesClient';
 
@@ -56,13 +58,13 @@ function Subtitle({ version, editing }: { version: RuleSetVersion; editing: bool
   return <p className="rs-head__sub">{text}</p>;
 }
 
-function Inspector({ version, onMatched }: { version: RuleSetVersion; onMatched: (ids: string[]) => void }) {
+function Inspector({ version, importedFrom, onMatched }: { version: RuleSetVersion; importedFrom: string | undefined; onMatched: (ids: string[]) => void }) {
   const { t } = useI18n();
   const [tab, setTab] = useState<'details' | 'try'>('details');
   return (
     <section className="card inspector" aria-label={t('inspector.label')}>
       <Tabs label={t('inspector.label')} items={[{ id: 'details', label: t('inspector.details') }, { id: 'try', label: t('inspector.tryIt') }]} selected={tab} onSelect={setTab}>
-        {tab === 'details' ? <DetailsPanel version={version} /> : <TryItPanel version={version} onMatched={onMatched} />}
+        {tab === 'details' ? <DetailsPanel version={version} importedFrom={importedFrom} /> : <TryItPanel version={version} onMatched={onMatched} />}
       </Tabs>
     </section>
   );
@@ -109,13 +111,23 @@ interface WorkbenchProps {
   lens: Lens;
   navigate: Navigate;
   say: (text: string) => void;
-  importVersion: Action<RuleDocument>;
+  importVersion: { start: (document: RuleDocument, fileName: string) => void; isPending: boolean; error: unknown; fileName: string | undefined };
+  /** The file each version was imported from on this page, by version number. */
+  importedFrom: Readonly<Record<number, string>>;
+  /** The version whose title takes the focus when it opens: after an import, so the import button no longer holds it. */
+  focusTitle: number | undefined;
+  onTitleFocused: () => void;
   /** The content hash of this version when the user opened it; a different current hash means it changed under them. */
   openedHash: string;
   onReviewAgain: () => void;
 }
 
-function Workbench({ version, versions, lens, navigate, say, importVersion, openedHash, onReviewAgain }: WorkbenchProps) {
+function Workbench({ version, versions, lens, navigate, say, importVersion, importedFrom, focusTitle, onTitleFocused, openedHash, onReviewAgain }: WorkbenchProps) {
+  useEffect(() => {
+    if (focusTitle !== version.version) return;
+    window.document.getElementById('rule-set-title')?.focus();
+    onTitleFocused();
+  }, [focusTitle, onTitleFocused, version.version]);
   const { t, locale } = useI18n();
   const { can } = useRulesSession();
   const [editing, setEditing] = useState(false);
@@ -129,7 +141,16 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
   const approve = useApprove((updated) => { say(t('dock.approved', { version: String(updated.version) })); });
 
   const reject = useReject((updated) => { say(t('dock.rejected', { version: String(updated.version) })); });
-  const picker = useFilePicker((document) => { importVersion.start(document); });
+  // Export hands the engine's bytes to the browser unchanged, so the file imports back with the same hash (RLE-032).
+  const exportFile = useExportVersion((exported) => {
+    saveFile(exported.file, exported.fileName);
+    say(t('export.done', { file: exported.fileName }));
+  });
+  const picker = useFilePicker((document, fileName) => { exportFile.reset(); importVersion.start(document, fileName); });
+  const label = (name: string) => {
+    const column = [...version.definition.inputs, ...version.definition.outputs].find((c) => c.name === name);
+    return columnLabel(name, column?.description);
+  };
   const errors = placeErrors(save.error ? toHostError(save.error) : undefined);
   const onlyLocated = errors.length > 0 && errors.every((e) => e.kind !== 'table');
   const document = editing ? toDocument(version.definition, draft.rows) : undefined;
@@ -191,7 +212,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
       <div className="rs-head">
         <div className="rs-head__row">
           <div className="rs-head__titles">
-            <h1 id="rule-set-title" className="rs-head__title">
+            <h1 id="rule-set-title" className="rs-head__title" tabIndex={-1}>
               {version.ruleSet} {editing ? <StatusBadge status="DRAFT" /> : <StatusBadge status={version.status} />}
             </h1>
             <Subtitle version={version} editing={editing} />
@@ -208,7 +229,8 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
         </div>
         <DraftsOffNote />
         {picker.input}
-        {importVersion.error !== undefined && importVersion.error !== null ? <ProblemNotice error={importVersion.error} located /> : null}
+        {importVersion.error !== undefined && importVersion.error !== null ? <ProblemNotice error={importVersion.error} located refusedFile={importVersion.fileName !== undefined ? { fileName: importVersion.fileName, columnLabel: label } : undefined} /> : null}
+        {exportFile.error ? <ProblemNotice error={exportFile.error} located columnLabel={label} /> : null}
         {requestPublish.error ? <ProblemNotice error={requestPublish.error} onReload={() => { window.location.reload(); }} /> : null}
         {!editing ? (
           <div className="rs-head__tabs">
@@ -216,11 +238,20 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
               items={[{ id: 'table', label: t('lens.table') }, { id: 'changes', label: t('lens.changes') }, { id: 'history', label: t('lens.history') }]}>
               {null}
             </Tabs>
-            <MenuButton label={t('more.label')} className="btn btn--ghost" trigger={<>{t('more.label')} <span aria-hidden="true">⌄</span></>}
-              items={[
-                { label: t('more.source'), onSelect: () => { go({ lens: 'source' }); } },
-                ...(can('rules:author') ? [{ label: t('ruleSet.import'), onSelect: picker.open, disabled: importVersion.isPending }] : []),
-              ]} />
+            <div className="rs-head__files">
+              {can('rules:author') ? (
+                <button type="button" className="btn btn--ghost" disabled={importVersion.isPending} aria-busy={importVersion.isPending} onClick={picker.open}>
+                  {importVersion.isPending ? t('rulesArea.importing') : t('ruleSet.import')}
+                </button>
+              ) : null}
+              <MenuButton label={t('export.label')} className="btn btn--ghost" trigger={<>{exportFile.isPending ? t('export.busy') : t('export.label')} <span aria-hidden="true">⌄</span></>}
+                items={[
+                  { label: t('export.json'), onSelect: () => { exportFile.start({ name: version.ruleSet, version: version.version, format: 'json' }); }, disabled: exportFile.isPending },
+                  { label: t('export.dmn'), onSelect: () => { exportFile.start({ name: version.ruleSet, version: version.version, format: 'dmn' }); }, disabled: exportFile.isPending },
+                ]} />
+              <MenuButton label={t('more.label')} className="btn btn--ghost" trigger={<>{t('more.label')} <span aria-hidden="true">⌄</span></>}
+                items={[{ label: t('more.source'), onSelect: () => { go({ lens: 'source' }); } }]} />
+            </div>
           </div>
         ) : null}
       </div>
@@ -237,7 +268,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
             </section>
           ) : null}
           {!editing ? (
-            <Inspector version={version} onMatched={(ids) => {
+            <Inspector version={version} importedFrom={importedFrom[version.version]} onMatched={(ids) => {
               setMatched(new Set(ids));
               // The matched row is marked in the table, so the table is what the user sees next.
               if (lens !== 'table' && ids.length > 0) go({ lens: 'table' });
@@ -264,8 +295,17 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
   const [opened, setOpened] = useState<Readonly<Record<number, string>>>({});
   const closeToast = useCallback(() => { setToast(undefined); }, []);
   // Import of the next version from a file (CKP-030); it stays available when cockpit drafts are off (PD-075).
+  const [pickedFile, setPickedFile] = useState<string | undefined>(undefined);
+  // The success callback is fixed when the import starts, so it reads the picked file from a ref.
+  const picked = useRef<string | undefined>(undefined);
+  const [focusTitle, setFocusTitle] = useState<number | undefined>(undefined);
+  const titleFocused = useCallback(() => { setFocusTitle(undefined); }, []);
+  const [importedFrom, setImportedFrom] = useState<Readonly<Record<number, string>>>({});
   const importVersion = useSaveDraft(name, (created) => {
+    const file = picked.current;
+    if (file !== undefined) setImportedFrom((known) => ({ ...known, [created.version]: file }));
     setToast(t('ruleSet.imported', { version: String(created.version) }));
+    setFocusTitle(created.version);
     navigate({ name: 'rule-set', ruleSet: created.ruleSet, version: created.version, lens: 'table' });
   });
   const latest = versions.data?.[0];
@@ -308,7 +348,10 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
         lens={activeLens}
         navigate={navigate}
         say={(text) => { setToast(text); }}
-        importVersion={{ start: (document) => { setToast(undefined); importVersion.start(document); }, isPending: importVersion.isPending, error: importVersion.error }}
+        importedFrom={importedFrom}
+        focusTitle={focusTitle}
+        onTitleFocused={titleFocused}
+        importVersion={{ start: (document, fileName) => { setToast(undefined); picked.current = fileName; setPickedFile(fileName); importVersion.start(document); }, isPending: importVersion.isPending, error: importVersion.error, fileName: pickedFile }}
       />
       <Toast text={toast} onClose={closeToast} />
     </section>
