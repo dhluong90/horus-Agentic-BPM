@@ -1,21 +1,31 @@
 package io.github.dhluong90.bpm.process.autoconfigure;
 
+import io.github.dhluong90.bpm.host.autoconfigure.ApproverMustDifferFrom;
+import io.github.dhluong90.bpm.host.autoconfigure.RetireApproval;
+import io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
+import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
+import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.TaskService;
 import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnReader;
+import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.internal.exec.BehaviorCatalog;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
+import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
+import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
+import io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService;
+import io.github.dhluong90.bpm.process.internal.service.ProcessQueries;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
@@ -72,8 +82,10 @@ import org.springframework.transaction.PlatformTransactionManager;
 public class ProcessEngineAutoConfiguration {
 
     static final String DEV_PROFILE = "dev";
-    static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:start",
-            "processes:cancel", "processes:task:work");
+    static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
+            "processes:approve", "processes:start", "processes:cancel", "processes:task:work");
+    /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
+    static final String REMOVED_AUTO_APPROVE = "horus.bpm.processes.definitions-auto-approve";
     private static final Log LOG = LogFactory.getLog(ProcessEngineAutoConfiguration.class);
 
     @Bean
@@ -182,10 +194,8 @@ public class ProcessEngineAutoConfiguration {
     ProcessServices processEngineServices(ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
             JdbcJobStore jobs, JobSettings jobSettings, ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
-            ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
-        if (properties.definitions().autoApprove()) {
-            requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");
-        }
+            ObjectProvider<RuleEngines> ruleEngines, ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
+        requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
                     + "(horus.bpm.processes.definitions.auto-approve, dev profile).");
@@ -201,10 +211,60 @@ public class ProcessEngineAutoConfiguration {
                 Limits.DEFAULTS.maxTextChars(), Limits.DEFAULTS.maxAttributeChars()));
         return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
+                Map.of(SourceFormat.BPMN_XML, new SubsetBpmnWriter()::write),
                 new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
-                        properties.handlers().slowCallWarning()), publisher,
-                properties.toSettings(), BehaviorCatalog.registry(),
+                        engineWork(ruleEngines), properties.handlers().slowCallWarning()), publisher,
+                properties.toSettings(EngineSettings.ApproverRule.valueOf(ApproverMustDifferFrom.from(environment).name()),
+                        EngineSettings.RetireLastVersionRule.valueOf(RetireLastVersion.from(environment).name())),
+                BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings);
+    }
+
+    /**
+     * Refuses, outside the {@code dev} profile, the relaxations of TR-SEC-11, and the removed auto-approve key on any
+     * profile (PRE-022).
+     *
+     * @param environment the environment
+     * @param properties the bound settings
+     */
+    static void requireDevOnlyRelaxations(Environment environment, ProcessEngineProperties properties) {
+        if (environment.containsProperty(REMOVED_AUTO_APPROVE)) {
+            throw new IllegalStateException(REMOVED_AUTO_APPROVE + " was removed; use "
+                    + "horus.bpm.processes.definitions.auto-approve, which is accepted only when the dev profile is "
+                    + "active on its own (PRE-022). Remove the old key whatever its value.");
+        }
+        if (properties.definitions().autoApprove()) {
+            requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");
+        }
+        // PD-102 and PD-101: the four-eyes retirement modes are not built for process definitions in this release.
+        if (RetireApproval.from(environment) == RetireApproval.FOUR_EYES) {
+            throw new IllegalStateException(RetireApproval.PROPERTY + "=four-eyes is not available for process "
+                    + "definitions in this release; use single (the default), which needs processes:approve and a "
+                    + "reason (PD-102)");
+        }
+        if (RetireLastVersion.from(environment) == RetireLastVersion.FOUR_EYES) {
+            throw new IllegalStateException(RetireLastVersion.PROPERTY + "=four-eyes is not available for process "
+                    + "definitions in this release; use confirm (the default) or refuse (PD-101)");
+        }
+        if (ApproverMustDifferFrom.from(environment) == ApproverMustDifferFrom.REQUESTER) {
+            LOG.warn(ApproverMustDifferFrom.PROPERTY + "=requester relaxes four eyes for process definitions: the "
+                    + "importer of a version may approve it (PD-096). Every approval records this.");
+        }
+        if (!properties.makerChecker().enabled()) {
+            requireDevProfileOnly(environment, "horus.bpm.processes.maker-checker.enabled=false");
+            LOG.warn("Maker-checker for process definitions is off (horus.bpm.processes.maker-checker.enabled, dev "
+                    + "profile): a requester may approve their own version.");
+        }
+    }
+
+    /**
+     * The Rule Engine's tenant-scoped entry point for this engine's own work, bound to {@code system:process-engine}
+     * (ADR-0027). Built here and handed only to the decision port; never registered as a bean, so no host code can
+     * inject it.
+     */
+    private static Optional<TenantScopedRuleEngine> engineWork(ObjectProvider<RuleEngines> ruleEngines) {
+        return Optional.ofNullable(ruleEngines.getIfUnique())
+                .map(engines -> engines.forEmbeddedEngine(DecisionCaller.ENGINE_IDENTITY));
     }
 
     /**
@@ -237,6 +297,15 @@ public class ProcessEngineAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean
+    LiveNodeCountService processEngineLiveNodeCounts(ObjectProvider<TenantResolver> tenants,
+            ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
+            JdbcProcessStore store, ProcessEngineProperties properties) {
+        return new LiveNodeCountService(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
+                clock.getIfUnique(Clock::systemUTC), transactions, store, properties.stats().toSettings());
+    }
+
+    @Bean
     @ConditionalOnMissingBean(TaskService.class)
     TaskService processTaskService(ProcessServices services) {
         return services;
@@ -244,8 +313,8 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(ProcessQueryService.class)
-    ProcessQueryService processQueryService(ProcessServices services) {
-        return services;
+    ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts) {
+        return new ProcessQueries(services, liveCounts);
     }
 
     @Bean
@@ -257,8 +326,11 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(name = "processEngineModuleDescriptor")
-    ModuleDescriptor processEngineModuleDescriptor(ProcessEngineProperties properties) {
-        return new ModuleDescriptor("processes", ProcessEngineModule.engineVersion(), "v1", List.of(), Map.of(),
+    ModuleDescriptor processEngineModuleDescriptor(ProcessEngineProperties properties, Environment environment) {
+        return new ModuleDescriptor("processes", ProcessEngineModule.engineVersion(), "v1", List.of(),
+                Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value(),
+                        RetireApproval.META_SETTING, RetireApproval.from(environment).value(),
+                        RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value()),
                 PERMISSIONS, properties.security().rolePermissions());
     }
 

@@ -1,10 +1,13 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import io.github.dhluong90.bpm.rules.api.RuleSetExistsException;
 import io.github.dhluong90.bpm.rules.api.RuleSetSummary;
 import io.github.dhluong90.bpm.rules.api.VersionSummary;
 import io.github.dhluong90.bpm.rules.api.VersionConflictException;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionLog;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionRecord;
 import io.github.dhluong90.bpm.rules.internal.store.EventOutbox;
@@ -24,6 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+import tools.jackson.databind.JsonNode;
 
 /** In-memory adapters of the storage ports, for service tests without a database. Not thread-safe across tenants. */
 final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, IdempotencyStore, TransactionRunner {
@@ -97,6 +101,44 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
         throw new IllegalStateException("no such version");
     }
 
+    /** {@code cache_epoch} by tenant and rule set id; 1 for a new rule set, as in the migration. */
+    final Map<String, Long> epochs = new ConcurrentHashMap<>();
+    /** Every epoch notification, as {@code tenant/ruleSet:epoch}, in order. */
+    final List<String> notifications = new ArrayList<>();
+
+    @Override
+    public Optional<EffectiveVersion> findEffectiveForCache(String tenantId, String ruleSet, Instant at) {
+        // The same window as JdbcRuleStore: the nearest start or retirement of any approved version on each side.
+        return findEffective(tenantId, ruleSet, at).map(v -> {
+            List<Instant> bounds = versions.stream()
+                    .filter(n -> n.tenantId().equals(tenantId) && n.ruleSetId().equals(v.ruleSetId())
+                            && n.approvedAt() != null)
+                    .flatMap(n -> java.util.stream.Stream.of(n.effectiveFrom(), n.retiredAt()))
+                    .filter(java.util.Objects::nonNull).toList();
+            Instant from = bounds.stream().filter(b -> !b.isAfter(at)).max(Comparator.naturalOrder()).orElseThrow();
+            Instant next = bounds.stream().filter(b -> b.isAfter(at)).min(Comparator.naturalOrder()).orElse(null);
+            return new EffectiveVersion(v, epochs.getOrDefault(tenantId + "/" + v.ruleSetId(), 1L), from, next);
+        });
+    }
+
+    @Override
+    public long advanceCacheEpoch(String tenantId, String ruleSetId, String ruleSet) {
+        long epoch = epochs.merge(tenantId + "/" + ruleSetId, 2L, (old, ignored) -> old + 1);
+        notifications.add(tenantId + "/" + ruleSet + ":" + epoch);
+        return epoch;
+    }
+
+    @Override
+    public Map<String, Long> cacheEpochs(String tenantId, java.util.Collection<String> names) {
+        Map<String, Long> result = new java.util.HashMap<>();
+        for (RuleSetRow row : ruleSets) {
+            if (row.tenantId().equals(tenantId) && names.contains(row.name())) {
+                result.put(row.name(), epochs.getOrDefault(tenantId + "/" + row.id(), 1L));
+            }
+        }
+        return result;
+    }
+
     @Override
     public void replaceDraft(StoredVersion updated, long expectedLockVersion) {
         for (int i = 0; i < versions.size(); i++) {
@@ -116,13 +158,67 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     public Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at) {
         return versions.stream()
                 .filter(v -> v.tenantId().equals(tenantId) && v.ruleSet().equals(ruleSet)
-                        && v.status() == VersionStatus.PUBLISHED && !v.effectiveFrom().isAfter(at))
-                .max(Comparator.comparing(StoredVersion::effectiveFrom).thenComparing(StoredVersion::version));
+                        && v.approvedAt() != null && !v.effectiveFrom().isAfter(at)
+                        && (v.retiredAt() == null || v.retiredAt().isAfter(at)))
+                .max(Comparator.comparing(StoredVersion::version));
+    }
+
+    @Override
+    public void lockRuleSet(String tenantId, String ruleSetId) {
+        // single-threaded tests: nothing to lock
+    }
+
+    @Override
+    public Optional<StoredVersion> nextScheduled(String tenantId, String ruleSetId, Instant after,
+            String excludingVersionId) {
+        return versions.stream().filter(v -> v.tenantId().equals(tenantId) && v.ruleSetId().equals(ruleSetId)
+                        && !v.id().equals(excludingVersionId) && v.approvedAt() != null && v.retiredAt() == null
+                        && v.effectiveFrom().isAfter(after))
+                .min(Comparator.comparing(StoredVersion::effectiveFrom));
+    }
+
+    @Override
+    public synchronized List<Superseded> retireSuperseded(String tenantId, String ruleSetId, Instant now) {
+        List<Superseded> retired = new ArrayList<>();
+        for (int i = 0; i < versions.size(); i++) {
+            StoredVersion old = versions.get(i);
+            if (old.status() != VersionStatus.PUBLISHED || (tenantId != null && !old.tenantId().equals(tenantId))
+                    || (ruleSetId != null && !old.ruleSetId().equals(ruleSetId))) {
+                continue;
+            }
+            java.util.OptionalInt newer = versions.stream()
+                    .filter(n -> n.tenantId().equals(old.tenantId()) && n.ruleSetId().equals(old.ruleSetId())
+                            && n.status() == VersionStatus.PUBLISHED && n.version() > old.version()
+                            && !n.effectiveFrom().isAfter(now))
+                    .mapToInt(StoredVersion::version).max();
+            if (newer.isPresent()) {
+                StoredVersion done = old.retired(now);
+                versions.set(i, done);
+                retired.add(new Superseded(done.tenantId(), done.id(), done.ruleSet(), done.version(),
+                        done.lockVersion(), newer.getAsInt()));
+            }
+        }
+        return retired;
     }
 
     @Override
     public void append(DecisionRecord record) {
         decisions.add(record);
+    }
+
+    @Override
+    public synchronized List<DecisionRecord> search(String tenantId, String ruleSet, Instant from, Instant to,
+            DecisionLog.Position after, int limit, java.time.Duration statementTimeout) {
+        Comparator<DecisionRecord> newestFirst = Comparator.comparing(DecisionRecord::createdAt)
+                .thenComparing(DecisionRecord::id).reversed();
+        return decisions.stream()
+                .filter(r -> r.tenantId().equals(tenantId) && r.ruleSet().equals(ruleSet))
+                .filter(r -> !r.createdAt().isBefore(from) && r.createdAt().isBefore(to))
+                .filter(r -> after == null || r.createdAt().isBefore(after.createdAt())
+                        || (r.createdAt().equals(after.createdAt()) && r.id().compareTo(after.id()) < 0))
+                .sorted(newestFirst)
+                .limit(limit)
+                .toList();
     }
 
     @Override
@@ -155,6 +251,13 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
 
     @Override
     public void append(String tenantId, String id, String payloadJson, Instant createdAt) {
+        // Every event any core test writes is checked against its schema file and its envelope (#241).
+        JsonNode payload = EngineJson.JSON.readTree(payloadJson);
+        EventSchemas.conforms(payload);
+        assertThat(payload.path("eventId").asString()).as("eventId is the row id")
+                .isEqualTo(id);
+        assertThat(payload.path("tenantId").asString()).as("tenantId is the row's")
+                .isEqualTo(tenantId);
         outbox.add(new OutboxRow(tenantId, id, payloadJson, createdAt));
     }
 
@@ -227,6 +330,18 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     final Map<String, byte[]> engineKeys = new ConcurrentHashMap<>();
+    /** Setting name to tenant to value, as {@code rle_setting_seen}. */
+    final Map<String, Map<String, String>> settingsSeen = new ConcurrentHashMap<>();
+
+    @Override
+    public Map<String, String> settingsSeen(String setting) {
+        return Map.copyOf(settingsSeen.getOrDefault(setting, Map.of()));
+    }
+
+    @Override
+    public void recordSettingSeen(String tenantId, String setting, String value, Instant at) {
+        settingsSeen.computeIfAbsent(setting, ignored -> new ConcurrentHashMap<>()).put(tenantId, value);
+    }
 
     @Override
     public byte[] engineKey(String name, byte[] candidate, Instant now) {

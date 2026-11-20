@@ -109,6 +109,14 @@ final class RestSupport {
         node.put("toStatus", entry.toStatus().name());
         node.put("actor", entry.actor());
         node.set("reason", EngineValues.value(entry.reason()));
+        if (entry.action() == io.github.dhluong90.bpm.rules.api.LifecycleAction.RETIRED) {
+            // Only a retirement has these: by hand (approvalMode single) or superseded (system, supersededBy).
+            node.set("supersededBy", entry.supersededBy() == null
+                    ? EngineJson.NODES.nullNode() : EngineJson.NODES.numberNode(entry.supersededBy()));
+            node.set("approvalMode", EngineValues.value(entry.approvalMode()));
+            node.set("noVersionInEffect", entry.noVersionInEffect() == null
+                    ? EngineJson.NODES.nullNode() : EngineJson.NODES.booleanNode(entry.noVersionInEffect()));
+        }
         node.put("lockVersion", entry.lockVersion());
         node.put("occurredAt", entry.occurredAt().toString());
         if (entry.canonicalHash() != null) {
@@ -222,6 +230,15 @@ final class RestSupport {
             }
         }
         node.put("unchangedCount", diff.unchangedCount());
+        ArrayNode masking = node.putArray("masking");
+        for (io.github.dhluong90.bpm.rules.api.VersionDiff.InputMasking input : diff.masking()) {
+            ObjectNode item = masking.addObject();
+            item.put("input", input.input());
+            item.set("from", EngineValues.value(input.from() == null ? null : input.from().name()));
+            item.set("to", EngineValues.value(input.to() == null ? null : input.to().name()));
+            item.put("changed", input.changed());
+            item.set("personalDataName", EngineValues.value(input.personalDataName()));
+        }
         return node;
     }
 

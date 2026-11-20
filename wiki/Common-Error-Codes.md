@@ -46,6 +46,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [IDEMPOTENCY_KEY_REUSE_MISMATCH](#idempotency_key_reuse_mismatch) | both | M1 |
 | 422 | [UNIQUE_HIT_VIOLATION](#unique_hit_violation) | rules | M1 |
 | 422 | [EVALUATION_ERROR](#evaluation_error) | rules | M1 |
+| 422 | [REPLAY_NOT_POSSIBLE](#replay_not_possible) | rules | M1 (0.2.0) |
 | 422 | [BATCH_TOO_LARGE](#batch_too_large) | rules | M1 |
 | 422 | [DEFINITION_TOO_LARGE](#definition_too_large) | processes | M2 |
 | 422 | [GUARDRAIL_CONTRACT_INVALID](#guardrail_contract_invalid) | processes | M2 |
@@ -94,18 +95,12 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `500`. Unexpected failure. The body carries only the fixed `detail` text and the `correlationId`, never a stack trace, class name, SQL or table name. Give the `correlationId` to the host's operators: the server log has the same id with the cause. Send `X-Correlation-Id` with your request to choose the id yourself.
 
 ### PRECONDITION_REQUIRED
-`428`. A command that must be conditional was sent without the header it needs: `If-Match` on a Rule Engine command such as `:withdraw`, `If-Match` and `Idempotency-Key` on a Process Engine task completion, or a business key or `Idempotency-Key` on a Process Engine instance start. Read the resource, then send its `ETag` as `If-Match: "<lockVersion>"` (and a new `Idempotency-Key` where asked), so the command cannot overwrite a change you have not seen or run twice.
+`428`. A command that must be conditional was sent without the header it needs: `If-Match` on a Rule Engine command (`PUT` of a draft, `:approve`, `:reject`, `:withdraw` or `:retire`), `If-Match` and `Idempotency-Key` on a Process Engine task completion, or a business key or `Idempotency-Key` on a Process Engine instance start. An approval must name the lock version of the content the approver reviewed. Read the resource, then send its `ETag` as `If-Match: "<lockVersion>"` (and a new `Idempotency-Key` where asked), so the command cannot overwrite a change you have not seen or run twice. `:simulate` writes nothing and needs neither header.
 
 ## Versions and approvals
 
 ### SELF_APPROVAL_FORBIDDEN
 `403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve. A requester who rejects their own rule set request gets this code too, with a detail pointing to `:withdraw`: take the request back with `POST .../versions/{v}:withdraw` instead (PD-089).
-
-### PRECONDITION_REQUIRED
-`428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft, `:approve`, `:reject` or `:withdraw`. An approval must name the lock version of the content the approver reviewed. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
-
-### PRECONDITION_REQUIRED
-`428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft, `:approve` or `:reject`. An approval must name the lock version of the content the approver reviewed. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
 
 ### NO_EFFECTIVE_VERSION
 `404`. No approved version is effective at the clock: nothing is published or active yet, the effective date is in the future, the last version was retired, or the request names a tenant with no version. Publish or approve a version, or check the tenant.
@@ -118,8 +113,10 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is the rule (row), `column` the input or output name, and either is `null` when the problem is outside them; `message` carries no location prefix. Every cell problem of the document is listed at once, in document order, up to 100 entries (`violationsTruncated: true` when there were more), so an editor can mark each cell; a structural problem (an unknown property, a missing key) stops reading and is the only entry. Example: `[{ "ruleId": "R3", "column": "fee", "message": "output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code" }]`.
 
+Under strict mode (`decision-log.require-explicit-mask: true`) an input that declares no `mask` is one entry with `ruleId: null` and `column` the input name, at import, draft replacement, publication request and approval: `[{ "ruleId": null, "column": "nationalId", "message": "declares no mask, and decision-log.require-explicit-mask requires every input to declare mask: true or mask: false" }]`. Add `mask: true`, or `mask: false` if the input holds no personal data.
+
 ### PAYLOAD_TOO_LARGE
-`413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve`, `:reject` and `:withdraw`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
+`413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve`, `:reject`, `:withdraw` and `:retire`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
 
 ### LAST_VERSION_IN_EFFECT
 `409`. The retirement would leave no version of the rule set or definition key in effect. After it, evaluations or new starts would fail until a new version is approved (PD-101).
@@ -136,22 +133,25 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 ## Rule Engine
 
 ### CLOCK_NOT_ALLOWED
-`403`. `clock` is set on `:evaluate` without `rules:simulate`. Drop `clock`, or use an identity with `rules:simulate`.
+`403`. `clock` is set on `:evaluate` or `/versions/{v}:evaluate` without `rules:simulate`. A chosen instant reaches versions and dates the caller would not get at the host clock. Drop `clock`, or use an identity with `rules:simulate`. Nothing is logged.
 
 ### RULE_SET_NOT_FOUND
 `404`. No rule set of that name in the caller's tenant. Another tenant's rule set also answers `404`, so names do not leak.
 
 ### VERSION_NOT_FOUND
-`404`. The rule set has no version with that number.
+`404`. The rule set has no version with that number in the caller's tenant. On `:simulate` a version of another tenant answers the same, so versions do not leak.
 
 ### DECISION_NOT_FOUND
-`404`. Unknown decision id, or a decision of another tenant.
+`404`. Unknown decision id, or a decision of another tenant, on `GET /decisions/{id}` or `POST /decisions/{id}:replay`. Ids of other tenants answer the same, so they do not leak.
 
 ### RULE_SET_EXISTS
 `409`. `POST /rule-sets` with a name already used in this tenant. Add a version to the existing rule set instead.
 
 ### UNIQUE_HIT_VIOLATION
 `422`. A `unique` table matched several rows for these inputs (`TR-DET-04`). Zero matches is not this error: it is no match, as with `first`. This is an authoring defect in the published rule set, so retrying never helps (ADR-0010). The decision is still logged with this outcome. Remove the overlap, or switch to `first` if order is intended. The problem body carries `decisionId` and `matchedRuleIds`, for example `"matchedRuleIds": ["R1", "R2"]`; it never carries partial outputs.
+
+### REPLAY_NOT_POSSIBLE
+`422`. `POST /decisions/{id}:replay` for a decision that used a masked input (`mask: true`) with a value. The decision log keeps such a value only as `masked`, so the decision cannot be evaluated again. `detail` names the inputs, never their values. Explain the decision from its log entry instead. Nothing is written.
 
 ### EVALUATION_ERROR
 `422`. Evaluation failed: `detail` names `CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT` or `FUNCTION_ERROR`. The decision is logged with this outcome. When the rule set masks an input and the tenant has no masking key, the decision is refused without being evaluated: the row has `error_code = MASKING_KEY_MISSING` and no inputs, and `detail` names `horus.bpm.rules.masking.hmac-key`. When an output reads an input that the tenant's masking default masks, the decision is refused the same way with `error_code = MASKED_INPUT_IN_OUTPUT`; an output that reads an input declared `mask: true` is refused at import instead.

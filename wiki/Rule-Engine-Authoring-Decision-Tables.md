@@ -16,7 +16,10 @@ ruleSet: card-fee               # unique within a tenant, kebab-case
 description: Monthly fee by card tier and balance
 hitPolicy: first                # first | unique | collect
 effectiveFrom: 2026-12-01T00:00:00+07:00   # optional ISO instant; otherwise effective when approved
+timeZone: Asia/Ho_Chi_Minh      # optional IANA zone of today(); default UTC
 ```
+
+`effectiveFrom` is when the version takes effect once approved; it is stored with the version and is not part of its hash. `timeZone` is part of the rules: `today()` is the date of the decision's clock in that zone, and `now()` is the clock itself. Both read the clock the decision records, never the server time, so a decision replays to the same result ([[Rule Engine Versioning and Publishing]]). Write `txDate: "== today()"` for a same-day test, or `billedOn: "today()"` as an output of type `date`; `today()` is a `date` and `now()` a `datetime`, and comparing one with the other type is refused at import.
 
 | Policy | Behaviour | Use it for |
 |---|---|---|
@@ -47,6 +50,8 @@ outputs:
 | `datetime` | `datetime('2026-12-01T00:00:00Z')` | |
 | `money` | `50000000 VND` | Currency plus amount; stored in minor units; never compared across currencies |
 | `list<T>` | `['VN', 'SG']` | |
+
+Mark every input that holds personal data with `mask: true`: national ids, names, account numbers, phone numbers, email and postal addresses, dates of birth. An input with no `mask` is stored in plain text in the decision log, which can never be changed. When you forget, the import warns you if the name looks like personal data (`UNMASKED_PERSONAL_DATA`), and the approver sees the same warning. Write `mask: false` on an input that holds no personal data to say so explicitly; a bank that turns on strict mode (`decision-log.require-explicit-mask`) refuses any input that says neither. See [[Rule Engine Configuration]].
 
 Inputs are validated against their type before evaluation. A wrong type is a `400 INPUT_INVALID` over REST or a `DecisionInputException` in Java, never a silent conversion.
 

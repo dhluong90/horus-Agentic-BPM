@@ -1,13 +1,18 @@
 openapi: 3.1.0
 info:
   title: HORUS Process Engine REST API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     REST API of the Process Engine, served by the host application under `/api/bpm/processes/v1`.
     Preview: this file covers importing a BPMN document, reading and listing definitions, starting, listing,
-    reading and cancelling instances, and reading, claiming, unclaiming and completing a user task. Outside the `dev` profile an imported definition
-    stays `DRAFT` and nothing in this release can activate it; the approval flow and the remaining endpoints of
-    process-engine/docs/DESIGN.md section 6.2 follow with the features that implement them.
+    reading and cancelling instances, reading, claiming, unclaiming and completing a user task, the live token
+    counts per node and the BPMN export of a version. From 0.2.0
+    it also covers the definition lifecycle with four eyes: an import is a `DRAFT`; a person requests
+    approval, optionally with an effective date; a second person approves it and it becomes the effective version
+    on that date, retiring the previous one; a reject sends it back to `DRAFT` with a reason. The requester can
+    never approve (`403 SELF_APPROVAL_FORBIDDEN`), and an older version is never approved over a newer active one
+    (`409 VERSION_SUPERSEDED`). The remaining endpoints of process-engine/docs/DESIGN.md section 6.2 follow with the
+    features that implement them.
 
     Every body is read and written with the engine's own JSON mapper, so the host's `spring.jackson.*` settings
     never change an engine payload (PRE-045): keys are camelCase and times are ISO 8601 strings in UTC.
@@ -28,6 +33,8 @@ security:
 tags:
   - name: definitions
     description: Import, list and read BPMN process definitions
+  - name: lifecycle
+    description: Request, approve, reject and retire definition versions, with four eyes
   - name: instances
     description: Start, list, read and cancel process instances
   - name: tasks
@@ -45,7 +52,8 @@ paths:
         document. DTDs and entities are refused (`BPMN_UNSAFE_XML`), every element outside the subset is named with
         its id and line (`BPMN_UNSUPPORTED_ELEMENT`), and a condition in another expression language is
         `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`. The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A
-        document identical to the latest version of its key returns that version, also with `201`. Permission
+        document identical to the latest version of its key returns that version, also with `201`. A draft is never
+        the effective version: instances keep starting on the active one until the draft is approved. Permission
         `processes:deploy`.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -99,8 +107,9 @@ paths:
       operationId: getDefinitionVersion
       summary: Read one version of a definition
       description: |
-        Status, hashes and approval fields of the version; the source document is not part of the answer. The
-        `ETag` is the definition hash, quoted. Permission `processes:read`.
+        Status, hashes, approval and lifecycle fields of the version; the source document is not part of the
+        answer. The `ETag` is the definition hash, quoted; the lifecycle commands take the `lockVersion` field as
+        `If-Match`. Another tenant's version is `404 DEFINITION_NOT_FOUND`. Permission `processes:read`.
       parameters:
         - name: key
           in: path
@@ -118,6 +127,264 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DefinitionVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}/history:
+    get:
+      tags: [lifecycle]
+      operationId: getDefinitionHistory
+      summary: Lifecycle history of a definition version, oldest first
+      description: Append-only; one entry per import, request, approval, reject and retirement. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+      responses:
+        '200':
+          description: The history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/DefinitionHistoryEntry' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}:request-approval:
+    post:
+      tags: [lifecycle]
+      operationId: requestDefinitionApproval
+      summary: Request approval of a draft
+      description: |
+        `DRAFT` to `PENDING_APPROVAL`; the caller is recorded as requester and can never approve this version.
+        `effectiveFrom` is when the version should take effect once approved; omitted means at approval; a time in
+        the past is `400 INPUT_INVALID`. A version that is not a draft is `409 INVALID_STATE`. Publishes
+        `processes.definition.publish-requested.v1`. Permission `processes:author` or `processes:deploy`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - $ref: '#/components/parameters/IfMatchDefinition'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                effectiveFrom: { type: [string, 'null'], format: date-time }
+            example: { effectiveFrom: '2027-04-01T00:00:00+07:00' }
+      responses:
+        '200': { $ref: '#/components/responses/Definition' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}:approve:
+    post:
+      tags: [lifecycle]
+      operationId: approveDefinition
+      summary: Approve a pending version as a second person
+      description: |
+        `PENDING_APPROVAL` to `ACTIVE`. The requester, and under the default `horus.bpm.lifecycle.approver-must-differ-from:
+        makers` also the importer, is refused with `403 SELF_APPROVAL_FORBIDDEN` and nothing is written. A newer version of the key already active is `409 VERSION_SUPERSEDED`, and the version stays
+        pending. The version is the effective one from its `effectiveFrom` (or now); at that time every older active
+        version of the key is retired, once, with `processes.definition.retired.v1` and `supersededBy`. Running
+        instances keep their version. Publishes `processes.definition.approved.v1`. Permission `processes:approve`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - $ref: '#/components/parameters/IfMatchDefinition'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment: { type: [string, 'null'], maxLength: 2000 }
+      responses:
+        '200': { $ref: '#/components/responses/Definition' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}:reject:
+    post:
+      tags: [lifecycle]
+      operationId: rejectDefinition
+      summary: Send a pending version back to draft with a reason
+      description: |
+        `PENDING_APPROVAL` to `DRAFT`; the reason is stored as `decisionComment` and in the history. A missing or
+        blank reason is `400 INPUT_INVALID`. The requester cannot reject their own request
+        (`403 SELF_APPROVAL_FORBIDDEN`; withdraw follows). Publishes `processes.definition.rejected.v1`. Permission
+        `processes:approve`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - $ref: '#/components/parameters/IfMatchDefinition'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+            example: { reason: missing fraud check }
+      responses:
+        '200': { $ref: '#/components/responses/Definition' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}:retire:
+    post:
+      tags: [lifecycle]
+      operationId: retireDefinition
+      summary: Retire an active version or withdraw a draft
+      description: |
+        `ACTIVE` (permission `processes:approve`, `reason` required) or `DRAFT` (permission `processes:author`) to
+        `RETIRED`. A pending or retired version is `409 INVALID_STATE`. Retiring stops new starts only; running
+        instances keep their version. The mode is `horus.bpm.lifecycle.retire-approval: single` and is recorded on the
+        history row and the event. Retiring the last version in effect of the key needs `confirmNoVersionInEffect:
+        true` under `horus.bpm.lifecycle.retire-last-version: confirm` (the default), and is always refused under
+        `refuse`: `409 LAST_VERSION_IN_EFFECT`, naming what stops working. Publishes
+        `processes.definition.retired.v1` with `reason`, `approvalMode` and `noVersionInEffect`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - $ref: '#/components/parameters/IfMatchDefinition'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: [string, 'null'], maxLength: 2000 }
+                confirmNoVersionInEffect: { type: boolean, default: false }
+            example: { reason: fraud check bypass found, confirmNoVersionInEffect: true }
+      responses:
+        '200': { $ref: '#/components/responses/Definition' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}/node-stats:
+    get:
+      tags: [definitions]
+      operationId: getNodeStats
+      summary: Live tokens per node of one definition version
+      description: |
+        Counts the live tokens (`ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER`, `WAITING_EVENT`) at each
+        node of the version, in the caller's tenant only, from the live token index and never from history
+        (PRE-028). A node without live tokens is absent. Each replica caches an answer for `stats.live-cache-ttl`
+        (5 seconds), or `stats.live-cache-ttl-large` (15 seconds) when the version had more than
+        `stats.live-cache-large-threshold` (100,000) live tokens; a cached answer keeps its `asOf`. A version that
+        does not exist in the caller's tenant is `404 DEFINITION_NOT_FOUND`, also when it exists in another tenant.
+        Only `mode=live` in this release; the window mode follows with the hourly rollup. Open incidents per node
+        follow with the incident table. Permission `processes:read`.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$', maxLength: 200 }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: mode
+          in: query
+          required: false
+          description: Any other value is `400 INPUT_INVALID`
+          schema: { type: string, enum: [live], default: live }
+      responses:
+        '200':
+          description: The live counts
+          headers:
+            ETag:
+              description: The `asOf` time in epoch milliseconds, quoted; unchanged while the answer is cached
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeCounts' }
+              example:
+                definitionKey: kyc-onboarding
+                version: 2
+                mode: live
+                asOf: '2026-11-20T09:30:00Z'
+                nodes:
+                  approve: { WAITING_USER: 40 }
+                  assess-documents: { WAITING_ASYNC: 7 }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}/export:
+    get:
+      tags: [definitions]
+      operationId: exportDefinition
+      summary: Export a definition version as BPMN 2.0 XML
+      description: |
+        Writes the version of the caller's tenant in the executable subset with the `horus` extension attributes and
+        a generated BPMNDI layout, so it opens in BPMN modellers. Importing the document gives the same
+        `definitionHash` (PRE-034), which is also the `ETag`. The stored source is read again and must still give
+        the recorded hash (`500 DEFINITION_INTEGRITY_FAILED` otherwise). Read-only. A version of another tenant is
+        `404 DEFINITION_NOT_FOUND`, the same answer as a missing one. Permission `processes:read`.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$', maxLength: 200 }
+          example: card-fee-review
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          example: 1
+        - name: format
+          in: query
+          required: true
+          schema: { type: string, enum: [bpmn] }
+      responses:
+        '200':
+          description: The BPMN document
+          headers:
+            ETag:
+              description: The `definitionHash` of the version, quoted
+              schema: { type: string }
+            Content-Disposition: { schema: { type: string }, example: 'attachment; filename="card-fee-review-v1.bpmn"' }
+          content:
+            application/bpmn+xml:
+              schema: { type: string }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -400,6 +667,24 @@ components:
       scheme: bearer
       description: The host's own authentication. The engine reads the caller and tenant from the host's security context.
   parameters:
+    DefinitionKey:
+      name: key
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' }
+    DefinitionVersionNumber:
+      name: version
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    IfMatchDefinition:
+      name: If-Match
+      in: header
+      required: true
+      description: |
+        The version's `lockVersion`, quoted: the `lockVersion` field of the version, or the `ETag` of a lifecycle
+        command's answer. Missing is `428 PRECONDITION_REQUIRED`; stale is `409 VERSION_CONFLICT`.
+      schema: { type: string, example: '"1"' }
     TaskId:
       name: id
       in: path
@@ -442,6 +727,15 @@ components:
         `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`. Remembered for `idempotency-retention` (24 hours).
       schema: { type: string, minLength: 1, maxLength: 200 }
   responses:
+    Definition:
+      description: The definition version after the call
+      headers:
+        ETag:
+          description: The version's `lockVersion`, quoted
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DefinitionVersion' }
     Task:
       description: The task after the call
       headers:
@@ -469,8 +763,9 @@ components:
         `INSTANCE_NOT_FOUND` or `TASK_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
         carries a `WWW-Authenticate` challenge. `403` is `PERMISSION_DENIED` (missing engine permission),
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
-        the caller's, or a decision step whose caller tenant is not the instance tenant). `409` is
-        `VERSION_CONFLICT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
+        the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
+        `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
+        `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
         `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH` or `STEP_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
@@ -589,11 +884,36 @@ components:
           type: string
           description: SHA-256 of the stored source document; checked before every compile
         nodeCount: { type: integer }
-        approvedBy: { type: [string, 'null'] }
-        approvedAt: { type: [string, 'null'], format: date-time }
-        effectiveFrom: { type: [string, 'null'], format: date-time }
+        approvedBy:
+          type: [string, 'null']
+          description: The approver; `system:dev-auto-approve` for a dev-profile auto-approval
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
+        source: { type: [string, 'null'], enum: [IMPORT, STARTUP, AUTHORED, BPMN, null] }
+        lockVersion: { type: integer, description: Send as If-Match on the lifecycle commands }
+        effectiveFrom:
+          type: [string, 'null']
+          format: date-time
+          description: When the version is (or will be) the effective one; on a pending version, the requested date
+        requestedBy: { type: [string, 'null'] }
+        requestedAt: { type: [string, 'null'], format: date-time }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        decisionComment: { type: [string, 'null'], description: The approval comment or the last rejection reason }
+        retiredBy:
+          type: [string, 'null']
+          description: '`system:effective-date` when a newer version took effect'
+        retiredAt: { type: [string, 'null'], format: date-time }
+        supersededBy: { type: [integer, 'null'], description: The version that superseded this one }
+    DefinitionHistoryEntry:
+      type: object
+      required: [action, toStatus, actor, occurredAt]
+      properties:
+        action: { type: string, enum: [IMPORTED, REQUESTED, APPROVED, REJECTED, RETIRED] }
+        fromStatus: { type: [string, 'null'] }
+        toStatus: { type: string }
+        actor: { type: string }
+        comment: { type: [string, 'null'] }
+        occurredAt: { type: string, format: date-time }
     ProcessInstance:
       type: object
       required: [id, definitionKey, definitionVersion, status, variables, tokens, tasks, lockVersion, startedAt]
@@ -637,6 +957,20 @@ components:
         startedBy: { type: [string, 'null'] }
         startedAt: { type: string, format: date-time }
         endedAt: { type: [string, 'null'], format: date-time }
+    NodeCounts:
+      type: object
+      required: [definitionKey, version, mode, asOf, nodes]
+      properties:
+        definitionKey: { type: string }
+        version: { type: integer, minimum: 1 }
+        mode: { type: string, enum: [live] }
+        asOf: { type: string, format: date-time, description: When the counts were read }
+        nodes:
+          type: object
+          description: Node id to token status to count
+          additionalProperties:
+            type: object
+            additionalProperties: { type: integer, minimum: 1 }
     DefinitionProblemItem:
       type: object
       required: [code, message]
@@ -657,8 +991,8 @@ components:
           type: string
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED,
             SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND,
-            TASK_NOT_FOUND, INVALID_STATE,
-            VERSION_CONFLICT, IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
+            TASK_NOT_FOUND, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
+            IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
             BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, PRECONDITION_REQUIRED,
             DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]
         detail: { type: string }
@@ -668,6 +1002,16 @@ components:
           description: Present on `VALIDATION_FAILED` and `BPMN_UNSUPPORTED_ELEMENT`
           items: { $ref: '#/components/schemas/DefinitionProblemItem' }
         nodeId: { type: string, description: Present on `STEP_FAILED` }
+        definitionKey: { type: string, description: Present on `LAST_VERSION_IN_EFFECT` }
+        version: { type: integer, description: Present on `LAST_VERSION_IN_EFFECT` }
+        setting:
+          type: string
+          enum: [confirm, refuse]
+          description: Present on `LAST_VERSION_IN_EFFECT`, the `lifecycle.retire-last-version` value in force
+        nextEffectiveFrom:
+          type: [string, 'null']
+          format: date-time
+          description: Present on `LAST_VERSION_IN_EFFECT`; when the next approved version takes effect, or null
         reason:
           type: string
           description: >-

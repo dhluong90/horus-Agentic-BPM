@@ -6,6 +6,7 @@ import io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator;
 import io.github.dhluong90.bpm.rules.postgres.SchemaStatus;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.YearMonth;
 import java.util.Map;
 import java.util.Objects;
@@ -49,6 +50,7 @@ final class RuleEngineHealthCheck {
     private final Clock clock;
     private final LongSupplier nanoTime;
     private final AtomicReference<Snapshot> cache = new AtomicReference<>();
+    private final java.util.List<RuleEngineBackgroundJob> jobs;
 
     RuleEngineHealthCheck(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, Clock clock) {
         this(migrator, partitions, clock, System::nanoTime);
@@ -56,10 +58,16 @@ final class RuleEngineHealthCheck {
 
     RuleEngineHealthCheck(
             RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, Clock clock, LongSupplier nanoTime) {
+        this(migrator, partitions, clock, nanoTime, java.util.List.of());
+    }
+
+    RuleEngineHealthCheck(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, Clock clock,
+            LongSupplier nanoTime, java.util.List<RuleEngineBackgroundJob> jobs) {
         this.migrator = Objects.requireNonNull(migrator, "migrator must not be null");
         this.partitions = Objects.requireNonNull(partitions, "partitions must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime must not be null");
+        this.jobs = java.util.List.copyOf(jobs);
     }
 
     Result check() {
@@ -69,7 +77,21 @@ final class RuleEngineHealthCheck {
             snapshot = new Snapshot(now, compute());
             cache.set(snapshot);
         }
-        return snapshot.result();
+        // Background jobs are read live, outside the cached snapshot: a stopped loop is DOWN at once.
+        if (jobs.isEmpty()) {
+            return snapshot.result();
+        }
+        java.util.Map<String, Object> details = new java.util.LinkedHashMap<>(snapshot.result().details());
+        boolean up = snapshot.result().up();
+        for (RuleEngineBackgroundJob job : jobs) {
+            Instant last = job.lastSuccess();
+            details.put(job.jobName() + "LastSuccess", last == null ? "never" : last.toString());
+            if (job.stopped()) {
+                details.put(job.jobName(), "STOPPED");
+                up = false;
+            }
+        }
+        return new Result(up, details);
     }
 
     private Result compute() {

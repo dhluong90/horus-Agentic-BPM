@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.spi;
 
 import io.github.dhluong90.bpm.rules.api.MaskingKey;
+import io.github.dhluong90.bpm.rules.api.PersonalDataNames;
 import java.util.Optional;
 
 /**
@@ -11,6 +12,9 @@ import java.util.Optional;
  * from a secret store. The key returned for a tenant is used as it is; a host that shares one root key between
  * tenants derives each tenant's key with {@link MaskingKey#forTenant(String)}, as the default does. Implementations
  * must be thread-safe and must never log a key.
+ *
+ * <p>It also carries the tenant's guards against unmasked personal data (PD-099): strict mode and the list of input
+ * names that look like personal data.
  */
 public interface MaskingPolicy {
 
@@ -81,6 +85,30 @@ public interface MaskingPolicy {
      */
     default boolean maskByDefault(String tenantId) {
         return false;
+    }
+
+    /**
+     * Tells whether every input of a tenant's rule sets must declare {@code mask: true} or {@code mask: false}
+     * ({@code decision-log.require-explicit-mask}, PD-099 mitigation 2, RLE-050). When true, an import, a draft
+     * replacement or a publication request with an undeclared input is refused with {@code VALIDATION_FAILED} naming
+     * the input.
+     *
+     * @param tenantId the tenant
+     * @return true for strict mode; the default is false
+     */
+    default boolean requireExplicitMask(String tenantId) {
+        return false;
+    }
+
+    /**
+     * Returns the input names that look like personal data for a tenant (PD-099 mitigation 1, RLE-049). An undeclared
+     * input whose name matches one gets a warning at import and at the publication request.
+     *
+     * @param tenantId the tenant
+     * @return the names; the default is {@link PersonalDataNames#builtIn()}
+     */
+    default PersonalDataNames personalDataNames(String tenantId) {
+        return PersonalDataNames.builtIn();
     }
 
     /**

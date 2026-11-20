@@ -1,11 +1,14 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
 import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.rules.api.PersonalDataNames;
 import io.github.dhluong90.bpm.rules.api.VersionDiff;
 import io.github.dhluong90.bpm.rules.api.VersionDiff.Change;
 import io.github.dhluong90.bpm.rules.api.VersionDiff.ColumnChange;
 import io.github.dhluong90.bpm.rules.api.VersionDiff.ColumnChanges;
 import io.github.dhluong90.bpm.rules.api.VersionDiff.FieldChange;
+import io.github.dhluong90.bpm.rules.api.VersionDiff.InputMasking;
+import io.github.dhluong90.bpm.rules.api.VersionDiff.Masking;
 import io.github.dhluong90.bpm.rules.api.VersionDiff.RowChange;
 import io.github.dhluong90.bpm.rules.internal.expr.Expr;
 import io.github.dhluong90.bpm.rules.internal.expr.Parser;
@@ -52,6 +55,20 @@ final class VersionDiffs {
      * @return the diff
      */
     static VersionDiff diff(StoredVersion version, StoredVersion base) {
+        return diff(version, base, false, PersonalDataNames.of(List.of()));
+    }
+
+    /**
+     * Compares {@code version} against {@code base}, with each input's masking status (RLE-051).
+     *
+     * @param version the version compared
+     * @param base the version it is compared against; the same rule set
+     * @param maskByDefault the tenant's {@code decision-log.mask-default}, for inputs that declare no {@code mask}
+     * @param names the tenant's personal-data names, to mark an undeclared look-alike in {@code version}
+     * @return the diff
+     */
+    static VersionDiff diff(StoredVersion version, StoredVersion base, boolean maskByDefault,
+            PersonalDataNames names) {
         JsonNode v = EngineValues.read(version.canonicalJson());
         JsonNode w = EngineValues.read(base.canonicalJson());
         List<FieldChange> header = members(w, v, "", NOT_HEADER, false);
@@ -60,7 +77,25 @@ final class VersionDiffs {
         Rows rows = rows(w.path("rules"), v.path("rules"));
         return new VersionDiff(version.ruleSet(), version.version(), base.version(), version.canonicalHash(),
                 base.canonicalHash(), !version.sourceHash().equals(base.sourceHash()), version.effectiveFrom(),
-                base.effectiveFrom(), header, inputs, outputs, rows.changes(), rows.unchanged());
+                base.effectiveFrom(), header, inputs, outputs, rows.changes(), rows.unchanged(),
+                masking(version.canonicalJson(), base.canonicalJson(), maskByDefault, names));
+    }
+
+    // ---------------------------------------------------------------- masking
+
+    /** Every input of either version with its status in both; inputs of {@code version} first, in its order. */
+    private static List<InputMasking> masking(String version, String base, boolean maskByDefault,
+            PersonalDataNames names) {
+        Map<String, Masking> before = new LinkedHashMap<>();
+        MaskDeclarations.statuses(base, maskByDefault).forEach(s -> before.put(s.input(), s.masking()));
+        List<InputMasking> result = new ArrayList<>();
+        for (MaskDeclarations.Status now : MaskDeclarations.statuses(version, maskByDefault)) {
+            Masking from = before.remove(now.input());
+            String lookAlike = now.masking().declared() ? null : names.match(now.input()).orElse(null);
+            result.add(new InputMasking(now.input(), from, now.masking(), from != now.masking(), lookAlike));
+        }
+        before.forEach((input, from) -> result.add(new InputMasking(input, from, null, true, null)));
+        return result;
     }
 
     // ---------------------------------------------------------------- rows

@@ -239,6 +239,79 @@ class ProcessServicesQaTest {
         assertThat(delivered.get()).isEqualTo(1);
     }
 
+    // ---- BPMN export (PRE-034) ------------------------------------------------------------------------------
+
+    private record ExportRig(ProcessServices services, MemoryStore store, AtomicInteger events,
+            java.util.concurrent.atomic.AtomicReference<String> tenant) {
+    }
+
+    private ExportRig exportRig(Set<String> permissions) {
+        MemoryStore store = new MemoryStore();
+        AtomicInteger events = new AtomicInteger();
+        java.util.concurrent.atomic.AtomicReference<String> tenant = new java.util.concurrent.atomic.AtomicReference<>("bank-a");
+        CallerResolver caller = new CallerResolver() {
+            @Override
+            public String currentCallerId() {
+                return "erin";
+            }
+
+            @Override
+            public Set<String> currentPermissions() {
+                return permissions;
+            }
+        };
+        Process process = pricing();
+        ProcessServices services = new ProcessServices(tenant::get, caller, clock, new Supplier0(), store,
+                Map.of(SourceFormat.BPMN_XML, bytes -> process),
+                Map.of(SourceFormat.BPMN_XML, p -> ("<exported " + p.id() + "/>").getBytes(StandardCharsets.UTF_8)),
+                new LocalServiceInvoker(Map.of(), Optional.of(ruleEngine(new AtomicInteger())), Duration.ofSeconds(5)),
+                event -> events.incrementAndGet(),
+                new EngineSettings(true, 500, 1_048_576, Duration.ofDays(1), Duration.ofMillis(200)),
+                BehaviorCatalog.registry(), new V1ExpressionEvaluator(100));
+        services.importAtStartup("bank-a", new ImportRequest(SourceFormat.BPMN_XML, "p".getBytes(StandardCharsets.UTF_8), null));
+        return new ExportRig(services, store, events, tenant);
+    }
+
+    @Test
+    void PRE_034_export_returns_the_version_of_the_callers_tenant_with_its_definition_hash() {
+        ExportRig rig = exportRig(Set.of("processes:read"));
+
+        io.github.dhluong90.bpm.process.api.DefinitionExport export =
+                rig.services().exportDefinition("pricing", 1, SourceFormat.BPMN_XML);
+
+        assertThat(export.document()).isEqualTo("<exported pricing/>");
+        assertThat(export.definitionHash()).isEqualTo(rig.store().definitions.get(0).definitionHash());
+        assertThat(export.version()).isEqualTo(1);
+    }
+
+    @Test
+    void PRE_034_another_tenants_version_is_not_found_and_nothing_is_written() {
+        ExportRig rig = exportRig(Set.of("processes:read"));
+        int eventsBefore = rig.events().get();
+        rig.tenant().set("bank-b");
+
+        assertThatThrownBy(() -> rig.services().exportDefinition("pricing", 1, SourceFormat.BPMN_XML))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.DefinitionNotFoundException.class)
+                .satisfies(e -> assertThat(((io.github.dhluong90.bpm.process.api.ProcessException) e).code())
+                        .isEqualTo("DEFINITION_NOT_FOUND"));
+        assertThat(rig.store().definitions).hasSize(1).allSatisfy(d -> assertThat(d.tenantId()).isEqualTo("bank-a"));
+        assertThat(rig.store().idempotency).isEmpty();
+        assertThat(rig.events().get()).isEqualTo(eventsBefore);
+    }
+
+    @Test
+    void PRE_034_export_needs_processes_read_and_a_supported_format() {
+        ExportRig withoutRead = exportRig(Set.of("processes:start"));
+        assertThatThrownBy(() -> withoutRead.services().exportDefinition("pricing", 1, SourceFormat.BPMN_XML))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.PermissionDeniedException.class);
+
+        ExportRig reader = exportRig(Set.of("processes:read"));
+        assertThatThrownBy(() -> reader.services().exportDefinition("pricing", 1, SourceFormat.YAML))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.InputInvalidException.class);
+        assertThatThrownBy(() -> reader.services().exportDefinition("pricing", 2, SourceFormat.BPMN_XML))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.DefinitionNotFoundException.class);
+    }
+
     // ---- wiring ---------------------------------------------------------------------------------------------
 
     private ProcessServices services(Process process, io.github.dhluong90.bpm.process.spi.TenantResolver tenants,
@@ -313,7 +386,8 @@ class ProcessServicesQaTest {
 
         @Override
         public Optional<StoredDefinition> definitionVersion(String tenant, String key, int version) {
-            return definitions.stream().filter(d -> d.key().equals(key) && d.version() == version).findFirst();
+            return definitions.stream().filter(d -> d.tenantId().equals(tenant) && d.key().equals(key)
+                    && d.version() == version).findFirst();
         }
 
         @Override
@@ -325,6 +399,26 @@ class ProcessServicesQaTest {
         @Override
         public void insertDefinition(StoredDefinition definition) {
             definitions.add(definition);
+        }
+
+        @Override
+        public List<StoredDefinition> lockDefinitions(String tenant, String key) {
+            return definitions.stream().filter(d -> d.key().equals(key)).toList();
+        }
+
+        @Override
+        public int updateDefinition(StoredDefinition updated) {
+            definitions.replaceAll(d -> d.id().equals(updated.id()) ? updated : d);
+            return 1;
+        }
+
+        @Override
+        public void appendDefinitionHistory(DefinitionHistoryRow row) {
+        }
+
+        @Override
+        public List<DefinitionHistoryRow> definitionHistory(String tenant, String definitionId) {
+            return List.of();
         }
 
         @Override

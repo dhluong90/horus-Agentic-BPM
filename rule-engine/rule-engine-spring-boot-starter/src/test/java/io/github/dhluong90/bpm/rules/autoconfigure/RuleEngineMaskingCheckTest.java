@@ -19,11 +19,21 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 @ExtendWith(OutputCaptureExtension.class)
 class RuleEngineMaskingCheckTest {
 
-    /** A store without live rule sets: only the RLE-035 read is ever called. */
+    /** A store without live rule sets: only the RLE-035 read and the RLE-052 record of the masking default. */
     static final RuleStore EMPTY = (RuleStore) Proxy.newProxyInstance(RuleStore.class.getClassLoader(),
             new Class<?>[] {RuleStore.class}, (proxy, method, args) -> {
-                if (method.getName().equals("liveVersionInputs")) {
-                    return List.of();
+                switch (method.getName()) {
+                    case "liveVersionInputs" -> {
+                        return List.of();
+                    }
+                    case "settingsSeen" -> {
+                        return Map.of();
+                    }
+                    case "recordSettingSeen" -> {
+                        return null;
+                    }
+                    default -> {
+                    }
                 }
                 throw new UnsupportedOperationException(method.getName());
             });

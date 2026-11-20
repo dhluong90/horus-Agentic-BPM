@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.rules.api.RuleSetSummary;
 import io.github.dhluong90.bpm.rules.api.VersionSummary;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -79,7 +80,11 @@ public interface RuleStore {
     void replaceDraft(StoredVersion updated, long expectedLockVersion);
 
     /**
-     * Finds the published version effective at an instant: the latest {@code effectiveFrom} at or before it.
+     * Finds the version in force at an instant (ADR-0025 decision 3, DESIGN section 3.3.1): the highest version number
+     * among the approved versions ({@code approvedAt} set) whose {@code effectiveFrom} is at or before it and that were
+     * not retired at it ({@code retiredAt} null or after it). The status is not read, so a newer version takes over at
+     * its effective date whether or not the older one's status has changed yet, and a clock before a retirement still
+     * selects the retired version.
      *
      * @param tenantId the tenant
      * @param ruleSet the rule set name
@@ -87,6 +92,54 @@ public interface RuleStore {
      * @return the version, or empty
      */
     Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at);
+
+    /**
+     * Locks the rule set row for this transaction ({@code SELECT ... FOR UPDATE}), so two retirements of its last
+     * versions run one after the other and the second sees that it is now the last (PD-101).
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     */
+    void lockRuleSet(String tenantId, String ruleSetId);
+
+    /**
+     * Finds the approved, not retired version that starts soonest after an instant, other than one version.
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     * @param after the instant
+     * @param excludingVersionId the version left out, usually the one being retired
+     * @return the version, or empty when none is scheduled
+     */
+    Optional<StoredVersion> nextScheduled(String tenantId, String ruleSetId, Instant after, String excludingVersionId);
+
+    /**
+     * Retires every {@code PUBLISHED} version that a newer {@code PUBLISHED} version of its rule set, in effect at
+     * {@code now}, has superseded (DESIGN section 3.3.2): one conditional {@code UPDATE ... WHERE status = 'PUBLISHED'
+     * ... RETURNING}, so across replicas each version is returned exactly once, with no advisory lock. Sets status
+     * {@code RETIRED}, {@code retiredAt = now} and the lock version plus one. The caller writes the history row and the
+     * event for the returned rows only, in the same transaction.
+     *
+     * @param tenantId the tenant, or null for every tenant (the engine's sweep)
+     * @param ruleSetId the rule set, or null for every rule set of the tenant; requires a tenant
+     * @param now the engine clock
+     * @return the retired versions, each with the version in force that superseded it
+     */
+    List<Superseded> retireSuperseded(String tenantId, String ruleSetId, Instant now);
+
+    /**
+     * A version retired because a newer one is in effect.
+     *
+     * @param tenantId the tenant
+     * @param versionId the retired version's id
+     * @param ruleSet the rule set name
+     * @param version the retired version's number
+     * @param lockVersion its lock version after the retirement
+     * @param supersededBy the number of the newer version in force, the highest one in effect
+     */
+    record Superseded(String tenantId, String versionId, String ruleSet, int version, long lockVersion,
+            int supersededBy) {
+    }
 
     /**
      * Lists rule set summaries by name, ascending.
@@ -156,6 +209,50 @@ public interface RuleStore {
     Optional<byte[]> findEngineKey(String name);
 
     /**
+     * Returns the version in force at an instant, selected as {@link #findEffective} does, together with what the
+     * compiled cache needs to keep it: the rule set's {@code cache_epoch} and the window around the instant over which
+     * that selection holds, read in one statement so they agree (ADR-0009). The window runs from the latest instant at
+     * or before {@code at} to the earliest instant after it at which any approved version starts or is retired.
+     *
+     * @param tenantId the tenant
+     * @param ruleSet the rule set name
+     * @param at the evaluation instant
+     * @return the effective version, or empty when none is effective
+     */
+    Optional<EffectiveVersion> findEffectiveForCache(String tenantId, String ruleSet, Instant at);
+
+    /**
+     * Increments the rule set's {@code cache_epoch} in the current transaction and notifies every replica after
+     * commit (PostgreSQL {@code pg_notify('horus_rle_cache', ...)}).
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     * @param ruleSet the rule set name, carried by the notification
+     * @return the new epoch
+     */
+    long advanceCacheEpoch(String tenantId, String ruleSetId, String ruleSet);
+
+    /**
+     * Returns the current {@code cache_epoch} of rule sets of one tenant; a name the tenant does not have is absent.
+     *
+     * @param tenantId the tenant
+     * @param ruleSets the rule set names, at most {@code cache.max-entries}
+     * @return epoch by rule set name
+     */
+    java.util.Map<String, Long> cacheEpochs(String tenantId, java.util.Collection<String> ruleSets);
+
+    /**
+     * The version in force and its cache window.
+     *
+     * @param version the version
+     * @param cacheEpoch the rule set's {@code cache_epoch}
+     * @param validFrom the start of the window, inclusive
+     * @param nextEffectiveFrom the end of the window, exclusive, or null when nothing is scheduled after it
+     */
+    record EffectiveVersion(StoredVersion version, long cacheEpoch, Instant validFrom, Instant nextEffectiveFrom) {
+    }
+
+    /**
      * Lists the declared inputs of every version that is not retired, in every tenant. Engine-internal, used once at
      * start-up outside any request; never exposed to a caller.
      *
@@ -184,4 +281,23 @@ public interface RuleStore {
      * @return the scopes ({@code *} for the host, otherwise tenant ids), possibly empty
      */
     java.util.Set<String> maskingKeyScopes(String keyId);
+
+    /**
+     * Reads the value of a setting each tenant last started with (RLE-052). Engine-internal, read once at start-up
+     * outside any request.
+     *
+     * @param setting the setting name, for example {@code decision-log.mask-default}
+     * @return the recorded value by tenant
+     */
+    Map<String, String> settingsSeen(String setting);
+
+    /**
+     * Records the value of a setting a tenant started with, replacing the previous one.
+     *
+     * @param tenantId the tenant
+     * @param setting the setting name
+     * @param value the value in force
+     * @param at the start-up time
+     */
+    void recordSettingSeen(String tenantId, String setting, String value, Instant at);
 }

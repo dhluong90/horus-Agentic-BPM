@@ -96,6 +96,16 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    void TR_TEN_01_the_rule_engine_bean_is_not_the_tenant_scoped_entry_point() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(io.github.dhluong90.bpm.rules.api.RuleEngine.class))
+                    .isNotInstanceOf(io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine.class);
+            assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine.class);
+        });
+    }
+
+    @Test
     void TR_EXT_03_an_out_of_range_setting_stops_start_up() {
         runner.withUserConfiguration(HostWithEngineStandIns.class)
                 .withPropertyValues("horus.bpm.rules.cache.max-entries=0")
@@ -175,7 +185,7 @@ class RuleEngineAutoConfigurationTest {
             DecisionLogPartitions partitions = context.getBean(DecisionLogPartitions.class);
             InOrder order = inOrder(migrator, partitions);
             order.verify(migrator).migrate();
-            order.verify(partitions).ensureCurrentAndNextMonth(JAN_26_2027);
+            order.verify(partitions).ensureAhead(JAN_26_2027, java.time.Duration.ofDays(7));
         });
     }
 
@@ -185,7 +195,7 @@ class RuleEngineAutoConfigurationTest {
                 .withPropertyValues("horus.bpm.rules.migrate-on-start=false")
                 .run(context -> {
                     verify(context.getBean(RuleEngineSchemaMigrator.class), never()).migrate();
-                    verify(context.getBean(DecisionLogPartitions.class)).ensureCurrentAndNextMonth(JAN_26_2027);
+                    verify(context.getBean(DecisionLogPartitions.class)).ensureAhead(JAN_26_2027, java.time.Duration.ofDays(7));
                 });
     }
 
@@ -195,8 +205,8 @@ class RuleEngineAutoConfigurationTest {
                 .withPropertyValues("horus.bpm.rules.migrate-on-start=false")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
-                    verify(context.getBean(DecisionLogPartitions.class), never()).ensureCurrentAndNextMonth(
-                            org.mockito.ArgumentMatchers.any());
+                    verify(context.getBean(DecisionLogPartitions.class), never()).ensureAhead(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
                 });
         assertThat(output).contains("Rule Engine schema is not current");
     }

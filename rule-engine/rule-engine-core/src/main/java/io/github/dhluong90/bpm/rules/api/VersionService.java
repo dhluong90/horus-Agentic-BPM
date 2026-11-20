@@ -116,6 +116,40 @@ public interface VersionService {
     RuleSetVersion reject(String ruleSet, int version, WriteOptions options);
 
     /**
+     * Takes a published version out of service by hand (ADR-0025, PD-080, RLE-026). In the default
+     * {@code lifecycle.retire-approval: single} mode one holder of {@code rules:approve} with a reason is enough. The
+     * version becomes {@code RETIRED} from the transaction's clock on: evaluation stops selecting it on every replica,
+     * while a clock before it still does and logged decisions still replay. Older published versions it had
+     * superseded are retired with it, so a retire never brings an older version back. Writes one {@code RETIRED}
+     * history row with the approval mode and one {@code rules.version.retired.v1} event.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key, optimistic lock and the required reason in {@link WriteOptions#comment()}
+     * @return the version, now retired
+     * @throws InputInvalidException when the reason is blank or longer than {@code lifecycle.reason-max-length}
+     * @throws InvalidStateException when the version is not published, or a newer version in effect supersedes it
+     * @throws VersionConflictException when the lock version is stale
+     */
+    RuleSetVersion retire(String ruleSet, int version, WriteOptions options);
+
+    /**
+     * Retires a published version as {@link #retire(String, int, WriteOptions)} does, and lets it be the last version
+     * in effect of its rule set when {@code confirmNoVersionInEffect} is true (PD-101). Without the confirmation, a
+     * retirement that would leave no version in effect is refused with {@link LastVersionInEffectException}; with it,
+     * the history row and the event record that no version remains in effect. A host with
+     * {@code horus.bpm.lifecycle.retire-last-version: refuse} refuses it either way.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key, optimistic lock and the required reason
+     * @param confirmNoVersionInEffect true to accept that no version will be in effect afterwards
+     * @return the version, now retired
+     * @throws LastVersionInEffectException when it is the last version in effect and that is not confirmed or allowed
+     */
+    RuleSetVersion retire(String ruleSet, int version, WriteOptions options, boolean confirmNoVersionInEffect);
+
+    /**
      * Takes the caller's own publication request back (PD-089, RLE-046): a pending version returns to {@code DRAFT},
      * nothing is published and the version in effect does not change. Writes one {@code WITHDRAWN} history row and
      * one {@code rules.version.withdrawn.v1} event. Needs {@code rules:author}, and the caller must be the requester.

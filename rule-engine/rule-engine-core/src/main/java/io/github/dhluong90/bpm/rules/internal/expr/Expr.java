@@ -76,6 +76,85 @@ public sealed interface Expr {
     }
 
     /**
+     * A call of a whitelisted pure function (rule-engine DESIGN 3.2 item 3). A {@code null} argument gives
+     * {@code null}, as in FEEL.
+     *
+     * @param function the function
+     * @param args the arguments, as many as the function takes
+     */
+    record Call(Function function, List<Expr> args) implements Expr {
+        public Call {
+            args = List.copyOf(args);
+        }
+    }
+
+    /** The pure functions of {@code horus-expr-v1}, with their FEEL translation. */
+    enum Function {
+        /** {@code round(x, scale)}, half-even; FEEL {@code decimal(x, scale)}, the same as {@code round half even}. */
+        ROUND("round"),
+        /** {@code daysBetween(d1, d2)}, calendar days from d1 to d2; FEEL {@code (d2 - d1).days}. */
+        DAYS_BETWEEN("daysBetween");
+
+        private final String text;
+
+        Function(String text) {
+            this.text = text;
+        }
+
+        /** The name as written in an expression. */
+        public String text() {
+            return text;
+        }
+
+        /** The number of arguments. */
+        public int arity() {
+            return 2;
+        }
+    }
+
+    /**
+     * {@code today()} or {@code now()}: the evaluation clock, never the system time (TR-DET-01). The compiler binds
+     * both to slots after the inputs, filled for each evaluation from the decision's clock in the rule set's
+     * {@code timeZone}; a parse without a clock (printing, translation) leaves the slot at -1.
+     *
+     * @param function which reading of the clock
+     * @param slot the frame slot holding the value, or -1 when the tree is not bound to a clock
+     */
+    record Clock(ClockFunction function, int slot) implements Expr {
+    }
+
+    /** The clock functions: {@code today()} is a {@code date}, {@code now()} a {@code datetime}. */
+    enum ClockFunction {
+        TODAY("today"),
+        NOW("now");
+
+        private final String text;
+
+        ClockFunction(String text) {
+            this.text = text;
+        }
+
+        /**
+         * Returns the function name as written, without parentheses.
+         *
+         * @return {@code today} or {@code now}
+         */
+        public String text() {
+            return text;
+        }
+
+        /**
+         * Returns the name a slot resolver answers with the frame slot of this function, for example
+         * {@code today()}. No input can have it: input names hold no parentheses.
+         *
+         * @return the slot name
+         */
+        public String slotName() {
+            return text + "()";
+        }
+    }
+
+    /**
      * {@code matches(text, 'pattern')}: an unanchored search of a regular expression, bounded in input length and
      * time (TR-SEC-02). The pattern is a string literal, checked and compiled once at import.
      *

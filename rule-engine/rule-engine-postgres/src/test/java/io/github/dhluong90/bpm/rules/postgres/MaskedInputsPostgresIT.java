@@ -198,6 +198,74 @@ class MaskedInputsPostgresIT {
                 .hasMessageContaining("horus.bpm.rules.masking.hmac-key");
     }
 
+    @Test
+    void RLE_052_the_masking_default_each_tenant_started_with_is_recorded_and_a_change_logged() {
+        // Given bank-a has minor-review and the host starts with mask-default false
+        publish("bank-a");
+        engines.maskingCheck().recordMaskDefaults(Set.of("bank-b"), NOW);
+        JdbcClient jdbc = JdbcClient.create(db);
+        assertThat(jdbc.sql("SELECT tenant_id || '=' || value FROM rle_setting_seen"
+                + " WHERE setting = 'decision-log.mask-default' ORDER BY tenant_id").query(String.class).list())
+                .containsExactly("=false", "bank-a=false", "bank-b=false");
+
+        // When the host restarts with mask-default true for bank-a only
+        RuleEngines restarted = engines(maskByDefault("bank-a"));
+        List<String> lines = restarted.maskingCheck().recordMaskDefaults(Set.of("bank-b"), NOW.plusSeconds(3_600));
+
+        // Then one line names bank-a with the old and new value, and the new value and time are recorded
+        assertThat(lines).containsExactly(
+                "decision-log.mask-default for tenant bank-a changed from false to true since the last start-up");
+        assertThat(jdbc.sql("SELECT value FROM rle_setting_seen WHERE tenant_id = 'bank-a'").query(String.class)
+                .single()).isEqualTo("true");
+        assertThat(jdbc.sql("SELECT recorded_at FROM rle_setting_seen WHERE tenant_id = 'bank-a'")
+                .query(java.sql.Timestamp.class).single().toInstant()).isEqualTo(NOW.plusSeconds(3_600));
+        // And a third start with the same values logs nothing
+        assertThat(engines(maskByDefault("bank-a")).maskingCheck().recordMaskDefaults(Set.of("bank-b"),
+                NOW.plusSeconds(7_200))).isEmpty();
+    }
+
+    @Test
+    void RLE_050_a_strict_mode_refusal_stores_nothing_in_postgres() {
+        // Given bank-a in strict mode
+        RuleEngines strict = engines(new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenantId) {
+                return Optional.of(MaskingKey.of(KEY_A));
+            }
+
+            @Override
+            public boolean requireExplicitMask(String tenantId) {
+                return true;
+            }
+        });
+        caller.as("bank-a", "alice");
+
+        // When alice imports minor-review, whose age declares no mask
+        assertThatThrownBy(() -> strict.versionService().importRuleSet(
+                ImportRequest.yaml(MINOR_REVIEW.getBytes(StandardCharsets.UTF_8))))
+                .hasMessageContaining("age");
+
+        // Then no rule set, version or event row exists
+        JdbcClient jdbc = JdbcClient.create(db);
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_rule_set").query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_version").query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision_outbox").query(Long.class).single()).isZero();
+    }
+
+    static MaskingPolicy maskByDefault(String tenant) {
+        return new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenantId) {
+                return Optional.of(MaskingKey.of(tenantId.equals("bank-a") ? KEY_A : KEY_B));
+            }
+
+            @Override
+            public boolean maskByDefault(String tenantId) {
+                return tenantId.equals(tenant);
+            }
+        };
+    }
+
     MaskedInputQuery query() {
         return new MaskedInputQuery("minor-review", "nationalId", NATIONAL_ID, NOW.minusSeconds(86_400),
                 NOW.plusSeconds(86_400), 50);

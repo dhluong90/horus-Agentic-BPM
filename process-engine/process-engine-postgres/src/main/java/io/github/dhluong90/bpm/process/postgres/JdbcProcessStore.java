@@ -7,6 +7,7 @@ import io.github.dhluong90.bpm.process.internal.exec.TokenKind;
 import io.github.dhluong90.bpm.process.internal.exec.TokenStatus;
 import io.github.dhluong90.bpm.process.internal.json.Ulid;
 import io.github.dhluong90.bpm.process.internal.json.Values;
+import io.github.dhluong90.bpm.process.internal.store.ProcessQueryStore;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -25,7 +26,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * {@link ProcessStore} on the host's PostgreSQL through {@link JdbcClient}. Every statement filters by
  * {@code tenant_id} first. Uses the host's {@link DataSource}, so statements join the caller's transaction.
  */
-public final class JdbcProcessStore implements ProcessStore {
+public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     private final JdbcClient jdbc;
 
@@ -34,11 +35,38 @@ public final class JdbcProcessStore implements ProcessStore {
         this.jdbc = JdbcClient.create(Objects.requireNonNull(dataSource, "dataSource must not be null"));
     }
 
+    // ---- queries (PRE-028) ---------------------------------------------------------------------------------
+
+    /**
+     * The live statuses, written exactly as in the predicate of {@code idx_pre_token_live} (V1), so the planner can
+     * answer the count with an index-only scan of that partial index and never touches {@code pre_history}.
+     */
+    static final String LIVE_STATUSES = "('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT')";
+
+    static final String LIVE_COUNTS_SQL = "SELECT current_node_id, status, count(*) AS live FROM pre_token "
+            + "WHERE tenant_id = ? AND definition_id = ? AND status IN " + LIVE_STATUSES + " "
+            + "GROUP BY current_node_id, status";
+
+    @Override
+    public Optional<String> definitionId(String tenant, String key, int version) {
+        return jdbc.sql("SELECT id FROM pre_definition WHERE tenant_id = ? AND key_name = ? AND version_num = ?")
+                .params(tenant, key, version).query(String.class).optional();
+    }
+
+    @Override
+    public List<LiveCount> liveTokenCounts(String tenant, String definitionId) {
+        return jdbc.sql(LIVE_COUNTS_SQL).params(tenant, definitionId)
+                .query((rs, row) -> new LiveCount(rs.getString("current_node_id"), rs.getString("status"),
+                        rs.getLong("live")))
+                .list();
+    }
+
     // ---- definitions --------------------------------------------------------------------------------------
 
     private static final String DEFINITION_COLUMNS = "tenant_id, id, key_name, version_num, status, name, "
             + "definition_json::text AS definition_json, definition_hash, source_format, source_document, source_hash, "
-            + "node_count, source, effective_from, created_by, created_at, approved_by, approved_at";
+            + "node_count, source, effective_from, created_by, created_at, approved_by, approved_at, lock_version, "
+            + "requested_by, requested_at, decision_comment, retired_by, retired_at, superseded_by";
 
     @Override
     public Optional<StoredDefinition> latestDefinition(String tenant, String key) {
@@ -110,7 +138,49 @@ public final class JdbcProcessStore implements ProcessStore {
                 rs.getString("definition_hash"), rs.getString("source_format"), rs.getString("source_document"),
                 rs.getString("source_hash"), rs.getInt("node_count"), rs.getString("source"),
                 instant(rs, "effective_from"), rs.getString("created_by"), instant(rs, "created_at"),
-                rs.getString("approved_by"), instant(rs, "approved_at"));
+                rs.getString("approved_by"), instant(rs, "approved_at"), rs.getLong("lock_version"),
+                rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("decision_comment"),
+                rs.getString("retired_by"), instant(rs, "retired_at"), (Integer) rs.getObject("superseded_by"));
+    }
+
+    @Override
+    public List<StoredDefinition> lockDefinitions(String tenant, String key) {
+        return jdbc.sql("SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE tenant_id = ? AND key_name = ? "
+                        + "ORDER BY version_num FOR UPDATE")
+                .params(tenant, key).query(JdbcProcessStore::definition).list();
+    }
+
+    @Override
+    public int updateDefinition(StoredDefinition d) {
+        return jdbc.sql("UPDATE pre_definition SET status = ?, effective_from = ?, approved_by = ?, approved_at = ?, "
+                        + "requested_by = ?, requested_at = ?, decision_comment = ?, retired_by = ?, retired_at = ?, "
+                        + "superseded_by = ?, lock_version = ? WHERE tenant_id = ? AND id = ? AND lock_version = ?")
+                .params(d.status(), ts(d.effectiveFrom()), d.approvedBy(), ts(d.approvedAt()), d.requestedBy(),
+                        ts(d.requestedAt()), d.decisionComment(), d.retiredBy(), ts(d.retiredAt()), d.supersededBy(),
+                        d.lockVersion(), d.tenantId(), d.id(), d.lockVersion() - 1)
+                .update();
+    }
+
+    @Override
+    public void appendDefinitionHistory(DefinitionHistoryRow r) {
+        jdbc.sql("INSERT INTO pre_definition_history (tenant_id, id, definition_id, action, from_status, to_status, "
+                        + "actor_id, comment, details, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)")
+                .params(r.tenantId(), r.id(), r.definitionId(), r.action(), r.fromStatus(), r.toStatus(), r.actorId(),
+                        r.comment(), r.detailsJson(), ts(r.occurredAt()))
+                .update();
+    }
+
+    @Override
+    public List<DefinitionHistoryRow> definitionHistory(String tenant, String definitionId) {
+        return jdbc.sql("SELECT tenant_id, id, definition_id, action, from_status, to_status, actor_id, comment, "
+                        + "details::text AS details, occurred_at FROM pre_definition_history "
+                        + "WHERE tenant_id = ? AND definition_id = ? ORDER BY occurred_at, id")
+                .params(tenant, definitionId)
+                .query((rs, row) -> new DefinitionHistoryRow(rs.getString("tenant_id"), rs.getString("id"),
+                        rs.getString("definition_id"), rs.getString("action"), rs.getString("from_status"),
+                        rs.getString("to_status"), rs.getString("actor_id"), rs.getString("comment"),
+                        rs.getString("details"), instant(rs, "occurred_at")))
+                .list();
     }
 
     // ---- instances ----------------------------------------------------------------------------------------

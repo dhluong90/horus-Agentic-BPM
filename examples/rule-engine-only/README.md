@@ -31,20 +31,20 @@ Needs JDK 21 or later and Docker. To run the host as a container beside PostgreS
 docker run -d --name horus-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
   -e POSTGRES_PASSWORD=change-me -p 5432:5432 postgres:16-alpine
 
-mvn -B -pl examples/rule-engine-only -am package -DskipTests      # from the repository root
-HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+mvn -B -pl examples/rule-engine-only -am package -DskipTests -Dcockpit.bundle.skip=true   # from the repository root, Java only
+HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 ```
 
 Check it (health is public; everything else needs a caller):
 
 ```bash
 curl -s localhost:8080/actuator/health
-# {"status":"UP"}   component names are shown to authorised callers only (show-components: when-authorized)
+# {"groups":["liveness","readiness"],"status":"UP"}   component names are shown to authorised callers only (show-components: when-authorized)
 
 docker exec horus-pg psql -U horus -d horus -c '\dt'
 # flyway_schema_history, loan_application, rle_decision (partitioned), rle_decision_YYYY_MM (this month and next),
 # rle_decision_default, rle_decision_outbox, rle_idempotency, rle_rule, rle_rule_set, rle_schema_history, rle_version,
-# rle_version_history, rle_engine_key
+# rle_version_history, rle_engine_key, rle_setting_seen
 
 docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_schema_history ORDER BY installed_rank'
 #  0       | Rule Engine baseline
@@ -54,11 +54,17 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  4       | V4__rle_version_history_append_only.sql
 #  5       | V5__rle_engine_key.sql
 #  6       | V6__rle_version_history_draft_updated.sql
+#  10      | V10__rle_decision_pinned.sql
+#  11      | V11__rle_version_retired_at.sql
+#  12      | V12__rle_version_four_eyes_no_exemption.sql
+#  14      | V14__rle_setting_seen.sql
 ```
 
 ### The cursor key
 
 At start-up, after the migrations, the engine creates its list-cursor key in `rle_engine_key` if it is missing and reads it, so the runtime database user needs `SELECT` and `INSERT` on that table; without them start-up stops with a message naming the table. Requests only use the key in memory.
+
+The engine also records, in `rle_setting_seen`, the masking default (`decision-log.mask-default`) each tenant started with, and logs one line naming the tenant and the old and new value when it changes between start-ups. The runtime user needs `SELECT`, `INSERT` and `UPDATE` on that table.
 
 ### Protect the audit tables
 
@@ -78,7 +84,7 @@ On the `dev` profile the host has two demo users, Lan (role `PRICING_AUTHOR`) an
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=choose-one HORUS_DB_PASSWORD=change-me \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 
 # sign in as lan with the form, keeping the session cookie in ./jar
 CSRF=$(curl -s -c jar -b jar localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
@@ -97,7 +103,7 @@ curl -s -i localhost:8080/api/bpm/meta
 # {"type":"https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#unauthenticated","title":"Authentication required","status":401,"code":"UNAUTHENTICATED","detail":"Sign in, or send a token issued for this host.","instance":"/api/bpm/meta","correlationId":"01M7RR0S1MJ2AFNEK9G00A9E1N"}
 ```
 
-Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve"]`. Calls that change state with the session need the CSRF token: the host sets it in the `XSRF-TOKEN` cookie and expects it back as `X-XSRF-TOKEN`.
+Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve","rules:simulate"]`. Calls that change state with the session need the CSRF token: the host sets it in the `XSRF-TOKEN` cookie and expects it back as `X-XSRF-TOKEN`.
 
 The demo users exist only on the `dev` profile, and the host refuses to start on `dev` beside another profile (other than `test`) or with a token issuer that is not on this machine. Without `dev` the user store is empty. The host accepts bearer tokens when an issuer, JWK set or public key is configured, and then requires its own audience; token claim `roles` becomes `ROLE_*` authorities and claim `tenant_id` the tenant.
 
@@ -109,17 +115,21 @@ This walkthrough uses the demo users of the `dev` profile, in tenant `bank-a` (t
 
 | User | Roles | Engine permissions |
 |---|---|---|
-| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve` |
-| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
+| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve`, `rules:simulate` |
+| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve`, `rules:simulate` |
 | `tuan` | `TELLER` | `rules:evaluate` |
 
 One more role is mapped and given to no demo user: `PRIVACY_OPS`, with `rules:log:read` and `rules:masked:search`. It is the only role that may look decisions up by a masked value such as a national id (`POST /decisions:find-by-masked-input`), at most 30 times a minute per person (`masking.search.max-per-minute`).
+
+A recording of steps 1 to 6 on a fresh start is in [`media/rule-lifecycle-walkthrough.gif`](media/rule-lifecycle-walkthrough.gif) (the same session as an [asciinema cast](media/rule-lifecycle-walkthrough.cast); play it with `asciinema play`). It shows the import, the self-approval refused with `403 SELF_APPROVAL_FORBIDDEN`, Minh's approval, the 0 VND fee for a Gold customer and the decision row.
+
+![Terminal recording of the rule lifecycle walkthrough](media/rule-lifecycle-walkthrough.gif)
 
 Start PostgreSQL as above, then start the host on the `dev` profile:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 H=localhost:8080/api/bpm/rules/v1
 ```
 
@@ -144,8 +154,9 @@ H=localhost:8080/api/bpm/rules/v1
 3. Hoa tries to approve her own request and is refused:
 
    ```bash
-   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
-   # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
+   curl -s -w '\nHTTP %{http_code}\n' -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
+   # {"type":"...","title":"Forbidden","status":403,"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester or author of card-fee v1 cannot approve it",...}
+   # HTTP 403
    ```
 
 4. Minh approves; the version is published and takes effect now. `If-Match` names the lock version he reviewed (the `ETag` of the version he read); without it the answer is `428 PRECONDITION_REQUIRED`, and if the version changed since, `409 VERSION_CONFLICT`:
@@ -182,18 +193,18 @@ H=localhost:8080/api/bpm/rules/v1
    # {..., "sourceDocument":"# Monthly card fee, the rule set of the Rule Engine walking skeleton (RLE-001).\n...", ...}
    ```
 
-9. Lists for an editor: rule sets by name and versions newest first, a page at a time (`limit` 1 to 200, default 50; pass `nextCursor` back as `cursor`). Each version carries `allowedActions` for the caller:
+9. Lists for an editor. Set up first: import `loan-pricing.yaml` and `risk-flags.yaml` as drafts the same way, and add a second `card-fee` version and request it with `curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee.yaml` and then `:request-publish` on version 2. Rule sets by name and versions newest first, rule sets by name and versions newest first, a page at a time (`limit` 1 to 200, default 50; pass `nextCursor` back as `cursor`). Each version carries `allowedActions` for the caller:
 
    ```bash
    curl -s -u minh:demo-only "$H/rule-sets?limit=2"
    # {"data":[{"ruleSet":"card-fee","latestVersion":2,"latestStatus":"PENDING_APPROVAL","publishedVersion":1,
-   #           "lastChangedAt":"..."},{"ruleSet":"fx-margin",...}],"nextCursor":"cnVsZS1zZXRzOmZ4LW1hcmdpbg","hasNext":true}
+   #           "lastChangedAt":"..."},{"ruleSet":"loan-pricing","latestVersion":1,"latestStatus":"DRAFT",...}],"nextCursor":"cnVsZS1zZXRzOmxvYW4tcHJpY2luZw.kO1EG8-56ZILiBWSL2lnrw","hasNext":true}
    curl -s -u minh:demo-only "$H/rule-sets/card-fee/versions"
    # {"data":[{"version":2,"status":"PENDING_APPROVAL","createdBy":"hoa","requestedBy":"hoa",
    #           "allowedActions":["approve","reject"],...},{"version":1,"status":"PUBLISHED","approvedBy":"minh",...}],...}
    ```
 
-10. Minh sends a pending version back with a reason; it is a draft again and the reason is in its history:
+10. With version 2 pending from step 9, Minh sends it back with a reason; it is a draft again and the reason is in its history:
 
     ```bash
     curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:reject -H 'Content-Type: application/json' \
@@ -216,13 +227,59 @@ H=localhost:8080/api/bpm/rules/v1
     #   "basePosition":2,"moved":false,"fields":[{"path":"/then/fee","from":{...},"to":{...},"nonAscii":false}]}],...}
     ```
 
-11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them:
+11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them. Save this as `bad.yaml` (rule `R2` compares the money input `balance` with a number, `R3` has no currency):
+
+    ```yaml
+    schemaVersion: 1
+    ruleSet: card-fee-bad
+    hitPolicy: first
+    inputs:
+      - { name: tier,    type: string }
+      - { name: balance, type: money }
+    outputs:
+      - { name: fee, type: money }
+    rules:
+      - id: R1
+        when: { tier: "== 'GOLD'" }
+        then: { fee: "0 VND" }
+      - id: R2
+        when: { balance: ">= 3" }
+        then: { fee: "10000 VND" }
+      - id: R3
+        when: {}
+        then: { fee: "30000" }
+    ```
 
     ```bash
-    # 422 {"code":"VALIDATION_FAILED","violations":[
+    curl -s -w '\nHTTP %{http_code}\n' -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' --data-binary @bad.yaml
+    # {"code":"VALIDATION_FAILED","violations":[
     #   {"ruleId":"R2","column":"balance","message":"compares a money with a number"},
     #   {"ruleId":"R3","column":"fee","message":"output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code"}]}
+    # HTTP 422
     ```
+
+### Simulate a changed fee table before approving it
+
+Version 2 of the card fee, [`rules/card-fee-v2.yaml`](src/main/resources/rules/card-fee-v2.yaml), lowers the default fee from 50,000 VND to 30,000 VND. Before Minh approves it, he runs the five sample customers of [`rules/card-fee-samples.json`](src/main/resources/rules/card-fee-samples.json) through v2 and through v1, which is in force. Nothing is logged. After steps 1 to 6 (if a version 2 exists already, the import gets the next number; simulate that one):
+
+```bash
+curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' \
+  --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee-v2.yaml
+# 201 {"ruleSet":"card-fee","version":2,"status":"DRAFT",...}
+curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:simulate -H 'Content-Type: application/json' \
+  --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee-samples.json
+# 200 {"ruleSet":"card-fee","version":2,"status":"DRAFT","baselineVersion":1,"evaluatedAt":"...",
+#      "sampleCount":5,"changedCount":2,"results":[
+#      {"index":0,"changed":false,"simulated":{"outcome":"MATCHED","matchedRuleIds":["R1"],"outputs":{"fee":{"currency":"VND","amount":0}}},...},
+#      ...
+#      {"index":3,"changed":true,"simulated":{...,"outputs":{"fee":{"currency":"VND","amount":30000}}},
+#                                "baseline":{...,"outputs":{"fee":{"currency":"VND","amount":50000}}}},
+#      {"index":4,"changed":true,...}]}
+docker exec horus-pg psql -U horus -d horus -tc 'SELECT count(*) FROM rle_decision'
+# 1   (the decision of step 5 only)
+```
+
+The approver role has `rules:simulate` in [`application.yml`](src/main/resources/application.yml); Tuan, a teller, gets `403 PERMISSION_DENIED`. `SimulationIT` runs the same steps with bearer tokens and prints each sample with its two fees. Once Minh approves v2 (with `If-Match: "1"`), it is in force and v1 is retired as superseded: a new simulation compares with v2, and a pinned evaluate of v1 is `409 INVALID_STATE` while `evaluation.pin-retired` is off.
 
 ### Hit policies: exactly one row, or every matching row
 
@@ -268,6 +325,188 @@ public Money cardFee(String tier, int txCount) {
 }
 ```
 
+### Missing values and mixed currencies
+
+[`null-check.yaml`](src/main/resources/rules/null-check.yaml) is the table of `RLE-006`: missing values follow FEEL, and a row matches only when its condition is `true`, never when it is `null`. Import, request and approve it as in steps 1 to 4, then evaluate with both inputs missing:
+
+```bash
+curl -s -u tuan:demo-only -X POST $H/decisions/null-check:evaluate \
+  -H 'Content-Type: application/json' -d '{"inputs":{"income":null,"tier":null}}'
+# 200 {"outcome":"MATCHED","matchedRuleIds":["R2","R3","R5","R7"],
+#      "outputs":{"hit":["R2","R3","R5","R7"]},...}
+```
+
+`R3` (`tier != 'GOLD'`) and `R5` (`tier not in [...]`) match a missing tier, as in FEEL; `R1` (`income < 5000000 VND`) and `R4` (`not (income < 5000000 VND)`) are both `null` and match nothing.
+
+Money never mixes currencies. A cell that adds 5 USD to a balance and compares it with a VND amount is refused at import, and a USD balance compared with a VND limit fails the decision:
+
+```bash
+curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+  --data-binary @examples/rule-engine-only/src/test/resources/rules/mixed-currency.yaml
+# 422 {"code":"VALIDATION_FAILED","violations":[
+#   {"ruleId":"R1","column":"balance","message":"mixes the currencies USD and VND"}]}
+```
+
+`RuleLifecycleFailurePathsIT` runs both, and `RLE_005_money_currency_mismatch_is_rejected` the run-time case (`422 EVALUATION_ERROR`, no outputs, logged).
+
+## Demo: two copies of the host, one approval
+
+Banks run several copies of a service. Each copy keeps compiled rule versions in memory, and an approval on one copy reaches the others through the database. Start two copies on the same database, on ports 8080 and 8081, after steps 1 to 4 of the walkthrough above:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar --server.port=8081 &
+B=localhost:8081/api/bpm/rules/v1
+curl -s -u tuan:demo-only -X POST $B/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
+  -d '{"inputs":{"tier":"SILVER","txCount":1}}'
+# {"version":1,...,"outputs":{"fee":{"currency":"VND","amount":50000}}}
+```
+
+1. Hoa imports v2 with a higher default fee on copy A and Minh approves it there:
+
+   ```bash
+   sed 's/"50000 VND"/"60000 VND"/' examples/rule-engine-only/src/main/resources/rules/card-fee.yaml > /tmp/card-fee-v2.yaml
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' --data-binary @/tmp/card-fee-v2.yaml
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/2:request-publish
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:approve -H 'If-Match: "1"'
+   ```
+
+2. Copy B answers with v2 within a second, without a restart:
+
+   ```bash
+   curl -s -u tuan:demo-only -X POST $B/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"tier":"SILVER","txCount":1}}'
+   # {"version":2,...,"outputs":{"fee":{"currency":"VND","amount":60000}}}
+   ```
+
+Behind a transaction-mode connection pooler such as PgBouncer, start both copies with `--horus.bpm.rules.cache.listen-notify=false` and `prepareThreshold=0` on the JDBC URL: copy B then answers with v2 within the 5 s epoch check. Both runs are recorded for the sprint review from the tests:
+
+```bash
+mvn -B -pl examples/rule-engine-only -am verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test=MultiReplicaCacheIT
+# [INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0 -- in ...MultiReplicaCacheIT
+```
+
+## Demo: the decision log by month
+
+The decision log keeps one table section per calendar month, created ahead of the clock while the host runs. An auditor reads one rule set's decisions for a period of at most 31 days, 200 at a time. The demo users hold no audit permission by default, so start the host as in the walkthrough above with one more argument that gives Minh `rules:log:read`, then run steps 1 to 5 there so `card-fee` has decisions:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  --horus.bpm.rules.security.role-permissions.ROLE_PRICING_APPROVER=rules:read,rules:approve,rules:log:read
+FROM=$(date -u +%Y-%m-01T00:00:00Z)
+TO=$(date -u -v+1m +%Y-%m-01T00:00:00Z 2>/dev/null || date -u -d "$(date -u +%Y-%m-01) +1 month" +%Y-%m-01T00:00:00Z)
+```
+
+1. Minh lists this month's card fee decisions, newest first. A page holds up to 200; pass `nextCursor` back as `cursor` with the same query for the next one:
+
+   ```bash
+   curl -s -u minh:demo-only "$H/decisions?ruleSet=card-fee&from=$FROM&to=$TO"
+   # {"data":[{"decisionId":"...","ruleSet":"card-fee","version":1,"hitPolicy":"FIRST","outcome":"MATCHED",
+   #   "matchedRuleIds":["R1"],"inputs":{"tier":"GOLD","txCount":5},"outputs":{"fee":{"currency":"VND","amount":0}},
+   #   "callerId":"tuan",...}],"nextCursor":null,"hasNext":false}
+   ```
+
+2. A period longer than 31 days, or no rule set, is refused before the database is read; a teller without the permission gets `403`:
+
+   ```bash
+   curl -s -u minh:demo-only "$H/decisions?ruleSet=card-fee&from=2027-01-01T00:00:00Z&to=2027-02-02T00:00:00Z"
+   # 400 {"code":"QUERY_INVALID","detail":"from and to may be at most 31 days apart (query.max-range P31D), were PT768H",...}
+   curl -s -o /dev/null -w '%{http_code}\n' -u tuan:demo-only "$H/decisions?ruleSet=card-fee&from=$FROM&to=$TO"
+   # 403
+   ```
+
+3. The sections that exist: this month and the next one, created at start-up, plus every month up to `decision-log.partitions-ahead` (7 days) ahead. A daily run adds the next month without a restart:
+
+   ```bash
+   docker exec horus-pg psql -U horus -d horus -At -c \
+     "SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid WHERE i.inhparent = 'rle_decision'::regclass ORDER BY 1"
+   # rle_decision_2026_11
+   # rle_decision_2026_12
+   # rle_decision_default
+   ```
+
+4. The clock move, the overflow counter and the 250-decision search run as tests with a fixed clock, recorded for the sprint review. The host clock moves from 26 January to 25 February 2027 without a restart and March appears; a decision of 15 March that landed in the default section moves into March, and the gauge `horus.rle.partition.default.rows` goes from 1 to 0:
+
+   ```bash
+   mvn -B -pl examples/rule-engine-only -am verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false \
+     -Dit.test=DecisionLogSearchIT
+   # [INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- in ...DecisionLogSearchIT
+   ```
+
+   In a host with Actuator's metrics endpoint exposed, `GET /actuator/metrics/horus.rle.partition.default.rows` shows the same gauge; this example exposes only `health`.
+
+## Demo: a fee change on a date, replay and the bank's time zone
+
+`card-fee` v1 charges a default of 50,000 VND. [`rules/card-fee-december.yaml`](src/main/resources/rules/card-fee-december.yaml) is the same table with a default of 30,000 VND and `effectiveFrom: "2026-12-01T00:00:00Z"`, so it is approved now and takes over on that instant. Choosing the evaluation clock needs `rules:simulate` and replay needs `rules:log:read`, which the demo roles do not hold by default. Start the host with two extra mappings, then run steps 1 to 4 of the demo above for v1:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate,rules:simulate' \
+  '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:log:read'
+H=localhost:8080/api/bpm/rules/v1
+R=examples/rule-engine-only/src/main/resources/rules
+```
+
+1. Hoa imports the December version and requests publication, and Minh approves it. It is published but not yet in force:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' \
+     --data-binary @$R/card-fee-december.yaml
+   # 201 {"ruleSet":"card-fee","version":2,"status":"DRAFT","effectiveFrom":"2026-12-01T00:00:00Z",...}
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/2:request-publish
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:approve -H 'If-Match: "1"'
+   # 200 {"version":2,"status":"PUBLISHED","effectiveFrom":"2026-12-01T00:00:00Z",...}
+   ```
+
+2. The clock chooses the version in force. On 20 November it is v1, from 1 December v2:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"tier":"STANDARD","txCount":1},"clock":"2026-11-20T10:00:00Z"}'
+   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9","ruleSet":"card-fee","version":1,"evalClock":"2026-11-20T10:00:00Z",
+   #      "evaluatedAt":"2026-11-19T15:25:08.804765Z","clockChosen":true,"pinned":false,"outcome":"MATCHED","matchedRuleIds":["R3"],
+   #      "outputs":{"fee":{"currency":"VND","amount":50000}}}
+   curl -s -u hoa:demo-only -X POST $H/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"tier":"STANDARD","txCount":1},"clock":"2026-12-01T00:00:00Z"}'
+   # 200 {...,"version":2,"evalClock":"2026-12-01T00:00:00Z",...,"outputs":{"fee":{"currency":"VND","amount":30000}}}
+   ```
+
+   Without a `clock` the host clock is used. Tuan, who holds `rules:evaluate` only, gets `403 CLOCK_NOT_ALLOWED` when he sends one.
+
+3. Minh replays the November decision by its id, with the version, inputs and clock its row recorded. The answer is the logged one, and the decision log gains no row:
+
+   ```bash
+   curl -s -u minh:demo-only -X POST $H/decisions/01M7T6JQT4SA6RT95E8KW201Y9:replay
+   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9","version":1,"evalClock":"2026-11-20T10:00:00Z",...,
+   #      "matchedRuleIds":["R3"],"outputs":{"fee":{"currency":"VND","amount":50000}}}
+   docker exec horus-pg psql -U horus -d horus -c \
+     "SELECT version_num, eval_clock, created_at, matched_rule_ids FROM rle_decision WHERE id = '01M7T6JQT4SA6RT95E8KW201Y9'"
+   #  1 | 2026-11-20 10:00:00+00 | 2026-11-19 15:25:08.804765+00 | ["R3"]
+   curl -s -u minh:demo-only $H/decisions/01M7T6JQT4SA6RT95E8KW201Y9
+   # 200 {"decisionId":"01M7T6JQT4SA6RT95E8KW201Y9",...,"evalClock":"2026-11-20T10:00:00Z",
+   #      "evaluatedAt":"2026-11-19T15:25:08.804765Z","clockChosen":true,"pinned":false,...}
+   ```
+
+   The decision-log read shows the same `evalClock`, `clockChosen` and `pinned` as the evaluation did, so a back-dated or pinned decision never reads as a normal one.
+
+   Pinning, `POST $H/decisions/card-fee/versions/1:evaluate` with the same body, gives the same answer as a new logged decision. It needs `rules:pin`, which this host grants to nobody, because a pin bypasses the version in force; no example host grants it until a process step pins a version, and `EffectiveDatesAndReplayIT` runs the call as a service identity that holds it. Hoa's pin is `403 PERMISSION_DENIED`. A retired version is refused unless `horus.bpm.rules.evaluation.pin-retired` is `true`. A pinned draft is `409 INVALID_STATE`. Tuan's replay is `403 PERMISSION_DENIED`, and an unknown id, or one of another tenant, is `404 DECISION_NOT_FOUND`.
+
+4. [`rules/same-day-cutoff.yaml`](src/main/resources/rules/same-day-cutoff.yaml) declares `timeZone: Asia/Ho_Chi_Minh`. At `2027-01-15T18:30:00Z` it is 01:30 on 16 January in Ho Chi Minh City, so a transfer dated 16 January is same-day and one dated 15 January is not. In UTC it would be the other way round. Import, request and approve it as above, then:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/decisions/same-day-cutoff:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"txDate":"2027-01-16"},"clock":"2027-01-15T18:30:00Z"}'
+   # 200 {...,"matchedRuleIds":["R1"],"outputs":{"sameDay":true}}
+   curl -s -u hoa:demo-only -X POST $H/decisions/same-day-cutoff:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"txDate":"2027-01-15"},"clock":"2027-01-15T18:30:00Z"}'
+   # 200 {...,"matchedRuleIds":["R2"],"outputs":{"sameDay":false}}
+   ```
+
+The same steps run as `EffectiveDatesAndReplayIT` against a Testcontainers database on every build.
+
 ## Demo: one error shape, and a duplicate sent while the first still runs
 
 Every Rule Engine error is an `application/problem+json` body with `code`, `detail`, `correlationId` and a `type` link to [Common Error Codes](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes). The integration test triggers each code through this host, prints one line per code, and replays the in-flight duplicate with the first request paused inside the engine:
@@ -293,13 +532,91 @@ By hand, a second request with the same `Idempotency-Key` that arrives while the
 
 Wait one second and send the same request again: once the first has finished, the answer is its `201` and body, and only one version exists.
 
+## Demo: retire a version by hand and by supersession
+
+[`rules/tet-fee-waiver.yaml`](src/main/resources/rules/tet-fee-waiver.yaml) waives the card fee during the Tet promotion. Minh, who holds `rules:approve`, ends the promotion by retiring the version with a reason. From that instant no replica serves it. Start the host on the `dev` profile as in the demo above, then:
+
+1. Hoa imports and requests the waiver, and Minh approves it. Tuan's card transaction is waived, and the version offers `retire` to Minh:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+     --data-binary @examples/rule-engine-only/src/main/resources/rules/tet-fee-waiver.yaml
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:request-publish
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:approve -H 'If-Match: "1"'
+   # 200 {"version":1,"status":"PUBLISHED","lockVersion":2,...}
+   curl -s -u tuan:demo-only -X POST $H/decisions/tet-fee-waiver:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"channel":"CARD"}}'
+   # 200 {...,"version":1,"matchedRuleIds":["R1"],"outputs":{"waiveFee":true}}
+   curl -s -u minh:demo-only $H/rule-sets/tet-fee-waiver/versions/1
+   # ETag: "2"   {"status":"PUBLISHED","allowedActions":["retire"],...}
+   ```
+
+2. Minh retires it. `If-Match` and `Idempotency-Key` are required, and so is a reason:
+
+   ```bash
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -d '{"reason":"Tet promotion ended"}'
+   # 428 {"code":"PRECONDITION_REQUIRED",...}
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -H 'If-Match: "2"' -d '{"reason":"Tet promotion ended"}'
+   # 409 {"code":"LAST_VERSION_IN_EFFECT","ruleSet":"tet-fee-waiver","version":1,"setting":"confirm","nextEffectiveFrom":null,
+   #      "detail":"tet-fee-waiver v1 is the last version in effect of rule set tet-fee-waiver; ...",...}
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -H 'If-Match: "2"' -d '{"reason":"Tet promotion ended","confirmNoVersionInEffect":true}'
+   # 200 {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T19:31:55.928264Z",...}
+   ```
+
+   The waiver is the only version in effect, so retiring it leaves none: the first call is refused until Minh confirms it (PD-101).
+
+   An empty reason is `400 INPUT_INVALID`. A caller with `rules:author` only is `403 PERMISSION_DENIED`, before the headers are read. A stale `If-Match` is `409 VERSION_CONFLICT`.
+
+3. It stops serving at once, and the history and the event record the actor, the reason and the mode:
+
+   ```bash
+   curl -s -u tuan:demo-only -X POST $H/decisions/tet-fee-waiver:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"channel":"CARD"}}'
+   # 404 {"code":"NO_EFFECTIVE_VERSION",...}
+   curl -s -u minh:demo-only $H/rule-sets/tet-fee-waiver/versions/1/history
+   # {"data":[...,{"action":"RETIRED","fromStatus":"PUBLISHED","toStatus":"RETIRED","actor":"minh",
+   #   "reason":"Tet promotion ended","supersededBy":null,"approvalMode":"single","noVersionInEffect":true,"lockVersion":3,...}]}
+   docker exec horus-pg psql -U horus -d horus -tAc "SELECT payload->>'retiredBy', payload->>'reason', \
+     payload->>'approvalMode', payload->>'noVersionInEffect' FROM rle_decision_outbox \
+     WHERE payload->>'eventType' = 'rules.version.retired.v1'"
+   # minh|Tet promotion ended|single|true
+   ```
+
+4. A newer version in effect at its approval retires the older one in the same transaction. Import [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml) twice, as v1 and v2, and approve both:
+
+   ```bash
+   curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1
+   # {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T19:32:01.858780Z",...}
+   curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1/history
+   # {"data":[...,{"action":"RETIRED","actor":"system:supersession","reason":"SUPERSEDED","supersededBy":2,"approvalMode":"system",...}]}
+   ```
+
+   A version scheduled for a later date retires its predecessor when the date comes, through the lifecycle sweep (`horus.bpm.rules.lifecycle.sweep-interval`, one minute by default). Evaluation switches at the date itself, without waiting for the sweep.
+
+5. The host shows the retirement mode in force:
+
+   ```bash
+   curl -s -u minh:demo-only localhost:8080/api/bpm/meta
+   # {...,"modules":[{"module":"rules",...,"settings":{"authoring.cockpit-drafts":true,"lifecycle.retire-approval":"single",
+   #   "lifecycle.retire-last-version":"confirm"}}],...}
+   ```
+
+The same steps run as `RetireVersionIT` against a Testcontainers database on every build.
+
 ## Demo: import a DMN decision table
 
 A `.dmn` file goes through the same import endpoint as YAML, with `Content-Type: application/xml` (or `text/xml`, `application/dmn+xml`). It becomes a `DRAFT` that a second person approves before it evaluates. The sample is a hand-written table in the style a common DMN modeller writes: [`card-fee-modeller.dmn`](src/test/resources/rules/dmn/card-fee-modeller.dmn).
 
-Start the host on the `dev` profile as in [Host metadata with two demo users](#host-metadata-with-two-demo-users), then sign in `lan` (author), `minh` (approver) and `tuan` (teller), each with their own cookie jar, and send the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on every `POST`:
+Start the host on the `dev` profile as in [Host metadata with two demo users](#host-metadata-with-two-demo-users), on a fresh database (the YAML demo above already created `card-fee`), with `HORUS_DEMO_PASSWORD=demo-only`. Then sign in `lan` (author), `minh` (approver) and `tuan` (teller), each with their own cookie jar, and send the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on every `POST`:
 
 ```bash
+for u in lan minh tuan; do
+  CSRF=$(curl -s -c $u -b $u localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
+  curl -s -c $u -b $u -o /dev/null -d "username=$u&password=demo-only&_csrf=$CSRF" localhost:8080/login
+done
 DMN=examples/rule-engine-only/src/test/resources/rules/dmn/card-fee-modeller.dmn
 xsrf() { awk '$6=="XSRF-TOKEN"{print $7}' "$1"; }
 
@@ -348,13 +665,13 @@ The two passwords can also come as files: with `SPRING_CONFIG_IMPORT=configtree:
 
 ## Open the cockpit
 
-The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`), on the `dev` profile with the demo users. Build the cockpit bundle before packaging:
+The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`), on the `dev` profile with the demo users. Prerequisite: this section needs the cockpit bundle (Node and `npm`). The Java-only build used above does not include it. Build the bundle before packaging:
 
 ```bash
 npm --prefix cockpit/web ci && npm --prefix cockpit/web run build      # from the repository root
 mvn -B -pl examples/rule-engine-only -am package -DskipTests
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 ```
 
 Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
@@ -386,7 +703,7 @@ Draft editing in the cockpit is off by default in 0.1.0 (PD-094); this example t
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate' \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:evaluate'
 ```
@@ -435,6 +752,8 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `SignInPageTest` | The page in English and Vietnamese, the error and signed-out states, the escaped CSRF field, demo users only on `dev` with a password, no inline script or style, and the same message keys in both languages |
 | `CockpitEmbeddedIT.CKP_001_*` | On the `dev` profile: form sign-in, the cockpit page and its one-host registry, then `200` from `/api/bpm/meta` and `/api/bpm/me` with the session, valid against the cockpit schemas; a call that changes data needs `X-XSRF-TOKEN` from the cookie |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
+| `MultiReplicaCacheIT.RLE_010_*`, `MultiReplicaCacheIT.TR_ASY_04_*` | Two copies of this host on one database: copy B serves `card-fee` v2 within 1 s of copy A's approval on a direct connection, and within the 5 s epoch check through PgBouncer in transaction mode (`edoburu/pgbouncer`, override with `-Dbpm.test.pgbouncer.image`) with `cache.listen-notify=false`, where no session runs `LISTEN` |
+| `DecisionLogSearchIT.RLE_029_*`, `DecisionLogSearchIT.RLE_017_*` | The decision log demo above over HTTP: 250 card-fee decisions of January 2027 in pages of 200 and 50, a 32-day range and a missing rule set refused, another tenant's own rows only, `403` without `rules:log:read`, masked inputs still hashed; the default-section gauge from 1 to 0 when the job creates March without a restart |
 | `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*`, `RLE_002_*`, `RLE_003_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.

@@ -28,37 +28,45 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `decision-log.enabled` | `true` | 0.1 (M1) | Write `rle_decision` rows |
 | `decision-log.mode` | `transactional` | `transactional` 0.1 (M1); `async` M2 (March 2027), may move to M3 | `transactional`: one `INSERT` in the caller's transaction. `async`: insert into `rle_decision_outbox`, relayed by the scheduler thread, for high-volume hosts. Until `async` ships, setting it stops start-up with a message naming the milestone |
 | `decision-log.async.batch-size` | `100` | M2, may move to M3 | Outbox rows relayed per poll in `async` mode |
-| `decision-log.partitions-ahead` | `P7D` | 0.1 (M1) | How far ahead the scheduler creates monthly `rle_decision` partitions. See [Decision log partitions](#decision-log-partitions) |
+| `decision-log.partitions-ahead` | `P7D` | Built (0.2) | How far ahead of the host clock monthly `rle_decision` partitions are created, at start-up and daily while the host runs; `PT0S` to `P366D`. The current and the next month always exist. See [Decision log partitions](#decision-log-partitions) |
 | `decision-log.retention` | unset; required outside `dev` from M3 | M3 | ISO 8601 period in whole months, at least `decision-log.retention-floor`, for example `P12M` or `P120M`. From M3, outside the `dev` profile, the engine refuses to start until it is set, and refuses a value below the floor or not in whole months, naming the property. The scheduler drops whole monthly partitions that end before `now() - retention`. Nothing is deleted in the `dev` profile or before M3; before M3 the property is ignored with a start-up note. No decision row is ever deleted by date |
-| `decision-log.mask-default` | `false` | Built | Mask every input that declares no `mask`; an input with `mask: false` is never masked by this default |
+| `decision-log.mask-default` | `false` | Built | Mask every input that declares no `mask`; an input with `mask: false` is never masked by this default. A change is logged at start-up, one line per tenant with the old and new value, and the value in force is shown in `/api/bpm/meta`. See [Personal data guards](#personal-data-guards) |
+| `decision-log.require-explicit-mask` | `false` | 0.2 | Strict mode: every input must declare `mask: true` or `mask: false`. An undeclared input is `422 VALIDATION_FAILED` naming it, at import, draft replacement, publication request and approval. Shown in `/api/bpm/meta`. Turn it on for production |
+| `decision-log.personal-data-names` | the built-in list | 0.2 | Input names that look like personal data, replacing the built-in list. An undeclared input that matches one gets a warning the approver sees |
+| `decision-log.additional-personal-data-names` | empty | 0.2 | More names, added to the list |
 | `masking.hmac-key` | unset | Built | Base64 key, 32 bytes or more after decoding, for HMAC-SHA256 of masked inputs, used by every tenant without its own key. Supply it from an environment variable (`HORUS_BPM_RULES_MASKING_HMAC_KEY`) or a secret store. When unset, the shared `horus.bpm.masking.hmac-key` is used. See [Masking keys](#masking-keys) |
 | `masking.hmac-key-id`, `masking.tenants.<tenant>.hmac-key-id` | `k1` | Built | Label of the key, 1 to 32 letters, digits, `_` or `-`, stored in every fingerprint as `hmac:<keyId>:<hex>`, so each row says which key made it. Not secret; change it whenever you change the key. When unset, the shared `horus.bpm.masking.hmac-key-id` is used |
 | `masking.search.max-per-minute`, `masking.tenants.<tenant>.search.max-per-minute` | `30` | Built | Masked-input searches one caller may run per minute on one replica, at least `1`; it cannot be switched off. Past it: `429 RATE_LIMITED` with `Retry-After`, and an audit entry with `outcome = RATE_LIMITED`. A value below 1 stops start-up |
 | `masking.tenants.<tenant>.hmac-key` | unset | Built | The tenant's own key, same format. A tenant with this setting never writes with the host key, even when its own value is invalid. Its search still tries its subkeys of the host keys, so rows from before the move stay findable. The tenant id `*` is reserved and stops start-up |
 | `masking.previous-keys[n].hmac-key`, `masking.previous-keys[n].hmac-key-id`, `masking.tenants.<tenant>.previous-keys[n].*` | empty | 0.2.0 | Earlier keys kept after a rotation, each with the id its tokens carry (required). Used by the masked-input search only, never for writing. A previous host key is also searched for tenants that now have a key of their own. See [Rotating a key](#rotating-a-masking-key) |
 | `masking.tenants.<tenant>.mask-default` | `decision-log.mask-default` | Built | The masking default of one tenant |
+| `masking.tenants.<tenant>.require-explicit-mask` | `decision-log.require-explicit-mask` | 0.2 | Strict mode for one tenant |
+| `masking.tenants.<tenant>.personal-data-names` | the host's list | 0.2 | The tenant's own list, replacing the host's for that tenant only |
+| `masking.tenants.<tenant>.additional-personal-data-names` | empty | 0.2 | More names for one tenant, added to whichever list applies |
+| (key status in `/api/bpm/meta`) | | 0.2.0 | The rules settings show, for the caller's own tenant, `masking.hmac-key: set` or `unset`, and when set `masking.hmac-key-id` and `masking.hmac-key-check`, the key check value (the first 8 bytes of the HMAC-SHA256 of an empty message under `HKDF-SHA256(key, info = "horus-bpm/masking/v1/kcv")`, in hex, not secret). These describe the key the tenant writes with: its own key, or its subkey of the host key, so tenants that share the host key see different check values. For a tenant on the host key, the check value is therefore that of its subkey, not the one recorded for the host key in `rle_masking_key_check`. The key id is the same for every tenant on the host key, so those tenants can tell they share it; use an opaque host key id if that matters. The key itself is never shown. A `MaskingPolicy` bean of your own is described the same way |
 | `evaluation.max-rows` | `5000` | Built | Most rules a version may contain, checked at import (`422 VALIDATION_FAILED`). `1` to `5000`; may be lowered, never raised |
 | `evaluation.pin-retired` | `false` | 0.2 | Whether an evaluation pinned with `rules:pin` may name a `RETIRED` version. `false` answers `409 INVALID_STATE`, so a rule taken out of service never makes a new logged decision. Replay of a logged decision is not affected |
 | `evaluation.max-output-bytes` | `1048576` | Built | Estimated JSON size of one decision's outputs, checked while `collect` values accumulate. A breach fails the decision with a logged `EVALUATION_ERROR` and no outputs. `1` to `1048576`; may be lowered, never raised |
 | `evaluation.max-string-length` | `65536` | Built | Longest string input (`400 INPUT_INVALID`) and longest string that `+` may build (`EVALUATION_ERROR`, checked before the string is built), in UTF-16 code units. `1` to `65536`; may be lowered, never raised |
 | `evaluation.max-batch` | `1000` | M2, may move to M3 | Largest `:evaluate-batch` request |
-| `simulation.max-inputs` | `1000` | 0.1 (M1) | Largest set of sample inputs per `:simulate`; may be lowered, never raised |
+| `simulation.max-inputs` | `1000` | Built | Most sample input sets per `:simulate` (`400 INPUT_INVALID` above it). `1` to `1000`; may be lowered, never raised |
 | `evaluation.regex-max-reads` | `1000000` | Built | Characters one `matches()` may read, `1` to `1000000`; may be lowered, never raised. The primary bound: it is the same on every machine, so a decision that stops here replays the same. Past it the decision fails with `422 EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT` |
 | `evaluation.regex-max-reads-per-decision` | `5000000` | Built | Characters all the `matches()` of one decision may read together, `1` to `5000000`; may be lowered, never raised. Counted the same way as `regex-max-reads`, so it is the same on every machine. It bounds a rule set with many `matches()` rows: past it the decision fails with `422 EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT`, and no outputs. An invalid value stops start-up |
 | `evaluation.regex-timeout-ms` | `50` | Built | Backstop of the read budget: longest time one `matches()` may run, `1` to `1000` ms. Past it the match stops on its own thread and the decision fails with `422 EVALUATION_ERROR`; the decision row records `error_code = REGEX_TIMEOUT`. An invalid value stops start-up |
 | `evaluation.regex-max-input-length` | `4096` | Built | Longest text `matches()` looks at, `1` to `evaluation.max-string-length` (a lower `max-string-length` lowers this default with it). A longer text fails the decision without running the match, `error_code = REGEX_INPUT_TOO_LONG` |
 | `evaluation.max-input-scale` | `34` | Built | Largest absolute scale of a number input (`1e-35` and `1e35` are refused with `400 INPUT_INVALID`; at most 34 significant digits always). `0` to `34`; may be lowered, never raised. An invalid value stops start-up |
+| `evaluation.pin-retired` | `false` | 0.2 | Whether a pinned evaluation (`rules:pin`) may name a `RETIRED` version. `false` refuses it with `409 INVALID_STATE`, so a rule taken out of service produces no new decision; replay of logged decisions is not affected |
 | `evaluation.reject-undeclared-inputs` | `true` | Built | Refuse an input name the rule set does not declare with `400 INPUT_INVALID`, so a misspelt name such as `txcount` never falls to a default row. With `false`, undeclared inputs are ignored; they are never written to the decision log either way |
-| `cache.max-entries` | `1000` | Built | Compiled versions kept per replica, `1` to `100000`; the cache is cleared when full (LRU eviction from 0.1). An invalid value stops start-up |
-| `cache.listen-notify` | `true` | 0.1 (M1) | Open one session-mode connection for `LISTEN horus_rle_cache`; set `false` behind a transaction-mode pooler |
-| `cache.epoch-check-interval` | `PT5S` | 0.1 (M1) | Interval of the `cache_epoch` sweep; this is the staleness bound when NOTIFY is unavailable |
+| `cache.max-entries` | `1000` | Built (LRU from 0.2) | Compiled versions kept per replica, `1` to `100000`, one per rule set and tenant. When full, the least recently used entry leaves, counted by `horus.rle.cache.evictions{cause=size}`, so memory stays flat however many versions exist. An invalid value stops start-up |
+| `cache.listen-notify` | `true` | Built (0.2) | Hold one connection from the host's pool for `LISTEN horus_rle_cache`, so every replica drops an approved rule set within about a second. Set `false` behind a transaction-mode pooler. See [Replicas and connection poolers](#replicas-and-connection-poolers) |
+| `cache.epoch-check-interval` | `PT5S` | Built (0.2) | How often each replica compares its cached rule sets with their `cache_epoch`, `PT0.1S` to `PT5M`: one indexed read per cached tenant. The longest a replica serves a version after another replica's approval when no notification arrives |
 | `idempotency.retention` | `PT24H` | Built | Lifetime of `rle_idempotency` rows, `PT1M` to `P30D`. An invalid value stops start-up |
-| `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | 0.1 (M1) | Bounds of `GET /decisions` and list reads; range and page size may be lowered, never raised |
-| `lifecycle.sweep-interval` | `PT1M` | 0.1 (M1) | How often superseded versions are marked retired; evaluation already switches at `effectiveFrom` |
+| `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | Built (0.2) | Bounds of `GET /decisions` and list reads. `max-range` is the longest period of one decision search (`PT1H` to `P31D`); `max-page-size` the largest `limit`, and the page size of `GET /decisions` when no `limit` is given; `statement-timeout` the longest one search page may run (`PT0.1S` to `PT30S`), set for that statement only. Range and page size may be lowered, never raised |
+| `lifecycle.sweep-interval` | `PT1M` | 0.2 | How often superseded versions are marked retired, `PT1S` to `PT1H`; evaluation already switches at `effectiveFrom`. Runs on every replica, each retirement recorded once |
 | `authoring.cockpit-drafts` | `false` | Built (published in `/meta`); enforced on `PUT` of a draft from 0.2.0 | Whether the cockpit may create and edit drafts on this host; off by default in 0.1.0 (PD-094). Always published in `/api/bpm/meta` as the rules setting `authoring.cockpit-drafts`. Turn it on with `authoring.cockpit-drafts: true`, as the example host does on its `dev` profile. Import of a document, approvals and simulation are not affected. From 0.2.0 the engine enforces it: with `false`, replacing a draft (`PUT /rule-sets/{name}/versions/{v}`, also through the Java API) is refused with `403 DRAFT_AUTHORING_DISABLED` |
 | `readings.style` | `sentence` | 0.1 (M1) | Style of the plain-language readings of rules and of explanation `text`: `sentence` (patterns from the message catalogue) or `shorthand` (for example `tier: GOLD, PLATINUM`). If sentences miss the 8 Jan 2027 checkpoint, 0.1 accepts only `shorthand` until sentences ship. Shown in `/api/bpm/meta` as `rules.readings.style` |
 | `lifecycle.reason-required`, `lifecycle.reason-max-length` | `true`, `2000` | 0.1 (M1) | Reason on reject and retire; may be made optional for reject only |
-| `lifecycle.system-actor` | `system` | 0.1 (M1) | Actor recorded when the engine retires a superseded version |
+| `lifecycle.system-actor` | `system:supersession` | 0.2 | Actor recorded when the engine retires a superseded version. It must start with `system:`, a namespace reserved for the engine's own actors; a caller whose id starts with `system:` is refused with `403 PERMISSION_DENIED` on every operation |
 | `lifecycle.retire-approval` (host property `horus.bpm.lifecycle.retire-approval`, shared with the Process Engine) | `single` | 0.1 (M1); `four-eyes` M3 (May 2027), may move to 1.1 | Approval mode for retiring a published version by hand. `single`: one `rules:approve` holder retires it with a mandatory reason. `four-eyes`: `:retire` only records a request and the version keeps serving; a second `rules:approve` holder confirms with `:confirm-retire`, and the requester's own confirmation is refused with `403 SELF_APPROVAL_FORBIDDEN`; any holder can withdraw the request with `:cancel-retire` and a reason. The mode in force is shown in `/api/bpm/meta` and recorded on every retirement event and history row. Independent of the emergency single-approver path, which governs publication only. See [[Rule Engine Versioning and Publishing]] |
 | `lifecycle.retire-last-version` (host property `horus.bpm.lifecycle.retire-last-version`, shared with the Process Engine) | `confirm` | 0.2 | Retiring the last version in effect of a rule set. `confirm`: the retire needs `"confirmNoVersionInEffect": true`, else `409 LAST_VERSION_IN_EFFECT`. `four-eyes`: a second approver confirms (with four-eyes retirement, M3). `refuse`: never; approve a replacement first. Shown in `/api/bpm/meta` |
 | `lifecycle.approver-must-differ-from` (host property `horus.bpm.lifecycle.approver-must-differ-from`, shared with the Process Engine) | `makers` | 0.2 for the setting; `makers` behaviour built | Who may not approve a version. `makers`: nobody who imported, created, edited or requested it. `requester`: only the requester is excluded; this relaxes a control, so it is never the default, it appears in `/api/bpm/meta`, is logged at WARN at start-up and is recorded on every approval. The requester can never approve (PD-096). The Rule Engine always applies `makers`, and reports `makers` in `/meta`, because its database constraint refuses an approval by the author; `requester` affects the Process Engine only |
@@ -70,7 +78,7 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `tenancy.dev-tenant` | unset | Built as the host-wide `horus.bpm.tenancy.dev-tenant` | Fixed tenant for local work without an identity provider. `dev` profile only: start-up is refused when it is set outside `dev` |
 | `events.decision-evaluated` | `false` | 0.1 (M1) | Publish `rules.decision.evaluated.v1` for every decision |
 | `scheduler.enabled` | `true` | 0.1 (M1) | Run the engine's scheduler thread (outbox relay, partition creation, partition drop, idempotency cleanup) on this replica |
-| `security.role-permissions` | empty | Built | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities). Read by `/api/bpm/me` today; the engine endpoints use it from 0.1. A permission outside the six below stops the start-up |
+| `security.role-permissions` | empty | Built | Map of host role authorities to engine permissions; see [Mapping permissions](#mapping-permissions-to-the-hosts-authorities). Read by `/api/bpm/me` today; the engine endpoints use it from 0.1. A permission outside the seven below stops the start-up |
 
 ### Masking keys
 
@@ -97,6 +105,36 @@ A rule set marks personal data with `mask: true`; the decision log then stores `
 export HORUS_BPM_RULES_MASKING_HMAC_KEY="$(openssl rand -base64 32)"
 ```
 
+### Personal data guards
+
+The decision log can never be edited, so an input that holds personal data and was never marked `mask: true` leaves data you cannot erase. Four guards catch it before publication (`RLE-049` to `RLE-052`):
+
+| Guard | What happens |
+|---|---|
+| Warning | An input that declares no `mask` and whose name looks like personal data gets a warning in `warnings` of the version: `{ code: UNMASKED_PERSONAL_DATA, input: nationalId, matchedName: "national id", message }`. It comes back from the import, the draft replacement and the publication request, and on every read of the version, so the approver sees it too |
+| Strict mode | With `decision-log.require-explicit-mask: true`, an input that declares no `mask` is `422 VALIDATION_FAILED`, one violation per input with `column` naming it, and nothing is stored. A draft imported, or a request made, before strict mode was turned on can be neither sent for approval nor approved until every input is declared |
+| Diff | The version diff lists every input's masking status in `masking`, and marks changes: `nationalId: MASKED to NOT_MASKED` |
+| Masking default | A change of `decision-log.mask-default` since the last start-up is one log line per tenant with the old and new value, at WARN when masking is turned off. `/api/bpm/meta` shows the masking default and strict mode in force for the caller's tenant |
+
+The built-in names cover full name, `ho ten`, `ho va ten`, national id, citizen id, `cccd`, `cmnd`, passport, `ho chieu`, phone, `so dien thoai`, `sdt`, email, address, `dia chi`, date of birth, `dob`, `ngay sinh`, account number, `so tai khoan`, `stk`, IBAN, card number, tax id, `ma so thue`, `mst`, driver licence, `giay phep lai xe`, `gplx` and `bang lai`. Names are compared as words, ignoring case, punctuation and accents, without regular expressions: `nationalId`, `national_id` and `NATIONAL_ID` match "national id", and `company` matches nothing. Only names are checked, never values.
+
+```yaml
+horus:
+  bpm:
+    rules:
+      decision-log:
+        require-explicit-mask: true              # every input must say mask: true or mask: false
+        additional-personal-data-names: ["cif", "customer ref"]
+      masking:
+        tenants:
+          sandbox:
+            require-explicit-mask: false         # a test tenant keeps warnings only
+          bank-b:
+            personal-data-names: ["customer ref"] # bank-b's own list, for bank-b only
+```
+
+The start-up record lives in `rle_setting_seen` (one row per tenant, plus one for the host default), so the runtime database user needs `SELECT`, `INSERT` and `UPDATE` on it.
+
 **Tenant subkeys.** The host key is never used directly. A tenant without its own key uses the subkey `HKDF-SHA256(IKM = host key, salt = none, info = "horus-bpm/masking/v1/tenant/" + tenantId, 32 bytes)` (RFC 5869), so two tenants that share the host key never store the same token for one value. A tenant's own key is used as it is. The key id is the host key's, and the `v1` in `info` is fixed for the `hmac:<keyId>:<hex>` format. To check an implementation of your own, use this vector:
 
 | Host key (hex) | Tenant | Value | Token |
@@ -106,7 +144,7 @@ export HORUS_BPM_RULES_MASKING_HMAC_KEY="$(openssl rand -base64 32)"
 
 The subkey of `bank-a` in that vector is `c8e45e83d5ee7574102467fccc635e7113045b1b05714cca14a9aab5f01c2ecb`. The token is the input's value fingerprinted with the tenant's key only, without the rule set or the input name, so one person has one token across a tenant's rule sets.
 
-To keep one key per tenant, either set `masking.tenants.<tenant>.hmac-key` for each tenant, or declare a `MaskingPolicy` bean that reads the tenant's key from your vault; the bean replaces every `masking.*` setting. A bean that shares one root key between tenants derives each tenant's key with `MaskingKey.forTenant(tenantId)`. The key never appears in a log line, a response, an event or a metric. Decisions keep the fingerprint, and the key id, of the key in force when they were made; stored rows are never re-fingerprinted.
+To keep one key per tenant, either set `masking.tenants.<tenant>.hmac-key` for each tenant, or declare a `MaskingPolicy` bean that reads the tenant's key from your vault; the bean replaces every `masking.*` setting, and with it the personal-data settings: its `requireExplicitMask(tenant)` and `personalDataNames(tenant)` default to off and to the built-in list. A bean that shares one root key between tenants derives each tenant's key with `MaskingKey.forTenant(tenantId)`. The key never appears in a log line, a response, an event or a metric. Decisions keep the fingerprint, and the key id, of the key in force when they were made; stored rows are never re-fingerprinted.
 
 #### Rotating a masking key
 
@@ -197,14 +235,39 @@ On the next start both partitions exist, so only the first line appears, with `0
 |---|---|---|
 | Create the partitions of the current and the next month | Every start-up, after the engine's migrations. The month comes from the host `Clock` bean, or system UTC when the host has none, never from the database clock | Built |
 | Move rows of a month out of `rle_decision_default` | When that month's partition is created, in the same transaction, before it is attached | Built |
-| Create partitions up to `now() + decision-log.partitions-ahead` | Daily, from the scheduler thread | 0.1 (M1) |
+| Create partitions up to `now() + decision-log.partitions-ahead` | At start-up and then daily, on the engine's own daemon thread `horus-rle-partitions`, without a restart | Built (0.2) |
 | Drop partitions older than `decision-log.retention` | From the scheduler thread, outside the `dev` profile | M3 |
 
-Several replicas can start at once: a transaction-scoped advisory lock lets one replica create the partitions at a time, and the others find them present. Each creation waits at most 5 s for locks (`lock_timeout`).
+Several replicas can start at once: a transaction-scoped advisory lock lets one replica create the partitions at a time, and the others find them present. Each creation waits at most 5 s for locks (`lock_timeout`). A daily run that times out logs a warning and the next run retries; the 7 days ahead leave room for it. No failure of one run ends the daily loop: any error is logged with the period it was creating and the next run retries. Only a JVM-fatal error (`OutOfMemoryError`, `StackOverflowError`) stops it; the `ruleEngine` health contributor then reports `DOWN` with `partitionMaintenance: STOPPED`, so the orchestrator restarts the host. The detail `partitionMaintenanceLastSuccess` shows the time of the last successful run (`never` before the first). The job creates and attaches partitions only: it issues no `UPDATE`, no `DELETE` on `rle_decision` and no `DROP`.
+
+The gauge `horus.rle.partition.default.rows` (Prometheus `horus_rle_partition_default_rows`) counts the rows in `rle_decision_default` each time the host's meter registry reads it. It should read 0; alert above 0. It is registered only when the host has Micrometer on its classpath, for example through Spring Boot Actuator, and reads `NaN` when the database cannot be reached. When the job creates a month, the rows of that month move out of the default partition and the gauge drops back.
 
 With `migrate-on-start: false`, the engine creates partitions only if its schema is current. If migrations are pending, it skips the partitions, logs a warning, and the `ruleEngine` health contributor reports `DOWN`. Run the migrations, then restart.
 
 The `ruleEngine` health contributor also reports whether next month's partition exists. A missing partition is a detail, not a failure: decisions of a month without a partition go to `rle_decision_default` until that partition is created.
+
+## Replicas and connection poolers
+
+Each replica keeps the compiled version of every rule set it evaluates in memory, so a cached evaluation reads nothing from the database and writes its one decision row. An approval increments the rule set's `cache_epoch` and sends `pg_notify('horus_rle_cache', ...)` in its own transaction; PostgreSQL delivers the notification after commit, and the approving replica drops its own entry at the same moment.
+
+| Path | When it applies | Bound |
+|---|---|---|
+| Notification | `cache.listen-notify: true` on a direct connection. One connection of the host's pool stays open for `LISTEN` for the replica's lifetime; size the pool with one connection to spare | About 1 s |
+| Epoch check | Always, every `cache.epoch-check-interval` | The interval, 5 s by default |
+| Hand-over | A published version with a later `effectiveFrom` takes over at that instant on every replica, with no notification | Exact |
+
+Behind PgBouncer or another pooler in transaction mode, `LISTEN` does not work: the pooler hands each transaction to any server connection and drops notifications. Set `cache.listen-notify: false` there. No session connection is opened, and the epoch check alone brings every replica to a new version within the interval. Sending the notification is transactional, so approvals work through the pooler either way. With the JDBC driver behind a transaction-mode pooler, also set `prepareThreshold=0` on the URL unless the pooler supports prepared statements.
+
+If the listener loses its connection (a failover, a restart of PostgreSQL), it logs one warning, retries every second, and logs one line when it listens again; it runs one epoch check on reconnect, because PostgreSQL does not replay notifications sent while it was away.
+
+No failure of one iteration ends the listener or the epoch check: any error, including an `Error` from a library, is logged and the loop carries on. Only a JVM-fatal error (`OutOfMemoryError`, `StackOverflowError`) stops them; the `ruleEngine` health contributor then reports `DOWN` with `cacheEpochCheck: STOPPED`, so the orchestrator restarts the host. The detail `cacheEpochCheckLastSuccess` shows the time of the last successful epoch check (`never` before the first).
+
+| Meter | Prometheus | Meaning |
+|---|---|---|
+| `horus.rle.cache.size` | `horus_rle_cache_size` | Compiled entries held; at most `cache.max-entries` |
+| `horus.rle.cache.evictions` | `horus_rle_cache_evictions_total` | Entries that left the cache, tag `cause`: `size`, `epoch` or `notify` |
+
+The meters are registered only when the host has Micrometer on its classpath, for example through Spring Boot Actuator. No meter carries a tenant or a rule set.
 
 ## Host beans the starter picks up
 
@@ -231,7 +294,7 @@ The engine's default beans are `@ConditionalOnMissingBean`, so a host bean repla
 | `rules:approve` | `:approve`, `:reject`, `:retire`. Approval by the requester is refused regardless |
 | `rules:simulate` | `:simulate`, set `clock` on `:evaluate` |
 | `rules:pin` | Evaluate one named approved version (`/versions/{v}:evaluate`). No role holds it by default; grant it only to a service identity such as the Process Engine's. A retired version is refused unless `evaluation.pin-retired` is `true` |
-| `rules:log:read` | Read the decision log and explanations |
+| `rules:log:read` | Read the decision log and explanations, and replay a logged decision |
 | `rules:masked:search` | Find decisions by the plain value of a masked input. Not implied by `rules:log:read`; grant it to as few people as possible |
 
 ### Mapping permissions to the host's authorities

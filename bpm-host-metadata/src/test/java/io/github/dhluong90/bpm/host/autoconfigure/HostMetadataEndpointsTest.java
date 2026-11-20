@@ -33,6 +33,7 @@ import tools.jackson.databind.json.JsonMapper;
  * Callers are Lan, a pricing author at bank-a, and Minh, a pricing approver; Thu is a teller with no
  * engine permission. Tenancy cases are in {@link TenantResolutionTest}.
  */
+@org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
 class HostMetadataEndpointsTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -71,6 +72,91 @@ class HostMetadataEndpointsTest {
             assertThat(meBody.path("tenant").path("current").asString()).isEqualTo("bank-a");
             assertThat(strings(meBody.path("tenant").path("allowed"))).containsExactly("bank-a");
             assertThat(strings(meBody.path("permissions"))).containsExactly("rules:read", "rules:author");
+        });
+    }
+
+    /** The rules entry with one host setting, and a masking default that bank-b turns on (RLE-052). */
+    @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
+    static class RulesWithTenantSettings {
+
+        @org.springframework.context.annotation.Bean
+        io.github.dhluong90.bpm.host.spi.ModuleDescriptor ruleEngineModuleDescriptor() {
+            io.github.dhluong90.bpm.host.spi.ModuleDescriptor rules = TestHosts.rules(java.util.Map.of());
+            return new io.github.dhluong90.bpm.host.spi.ModuleDescriptor(rules.module(), rules.engineVersion(),
+                    rules.apiVersion(), rules.features(), java.util.Map.of("authoring.cockpit-drafts", false),
+                    rules.permissions(), rules.rolePermissions());
+        }
+
+        @org.springframework.context.annotation.Bean
+        io.github.dhluong90.bpm.host.spi.ModuleTenantSettings ruleEngineTenantSettings() {
+            return new io.github.dhluong90.bpm.host.spi.ModuleTenantSettings() {
+                @Override
+                public String module() {
+                    return "rules";
+                }
+
+                @Override
+                public List<String> names() {
+                    return List.of("decision-log.mask-default");
+                }
+
+                @Override
+                public java.util.Map<String, Object> settings(String tenantId) {
+                    return java.util.Map.of("decision-log.mask-default", tenantId.equals("bank-b"));
+                }
+            };
+        }
+    }
+
+    @Test
+    void RLE_052_meta_shows_each_caller_the_settings_in_force_for_their_own_tenant() {
+        // Given a host whose rules engine masks undeclared inputs by default for bank-b only
+        TestHosts.runner().withUserConfiguration(RulesWithTenantSettings.class).run(context -> {
+            MockMvc mvc = TestHosts.mockMvc(context);
+
+            // When lan of bank-a and binh of bank-b read /meta
+            MvcResult atBankA = call(mvc, get("/api/bpm/meta").with(lan()));
+            MvcResult atBankB = call(mvc, get("/api/bpm/meta").with(caller("binh", "bank-b", "rules:read")));
+
+            // Then each sees the host setting and the masking default in force for their tenant
+            JsonNode a = json(atBankA).path("modules").get(0).path("settings");
+            JsonNode b = json(atBankB).path("modules").get(0).path("settings");
+            assertThat(a.path("authoring.cockpit-drafts").asBoolean(true)).isFalse();
+            assertThat(a.path("decision-log.mask-default").isBoolean()).isTrue();
+            assertThat(a.path("decision-log.mask-default").asBoolean(true)).isFalse();
+            assertThat(b.path("decision-log.mask-default").asBoolean(false)).isTrue();
+            // And the two bodies differ, so their ETags do too
+            assertThat(atBankA.getResponse().getHeader("ETag")).isNotEqualTo(atBankB.getResponse().getHeader("ETag"));
+        });
+    }
+
+    @Test
+    void RLE_052_one_session_in_two_tenants_gets_two_meta_bodies_and_never_a_304_across_tenants() {
+        // Given lan holds a role in bank-a and in bank-b; bank-b masks undeclared inputs by default
+        TestHosts.runner().withUserConfiguration(RulesWithTenantSettings.class).run(context -> {
+            MockMvc mvc = TestHosts.mockMvc(context);
+
+            // When lan reads /meta in bank-a, then switches to bank-b and revalidates with bank-a's ETag
+            MvcResult inA = call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-a", "rules:read")));
+            String etagA = inA.getResponse().getHeader("ETag");
+            MvcResult inB = call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-b", "rules:read"))
+                    .header("If-None-Match", etagA));
+
+            // Then bank-b answers 200 with its own body and ETag, never 304 with bank-a's cached body
+            assertThat(inB.getResponse().getStatus()).isEqualTo(200);
+            assertThat(inB.getResponse().getHeader("ETag")).isNotEqualTo(etagA);
+            assertThat(json(inA).path("modules").get(0).path("settings").path("decision-log.mask-default")
+                    .asBoolean(true)).isFalse();
+            assertThat(json(inB).path("modules").get(0).path("settings").path("decision-log.mask-default")
+                    .asBoolean(false)).isTrue();
+            // And /meta varies like /me, so a shared or browser cache keys it by credentials and tenant header
+            for (MvcResult meta : List.of(inA, inB)) {
+                assertThat(String.join(", ", meta.getResponse().getHeaders("Vary")))
+                        .isEqualTo("Authorization, Cookie, X-Tenant-Id");
+            }
+            // And the same tenant still revalidates to 304
+            assertThat(call(mvc, get("/api/bpm/meta").with(caller("lan", "bank-a", "rules:read"))
+                    .header("If-None-Match", etagA)).getResponse().getStatus()).isEqualTo(304);
         });
     }
 
@@ -195,6 +281,87 @@ class HostMetadataEndpointsTest {
             String minhTag = call(mvc, get("/api/bpm/me").with(minh())).getResponse().getHeader("ETag");
             assertThat(minhTag).isNotEqualTo(me.getResponse().getHeader("ETag"));
         });
+    }
+
+    @Test
+    void TR_EXT_08_tenant_settings_follow_the_callers_tenant_and_meta_then_varies_by_credentials() {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, TestHosts.MaskingStatus.class)
+                .run(context -> {
+                    MockMvc mvc = TestHosts.mockMvc(context);
+                    MvcResult bankA = call(mvc, get("/api/bpm/meta").with(lan()));
+                    MvcResult bankB = call(mvc, get("/api/bpm/meta").with(caller("vy", "bank-b", "rules:read")));
+
+                    JsonNode a = json(bankA).path("modules").get(0).path("settings");
+                    JsonNode b = json(bankB).path("modules").get(0).path("settings");
+                    assertThat(a.path("masking.hmac-key").asString()).isEqualTo("set");
+                    assertThat(a.path("masking.hmac-key-id").asString()).isEqualTo("a1");
+                    assertThat(b.path("masking.hmac-key").asString()).isEqualTo("unset");
+                    assertThat(b.has("masking.hmac-key-id")).isFalse();
+                    // An undeclared name is never published, and one tenant never sees another's values.
+                    assertThat(bankA.getResponse().getContentAsString()).doesNotContain("undeclared", "bank-b");
+                    assertThat(bankB.getResponse().getContentAsString()).doesNotContain("undeclared", "a1");
+                    assertThat(String.join(", ", bankA.getResponse().getHeaders("Vary")))
+                            .isEqualTo("Authorization, Cookie, X-Tenant-Id");
+                    // Tenant data: never served from cache without asking the host, as /me.
+                    assertThat(bankA.getResponse().getHeader("Cache-Control")).isEqualTo("private, no-cache");
+                    assertThat(bankA.getResponse().getHeader("ETag")).isNotEqualTo(bankB.getResponse().getHeader("ETag"));
+                });
+        // Without tenant settings /meta is the same for every caller, does not vary and may be cached a minute.
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).run(context -> {
+            MvcResult plain = call(TestHosts.mockMvc(context), get("/api/bpm/meta").with(lan()));
+            assertThat(plain.getResponse().getHeaders("Vary")).isEmpty();
+            assertThat(plain.getResponse().getHeader("Cache-Control")).isEqualTo("private, max-age=60");
+        });
+    }
+
+    @Test
+    void TR_EXT_08_a_failing_or_mistyped_contributor_is_left_out_and_logged_and_meta_still_answers(
+            org.springframework.boot.test.system.CapturedOutput output) {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, TestHosts.MaskingStatus.class,
+                        TestHosts.FaultyTenantSettings.class)
+                .run(context -> {
+                    MockMvc mvc = TestHosts.mockMvc(context);
+                    MvcResult first = call(mvc, get("/api/bpm/meta").with(lan()));
+                    MvcResult second = call(mvc, get("/api/bpm/meta").with(lan()));
+                    assertThat(first.getResponse().getStatus()).isEqualTo(200);
+                    assertThat(second.getResponse().getStatus()).isEqualTo(200);
+                    JsonNode settings = json(first).path("modules").get(0).path("settings");
+                    // The working contributor is published; both faulty ones are left out whole.
+                    assertThat(settings.path("masking.hmac-key").asString()).isEqualTo("set");
+                    assertThat(settings.has("limits.daily-remaining")).isFalse();
+                    assertThat(settings.has("limits.daily-cap")).isFalse();
+                    assertThat(settings.has("limits.daily-cap-label")).isFalse();
+                });
+        // Loud, once per problem, never with the value.
+        assertThat(output.getAll()).contains("of module 'rules' threw java.lang.IllegalStateException",
+                "returned a java.math.BigDecimal for 'limits.daily-cap'", "left out of /api/bpm/meta");
+        assertThat(output.getAll().split("threw java.lang.IllegalStateException", -1)).hasSize(2);
+        assertThat(output.getAll()).doesNotContain("50000000");
+    }
+
+    @Test
+    void TR_EXT_08_a_host_bean_of_the_engine_only_tenant_settings_spi_stops_the_host() {
+        var rules = TestHosts.rules(java.util.Map.of());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> HostMetadataController.checkTenantSettings(
+                        List.of(rules), List.of(new com.example.bank.BankTenantSettings())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("com.example.bank.BankTenantSettings")
+                .hasMessageContaining("engine starters only");
+    }
+
+    @Test
+    void TR_EXT_08_tenant_settings_for_a_missing_module_or_a_fixed_setting_name_stop_the_host() {
+        var rules = new io.github.dhluong90.bpm.host.spi.ModuleDescriptor("rules", "0.1.3", "v1", List.of(),
+                java.util.Map.of("authoring.cockpit-drafts", false), TestHosts.RULES_PERMISSIONS, java.util.Map.of());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> HostMetadataController.checkTenantSettings(
+                        List.of(rules), List.of(TestHosts.tenantSettings("rules", "authoring.cockpit-drafts"))))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("authoring.cockpit-drafts");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> HostMetadataController.checkTenantSettings(
+                        List.of(rules), List.of(TestHosts.tenantSettings("processes", "x"))))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("processes");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> HostMetadataController.checkTenantSettings(
+                        List.of(rules), List.of(TestHosts.tenantSettings("rules", "a"), TestHosts.tenantSettings("rules", "a"))))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("'a'");
     }
 
     @Test

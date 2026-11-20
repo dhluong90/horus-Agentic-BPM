@@ -14,6 +14,9 @@ public final class EngineDefaults {
     /** Largest accepted {@code cache.max-entries}. */
     public static final int CACHE_MAX_ENTRIES_LIMIT = 100_000;
 
+    /** How often each replica checks the {@code cache_epoch} of its cached rule sets (ADR-0009). */
+    public static final Duration CACHE_EPOCH_CHECK_INTERVAL = Duration.ofSeconds(5);
+
     /** Default of {@code horus.bpm.rules.idempotency.retention}: how long a key is remembered (ADR-0006). */
     public static final Duration IDEMPOTENCY_RETENTION = Duration.ofHours(24);
 
@@ -67,9 +70,30 @@ public final class EngineDefaults {
     /** Items per page of a list read when the request names no {@code limit}. */
     public static final int QUERY_DEFAULT_PAGE_SIZE = 50;
 
+    /** Longest period of a decision log search, {@code query.max-range} (ADR-0015); may be lowered only. */
+    public static final Duration QUERY_MAX_RANGE = Duration.ofDays(31);
+
+    /** Longest a decision log search may run, {@code query.statement-timeout}. */
+    public static final Duration QUERY_STATEMENT_TIMEOUT = Duration.ofSeconds(2);
+
+    /** Bounds of {@code query.statement-timeout}. */
+    public static final Duration QUERY_STATEMENT_TIMEOUT_MIN = Duration.ofMillis(100);
+
+    /** Bounds of {@code query.statement-timeout}. */
+    public static final Duration QUERY_STATEMENT_TIMEOUT_MAX = Duration.ofSeconds(30);
+
+    /** How far ahead monthly partitions of the decision log are created, {@code decision-log.partitions-ahead}. */
+    public static final Duration PARTITIONS_AHEAD = Duration.ofDays(7);
+
+    /** Largest {@code decision-log.partitions-ahead}: one year of months. */
+    public static final Duration PARTITIONS_AHEAD_MAX = Duration.ofDays(366);
+
+    /** How often partition maintenance runs after start-up: daily. */
+    public static final Duration PARTITION_MAINTENANCE_INTERVAL = Duration.ofDays(1);
+
     /**
-     * Default and ceiling of {@code horus.bpm.rules.lifecycle.reason-max-length}: longest reason of a reject (and,
-     * later, a retire), in characters. A host may lower it, never raise it.
+     * Default and ceiling of {@code horus.bpm.rules.lifecycle.reason-max-length}: longest reason of a reject or a
+     * retire, in characters. A host may lower it, never raise it.
      */
     public static final int REASON_MAX_LENGTH = 2000;
 
@@ -88,20 +112,60 @@ public final class EngineDefaults {
     public static final int EVALUATE_BODY_MAX_BYTES = 1_048_576;
 
     /**
+     * Default and ceiling of {@code simulation.max-inputs}: the most sample input sets one simulation accepts
+     * (RLE-016). A simulation runs in the request, so the bound keeps its time and memory close to a batch
+     * evaluation; its body is read with {@link #EVALUATE_BODY_MAX_BYTES}. May be lowered, never raised.
+     */
+    public static final int SIMULATION_MAX_SAMPLES = 1_000;
+
+    /**
      * How long a replica keeps the cursor key before reading it again from {@code rle_engine_key}. Deleting the row
      * rotates the key; every replica uses the new key within this time, and one that meets a cursor it cannot
      * verify re-reads at once. A bound of the engine, not a setting.
      */
     public static final java.time.Duration CURSOR_KEY_REFRESH = java.time.Duration.ofMinutes(5);
 
-    /** Longest accepted {@code X-Correlation-Id}; a longer or malformed one is replaced by a generated id. */
-    public static final int CORRELATION_ID_MAX_LENGTH = 128;
+    /** Default of {@code horus.bpm.rules.lifecycle.system-actor}: the actor recorded when a version is superseded. */
+    public static final String SYSTEM_ACTOR = "system:supersession";
 
     /**
-     * Longest period of one decision-log search, from inclusive to exclusive (ADR-0015): at most two monthly
-     * partitions are read. A bound of the engine.
+     * The namespace of the engine's own actors: {@code lifecycle.system-actor} must start with it, and no caller id
+     * may, so a host user can never act or appear in the audit trail under an engine actor's name.
      */
-    public static final java.time.Duration QUERY_MAX_RANGE = java.time.Duration.ofDays(31);
+    public static final String RESERVED_ACTOR_PREFIX = "system:";
+
+    /** Longest {@code lifecycle.system-actor}, in characters, the bound of every recorded actor. */
+    public static final int SYSTEM_ACTOR_MAX_LENGTH = 200;
+
+    /**
+     * Default of {@code horus.bpm.lifecycle.retire-approval} (PD-080): one {@code rules:approve} holder with a
+     * reason retires a version. The other value, {@code four-eyes}, arrives in M3 (RLE-038).
+     */
+    public static final String RETIRE_APPROVAL = "single";
+
+    /**
+     * Default of {@code horus.bpm.lifecycle.retire-last-version} (PD-101): retiring the version in effect, when no other
+     * would remain, needs {@code confirmNoVersionInEffect} on the request.
+     */
+    public static final String RETIRE_LAST_CONFIRM = "confirm";
+
+    /** {@code horus.bpm.lifecycle.retire-last-version: refuse}: the last version in effect is never retired by hand. */
+    public static final String RETIRE_LAST_REFUSE = "refuse";
+
+    /** Default of {@code horus.bpm.rules.lifecycle.sweep-interval}: how often superseded versions are retired. */
+    public static final java.time.Duration SWEEP_INTERVAL = java.time.Duration.ofMinutes(1);
+
+    /** Reason recorded on a version retired because a newer one is in effect (ADR-0025 decision 2). */
+    public static final String REASON_SUPERSEDED = "SUPERSEDED";
+
+    /**
+     * Default of {@code horus.bpm.rules.evaluation.pin-retired}: a pinned evaluation of a retired version is refused,
+     * so a rule taken out of service cannot produce new decisions through the pin.
+     */
+    public static final boolean PIN_RETIRED = false;
+
+    /** Longest accepted {@code X-Correlation-Id}; a longer or malformed one is replaced by a generated id. */
+    public static final int CORRELATION_ID_MAX_LENGTH = 128;
 
     /** The host setting of the masking key, named in every message about a missing or invalid key (RLE-035). */
     public static final String MASKING_KEY_PROPERTY = "horus.bpm.rules.masking.hmac-key";

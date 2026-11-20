@@ -99,4 +99,106 @@ final class TestHosts {
             return rules(Map.of("ROLE_PRICING_APPROVER", List.of("rules:approve")));
         }
     }
+
+    /** Tenant settings declaring the given names; values are empty. */
+    static io.github.dhluong90.bpm.host.spi.ModuleTenantSettings tenantSettings(String module, String... names) {
+        return new io.github.dhluong90.bpm.host.spi.ModuleTenantSettings() {
+            @Override
+            public String module() {
+                return module;
+            }
+
+            @Override
+            public List<String> names() {
+                return List.of(names);
+            }
+
+            @Override
+            public Map<String, Object> settings(String tenantId) {
+                return Map.of();
+            }
+        };
+    }
+
+    /** Tenant settings that throw for bank-a. */
+    static io.github.dhluong90.bpm.host.spi.ModuleTenantSettings throwing(String name) {
+        return new io.github.dhluong90.bpm.host.spi.ModuleTenantSettings() {
+            @Override
+            public String module() {
+                return "rules";
+            }
+
+            @Override
+            public List<String> names() {
+                return List.of(name);
+            }
+
+            @Override
+            public Map<String, Object> settings(String tenantId) {
+                throw new IllegalStateException("status of " + tenantId + " is not loaded");
+            }
+        };
+    }
+
+    /** Tenant settings that return an amount, which /meta does not publish. */
+    static io.github.dhluong90.bpm.host.spi.ModuleTenantSettings mistyped(String name) {
+        return new io.github.dhluong90.bpm.host.spi.ModuleTenantSettings() {
+            @Override
+            public String module() {
+                return "rules";
+            }
+
+            @Override
+            public List<String> names() {
+                return List.of(name, name + "-label");
+            }
+
+            @Override
+            public Map<String, Object> settings(String tenantId) {
+                return Map.of(name, new java.math.BigDecimal("50000000"), name + "-label", "VND");
+            }
+        };
+    }
+
+    /** The masking status beside one contributor that throws and one that returns an unsupported type. */
+    @Configuration(proxyBeanMethods = false)
+    static class FaultyTenantSettings {
+
+        @Bean
+        io.github.dhluong90.bpm.host.spi.ModuleTenantSettings failingStatus() {
+            return throwing("limits.daily-remaining");
+        }
+
+        @Bean
+        io.github.dhluong90.bpm.host.spi.ModuleTenantSettings amountStatus() {
+            return mistyped("limits.daily-cap");
+        }
+    }
+
+    /** A masking status like the Rule Engine's: bank-a has key a1, every other tenant none; one undeclared name. */
+    @Configuration(proxyBeanMethods = false)
+    static class MaskingStatus {
+
+        @Bean
+        io.github.dhluong90.bpm.host.spi.ModuleTenantSettings maskingStatus() {
+            return new io.github.dhluong90.bpm.host.spi.ModuleTenantSettings() {
+                @Override
+                public String module() {
+                    return "rules";
+                }
+
+                @Override
+                public List<String> names() {
+                    return List.of("masking.hmac-key", "masking.hmac-key-id");
+                }
+
+                @Override
+                public Map<String, Object> settings(String tenantId) {
+                    return "bank-a".equals(tenantId)
+                            ? Map.of("masking.hmac-key", "set", "masking.hmac-key-id", "a1", "undeclared", "x")
+                            : Map.of("masking.hmac-key", "unset", "undeclared", "x");
+                }
+            };
+        }
+    }
 }

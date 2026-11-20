@@ -19,13 +19,14 @@ Design preview: describes the 0.1 target.
 | `matchedRuleIds`, `outputs` | The explanation |
 | `outcome` | `ok` or an error code such as `UNIQUE_HIT_VIOLATION` |
 | `caller`, `correlationId` | From the security context and the request |
-| `clock`, `evaluatedAt`, `durationMicros` | The instant the decision reasoned about, when it ran, and how long |
+| `evalClock`, `evaluatedAt`, `durationMicros` | The instant the decision reasoned about, when it ran, and how long |
+| `clockChosen`, `pinned` | Whether the caller chose the clock (`rules:simulate`), so the decision is back-dated or forward-dated, and whether the caller named the version (`rules:pin`). The engine sets both; `GET /decisions/{id}` and the masked-input search return them |
 | async marker | Set when the entry was written in `async` mode (see below) |
 
 ## Find decisions
 
 ```bash
-curl -s 'http://localhost:8080/api/bpm/rules/v1/decisions?ruleSet=card-fee&from=2026-12-01T00:00:00Z&to=2026-12-31T23:59:59Z&outcome=error'
+curl -s 'http://localhost:8080/api/bpm/rules/v1/decisions?ruleSet=card-fee&from=2026-12-01T00:00:00Z&to=2027-01-01T00:00:00Z'
 ```
 
 Filters: `ruleSet`, `from`, `to`, `outcome`, matched rule id, and any output value. Results are paginated by cursor; exact parameter names are in [[Rule Engine Decision API]]. The Decisions screen in the [[Cockpit]] offers the same filters.
@@ -63,7 +64,7 @@ inputs:
   - { name: nationalId, type: string, mask: true }
 ```
 
-The log stores a keyed HMAC of the value instead of the value, `hmac:` followed by 64 hex digits. The same national id always produces the same token under one key, so an auditor can still find every decision about one person without the id being stored. The REST API returns it masked (TR-SEC-05); the key setting and the start-up check are described in [[Rule Engine Configuration]].
+The log stores a keyed HMAC of the value instead of the value, `hmac:` followed by 64 hex digits. The same national id always produces the same token under one key, so an auditor can still find every decision about one person without the id being stored. The REST API returns it masked (TR-SEC-05); the key setting and the start-up check are described in [[Rule Engine Configuration]]. An input that declares no `mask` and looks like personal data is a warning at import and in the change the approver reviews, and a bank can make every input declare its masking; see the personal data guards in [[Rule Engine Configuration]].
 
 To find the decisions about one person, a holder of `rules:masked:search` (a separate permission that `rules:log:read` does not imply) posts the plain value, at most 30 times a minute by default (`masking.search.max-per-minute`); the engine fingerprints it with your tenant's key before it searches:
 
@@ -108,6 +109,8 @@ Retention is the host's decision; no product default deletes audit data. The tab
 | `rules.version.retired` | A version was retired |
 | `rules.decision.evaluated` | Every decision; off by default because of volume |
 | `rules.decision-log.masked-input-searched` | Every search by a masked input's plain value; the audit entry of that lookup, without the value |
+
+These are the events an audit consumer usually needs; the full list, the envelope (`eventId`, `correlationId`, `causationId`, `producer`, `schemaVersion`) and the schema files are in [[Rule Engine Decision API]].
 
 Events are delivered through the `RuleEventPublisher` SPI, which the host implements to forward them to its own audit or messaging system. The engine itself never calls the network (TR-EMB-05).
 

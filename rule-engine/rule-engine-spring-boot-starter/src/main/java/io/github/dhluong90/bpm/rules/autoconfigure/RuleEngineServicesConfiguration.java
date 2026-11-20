@@ -1,16 +1,20 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
+import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
+import io.github.dhluong90.bpm.rules.api.DecisionLogQuery;
 import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
+import io.github.dhluong90.bpm.rules.postgres.CacheCoherence;
 import io.github.dhluong90.bpm.rules.postgres.PostgresRuleEngines;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
 import io.github.dhluong90.bpm.rules.rest.DecisionController;
 import io.github.dhluong90.bpm.rules.rest.DecisionLogController;
 import io.github.dhluong90.bpm.rules.rest.ProblemDetails;
 import io.github.dhluong90.bpm.rules.rest.RuleSetController;
+import io.github.dhluong90.bpm.rules.rest.SimulationController;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
@@ -64,15 +68,27 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
-            MaskingPolicy masking) {
+            MaskingPolicy masking, Environment environment) {
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(), masking);
+                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(environment), masking,
+                properties.toQuerySettings());
     }
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngines engines, MaskingPolicy masking) {
-        return RuleEngineMaskingCheck.of(engines.maskingCheck(), masking);
+    RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngines engines, MaskingPolicy masking,
+            ObjectProvider<Clock> clock) {
+        return RuleEngineMaskingCheck.of(engines.maskingCheck(), masking, RuleEngineAutoConfiguration.engineClock(clock));
+    }
+
+    /**
+     * The masking default and strict mode in force for the caller's tenant, in the {@code rules} settings of
+     * {@code GET /api/bpm/meta} (RLE-050, RLE-052).
+     */
+    @Bean
+    @ConditionalOnMissingBean(name = "ruleEngineTenantSettings")
+    ModuleTenantSettings ruleEngineTenantSettings(MaskingPolicy masking) {
+        return RuleEngineModule.tenantSettings(masking);
     }
 
     @Bean
@@ -89,6 +105,33 @@ class RuleEngineServicesConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    RuleEngineLifecycleSweeper ruleEngineLifecycleSweeper(RuleEngines engines, RuleEngineProperties properties) {
+        return new RuleEngineLifecycleSweeper(engines.lifecycleSweep()::run,
+                properties.lifecycle().sweepIntervalOrDefault());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    RuleEngineCacheCoherence ruleEngineCacheCoherence(DataSource dataSource, RuleEngines engines,
+            RuleEngineProperties properties) {
+        return new RuleEngineCacheCoherence(new CacheCoherence(dataSource, engines.cache(),
+                properties.cache().epochCheckIntervalOrDefault(), properties.cache().listenNotifyOrDefault()));
+    }
+
+    /** The compiled-cache meters, bound by the host's meter registry when Micrometer is present (DESIGN 4.8). */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.core.instrument.binder.MeterBinder")
+    static class CacheMetricsConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(name = "ruleEngineCacheMetrics")
+        RuleEngineCacheMetrics ruleEngineCacheMetrics(RuleEngines engines) {
+            return new RuleEngineCacheMetrics(engines.cache());
+        }
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     RuleEngine ruleEngine(RuleEngines engines) {
         return engines.ruleEngine();
     }
@@ -97,6 +140,12 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     VersionService ruleEngineVersionService(RuleEngines engines) {
         return engines.versionService();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    DecisionLogQuery ruleEngineDecisionLogQuery(RuleEngines engines) {
+        return engines.decisionLogQuery();
     }
 
     @Configuration(proxyBeanMethods = false)
@@ -146,14 +195,21 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        DecisionController ruleEngineDecisionController(RuleEngine engine, CallerResolver callers) {
-            return new DecisionController(engine, callers);
+        DecisionController ruleEngineDecisionController(RuleEngine engine, DecisionLogQuery log,
+                CallerResolver callers) {
+            return new DecisionController(engine, log, callers);
         }
 
         @Bean
         @ConditionalOnMissingBean
         DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions, CallerResolver callers) {
             return new DecisionLogController(decisions, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        SimulationController ruleEngineSimulationController(RuleEngine engine, CallerResolver callers) {
+            return new SimulationController(engine, callers);
         }
 
         @Bean

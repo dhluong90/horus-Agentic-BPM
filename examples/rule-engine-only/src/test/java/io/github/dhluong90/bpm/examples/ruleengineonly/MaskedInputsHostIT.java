@@ -118,6 +118,20 @@ class MaskedInputsHostIT {
             assertThat(found.json().path("data")).hasSize(2);
             assertThat(found.json().path("truncated").asBoolean()).isFalse();
 
+            // TR-EXT-08: /api/bpm/meta shows the key status of the caller's own tenant: set, its id and the check
+            // value of the tenant's subkey, computed here independently; never the key.
+            for (String[] tenant : new String[][] {{"bank-a", auditor}, {"tenant-b", otherTenantAuditor}}) {
+                HttpResponse<String> meta = HTTP.send(HttpRequest.newBuilder(
+                                URI.create("http://localhost:" + port + "/api/bpm/meta"))
+                        .header("Authorization", tenant[1]).GET().build(), HttpResponse.BodyHandlers.ofString());
+                bodies.add(meta.body());
+                JsonNode settings = JSON.readTree(meta.body()).path("modules").get(0).path("settings");
+                assertThat(settings.path("masking.hmac-key").asString()).isEqualTo("set");
+                assertThat(settings.path("masking.hmac-key-id").asString()).isEqualTo("k1");
+                assertThat(settings.path("masking.hmac-key-check").asString()).isEqualTo(
+                        checkValue(tenantSubkey(K32, tenant[0])));
+            }
+
             // Tenant isolation: another tenant's auditor neither reads nor finds bank-a's decision.
             Reply foreignRead = send(port, otherTenantAuditor, "GET", "/decisions/" + decisionId, null, null);
             bodies.add(foreignRead.body());

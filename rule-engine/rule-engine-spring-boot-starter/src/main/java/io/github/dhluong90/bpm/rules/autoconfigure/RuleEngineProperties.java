@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
+import io.github.dhluong90.bpm.rules.internal.service.DecisionQuerySettings;
 import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
@@ -20,12 +21,13 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param cache the compiled-version cache
  * @param idempotency idempotency records
  * @param evaluation limits on evaluation inputs
- * @param query bounds of list reads
+ * @param query bounds of list reads and decision log searches
  * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
  * @param authoring how rule changes may be made on this host
  * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
- * @param decisionLog what the decision log records
+ * @param decisionLog what the decision log records and how far ahead its partitions are created
+ * @param simulation limits of {@code :simulate}
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -39,7 +41,17 @@ public record RuleEngineProperties(
         @DefaultValue Security security,
         @DefaultValue Authoring authoring,
         @DefaultValue Masking masking,
-        @DefaultValue DecisionLog decisionLog) {
+        @DefaultValue DecisionLog decisionLog,
+        @DefaultValue Simulation simulation) {
+
+    /**
+     * Limits of {@code POST .../versions/{v}:simulate} (RLE-016).
+     *
+     * @param maxInputs the most sample input sets one simulation accepts, 1 to 1000; default 1000. May be lowered,
+     *     never raised
+     */
+    public record Simulation(Integer maxInputs) {
+    }
 
     /**
      * Keys of the keyed fingerprints (HMAC-SHA256) of masked inputs (RLE-012, RLE-035). Supply every key from an
@@ -107,9 +119,15 @@ public record RuleEngineProperties(
      * @param maskDefault whether this tenant's inputs that declare no {@code mask} are masked; unset uses
      *     {@code decision-log.mask-default}
      * @param search the tenant's own search limit; unset uses {@code masking.search}
+     * @param requireExplicitMask strict mode for this tenant: every input must declare mask: true or mask: false;
+     *     unset uses {@code decision-log.require-explicit-mask}
+     * @param personalDataNames input names that look like personal data for this tenant, replacing the host's list;
+     *     unset uses the host's list
+     * @param additionalPersonalDataNames more names for this tenant, added to its list
      * @param previousKeys the tenant's earlier keys, for search only, never for writing
      */
     public record TenantMasking(String hmacKey, String hmacKeyId, Boolean maskDefault, Search search,
+            Boolean requireExplicitMask, List<String> personalDataNames, List<String> additionalPersonalDataNames,
             List<PreviousKey> previousKeys) {
 
         /** Copies the previous keys; unset is empty. */
@@ -127,12 +145,43 @@ public record RuleEngineProperties(
     }
 
     /**
-     * What the decision log records.
+     * What the decision log records, and its maintenance (RLE-017).
      *
      * @param maskDefault whether inputs that declare no {@code mask} are masked, for every tenant without its own
-     *     setting; default false. An input with {@code mask: false} is never masked by this default
+     *     setting; default false. An input with {@code mask: false} is never masked by this default. A change is
+     *     logged at start-up with the old and new value per tenant, and the value in force is shown in
+     *     {@code /api/bpm/meta}
+     * @param requireExplicitMask strict mode: every input must declare mask: true or mask: false, or the import, the
+     *     draft replacement and the publication request are refused with 422 VALIDATION_FAILED naming the input;
+     *     default false. Shown in {@code /api/bpm/meta}
+     * @param personalDataNames input names that look like personal data, replacing the built-in list (national id,
+     *     passport, phone, email, address, date of birth and account number, in English and Vietnamese). An input
+     *     that declares no mask and matches one gets a warning at import and at the publication request. Names are
+     *     compared as words, ignoring case, punctuation and accents; unset uses the built-in list
+     * @param additionalPersonalDataNames more names, added to the list
+     * @param partitionsAhead how far ahead of the host clock monthly partitions are created, at start-up and daily;
+     *     {@code PT0S} to {@code P366D}, default {@code P7D}. The current and the next month always exist
      */
-    public record DecisionLog(Boolean maskDefault) {
+    public record DecisionLog(Boolean maskDefault, Boolean requireExplicitMask, List<String> personalDataNames,
+            List<String> additionalPersonalDataNames, Duration partitionsAhead) {
+
+        /** Validates the period; an out-of-range value fails start-up naming the property. */
+        public DecisionLog {
+            if (partitionsAhead != null && (partitionsAhead.isNegative()
+                    || partitionsAhead.compareTo(EngineDefaults.PARTITIONS_AHEAD_MAX) > 0)) {
+                throw new IllegalArgumentException("horus.bpm.rules.decision-log.partitions-ahead must be PT0S to "
+                        + "P366D, was " + partitionsAhead);
+            }
+        }
+
+        /**
+         * Returns the period in force.
+         *
+         * @return the configured period, or {@code P7D}
+         */
+        public Duration partitionsAheadOrDefault() {
+            return partitionsAhead == null ? EngineDefaults.PARTITIONS_AHEAD : partitionsAhead;
+        }
     }
 
     /**
@@ -149,9 +198,43 @@ public record RuleEngineProperties(
     /**
      * The compiled-version cache.
      *
-     * @param maxEntries compiled versions kept per replica, 1 to 100000; default 1000
+     * @param maxEntries compiled versions kept per replica, 1 to 100000; default 1000. The least recently used
+     *     entry leaves first, counted by {@code horus.rle.cache.evictions{cause=size}}
+     * @param epochCheckInterval how often each replica compares its cached rule sets with their {@code cache_epoch},
+     *     {@code PT0.1S} to {@code PT5M}; default {@code PT5S}. The longest a replica serves a version after another
+     *     replica's approval when no notification arrives (ADR-0009)
+     * @param listenNotify hold one session connection from the pool for {@code LISTEN horus_rle_cache}, so replicas
+     *     refresh within a second; default true. Set false behind a transaction-mode connection pooler, which drops
+     *     notifications; the epoch check alone then keeps the bound
      */
-    public record Cache(Integer maxEntries) {
+    public record Cache(Integer maxEntries, Duration epochCheckInterval, Boolean listenNotify) {
+
+        /** Validates the interval; an out-of-range value fails start-up naming the property. */
+        public Cache {
+            if (epochCheckInterval != null && (epochCheckInterval.compareTo(Duration.ofMillis(100)) < 0
+                    || epochCheckInterval.compareTo(Duration.ofMinutes(5)) > 0)) {
+                throw new IllegalArgumentException("horus.bpm.rules.cache.epoch-check-interval must be PT0.1S to PT5M, "
+                        + "was " + epochCheckInterval);
+            }
+        }
+
+        /**
+         * Returns the interval in force.
+         *
+         * @return the configured interval, or {@code PT5S}
+         */
+        public Duration epochCheckIntervalOrDefault() {
+            return epochCheckInterval == null ? EngineDefaults.CACHE_EPOCH_CHECK_INTERVAL : epochCheckInterval;
+        }
+
+        /**
+         * Returns whether the listener runs.
+         *
+         * @return the configured value, or true
+         */
+        public boolean listenNotifyOrDefault() {
+            return listenNotify == null || listenNotify;
+        }
     }
 
     /**
@@ -182,32 +265,79 @@ public record RuleEngineProperties(
      *     5000000; default 5000000. Counted the same deterministic way as {@code regex-max-reads}, so a rule set of
      *     many {@code matches()} rows stops at this total; past it the decision fails with {@code REGEX_TIMEOUT}.
      *     Lower only
+     * @param pinRetired whether a pinned evaluation ({@code rules:pin}) may name a {@code RETIRED} version; default
+     *     false. Replay of a logged decision is not affected
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
             Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
-            Integer regexMaxReads, Integer regexMaxReadsPerDecision) {
+            Integer regexMaxReads, Integer regexMaxReadsPerDecision, Boolean pinRetired) {
     }
 
     /**
      * Bounds of list reads (ADR-0015).
      *
-     * @param maxPageSize the largest {@code limit} of {@code GET /rule-sets} and {@code GET .../versions}, 1 to 200;
-     *     default 200. May be lowered, never raised
+     * @param maxPageSize the largest {@code limit} of {@code GET /rule-sets}, {@code GET .../versions} and
+     *     {@code GET /decisions}, 1 to 200; default 200. May be lowered, never raised
+     * @param maxRange the longest period of {@code GET /decisions}, {@code PT1H} to {@code P31D}; default {@code P31D}.
+     *     May be lowered, never raised
+     * @param statementTimeout the longest one {@code GET /decisions} page may run in the database, {@code PT0.1S} to
+     *     {@code PT30S}; default {@code PT2S}
      */
-    public record Query(Integer maxPageSize) {
+    public record Query(Integer maxPageSize, Duration maxRange, Duration statementTimeout) {
     }
 
     /**
-     * Version lifecycle commands.
+     * Version lifecycle commands and the automatic retirement of superseded versions (ADR-0025).
      *
-     * @param reasonMaxLength the longest reason of {@code :reject}, in characters, 1 to 2000; default 2000. May be
-     *     lowered, never raised
+     * @param reasonMaxLength the longest reason of {@code :reject} and {@code :retire}, in characters, 1 to 2000;
+     *     default 2000. May be lowered, never raised
+     * @param sweepInterval how often the lifecycle sweep retires versions a newer version in effect has superseded,
+     *     {@code PT1S} to {@code PT1H}; default {@code PT1M}. Status only: selection follows the effective date
+     * @param systemActor the actor recorded on the history row and event of a superseded version; it must start with
+     *     {@code system:}, a namespace no caller id may use; default {@code system:supersession}
      */
-    public record Lifecycle(Integer reasonMaxLength) {
+    public record Lifecycle(Integer reasonMaxLength, Duration sweepInterval, String systemActor) {
+
+        /** Shortest accepted {@code sweep-interval}. */
+        static final Duration SWEEP_MIN = Duration.ofSeconds(1);
+
+        /** Longest accepted {@code sweep-interval}: the status of a superseded version lags at most this long. */
+        static final Duration SWEEP_MAX = Duration.ofHours(1);
+
+        /**
+         * Returns the validated sweep interval.
+         *
+         * @return the interval, the default when unset
+         * @throws IllegalArgumentException when it is outside {@code PT1S} to {@code PT1H}, naming the property
+         */
+        public Duration sweepIntervalOrDefault() {
+            Duration interval = sweepInterval == null ? EngineDefaults.SWEEP_INTERVAL : sweepInterval;
+            if (interval.compareTo(SWEEP_MIN) < 0 || interval.compareTo(SWEEP_MAX) > 0) {
+                throw new IllegalArgumentException("horus.bpm.rules.lifecycle.sweep-interval must be PT1S to PT1H,"
+                        + " was " + interval);
+            }
+            return interval;
+        }
     }
 
     /**
-     * Returns the validated settings; an out-of-range value fails start-up naming the property.
+     * Returns the validated settings, with the retirement settings shared by both engines read from the host
+     * (PD-101, PD-102: {@code horus.bpm.lifecycle.retire-approval} and {@code horus.bpm.lifecycle.retire-last-version},
+     * through bpm-host-metadata); an out-of-range value fails start-up naming the property.
+     *
+     * @param environment the host environment
+     * @return the engine settings
+     */
+    public EngineSettings toSettings(org.springframework.core.env.Environment environment) {
+        EngineSettings settings = toSettings();
+        return settings.withLifecycle(settings.systemActor(),
+                        io.github.dhluong90.bpm.host.autoconfigure.RetireApproval.from(environment).value())
+                .withRetireLastVersion(io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion.from(environment)
+                        .value());
+    }
+
+    /**
+     * Returns the validated settings with the shared retirement settings at their defaults.
      *
      * @return the engine settings
      */
@@ -233,7 +363,24 @@ public record RuleEngineProperties(
                         evaluation.regexMaxReads() == null ? RegexLimits.MAX_READS : evaluation.regexMaxReads(),
                         evaluation.regexMaxReadsPerDecision() == null
                                 ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision()))
-                .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()));
+                .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()))
+                .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired())
+                .withLifecycle(
+                        lifecycle.systemActor() == null ? EngineDefaults.SYSTEM_ACTOR : lifecycle.systemActor(),
+                        EngineDefaults.RETIRE_APPROVAL)
+                .withSimulationMaxInputs(
+                        simulation.maxInputs() == null ? EngineDefaults.SIMULATION_MAX_SAMPLES : simulation.maxInputs());
+    }
+
+    /**
+     * Returns the validated bounds of decision log searches; an out-of-range value fails start-up naming the property.
+     *
+     * @return the search settings
+     */
+    public DecisionQuerySettings toQuerySettings() {
+        return new DecisionQuerySettings(
+                query.maxRange() == null ? EngineDefaults.QUERY_MAX_RANGE : query.maxRange(),
+                query.statementTimeout() == null ? EngineDefaults.QUERY_STATEMENT_TIMEOUT : query.statementTimeout());
     }
 
     /**

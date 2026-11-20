@@ -22,7 +22,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
  * Bearer tokens for the lifecycle tests, validated by the example host's own resource server: an RSA key made
  * per test run, the audience {@code rule-engine-only}, the tenant in {@code tenant_id} and engine permissions in
  * {@code permissions}. Users: alice (author and approver) and bob (approver) at bank-a, teller (evaluate) at
- * bank-a, carol and dave as alice and bob at tenant-b.
+ * bank-a, carol and dave as alice and bob at tenant-b, and the auditors dan (bank-a) and erin (tenant-b) with
+ * {@code rules:log:read} only.
  */
 final class TestTokens {
 
@@ -36,7 +37,9 @@ final class TestTokens {
             "bob", Map.entry("bank-a", APPROVER),
             "teller", Map.entry("bank-a", List.of("rules:evaluate")),
             "carol", Map.entry("tenant-b", AUTHOR_APPROVER),
-            "dave", Map.entry("tenant-b", APPROVER));
+            "dave", Map.entry("tenant-b", APPROVER),
+            "dan", Map.entry("bank-a", List.of("rules:log:read")),
+            "erin", Map.entry("tenant-b", List.of("rules:log:read")));
 
     private TestTokens() {
     }
@@ -44,6 +47,11 @@ final class TestTokens {
     /** Registers the public key and the audience with the host's token validation. */
     static void register(DynamicPropertyRegistry registry) {
         properties().forEach((name, value) -> registry.add(name, () -> value));
+    }
+
+    /** The same settings as command-line arguments, for hosts started with {@code SpringApplicationBuilder}. */
+    static List<String> arguments() {
+        return properties().entrySet().stream().map(e -> "--" + e.getKey() + "=" + e.getValue()).toList();
     }
 
     /** The token-validation properties of the host, for a host started with command-line arguments. */

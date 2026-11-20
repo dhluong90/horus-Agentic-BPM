@@ -1,5 +1,8 @@
 package io.github.dhluong90.bpm.process.rest;
 
+import io.github.dhluong90.bpm.process.api.DefinitionExport;
+import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
+import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import io.github.dhluong90.bpm.process.api.InstanceQuery;
@@ -13,7 +16,9 @@ import io.github.dhluong90.bpm.process.api.InputInvalidException;
 import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
 import io.github.dhluong90.bpm.process.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
+import io.github.dhluong90.bpm.process.api.NodeCounts;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
+import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
 import io.github.dhluong90.bpm.process.api.TaskService;
@@ -25,10 +30,12 @@ import io.github.dhluong90.bpm.process.internal.service.Views;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
@@ -44,6 +51,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Process Engine REST endpoints under {@code /api/bpm/processes/v1}. Bodies are read and written with the
@@ -67,7 +75,7 @@ public class ProcessController {
      * @param definitions definition service
      * @param engine process engine
      * @param tasks task service
-     * @param queries list queries
+     * @param queries list and count queries
      * @param maxDefinitionBytes largest BPMN document accepted ({@code definitions.max-bytes})
      */
     public ProcessController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
@@ -88,6 +96,103 @@ public class ProcessController {
                 new ImportRequest(SourceFormat.BPMN_XML, body, idempotencyKey));
         return json(HttpStatus.CREATED, Views.definition(version), null,
                 BASE + "/definitions/" + version.key() + "/versions/" + version.version());
+    }
+
+    /** Lifecycle history of a version, oldest first ({@code processes:read}). */
+    @GetMapping("/definitions/{key}/versions/{version}/history")
+    public ResponseEntity<byte[]> definitionHistory(@PathVariable("key") String key,
+            @PathVariable("version") int version) {
+        List<DefinitionHistoryEntry> history = definitions.history(DefinitionRef.of(key, version));
+        tools.jackson.databind.node.ObjectNode body = EngineJson.NODES.objectNode();
+        body.set("items", Views.definitionHistory(history));
+        return json(HttpStatus.OK, body, null, null);
+    }
+
+    /**
+     * Requests approval of a draft ({@code processes:author} or {@code processes:deploy}). Body, optional:
+     * {@code effectiveFrom} (RFC 3339, not in the past). {@code If-Match} is required.
+     */
+    @PostMapping("/definitions/{key}/versions/{version}:request-approval")
+    public ResponseEntity<byte[]> requestApproval(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        JsonNode body = optionalBody(http);
+        Instant effectiveFrom = null;
+        String from = text(body, "effectiveFrom");
+        if (from != null) {
+            try {
+                effectiveFrom = OffsetDateTime.parse(from).toInstant();
+            } catch (DateTimeException e) {
+                throw new InputInvalidException("effectiveFrom must be an RFC 3339 date-time with an offset");
+            }
+        }
+        return version(definitions.requestApproval(DefinitionRef.of(key, version), lock, effectiveFrom, idempotencyKey));
+    }
+
+    /** Approves a pending version as a second person ({@code processes:approve}). Body, optional: {@code comment}. */
+    @PostMapping("/definitions/{key}/versions/{version}:approve")
+    public ResponseEntity<byte[]> approve(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        return version(definitions.approve(DefinitionRef.of(key, version), lock, text(optionalBody(http), "comment"),
+                idempotencyKey));
+    }
+
+    /** Sends a pending version back to draft ({@code processes:approve}). Body: {@code reason}, required. */
+    @PostMapping("/definitions/{key}/versions/{version}:reject")
+    public ResponseEntity<byte[]> reject(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        return version(definitions.reject(DefinitionRef.of(key, version), lock, text(optionalBody(http), "reason"),
+                idempotencyKey));
+    }
+
+    /**
+     * Retires an active version ({@code processes:approve}) or withdraws a draft ({@code processes:author}). Body:
+     * {@code reason} (required for an active version) and {@code confirmNoVersionInEffect} (PD-101).
+     */
+    @PostMapping("/definitions/{key}/versions/{version}:retire")
+    public ResponseEntity<byte[]> retire(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        JsonNode body = optionalBody(http);
+        JsonNode confirm = body.get("confirmNoVersionInEffect");
+        if (confirm != null && !confirm.isNull() && !confirm.isBoolean()) {
+            throw new InputInvalidException("confirmNoVersionInEffect must be true or false");
+        }
+        return version(definitions.retire(DefinitionRef.of(key, version), lock, text(body, "reason"),
+                confirm != null && confirm.isBoolean() && confirm.booleanValue(), idempotencyKey));
+    }
+
+    private ResponseEntity<byte[]> version(DefinitionVersion v) {
+        return json(HttpStatus.OK, Views.definition(v), v.lockVersion(), null);
+    }
+
+    private static long requiredLockVersion(String ifMatch) {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new PreconditionRequiredException("Send If-Match with the version's lockVersion, for example \"0\"");
+        }
+        return lockVersion(ifMatch);
+    }
+
+    private static JsonNode optionalBody(HttpServletRequest http) throws IOException {
+        byte[] body = boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
+        return body.length == 0 ? EngineJson.NODES.objectNode() : parse(body);
+    }
+
+    private static String text(JsonNode body, String field) {
+        JsonNode value = body.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isString()) {
+            throw new InputInvalidException(field + " must be a string");
+        }
+        return value.stringValue();
     }
 
     /** Lists the definition keys of the tenant ({@code processes:read}). */
@@ -134,6 +239,34 @@ public class ProcessController {
         InstanceQuery query = new InstanceQuery(statuses, definitionKey, instantOf("startedFrom", startedFrom),
                 instantOf("startedTo", startedTo), new PageRequest(limitOf(limit), cursor));
         return json(HttpStatus.OK, Views.page(queries.instances(query), Views::instanceSummary), null, null);
+    }
+
+    /**
+     * Exports a definition version of the caller's tenant ({@code processes:read}, PRE-034). {@code format=bpmn}
+     * returns BPMN 2.0 XML that imports back to the same {@code definitionHash}, which is also the {@code ETag}.
+     */
+    @GetMapping("/definitions/{key}/versions/{version}/export")
+    public ResponseEntity<byte[]> exportDefinition(@PathVariable("key") String key,
+            @PathVariable("version") String version, @RequestParam(value = "format", required = false) String format) {
+        if (!"bpmn".equals(format)) {
+            throw new InputInvalidException("format must be bpmn");
+        }
+        int number;
+        try {
+            number = Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException("version must be a positive whole number");
+        }
+        if (number < 1) {
+            throw new InputInvalidException("version must be a positive whole number");
+        }
+        DefinitionExport export = definitions.exportDefinition(key, number, SourceFormat.BPMN_XML);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/bpmn+xml"))
+                .header(HttpHeaders.ETAG, "\"" + export.definitionHash() + "\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + export.key() + "-v"
+                        + export.version() + ".bpmn\"")
+                .body(export.document().getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -247,6 +380,39 @@ public class ProcessController {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot " + action + " twice");
         }
+    }
+
+    /**
+     * Live tokens per node of one definition version, from the live token index ({@code processes:read}, PRE-028).
+     * Only {@code mode=live} in this release; the window mode follows with the hourly rollup.
+     */
+    @GetMapping("/definitions/{key}/versions/{version}/node-stats")
+    public ResponseEntity<byte[]> nodeStats(@PathVariable("key") String key, @PathVariable("version") String version,
+            @RequestParam(value = "mode", defaultValue = "live") String mode) {
+        if (!"live".equals(mode)) {
+            throw new InputInvalidException("mode must be live in this release");
+        }
+        int number;
+        try {
+            number = Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException("version must be a positive integer");
+        }
+        if (number < 1) {
+            throw new InputInvalidException("version must be a positive integer");
+        }
+        NodeCounts counts = queries.liveNodeCounts(key, number);
+        ObjectNode body = EngineJson.NODES.objectNode();
+        body.put("definitionKey", counts.definitionKey());
+        body.put("version", counts.version());
+        body.put("mode", "live");
+        body.put("asOf", counts.asOf().toString());
+        ObjectNode nodes = body.putObject("nodes");
+        counts.nodes().forEach((node, byStatus) -> {
+            ObjectNode statuses = nodes.putObject(node);
+            byStatus.forEach(statuses::put);
+        });
+        return json(HttpStatus.OK, body, counts.asOf().toEpochMilli(), null);
     }
 
     /**

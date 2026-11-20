@@ -7,6 +7,7 @@ import io.github.dhluong90.bpm.rules.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.rules.api.VersionDiff;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
+import io.github.dhluong90.bpm.rules.api.LastVersionInEffectException;
 import io.github.dhluong90.bpm.rules.api.PayloadTooLargeException;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.rules.api.LifecycleAction;
@@ -28,7 +29,6 @@ import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
-import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
 import io.github.dhluong90.bpm.rules.internal.json.Hashes;
 import io.github.dhluong90.bpm.rules.internal.json.Ulid;
@@ -61,6 +61,7 @@ public final class DefaultVersionService implements VersionService {
     static final String EVENT_PUBLISH_REQUESTED = "rules.version.publish-requested.v1";
     static final String EVENT_PUBLISHED = "rules.version.published.v1";
     static final String EVENT_REJECTED = "rules.version.rejected.v1";
+    static final String EVENT_RETIRED = Supersession.EVENT_RETIRED;
     static final String EVENT_DRAFT_UPDATED = "rules.version.draft-updated.v1";
     static final String EVENT_WITHDRAWN = "rules.version.withdrawn.v1";
 
@@ -72,6 +73,9 @@ public final class DefaultVersionService implements VersionService {
     private final EventOutbox outbox;
     /** The cursor key in memory, loaded at start-up (RLE-039). */
     private final CursorKeys cursorKeys;
+    /** This replica's compiled versions; an approval evicts its rule set after commit (ADR-0009). */
+    private final CompiledCache cache;
+    private final Supersession supersession;
 
     /**
      * Creates the service.
@@ -81,12 +85,17 @@ public final class DefaultVersionService implements VersionService {
      * @param outbox event outbox
      * @param cursorKeys the cursor key, loaded at start-up; the only constructor, so a hand-wired engine always
      *     shares the holder that {@link RuleEngines#cursorKeys()} exposes for loading
+     * @param cache the compiled cache the evaluation of the same replica uses
+     * @param supersession retires superseded versions, shared with the lifecycle sweep
      */
-    DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox, CursorKeys cursorKeys) {
+    DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox, CursorKeys cursorKeys,
+            Supersession supersession, CompiledCache cache) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.outbox = Objects.requireNonNull(outbox, "outbox must not be null");
         this.cursorKeys = Objects.requireNonNull(cursorKeys, "cursorKeys must not be null");
+        this.cache = Objects.requireNonNull(cache, "cache must not be null");
+        this.supersession = Objects.requireNonNull(supersession, "supersession must not be null");
     }
 
     @Override
@@ -107,11 +116,12 @@ public final class DefaultVersionService implements VersionService {
         }
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_AUTHOR);
+        String correlationId = EventEnvelope.requireValidCorrelationId(request.correlationId());
         byte[] source = request.source();
         String operation = targetRuleSet == null ? "import-rule-set" : "import-version";
         String requestHash = Hashes.sha256Parts(operation, actor, targetRuleSet, request.format().name(), Hashes.sha256(source));
         return context.idempotent(tenant, operation, request.idempotencyKey(), requestHash, 201,
-                () -> doImport(tenant, actor, targetRuleSet, request.format(), source),
+                () -> doImport(tenant, actor, targetRuleSet, request.format(), source, correlationId),
                 version -> EngineValues.write(EngineValues.version(version)),
                 EngineValues::versionFromJson);
     }
@@ -136,12 +146,14 @@ public final class DefaultVersionService implements VersionService {
         return parsed;
     }
 
-    private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source) {
+    private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source,
+            String correlationId) {
         if (format != SourceFormat.YAML && format != SourceFormat.DMN_XML) {
             throw new InputInvalidException("Only YAML and DMN XML import are available in this release");
         }
         String sourceText = utf8(source);
         ParsedRuleSet parsed = checkedDocument(format, source);
+        requireMaskDeclarations(tenant, parsed.canonicalJson());
         String name = parsed.model().name();
         Instant now = context.clock().instant();
         String ruleSetId;
@@ -164,8 +176,8 @@ public final class DefaultVersionService implements VersionService {
                 null, null, null, null, null, actor, now);
         store.insertVersion(version);
         history(version, LifecycleAction.CREATED, null, actor, null, now);
-        event(tenant, EVENT_CREATED, version, actor, now);
-        return version.toView(false);
+        event(tenant, EVENT_CREATED, version, actor, now, correlationId, payload -> { });
+        return view(version, false);
     }
 
     @Override
@@ -175,6 +187,8 @@ public final class DefaultVersionService implements VersionService {
         if (request.size() > RuleSetReader.MAX_SOURCE_BYTES) {
             throw new PayloadTooLargeException(RuleSetReader.MAX_SOURCE_BYTES);
         }
+        String correlationId = EventEnvelope.requireValidCorrelationId(
+                opts.correlationId() != null ? opts.correlationId() : request.correlationId());
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_AUTHOR);
         if (!context.settings().draftAuthoring()) {
@@ -197,6 +211,7 @@ public final class DefaultVersionService implements VersionService {
             checkLock(current, opts);
             String sourceText = utf8(source);
             ParsedRuleSet parsed = checkedDocument(request.format(), source);
+            requireMaskDeclarations(tenant, parsed.canonicalJson());
             if (!ruleSet.equals(parsed.model().name())) {
                 throw new InputInvalidException("Document names rule set '" + parsed.model().name() + "', not '"
                         + ruleSet + "'");
@@ -210,11 +225,12 @@ public final class DefaultVersionService implements VersionService {
             store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.DRAFT_UPDATED,
                     VersionStatus.DRAFT, VersionStatus.DRAFT, actor, null, updated.lockVersion(), now,
                     updated.canonicalHash(), current.canonicalHash()));
-            event(tenant, EVENT_DRAFT_UPDATED, updated, actor, now, payload -> payload
+            event(tenant, EVENT_DRAFT_UPDATED, updated, actor, now, correlationId, payload -> payload
                     .put("updatedBy", actor)
+                    .put("lockVersion", updated.lockVersion())
                     .put("canonicalHash", updated.canonicalHash())
                     .put("previousCanonicalHash", current.canonicalHash()));
-            return updated.toView(false);
+            return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
 
@@ -229,7 +245,8 @@ public final class DefaultVersionService implements VersionService {
         return context.withoutDooming(() -> {
             StoredVersion compared = existing(tenant, ruleSet, version);
             StoredVersion against = existing(tenant, ruleSet, base);
-            return VersionDiffs.diff(compared, against);
+            return VersionDiffs.diff(compared, against, context.masking().maskByDefault(tenant),
+                    context.masking().personalDataNames(tenant));
         });
     }
 
@@ -243,6 +260,7 @@ public final class DefaultVersionService implements VersionService {
     @Override
     public RuleSetVersion requestPublish(String ruleSet, int version, WriteOptions options) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
+        EventEnvelope.requireValidCorrelationId(opts.correlationId());
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_AUTHOR);
         String requestHash = Hashes.sha256Parts("request-publish", actor, ruleSet, Integer.toString(version),
@@ -253,23 +271,26 @@ public final class DefaultVersionService implements VersionService {
                 throw new InvalidStateException(ruleSet, version, current.status(), "request-publish");
             }
             checkLock(current, opts);
+            // A draft imported before strict mode was turned on is checked again before anyone can approve it.
+            requireMaskDeclarations(tenant, current.canonicalJson());
             Instant now = context.clock().instant();
             StoredVersion updated = current.requested(actor, now);
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.REQUESTED, current.status(), actor, null, now);
             // DESIGN 3.3: the request names the behaviour hash and the date it asks for (null means at approval).
-            event(tenant, EVENT_PUBLISH_REQUESTED, updated, actor, now, payload -> {
+            event(tenant, EVENT_PUBLISH_REQUESTED, updated, actor, now, opts.correlationId(), payload -> {
                 payload.put("canonicalHash", updated.canonicalHash());
                 payload.put("requestedBy", actor);
                 payload.set("effectiveFrom", EngineValues.value(updated.effectiveFrom()));
             });
-            return updated.toView(false);
+            return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
 
     @Override
     public RuleSetVersion approve(String ruleSet, int version, WriteOptions options) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
+        EventEnvelope.requireValidCorrelationId(opts.correlationId());
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_APPROVE);
         requireLockVersion(opts, ":approve");
@@ -285,25 +306,37 @@ public final class DefaultVersionService implements VersionService {
             if (actor.equals(current.requestedBy()) || actor.equals(current.createdBy())) {
                 throw new SelfApprovalForbiddenException(ruleSet, version);
             }
+            // A version requested before strict mode was turned on is checked again, so it never reaches the
+            // append-only decision log with an undeclared input (security review of #308).
+            requireMaskDeclarations(tenant, current.canonicalJson());
             checkLock(current, opts);
             Instant now = context.clock().instant();
             StoredVersion updated = current.approved(actor, now, opts.comment());
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.APPROVED, current.status(), actor, opts.comment(), now);
+            // ADR-0009: the epoch moves and every replica is notified in this transaction; this replica evicts
+            // once the approval is committed, so it never reloads the version before others can see it.
+            long epoch = store.advanceCacheEpoch(tenant, updated.ruleSetId(), updated.ruleSet());
+            context.transactions().afterCommit(() -> cache.evict(tenant, updated.ruleSet(), epoch));
             // DESIGN 3.3: the publication names what was approved, from when, and both people of the four eyes.
-            event(tenant, EVENT_PUBLISHED, updated, actor, now, payload -> {
+            event(tenant, EVENT_PUBLISHED, updated, actor, now, opts.correlationId(), payload -> {
                 payload.put("canonicalHash", updated.canonicalHash());
                 payload.set("effectiveFrom", EngineValues.value(updated.effectiveFrom()));
                 payload.put("requestedBy", updated.requestedBy());
                 payload.put("approvedBy", actor);
             });
-            return updated.toView(false);
+            if (!updated.effectiveFrom().isAfter(now)) {
+                // In effect at once: what it supersedes retires in this transaction (DESIGN 3.3.2, RLE-027).
+                supersession.retire(tenant, updated.ruleSetId(), now, opts.correlationId());
+            }
+            return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
 
     @Override
     public RuleSetVersion reject(String ruleSet, int version, WriteOptions options) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
+        EventEnvelope.requireValidCorrelationId(opts.correlationId());
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_APPROVE);
         requireLockVersion(opts, ":reject");
@@ -325,16 +358,85 @@ public final class DefaultVersionService implements VersionService {
             StoredVersion updated = current.rejected();
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.REJECTED, current.status(), actor, reason, now);
-            event(tenant, EVENT_REJECTED, updated, actor, now, payload -> payload
+            event(tenant, EVENT_REJECTED, updated, actor, now, opts.correlationId(), payload -> payload
                     .put("rejectedBy", actor)
                     .put("reason", reason));
-            return updated.toView(false);
+            return view(updated, false);
+        }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
+    }
+
+    @Override
+    public RuleSetVersion retire(String ruleSet, int version, WriteOptions options) {
+        return retire(ruleSet, version, options, false);
+    }
+
+    @Override
+    public RuleSetVersion retire(String ruleSet, int version, WriteOptions options, boolean confirmNoVersionInEffect) {
+        WriteOptions opts = options == null ? WriteOptions.none() : options;
+        String tenant = context.tenant();
+        String actor = context.callerWith(PERMISSION_APPROVE);
+        String reason = requireReason(opts.comment());
+        EventEnvelope.requireValidCorrelationId(opts.correlationId());
+        // The confirmation is part of the request only when given, so a key used without it still replays.
+        String requestHash = confirmNoVersionInEffect
+                ? Hashes.sha256Parts("retire", actor, ruleSet, Integer.toString(version),
+                        String.valueOf(opts.expectedLockVersion()), reason, "confirm-no-version-in-effect")
+                : Hashes.sha256Parts("retire", actor, ruleSet, Integer.toString(version),
+                        String.valueOf(opts.expectedLockVersion()), reason);
+        return context.idempotent(tenant, "retire", opts.idempotencyKey(), requestHash, 200, () -> {
+            requireRuleSetName(ruleSet);
+            String ruleSetId = store.findRuleSetId(tenant, ruleSet).orElseThrow(() -> new RuleSetNotFoundException(ruleSet));
+            // The rule set row first, then the versions in effect: two concurrent retirements of its last two versions
+            // run one after the other, and the second sees that it is now the last (PD-101).
+            store.lockRuleSet(tenant, ruleSetId);
+            StoredVersion current = load(tenant, ruleSet, version);
+            if (current.status() != VersionStatus.PUBLISHED) {
+                throw new InvalidStateException(ruleSet, version, current.status(), "retire");
+            }
+            checkLock(current, opts);
+            Instant now = context.clock().instant();
+            // Already superseded by a newer version in effect: it no longer serves and the sweep retires it; refused
+            // before anything is written, so the actor and reason are never recorded on the wrong transition.
+            Optional<StoredVersion> inForce = store.findEffective(tenant, ruleSet, now);
+            if (inForce.isPresent() && inForce.get().version() > current.version()) {
+                throw InvalidStateException.superseded(ruleSet, version, inForce.get().version());
+            }
+            // PD-101: no other version remains in effect afterwards when this one is in force (older versions retire
+            // with it and none comes back) or when nothing is in force at all. A version that only starts later does
+            // not count. That needs an explicit confirmation, or the host refuses it.
+            boolean last = inForce.isEmpty() || inForce.get().version() == current.version();
+            if (last) {
+                String setting = context.settings().retireLastVersion();
+                if (EngineDefaults.RETIRE_LAST_REFUSE.equals(setting) || !confirmNoVersionInEffect) {
+                    Optional<StoredVersion> next = store.nextScheduled(tenant, ruleSetId, now, current.id());
+                    throw new LastVersionInEffectException(ruleSet, version, setting,
+                            next.map(StoredVersion::version).orElse(null),
+                            next.map(StoredVersion::effectiveFrom).orElse(null));
+                }
+            }
+            // Retire what it superseded first, while it is still published, so a retire never brings back an older
+            // version whose status lags its supersession (ADR-0025 decision 1).
+            supersession.retire(tenant, current.ruleSetId(), now, opts.correlationId());
+            StoredVersion updated = current.retired(now);
+            store.updateVersion(updated, current.lockVersion());
+            // ADR-0009: as on approve, the epoch moves and every replica is notified in this transaction; this replica
+            // evicts once the retirement is committed.
+            long epoch = store.advanceCacheEpoch(tenant, updated.ruleSetId(), updated.ruleSet());
+            context.transactions().afterCommit(() -> cache.evict(tenant, updated.ruleSet(), epoch));
+            String mode = context.settings().retireApproval();
+            store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.RETIRED,
+                    current.status(), updated.status(), actor, reason, updated.lockVersion(), now, null, mode, last));
+            String eventId = Ulid.next(now);
+            outbox.append(tenant, eventId, EngineValues.write(Supersession.retiredEvent(eventId, opts.correlationId(),
+                    tenant, ruleSet, version, actor, reason, null, now, mode, last)), now);
+            return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
 
     @Override
     public RuleSetVersion withdraw(String ruleSet, int version, WriteOptions options) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
+        EventEnvelope.requireValidCorrelationId(opts.correlationId());
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_AUTHOR);
         String reason = optionalReason(opts.comment());
@@ -355,10 +457,10 @@ public final class DefaultVersionService implements VersionService {
             StoredVersion updated = current.withdrawn();
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.WITHDRAWN, current.status(), actor, reason, now);
-            event(tenant, EVENT_WITHDRAWN, updated, actor, now, payload -> payload
+            event(tenant, EVENT_WITHDRAWN, updated, actor, now, opts.correlationId(), payload -> payload
                     .put("withdrawnBy", actor)
                     .put("reason", reason));
-            return updated.toView(false);
+            return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }
 
@@ -481,7 +583,7 @@ public final class DefaultVersionService implements VersionService {
             return Optional.empty();
         }
         return context.withoutDooming(() ->
-                store.findVersion(tenant, ruleSet, version, false).map(v -> v.toView(includeSource)));
+                store.findVersion(tenant, ruleSet, version, false).map(v -> view(v, includeSource)));
     }
 
     @Override
@@ -508,6 +610,24 @@ public final class DefaultVersionService implements VersionService {
     private static void requireRuleSetName(String ruleSet) {
         if (!RuleSetReader.isRuleSetName(ruleSet)) {
             throw new RuleSetNotFoundException("(invalid name)");
+        }
+    }
+
+    /**
+     * The caller's view of a version, with the warnings its author and approver should see (RLE-049): every undeclared
+     * input whose name looks like personal data under the tenant's list. Computed from the stored definition and the
+     * tenant's settings on each read, so the approver sees what the author saw at import.
+     */
+    private RuleSetVersion view(StoredVersion version, boolean includeSource) {
+        String tenant = version.tenantId();
+        return version.toView(includeSource).withWarnings(MaskDeclarations.warnings(version.canonicalJson(),
+                context.masking().personalDataNames(tenant), context.masking().maskByDefault(tenant)));
+    }
+
+    /** Strict mode (RLE-050): every input declares {@code mask}, or the command is refused before anything is stored. */
+    private void requireMaskDeclarations(String tenant, String canonicalJson) {
+        if (context.masking().requireExplicitMask(tenant)) {
+            MaskDeclarations.requireDeclared(canonicalJson);
         }
     }
 
@@ -538,21 +658,19 @@ public final class DefaultVersionService implements VersionService {
         }
     }
 
-    private void event(String tenant, String type, StoredVersion version, String actor, Instant at) {
-        event(tenant, type, version, actor, at, payload -> { });
-    }
-
+    /**
+     * Writes one lifecycle event with the full envelope (DESIGN section 3.3). The event id is the outbox row id. A
+     * lifecycle command has no command id of its own, so {@code causationId} is null.
+     */
     private void event(String tenant, String type, StoredVersion version, String actor, Instant at,
-            java.util.function.Consumer<ObjectNode> extra) {
-        ObjectNode payload = EngineJson.NODES.objectNode()
-                .put("eventType", type)
+            String correlationId, java.util.function.Consumer<ObjectNode> extra) {
+        String eventId = Ulid.next(at);
+        ObjectNode payload = EventEnvelope.start(eventId, type, tenant, at, correlationId, null)
                 .put("ruleSet", version.ruleSet())
                 .put("version", version.version())
-                .put("tenantId", tenant)
-                .put("actor", actor)
-                .put("occurredAt", at.toString());
+                .put("actor", actor);
         extra.accept(payload);
-        outbox.append(tenant, Ulid.next(at), EngineValues.write(payload), at);
+        outbox.append(tenant, eventId, EngineValues.write(payload), at);
     }
 
     private static String utf8(byte[] source) {

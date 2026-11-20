@@ -100,7 +100,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** User `alice` (`rules:author`, `rules:approve`) creates `card-fee` v2 and calls `:request-publish`.
 - **When:** `alice` invokes `VersionService.approve(...)` directly OR calls `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve`.
-- **Then:** Both Java API and REST (`403 SELF_APPROVAL_FORBIDDEN`) reject the approval; version remains `PENDING_APPROVAL`. Only distinct identity `bob` (`rules:approve`) succeeds.
+- **Then:** Both Java API and REST (`403 SELF_APPROVAL_FORBIDDEN`) reject the approval; version remains `PENDING_APPROVAL`. Only distinct identity `bob` (`rules:approve`) succeeds. The Rule Engine always applies `makers`: the same refusal holds when the host sets `lifecycle.approver-must-differ-from` to `requester`, and `/api/bpm/meta` reports `makers`.
 - **Example:** `requester=alice, approver=alice -> 403; approver=bob -> 200 PUBLISHED`.
 - **Test ID:** `RLE_009_maker_checker_blocks_self_approval`
 
@@ -111,6 +111,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** `Pod A` approves `card-fee` v2 (`effectiveFrom <= now`); `Pod B` evaluates `card-fee` every 100 ms.
 - **Then:** `Pod A` publishes `rules.version.published.v1`, increments `cache_epoch` and notifies after commit; in the direct run `Pod B` evaluates v2 within 1 s of the commit; in the pooler run, with no notification delivered, `Pod B` evaluates v2 within 5 s of the commit (the epoch sweep bound) and never after; neither run opens a session-mode connection behind the pooler.
 - **Example:** `Pod A approves v2 -> Pod B returns version=2 within 1 s (NOTIFY) or within 5 s (PgBouncer, epoch sweep only)`.
+- **Delivery:** the two-copy runs are `MultiReplicaCacheIT` (example host); the lost-listener failure path is `RLE_010_a_lost_listener_connection_still_refreshes_within_the_interval_and_logs_the_reconnect_once`. The pooler run allows one 100 ms evaluation step on top of the 5 s interval, because copy B polls every 100 ms.
 - **Test ID:** `RLE_010_multi_replica_cache_invalidates_on_publish`
 
 ---
@@ -182,6 +183,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** The engine migration runs and the partition job runs in each case, with SQL captured.
 - **Then:** After migration `rle_decision` is range-partitioned with `rle_decision_default`, `rle_decision_2027_01` and `rle_decision_2027_02` (7 days ahead reaches February). In the retention run only `rle_decision_2027_01` is dropped (its upper bound `2027-02-01` is before `2027-02-03`); no `DELETE` statement on `rle_decision` appears. In the third run the straggler is moved into the new `2027_03` partition before `ATTACH` and the default partition is empty afterwards. With `decision-log.retention` unset, no partition is ever dropped.
 - **Example:** `retention P12M at 2028-02-03 -> drop rle_decision_2027_01 only; 0 DELETE statements`.
+- **Delivery:** creation ahead and the overflow case are tested by `RLE_017_*` in `DecisionLogPartitionMaintenanceIT` and `DecisionLogSearchIT`; the retention run lands with the retention slice (RE-F-31), and until then nothing is dropped.
 - **Test ID:** `RLE_017_decision_log_monthly_partitions_and_retention_by_drop`
 
 ### RLE-018 `X-Tenant-Id` is accepted only for a tenant in the token's allowed list
@@ -295,7 +297,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v1 `PUBLISHED`, effective since `2026-11-01T00:00:00Z`; `card-fee` v2 approved at `2026-11-25T10:00:00Z` with `effectiveFrom: 2026-12-01T00:00:00Z`; two replicas share one database; `TestClock` drives both. Second case: rule set `fx-margin` v3 `PUBLISHED` and v4 approved with `effectiveFrom` equal to the approval instant.
 - **When:** The clock moves from `2026-11-30T23:59:59Z` to `2026-12-01T00:00:01Z`; each replica evaluates `card-fee`; then the lifecycle sweep (`DESIGN.md` section 3.3.2) runs on both replicas at the same moment, through PgBouncer in transaction mode in the pooler leg. In the second case v4's approval commits.
-- **Then:** At `2026-11-30T23:59:59Z` v1 is `PUBLISHED` and evaluation selects v1. At `2026-12-01T00:00:01Z` evaluation selects v2 on both replicas whether or not v1's status has changed yet, because selection follows the effective date (`RLE-008`). After the maintenance run v1 is `RETIRED` and exactly one `rules.version.retired.v1` event exists for it, with actor `system`, reason `SUPERSEDED` and `supersededBy: 2`, and exactly one history row `RETIRED`, although both replicas ran; no advisory lock was taken. An evaluation of v1's decision with `clock = 2026-11-20T10:00:00Z` still selects v1. In the second case v3 is `RETIRED` in the transaction that publishes v4, with one retired event.
+- **Then:** At `2026-11-30T23:59:59Z` v1 is `PUBLISHED` and evaluation selects v1. At `2026-12-01T00:00:01Z` evaluation selects v2 on both replicas whether or not v1's status has changed yet, because selection follows the effective date (`RLE-008`). After the maintenance run v1 is `RETIRED` and exactly one `rules.version.retired.v1` event exists for it, with actor `system:supersession`, reason `SUPERSEDED` and `supersededBy: 2`, and exactly one history row `RETIRED`, although both replicas ran; no advisory lock was taken. An evaluation of v1's decision with `clock = 2026-11-20T10:00:00Z` still selects v1. In the second case v3 is `RETIRED` in the transaction that publishes v4, with one retired event.
 - **Example:** `clock 2026-12-01T00:00:01Z -> evaluate selects v2; after the sweep on 2 replicas -> v1 RETIRED, 1 retired event (actor system, reason SUPERSEDED)`.
 - **Test ID:** `RLE_027_previous_version_retires_once_when_newer_becomes_effective`
 
@@ -383,6 +385,47 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The v2 diff lists `R1` as `CHANGED` with field `/when/country` from `!= 'VN'` to `!= 'ВN'` and `nonAscii: true`, and different canonical hashes. The v3 diff lists the same field with `to` `!= 'V\u200BN'` and `nonAscii: true`. In both, a field whose values are printable ASCII has `nonAscii: false`. The v4 diff has no row change and `unchangedCount: 1`; `header` holds `{ path: /hitPolicy, from: first, to: unique }`; `inputs.added` is `[segment]`; `inputs.changed` holds `country` with field `/mask` from null to `true`.
 - **Example:** `country != 'VN' -> country != 'ВN' (Cyrillic) -> CHANGED /when/country, nonAscii true; hit policy first -> unique -> header /hitPolicy`.
 - **Test ID:** `RLE_048_diff_marks_non_ascii_literals_and_reports_header_and_column_changes`
+
+### RLE-049 An undeclared input whose name looks like personal data is a warning the approver sees
+- **Traces to:** `TR-SEC-05`, PD-099 (mitigation 1)
+- **Milestone:** M1
+- **Given:** Tenants `bank-a` and `bank-b`. Rule set `kyc-routing` with inputs `nationalId` (string, no `mask`), `age` (integer, `mask: false`) and `segment` (string, `mask: false`). Rule set `lien-he` with inputs `so_dien_thoai` and `ngaySinh` (no `mask`) and `kenh`. Rule set `company-fee` with inputs `company` and `tier` (no `mask`), `customerEmail` (`mask: true`) and `homeAddress` (`mask: false`). `bank-a` uses the built-in personal-data names; `bank-b` sets `horus.bpm.rules.masking.tenants.bank-b.personal-data-names: [segment]`. `lan` holds `rules:author`, `bob` holds `rules:approve`.
+- **When:** `lan` imports `kyc-routing`, `lien-he` and `company-fee` in `bank-a`, requests publication of `kyc-routing` v1, and `bob` reads it; `lan` imports `kyc-routing` in `bank-b`; the import is repeated with the same `Idempotency-Key`.
+- **Then:**
+  - The `bank-a` import of `kyc-routing` answers `201` with `warnings: [{ code: UNMASKED_PERSONAL_DATA, input: nationalId, matchedName: "national id", message }]`; the message names the input and the matched name and says the values would be stored in plain text. The publication request answers with the same warning, and `bob`'s `GET` of the pending version shows it too.
+  - `lien-he` warns about `so_dien_thoai` ("so dien thoai") and `ngaySinh` ("ngay sinh"), not `kenh`. `company-fee` has no warning: a declared input never warns, and a name matches only on whole words, so `company` does not match a short entry inside it.
+  - In `bank-b` the import has no warning: its own list has no "national id", and `segment` is declared.
+  - The replay returns the original body, warnings included. When the tenant masks undeclared inputs by default, the message says the input is masked only by that default.
+  - Names are compared as words, ignoring case, punctuation and accents, without regular expressions; the built-in list covers full name, national id, passport, phone, email, address, date of birth, account and card number, tax id and driver licence in English and Vietnamese. Only names are checked, never values.
+- **Example:** `nationalId without mask -> 201 with UNMASKED_PERSONAL_DATA (national id), seen by the approver; company -> no warning; bank-b list [segment] -> no warning`.
+- **Test ID:** `RLE_049_an_undeclared_national_id_warns_at_import_naming_the_input_and_the_matched_name`
+
+### RLE-050 Strict mode refuses an input that declares no mask, and names it
+- **Traces to:** `TR-SEC-05`, PD-099 (mitigation 2), PD-074
+- **Milestone:** M1
+- **Given:** `bank-b` sets `horus.bpm.rules.masking.tenants.bank-b.require-explicit-mask: true`; `bank-a` keeps the default `decision-log.require-explicit-mask: false`. Rule set `kyc-routing` as in `RLE-049`, and the same table with `nationalId` declared `mask: true`. In `bank-a`, a draft of `kyc-routing` imported while strict mode was off.
+- **When:** `lan` imports `kyc-routing` in `bank-b`, then the declared table; replaces a declared draft in `bank-b` with the undeclared table; `bank-a` turns strict mode on and `lan` requests publication of its older draft; in `bank-a`, a version requested while strict mode was off is approved by `bob` after strict mode is turned on.
+- **Then:** The undeclared import is `422 VALIDATION_FAILED` with one violation per undeclared input, its `column` `nationalId`, the detail naming `decision-log.require-explicit-mask`; no rule set, version, event or idempotency record is stored. The declared import answers `201`. The replacement is refused the same way and the draft is unchanged. The publication request of the older draft is refused naming `nationalId`, and the version stays `DRAFT`. `bob`'s approval is refused the same way: the version stays `PENDING_APPROVAL` with its lock version, and no event is written. `bank-a` without strict mode imports the undeclared table with a warning only. `/api/bpm/meta` shows `decision-log.require-explicit-mask` for the caller's tenant.
+- **Example:** `strict bank-b imports nationalId without mask -> 422 VALIDATION_FAILED, column nationalId, nothing stored; every input declared -> 201`.
+- **Test ID:** `RLE_050_strict_mode_refuses_an_undeclared_input_naming_it_and_stores_nothing`
+
+### RLE-051 The version diff shows each input's masking status and marks changes
+- **Traces to:** `TR-SEC-05`, `TR-UI-02`, PD-099 (mitigation 3)
+- **Milestone:** M1
+- **Given:** `kyc-routing` v1 `PUBLISHED` with `nationalId` `mask: true`; v2 a draft with `nationalId` `mask: false`. In a tenant that masks undeclared inputs by default, v1 with `nationalId` `mask: true` and v2 with no `mask` on `nationalId` and without the input `segment`.
+- **When:** `bob` reads `GET .../rule-sets/kyc-routing/versions/2/diff?base=1`.
+- **Then:** `masking` lists every input of either version: `{ input: nationalId, from: MASKED, to: NOT_MASKED, changed: true }`, then `age` and `segment` with `changed: false`. In the tenant that masks by default, `nationalId` is `MASKED` to `MASKED_BY_DEFAULT` with `changed: true` and `personalDataName: "national id"`, and `segment` is `NOT_MASKED` to null with `changed: true`. `inputs.changed` still reports the `/mask` member as before.
+- **Example:** `nationalId mask true -> false -> masking: MASKED to NOT_MASKED, changed true`.
+- **Test ID:** `RLE_051_the_diff_marks_national_id_going_from_masked_to_not_masked`
+
+### RLE-052 A change of the masking default is logged at start-up and the value in force is shown
+- **Traces to:** `TR-SEC-05`, `TR-OBS-01`, PD-099 (mitigation 4)
+- **Milestone:** M1
+- **Given:** The example host on one database: `bank-a` has rule sets and no masking setting of its own, `bank-b` sets `require-explicit-mask: true`; the host masking default is `false`. Then the host restarts with `horus.bpm.rules.masking.tenants.bank-a.mask-default: true` and a masking key.
+- **When:** The host starts, `lan` (`bank-a`) and `binh` (`bank-b`) read `GET /api/bpm/meta`; the host restarts; `lan` reads `/api/bpm/meta` again; the host restarts a third time unchanged.
+- **Then:** The first start records the host default and every known tenant in `rle_setting_seen`. `/api/bpm/meta` shows `decision-log.mask-default: false` and `decision-log.require-explicit-mask: false` in the `rules` settings for `lan`, and `require-explicit-mask: true` for `binh`. The restart logs exactly one line, `decision-log.mask-default for tenant bank-a changed from false to true since the last start-up`, at INFO (WARN when masking is turned off), and none for `bank-b`; `/api/bpm/meta` then shows `true` for `lan`. A tenant first seen since the last start-up is compared with the host default it followed then. The third start logs nothing. No line carries the key.
+- **Example:** `bank-a mask-default false -> true across a restart -> one log line naming bank-a, false and true; /meta shows true`.
+- **Test ID:** `RLE_052_a_changed_masking_default_is_one_line_with_the_tenant_and_the_old_and_new_value`
 
 ---
 
@@ -482,7 +525,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v2 `PENDING_APPROVAL`, created and requested by `lan`; v3 `DRAFT` created by `lan`; v1 `PUBLISHED`. `lan` holds `rules:read`, `rules:author` and `rules:approve`; `minh` holds `rules:read` and `rules:approve`; `dan` holds `rules:read` only.
 - **When:** Each of them reads v1, v2 and v3 with `GET .../versions/{v}` and lists the versions.
-- **Then:** On v2 `lan` gets `allowedActions: ["withdraw"]` (`approve` and `reject` are absent because `lan` requested it; `withdraw` is the requester's action, `RLE-046`), `minh` gets `["approve", "reject"]`, `dan` gets `[]`. On v3 `lan` gets `["request-publish"]` and `minh` gets `[]`. On v1 everyone gets `[]`. The list items carry the same values. `lan`'s `approve` of v2 is still refused with `403 SELF_APPROVAL_FORBIDDEN`, because `allowedActions` is a hint and the command checks again. An idempotent replay of a command returns the actions computed for the caller at replay time, not the stored ones.
+- **Then:** On v2 `lan` gets `allowedActions: ["withdraw"]` (`approve` and `reject` are absent because `lan` requested it; `withdraw` is the requester's action, `RLE-046`), `minh` gets `["approve", "reject"]`, `dan` gets `[]`. On v3 `lan` gets `["request-publish"]` and `minh` gets `[]`. On v1 `lan` and `minh` get `["retire"]` (they hold `rules:approve`, #28) and `dan` gets `[]`; a retired version gives everyone `[]`. The list items carry the same values. `lan`'s `approve` of v2 is still refused with `403 SELF_APPROVAL_FORBIDDEN`, because `allowedActions` is a hint and the command checks again. An idempotent replay of a command returns the actions computed for the caller at replay time, not the stored ones.
 - **Example:** `v2 requested by lan -> lan: [withdraw], minh: [approve, reject], dan: []`.
 - **Test ID:** `RLE_043_allowed_actions_follow_permissions_and_four_eyes`
 

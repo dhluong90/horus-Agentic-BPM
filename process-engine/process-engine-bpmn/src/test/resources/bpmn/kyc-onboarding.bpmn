@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- KYC onboarding without a layout: documents are checked, a risk rule set scores the customer, low risk is
+     approved, high risk goes to a compliance officer under four eyes, and a request for more documents loops back.
+     Names carry markup characters, a line break and Vietnamese text so the export escaping is exercised. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  xmlns:acme="urn:acme:modeller"
+                  id="Definitions_kyc" targetNamespace="urn:horus-bpm:examples">
+  <bpmn:process id="kyc-onboarding" name="KYC onboarding &amp; review" isExecutable="true">
+    <bpmn:startEvent id="start" name="Mở tài khoản"/>
+    <bpmn:serviceTask id="check-documents" name="Check &quot;ID&quot; &lt;and&gt; address&#10;documents"
+                      horus:handler="kyc.verifyDocuments" horus:mode="local" horus:resultVariable="documents">
+      <bpmn:extensionElements>
+        <horus:input name="customerId" value="${instance.customerId}"/>
+        <horus:input name="note" value="tab&#9;and &amp; ampersand"/>
+        <acme:colour value="blue"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:businessRuleTask id="score-risk" name="Score risk" horus:ruleSet="kyc-risk" horus:resultVariable="risk">
+      <bpmn:extensionElements>
+        <horus:input name="country" value="${instance.country}"/>
+      </bpmn:extensionElements>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="risk-level" name="Risk level?" default="risk-level__review"/>
+    <bpmn:userTask id="compliance-review" name="Compliance reviews" horus:assignee="role:COMPLIANCE_OFFICER"
+                   horus:fourEyes="true" horus:resultVariable="review"/>
+    <bpmn:exclusiveGateway id="review-outcome" name="Outcome?" default="review-outcome__reject"/>
+    <bpmn:userTask id="request-documents" name="Request more documents" horus:assignee="group:branch-ops"
+                   horus:resultVariable="request"/>
+    <bpmn:serviceTask id="open-account" name="Open account" horus:handler="accounts.open"/>
+    <bpmn:endEvent id="end-opened" name="Account opened"/>
+    <bpmn:endEvent id="end-rejected" name="Rejected"/>
+
+    <bpmn:sequenceFlow id="start__check" sourceRef="start" targetRef="check-documents"/>
+    <bpmn:sequenceFlow id="check__score" sourceRef="check-documents" targetRef="score-risk"/>
+    <bpmn:sequenceFlow id="score__level" sourceRef="score-risk" targetRef="risk-level"/>
+    <bpmn:sequenceFlow id="risk-level__low" name="score &lt; 30" sourceRef="risk-level" targetRef="open-account">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">risk.score &lt; 30 and documents.complete == true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="risk-level__review" sourceRef="risk-level" targetRef="compliance-review"/>
+    <bpmn:sequenceFlow id="review__outcome" sourceRef="compliance-review" targetRef="review-outcome"/>
+    <bpmn:sequenceFlow id="review-outcome__approve" name="approved" sourceRef="review-outcome" targetRef="open-account">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">review.decision == 'APPROVE'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="review-outcome__more" name="more documents" sourceRef="review-outcome" targetRef="request-documents">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">review.decision == 'MORE_DOCUMENTS'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="review-outcome__reject" sourceRef="review-outcome" targetRef="end-rejected"/>
+    <bpmn:sequenceFlow id="request__check" sourceRef="request-documents" targetRef="check-documents"/>
+    <bpmn:sequenceFlow id="open__end" sourceRef="open-account" targetRef="end-opened"/>
+  </bpmn:process>
+</bpmn:definitions>
