@@ -169,6 +169,21 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     @Override
+    public synchronized List<DecisionRecord> search(String tenantId, String ruleSet, Instant from, Instant to,
+            DecisionLog.Position after, int limit, java.time.Duration statementTimeout) {
+        Comparator<DecisionRecord> newestFirst = Comparator.comparing(DecisionRecord::createdAt)
+                .thenComparing(DecisionRecord::id).reversed();
+        return decisions.stream()
+                .filter(r -> r.tenantId().equals(tenantId) && r.ruleSet().equals(ruleSet))
+                .filter(r -> !r.createdAt().isBefore(from) && r.createdAt().isBefore(to))
+                .filter(r -> after == null || r.createdAt().isBefore(after.createdAt())
+                        || (r.createdAt().equals(after.createdAt()) && r.id().compareTo(after.id()) < 0))
+                .sorted(newestFirst)
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
     public Optional<DecisionRecord> find(String tenantId, String id) {
         return decisions.stream().filter(d -> d.tenantId().equals(tenantId) && d.id().equals(id)).findFirst();
     }

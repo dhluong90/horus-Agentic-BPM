@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
+import io.github.dhluong90.bpm.rules.internal.service.DecisionQuerySettings;
 import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
@@ -20,12 +21,12 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param cache the compiled-version cache
  * @param idempotency idempotency records
  * @param evaluation limits on evaluation inputs
- * @param query bounds of list reads
+ * @param query bounds of list reads and decision log searches
  * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
  * @param authoring how rule changes may be made on this host
  * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
- * @param decisionLog what the decision log records
+ * @param decisionLog what the decision log records and how far ahead its partitions are created
  * @param simulation limits of {@code :simulate}
  */
 @ConfigurationProperties("horus.bpm.rules")
@@ -116,7 +117,7 @@ public record RuleEngineProperties(
     }
 
     /**
-     * What the decision log records.
+     * What the decision log records, and its maintenance (RLE-017).
      *
      * @param maskDefault whether inputs that declare no {@code mask} are masked, for every tenant without its own
      *     setting; default false. An input with {@code mask: false} is never masked by this default. A change is
@@ -130,9 +131,29 @@ public record RuleEngineProperties(
      *     that declares no mask and matches one gets a warning at import and at the publication request. Names are
      *     compared as words, ignoring case, punctuation and accents; unset uses the built-in list
      * @param additionalPersonalDataNames more names, added to the list
+     * @param partitionsAhead how far ahead of the host clock monthly partitions are created, at start-up and daily;
+     *     {@code PT0S} to {@code P366D}, default {@code P7D}. The current and the next month always exist
      */
     public record DecisionLog(Boolean maskDefault, Boolean requireExplicitMask, List<String> personalDataNames,
-            List<String> additionalPersonalDataNames) {
+            List<String> additionalPersonalDataNames, Duration partitionsAhead) {
+
+        /** Validates the period; an out-of-range value fails start-up naming the property. */
+        public DecisionLog {
+            if (partitionsAhead != null && (partitionsAhead.isNegative()
+                    || partitionsAhead.compareTo(EngineDefaults.PARTITIONS_AHEAD_MAX) > 0)) {
+                throw new IllegalArgumentException("horus.bpm.rules.decision-log.partitions-ahead must be PT0S to "
+                        + "P366D, was " + partitionsAhead);
+            }
+        }
+
+        /**
+         * Returns the period in force.
+         *
+         * @return the configured period, or {@code P7D}
+         */
+        public Duration partitionsAheadOrDefault() {
+            return partitionsAhead == null ? EngineDefaults.PARTITIONS_AHEAD : partitionsAhead;
+        }
     }
 
     /**
@@ -193,10 +214,14 @@ public record RuleEngineProperties(
     /**
      * Bounds of list reads (ADR-0015).
      *
-     * @param maxPageSize the largest {@code limit} of {@code GET /rule-sets} and {@code GET .../versions}, 1 to 200;
-     *     default 200. May be lowered, never raised
+     * @param maxPageSize the largest {@code limit} of {@code GET /rule-sets}, {@code GET .../versions} and
+     *     {@code GET /decisions}, 1 to 200; default 200. May be lowered, never raised
+     * @param maxRange the longest period of {@code GET /decisions}, {@code PT1H} to {@code P31D}; default {@code P31D}.
+     *     May be lowered, never raised
+     * @param statementTimeout the longest one {@code GET /decisions} page may run in the database, {@code PT0.1S} to
+     *     {@code PT30S}; default {@code PT2S}
      */
-    public record Query(Integer maxPageSize) {
+    public record Query(Integer maxPageSize, Duration maxRange, Duration statementTimeout) {
     }
 
     /**
@@ -290,6 +315,17 @@ public record RuleEngineProperties(
                         simulation.maxInputs() == null ? EngineDefaults.SIMULATION_MAX_SAMPLES : simulation.maxInputs())
                 .withAcknowledgeWarnings(lifecycle.acknowledgeWarnings() == null
                         ? EngineDefaults.ACKNOWLEDGE_WARNINGS : lifecycle.acknowledgeWarnings());
+    }
+
+    /**
+     * Returns the validated bounds of decision log searches; an out-of-range value fails start-up naming the property.
+     *
+     * @return the search settings
+     */
+    public DecisionQuerySettings toQuerySettings() {
+        return new DecisionQuerySettings(
+                query.maxRange() == null ? EngineDefaults.QUERY_MAX_RANGE : query.maxRange(),
+                query.statementTimeout() == null ? EngineDefaults.QUERY_STATEMENT_TIMEOUT : query.statementTimeout());
     }
 
     /**

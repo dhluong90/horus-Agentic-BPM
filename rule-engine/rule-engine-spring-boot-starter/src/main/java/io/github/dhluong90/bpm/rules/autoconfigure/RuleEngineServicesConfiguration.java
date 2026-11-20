@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
+import io.github.dhluong90.bpm.rules.api.DecisionLogQuery;
 import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
@@ -72,7 +73,8 @@ class RuleEngineServicesConfiguration {
         EngineSettings settings = properties.toSettings(environment);
         warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock), settings, masking);
+                RuleEngineAutoConfiguration.engineClock(clock), settings, masking,
+                properties.toQuerySettings());
     }
 
     /**
@@ -140,6 +142,12 @@ class RuleEngineServicesConfiguration {
         return engines.versionService();
     }
 
+    @Bean
+    @ConditionalOnMissingBean
+    DecisionLogQuery ruleEngineDecisionLogQuery(RuleEngines engines) {
+        return engines.decisionLogQuery();
+    }
+
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "org.springframework.security.core.context.SecurityContextHolder")
     static class SecurityCallerConfiguration {
@@ -187,8 +195,9 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        DecisionController ruleEngineDecisionController(RuleEngine engine, CallerResolver callers) {
-            return new DecisionController(engine, callers);
+        DecisionController ruleEngineDecisionController(RuleEngine engine, DecisionLogQuery log,
+                CallerResolver callers) {
+            return new DecisionController(engine, log, callers);
         }
 
         @Bean
