@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.VersionWarning;
 import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
+import io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.rules.postgres.CacheCoherence;
@@ -27,6 +28,7 @@ import javax.sql.DataSource;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
@@ -159,13 +161,30 @@ class RuleEngineServicesConfiguration {
     }
 
     /**
-     * The one-time hand-off of the tenant-scoped entry point to the Process Engine (ADR-0027, #336). Only the Process
-     * Engine's decision port can claim it, once; a host that injects it is refused.
+     * The one-time hand-off of the tenant-scoped entry point to the Process Engine (ADR-0027, #336). Registered only
+     * when the Process Engine's decision port, its one registered claimant, is on the class path. The Process Engine
+     * claims it while its beans are created; when start-up finishes, any identity still unclaimed is closed for good,
+     * so a grant nobody claimed never stays open for the rest of the run. A host that injects it is refused.
      */
-    @Bean
-    EmbeddedEngineGrant ruleEngineEmbeddedEngineGrant(RuleEngineInternals internals) {
-        return internals.engines().embeddedEngines();
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = EMBEDDED_ENGINE_CLAIMANT)
+    static class EmbeddedEngineGrantConfiguration {
+
+        @Bean
+        EmbeddedEngineGrant ruleEngineEmbeddedEngineGrant(RuleEngineInternals internals) {
+            return EmbeddedEngineGrants.open(internals.engines());
+        }
+
+        /** Runs after every singleton, the Process Engine's included, has been created. */
+        @Bean
+        SmartInitializingSingleton ruleEngineEmbeddedEngineGrantCloser(EmbeddedEngineGrant grant) {
+            return grant::closeUnclaimed;
+        }
     }
+
+    /** The registered claimant of {@code system:process-engine}; see {@link EmbeddedEngineGrant#REGISTERED_CLAIMANTS}. */
+    static final String EMBEDDED_ENGINE_CLAIMANT =
+            "io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort";
 
     @Bean
     @ConditionalOnMissingBean

@@ -12,6 +12,8 @@ import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -52,7 +54,7 @@ class EmbeddedEngineGrantTest {
     @Test
     void TR_TEN_01_host_code_holding_the_grant_is_refused() {
         // Given the grant of a Rule Engine, as host code that imports internals could reach it
-        EmbeddedEngineGrant grant = engines.embeddedEngines();
+        EmbeddedEngineGrant grant = EmbeddedEngineGrants.open(engines);
 
         // When a host class claims the process engine's entry point, then it is refused and nothing is spent
         assertThatThrownBy(() -> grant.claim("system:process-engine", new HostController()))
@@ -69,7 +71,7 @@ class EmbeddedEngineGrantTest {
                 EngineSettings.defaults()), stores, stores, stores);
 
         // When, then
-        assertThatThrownBy(() -> own.embeddedEngines().claim("system:process-engine", this))
+        assertThatThrownBy(() -> EmbeddedEngineGrants.open(own).claim("system:process-engine", this))
                 .isInstanceOf(SecurityException.class);
     }
 
@@ -101,6 +103,61 @@ class EmbeddedEngineGrantTest {
     }
 
     @Test
+    void TR_TEN_01_a_class_of_the_same_name_from_another_class_loader_is_refused() throws Exception {
+        // Given a grant whose registered claimant is RegisteredClaimant, and a copy of that class defined by a
+        // separate class loader: same name, different class
+        OneTimeEmbeddedEngineGrant grant = grantFor(RegisteredClaimant.class);
+        URL classes = RegisteredClaimant.class.getProtectionDomain().getCodeSource().getLocation();
+        try (URLClassLoader isolated = new URLClassLoader(new URL[] {classes}, null)) {
+            Class<?> copy = isolated.loadClass(RegisteredClaimant.class.getName());
+            assertThat(copy.getName()).isEqualTo(RegisteredClaimant.class.getName());
+            assertThat(copy).isNotSameAs(RegisteredClaimant.class);
+            var ctor = copy.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            Object impostor = ctor.newInstance();
+
+            // When, then
+            assertThatThrownBy(() -> grant.claim("system:process-engine", impostor))
+                    .isInstanceOf(SecurityException.class);
+            assertThat(grant.isOpen("system:process-engine")).isTrue();
+        }
+    }
+
+    @Test
+    void TR_TEN_01_an_identity_left_unclaimed_at_start_up_is_closed_for_good() {
+        // Given a grant nobody claimed during start-up
+        OneTimeEmbeddedEngineGrant grant = grantFor(RegisteredClaimant.class);
+        assertThat(grant.isOpen("system:process-engine")).isTrue();
+
+        // When start-up finishes
+        grant.closeUnclaimed();
+
+        // Then even the registered claimant is refused afterwards
+        assertThat(grant.isOpen("system:process-engine")).isFalse();
+        assertThat(grant.isClaimed("system:process-engine")).isFalse();
+        assertThatThrownBy(() -> grant.claim("system:process-engine", new RegisteredClaimant()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+    }
+
+    @Test
+    void TR_TEN_01_closing_keeps_a_claim_already_made() {
+        OneTimeEmbeddedEngineGrant grant = grantFor(RegisteredClaimant.class);
+        TenantScopedRuleEngine scoped = grant.claim("system:process-engine", new RegisteredClaimant());
+
+        grant.closeUnclaimed();
+
+        assertThat(grant.isClaimed("system:process-engine")).isTrue();
+        assertThat(scoped.engineId()).isEqualTo("system:process-engine");
+    }
+
+    @Test
+    void TR_TEN_01_building_a_rule_engine_hands_out_no_grant() {
+        // RuleEngines has no grant component: a host that builds its own gets none from the factory
+        assertThat(java.util.Arrays.stream(RuleEngines.class.getRecordComponents())
+                .noneMatch(c -> EmbeddedEngineGrant.class.isAssignableFrom(c.getType()))).isTrue();
+    }
+
+    @Test
     void TR_TEN_01_a_refused_host_writes_no_decision_in_another_tenant() {
         // Given card-fee in bank-b, and a bank-a user whose host code tries to reach bank-b through the grant
         caller.become("bank-b", "alice");
@@ -111,7 +168,7 @@ class EmbeddedEngineGrantTest {
         caller.become("bank-a", "teller-01", Set.of("rules:evaluate"));
 
         // When
-        assertThatThrownBy(() -> engines.embeddedEngines().claim("system:process-engine", new HostController())
+        assertThatThrownBy(() -> EmbeddedEngineGrants.open(engines).claim("system:process-engine", new HostController())
                 .evaluate("bank-b", DecisionRequest.of("card-fee",
                         DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5))))).isInstanceOf(SecurityException.class);
 

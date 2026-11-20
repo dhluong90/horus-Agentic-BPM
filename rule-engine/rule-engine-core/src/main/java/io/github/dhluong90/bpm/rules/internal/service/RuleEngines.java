@@ -4,7 +4,6 @@ import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.DecisionLogQuery;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
-import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionLog;
 import io.github.dhluong90.bpm.rules.internal.store.EventOutbox;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
@@ -21,12 +20,10 @@ import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
  * @param decisionLogQuery decision log search
  * @param cache the compiled versions of this replica, shared by evaluation and approval; the host's scheduler runs
  *     {@link CompiledCache#checkEpochs()} and its notification listener calls {@link CompiledCache#evict}
- * @param embeddedEngines the one-time hand-off of the tenant-scoped entry point to a registered embedded engine
- *     (ADR-0027); the entry point itself is never a component
  */
 public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, CursorKeys cursorKeys,
         DecisionLogService decisionLog, MaskingStartupCheck maskingCheck, LifecycleSweep lifecycleSweep,
-        DecisionLogQuery decisionLogQuery, CompiledCache cache, EmbeddedEngineGrant embeddedEngines) {
+        DecisionLogQuery decisionLogQuery, CompiledCache cache) {
 
     /**
      * Builds the entry points with the default search bounds.
@@ -57,12 +54,11 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
         CursorKeys keys = new CursorKeys(store, context.transactions(), context.clock());
         CompiledCache cache = new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions());
         Supersession supersession = new Supersession(store, outbox, context.settings());
-        DefaultRuleEngine engine = new DefaultRuleEngine(context, store, log, cache);
-        return new RuleEngines(engine,
+        return new RuleEngines(new DefaultRuleEngine(context, store, log, cache),
                 new DefaultVersionService(context, store, outbox, keys, supersession, cache), keys,
                 new DefaultDecisionLogService(context, log, outbox), new MaskingStartupCheck(store, context.masking(),
                         context.transactions(), context.clock()),
                 new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, keys, querySettings),
-                cache, new OneTimeEmbeddedEngineGrant(engine));
+                cache);
     }
 }
