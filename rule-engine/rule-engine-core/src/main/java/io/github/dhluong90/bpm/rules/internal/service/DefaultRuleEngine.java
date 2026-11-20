@@ -17,7 +17,7 @@ import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
 import io.github.dhluong90.bpm.rules.internal.model.InputClause;
 import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
-import io.github.dhluong90.bpm.rules.internal.expr.RequestReads;
+import io.github.dhluong90.bpm.expr.internal.RequestReads;
 import io.github.dhluong90.bpm.rules.internal.json.CanonicalJson;
 import io.github.dhluong90.bpm.rules.internal.json.CorrelationIds;
 import io.github.dhluong90.bpm.rules.internal.json.ExactForm;

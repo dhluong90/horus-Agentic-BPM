@@ -1,4 +1,4 @@
-package io.github.dhluong90.bpm.rules.internal.expr;
+package io.github.dhluong90.bpm.expr.internal;
 
 /**
  * The characters every {@code matches} of one request may still read together

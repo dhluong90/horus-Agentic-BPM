@@ -135,7 +135,7 @@ public final class Evaluator {
      * @return an evaluator scoped to a fresh decision budget that charges the request
      */
     public Evaluator forDecision(RequestReads request) {
-        return new Evaluator(this, regexLimits.newDecision(request), evaluationLimits.newDecision());
+        return new Evaluator(this, regexLimits.newDecision(request), evaluationLimits.newDecision(), strict);
     }
 
     /**
