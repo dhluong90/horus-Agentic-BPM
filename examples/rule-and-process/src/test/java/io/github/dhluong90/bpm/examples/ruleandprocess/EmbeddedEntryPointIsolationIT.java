@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.examples.ruleandprocess;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -88,6 +89,39 @@ class EmbeddedEntryPointIsolationIT {
         RuleEngine ruleEngine = context.getBean(RuleEngine.class);
         assertThatThrownBy(() -> new LocalServiceInvoker(Map.of(), Optional.of(ruleEngine), Optional.of(grant),
                 Duration.ofSeconds(5))).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void TR_TEN_01_a_host_class_in_the_engines_package_is_refused_by_the_jvm() {
+        // The engine packages are sealed in the engine jars. When the engine runs from class directories instead (an
+        // IDE, or Maven goals run without the package phase), there is no jar to seal, so there is nothing to check.
+        assumeTrue(DecisionCaller.class.getProtectionDomain().getCodeSource().getLocation().getPath().endsWith(".jar"),
+                "the Process Engine runs from its jar");
+        assertThat(DecisionCaller.class.getPackage().isSealed()).isTrue();
+        assertThat(RuleEngines.class.getPackage().isSealed()).isTrue();
+        assertThat(TenantScopedRuleEngine.class.getPackage().isSealed()).isTrue();
+
+        // When host code in process.internal.service, which would build the decision port over a grant of its own
+        // and ask for engine work in bank-b, is loaded
+        assertThatThrownBy(() -> Class.forName(
+                "io.github.dhluong90.bpm.process.internal.service.SplitPackageAttacker"))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("sealing violation");
+    }
+
+    @Test
+    void TR_TEN_01_a_grant_over_a_rule_engine_the_host_built_is_useless_to_the_host() {
+        // Given a Rule Engine the host built itself over the same database, and a grant opened over it
+        RuleEngines own = io.github.dhluong90.bpm.rules.postgres.PostgresRuleEngines.create(
+                context.getBean(javax.sql.DataSource.class),
+                context.getBean(io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions.class),
+                () -> "bank-b", context.getBean(io.github.dhluong90.bpm.rules.spi.CallerResolver.class),
+                java.time.Clock.systemUTC(), io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults());
+        EmbeddedEngineGrant grant = io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants.open(own);
+
+        // When the host claims it, then it is refused: only the Process Engine's sealed, package-private port can
+        assertThatThrownBy(() -> grant.claim("system:process-engine", new HostController()))
+                .isInstanceOf(SecurityException.class);
     }
 
     @Test

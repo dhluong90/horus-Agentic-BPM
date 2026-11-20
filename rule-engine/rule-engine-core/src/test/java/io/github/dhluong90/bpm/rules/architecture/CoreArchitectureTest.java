@@ -95,7 +95,10 @@ class CoreArchitectureTest {
 
     @Test
     void TR_SEC_01_core_has_no_scripting_reflection_class_loading_or_deserialisation() {
+        // One exception: the grant of the tenant-scoped entry point resolves one constant class name, uninitialised,
+        // to compare the claimant's class identity (#336). The rule below keeps it the only one.
         noClasses()
+                .that().doNotHaveFullyQualifiedName(GRANT)
                 .should().dependOnClassesThat()
                 .resideInAnyPackage(
                         "javax.script..",
@@ -156,11 +159,31 @@ class CoreArchitectureTest {
                 .check(core);
     }
 
+    private static final String GRANT = "io.github.dhluong90.bpm.rules.internal.service.OneTimeEmbeddedEngineGrant";
+
+    @Test
+    void TR_SEC_01_the_grant_loads_no_class_and_uses_no_reflection_beyond_one_identity_lookup() {
+        noClasses()
+                .that().haveFullyQualifiedName(GRANT)
+                .should().dependOnClassesThat().resideInAnyPackage("javax.script..", "java.lang.reflect..",
+                        "java.lang.invoke..")
+                .orShould().callMethodWhere(target(name("newInstance")))
+                .orShould().callMethodWhere(target(name("loadClass")))
+                .because("the claimant check compares class identity and creates nothing (#336)")
+                .check(core);
+    }
+
     @Test
     void TR_TEN_01_only_the_one_time_grant_builds_the_tenant_scoped_entry_point() {
         noClasses()
                 .that().doNotHaveFullyQualifiedName(
-                        "io.github.dhluong90.bpm.rules.internal.service.OneTimeEmbeddedEngineGrant")
+                        "io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants")
+                .and().doNotHaveFullyQualifiedName(GRANT)
+                .should().callConstructorWhere(target(owner(name(GRANT))))
+                .because("only the engine wiring opens a grant, never RuleEngines.create (#336)")
+                .check(core);
+        noClasses()
+                .that().doNotHaveFullyQualifiedName(GRANT)
                 .should().callConstructorWhere(target(owner(name(
                         "io.github.dhluong90.bpm.rules.internal.service.EngineScopedRuleEngine"))))
                 .because("the entry point is handed out once, to the registered claimant (#336)")
@@ -175,7 +198,9 @@ class CoreArchitectureTest {
                 .that().resideInAPackage("io.github.dhluong90.bpm.rules.internal.service..")
                 .should().callMethod(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class, "claim",
                         String.class, Object.class)
-                .because("the Rule Engine hands the entry point out and never claims it itself (#336)")
+                .orShould().callMethod("io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants", "open",
+                        "io.github.dhluong90.bpm.rules.internal.service.RuleEngines")
+                .because("the Rule Engine hands the entry point out and never opens or claims a grant itself (#336)")
                 .check(core);
     }
 

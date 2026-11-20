@@ -98,10 +98,10 @@ class TenantScopedEvaluationTest {
         // When a host picks another identity, reserved or invented, then it is refused
         for (String forged : new String[] {"system:timer", "system:dev-auto-approve", "system:effective-date",
                 "system:anything", "system:", "tuan", " "}) {
-            assertThatThrownBy(() -> engines.embeddedEngines().claim(forged, this))
+            assertThatThrownBy(() -> EmbeddedEngineGrants.open(engines).claim(forged, this))
                     .as(forged).isInstanceOf(IllegalArgumentException.class);
         }
-        assertThatThrownBy(() -> engines.embeddedEngines().claim(null, this))
+        assertThatThrownBy(() -> EmbeddedEngineGrants.open(engines).claim(null, this))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

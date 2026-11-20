@@ -50,13 +50,13 @@ public interface EmbeddedEngineGrant {                               // a bean, 
 `TenantScopedRuleEngine` is for an embedded engine acting on its own stored work with no caller signed in, for example the Process Engine pricing a step after a timer. The tenant is the one the engine read from its own stored row; a blank tenant is refused. The caller written to the decision log is the engine identity, fixed when the object is built. There is no REST endpoint for it.
 
 **Hosts have no way to reach this entry point.**
-- It is never a bean, and the `RuleEngine` bean does not implement it. `RuleEngines`, the engine's internals, is not a bean either.
-- The only route to it is `EmbeddedEngineGrant.claim`. That method hands the entry point out once per engine identity, and only to the claimant registered for it. For `system:process-engine`, that is the Process Engine's decision port. The port is a package-private class, so host code cannot create one.
-- Host code that injects the grant and claims is refused with a `SecurityException`. In a running application the Process Engine has already claimed the entry point at start-up, so a second claim fails too. A host that claims first makes start-up fail.
-- A host that builds its own `RuleEngines` gets a grant that refuses it in the same way.
-- The Process Engine uses the entry point only for an engine caller (`DecisionCaller.Engine`). Only the engine's own timer path can create one.
+- It is never a bean, and the `RuleEngine` bean does not implement it. `RuleEngines`, the engine's internals, is not a bean either, and building a `RuleEngines` hands out no grant.
+- The only route to it is `EmbeddedEngineGrant.claim`. That method hands the entry point out once per engine identity, and only to the claimant registered for it. For `system:process-engine`, that is the Process Engine's decision port. The claimant is checked by class identity, so a class with the same name from another class loader is refused.
+- The decision port and the engine caller (`DecisionCaller.Engine`) are package-private. Their packages, and the Rule Engine's internal and engine-to-engine packages, are **sealed** in the engine jars. A host class placed in one of those packages is refused by the JVM with a "sealing violation", on a plain class path and inside a Spring Boot executable jar.
+- The grant bean exists only when the Process Engine is on the class path. The Process Engine claims the entry point while its beans are created, and start-up fails if it could not. When start-up finishes, the Rule Engine starter closes every identity still unclaimed, for good.
+- Host code that injects the grant and claims is refused with a `SecurityException`. A host that opens a grant over a Rule Engine it built itself cannot claim it either, because it cannot create the claimant.
 
-ArchUnit rules and context tests check all of this (`TR-TEN-01`). The checks are Java access rules on a plain classpath, so they do not stop code that uses reflection or defines a class with the same name as an engine class. Such code is out of scope, because it could equally read any private field of the engine.
+ArchUnit rules, context tests and a test on the repackaged sample host check all of this (`TR-TEN-01`). Sealing needs the engine jars: when the engine runs from class directories, as in an IDE, the packages are not sealed. Reflection that overrides access checks is out of scope, because it could equally read any private field of the engine. So is a host that ships only the Rule Engine starter and defines a class with the decision port's exact name: it could claim during start-up, before the grant closes.
 ```java
 DecisionResult r = rules.evaluate("card-fee", DecisionInput.of("tier", "GOLD", "balance", Money.ofMinor("VND", 60_000_000), "txCount", 3));
 r.ruleSet();            // "card-fee"
