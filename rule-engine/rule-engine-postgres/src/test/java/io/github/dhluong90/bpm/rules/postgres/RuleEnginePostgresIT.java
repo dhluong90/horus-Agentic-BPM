@@ -58,7 +58,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class RuleEnginePostgresIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant NOW = Instant.parse("2026-12-15T02:00:00Z");
     private static final AtomicInteger DATABASES = new AtomicInteger();
@@ -221,12 +221,12 @@ class RuleEnginePostgresIT {
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
 
         // When / Then
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
         assertThat(engines.versionService().find("card-fee", 1, false).orElseThrow().status())
                 .isEqualTo(VersionStatus.PENDING_APPROVAL);
         caller.as("bank-a", "bob");
-        assertThat(engines.versionService().approve("card-fee", 1, WriteOptions.none()).status())
+        assertThat(engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)).status())
                 .isEqualTo(VersionStatus.PUBLISHED);
     }
 
@@ -300,7 +300,7 @@ class RuleEnginePostgresIT {
         engines.versionService().importRuleSet(ImportRequest.yaml(dated));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.as("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
 
         // Then the row holds the date, canonical_json does not, and the hash is the undated card-fee hash
         JdbcClient sql = JdbcClient.create(db);
@@ -340,7 +340,7 @@ class RuleEnginePostgresIT {
         String hash = engines.versionService().importRuleSet(ImportRequest.yaml(cardFee())).canonicalHash();
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.as("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
 
         JdbcClient sql = JdbcClient.create(db);
         assertThat(sql.sql("""
@@ -356,12 +356,34 @@ class RuleEnginePostgresIT {
                 """).query(String.class).single()).isEqualTo(hash + " " + NOW + " alice bob");
     }
 
+    /** #241: every outbox row carries the full envelope through JSONB; the event id is the row id. */
+    @Test
+    void TR_OBS_06_every_outbox_row_carries_the_full_envelope() {
+        caller.as("bank-a", "alice");
+        engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()).withCorrelationId("req-import-1"));
+        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none().withCorrelationId("req-request-1"));
+        caller.as("bank-a", "bob");
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
+
+        // The approval passed no correlation id, so its event starts its own chain: correlationId = eventId.
+        assertThat(JdbcClient.create(db).sql("""
+                SELECT (payload->>'eventId' = id)::text || ' ' || (payload->>'eventType') || ' '
+                  || CASE WHEN payload->>'correlationId' = id THEN 'own-chain' ELSE payload->>'correlationId' END || ' '
+                  || jsonb_typeof(payload->'causationId') || ' ' || (payload->>'producer' LIKE 'rule-engine/_%')::text
+                  || ' ' || jsonb_typeof(payload->'schemaVersion') || ':' || (payload->>'schemaVersion')
+                FROM rle_decision_outbox WHERE tenant_id = 'bank-a' ORDER BY id
+                """).query(String.class).list()).containsExactly(
+                "true rules.version.created.v1 req-import-1 null true number:1",
+                "true rules.version.publish-requested.v1 req-request-1 null true number:1",
+                "true rules.version.published.v1 own-chain null true number:1");
+    }
+
     private void publish(String resource, String name) {
         caller.as("bank-a", "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(resource(resource)));
         engines.versionService().requestPublish(name, 1, WriteOptions.none());
         caller.as("bank-a", "bob");
-        engines.versionService().approve(name, 1, WriteOptions.none());
+        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
     }
 
     private void publishCardFee() {
@@ -369,7 +391,7 @@ class RuleEnginePostgresIT {
         engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.as("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
     }
 
     private long decisionRows() {

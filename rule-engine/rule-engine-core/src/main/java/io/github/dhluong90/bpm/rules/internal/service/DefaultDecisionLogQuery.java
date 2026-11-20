@@ -108,6 +108,7 @@ final class DefaultDecisionLogQuery implements DecisionLogQuery {
         };
         return new DecisionLogEntry(row.id(), row.ruleSet(), row.version(), row.hitPolicy(), outcome, matched,
                 EngineValues.loggedValues(row.maskedInputsJson()), EngineValues.loggedValues(row.outputsJson()),
-                row.callerId(), row.correlationId(), row.evalClock(), row.createdAt(), row.durationMicros());
+                row.callerId(), row.correlationId(), row.evalClock(), row.createdAt(), row.createdAt(),
+                row.durationMicros(), row.pinned());
     }
 }

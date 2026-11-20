@@ -75,6 +75,38 @@ class DecisionLogQueryTest {
     }
 
     @Test
+    void RLE_029_every_entry_carries_eval_clock_clock_chosen_and_pinned() {
+        // Given three card-fee decisions logged on 20 January 2027: at the host clock, back-dated to 31 December
+        // 2026 by a chosen clock, and pinned to version 1 at the host clock
+        Instant at = Instant.parse("2027-01-20T10:00:00Z");
+        Instant december = Instant.parse("2026-12-31T10:00:00Z");
+        String normal = Ulid.next(at);
+        String backDated = Ulid.next(at.plusSeconds(1));
+        String pinned = Ulid.next(at.plusSeconds(2));
+        stores.decisions.add(row("bank-a", "card-fee", normal, at, at, false));
+        stores.decisions.add(row("bank-a", "card-fee", backDated, at.plusSeconds(1), december, false));
+        stores.decisions.add(row("bank-a", "card-fee", pinned, at.plusSeconds(2), at.plusSeconds(2), true));
+
+        // When
+        List<DecisionLogEntry> entries = search(DecisionSearch.of("card-fee", JAN, FEB), null).items();
+
+        // Then each entry reads as it was evaluated, newest first
+        assertThat(entries).extracting(DecisionLogEntry::decisionId).containsExactly(pinned, backDated, normal);
+        DecisionLogEntry p = entries.get(0);
+        DecisionLogEntry b = entries.get(1);
+        DecisionLogEntry n = entries.get(2);
+        assertThat(n.evalClock()).isEqualTo(at).isEqualTo(n.evaluatedAt()).isEqualTo(n.loggedAt());
+        assertThat(n.clockChosen()).isFalse();
+        assertThat(n.pinned()).isFalse();
+        assertThat(b.evalClock()).isEqualTo(december);
+        assertThat(b.evaluatedAt()).isEqualTo(at.plusSeconds(1)).isEqualTo(b.loggedAt());
+        assertThat(b.clockChosen()).isTrue();
+        assertThat(b.pinned()).isFalse();
+        assertThat(p.clockChosen()).isFalse();
+        assertThat(p.pinned()).isTrue();
+    }
+
+    @Test
     void RLE_029_a_range_over_31_days_or_a_missing_rule_set_is_query_invalid() {
         assertThatThrownBy(() -> search(DecisionSearch.of("card-fee", JAN, Instant.parse("2027-02-02T00:00:00Z")),
                 null)).isInstanceOf(QueryInvalidException.class).hasMessageContaining("from and to");
@@ -189,8 +221,14 @@ class DecisionLogQueryTest {
     }
 
     private static DecisionRecord row(String tenant, String ruleSet, String id, Instant at) {
+        return row(tenant, ruleSet, id, at, at, false);
+    }
+
+    private static DecisionRecord row(String tenant, String ruleSet, String id, Instant at, Instant evalClock,
+            boolean pinned) {
         return new DecisionRecord(tenant, id, at, ruleSet, 1, "FIRST", "OK", null,
                 "{\"tier\":\"SILVER\",\"txCount\":5,\"nationalId\":\"hmac:9f2c41d07a\"}",
-                "{\"fee\":{\"currency\":\"VND\",\"amount\":10000}}", "[\"R2\"]", "teller-01", null, at, 31);
+                "{\"fee\":{\"currency\":\"VND\",\"amount\":10000}}", "[\"R2\"]", "teller-01", null, evalClock, 31,
+                pinned);
     }
 }

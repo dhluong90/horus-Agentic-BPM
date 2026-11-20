@@ -7,7 +7,7 @@
   <parent>
     <groupId>io.github.dhluong90.bpm</groupId>
     <artifactId>rule-engine-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.2.0-SNAPSHOT</version>
   </parent>
 
   <artifactId>rule-engine-core</artifactId>
@@ -46,6 +46,26 @@
   </dependencies>
 
   <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>false</filtering>
+      </resource>
+      <!-- Only the engine version file is filtered: it names the producer in every event envelope. -->
+      <resource>
+        <directory>src/main/resources-filtered</directory>
+        <filtering>true</filtering>
+      </resource>
+      <!-- Repeated from the parent, which this list replaces (TR-LIC-02). -->
+      <resource>
+        <directory>${bpm.root}</directory>
+        <targetPath>META-INF</targetPath>
+        <includes>
+          <include>LICENSE</include>
+          <include>COMMERCIAL-LICENSE.md</include>
+        </includes>
+      </resource>
+    </resources>
     <plugins>
       <!--
         TR-EMB-03 by dependency analysis: ArchUnit sees only referenced bytecode, so this rule also

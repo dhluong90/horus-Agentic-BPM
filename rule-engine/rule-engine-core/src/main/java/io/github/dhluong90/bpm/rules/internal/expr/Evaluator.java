@@ -13,13 +13,19 @@ import java.time.LocalDate;
  * and arithmetic with a null operand give null; {@code between} is {@code x >= a and x <= b}, as
  * DMN 1.5; {@code ==} and {@code !=} are two-valued; {@code in} is true when an element equals the
  * target, so a null target is in a list only when the list holds null; {@code and}, {@code or} and
- * {@code not} follow the FEEL truth tables. Mixed currencies and division by zero raise {@link EvaluationException}.
- * Stateless and thread-safe.
+ * {@code not} follow the FEEL truth tables. Mixed currencies and division by zero raise {@link EvaluationException}, as does
+ * a {@code matches} past one of its bounds ({@link BoundedRegex}).
+ * An evaluator made by a constructor is stateless and thread-safe, and gives each {@code matches} a decision budget
+ * of its own. An evaluator made by {@link #forDecision()} charges every {@code matches} it runs to one budget of
+ * {@code evaluation.regex-max-reads-per-decision} and belongs to the thread evaluating that decision.
  */
 public final class Evaluator {
 
     private final RoundingMode moneyRounding;
     private final int maxStringLength;
+    private final RegexLimits regexLimits;
+    /** The read budget of the decision this evaluator is scoped to, or null for a shared evaluator. */
+    private final DecisionReads decision;
 
     /**
      * Creates an evaluator with the default string bound.
@@ -37,8 +43,38 @@ public final class Evaluator {
      * @param maxStringLength the longest string {@code +} may build; longer is {@link EvaluationException}
      */
     public Evaluator(RoundingMode moneyRounding, int maxStringLength) {
+        this(moneyRounding, maxStringLength, RegexLimits.defaults());
+    }
+
+    /**
+     * Creates an evaluator with regular expression bounds.
+     *
+     * @param moneyRounding rounding of money multiplication and division
+     * @param maxStringLength the longest string {@code +} may build; longer is {@link EvaluationException}
+     * @param regexLimits the length and time bounds of {@code matches}
+     */
+    public Evaluator(RoundingMode moneyRounding, int maxStringLength, RegexLimits regexLimits) {
         this.moneyRounding = moneyRounding;
         this.maxStringLength = maxStringLength;
+        this.regexLimits = java.util.Objects.requireNonNull(regexLimits, "regexLimits must not be null");
+        this.decision = null;
+    }
+
+    private Evaluator(Evaluator shared, DecisionReads decision) {
+        this.moneyRounding = shared.moneyRounding;
+        this.maxStringLength = shared.maxStringLength;
+        this.regexLimits = shared.regexLimits;
+        this.decision = decision;
+    }
+
+    /**
+     * Returns an evaluator for one decision: every {@code matches} it runs reads from one budget of
+     * {@code evaluation.regex-max-reads-per-decision} characters (RLE-007). Use it on one thread, for one decision.
+     *
+     * @return an evaluator scoped to a fresh decision budget
+     */
+    public Evaluator forDecision() {
+        return new Evaluator(this, regexLimits.newDecision());
     }
 
     /**
@@ -53,6 +89,7 @@ public final class Evaluator {
         return switch (expr) {
             case Expr.Literal literal -> literal.value();
             case Expr.Var var -> slots[var.slot()];
+            case Expr.Clock clock -> clockValue(clock, slots);
             case Expr.Unary unary -> unary(unary.op(), evaluate(unary.operand(), slots));
             case Expr.Binary binary -> binary(binary, slots);
             case Expr.InList inList -> {
@@ -69,7 +106,24 @@ public final class Evaluator {
                 yield and(low, compare(Expr.BinaryOp.LE, value, evaluate(between.high(), slots)));
             }
             case Expr.IsNull isNull -> (evaluate(isNull.target(), slots) == null) != isNull.negated();
+            case Expr.Matches matches -> {
+                // FEEL: a null or non-string text gives null, which never matches.
+                Object text = evaluate(matches.target(), slots);
+                yield text instanceof String string ? BoundedRegex.find(matches.compiled(), string, regexLimits,
+                        decision == null ? regexLimits.newDecision() : decision) : null;
+            }
         };
+    }
+
+    /**
+     * Reads {@code today()} or {@code now()} from its frame slot. A tree parsed without a clock, or a frame bound
+     * without one, fails deterministically instead of reading the system time or another slot.
+     */
+    private static Object clockValue(Expr.Clock clock, Object[] slots) {
+        if (clock.slot() < 0 || clock.slot() >= slots.length || slots[clock.slot()] == null) {
+            throw new EvaluationException(clock.function().text() + "() needs an evaluation clock");
+        }
+        return slots[clock.slot()];
     }
 
     /**

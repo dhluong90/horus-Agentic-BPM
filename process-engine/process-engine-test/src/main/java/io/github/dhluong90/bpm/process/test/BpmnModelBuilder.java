@@ -12,6 +12,8 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ExtensionBag;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.GatewayDirection;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ProcessType;
@@ -133,6 +135,18 @@ public final class BpmnModelBuilder {
         return node(new ExclusiveGateway(id, null, null, null, GatewayDirection.UNSPECIFIED, defaultFlow, null));
     }
 
+    /**
+     * An intermediate timer catch event that waits for an ISO 8601 duration.
+     *
+     * @param id node id
+     * @param duration for example {@code PT10M}
+     * @return this
+     */
+    public BpmnModelBuilder timerCatch(String id, String duration) {
+        return node(new IntermediateCatchEvent(id, null, null, null, List.of(new TimerEventDefinition(id + "-timer", null,
+                new Expression(duration, null, null), null, null)), null, null, false, null));
+    }
+
     /** @param id node id @return this */
     public BpmnModelBuilder parallelGateway(String id) {
         return node(new ParallelGateway(id, null, null, null, GatewayDirection.UNSPECIFIED, null));
@@ -218,6 +232,8 @@ public final class BpmnModelBuilder {
             case ExclusiveGateway g -> new ExclusiveGateway(g.id(), g.name(), in, out, g.gatewayDirection(),
                     g.defaultFlow(), g.info());
             case ParallelGateway g -> new ParallelGateway(g.id(), g.name(), in, out, g.gatewayDirection(), g.info());
+            case IntermediateCatchEvent c -> new IntermediateCatchEvent(c.id(), c.name(), in, out, c.eventDefinitions(),
+                    c.eventDefinitionRefs(), data, c.parallelMultiple(), c.info());
             default -> node;
         };
     }

@@ -21,6 +21,27 @@ export const metaRulesOnly: BpmMetaV1 = {
   limits: { maxPageSize: 200 },
 };
 
+/** A module name no cockpit of this release knows: what a newer host with a third engine module reports. */
+export const UNKNOWN_MODULE = 'cases';
+
+const rulesModule = { module: 'rules', engineVersion: '0.1.0', apiVersion: 'v1', features: [], settings: { 'authoring.cockpit-drafts': true } } as const;
+const processesModule = { module: 'processes', engineVersion: '0.1.0', apiVersion: 'v1', features: [] } as const;
+const unknownModule = { module: UNKNOWN_MODULE, engineVersion: '0.3.0', apiVersion: 'v1', features: ['cases.read'] } as const;
+
+/** A newer host: rules, processes and a module this cockpit does not know (cockpit DESIGN 5.2). */
+export const metaWithUnknownModule = {
+  ...metaRulesOnly,
+  modules: [rulesModule, processesModule, unknownModule],
+};
+
+/** The same host with a malformed known module: the strict schema still rejects it. */
+export const metaWithBadKnownModule = {
+  ...metaRulesOnly,
+  modules: [{ ...rulesModule, engineVersion: '0.1' }, processesModule, unknownModule],
+};
+
+export const META_MODULES = { rules: rulesModule, processes: processesModule, unknown: unknownModule } as const;
+
 export const meLan: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'lan', displayName: 'Nguyễn Thị Lan' },
@@ -36,6 +57,9 @@ export const meMinh: BpmMeV1 = {
   permissions: ['rules:read', 'rules:approve', 'rules:log:read'],
   roles: ['PRICING_APPROVER'],
 };
+
+/** A permission name from a newer host that does not match this cockpit's pattern (a hyphen in the action). */
+export const UNREADABLE_PERMISSION = 'rules:log:search-masked';
 
 const ERROR_TYPE = 'https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#';
 
@@ -72,7 +96,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -118,6 +142,11 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       return { ...ok, me: problem(problemInternal) };
     case 'meta-internal-error':
       return { ...ok, meta: problem(problemInternal) };
+    case 'meta-unknown-module':
+      return { ...ok, meta: json(metaWithUnknownModule) };
+    case 'meta-bad-known-module':
+      // The unknown module is skipped, but a malformed known module still fails the strict schema.
+      return { ...ok, meta: json(metaWithBadKnownModule) };
     case 'signed-out': {
       // The host's sign-in redirect for an ended session.
       const toSignIn: MockResponse = { status: 302, contentType: 'text/html', body: '', location: '/login' };
@@ -125,6 +154,9 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
     }
     case 'me-unauthenticated':
       return { ...ok, meta: problem(problemUnauthenticated), me: problem(problemUnauthenticated) };
+    case 'me-unknown-permission':
+      // A newer host lists a permission name this cockpit cannot read; the cockpit drops it and signs Lan in.
+      return { ...ok, me: json({ ...meLan, permissions: [...meLan.permissions, UNREADABLE_PERMISSION] }) };
     case 'me-bad-shape':
       return { ...ok, me: json({ schemaVersion: 1, user: { id: '' }, permissions: [] }) };
     case 'meta-not-found':

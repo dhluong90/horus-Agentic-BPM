@@ -28,7 +28,8 @@ import org.springframework.beans.factory.SmartInitializingSingleton;
  * <p>Last step: load the cursor key ({@code rle_engine_key}, RLE-039) in one short transaction outside any
  * request, then re-read it every {@code EngineDefaults.CURSOR_KEY_REFRESH} on a daemon thread of its own, in a
  * read-only transaction. A request never reads or writes the key. A database user without SELECT and INSERT on
- * {@code rle_engine_key} fails start-up with a message naming the table.
+ * {@code rle_engine_key} fails start-up with a message naming the table. Then the lifecycle sweep starts
+ * ({@link RuleEngineLifecycleSweeper}), which needs the current schema.
  */
 public final class RuleEngineSchemaInitializer implements SmartInitializingSingleton {
 
@@ -40,6 +41,8 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
     private final Clock clock;
     private final RuleEngineCursorKeyInitializer cursorKeys;
     private final RuleEnginePartitionMaintenance maintenance;
+    private final RuleEngineMaskingCheck maskingCheck;
+    private final RuleEngineLifecycleSweeper sweeper;
 
     RuleEngineSchemaInitializer(
             RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate, Clock clock) {
@@ -48,17 +51,20 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
 
     RuleEngineSchemaInitializer(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate,
             Clock clock, RuleEngineCursorKeyInitializer cursorKeys) {
-        this(migrator, partitions, migrate, clock, cursorKeys, null);
+        this(migrator, partitions, migrate, clock, cursorKeys, null, null, null);
     }
 
     RuleEngineSchemaInitializer(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate,
-            Clock clock, RuleEngineCursorKeyInitializer cursorKeys, RuleEnginePartitionMaintenance maintenance) {
+            Clock clock, RuleEngineCursorKeyInitializer cursorKeys, RuleEngineMaskingCheck maskingCheck,
+            RuleEngineLifecycleSweeper sweeper, RuleEnginePartitionMaintenance maintenance) {
+        this.sweeper = sweeper;
         this.migrator = Objects.requireNonNull(migrator, "migrator must not be null");
         this.partitions = Objects.requireNonNull(partitions, "partitions must not be null");
         this.migrate = migrate;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.cursorKeys = cursorKeys;
         this.maintenance = maintenance;
+        this.maskingCheck = maskingCheck;
     }
 
     @Override
@@ -89,8 +95,16 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
                 LOG.info("Rule Engine created decision log partitions " + created);
             }
         }
+        if (maskingCheck != null) {
+            // Before any key is loaded or request served: a host that would log personal data in plain text, or
+            // refuse every masked decision, does not start (RLE-035).
+            maskingCheck.verify();
+        }
         if (cursorKeys != null) {
             cursorKeys.start();
+        }
+        if (sweeper != null) {
+            sweeper.start();
         }
     }
 }

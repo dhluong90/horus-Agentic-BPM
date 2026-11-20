@@ -48,7 +48,7 @@ class DecisionLogSearchPostgresIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant JAN = Instant.parse("2027-01-01T00:00:00Z");
     static final Instant FEB = Instant.parse("2027-02-01T00:00:00Z");
@@ -124,6 +124,37 @@ class DecisionLogSearchPostgresIT {
         DecisionLogEntry last = first.items().getLast();
         assertThat(partitionsRead(midJanuary, midJanuary.plus(Duration.ofDays(31)), last))
                 .hasSizeLessThanOrEqualTo(2).doesNotContain("rle_decision_default");
+    }
+
+    @Test
+    void RLE_029_eval_clock_and_pinned_are_read_back_from_the_row() {
+        // Given a card-fee decision of 20 January 2027 back-dated to 31 December 2026, and one pinned to version 1
+        Instant at = Instant.parse("2027-01-20T10:00:00Z");
+        Instant december = Instant.parse("2026-12-31T10:00:00Z");
+        String backDated = Ulid.next(at);
+        String pinned = Ulid.next(at.plusSeconds(1));
+        log.append(row("bank-a", backDated, at, december, false));
+        log.append(row("bank-a", pinned, at.plusSeconds(1), at.plusSeconds(1), true));
+        auditor.as("bank-a", "dan");
+
+        // When
+        List<DecisionLogEntry> entries = engines.decisionLogQuery()
+                .search(DecisionSearch.of("card-fee", JAN, FEB), PageRequest.first()).items();
+
+        // Then eval_clock, created_at and pinned come back from the row
+        assertThat(entries).extracting(DecisionLogEntry::decisionId).containsExactly(pinned, backDated);
+        assertThat(entries.get(1).evalClock()).isEqualTo(december);
+        assertThat(entries.get(1).evaluatedAt()).isEqualTo(at);
+        assertThat(entries.get(1).clockChosen()).isTrue();
+        assertThat(entries.get(1).pinned()).isFalse();
+        assertThat(entries.get(0).clockChosen()).isFalse();
+        assertThat(entries.get(0).pinned()).isTrue();
+    }
+
+    private static DecisionRecord row(String tenant, String id, Instant at, Instant evalClock, boolean pinned) {
+        return new DecisionRecord(tenant, id, at, "card-fee", 1, "FIRST", "OK", null,
+                "{\"tier\":\"SILVER\",\"txCount\":5}", "{\"fee\":{\"currency\":\"VND\",\"amount\":10000}}",
+                "[\"R2\"]", "teller-01", null, evalClock, 31, pinned);
     }
 
     @Test

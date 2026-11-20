@@ -53,7 +53,7 @@ class DecisionLogSearchIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @org.springframework.test.context.DynamicPropertySource
     static void database(org.springframework.test.context.DynamicPropertyRegistry registry) {
@@ -126,6 +126,33 @@ class DecisionLogSearchIT {
     }
 
     @Test
+    void RLE_029_each_item_carries_eval_clock_clock_chosen_and_pinned_over_http() throws Exception {
+        // Given two loan-fee decisions of bank-a on 20 January 2027: one back-dated to 31 December 2026 by a chosen
+        // clock, and one pinned to version 1 at the host clock
+        Instant at = Instant.parse("2027-01-20T10:00:00Z");
+        String backDated = insert("bank-a", "loan-fee", at, 3000, Instant.parse("2026-12-31T10:00:00Z"), false);
+        String pinned = insert("bank-a", "loan-fee", at.plusSeconds(1), 3001, at.plusSeconds(1), true);
+
+        // When dan lists January
+        Reply reply = get("dan", "/decisions?ruleSet=loan-fee&from=2027-01-01T00:00:00Z&to=2027-02-01T00:00:00Z");
+
+        // Then each item says how it was evaluated, as GET /decisions/{id} does
+        assertThat(reply.status()).isEqualTo(200);
+        JsonNode first = reply.json().path("data").get(0);
+        JsonNode second = reply.json().path("data").get(1);
+        assertThat(first.path("decisionId").asString()).isEqualTo(pinned);
+        assertThat(first.path("pinned").asBoolean()).isTrue();
+        assertThat(first.path("clockChosen").asBoolean()).isFalse();
+        assertThat(first.path("evalClock").asString()).isEqualTo("2027-01-20T10:00:01Z");
+        assertThat(second.path("decisionId").asString()).isEqualTo(backDated);
+        assertThat(second.path("evalClock").asString()).isEqualTo("2026-12-31T10:00:00Z");
+        assertThat(second.path("evaluatedAt").asString()).isEqualTo("2027-01-20T10:00:00Z");
+        assertThat(second.path("loggedAt").asString()).isEqualTo("2027-01-20T10:00:00Z");
+        assertThat(second.path("clockChosen").asBoolean()).isTrue();
+        assertThat(second.path("pinned").asBoolean()).isFalse();
+    }
+
+    @Test
     void RLE_029_failure_paths_over_http() throws Exception {
         // A range of 32 days and a missing rule set are 400 QUERY_INVALID naming the parameter
         Reply tooLong = get("dan", "/decisions?ruleSet=card-fee&from=2027-01-01T00:00:00Z&to=2027-02-02T00:00:00Z");
@@ -166,16 +193,20 @@ class DecisionLogSearchIT {
     }
 
     private String insert(String tenant, String ruleSet, Instant at, int n) {
+        return insert(tenant, ruleSet, at, n, at, false);
+    }
+
+    private String insert(String tenant, String ruleSet, Instant at, int n, Instant evalClock, boolean pinned) {
         String id = String.format("01KD%022d", n);   // a ULID-shaped id; rows are ordered by time first
         jdbc.sql("""
                 INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy, outcome,
-                  masked_inputs, outputs, matched_rule_ids, caller_id, eval_clock, duration_micros, log_mode)
+                  masked_inputs, outputs, matched_rule_ids, caller_id, eval_clock, duration_micros, log_mode, pinned)
                 VALUES (:tenant, :at, :id, :ruleSet, 1, 'FIRST', 'OK', CAST(:inputs AS jsonb),
                   CAST('{"fee": {"currency": "VND", "amount": 10000}}' AS jsonb), CAST('["R2"]' AS jsonb), 'teller',
-                  :at, 31, 'TRANSACTIONAL')
+                  :clock, 31, 'TRANSACTIONAL', :pinned)
                 """)
                 .param("tenant", tenant).param("at", java.sql.Timestamp.from(at)).param("id", id)
-                .param("ruleSet", ruleSet)
+                .param("ruleSet", ruleSet).param("clock", java.sql.Timestamp.from(evalClock)).param("pinned", pinned)
                 .param("inputs", "{\"tier\": \"SILVER\", \"txCount\": " + (n % 9) + ", \"nationalId\": \"" + HASH + "\"}")
                 .update();
         return id;

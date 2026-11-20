@@ -31,6 +31,8 @@ horus:
           # Starting a process and completing a task run its businessRuleTask steps as the caller.
           ROLE_TELLER: [rules:evaluate]
           ROLE_CARD_OFFICER: [rules:evaluate]
+          # rules:pin is granted to no role: no process step pins a version yet, and a pin bypasses the version in
+          # force. Grant it to the account process steps run under once a step needs it.
     processes:
       definitions:
         # Imported at start-up for each start-up tenant, through the normal import path.
@@ -39,8 +41,12 @@ horus:
       security:
         role-permissions:
           ROLE_PROCESS_DEPLOYER: [processes:deploy, processes:read]
+          # Approves process definition versions requested by someone else (four eyes).
+          ROLE_PROCESS_APPROVER: [processes:approve, processes:read]
           ROLE_TELLER: [processes:start, processes:read]
           ROLE_CARD_OFFICER: [processes:read, processes:task:work]
+          # Cancelling an application's process is its own permission (PD-103); starting does not grant it.
+          ROLE_BRANCH_SUPERVISOR: [processes:read, processes:cancel]
     cockpit:
       # How the cockpit header names this service.
       host-label: Card issuing

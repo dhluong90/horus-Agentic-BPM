@@ -37,7 +37,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class RuleLifecycleAcceptancePostgresIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant NOW = Instant.parse("2026-12-15T02:00:00Z");
     private static final AtomicInteger DATABASES = new AtomicInteger();
@@ -216,7 +216,7 @@ class RuleLifecycleAcceptancePostgresIT {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.as(tenant, tenant + "-checker");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
     }
 
     private long count(String table) {
