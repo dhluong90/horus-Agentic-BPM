@@ -122,6 +122,26 @@ public final class JdbcJobStore implements JobStore {
     }
 
     @Override
+    public boolean issueCompletionToken(String tenant, String id, int attempt, byte[] tokenHash) {
+        return jdbc.sql("UPDATE pre_timer SET completion_token_hash = ? "
+                        + "WHERE tenant_id = ? AND id = ? AND status = 'CLAIMED' AND attempt = ?")
+                .params(tokenHash, tenant, id, attempt).update() == 1;
+    }
+
+    @Override
+    public Optional<byte[]> completionTokenHash(String tenant, String id) {
+        return jdbc.sql("SELECT completion_token_hash FROM pre_timer WHERE tenant_id = ? AND id = ? "
+                        + "AND completion_token_hash IS NOT NULL")
+                .params(tenant, id).query((rs, row) -> rs.getBytes(1)).optional();
+    }
+
+    @Override
+    public boolean markLateResult(String tenant, String id, Instant now) {
+        return jdbc.sql("UPDATE pre_timer SET late_result_at = ? WHERE tenant_id = ? AND id = ? AND late_result_at IS NULL")
+                .params(ts(now), tenant, id).update() == 1;
+    }
+
+    @Override
     public Optional<JobRow> findJob(String tenant, String id) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM pre_timer WHERE tenant_id = ? AND id = ?")
                 .params(tenant, id).query(JdbcJobStore::job).optional();

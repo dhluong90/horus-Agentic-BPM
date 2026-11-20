@@ -178,10 +178,15 @@ public record ProcessEngineProperties(
      * @param defaultTimeout timeout of a remote step that declares no {@code horus:timeout}; the lease of its job is
      *     this plus {@code jobs.lease-margin}
      * @param executorThreads adapter calls in flight per replica; a job is claimed only when one of these is free
+     * @param completerRoles per adapter name (the {@code horus:handler} value; write a name with dots as
+     *     {@code "[creditBureau.score]"}), the roles that may complete its steps through
+     *     {@code POST /async-steps/{jobId}:complete}, on top of {@code processes:step:complete}. An adapter without an
+     *     entry cannot be completed from outside. A name that is no registered adapter stops start-up
      */
     public record Adapters(
             @DefaultValue("PT30S") Duration defaultTimeout,
-            @DefaultValue("16") int executorThreads) {
+            @DefaultValue("16") int executorThreads,
+            @DefaultValue Map<String, List<String>> completerRoles) {
 
         public Adapters {
             if (defaultTimeout.isNegative() || defaultTimeout.isZero()) {
@@ -197,8 +202,11 @@ public record ProcessEngineProperties(
      * @return the async step settings
      */
     io.github.dhluong90.bpm.process.internal.service.AsyncSettings toAsyncSettings() {
+        Map<String, java.util.Set<String>> roles = new java.util.LinkedHashMap<>();
+        (adapters.completerRoles() == null ? Map.<String, List<String>>of() : adapters.completerRoles())
+                .forEach((adapter, names) -> roles.put(adapter, java.util.Set.copyOf(names == null ? List.of() : names)));
         return new io.github.dhluong90.bpm.process.internal.service.AsyncSettings(jobs.leaseMargin(),
-                adapters.defaultTimeout(), adapters.executorThreads());
+                adapters.defaultTimeout(), adapters.executorThreads(), roles);
     }
 
     /**

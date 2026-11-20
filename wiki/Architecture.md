@@ -109,7 +109,7 @@ Positions in a process are rows in `pre_token`, not a column on the instance, be
 | Sync in-transaction | The caller's or the scheduler's current transaction | Milliseconds: the engine's own writes | `decision`, gateways, `userTask` state changes, a local `serviceTask` bean that writes only to the same database |
 | Async wait-state | TX1 (claim with a 60 s lease, commit), then the adapter call with no connection, then TX2 (verify lease, record, advance or fail) | Never during the adapter call | `agentTask`, remote HTTP or MCP `serviceTask`, compensation handlers that call other systems |
 
-TX2 re-reads the job `WHERE locked_by = me AND locked_until > now()`. If another replica took the lease after it expired, the late result is discarded and the other attempt owns the step. Adapters receive the `attemptId` so hosts can make their side idempotent (`TR-IDEM-04`). ADR-0008 records the decision. The idempotent start and complete calls:
+TX2 re-reads the job `WHERE locked_by = me AND locked_until > now()`. If another replica took the lease after it expired, the late result is discarded and the other attempt owns the step. Adapters receive the job id as `idempotencyKey()`, the same on every retry, so hosts can make their side idempotent (`TR-IDEM-04`); the `attemptId` changes on every attempt and only fences late results. ADR-0008 records the decision. The idempotent start and complete calls:
 
 ![Idempotent start and complete](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/idempotent-start-complete.svg)
 
@@ -177,7 +177,7 @@ Latency budget per hot path (p50 / p99 targets after warm-up):
 | Scenario | Blast radius | Detection | Recovery |
 |---|---|---|---|
 | Replica crashes after TX1, before TX2 of an async step | One step of one instance | `locked_until < now()` | Another replica reclaims the job with `SKIP LOCKED`; the attempt counter increments; incident after `retry.max` |
-| Adapter returns after the lease expired | One step | TX2 lease check fails | Late result discarded; the reclaiming attempt owns the step; host side idempotent by `attemptId` |
+| Adapter returns after the lease expired | One step | TX2 lease check fails | Late result discarded; the reclaiming attempt owns the step; host side idempotent by the job id |
 | Client retries a start or a complete | One request | `pre_idempotency` primary key; `request_hash` comparison | Stored status and body returned; `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` on a different payload; `409` with `Retry-After` while in flight |
 | Two operators complete the same task | One task | `lock_version` predicate updates 0 rows | `409 VERSION_CONFLICT`; the client reloads and decides |
 | Two replicas finish both branches of a join at once | One instance | `pre_instance` row lock serialises the two transactions | Exactly one outgoing token; no lost wakeup (`TR-ASY-03`) |

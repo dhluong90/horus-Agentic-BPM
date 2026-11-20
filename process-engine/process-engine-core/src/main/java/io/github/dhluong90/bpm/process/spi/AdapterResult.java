@@ -61,7 +61,7 @@ public sealed interface AdapterResult permits AdapterResult.Completed, AdapterRe
 
     /**
      * The remote side took the request and reports the result later through the completion API, quoting the attempt
-     * id. The job keeps its lease; a completion after the lease ends is discarded and the step is called again.
+     * id and presenting the attempt's completion token. The job keeps its lease; a completion after the lease ends is discarded and the step is called again.
      */
     record Accepted() implements AdapterResult {
     }

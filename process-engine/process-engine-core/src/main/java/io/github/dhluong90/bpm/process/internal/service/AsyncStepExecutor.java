@@ -36,7 +36,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * </ol>
  * No thread waits for a remote side: an adapter that answers {@link AdapterResult.Accepted} frees its slot at once and
  * the step waits durably in {@code pre_timer} until the completion API reports the result or the lease ends. Every
- * claim has a new attempt id ({@link ProcessServices#attemptId}). Thread-safe; callers must not hold a transaction.
+ * claim has a new attempt id ({@link ProcessServices#attemptId}) and a new random completion token, whose hash TX1
+ * stores. Thread-safe; callers must not hold a transaction.
  */
 public final class AsyncStepExecutor implements AutoCloseable {
 
@@ -52,6 +53,26 @@ public final class AsyncStepExecutor implements AutoCloseable {
     private final ProcessServices services;
     private final ExecutorService adapterPool;
     private final ScheduledExecutorService timeouts;
+
+    /**
+     * One claimed attempt: the job row and the completion token issued with the claim, which only the adapter call
+     * receives.
+     *
+     * @param job the claimed job
+     * @param completionToken the token; never stored, never logged
+     */
+    public record Claim(JobRow job, String completionToken) {
+
+        public Claim {
+            Objects.requireNonNull(job, "job must not be null");
+            Objects.requireNonNull(completionToken, "completionToken must not be null");
+        }
+
+        @Override
+        public String toString() {
+            return "Claim[job=" + job.id() + ", attempt=" + job.attempt() + ", completionToken=***]";
+        }
+    }
     private final Semaphore slots;
     private final int capacity;
 
@@ -70,7 +91,8 @@ public final class AsyncStepExecutor implements AutoCloseable {
             AsyncSettings async, Map<String, ServiceAdapter> adapters, ProcessServices services,
             ExecutorService adapterPool, ScheduledExecutorService timeouts) {
         this.jobs = Objects.requireNonNull(jobs, "jobs must not be null");
-        this.transactions = Objects.requireNonNull(transactions, "transactions must not be null");
+        this.transactions = TransactionRunner.tracked(Objects.requireNonNull(transactions,
+                "transactions must not be null"));
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.adapters = Map.copyOf(adapters);
@@ -113,9 +135,9 @@ public final class AsyncStepExecutor implements AutoCloseable {
         if (free < 1) {
             return 0;
         }
-        List<JobRow> claimed = claim(free);
+        List<Claim> claimed = claim(free);
         int started = 0;
-        for (JobRow job : claimed) {
+        for (Claim job : claimed) {
             if (dispatch(job)) {
                 started++;
             }
@@ -124,33 +146,36 @@ public final class AsyncStepExecutor implements AutoCloseable {
     }
 
     /**
-     * TX1 alone. Separate so a test can stop a replica between the claim and the call, as a crash would.
+     * TX1 alone: claims due jobs and issues each claim its completion token. Separate so a test can stop a replica
+     * between the claim and the call, as a crash would.
      *
      * @param limit at most this many jobs
-     * @return the claimed jobs
+     * @return the claimed attempts
      */
-    public List<JobRow> claim(int limit) {
-        return transactions.inTransaction(() -> jobs.claimDueAsync(settings.replicaId(), clock.instant(), limit));
+    public List<Claim> claim(int limit) {
+        return transactions.inTransaction(() -> jobs.claimDueAsync(settings.replicaId(), clock.instant(), limit)
+                .stream().map(job -> new Claim(job, services.issueCompletionToken(job))).toList());
     }
 
     /**
      * Runs one claimed attempt on the calling thread: the adapter call, then TX2. No timeout is applied; for tests and
      * for hosts that drive the steps themselves.
      *
-     * @param job a job claimed by this replica
+     * @param job an attempt claimed by this replica
      * @return the outcome of TX2, or empty when the adapter handed the call off or the job was not run
      */
-    public java.util.Optional<StepCompletion.Outcome> runNow(JobRow job) {
-        if (exhausted(job)) {
+    public java.util.Optional<StepCompletion.Outcome> runNow(Claim job) {
+        if (exhausted(job.job())) {
             return java.util.Optional.empty();
         }
         AdapterResult result = call(job);
         return result instanceof AdapterResult.Accepted ? java.util.Optional.empty()
-                : java.util.Optional.of(record(job, toStep(result)));
+                : java.util.Optional.of(record(job.job(), toStep(result)));
     }
 
     /** Starts one claimed attempt on the adapter executor, with its timeout. */
-    private boolean dispatch(JobRow job) {
+    private boolean dispatch(Claim claim) {
+        JobRow job = claim.job();
         if (exhausted(job)) {
             return false;
         }
@@ -178,7 +203,7 @@ public final class AsyncStepExecutor implements AutoCloseable {
                     return; // abandoned at its timeout before it started; the timeout counted this thread as ended
                 }
                 try {
-                    AdapterResult result = call(job);
+                    AdapterResult result = call(claim);
                     if (finished.compareAndSet(false, true)) {
                         ScheduledFuture<?> pendingDeadline = deadline.get();
                         if (pendingDeadline != null) {
@@ -217,7 +242,8 @@ public final class AsyncStepExecutor implements AutoCloseable {
     }
 
     /** The adapter call: no transaction may be open on this thread (TR-ASY-01). */
-    private AdapterResult call(JobRow job) {
+    private AdapterResult call(Claim claim) {
+        JobRow job = claim.job();
         if (transactions.activeOnThisThread()) {
             throw new IllegalStateException("An adapter must not be called inside a transaction (ADR-0008)");
         }
@@ -232,8 +258,8 @@ public final class AsyncStepExecutor implements AutoCloseable {
         Instant claimedAt = job.lockedUntil().minus(job.leaseDuration());
         AdapterCall call = new AdapterCall(job.tenantId(), job.instanceId(), job.nodeId(),
                 payload.get("businessKey") == null ? null : String.valueOf(payload.get("businessKey")), job.id(),
-                ProcessServices.attemptId(job.id(), job.attempt()), job.attempt(), claimedAt.plus(timeoutOf(job)),
-                inputs);
+                ProcessServices.attemptId(job.id(), job.attempt()), claim.completionToken(), job.attempt(),
+                claimedAt.plus(timeoutOf(job)), inputs);
         try {
             AdapterResult result = adapter.execute(call);
             return result == null ? new AdapterResult.Failed("ADAPTER_NULL_RESULT", "The adapter returned null", true)
@@ -263,9 +289,7 @@ public final class AsyncStepExecutor implements AutoCloseable {
         if (job.attempt() <= job.maxAttempts()) {
             return false;
         }
-        transactions.inTransaction(() -> jobs.lockClaim(job.tenantId(), job.id(), settings.replicaId(), job.attempt(),
-                clock.instant()).map(held -> jobs.release(job.tenantId(), job.id(), settings.replicaId(), job.attempt(),
-                job.nextFireAt(), true, clock.instant())).orElse(false));
+        services.failExhausted(job, settings.replicaId());
         LOG.log(System.Logger.Level.WARNING, "process.async.failed tenant={0} job={1} attempt={2} reason=max attempts"
                 + " reached", job.tenantId(), job.id(), job.attempt());
         return true;

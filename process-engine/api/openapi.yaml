@@ -551,13 +551,18 @@ paths:
         For a remote `serviceTask` whose `ServiceAdapter` answered `Accepted`: the remote side, or the host service
         that receives its callback, reports the result of the attempt it was given. Recorded in one transaction, and
         only while the attempt is current: the job is `CLAIMED` under that attempt and its lease (step timeout plus
-        `jobs.lease-margin`) has not ended (ADR-0008). The attempt id is the idempotency key: a repeat of an accepted
-        result answers `DUPLICATE` and writes nothing. A result after the lease ended or after another attempt took
+        `jobs.lease-margin`) has not ended (ADR-0008). The caller presents the attempt id and the attempt's
+        `completionToken` (`AdapterCall.completionToken`); the attempt id is derived from public ids and is not a
+        credential, and a token that does not match the attempt is `403 PERMISSION_DENIED` with nothing written. A
+        repeat of an accepted result answers `DUPLICATE` and writes nothing. A result after the lease ended or after another attempt took
         the step over answers `DISCARDED` and changes nothing; for a cancelled instance it also records
-        `LATE_RESULT_DISCARDED`. A failed result makes the job due again after `jobs.retry-backoff` times the attempt,
+        `LATE_RESULT_DISCARDED`, once per job however often it is repeated. A failed result makes the job due again after `jobs.retry-backoff` times the attempt,
         with a new attempt id, until `jobs.max-attempts`; a business error or a failure with `retryable: false` fails
-        the job. Permission `processes:step:complete`; the tenant comes from the caller, and a job of another tenant is
-        `404 ASYNC_STEP_NOT_FOUND` with nothing written.
+        the job; `retryable` and the reporting caller are recorded in history. Permission `processes:step:complete`,
+        plus one of the roles `horus.bpm.processes.adapters.completer-roles` lists for the step's adapter, otherwise
+        `403 PERMISSION_DENIED`. The tenant comes from the caller, and a job of another tenant is
+        `404 ASYNC_STEP_NOT_FOUND` with nothing written. The remote call itself is deduplicated by the job id
+        (`AdapterCall.idempotencyKey`), which a retry keeps; the attempt id changes on every attempt.
       parameters:
         - name: jobId
           in: path
@@ -571,9 +576,9 @@ paths:
             schema: { $ref: '#/components/schemas/AsyncStepResult' }
             examples:
               completed:
-                value: { attemptId: 4S2Q8M0Z7XK1D9V3B6N5R2T8WA, status: COMPLETED, output: { score: 705, band: A } }
+                value: { attemptId: 4S2Q8M0Z7XK1D9V3B6N5R2T8WA, completionToken: q3V9tYc0mB7xKpL2sWfN8rUeHjD4aZ6oG1iE5vQyT0k, status: COMPLETED, output: { score: 705, band: A } }
               failed:
-                value: { attemptId: 4S2Q8M0Z7XK1D9V3B6N5R2T8WA, status: FAILED, errorCode: BUREAU_UNAVAILABLE, retryable: true }
+                value: { attemptId: 4S2Q8M0Z7XK1D9V3B6N5R2T8WA, completionToken: q3V9tYc0mB7xKpL2sWfN8rUeHjD4aZ6oG1iE5vQyT0k, status: FAILED, errorCode: BUREAU_UNAVAILABLE, retryable: true }
       responses:
         '200':
           description: What the engine did with the result
@@ -831,12 +836,20 @@ components:
   schemas:
     AsyncStepResult:
       type: object
-      required: [attemptId, status]
+      required: [attemptId, completionToken, status]
       properties:
         attemptId:
           type: string
           maxLength: 26
-          description: The attempt id the adapter received (`AdapterCall.attemptId`)
+          description: The attempt id the adapter received (`AdapterCall.attemptId`); a correlation id, not a credential
+        completionToken:
+          type: string
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+          description: |
+            The completion token the adapter received (`AdapterCall.completionToken`): 256 random bits, base64url, new
+            for every attempt. The engine stores only its SHA-256; never log it
         status:
           type: string
           enum: [COMPLETED, FAILED, BUSINESS_ERROR]

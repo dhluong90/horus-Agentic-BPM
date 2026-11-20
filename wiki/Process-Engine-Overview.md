@@ -35,14 +35,14 @@ The transition table with guards and emitted events is in [[Architecture]] secti
 
 ![Async wait-state protocol](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/async-wait-state.svg)
 
-Numbers that follow from the rule: 100 concurrent agent calls of 10 s each hold 0 connections while waiting; the same calls inside a transaction would need 100 connections. The engine part of an async step costs two short transactions, about 10 ms in total. Adapters receive `attemptId`; a result that arrives after the lease expired is discarded because another attempt owns the step by then (`TR-ASY-01`, `TR-ASY-02`, ADR-0008).
+Numbers that follow from the rule: 100 concurrent agent calls of 10 s each hold 0 connections while waiting; the same calls inside a transaction would need 100 connections. The engine part of an async step costs two short transactions, about 10 ms in total. Adapters receive the job id as idempotency key, which a retry keeps, and an `attemptId` that changes on every attempt; a result that arrives after the lease expired is discarded because another attempt owns the step by then (`TR-IDEM-04`, `TR-ASY-01`, `TR-ASY-02`, ADR-0008).
 
-Since 0.2.0 a `serviceTask` with `horus:mode="remote"` (and an optional `horus:timeout`, default `adapters.default-timeout`) runs this way through a `ServiceAdapter` bean named by `horus:handler`. A job is claimed only when one of the replica's `adapters.executor-threads` slots is free; its lease is the timeout plus `jobs.lease-margin`. A crashed replica's attempt is claimed again when its lease ends, as attempt 2 with a new attempt id. A failed attempt is retried after `jobs.retry-backoff` times the attempt, up to `jobs.max-attempts`. An adapter that answers `Accepted` frees its thread at once; the remote side later reports the result through `POST /api/bpm/processes/v1/async-steps/{jobId}:complete` ([[Process Engine API]]) before the lease ends.
+Since 0.2.0 a `serviceTask` with `horus:mode="remote"` (and an optional `horus:timeout`, default `adapters.default-timeout`) runs this way through a `ServiceAdapter` bean named by `horus:handler`. A job is claimed only when one of the replica's `adapters.executor-threads` slots is free; its lease is the timeout plus `jobs.lease-margin`. A crashed replica's attempt is claimed again when its lease ends, as attempt 2 with a new attempt id. A failed attempt is retried after `jobs.retry-backoff` times the attempt, up to `jobs.max-attempts`. An adapter that answers `Accepted` frees its thread at once; the remote side later reports the result through `POST /api/bpm/processes/v1/async-steps/{jobId}:complete` ([[Process Engine API]]) before the lease ends, with the attempt's completion token. The caller needs `processes:step:complete` and a role listed for that adapter in `horus.bpm.processes.adapters.completer-roles`.
 
 ```java
 public interface ServiceAdapter {
   String name();                                         // the horus:handler name
-  AdapterResult execute(AdapterCall call);               // call: tenantId, instanceId, nodeId, businessKey, jobId, attemptId, attempt, deadline, inputs
+  AdapterResult execute(AdapterCall call);               // call: tenantId, instanceId, nodeId, businessKey, jobId, attemptId, completionToken, attempt, deadline, inputs; idempotencyKey() is the jobId
 }
 // AdapterResult: Completed(output) | BusinessError(code, message) | Failed(errorCode, detail, retryable) | Accepted()
 public interface AgentAdapter {                          // with the agent step (#52)

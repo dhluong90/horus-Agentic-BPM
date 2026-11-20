@@ -181,6 +181,36 @@ public interface JobStore {
     int cancelJob(String tenant, String id, Instant now);
 
     /**
+     * Stores the SHA-256 of the completion token issued to the current claim of an async job, in the claim
+     * transaction (ADR-0008). Only the hash is stored; the token itself goes to the adapter and nowhere else.
+     *
+     * @param tenant tenant
+     * @param id job id
+     * @param attempt the attempt of that claim
+     * @param tokenHash SHA-256 of the token, 32 bytes
+     * @return true when the job is still claimed under that attempt
+     */
+    boolean issueCompletionToken(String tenant, String id, int attempt, byte[] tokenHash);
+
+    /**
+     * @param tenant tenant
+     * @param id job id
+     * @return the hash of the completion token of the job's latest claim, or empty when none was issued
+     */
+    Optional<byte[]> completionTokenHash(String tenant, String id);
+
+    /**
+     * Marks that a late result for a cancelled job has been recorded, once per job, so repeated late callbacks write
+     * one history row in total.
+     *
+     * @param tenant tenant
+     * @param id job id
+     * @param now current time
+     * @return true for the first late result of the job; false when one was already recorded
+     */
+    boolean markLateResult(String tenant, String id, Instant now);
+
+    /**
      * @param tenant tenant
      * @param id job id
      * @return the job in the tenant
@@ -238,6 +268,21 @@ public interface JobStore {
         @Override
         public int cancelJob(String tenant, String id, Instant now) {
             return 0;
+        }
+
+        @Override
+        public boolean issueCompletionToken(String tenant, String id, int attempt, byte[] tokenHash) {
+            return false;
+        }
+
+        @Override
+        public Optional<byte[]> completionTokenHash(String tenant, String id) {
+            return Optional.empty();
+        }
+
+        @Override
+        public boolean markLateResult(String tenant, String id, Instant now) {
+            return false;
         }
 
         @Override

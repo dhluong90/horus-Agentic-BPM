@@ -15,7 +15,7 @@ import io.github.dhluong90.bpm.process.api.StepCompletion;
 import io.github.dhluong90.bpm.process.internal.service.AsyncSettings;
 import io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
-import io.github.dhluong90.bpm.process.internal.store.JobStore.JobRow;
+import io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor.Claim;
 import io.github.dhluong90.bpm.process.spi.AdapterCall;
 import io.github.dhluong90.bpm.process.spi.AdapterResult;
 import io.github.dhluong90.bpm.process.spi.ServiceAdapter;
@@ -52,6 +52,15 @@ class AsyncWaitStateTest {
 
     private static final Instant T0 = Instant.parse("2027-03-01T02:00:00Z");
     private static final String BUREAU = "creditBureau.score";
+    private static final String SANCTIONS = "sanctions.screen";
+    /** The role of the bureau's callback client: may complete bureau steps only. */
+    private static final String BUREAU_CALLBACK = "BUREAU_CALLBACK";
+    /** The role of the sanctions provider's callback client: may complete sanctions steps only. */
+    private static final String SANCTIONS_CALLBACK = "SANCTIONS_CALLBACK";
+    /** adapters.completer-roles of every replica. */
+    private static final AsyncSettings SCOPED = new AsyncSettings(AsyncSettings.DEFAULT_LEASE_MARGIN,
+            AsyncSettings.DEFAULT_TIMEOUT, AsyncSettings.DEFAULT_EXECUTOR_THREADS,
+            Map.of(BUREAU, java.util.Set.of("ROLE_" + BUREAU_CALLBACK), SANCTIONS, java.util.Set.of(SANCTIONS_CALLBACK)));
 
     private final TestClock clock = TestClock.at(T0);
     private final List<TestEngine> engines = new ArrayList<>();
@@ -84,18 +93,34 @@ class AsyncWaitStateTest {
         };
     }
 
+    /** A sanctions screening stub on the same replica, never called by the loan process. */
+    private static ServiceAdapter sanctions() {
+        return new ServiceAdapter() {
+            @Override
+            public String name() {
+                return SANCTIONS;
+            }
+
+            @Override
+            public AdapterResult execute(AdapterCall call) {
+                return AdapterResult.completed(Map.of("cleared", true));
+            }
+        };
+    }
+
     private static AdapterResult score(int value) {
         return AdapterResult.completed(Map.of("score", value, "band", value >= 700 ? "A" : "C"));
     }
 
     private TestEngine replica(String id, ServiceAdapter adapter) {
-        return track(TestEngine.replica(id, clock).adapters(adapter).build());
+        return track(TestEngine.replica(id, clock).async(SCOPED).adapters(adapter, sanctions()).build());
     }
 
     private TestEngine track(TestEngine engine) {
         engines.add(engine);
         engine.identity.permissions = java.util.Set.of("processes:deploy", "processes:start", "processes:read",
                 "processes:task:work", "processes:cancel", "processes:step:complete");
+        engine.identity.roles = java.util.Set.of(BUREAU_CALLBACK);
         return engine;
     }
 
@@ -218,12 +243,12 @@ class AsyncWaitStateTest {
         assertThat(job(loan)).containsEntry("status", "DUE").containsEntry("job_kind", "ASYNC_SERVICE");
 
         // When pod 1 claims at T0 and pod 2 polls during the call and after it
-        List<JobRow> claimed = pod1.async.claim(16);
+        List<Claim> claimed = pod1.async.claim(16);
 
         // Then TX1 sets locked_until = T0 + 32 s, pod 2 never claims the live attempt, and TX2 records the result once
         assertThat(claimed).hasSize(1);
         assertThat(lockedUntil(loan)).isEqualTo(T0.plusSeconds(32));
-        assertThat(claimed.get(0).leaseDuration()).isEqualTo(Duration.ofSeconds(32));
+        assertThat(claimed.get(0).job().leaseDuration()).isEqualTo(Duration.ofSeconds(32));
         assertThat(pod1.async.runNow(claimed.get(0))).contains(StepCompletion.Outcome.ACCEPTED);
         assertThat(pod2ClaimedDuringCall).isFalse();
         assertThat(pod2[0].async.claim(16)).isEmpty();
@@ -240,24 +265,24 @@ class AsyncWaitStateTest {
         TestEngine pod2 = replica("pod-2", bureau(call -> score(731)));
         deploy(pod1);
         String loan = apply(pod1, "LOAN-2027-0043").id();
-        JobRow first = pod1.async.claim(16).get(0);
+        Claim first = pod1.async.claim(16).get(0);
 
         // When pod 2 polls just before and at T0 + 32 s
         clock.set(T0.plusSeconds(32).minusMillis(1));
-        List<JobRow> early = pod2.async.claim(16);
+        List<Claim> early = pod2.async.claim(16);
         clock.set(T0.plusSeconds(32));
-        List<JobRow> late = pod2.async.claim(16);
+        List<Claim> late = pod2.async.claim(16);
 
         // Then pod 2 skips the job until the lease ends, then reclaims it as attempt 2 with a new attempt id
         assertThat(early).isEmpty();
         assertThat(late).hasSize(1);
-        assertThat(late.get(0).attempt()).isEqualTo(2);
+        assertThat(late.get(0).job().attempt()).isEqualTo(2);
         assertThat(job(loan)).containsEntry("locked_by", "pod-2").containsEntry("attempt", 2);
         assertThat(pod2.async.runNow(late.get(0))).contains(StepCompletion.Outcome.ACCEPTED);
         assertThat(calls).hasSize(1);
         assertThat(calls.get(0).attempt()).isEqualTo(2);
-        assertThat(calls.get(0).attemptId()).isEqualTo(ProcessServices.attemptId(first.id(), 2))
-                .isNotEqualTo(ProcessServices.attemptId(first.id(), 1));
+        assertThat(calls.get(0).attemptId()).isEqualTo(ProcessServices.attemptId(first.job().id(), 2))
+                .isNotEqualTo(ProcessServices.attemptId(first.job().id(), 1));
         assertThat(calls.get(0).deadline()).isEqualTo(T0.plusSeconds(34));
         assertThat(pod2.services.instance(loan).variables()).containsEntry("bureau", Map.of("score", 731L, "band", "A"));
     }
@@ -271,9 +296,9 @@ class AsyncWaitStateTest {
         TestEngine pod2 = replica("pod-2", bureau(call -> score(744)));
         deploy(pod1);
         String loan = apply(pod1, "LOAN-2027-0044").id();
-        JobRow stalled = pod1.async.claim(16).get(0);
+        Claim stalled = pod1.async.claim(16).get(0);
         clock.set(T0.plusSeconds(32));
-        JobRow takeover = pod2.async.claim(16).get(0);
+        Claim takeover = pod2.async.claim(16).get(0);
         int historyBefore = history(loan);
 
         // When pod 1's bureau answer finally arrives
@@ -303,7 +328,7 @@ class AsyncWaitStateTest {
 
         assertThat(history(loan)).isEqualTo(historyBefore);
         assertThat(job(loan)).containsEntry("status", "CLAIMED").containsEntry("attempt", 1);
-        assertThat(pod1.async.claim(16)).singleElement().extracting(JobRow::attempt).isEqualTo(2);
+        assertThat(pod1.async.claim(16)).singleElement().extracting(c -> c.job().attempt()).isEqualTo(2);
     }
 
     // ---- completion API ---------------------------------------------------------------------------------------
@@ -314,18 +339,19 @@ class AsyncWaitStateTest {
         TestEngine pod1 = replica("pod-1", bureau(call -> new AdapterResult.Accepted()));
         deploy(pod1);
         String loan = apply(pod1, "LOAN-2027-0046").id();
-        JobRow claimed = pod1.async.claim(16).get(0);
+        Claim claimed = pod1.async.claim(16).get(0);
         assertThat(pod1.async.runNow(claimed)).isEmpty();
         assertThat(job(loan)).containsEntry("status", "CLAIMED");
         String attemptId = calls.get(0).attemptId();
-        assertThat(calls.get(0).jobId()).isEqualTo(claimed.id());
+        String token = calls.get(0).completionToken();
+        assertThat(calls.get(0).jobId()).isEqualTo(claimed.job().id());
 
         // When the callback arrives on another replica, and the partner repeats it
         TestEngine pod2 = replica("pod-2", bureau(call -> score(1)));
         clock.advance(Duration.ofSeconds(5));
-        StepCompletion first = pod2.services.complete(claimed.id(), attemptId, score(705));
+        StepCompletion first = pod2.services.complete(claimed.job().id(), attemptId, token, score(705));
         int historyAfterFirst = history(loan);
-        StepCompletion repeat = pod2.services.complete(claimed.id(), attemptId, score(705));
+        StepCompletion repeat = pod2.services.complete(claimed.job().id(), attemptId, token, score(705));
 
         // Then the first is accepted and moves the loan on; the repeat is a duplicate and writes nothing
         assertThat(first.outcome()).isEqualTo(StepCompletion.Outcome.ACCEPTED);
@@ -342,22 +368,23 @@ class AsyncWaitStateTest {
         TestEngine pod1 = replica("pod-1", bureau(call -> new AdapterResult.Accepted()));
         deploy(pod1);
         String loan = apply(pod1, "LOAN-2027-0047").id();
-        JobRow claimed = pod1.async.claim(16).get(0);
+        Claim claimed = pod1.async.claim(16).get(0);
         pod1.async.runNow(claimed);
         String attemptId = calls.get(0).attemptId();
+        String token = calls.get(0).completionToken();
         int historyBefore = history(loan);
 
-        pod1.identity.as("bank-b", "partner-b", "processes:step:complete");
-        assertThatThrownBy(() -> pod1.services.complete(claimed.id(), attemptId, score(800)))
+        pod1.identity.as("bank-b", "partner-b", "processes:step:complete").roles = java.util.Set.of(BUREAU_CALLBACK);
+        assertThatThrownBy(() -> pod1.services.complete(claimed.job().id(), attemptId, token, score(800)))
                 .isInstanceOf(AsyncStepNotFoundException.class)
                 .extracting(e -> ((AsyncStepNotFoundException) e).code()).isEqualTo("ASYNC_STEP_NOT_FOUND");
 
         pod1.identity.as("bank-a", "teller-lan", "processes:read");
-        assertThatThrownBy(() -> pod1.services.complete(claimed.id(), attemptId, score(800)))
+        assertThatThrownBy(() -> pod1.services.complete(claimed.job().id(), attemptId, token, score(800)))
                 .isInstanceOf(PermissionDeniedException.class);
 
-        pod1.identity.as("bank-a", "partner-a", "processes:step:complete");
-        assertThatThrownBy(() -> pod1.services.complete(claimed.id(), attemptId, new AdapterResult.Accepted()))
+        pod1.identity.as("bank-a", "partner-a", "processes:step:complete").roles = java.util.Set.of(BUREAU_CALLBACK);
+        assertThatThrownBy(() -> pod1.services.complete(claimed.job().id(), attemptId, token, new AdapterResult.Accepted()))
                 .isInstanceOf(InputInvalidException.class);
 
         assertThat(history(loan)).isEqualTo(historyBefore);
@@ -377,13 +404,18 @@ class AsyncWaitStateTest {
         assertThat(job(loan)).containsEntry("status", "DUE");
         assertThat(pod1.async.claim(16)).isEmpty();
         clock.advance(Duration.ofSeconds(10));
-        JobRow retry = pod1.async.claim(16).get(0);
+        Claim retry = pod1.async.claim(16).get(0);
         assertThat(pod1.async.runNow(retry)).contains(StepCompletion.Outcome.ACCEPTED);
 
         assertThat(calls).extracting(AdapterCall::attempt).containsExactly(1, 2);
         assertThat(calls.get(0).attemptId()).isNotEqualTo(calls.get(1).attemptId());
         assertThat(job(loan)).containsEntry("status", "FAILED").containsEntry("attempt", 2);
         assertThat(history(loan, "ASYNC_ATTEMPT_FAILED")).isEqualTo(2);
+        assertThat(TestEngine.jdbc().sql("SELECT details->>'errorCode' || ' retryable=' || (details->>'retryable') || "
+                + "' final=' || (details->>'final') FROM pre_history WHERE instance_id = ? AND event_type = "
+                + "'ASYNC_ATTEMPT_FAILED' ORDER BY (details->>'attempt')::int").param(loan).query(String.class).list())
+                .containsExactly("BUREAU_UNAVAILABLE retryable=true final=false",
+                        "APPLICANT_UNKNOWN retryable=false final=true");
         assertThat(tokenOn(pod1, loan)).isEqualTo("bureau-score:WAITING_ASYNC");
     }
 
@@ -434,7 +466,7 @@ class AsyncWaitStateTest {
         }));
         deploy(pod[0]);
         String loan = apply(pod[0], "LOAN-2027-0050").id();
-        JobRow claimed = pod[0].async.claim(16).get(0);
+        Claim claimed = pod[0].async.claim(16).get(0);
 
         Optional<StepCompletion.Outcome> outcome = pod[0].async.runNow(claimed);
 
@@ -445,8 +477,219 @@ class AsyncWaitStateTest {
         assertThat(history(loan, "TOKEN_CANCELLED")).isEqualTo(1);
         assertThat(TestEngine.jdbc().sql("SELECT attempt_id FROM pre_history WHERE instance_id = ? AND event_type = "
                 + "'LATE_RESULT_DISCARDED'").param(loan).query(String.class).single())
-                .isEqualTo(ProcessServices.attemptId(claimed.id(), 1));
+                .isEqualTo(ProcessServices.attemptId(claimed.job().id(), 1));
         assertThat(history(loan, "ASYNC_RESULT_ACCEPTED") + history(loan, "ASYNC_ATTEMPT_FAILED")).isZero();
         assertThat(pod[0].services.instance(loan).variables()).doesNotContainKey("bureau");
+    }
+
+    // ---- completion token and adapter scope ---------------------------------------------------------------------
+
+    /** Starts a loan whose bureau call is handed off, and returns the call the bureau received. */
+    private AdapterCall handedOff(TestEngine engine, String applicationId) {
+        apply(engine, applicationId);
+        int before = calls.size();
+        Claim claimed = engine.async.claim(16).get(0);
+        assertThat(engine.async.runNow(claimed)).isEmpty();
+        assertThat(calls).hasSize(before + 1);
+        return calls.get(before);
+    }
+
+    @Test
+    void TR_ASY_02_a_derived_attempt_id_without_the_completion_token_is_refused_and_writes_nothing() {
+        // Given a bureau call handed off; a client reads the instance and derives the job's current attempt id
+        TestEngine pod1 = replica("pod-1", bureau(call -> new AdapterResult.Accepted()));
+        deploy(pod1);
+        AdapterCall call = handedOff(pod1, "LOAN-2027-0051");
+        String derived = ProcessServices.attemptId(call.jobId(), 1);
+        int historyBefore = history(call.instanceId());
+
+        // When it posts a forged result with the derived id and a guessed token
+        org.assertj.core.api.ThrowableAssert.ThrowingCallable forged = () -> pod1.services.complete(call.jobId(),
+                derived, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", score(850));
+
+        // Then the derived id is the real one, yet the completion is refused and nothing changes
+        assertThat(derived).isEqualTo(call.attemptId());
+        assertThatThrownBy(forged).isInstanceOf(PermissionDeniedException.class);
+        assertThatThrownBy(() -> pod1.services.complete(call.jobId(), derived, " ", score(850)))
+                .isInstanceOf(InputInvalidException.class);
+        assertThat(history(call.instanceId())).isEqualTo(historyBefore);
+        assertThat(job(call.instanceId())).containsEntry("status", "CLAIMED").containsEntry("attempt", 1);
+        assertThat(tokenOn(pod1, call.instanceId())).isEqualTo("bureau-score:WAITING_ASYNC");
+        assertThat(call.completionToken()).hasSize(43).isNotEqualTo(call.attemptId());
+        assertThat(call.toString()).doesNotContain(call.completionToken()).contains("completionToken=***");
+        byte[] stored = TestEngine.jdbc().sql("SELECT completion_token_hash FROM pre_timer WHERE id = ?")
+                .param(call.jobId()).query((rs, row) -> rs.getBytes(1)).single();
+        assertThat(stored).hasSize(32);
+        assertThat(new String(stored, StandardCharsets.ISO_8859_1)).doesNotContain(call.completionToken());
+    }
+
+    @Test
+    void TR_ASY_02_a_token_from_another_job_is_refused() {
+        // Given two loans whose bureau calls are both handed off
+        TestEngine pod1 = replica("pod-1", bureau(call -> new AdapterResult.Accepted()));
+        deploy(pod1);
+        AdapterCall first = handedOff(pod1, "LOAN-2027-0052");
+        AdapterCall second = handedOff(pod1, "LOAN-2027-0053");
+
+        // When the first loan's step is completed with the second loan's token, then with its own
+        org.assertj.core.api.ThrowableAssert.ThrowingCallable swapped = () -> pod1.services.complete(first.jobId(),
+                first.attemptId(), second.completionToken(), score(790));
+
+        // Then the swapped token is refused, and the right one is accepted
+        assertThatThrownBy(swapped).isInstanceOf(PermissionDeniedException.class);
+        assertThat(job(first.instanceId())).containsEntry("status", "CLAIMED");
+        assertThat(pod1.services.complete(first.jobId(), first.attemptId(), first.completionToken(), score(790))
+                .outcome()).isEqualTo(StepCompletion.Outcome.ACCEPTED);
+        assertThat(job(second.instanceId())).containsEntry("status", "CLAIMED");
+    }
+
+    @Test
+    void TR_ASY_02_a_token_of_an_earlier_attempt_cannot_complete_the_current_one() {
+        // Given attempt 1 handed off, its lease ended, and attempt 2 handed off again
+        TestEngine pod1 = replica("pod-1", bureau(call -> new AdapterResult.Accepted()));
+        deploy(pod1);
+        AdapterCall attempt1 = handedOff(pod1, "LOAN-2027-0054");
+        clock.advance(Duration.ofSeconds(60));
+        Claim reclaimed = pod1.async.claim(16).get(0);
+        pod1.async.runNow(reclaimed);
+        AdapterCall attempt2 = calls.get(calls.size() - 1);
+
+        // When attempt 2 is reported with attempt 1's token, and attempt 1 is reported late with its own
+        org.assertj.core.api.ThrowableAssert.ThrowingCallable oldToken = () -> pod1.services.complete(
+                attempt2.jobId(), attempt2.attemptId(), attempt1.completionToken(), score(700));
+        StepCompletion late = pod1.services.complete(attempt1.jobId(), attempt1.attemptId(),
+                attempt1.completionToken(), score(700));
+
+        // Then the first is refused and the late one is discarded; the attempt 2 token still works
+        assertThat(attempt2.completionToken()).isNotEqualTo(attempt1.completionToken());
+        assertThat(attempt2.idempotencyKey()).isEqualTo(attempt1.idempotencyKey()).isEqualTo(attempt1.jobId());
+        assertThatThrownBy(oldToken).isInstanceOf(PermissionDeniedException.class);
+        assertThat(late.outcome()).isEqualTo(StepCompletion.Outcome.DISCARDED);
+        assertThat(pod1.services.complete(attempt2.jobId(), attempt2.attemptId(), attempt2.completionToken(),
+                score(700)).outcome()).isEqualTo(StepCompletion.Outcome.ACCEPTED);
+    }
+
+    @Test
+    void TR_SEC_04_a_client_scoped_to_another_adapter_cannot_complete_a_bureau_step() {
+        // Given a bureau call handed off, and the sanctions provider's callback client holding the bureau's token
+        TestEngine pod1 = replica("pod-1", bureau(call -> new AdapterResult.Accepted()));
+        deploy(pod1);
+        AdapterCall call = handedOff(pod1, "LOAN-2027-0055");
+        int historyBefore = history(call.instanceId());
+        pod1.identity.as("bank-a", "sanctions-callback", "processes:step:complete").roles =
+                java.util.Set.of(SANCTIONS_CALLBACK);
+
+        // When it posts a cleared result for the bureau step, and a caller with no completer role tries the same
+        org.assertj.core.api.ThrowableAssert.ThrowingCallable outOfScope = () -> pod1.services.complete(call.jobId(),
+                call.attemptId(), call.completionToken(), score(810));
+
+        // Then both are refused and nothing is written; the bureau's own client completes it
+        assertThatThrownBy(outOfScope).isInstanceOf(PermissionDeniedException.class)
+                .hasMessageContaining("completer-roles");
+        pod1.identity.roles = java.util.Set.of();
+        assertThatThrownBy(outOfScope).isInstanceOf(PermissionDeniedException.class);
+        assertThat(history(call.instanceId())).isEqualTo(historyBefore);
+        assertThat(job(call.instanceId())).containsEntry("status", "CLAIMED");
+        pod1.identity.as("bank-a", "bureau-callback", "processes:step:complete").roles =
+                java.util.Set.of(BUREAU_CALLBACK);
+        assertThat(pod1.services.complete(call.jobId(), call.attemptId(), call.completionToken(), score(810))
+                .outcome()).isEqualTo(StepCompletion.Outcome.ACCEPTED);
+    }
+
+    @Test
+    void completer_roles_naming_an_unregistered_adapter_stop_the_engine() {
+        AsyncSettings typo = new AsyncSettings(AsyncSettings.DEFAULT_LEASE_MARGIN, AsyncSettings.DEFAULT_TIMEOUT, 2,
+                Map.of("creditBureau.scor", java.util.Set.of(BUREAU_CALLBACK)));
+
+        assertThatThrownBy(() -> TestEngine.replica("pod-1", clock).async(typo).adapters(bureau(c -> score(1))).build())
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("creditBureau.scor");
+    }
+
+    // ---- TR-IDEM-04 -------------------------------------------------------------------------------------------
+
+    @Test
+    void TR_IDEM_04_a_retry_after_a_timeout_sends_the_same_idempotency_key() throws Exception {
+        // Given a bureau whose first call hangs past the 0.2 s step timeout and whose second answers
+        CountDownLatch never = new CountDownLatch(1);
+        AtomicInteger n = new AtomicInteger();
+        TestEngine pod1 = track(TestEngine.replica("pod-1", clock)
+                .async(new AsyncSettings(Duration.ofSeconds(30), Duration.ofSeconds(30), 2))
+                .adapters(bureau(call -> {
+                    if (n.incrementAndGet() == 1) {
+                        try {
+                            never.await(30, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    return score(702);
+                })).build());
+        byte[] fast = new String(TestEngine.resource("/bpmn/loan-bureau-check.bpmn"), StandardCharsets.UTF_8)
+                .replace("horus:timeout=\"PT2S\"", "horus:timeout=\"PT0.2S\"").getBytes(StandardCharsets.UTF_8);
+        deploy(pod1, fast);
+        String loan = apply(pod1, "LOAN-2027-0056").id();
+
+        // When attempt 1 times out, and attempt 2 runs after the retry backoff
+        assertThat(pod1.async.pollOnce()).isEqualTo(1);
+        assertThat(pod1.async.awaitIdle(Duration.ofSeconds(30))).isTrue();
+        clock.advance(Duration.ofSeconds(10));
+        assertThat(pod1.async.pollOnce()).isEqualTo(1);
+        assertThat(pod1.async.awaitIdle(Duration.ofSeconds(30))).isTrue();
+
+        // Then both calls carry the job id as idempotency key, while attempt ids and tokens differ
+        assertThat(calls).hasSize(2);
+        assertThat(calls).extracting(AdapterCall::idempotencyKey).containsOnly(calls.get(0).jobId());
+        assertThat(calls.get(0).attemptId()).isNotEqualTo(calls.get(1).attemptId());
+        assertThat(calls.get(0).completionToken()).isNotEqualTo(calls.get(1).completionToken());
+        assertThat(job(loan)).containsEntry("status", "DONE").containsEntry("attempt", 2);
+        assertThat(pod1.services.instance(loan).variables()).containsEntry("bureau", Map.of("score", 702L, "band", "A"));
+    }
+
+    // ---- bounded history ----------------------------------------------------------------------------------------
+
+    @Test
+    void PRE_041_a_hundred_late_callbacks_on_a_cancelled_step_write_one_history_row() {
+        // Given a bureau call handed off, then the loan cancelled
+        TestEngine pod1 = replica("pod-1", bureau(call -> new AdapterResult.Accepted()));
+        deploy(pod1);
+        AdapterCall call = handedOff(pod1, "LOAN-2027-0057");
+        ProcessInstance current = pod1.services.instance(call.instanceId());
+        pod1.services.cancel(call.instanceId(), current.lockVersion(), "Applicant withdrew", "cancel-0057");
+
+        // When the bureau's callback is repeated 100 times
+        List<StepCompletion.Outcome> outcomes = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            outcomes.add(pod1.services.complete(call.jobId(), call.attemptId(), call.completionToken(), score(690))
+                    .outcome());
+        }
+
+        // Then every one is discarded and exactly one LATE_RESULT_DISCARDED row exists
+        assertThat(outcomes).containsOnly(StepCompletion.Outcome.DISCARDED);
+        assertThat(history(call.instanceId(), "LATE_RESULT_DISCARDED")).isEqualTo(1);
+        assertThat(pod1.services.instance(call.instanceId()).status()).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void a_job_claimed_beyond_its_attempts_fails_with_a_history_entry() {
+        // Given a bureau step whose attempts keep dying with their replica: claimed 3 times, never run
+        TestEngine pod1 = replica("pod-1", bureau(call -> score(1)));
+        deploy(pod1);
+        String loan = apply(pod1, "LOAN-2027-0058").id();
+        for (int i = 0; i < 3; i++) {
+            assertThat(pod1.async.claim(16)).hasSize(1);
+            clock.advance(Duration.ofSeconds(60));
+        }
+
+        // When the fourth claim is run
+        Claim fourth = pod1.async.claim(16).get(0);
+        Optional<StepCompletion.Outcome> outcome = pod1.async.runNow(fourth);
+
+        // Then the adapter is not called, the job fails and history says why
+        assertThat(outcome).isEmpty();
+        assertThat(calls).isEmpty();
+        assertThat(job(loan)).containsEntry("status", "FAILED").containsEntry("attempt", 4);
+        assertThat(TestEngine.jdbc().sql("SELECT details->>'errorCode' || ' final=' || (details->>'final') FROM "
+                + "pre_history WHERE instance_id = ? AND event_type = 'ASYNC_ATTEMPT_FAILED'").param(loan)
+                .query(String.class).single()).isEqualTo("MAX_ATTEMPTS_REACHED final=true");
     }
 }

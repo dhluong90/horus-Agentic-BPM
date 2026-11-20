@@ -307,13 +307,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             java.util.Set<String> adapters) {
         this.async = Objects.requireNonNull(async);
         this.adapters = java.util.Set.copyOf(adapters);
+        for (String adapter : async.completerRoles().keySet()) {
+            if (!this.adapters.contains(adapter)) {
+                throw new IllegalArgumentException("adapters.completer-roles names " + adapter
+                        + ", which is no registered ServiceAdapter");
+            }
+        }
         this.writers = Map.copyOf(writers);
         this.jobs = Objects.requireNonNull(jobs);
         this.jobSettings = Objects.requireNonNull(jobSettings);
         this.tenants = Objects.requireNonNull(tenants);
         this.callers = Objects.requireNonNull(callers);
         this.clock = Objects.requireNonNull(clock);
-        this.transactions = Objects.requireNonNull(transactions);
+        this.transactions = TransactionRunner.tracked(Objects.requireNonNull(transactions));
         this.store = Objects.requireNonNull(store);
         this.readers = Map.copyOf(readers);
         this.invoker = Objects.requireNonNull(invoker);
@@ -1067,9 +1073,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     // ---- async steps (ADR-0008) ------------------------------------------------------------------------------
 
+    /** Error code recorded when a job is claimed more often than {@code jobs.max-attempts} allows. */
+    static final String MAX_ATTEMPTS_REACHED = "MAX_ATTEMPTS_REACHED";
+
     /**
      * The attempt id of one claim of an async job: derived from the job id and the attempt number, so every claim
-     * has a new one (TR-ASY-02) and a result can be matched to its claim without storing anything in the claim.
+     * has a new one (TR-ASY-02) and a result can be matched to its claim. A correlation id and the history key, never
+     * a credential: a completion from outside must also present the attempt's completion token.
      *
      * @param jobId the job id
      * @param attempt the attempt number, from 1
@@ -1079,13 +1089,32 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return Ids.child(jobId, attempt);
     }
 
+    /**
+     * Issues the completion token of a claim, inside the claim transaction: a new random token whose hash is stored on
+     * the job row. The token is returned once, for the adapter call, and is never stored or logged.
+     *
+     * @param job a job this transaction just claimed
+     * @return the token
+     */
+    String issueCompletionToken(JobRow job) {
+        String token = CompletionTokens.issue();
+        if (!jobs.issueCompletionToken(job.tenantId(), job.id(), job.attempt(), CompletionTokens.hash(token))) {
+            throw new IllegalStateException("Job " + job.id() + " lost its claim inside its claim transaction");
+        }
+        return token;
+    }
+
     @Override
-    public StepCompletion complete(String jobId, String attemptId, AdapterResult result) {
+    public StepCompletion complete(String jobId, String attemptId, String completionToken, AdapterResult result) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_STEP_COMPLETE);
         if (jobId == null || jobId.isBlank() || jobId.length() > 26 || attemptId == null || attemptId.isBlank()
                 || attemptId.length() > 26) {
             throw new InputInvalidException("jobId and attemptId are required, at most 26 characters");
+        }
+        if (completionToken == null || completionToken.isBlank() || completionToken.length() > CompletionTokens.MAX_LENGTH) {
+            throw new InputInvalidException("completionToken is required, at most " + CompletionTokens.MAX_LENGTH
+                    + " characters");
         }
         Objects.requireNonNull(result, "result must not be null");
         StepResult step = switch (result) {
@@ -1097,19 +1126,35 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             case AdapterResult.Failed f -> new StepResult.Failed(f.errorCode(), f.detail(), f.retryable());
             case AdapterResult.Accepted a -> throw new InputInvalidException("A completion carries a result, not Accepted");
         };
-        return new StepCompletion(jobId, attemptId, recordAttempt(tenant, jobId, attemptId, step, caller));
+        // The adapter scope never changes for a job, so it is checked before any lock is taken.
+        JobRow peek = jobs.findJob(tenant, jobId).filter(j -> JobStore.isAsync(j.jobKind()))
+                .orElseThrow(() -> new AsyncStepNotFoundException("No async step " + jobId));
+        if (!async.mayComplete(target(peek), callers.currentRoles())) {
+            throw new PermissionDeniedException("Not a completer of this step's adapter (adapters.completer-roles)");
+        }
+        return new StepCompletion(jobId, attemptId, recordAttempt(tenant, jobId, attemptId,
+                new Presented(completionToken), step, caller));
+    }
+
+    /** The adapter name a job calls. */
+    private static String target(JobRow job) {
+        Object target = Values.readMap(job.payloadJson()).get("target");
+        return target == null ? "" : String.valueOf(target);
+    }
+
+    /** The completion token a caller of the completion API presented; null for the engine's own executor. */
+    private record Presented(String token) {
+        @Override
+        public String toString() {
+            return "Presented[***]";
+        }
     }
 
     /**
-     * The result transaction (TX2) of an async step attempt, for the async executor and for {@link #complete}. Locks
-     * the instance row, then the job row (the order of every other writer), and records the result only while the
-     * attempt is current: job {@code CLAIMED} under that attempt with an unexpired lease. A completed result advances
-     * the token; a failed one gives the job back for a retry with a new attempt id, or fails it. Otherwise nothing in
-     * the process changes: a repeat of a completed attempt is {@code DUPLICATE}, a result after the lease ended or
-     * after a takeover is {@code DISCARDED} with nothing written, and a result for a cancelled job is
-     * {@code DISCARDED} with one {@code LATE_RESULT_DISCARDED} history entry (DN-10, PRE-041).
+     * The result transaction (TX2) of an async step attempt, for the async executor. See
+     * {@link #recordAttempt(String, String, String, Presented, StepResult, String)}.
      *
-     * @param tenant the tenant the job is looked up in; the job's own for the executor, the caller's for the API
+     * @param tenant the job's tenant
      * @param jobId the job
      * @param attemptId the attempt the result is for
      * @param result the result
@@ -1119,9 +1164,26 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     public StepCompletion.Outcome recordAttempt(String tenant, String jobId, String attemptId, StepResult result,
             String reportedBy) {
+        return recordAttempt(tenant, jobId, attemptId, null, result, reportedBy);
+    }
+
+    /**
+     * The result transaction (TX2) of an async step attempt, for the async executor and for {@link #complete}. Locks
+     * the instance row, then the job row (the order of every other writer). A caller of the completion API must
+     * present the completion token of the job's latest claim when it quotes that claim's attempt id; a wrong token is
+     * refused and writes nothing. The result is recorded only while the attempt is current: job {@code CLAIMED} under
+     * that attempt with an unexpired lease. A completed result advances the token; a failed one gives the job back for
+     * a retry with a new attempt id, or fails it. Otherwise nothing in the process changes: a repeat of a completed
+     * attempt is {@code DUPLICATE}, a result after the lease ended or after a takeover is {@code DISCARDED} with
+     * nothing written, and a result for a cancelled job is {@code DISCARDED} with one {@code LATE_RESULT_DISCARDED}
+     * history entry per job, however often it is repeated (DN-10, PRE-041).
+     */
+    private StepCompletion.Outcome recordAttempt(String tenant, String jobId, String attemptId, Presented presented,
+            StepResult result, String reportedBy) {
         Objects.requireNonNull(tenant, "tenant must not be null");
         try {
-            return transactions.inTransaction(() -> recordInTransaction(tenant, jobId, attemptId, result, reportedBy));
+            return transactions.inTransaction(() -> recordInTransaction(tenant, jobId, attemptId, presented, result,
+                    reportedBy));
         } catch (AttemptRunFailed failed) {
             // The step's continuation failed and rolled back; give the attempt back as a failed one.
             RuntimeException cause = failed.getCause() instanceof RuntimeException r ? r : failed;
@@ -1151,22 +1213,34 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
     }
 
-    private StepCompletion.Outcome recordInTransaction(String tenant, String jobId, String attemptId, StepResult result,
-            String reportedBy) {
+    private StepCompletion.Outcome recordInTransaction(String tenant, String jobId, String attemptId, Presented presented,
+            StepResult result, String reportedBy) {
         JobRow peek = jobs.findJob(tenant, jobId).filter(j -> JobStore.isAsync(j.jobKind()))
                 .orElseThrow(() -> new AsyncStepNotFoundException("No async step " + jobId));
         InstanceRow row = store.lockInstance(tenant, peek.instanceId()).orElse(null);
         JobRow job = jobs.lockJob(tenant, jobId).orElseThrow(() -> new AsyncStepNotFoundException("No async step " + jobId));
         boolean sameAttempt = job.attempt() > 0 && attemptId.equals(attemptId(job.id(), job.attempt()));
+        if (sameAttempt && presented != null
+                && !CompletionTokens.matches(presented.token(), jobs.completionTokenHash(tenant, jobId).orElse(null))) {
+            // The attempt id is derived from public ids; only the token proves the caller was handed this attempt.
+            LOG.log(System.Logger.Level.WARNING, "process.async.token.refused tenant={0} job={1} attempt={2}", tenant,
+                    job.id(), job.attempt());
+            throw new PermissionDeniedException("The completion token does not match the attempt");
+        }
         if ("DONE".equals(job.status()) && sameAttempt) {
             return StepCompletion.Outcome.DUPLICATE;
         }
-        if ("CANCELLED".equals(job.status()) && row != null && wasAttemptOf(job, attemptId)) {
-            store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry("LATE_RESULT_DISCARDED",
-                    job.nodeId(), job.tokenId(), attemptId, reportedBy, clock.instant(), Map.of("jobId", job.id(),
-                    "result", kind(result)))));
-            LOG.log(System.Logger.Level.INFO, "process.async.late-result tenant={0} job={1} reason=cancelled", tenant,
-                    job.id());
+        if ("CANCELLED".equals(job.status()) && row != null && sameAttempt) {
+            if (jobs.markLateResult(tenant, job.id(), clock.instant())) {
+                store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry(
+                        "LATE_RESULT_DISCARDED", job.nodeId(), job.tokenId(), attemptId, reportedBy, clock.instant(),
+                        Map.of("jobId", job.id(), "result", kind(result)))));
+                LOG.log(System.Logger.Level.INFO, "process.async.late-result tenant={0} job={1} reason=cancelled", tenant,
+                        job.id());
+            } else {
+                LOG.log(System.Logger.Level.DEBUG, "process.async.late-result tenant={0} job={1} reason=cancelled"
+                        + " repeat", tenant, job.id());
+            }
             return StepCompletion.Outcome.DISCARDED;
         }
         if (!current(job, attemptId)) {
@@ -1211,19 +1285,43 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return StepCompletion.Outcome.ACCEPTED;
     }
 
+    /**
+     * Fails a job that was claimed more often than {@code jobs.max-attempts} allows (its attempts kept dying with
+     * their replica), without calling the adapter, and records {@code ASYNC_ATTEMPT_FAILED} with
+     * {@code MAX_ATTEMPTS_REACHED}. Nothing happens when the claim no longer holds.
+     *
+     * @param job the claimed job
+     * @param replicaId the claiming replica
+     * @return true when the job was failed
+     */
+    public boolean failExhausted(JobRow job, String replicaId) {
+        return transactions.inTransaction(() -> {
+            if (job.instanceId() != null) {
+                store.lockInstance(job.tenantId(), job.instanceId());
+            }
+            return jobs.lockClaim(job.tenantId(), job.id(), replicaId, job.attempt(), clock.instant()).map(held -> {
+                Instant now = clock.instant();
+                if (!jobs.release(job.tenantId(), job.id(), replicaId, job.attempt(), job.nextFireAt(), true, now)) {
+                    return false;
+                }
+                Map<String, Object> details = new LinkedHashMap<>();
+                details.put("jobId", job.id());
+                details.put("attempt", job.attempt());
+                details.put("errorCode", MAX_ATTEMPTS_REACHED);
+                details.put("retryable", false);
+                details.put("final", true);
+                store.appendHistory(job.tenantId(), job.instanceId(), job.definitionId(), List.of(new HistoryEntry(
+                        "ASYNC_ATTEMPT_FAILED", job.nodeId(), job.tokenId(), attemptId(job.id(), job.attempt()),
+                        "system:replica:" + replicaId, now, details)));
+                return true;
+            }).orElse(false);
+        });
+    }
+
     /** Whether the attempt is the job's current claim: {@code CLAIMED}, that attempt, lease not ended. */
     private boolean current(JobRow job, String attemptId) {
         return "CLAIMED".equals(job.status()) && job.attempt() > 0 && attemptId.equals(attemptId(job.id(), job.attempt()))
                 && job.lockedUntil() != null && job.lockedUntil().isAfter(clock.instant());
-    }
-
-    private static boolean wasAttemptOf(JobRow job, String attemptId) {
-        for (int a = 1; a <= job.attempt(); a++) {
-            if (attemptId.equals(attemptId(job.id(), a))) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static String kind(StepResult result) {
@@ -1236,8 +1334,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     /**
      * A failed attempt: the job is due again after {@code jobs.retry-backoff} times the attempt, or {@code FAILED}
-     * when the failure is not retryable or the attempts are used; the token stays on the step. Only the code is
-     * recorded, never the detail, which may carry personal data.
+     * when the failure is not retryable or the attempts are used; the token stays on the step. The code, whether the
+     * reporter called it retryable, and the reporter are recorded, never the detail, which may carry personal data.
      */
     private void giveBack(JobRow job, String attemptId, String code, boolean retryable, String reportedBy) {
         Instant now = clock.instant();
@@ -1250,6 +1348,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         details.put("jobId", job.id());
         details.put("attempt", job.attempt());
         details.put("errorCode", code == null ? "-" : code);
+        details.put("retryable", retryable);
         details.put("final", last);
         if (!last) {
             details.put("retryAt", retryAt.toString());
@@ -1257,7 +1356,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         store.appendHistory(job.tenantId(), job.instanceId(), job.definitionId(), List.of(new HistoryEntry(
                 "ASYNC_ATTEMPT_FAILED", job.nodeId(), job.tokenId(), attemptId, reportedBy, now, details)));
         LOG.log(System.Logger.Level.WARNING, "process.async.attempt.failed tenant={0} job={1} attempt={2} code={3}"
-                + " final={4}", job.tenantId(), job.id(), job.attempt(), code, last);
+                + " retryable={4} final={5}", job.tenantId(), job.id(), job.attempt(), code, retryable, last);
     }
 
     @Override

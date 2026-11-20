@@ -55,7 +55,7 @@ The proof is `ExactlyOnceTimersTest` in `process-engine-postgres`: four replicas
 
 ## Remote steps (Async Wait-State)
 
-A `serviceTask` with `horus:mode="remote"` calls a `ServiceAdapter` bean (named by `horus:handler`) with no database connection and no row lock held (ADR-0008). The step stores a job; the poller claims it when an adapter slot is free, with a lease of the step's `horus:timeout` plus `jobs.lease-margin`; the adapter runs on the adapter executor; the result is recorded in a second short transaction only while the attempt still holds its lease. Every attempt carries a new `attemptId` for the remote side to deduplicate on. An adapter may answer `Accepted` and let the remote side report the result later through `POST /api/bpm/processes/v1/async-steps/{jobId}:complete` (permission `processes:step:complete`).
+A `serviceTask` with `horus:mode="remote"` calls a `ServiceAdapter` bean (named by `horus:handler`) with no database connection and no row lock held (ADR-0008). The step stores a job; the poller claims it when an adapter slot is free, with a lease of the step's `horus:timeout` plus `jobs.lease-margin`; the adapter runs on the adapter executor; the result is recorded in a second short transaction only while the attempt still holds its lease. The remote side deduplicates by `call.idempotencyKey()`, the job id, which stays the same when a timeout, a crash or a retryable failure makes the engine call again; the `attemptId` changes on every attempt and only fences late results. An adapter may answer `Accepted` and let the remote side report the result later through `POST /api/bpm/processes/v1/async-steps/{jobId}:complete` with the `attemptId` and the attempt's `completionToken`. The token is 256 random bits, new for each attempt; the engine keeps only its SHA-256 and compares it in constant time, so a client that can derive an attempt id still cannot complete the step. The caller needs `processes:step:complete` and one of the roles listed for the step's adapter in `adapters.completer-roles`, so the bureau's callback client cannot complete a sanctions step.
 
 ```java
 @Bean
@@ -63,7 +63,7 @@ ServiceAdapter creditBureau(BureauClient client) {
     return new ServiceAdapter() {
         public String name() { return "creditBureau.score"; }
         public AdapterResult execute(AdapterCall call) {
-            return AdapterResult.completed(client.score(call.inputs(), call.attemptId()));
+            return AdapterResult.completed(client.score(call.inputs(), call.idempotencyKey()));
         }
     };
 }
@@ -73,6 +73,7 @@ ServiceAdapter creditBureau(BureauClient client) {
 |---|---|---|
 | `horus.bpm.processes.adapters.default-timeout` | `PT30S` | Timeout of a remote step without `horus:timeout`; the engine abandons the call then |
 | `horus.bpm.processes.adapters.executor-threads` | `16` | Adapter calls in flight per copy; size this, not the connection pool, for slow partners |
+| `horus.bpm.processes.adapters.completer-roles` | none | Per adapter name, the roles that may complete its steps through the completion API, for example `completer-roles: { "[creditBureau.score]": [ROLE_BUREAU_CALLBACK] }`. An adapter without an entry cannot be completed from outside; a name that is no registered adapter stops start-up |
 | `horus.bpm.processes.jobs.lease-margin` | `30s` | Added to the timeout to give the lease, so a live attempt is never taken over |
 
-The proof is `AsyncWaitStateTest`: ten bureau calls in flight on a 2-connection pool with no connection active, a crashed attempt reclaimed exactly at the end of its lease, late and duplicate results that change nothing, and a cancelled loan whose late answer is only recorded as discarded.
+The proof is `AsyncWaitStateTest`: ten bureau calls in flight on a 2-connection pool with no connection active, a crashed attempt reclaimed exactly at the end of its lease, late and duplicate results that change nothing, a cancelled loan whose late answer is recorded as discarded once however often it is repeated, and a forged completion with a derived attempt id, a token of another job or a client of another adapter refused. `AsyncStepCompletionIT` in `examples/rule-and-process` runs the completion API over HTTP.

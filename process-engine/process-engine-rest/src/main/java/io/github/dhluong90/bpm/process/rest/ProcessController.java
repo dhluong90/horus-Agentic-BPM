@@ -354,15 +354,12 @@ public class ProcessController {
     }
 
     /**
-     * Claims an open task for the caller ({@code processes:task:work}). {@code If-Match} carries the task's
-     * {@code lockVersion} and {@code Idempotency-Key} makes a retry safe; both are required.
-     */
-    /**
      * Completes an attempt of a remote step whose adapter handed the call off ({@code processes:step:complete}),
-     * for example a credit bureau's callback. Body: {@code attemptId}, {@code status} ({@code COMPLETED},
-     * {@code FAILED} or {@code BUSINESS_ERROR}), and {@code output} for a completed attempt or {@code errorCode} (and
-     * {@code retryable} for a failure). The attempt id is the idempotency key: a repeat answers {@code DUPLICATE} and
-     * writes nothing; a result after the lease ended answers {@code DISCARDED} (ADR-0008).
+     * for example a credit bureau's callback. The caller also needs a completer role of the step's adapter
+     * ({@code adapters.completer-roles}). Body: {@code attemptId}, {@code completionToken}, {@code status}
+     * ({@code COMPLETED}, {@code FAILED} or {@code BUSINESS_ERROR}), and {@code output} for a completed attempt or
+     * {@code errorCode} (and {@code retryable} for a failure). A repeat answers {@code DUPLICATE} and writes nothing;
+     * a result after the lease ended answers {@code DISCARDED} (ADR-0008).
      */
     @PostMapping(value = "/async-steps/{jobId}:complete", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<byte[]> completeAsyncStep(@PathVariable("jobId") String jobId, HttpServletRequest http)
@@ -372,9 +369,10 @@ public class ProcessController {
         }
         JsonNode request = parse(boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES));
         String attemptId = text(request, "attemptId");
+        String completionToken = text(request, "completionToken");
         String status = text(request, "status");
-        if (attemptId == null || status == null) {
-            throw new InputInvalidException("attemptId and status are required");
+        if (attemptId == null || completionToken == null || status == null) {
+            throw new InputInvalidException("attemptId, completionToken and status are required");
         }
         AdapterResult result = switch (status) {
             case "COMPLETED" -> AdapterResult.completed(Views.variables(request.get("output")));
@@ -391,7 +389,7 @@ public class ProcessController {
             }
             default -> throw new InputInvalidException("status must be COMPLETED, FAILED or BUSINESS_ERROR");
         };
-        StepCompletion completion = steps.complete(jobId, attemptId, result);
+        StepCompletion completion = steps.complete(jobId, attemptId, completionToken, result);
         tools.jackson.databind.node.ObjectNode body = EngineJson.NODES.objectNode();
         body.put("jobId", completion.jobId());
         body.put("attemptId", completion.attemptId());
@@ -399,6 +397,10 @@ public class ProcessController {
         return json(HttpStatus.OK, body, null, null);
     }
 
+    /**
+     * Claims an open task for the caller ({@code processes:task:work}). {@code If-Match} carries the task's
+     * {@code lockVersion} and {@code Idempotency-Key} makes a retry safe; both are required.
+     */
     @PostMapping("/tasks/{id}:claim")
     public ResponseEntity<byte[]> claim(@PathVariable("id") String id,
             @RequestHeader(value = "If-Match", required = false) String ifMatch,
