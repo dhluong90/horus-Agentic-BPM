@@ -65,14 +65,14 @@ class VersionServiceTest {
 
         // When alice approves her own request
         // Then
-        assertThatThrownBy(() -> versions.approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> versions.approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class)
                 .extracting(e -> ((SelfApprovalForbiddenException) e).code()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
         assertThat(versions.find("card-fee", 1, false).orElseThrow().status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
 
         // When bob approves
         caller.become("bank-a", "bob");
-        RuleSetVersion published = versions.approve("card-fee", 1, new WriteOptions(null, null, "checked fees"));
+        RuleSetVersion published = versions.approve("card-fee", 1, new WriteOptions(null, 1L, "checked fees"));
 
         // Then
         assertThat(published.status()).isEqualTo(VersionStatus.PUBLISHED);
@@ -95,13 +95,13 @@ class VersionServiceTest {
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         versions.requestPublish("card-fee", 2, WriteOptions.none());
         caller.become("bank-a", "bob");
-        versions.approve("card-fee", 1, WriteOptions.idempotencyKey("ap-1"));
+        versions.approve("card-fee", 1, new WriteOptions("ap-1", 1L, null));
 
         // When alice approves her own v2 with a fresh key
         caller.become("bank-a", "alice");
 
         // Then it is refused and no idempotency record remains for the refused attempt
-        assertThatThrownBy(() -> versions.approve("card-fee", 2, WriteOptions.idempotencyKey("ap-2")))
+        assertThatThrownBy(() -> versions.approve("card-fee", 2, new WriteOptions("ap-2", 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
         assertThat(stores.idempotency).doesNotContainKey("bank-a|approve|ap-2");
         assertThat(versions.find("card-fee", 2, false).orElseThrow().status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
@@ -146,7 +146,7 @@ class VersionServiceTest {
     void lifecycle_commands_check_status_and_lock_version() {
         versions.importRuleSet(ImportRequest.yaml(CardFee.yaml()));
 
-        assertThatThrownBy(() -> versions.approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> versions.approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(InvalidStateException.class);
         assertThatThrownBy(() -> versions.requestPublish("card-fee", 1, new WriteOptions(null, 7L, null)))
                 .isInstanceOf(VersionConflictException.class);

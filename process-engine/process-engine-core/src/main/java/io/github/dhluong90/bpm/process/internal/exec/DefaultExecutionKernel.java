@@ -44,6 +44,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.CompleteTask complete -> trigger(complete.tokenId(), TokenStatus.WAITING_USER, null, complete, ctx);
             case Command.AsyncResult result -> trigger(result.tokenId(), TokenStatus.WAITING_ASYNC, result.attemptId(),
                     result, ctx);
+            case Command.JobDue due -> trigger(due.tokenId(), TokenStatus.WAITING_TIMER, due.jobId(), due, ctx);
             case Command.Cancel cancel -> cancel(cancel, ctx);
             default -> throw new ExecutionException("COMMAND_NOT_SUPPORTED", null,
                     command.getClass().getSimpleName() + " is not supported in this release");
@@ -98,8 +99,22 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         Token root = ctx.tree().root().orElseThrow(() -> new ExecutionException("INVALID_STATE", null, "Not started"));
         ctx.cancelSubtree(root);
         ctx.status(InstanceStatus.CANCELLED);
-        ctx.history("INSTANCE_ENDED", null, Map.of("status", "CANCELLED", "reason", String.valueOf(cancel.reason())));
-        ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.instance.cancelled.v1", Map.of("instanceId", ctx.snapshot().instanceId())));
+        Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("status", "CANCELLED");
+        details.put("reason", String.valueOf(cancel.reason()));
+        if (cancel.actor() != null) {
+            details.put("actor", cancel.actor());
+        }
+        ctx.history("INSTANCE_ENDED", null, details);
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("instanceId", ctx.snapshot().instanceId());
+        if (cancel.actor() != null) {
+            payload.put("cancelledBy", cancel.actor());
+        }
+        if (cancel.reason() != null) {
+            payload.put("reason", cancel.reason());
+        }
+        ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.instance.cancelled.v1", payload));
     }
 
     private void drain(WorkingContext ctx) {

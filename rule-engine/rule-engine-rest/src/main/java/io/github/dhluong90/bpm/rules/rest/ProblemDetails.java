@@ -54,6 +54,8 @@ public class ProblemDetails {
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
+            Map.entry("PRECONDITION_REQUIRED", HttpStatus.PRECONDITION_REQUIRED),
+            Map.entry("DRAFT_AUTHORING_DISABLED", HttpStatus.FORBIDDEN),
             Map.entry("RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
@@ -63,7 +65,8 @@ public class ProblemDetails {
             Map.entry("SCHEMA_NOT_READY", HttpStatus.SERVICE_UNAVAILABLE));
 
     /**
-     * Answers an engine exception.
+     * Answers an engine exception. A code outside the matrix (for example one a host extension made up) is answered
+     * as an unexpected failure, so its message never reaches the body of a {@code 500} (TR-SEC-08).
      *
      * @param e the exception
      * @param request the request, for its correlation id
@@ -71,7 +74,10 @@ public class ProblemDetails {
      */
     @ExceptionHandler(HorusBpmException.class)
     public ResponseEntity<byte[]> handle(HorusBpmException e, WebRequest request) {
-        HttpStatus status = STATUS.getOrDefault(e.code(), HttpStatus.INTERNAL_SERVER_ERROR);
+        HttpStatus status = STATUS.get(e.code());
+        if (status == null) {
+            return unexpected(e, request.getHeader(CORRELATION_HEADER));
+        }
         ObjectNode body = body(e.code(), status, e.getMessage(), request.getHeader(CORRELATION_HEADER));
         if (e instanceof ValidationFailedException failed) {
             ArrayNode violations = body.putArray("violations");

@@ -1,6 +1,6 @@
 # Rule Engine
 
-Code: `RLE` · Version: 0.1.0-SNAPSHOT · Status: pre-alpha
+Code: `RLE` · Version: 0.1.0 · Status: pre-alpha
 
 Embeddable decision library: decision tables, versioned rule sets, safe expression language, decision API and log, simulation.
 

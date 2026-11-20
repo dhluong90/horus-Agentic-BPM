@@ -2,9 +2,10 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { meLan, meMinh, metaRulesOnly, registryEmbedded } from '../mocks/fixtures';
+import { meLan, meMinh, metaRulesOnly, registryEmbedded, UNREADABLE_PERMISSION } from '../mocks/fixtures';
 import { bpmMeV1 } from './generated/bpm-me.v1';
 import { bpmMetaV1 } from './generated/bpm-meta.v1';
+import { readMe } from './meReader';
 import { validateRegistrySchema, type SchemaRefinement } from '../app/config/registry';
 
 // Vitest runs from cockpit/web; the schemas live in cockpit/api/schema.
@@ -22,6 +23,7 @@ const meCases: Array<[string, unknown]> = [
   ['no tenant', { schemaVersion: 1, user: { id: 'lan' }, permissions: [] }],
   ['empty user id', { ...meLan, user: { id: '' } }],
   ['unknown permission module', { ...meLan, permissions: ['loans:read'] }],
+  ['permission with a hyphen', { ...meLan, permissions: ['rules:read', UNREADABLE_PERMISSION] }],
   ['duplicate permission', { ...meLan, permissions: ['rules:read', 'rules:read'] }],
   ['schema version 2', { ...meLan, schemaVersion: 2 }],
   ['extra field kept', { ...meLan, locale: 'vi' }],
@@ -84,6 +86,23 @@ describe('generated zod schemas agree with the published JSON Schemas', () => {
     };
     expect(hostsSchema(body)).toBe(true);
     expect(validateRegistrySchema(body).ok).toBe(true);
+  });
+
+  // The published schema and the generated zod stay strict (the cases above). The cockpit reads /me more
+  // leniently than both: a permission name outside the pattern is dropped, not fatal (cockpit DESIGN 5.2).
+  // Only that one difference is allowed; any other body the JSON Schema rejects, the reader rejects too.
+  it.each([UNREADABLE_PERMISSION, 'loans:read', 'Rules:Read'])('CKP_001_contract_cockpit_reads_permission_%s_more_leniently_than_the_json_schema', (name) => {
+    const body = { ...meLan, permissions: [...meLan.permissions, name] };
+    expect(meSchema(body)).toBe(false);
+    expect(bpmMeV1.safeParse(body).success).toBe(false);
+    expect(readMe(body)).toEqual({ ok: true, me: meLan, dropped: [name] });
+  });
+
+  it.each(meCases)('CKP_001_contract_cockpit_reader_rejects_every_other_body_the_json_schema_rejects_%s', (_name, body) => {
+    const tolerated = typeof body === 'object' && body !== null && 'permissions' in body && Array.isArray(body.permissions)
+      ? { ...body, permissions: body.permissions.filter((item: unknown) => typeof item !== 'string' || meSchema({ ...meLan, permissions: [item] })) }
+      : body;
+    expect(readMe(body).ok).toBe(meSchema(tolerated));
   });
 
   it('CKP_001_contract_mock_host_fixtures_are_valid', () => {
