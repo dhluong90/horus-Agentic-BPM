@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.rules.internal.service.DecisionQuerySettings;
+import io.github.dhluong90.bpm.expr.internal.EvaluationLimits;
 import io.github.dhluong90.bpm.expr.internal.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
@@ -273,11 +274,17 @@ public record RuleEngineProperties(
      * @param pinRetired whether a pinned evaluation ({@code rules:pin}) may name a {@code RETIRED} version; default
      *     false. Replay of a logged decision is not affected
      * @param maxBatch most items one {@code :evaluate-batch} accepts, 1 to 1000; default 1000. Lower only
+     * @param stepBudget most expression nodes one decision may visit, 1 to 1000000; default 100000. Counted, so the
+     *     same decision stops at the same step on every machine; past it the decision fails with
+     *     {@code EVALUATION_ERROR}, reason {@code EVALUATION_BUDGET_EXCEEDED}. Import and request-publish refuse a
+     *     table whose worst case is over it
+     * @param timeoutMs longest time one decision may evaluate, in milliseconds, 1 to 30000; default 10000. The
+     *     backstop for a slow machine; the step budget decides first
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
             Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
             Integer regexMaxReads, Integer regexMaxReadsPerDecision, Long regexMaxReadsPerRequest, Boolean pinRetired,
-            Integer maxBatch) {
+            Integer maxBatch, Integer stepBudget, Integer timeoutMs) {
     }
 
     /**
@@ -377,6 +384,9 @@ public record RuleEngineProperties(
                                 ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision(),
                         evaluation.regexMaxReadsPerRequest() == null
                                 ? RegexLimits.MAX_READS_PER_REQUEST : evaluation.regexMaxReadsPerRequest()))
+                .withEvaluationLimits(new EvaluationLimits(
+                        evaluation.stepBudget() == null ? EvaluationLimits.STEP_BUDGET : evaluation.stepBudget(),
+                        evaluation.timeoutMs() == null ? EvaluationLimits.TIMEOUT_MILLIS : evaluation.timeoutMs()))
                 .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()))
                 .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired())
                 .withLifecycle(

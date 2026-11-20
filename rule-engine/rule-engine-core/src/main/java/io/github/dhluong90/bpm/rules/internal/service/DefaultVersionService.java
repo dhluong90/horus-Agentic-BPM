@@ -141,13 +141,57 @@ public final class DefaultVersionService implements VersionService {
         ParsedRuleSet parsed = RuleSetReader.read(format, source);
         // The import model equals the parsed canonical form (checked by the reader, ADR-0026 decision 4); it is compiled
         // here so violations follow the order cells are written in (RLE-041). Evaluation compiles only from the stored form.
-        int rows = parsed.model().decision().table().rules().size();
+        checkedModel(parsed.model());
+        return parsed;
+    }
+
+    /** The row limit and the publication checks of a model, shared by import, draft replacement and restore. */
+    private void checkedModel(io.github.dhluong90.bpm.rules.internal.model.Definitions model) {
+        int rows = model.decision().table().rules().size();
         if (rows > context.settings().maxRows()) {
             throw new ValidationFailedException("The rule set has " + rows + " rules; evaluation.max-rows allows "
                     + context.settings().maxRows());
         }
-        compileForPublication(parsed.model());
-        return parsed;
+        compileForPublication(model);
+    }
+
+    @Override
+    public RuleSetVersion copyVersion(String ruleSet, int version, WriteOptions options) {
+        Objects.requireNonNull(ruleSet, "ruleSet must not be null");
+        WriteOptions opts = options == null ? WriteOptions.none() : options;
+        String tenant = context.tenant();
+        String actor = context.callerWith(PERMISSION_AUTHOR);
+        String correlationId = EventEnvelope.requireValidCorrelationId(opts.correlationId());
+        if (version < 1) {
+            throw new InputInvalidException("copyOf must be a version number, 1 or more, was " + version);
+        }
+        requireRuleSetName(ruleSet);
+        String requestHash = Hashes.sha256Parts("copy-version", actor, ruleSet, Integer.toString(version));
+        return context.idempotent(tenant, "copy-version", opts.idempotencyKey(), requestHash, 201,
+                () -> doCopy(tenant, actor, ruleSet, version, correlationId),
+                v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
+    }
+
+    private RuleSetVersion doCopy(String tenant, String actor, String ruleSet, int from, String correlationId) {
+        // The source is read in the caller's tenant only: another tenant's rule set or version is not found (TR-TEN-01).
+        StoredVersion source = existing(tenant, ruleSet, from);
+        // The copy is checked as an import of the same document would be today (RLE-063), not as it was when approved.
+        checkedModel(RuleSetReader.readCanonical(source.canonicalJson()));
+        requireMaskDeclarations(tenant, source.canonicalJson());
+        Instant now = context.clock().instant();
+        int number = store.lockAndNextVersionNumber(tenant, source.ruleSetId());
+        // Nothing of the approval is copied: no approver, no effective date, no acknowledgement. The content, its
+        // canonical hash and the source it was imported from are the earlier version's, byte for byte.
+        StoredVersion copy = new StoredVersion(tenant, Ulid.next(now), source.ruleSetId(), ruleSet, number,
+                VersionStatus.DRAFT, source.hitPolicy(), null, source.canonicalJson(), source.canonicalHash(),
+                source.sourceFormat(), source.sourceDocument(), source.sourceHash(), 0, null, null, null, null, null,
+                actor, now, null, from);
+        store.insertVersion(copy);
+        store.appendHistory(new HistoryRow(tenant, Ulid.next(now), copy.id(), LifecycleAction.CREATED, null,
+                VersionStatus.DRAFT, actor, null, copy.lockVersion(), now, null, null, null, null, null, List.of(),
+                List.of(), from));
+        event(tenant, EVENT_CREATED, copy, actor, now, correlationId, payload -> payload.put("copiedFrom", from));
+        return view(copy, false);
     }
 
     private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source,

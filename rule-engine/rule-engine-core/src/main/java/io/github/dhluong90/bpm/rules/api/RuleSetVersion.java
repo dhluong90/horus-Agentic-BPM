@@ -26,6 +26,7 @@ import java.util.Objects;
  * @param createdAt when the version was created
  * @param retiredAt when the version was retired, by hand or as superseded; from then on evaluation no longer selects
  *     it, while a clock before it still does. Null while it is not retired
+ * @param copiedFrom the version this one restored as a draft (RLE-062), or null when it was imported
  * @param warnings what the author and the approver should see before publication, such as an undeclared input that
  *     looks like personal data (RLE-049); empty when none, never null
  */
@@ -48,6 +49,7 @@ public record RuleSetVersion(
         String createdBy,
         Instant createdAt,
         Instant retiredAt,
+        Integer copiedFrom,
         List<VersionWarning> warnings) {
 
     public RuleSetVersion {
@@ -71,7 +73,40 @@ public record RuleSetVersion(
     public RuleSetVersion withWarnings(List<VersionWarning> newWarnings) {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument,
                 canonicalHash, sourceFormat, sourceHash, sourceDocument, requestedBy, requestedAt, approvedBy,
-                approvedAt, createdBy, createdAt, retiredAt, newWarnings);
+                approvedAt, createdBy, createdAt, retiredAt, copiedFrom, newWarnings);
+    }
+
+    /**
+     * Creates a version that is not a restore.
+     *
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param status see the record
+     * @param hitPolicy see the record
+     * @param effectiveFrom see the record
+     * @param lockVersion see the record
+     * @param canonicalDocument see the record
+     * @param canonicalHash see the record
+     * @param sourceFormat see the record
+     * @param sourceHash see the record
+     * @param sourceDocument see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param approvedBy see the record
+     * @param approvedAt see the record
+     * @param createdBy see the record
+     * @param createdAt see the record
+     * @param retiredAt see the record
+     * @param warnings see the record
+     */
+    public RuleSetVersion(String ruleSet, int version, VersionStatus status, String hitPolicy, Instant effectiveFrom,
+            long lockVersion, String canonicalDocument, String canonicalHash, SourceFormat sourceFormat,
+            String sourceHash, String sourceDocument, String requestedBy, Instant requestedAt, String approvedBy,
+            Instant approvedAt, String createdBy, Instant createdAt, Instant retiredAt,
+            List<VersionWarning> warnings) {
+        this(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument, canonicalHash,
+                sourceFormat, sourceHash, sourceDocument, requestedBy, requestedAt, approvedBy, approvedAt, createdBy,
+                createdAt, retiredAt, null, warnings);
     }
 
     /**
@@ -101,7 +136,7 @@ public record RuleSetVersion(
             Instant approvedAt, String createdBy, Instant createdAt) {
         this(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument, canonicalHash,
                 sourceFormat, sourceHash, sourceDocument, requestedBy, requestedAt, approvedBy, approvedAt, createdBy,
-                createdAt, null, List.of());
+                createdAt, null, null, List.of());
     }
 
     /**
@@ -132,7 +167,7 @@ public record RuleSetVersion(
             Instant approvedAt, String createdBy, Instant createdAt, Instant retiredAt) {
         this(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument, canonicalHash,
                 sourceFormat, sourceHash, sourceDocument, requestedBy, requestedAt, approvedBy, approvedAt, createdBy,
-                createdAt, retiredAt, List.of());
+                createdAt, retiredAt, null, List.of());
     }
 
     /**
@@ -143,6 +178,6 @@ public record RuleSetVersion(
     public RuleSetVersion withoutSource() {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument,
                 canonicalHash, sourceFormat, sourceHash, null, requestedBy, requestedAt, approvedBy, approvedAt,
-                createdBy, createdAt, retiredAt, warnings);
+                createdBy, createdAt, retiredAt, copiedFrom, warnings);
     }
 }

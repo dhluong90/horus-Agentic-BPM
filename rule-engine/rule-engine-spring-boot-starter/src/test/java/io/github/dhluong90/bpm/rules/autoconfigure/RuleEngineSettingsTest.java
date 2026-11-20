@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.rules.autoconfigure;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
+import io.github.dhluong90.bpm.expr.internal.EvaluationLimits;
 import io.github.dhluong90.bpm.expr.internal.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import java.time.Duration;
@@ -154,6 +155,10 @@ class RuleEngineSettingsTest {
         "horus.bpm.rules.evaluation.regex-max-reads=1000001, horus.bpm.rules.evaluation.regex-max-reads",
         "horus.bpm.rules.evaluation.regex-max-reads-per-decision=0, horus.bpm.rules.evaluation.regex-max-reads-per-decision",
         "horus.bpm.rules.evaluation.regex-max-reads-per-decision=5000001, horus.bpm.rules.evaluation.regex-max-reads-per-decision",
+        "horus.bpm.rules.evaluation.step-budget=0, horus.bpm.rules.evaluation.step-budget",
+        "horus.bpm.rules.evaluation.step-budget=1000001, horus.bpm.rules.evaluation.step-budget",
+        "horus.bpm.rules.evaluation.timeout-ms=0, horus.bpm.rules.evaluation.timeout-ms",
+        "horus.bpm.rules.evaluation.timeout-ms=30001, horus.bpm.rules.evaluation.timeout-ms",
         "horus.bpm.rules.simulation.max-inputs=0, horus.bpm.rules.simulation.max-inputs",
         "horus.bpm.rules.simulation.max-inputs=1001, horus.bpm.rules.simulation.max-inputs",
         "horus.bpm.rules.evaluation.max-batch=0, horus.bpm.rules.evaluation.max-batch",
@@ -162,6 +167,30 @@ class RuleEngineSettingsTest {
     void TR_EXT_03_an_invalid_value_fails_start_up_naming_the_property(String property, String name) {
         runner.withPropertyValues(property).run(context -> assertThat(context).hasFailed()
                 .getFailure().rootCause().hasMessageContaining(name));
+    }
+
+    @Test
+    void RLE_082_the_step_budget_and_the_time_backstop_default_and_may_be_set() {
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class).evaluationLimits())
+                .isEqualTo(new EvaluationLimits(100_000, 10_000)));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.step-budget=10",
+                        "horus.bpm.rules.evaluation.timeout-ms=250")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).evaluationLimits())
+                        .isEqualTo(new EvaluationLimits(10, 250)));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.step-budget=1000000",
+                        "horus.bpm.rules.evaluation.timeout-ms=30000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).evaluationLimits())
+                        .isEqualTo(new EvaluationLimits(1_000_000, 30_000)));
+    }
+
+    @Test
+    void RLE_083_an_out_of_range_budget_stops_start_up_naming_the_property_and_its_range() {
+        runner.withPropertyValues("horus.bpm.rules.evaluation.step-budget=0")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.evaluation.step-budget must be 1 to 1000000"));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.timeout-ms=30001")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.evaluation.timeout-ms must be 1 to 30000"));
     }
 
     @Test

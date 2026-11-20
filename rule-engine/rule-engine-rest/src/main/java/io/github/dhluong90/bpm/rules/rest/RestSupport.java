@@ -117,6 +117,9 @@ final class RestSupport {
             node.set("noVersionInEffect", entry.noVersionInEffect() == null
                     ? EngineJson.NODES.nullNode() : EngineJson.NODES.booleanNode(entry.noVersionInEffect()));
         }
+        if (entry.copiedFrom() != null) {
+            node.put("copiedFrom", entry.copiedFrom());
+        }
         node.put("lockVersion", entry.lockVersion());
         node.put("occurredAt", entry.occurredAt().toString());
         if (entry.canonicalHash() != null) {

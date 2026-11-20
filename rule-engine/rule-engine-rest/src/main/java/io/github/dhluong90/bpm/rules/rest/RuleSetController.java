@@ -117,16 +117,31 @@ public class RuleSetController {
         return RestSupport.version(HttpStatus.CREATED, versions.importRuleSet(request), callers);
     }
 
-    /** {@code POST /rule-sets/{name}/versions}: imports a document as the next draft version. */
+    /**
+     * {@code POST /rule-sets/{name}/versions}: imports a document as the next draft version, or, with
+     * {@code ?copyOf={v}} and no body, restores version {@code v} as the next draft (RLE-062).
+     */
     @PostMapping("/{name}/versions")
     public ResponseEntity<byte[]> importVersion(
             @PathVariable("name") String name,
+            @RequestParam(value = "copyOf", required = false) String copyOf,
             InputStream body,
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         RestSupport.require(callers, "rules:author");
+        if (copyOf != null) {
+            if (RestSupport.boundedBody(body, contentLength).length > 0) {
+                throw new InputInvalidException("a request with copyOf takes no body");
+            }
+            int source = copyOf.matches("[0-9]{1,9}") ? Integer.parseInt(copyOf) : 0;
+            if (source < 1) {
+                throw new InputInvalidException("copyOf must be a version number, 1 or more, was '" + copyOf + "'");
+            }
+            return RestSupport.version(HttpStatus.CREATED, versions.copyVersion(name, source, new WriteOptions(
+                    idempotencyKey, null, null, ProblemDetails.correlationId(correlationId))), callers);
+        }
         ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength),
                 idempotencyKey, ProblemDetails.correlationId(correlationId));
         return RestSupport.version(HttpStatus.CREATED, versions.importVersion(name, request), callers);

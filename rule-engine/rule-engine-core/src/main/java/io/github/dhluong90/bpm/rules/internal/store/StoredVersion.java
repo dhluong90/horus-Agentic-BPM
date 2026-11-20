@@ -30,13 +30,50 @@ import java.time.Instant;
  * @param createdBy who imported the version (the author), or null for rows written before it was recorded
  * @param createdAt creation time
  * @param retiredAt when it was retired, or null while it is not; selection reads it (ADR-0025 decision 3)
+ * @param copiedFrom the earlier version this one restored as a draft (RLE-062), or null when it was imported
  */
 public record StoredVersion(
         String tenantId, String id, String ruleSetId, String ruleSet, int version, VersionStatus status,
         String hitPolicy, Instant effectiveFrom, String canonicalJson, String canonicalHash,
         SourceFormat sourceFormat, String sourceDocument, String sourceHash, long lockVersion,
         String requestedBy, Instant requestedAt, String approvedBy, Instant approvedAt, String approvalComment,
-        String createdBy, Instant createdAt, Instant retiredAt) {
+        String createdBy, Instant createdAt, Instant retiredAt, Integer copiedFrom) {
+
+    /**
+     * Creates a row that is not a restore.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param ruleSetId see the record
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param status see the record
+     * @param hitPolicy see the record
+     * @param effectiveFrom see the record
+     * @param canonicalJson see the record
+     * @param canonicalHash see the record
+     * @param sourceFormat see the record
+     * @param sourceDocument see the record
+     * @param sourceHash see the record
+     * @param lockVersion see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param approvedBy see the record
+     * @param approvedAt see the record
+     * @param approvalComment see the record
+     * @param createdBy see the record
+     * @param createdAt see the record
+     * @param retiredAt see the record
+     */
+    public StoredVersion(String tenantId, String id, String ruleSetId, String ruleSet, int version,
+            VersionStatus status, String hitPolicy, Instant effectiveFrom, String canonicalJson, String canonicalHash,
+            SourceFormat sourceFormat, String sourceDocument, String sourceHash, long lockVersion, String requestedBy,
+            Instant requestedAt, String approvedBy, Instant approvedAt, String approvalComment, String createdBy,
+            Instant createdAt, Instant retiredAt) {
+        this(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom, canonicalJson, canonicalHash,
+                sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy, requestedAt, approvedBy, approvedAt,
+                approvalComment, createdBy, createdAt, retiredAt, null);
+    }
 
     /**
      * Creates a row that is not retired.
@@ -70,7 +107,7 @@ public record StoredVersion(
             Instant createdAt) {
         this(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom, canonicalJson, canonicalHash,
                 sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy, requestedAt, approvedBy, approvedAt,
-                approvalComment, createdBy, createdAt, null);
+                approvalComment, createdBy, createdAt, null, null);
     }
 
     /**
@@ -82,7 +119,7 @@ public record StoredVersion(
     public RuleSetVersion toView(boolean includeSource) {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalJson,
                 canonicalHash, sourceFormat, sourceHash, includeSource ? sourceDocument : null, requestedBy,
-                requestedAt, approvedBy, approvedAt, createdBy, createdAt, retiredAt);
+                requestedAt, approvedBy, approvedAt, createdBy, createdAt, retiredAt, copiedFrom, java.util.List.of());
     }
 
     /**
@@ -95,7 +132,7 @@ public record StoredVersion(
     public StoredVersion requested(String requester, Instant at) {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.PENDING_APPROVAL, hitPolicy,
                 effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
-                requester, at, null, null, null, createdBy, createdAt);
+                requester, at, null, null, null, createdBy, createdAt, null, copiedFrom);
     }
 
     /**
@@ -109,7 +146,8 @@ public record StoredVersion(
     public StoredVersion approved(String approver, Instant at, String comment) {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.PUBLISHED, hitPolicy,
                 effectiveFrom == null ? at : effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument,
-                sourceHash, lockVersion + 1, requestedBy, requestedAt, approver, at, comment, createdBy, createdAt);
+                sourceHash, lockVersion + 1, requestedBy, requestedAt, approver, at, comment, createdBy, createdAt, null,
+                copiedFrom);
     }
 
     /**
@@ -121,7 +159,7 @@ public record StoredVersion(
     public StoredVersion rejected() {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.DRAFT, hitPolicy,
                 effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
-                null, null, null, null, approvalComment, createdBy, createdAt);
+                null, null, null, null, approvalComment, createdBy, createdAt, null, copiedFrom);
     }
 
     /**
@@ -133,7 +171,7 @@ public record StoredVersion(
     public StoredVersion retired(Instant at) {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.RETIRED, hitPolicy,
                 effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
-                requestedBy, requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, at);
+                requestedBy, requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, at, copiedFrom);
     }
 
     /**
@@ -163,7 +201,8 @@ public record StoredVersion(
             String newCanonicalHash, SourceFormat newSourceFormat, String newSourceDocument, String newSourceHash) {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicyName, newEffectiveFrom,
                 newCanonicalJson, newCanonicalHash, newSourceFormat, newSourceDocument, newSourceHash, lockVersion + 1,
-                requestedBy, requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt);
+                requestedBy, requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, retiredAt,
+                copiedFrom);
     }
 
     /**

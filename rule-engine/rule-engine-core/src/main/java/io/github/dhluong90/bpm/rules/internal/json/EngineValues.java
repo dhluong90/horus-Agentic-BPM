@@ -276,6 +276,9 @@ public final class EngineValues {
         node.set("createdBy", value(version.createdBy()));
         node.put("createdAt", version.createdAt().toString());
         node.set("retiredAt", value(version.retiredAt()));
+        if (version.copiedFrom() != null) {
+            node.put("copiedFrom", version.copiedFrom());
+        }
         node.set("definition", read(version.canonicalDocument()));
         ArrayNode warnings = node.putArray("warnings");
         for (VersionWarning warning : version.warnings()) {
@@ -316,6 +319,7 @@ public final class EngineValues {
                 text(node.get("createdBy")),
                 Instant.parse(node.get("createdAt").stringValue()),
                 instant(node.get("retiredAt")),
+                node.has("copiedFrom") && !node.get("copiedFrom").isNull() ? node.get("copiedFrom").asInt() : null,
                 warnings(node.get("warnings")));
     }
 
