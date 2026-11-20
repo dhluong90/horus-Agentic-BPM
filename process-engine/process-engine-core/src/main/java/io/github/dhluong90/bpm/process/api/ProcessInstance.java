@@ -54,18 +54,20 @@ public record ProcessInstance(String id, String definitionKey, int definitionVer
      * @param nodeId the {@code userTask} id
      * @param name the step name, or null
      * @param assignee {@code user:<id>}, {@code role:<role>} or {@code group:<group>}
-     * @param status {@code OPEN}, {@code COMPLETED} or {@code CANCELLED}
+     * @param status {@code OPEN}, {@code CLAIMED}, {@code COMPLETED} or {@code CANCELLED}
      * @param lockVersion optimistic lock version, sent back as {@code If-Match}
+     * @param claimedBy the claimant while {@code CLAIMED}, or null
+     * @param claimedAt when it was claimed, or null
      * @param completedBy who completed it, or null
      */
     public record Task(String id, String nodeId, String name, String assignee, String status, long lockVersion,
-            String completedBy) {
+            String claimedBy, Instant claimedAt, String completedBy) {
     }
 
     /**
-     * @return the open tasks only
+     * @return the tasks still to be done: open or claimed
      */
     public List<Task> openTasks() {
-        return tasks.stream().filter(t -> "OPEN".equals(t.status())).toList();
+        return tasks.stream().filter(t -> "OPEN".equals(t.status()) || "CLAIMED".equals(t.status())).toList();
     }
 }

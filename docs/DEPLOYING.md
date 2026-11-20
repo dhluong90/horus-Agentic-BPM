@@ -5,7 +5,6 @@
 > - demo users share one password and may sign in with HTTP Basic, and `hoa` may both author and approve;
 > - traffic is plain HTTP on 127.0.0.1, with no TLS;
 > - the host connects as the database owner, which also runs the migrations (a role without superuser rights);
-> - passwords reach the containers as environment variables;
 > - there is one instance of each service, and no backups.
 >
 > For anything shared, start from [Run without demo users](#run-without-demo-users). The host logs a `WARN` at start-up while demo users are on.
@@ -20,7 +19,8 @@ flowchart LR
         pg[("postgres<br/>PostgreSQL 16<br/>volume pgdata")]
         host -- "JDBC, compose network only" --> pg
     end
-    env[".env, not committed"] -. "passwords at start-up" .-> compose
+    secrets["secrets/, not committed<br/>three password files"] -. "mounted at /run/secrets" .-> compose
+    env[".env, not committed<br/>settings, no passwords"] -. "at start-up" .-> compose
 ```
 
 | Service | Image | Reachable at | Data |
@@ -33,7 +33,7 @@ flowchart LR
 | You need | Check |
 |---|---|
 | Docker Engine 24 or later with Compose v2 | `docker compose version` prints `v2.x` or later |
-| git, curl, openssl | `curl --version` |
+| git, curl, openssl | `curl --version`, `openssl version` |
 | Free port 8080 on 127.0.0.1, or another port set in `.env` | `lsof -nP -iTCP:8080 -sTCP:LISTEN` prints nothing |
 | Network access on the first build | Maven Central, the npm registry and GitHub (the JRE download) |
 
@@ -45,8 +45,16 @@ The image is `linux/amd64`. Its JRE, Temurin 21.0.13.1, carries the fix for a hi
 git clone https://github.com/dhluong90/horus-Agentic-BPM.git
 cd horus-Agentic-BPM
 cp .env.example .env
-sed -i.bak "s/^HORUS_DB_ADMIN_PASSWORD=.*/HORUS_DB_ADMIN_PASSWORD=$(openssl rand -hex 16)/; s/^HORUS_DB_PASSWORD=.*/HORUS_DB_PASSWORD=$(openssl rand -hex 16)/; s/^HORUS_DEMO_PASSWORD=.*/HORUS_DEMO_PASSWORD=$(openssl rand -hex 12)/" .env && rm .env.bak
+deploy/create-secrets.sh
 docker compose up --build --wait
+```
+
+`deploy/create-secrets.sh` writes three random passwords, one file each, and never prints them:
+
+```
+created  /home/you/horus-Agentic-BPM/secrets/db_admin_password
+created  /home/you/horus-Agentic-BPM/secrets/db_password
+created  /home/you/horus-Agentic-BPM/secrets/demo_password
 ```
 
 The first build downloads dependencies and takes 2 to 5 minutes; later builds reuse the cache. `--wait` returns when both containers report healthy:
@@ -59,11 +67,15 @@ The first build downloads dependencies and takes 2 to 5 minutes; later builds re
  Container horus-bpm-host-1 Healthy
 ```
 
-Every secret comes from `.env`, which git ignores. Without a database password compose stops before starting anything:
+The passwords reach the containers only as files mounted under `/run/secrets`, never as environment variables, so `docker inspect` and `/proc/1/environ` show none of them. `.env` holds settings only. git and the image build context ignore both `.env` and `secrets/`. When a secret file is missing, compose stops before any container starts and names the file:
 
 ```
-error while interpolating services.postgres.environment.POSTGRES_PASSWORD: required variable HORUS_DB_ADMIN_PASSWORD is missing a value: set HORUS_DB_ADMIN_PASSWORD in .env (see .env.example)
+ Container horus-bpm-postgres-1 Creating
+level=warning msg="secret file horus-bpm_db_password does not exist"
+Error response from daemon: invalid mount config for type "bind": bind source path does not exist: /home/you/horus-Agentic-BPM/secrets/db_password
 ```
+
+Run `deploy/create-secrets.sh` and start again.
 
 The host log names the demo users and warns that they are for local evaluation only:
 
@@ -89,7 +101,7 @@ curl -s 127.0.0.1:8080/actuator/health
 
 ## 3. Sign in
 
-`.env.example` starts the host on the `dev` profile, which turns on demo users with the password in `HORUS_DEMO_PASSWORD`. The `dev` profile is for your own machine only; see [Run without demo users](#run-without-demo-users).
+`.env.example` starts the host on the `dev` profile, which turns on demo users with the password in `secrets/demo_password`. The `dev` profile is for your own machine only; see [Run without demo users](#run-without-demo-users).
 
 | User | Role | Engine permissions |
 |---|---|---|
@@ -98,10 +110,10 @@ curl -s 127.0.0.1:8080/actuator/health
 | `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve` |
 | `tuan` | `TELLER` | `rules:evaluate` |
 
-Load the passwords into this shell and write one curl config file per demo user, so no password appears on a command line (where `ps` would show it). `printf` is a shell builtin, so it does not show either. Then sign in as `lan` with the host's form. The session cookie is kept in `./cookies`:
+Read the demo password from its secret file into this shell and write one curl config file per demo user, so no password appears on a command line (where `ps` would show it). `printf` is a shell builtin, so it does not show either. Then sign in as `lan` with the host's form. The session cookie is kept in `./cookies`:
 
 ```bash
-set -a; . ./.env; set +a
+HORUS_DEMO_PASSWORD=$(cat secrets/demo_password)
 C=$(mktemp -d); chmod 700 "$C"
 for u in lan minh hoa tuan; do printf 'user = "%s:%s"\n' "$u" "$HORUS_DEMO_PASSWORD" > "$C/$u"; done
 printf 'data-urlencode = "password=%s"\n' "$HORUS_DEMO_PASSWORD" > "$C/form"
@@ -115,7 +127,7 @@ curl -s -b cookies 127.0.0.1:8080/api/bpm/meta
 ```
 302
 {"schemaVersion":1,"user":{"id":"lan"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:author"],"roles":["ROLE_PRICING_AUTHOR"],"groups":[]}
-{"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0-SNAPSHOT","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
+{"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
 ```
 
 Without a caller the engine API answers `401` with a problem document:
@@ -161,7 +173,7 @@ H=127.0.0.1:8080/api/bpm/rules/v1
 3. Hoa tries to approve her own request and is refused (maker-checker):
 
    ```bash
-   curl -s -K "$C/hoa" -X POST $H/rule-sets/card-fee/versions/1:approve
+   curl -s -K "$C/hoa" -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
    ```
 
    ```
@@ -171,7 +183,7 @@ H=127.0.0.1:8080/api/bpm/rules/v1
 4. Minh approves. The version is published:
 
    ```bash
-   curl -s -K "$C/minh" -X POST $H/rule-sets/card-fee/versions/1:approve \
+   curl -s -K "$C/minh" -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"' \
      -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
    ```
 
@@ -241,14 +253,35 @@ Run again on the same database, the test finds `card-fee` already published and 
 
 ## 7. Check the image
 
-[`deploy/scan-image.sh`](../deploy/scan-image.sh) applies the release gates to the built image: no secret in any layer or in the image configuration, and no high or critical vulnerability (Grype, with the repository's [`.grype.yaml`](../.grype.yaml)).
+[`deploy/scan-image.sh`](../deploy/scan-image.sh) applies the release gates to the built image: no secret in any layer or in the image configuration (it searches for the values in `secrets/`), and no high or critical vulnerability (Grype, with the repository's [`.grype.yaml`](../.grype.yaml)).
+
+The secrets gate reads every layer, including files a later layer deletes, and unpacks every jar (and the jars nested in it), so a value inside a compressed jar entry is found too. It fails on:
+
+- a key or keystore file by name (`.env`, `*.pem`, `*.key`, `*.p8`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `*.truststore`, `*.bcfks`, `cacerts`, `id_rsa` and the other SSH key names, in any letter case), in a layer or inside a jar. The only exception is an exact path: the JRE's public CA store `opt/java/openjdk/lib/security/cacerts`. The Alpine signing keys end in `.rsa.pub`, are public, and are not matched;
+- a secret-like variable in the image configuration;
+- the value of `HORUS_DB_ADMIN_PASSWORD`, `HORUS_DB_PASSWORD` or `HORUS_DEMO_PASSWORD` anywhere in the image. Each value is taken from the environment, else from its file in `secrets/`, else from `.env` if that file exists.
+
+[`deploy/scan-image-canaries.sh`](../deploy/scan-image-canaries.sh) proves the gate on every Deploy run: it plants a `.pem` under `/usr/local/share` and a random value in a deflated entry of a jar in `BOOT-INF/lib`. Both must fail, the jar again when the value is read only from a secret file, while the image itself passes:
+
+```bash
+deploy/scan-image-canaries.sh horus-bpm/rule-engine-only:local
+```
+
+```
+PASS  canary 1: a .pem under /usr/local/share fails the gate: usr/local/share/canary/canary.pem
+PASS  canary 2: a value inside a deflated jar entry in BOOT-INF/lib fails the gate (not visible in the raw bytes)
+PASS  canary 3: the same value read from a secret file (secrets/demo_password) fails the gate
+PASS  the image horus-bpm/rule-engine-only:local passes: PASS  no secrets in the image layers, jars or config (...)
+```
+
+Both scripts need `unzip`; the canaries also need `zip`.
 
 ```bash
 deploy/scan-image.sh horus-bpm/rule-engine-only:local
 ```
 
 ```
-PASS  no secrets in the image layers or config (1031 files checked)
+PASS  no secrets in the image layers, jars or config (... files and jar entries checked, ... jars unpacked, 3 password values searched)
 NAME           INSTALLED   TYPE  VULNERABILITY   SEVERITY  EPSS         RISK
 busybox        1.37.0-r31  apk   CVE-2025-60876  Medium    0.3% (24th)  0.2
 busybox-binsh  1.37.0-r31  apk   CVE-2025-60876  Medium    0.3% (24th)  0.2
@@ -264,7 +297,7 @@ PASS  no high or critical vulnerability in horus-bpm/rule-engine-only:local (rep
 | User | `horus`, uid and gid 10001; the container runs with a read-only root file system, `/tmp` in memory (64 MB, `noexec`, `nosuid`, `nodev`), all capabilities dropped, at most 512 processes |
 | Health check | `wget` on `http://127.0.0.1:$PORT/actuator/health` every 10 seconds, after a 60-second start period |
 | Layers | one base layer, then the Spring Boot layers: dependencies, loader, snapshot dependencies, application |
-| Secrets | none; `.dockerignore` keeps `.env`, keys and build output out of the build context |
+| Secrets | none; `.dockerignore` keeps `.env`, `secrets/`, keys and build output out of the build context |
 | Size | about 82 MB |
 
 Base images are pinned by digest. To update one, resolve the new digest, replace tag, digest and version comment together in [`deploy/docker/Dockerfile`](../deploy/docker/Dockerfile) or [`docker-compose.yml`](../docker-compose.yml), then rebuild and run steps 6 and 7.
@@ -291,18 +324,33 @@ To move to a new JRE release:
 
 ## Configuration
 
-All values live in `.env` ([`.env.example`](../.env.example) documents each one).
+Settings live in `.env` ([`.env.example`](../.env.example) documents each one); passwords live in `secrets/`.
 
-| Variable | Default | Meaning |
+| Variable in `.env` | Default | Meaning |
 |---|---|---|
-| `HORUS_DB_ADMIN_PASSWORD` | none, required | Password of the PostgreSQL superuser `postgres`, used only to create the database on the first start. The host never receives it |
-| `HORUS_DB_PASSWORD` | none, required | Password of `horus`, the role the host connects with. PostgreSQL keeps both passwords from its first start; to change one, reset (below) |
 | `SPRING_PROFILES_ACTIVE` | `dev` in `.env.example` | `dev` turns on the demo users. Empty: no demo users |
-| `HORUS_DEMO_PASSWORD` | none | Password of the demo users on the `dev` profile. Empty: nobody can sign in |
 | `HORUS_EXAMPLE` | `rule-engine-only` | Example host to build, a folder under `examples/` |
 | `HORUS_HTTP_PORT` | `8080` | Port on 127.0.0.1 that serves the host |
 
-The same image runs everywhere: configuration reaches it only through environment variables.
+| File in `secrets/` | Mounted in | Meaning |
+|---|---|---|
+| `db_admin_password` | `postgres` at `/run/secrets/db_admin_password` (`POSTGRES_PASSWORD_FILE`) | Password of the PostgreSQL superuser `postgres`, used only to create the database on the first start. The host never receives it |
+| `db_password` | `postgres` at `/run/secrets/db_password`, read once by the init script; `host` at `/run/secrets/HORUS_DB_PASSWORD` | Password of `horus`, the role the host connects with. PostgreSQL keeps both database passwords from its first start; to change one, reset (below) |
+| `demo_password` | `host` at `/run/secrets/HORUS_DEMO_PASSWORD` | Password of the demo users on the `dev` profile |
+
+The host reads its two files through Spring Boot's config tree import (`SPRING_CONFIG_IMPORT=configtree:/run/secrets/`): each file becomes a property named after it, so the host's `${HORUS_DB_PASSWORD}` and `${HORUS_DEMO_PASSWORD}` resolve from the files. Nothing in the image changes: the same image runs everywhere, configured through environment variables and mounted files.
+
+To bring your own values instead of random ones, write each file before the first start, with no trailing newline, and keep the directory private:
+
+```bash
+mkdir -p secrets && chmod 700 secrets
+printf '%s' 'your-admin-password' > secrets/db_admin_password
+printf '%s' 'your-app-password' > secrets/db_password
+printf '%s' 'your-demo-password' > secrets/demo_password
+chmod 644 secrets/*
+```
+
+The files are `0644` because compose bind-mounts them as they are and the container users (`postgres`, uid 70, and `horus`, uid 10001) must read them; the `0700` directory keeps other users of your machine out. A database created before secret files existed keeps its old passwords: write those into the files, or reset.
 
 ### Database roles
 
@@ -339,9 +387,9 @@ The host refuses to start with an issuer and no audience, and refuses the `dev` 
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `required variable HORUS_DB_PASSWORD is missing a value` | No `.env`, or the value is empty | Step 1 |
+| `bind source path does not exist: .../secrets/db_password` | The secret files were not created | `deploy/create-secrets.sh`, then start again |
 | `Bind for 127.0.0.1:8080 failed: port is already allocated` | Another process uses 8080 | Set `HORUS_HTTP_PORT=18080` in `.env` and use that port in the commands |
-| Host restarts; log shows `password authentication failed for user "horus"` | A database password changed after the database was created, or the volume is from a version of this guide before the `horus` role existed | `docker compose down -v`, then start again |
-| Sign-in redirects to `/login?error` | Wrong demo password, or the host is not on the `dev` profile | `grep -E 'SPRING_PROFILES_ACTIVE|HORUS_DEMO_PASSWORD' .env` |
+| Host restarts; log shows `password authentication failed for user "horus"` | A database password changed after the database was created, or the volume is from a version of this guide before the `horus` role or the secret files existed | Write the old password into `secrets/db_password`, or `docker compose down -v` and start again |
+| Sign-in redirects to `/login?error` | Wrong demo password, or the host is not on the `dev` profile | `grep SPRING_PROFILES_ACTIVE .env`; the password is in `secrets/demo_password` |
 | `No patched Temurin JRE for arm64 yet` during the build | The build was asked for `linux/arm64` | Build through compose, or add `--platform linux/amd64` to `docker build` |
 | `docker compose up --wait` reports `host` unhealthy | The host did not start | `docker compose logs host` shows the reason, usually the database or a configuration check |

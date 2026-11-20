@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { scenarioPermissions, scenarioResponses, scenarioUser, type MockResponse, type Scenario } from '../src/mocks/fixtures';
-import { createFakeEngine, demoSeed } from '../src/mocks/ruleEngine';
+import { createFakeEngine, demoSeed, type StoredVersion } from '../src/mocks/ruleEngine';
 
 /** Answers the registry, /api/bpm/meta and /api/bpm/me from the shared fixtures, and records the calls. */
 export async function mockHost(page: Page, scenario: Scenario = 'ready'): Promise<string[]> {
@@ -40,12 +40,13 @@ export async function rememberLocale(page: Page, locale: 'en' | 'vi'): Promise<v
   }, locale);
 }
 
-/** Answers the Rule Engine endpoints from the in-memory engine with the demo data, as the scenario's user. */
-export async function mockRuleEngine(page: Page, scenario: Scenario): Promise<void> {
-  const engine = createFakeEngine(demoSeed());
+/** Answers the Rule Engine endpoints from the in-memory engine with the demo data (or `seed`), as the scenario's user. */
+export async function mockRuleEngine(page: Page, scenario: Scenario, seed: StoredVersion[] = demoSeed()): Promise<ReturnType<typeof createFakeEngine>> {
+  const engine = createFakeEngine(seed);
   await page.route('**/api/bpm/rules/v1/**', async (route) => {
     const request = route.request();
     const answer = engine.handle({ method: request.method(), path: request.url(), headers: request.headers(), body: request.postData() ?? '', user: scenarioUser(scenario), permissions: scenarioPermissions(scenario) });
     await route.fulfill({ status: answer.status, headers: answer.headers, body: answer.body });
   });
+  return engine;
 }
