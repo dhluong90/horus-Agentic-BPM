@@ -1,10 +1,11 @@
 # Container image of an example host (a Spring Boot service that embeds the engines).
 # Build context: the repository root.
 #
-#   docker build --platform linux/amd64 -f deploy/docker/Dockerfile -t horus-bpm/rule-engine-only:local .
-#   docker build --platform linux/amd64 -f deploy/docker/Dockerfile --build-arg EXAMPLE=rule-and-process -t horus-bpm/rule-and-process:local .
+#   docker build -f deploy/docker/Dockerfile -t horus-bpm/rule-engine-only:local .
+#   docker build -f deploy/docker/Dockerfile --build-arg EXAMPLE=rule-and-process -t horus-bpm/rule-and-process:local .
 #
-# The runtime image is linux/amd64 (see stage 3). EXAMPLE names a folder under examples/. Base images are pinned by digest; the comment names the
+# The runtime image is linux/amd64 or linux/arm64, the architecture of the machine that builds it unless
+# --platform says otherwise (see stage 3). EXAMPLE names a folder under examples/. Base images are pinned by digest; the comment names the
 # version the digest resolved to. Update tag, digest and comment together (docs/DEPLOYING.md).
 # Nothing secret is read at build time: credentials reach the container as environment variables at run time.
 
@@ -28,22 +29,57 @@ RUN set -eu; \
       cd cockpit/web && npm ci --ignore-scripts --no-audit --no-fund && npm run build && cp -R dist/. /out/dist/; \
     fi
 
-# Stage 2: build the example host and the engine modules it needs.
-# Maven 3.9.16 (the line CI uses), Eclipse Temurin JDK 21.
-FROM --platform=$BUILDPLATFORM maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS build
-ARG EXAMPLE
+# Stage 2a: the POMs only, each in its place. The dependency layer of stage 2 copies them, so that
+# layer is keyed on the POMs' content alone and a commit that changes no POM reuses it (BuildKit
+# compares content, not timestamps).
+FROM --platform=$BUILDPLATFORM maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS poms
 WORKDIR /src
 COPY . .
-COPY --from=cockpit /out/dist/ /tmp/cockpit-dist/
-RUN --mount=type=cache,id=horus-bpm-m2,target=/root/.m2/repository \
-    set -eu; \
+RUN set -eu; \
+    mkdir -p /poms; \
+    find . -name pom.xml -not -path '*/node_modules/*' -not -path '*/target/*' | tar -cf - -T - | tar -xf - -C /poms
+
+# Stage 2: build the example host and the engine modules it needs.
+# Maven 3.9.16 (the line CI uses), Eclipse Temurin JDK 21.
+# Maven runs through tools/mvn-retry.sh, as in CI: a run that failed only because Maven Central did not
+# deliver an artifact (a false 404, or a 429 after the resolver's own retries in .mvn/maven.config) runs
+# again with -U, at most 3 attempts, after MVN_RETRY_WAIT then twice that many seconds. Any other failure
+# ends the build at once. Retries are plain "mvn-retry: warning: ... Retrying" lines in the build log.
+FROM --platform=$BUILDPLATFORM maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS build
+ARG EXAMPLE
+ARG MVN_RETRY_WAIT=60
+WORKDIR /src
+# Dependency layer: the real package lifecycle of the example host and the modules it needs, run on the
+# POMs alone, puts every dependency and plugin the build uses into /root/.m2/repository in this layer.
+# With no sources the compiler skips its annotation processor, so that one is fetched by name. The help
+# and dependency plugins used here are pinned in the parent POM, and the enforcer checks they stay pinned.
+# The layer changes only when a POM, .mvn/ or the licence files (checked by the enforcer) change.
+COPY --from=poms /poms/ ./
+COPY .mvn/ .mvn/
+COPY LICENSE COMMERCIAL-LICENSE.md ./
+COPY tools/mvn-retry.sh tools/mvn-retry.sh
+RUN set -eu; \
     test -f "examples/${EXAMPLE}/pom.xml" || { echo "examples/${EXAMPLE} is not an example host" >&2; exit 1; }; \
+    bash tools/mvn-retry.sh -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests \
+      -Dcockpit.bundle.skip=true -Dspring-boot.repackage.skip=true; \
+    boot="$(mvn -B -ntp -q -N help:evaluate -Dexpression=spring-boot.version -DforceStdout)"; \
+    bash tools/mvn-retry.sh -B -ntp -q -N dependency:get -Dartifact="org.springframework.boot:spring-boot-configuration-processor:${boot}"; \
+    find . -name target -type d -prune -exec rm -rf {} +
+COPY . .
+COPY --from=cockpit /out/dist/ /tmp/cockpit-dist/
+# Online, as before, so every plugin runs exactly as in CI (CycloneDX skips itself offline); with the
+# dependency layer in place Maven fetches only what that layer lacks. The last line counts those downloads.
+RUN set -eu; \
     skip_cockpit=true; \
     if [ -f /tmp/cockpit-dist/index.html ]; then \
       rm -rf cockpit/web/dist && mkdir -p cockpit/web/dist && cp -R /tmp/cockpit-dist/. cockpit/web/dist/; \
       skip_cockpit=false; \
     fi; \
-    mvn -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests -Dcockpit.bundle.skip="${skip_cockpit}"; \
+    bash tools/mvn-retry.sh -B -pl "examples/${EXAMPLE}" -am package -DskipTests -Dcockpit.bundle.skip="${skip_cockpit}" \
+      > /tmp/build.log 2>&1 || { grep -v '^\[INFO\] Download' /tmp/build.log; exit 1; }; \
+    grep -v '^\[INFO\] Download' /tmp/build.log; \
+    echo "Maven downloads in this step, beyond the dependency layer: $(grep -c '^\[INFO\] Downloaded from' /tmp/build.log || true)"; \
+    grep '^\[INFO\] Downloaded from' /tmp/build.log | sed 's/^/  /' || true; \
     jar="$(find "examples/${EXAMPLE}/target" -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' | head -n 1)"; \
     test -n "$jar"; \
     mkdir -p /layers; \
@@ -55,8 +91,8 @@ RUN --mount=type=cache,id=horus-bpm-m2,target=/root/.m2/repository \
 #   2. the SHA-256 pinned below (the bytes are the ones reviewed when the version was bumped).
 # This stage is thrown away: gnupg never reaches the runtime image.
 # 21.0.13.1 fixes CVE-2026-114938 (high); the official eclipse-temurin images still carry 21.0.13+9.
-# Adoptium publishes this JRE for x64 only so far, so the image is linux/amd64 (docker-compose.yml sets
-# the platform). Add the aarch64 checksum here when Adoptium publishes that build.
+# One pinned SHA-256 per architecture, both from the .sha256.txt beside each archive on the release page;
+# the GPG check applies to both. Update both together.
 FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS jre
 ARG TARGETARCH
 ARG JRE_RELEASE=jdk-21.0.13.1+2
@@ -66,7 +102,8 @@ COPY deploy/docker/adoptium.asc /tmp/adoptium.asc
 RUN set -eu; \
     case "${TARGETARCH}" in \
       amd64) arch=x64; sha256=72835f41a468ae949fc058f8ec6a73d303ca3e5ea165621e08aacb36bb537bba ;; \
-      *) echo "No patched Temurin JRE for ${TARGETARCH} yet; build with --platform linux/amd64" >&2; exit 1 ;; \
+      arm64) arch=aarch64; sha256=0236751150c82f1ef91be8cc32a36091a95e97650285fea848f2bb82311e5da7 ;; \
+      *) echo "No pinned Temurin JRE for ${TARGETARCH}; build for linux/amd64 or linux/arm64" >&2; exit 1 ;; \
     esac; \
     apk add --no-cache gnupg; \
     url="https://github.com/adoptium/temurin21-binaries/releases/download/$(echo "${JRE_RELEASE}" | sed 's/+/%2B/')/OpenJDK21U-jre_${arch}_alpine-linux_hotspot_${JRE_FILE_VERSION}.tar.gz"; \

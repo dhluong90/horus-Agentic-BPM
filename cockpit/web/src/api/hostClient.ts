@@ -1,7 +1,7 @@
-import type { z } from 'zod';
-import { bpmMeV1, type BpmMeV1 } from './generated/bpm-me.v1';
+import type { BpmMeV1 } from './generated/bpm-me.v1';
 import { bpmMetaV1, type BpmMetaV1 } from './generated/bpm-meta.v1';
 import { HostCallError, readProblem } from './hostError';
+import { createDroppedPermissionsWarner, readMe } from './meReader';
 
 export interface HostClient {
   readonly baseUrl: string;
@@ -10,6 +10,25 @@ export interface HostClient {
 }
 
 type Fetch = typeof fetch;
+
+/** Turns a response body into the typed value, or undefined when it does not match the contract. */
+type Reader<T> = (body: unknown) => T | undefined;
+
+const readMeta: Reader<BpmMetaV1> = (body) => {
+  const parsed = bpmMetaV1.safeParse(body);
+  return parsed.success ? parsed.data : undefined;
+};
+
+/** One warner for the page: the same dropped names are noted once, however often /me is read. */
+const warnDroppedPermissions = createDroppedPermissionsWarner();
+
+/** /me is read tolerantly: a permission name outside the known pattern is dropped with one console note. */
+const readMeTolerantly: Reader<BpmMeV1> = (body) => {
+  const reading = readMe(body);
+  if (!reading.ok) return undefined;
+  warnDroppedPermissions(reading.dropped);
+  return reading.me;
+};
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -27,10 +46,11 @@ export function csrfHeaders(method: string, cookies: string = document.cookie): 
 /**
  * The one place the cockpit calls a host. This release supports host-session authentication only:
  * the host's own session cookie on the same origin (embedded mode). Every response is validated against the generated schema;
- * a body that does not match is an error, never rendered partially (cockpit DESIGN section 12).
+ * a body that does not match is an error, never rendered partially (cockpit DESIGN section 12). The one tolerance is in
+ * /me, which drops a permission name it cannot read instead of failing (cockpit DESIGN section 5.2).
  */
 export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): HostClient {
-  async function requestJson<T>(method: string, path: string, schema: z.ZodType<T>, signal: AbortSignal | undefined): Promise<T> {
+  async function requestJson<T>(method: string, path: string, read: Reader<T>, signal: AbortSignal | undefined): Promise<T> {
     let response: Response;
     try {
       response = await fetchImpl(`${baseUrl}${path}`, {
@@ -60,17 +80,17 @@ export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): Hos
     } catch {
       throw new HostCallError({ kind: 'unexpected-response', status: response.status, correlationId });
     }
-    const parsed = schema.safeParse(body);
-    if (!parsed.success) {
+    const value = read(body);
+    if (value === undefined) {
       throw new HostCallError({ kind: 'unexpected-response', status: response.status, correlationId });
     }
-    return parsed.data;
+    return value;
   }
 
   return {
     baseUrl,
-    getMeta: (signal) => requestJson('GET', '/api/bpm/meta', bpmMetaV1, signal),
-    getMe: (signal) => requestJson('GET', '/api/bpm/me', bpmMeV1, signal),
+    getMeta: (signal) => requestJson('GET', '/api/bpm/meta', readMeta, signal),
+    getMe: (signal) => requestJson('GET', '/api/bpm/me', readMeTolerantly, signal),
   };
 }
 

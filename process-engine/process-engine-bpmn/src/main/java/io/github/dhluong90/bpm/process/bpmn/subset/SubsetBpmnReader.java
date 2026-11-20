@@ -18,6 +18,10 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Expression;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExtensionBag;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.GatewayDirection;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
+import io.github.dhluong90.bpm.process.internal.exec.behavior.event.TimerSchedule;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ProcessType;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
@@ -46,7 +50,8 @@ import javax.xml.stream.XMLStreamReader;
 /**
  * Reads the executable BPMN subset of the first release into the semantic model: none {@code startEvent} and
  * {@code endEvent}, {@code serviceTask} ({@code horus:handler}), {@code businessRuleTask} ({@code horus:ruleSet}),
- * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} with {@code default}, and
+ * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} with {@code default}, {@code parallelGateway},
+ * an intermediate timer catch event with {@code timeDuration} or {@code timeDate}, and
  * {@code sequenceFlow} with an optional {@code conditionExpression} in {@code urn:horus-bpm:expr:v1}. Inputs are
  * {@code horus:input} elements and the result variable is {@code horus:resultVariable}.
  *
@@ -68,8 +73,7 @@ public final class SubsetBpmnReader {
     private static final Pattern ASSIGNEE = Pattern.compile("^(user|role|group):[A-Za-z0-9_.@-]{1,100}$");
     private static final Set<String> IGNORED_CHILDREN = Set.of("incoming", "outgoing", "documentation");
     private static final Map<String, String> LATER = Map.ofEntries(
-            Map.entry("parallelGateway", "the next sprint"),
-            Map.entry("intermediateCatchEvent", "the next sprint (timer catch)"),
+            Map.entry("intermediateCatchEvent", "S1 or S2 (message, signal and conditional catch events)"),
             Map.entry("callActivity", "the next sprint"),
             Map.entry("transaction", "the next sprint (saga)"),
             Map.entry("intermediateThrowEvent", "the next sprint (compensate throw)"),
@@ -216,6 +220,7 @@ public final class SubsetBpmnReader {
                     case "serviceTask" -> elements.add(serviceTask());
                     case "businessRuleTask" -> elements.add(businessRuleTask());
                     case "userTask" -> elements.add(userTask());
+                    case "intermediateCatchEvent" -> elements.add(catchEvent());
                     case "exclusiveGateway" -> {
                         String id = id();
                         String gwName = attr("name");
@@ -223,6 +228,13 @@ public final class SubsetBpmnReader {
                         Node children = children(local, id, false);
                         elements.add(new ExclusiveGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
                                 defaultFlow, children.info()));
+                    }
+                    case "parallelGateway" -> {
+                        String id = id();
+                        String gwName = attr("name");
+                        Node children = children(local, id, false);
+                        elements.add(new ParallelGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
+                                children.info()));
                     }
                     case "sequenceFlow" -> elements.add(sequenceFlow());
                     case "documentation", "extensionElements" -> skip();
@@ -263,6 +275,83 @@ public final class SubsetBpmnReader {
             return start
                     ? new StartEvent(id, name, List.of(), List.of(), List.of(), List.of(), null, false, true, null)
                     : new EndEvent(id, name, List.of(), List.of(), List.of(), List.of(), null, null);
+        }
+
+        /**
+         * An intermediate catch event with one {@code timerEventDefinition}: {@code timeDuration} or {@code timeDate}.
+         * Every other event definition, and {@code timeCycle}, is named as unsupported.
+         */
+        private FlowElement catchEvent() throws XMLStreamException {
+            String element = "intermediateCatchEvent";
+            String id = id();
+            String name = attr("name");
+            int line = line();
+            TimerEventDefinition timer = null;
+            int definitions = 0;
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
+                    definitions++;
+                    timer = timer(id);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
+                    definitions++;
+                    unsupported(element + " with " + local, id, "S1 or S2 (event definitions)");
+                    skip();
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "eventDefinitionRef".equals(local)) {
+                    definitions++;
+                    unsupported(element + " with eventDefinitionRef", id, "S1 (shared event definitions)");
+                    skip();
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
+                        && !"extensionElements".equals(local)) {
+                    unsupported(element + " child " + local, id, "a later stage");
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            if (definitions == 0) {
+                unsupported(element + " without an event definition", id, "S1 (link and none catch events)");
+            } else if (definitions > 1) {
+                unsupported(element + " with several event definitions", id, "S1 (multiple events)");
+            }
+            if (timer != null && definitions == 1) {
+                TimerSchedule.problem(timer).ifPresent(problem -> {
+                    if (problem.startsWith("timeCycle")) {
+                        unsupported.add(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
+                                "is not supported in this release; planned for S1 (timer cycles)", "timeCycle",
+                                safe(id), line));
+                    } else {
+                        invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line));
+                    }
+                });
+            }
+            return new IntermediateCatchEvent(id, name, List.of(), List.of(),
+                    timer == null ? List.of() : List.of(timer), List.of(), null, false, null);
+        }
+
+        private TimerEventDefinition timer(String eventId) throws XMLStreamException {
+            String definitionId = attr("id");
+            Expression date = null;
+            Expression duration = null;
+            Expression cycle = null;
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (!BPMN.equals(xml.getNamespaceURI())) {
+                    skip();
+                    continue;
+                }
+                switch (local) {
+                    case "timeDate" -> date = new Expression(text().strip(), null, null);
+                    case "timeDuration" -> duration = new Expression(text().strip(), null, null);
+                    case "timeCycle" -> cycle = new Expression(text().strip(), null, null);
+                    case "documentation", "extensionElements" -> skip();
+                    default -> {
+                        unsupported("timerEventDefinition child " + local, eventId, "a later stage");
+                        skip();
+                    }
+                }
+            }
+            return new TimerEventDefinition(definitionId, date, duration, cycle, null);
         }
 
         private FlowElement serviceTask() throws XMLStreamException {
@@ -595,6 +684,9 @@ public final class SubsetBpmnReader {
                 case UserTask t -> new UserTask(t.id(), t.name(), in, o, t.activity(), t.implementation(), t.info());
                 case ExclusiveGateway g -> new ExclusiveGateway(g.id(), g.name(), in, o, g.gatewayDirection(),
                         g.defaultFlow(), g.info());
+                case IntermediateCatchEvent c -> new IntermediateCatchEvent(c.id(), c.name(), in, o, c.eventDefinitions(),
+                        c.eventDefinitionRefs(), c.data(), c.parallelMultiple(), c.info());
+                case ParallelGateway g -> new ParallelGateway(g.id(), g.name(), in, o, g.gatewayDirection(), g.info());
                 default -> e;
             });
         }

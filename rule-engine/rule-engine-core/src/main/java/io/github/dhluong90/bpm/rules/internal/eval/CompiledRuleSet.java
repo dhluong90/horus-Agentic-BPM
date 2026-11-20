@@ -10,6 +10,7 @@ import io.github.dhluong90.bpm.rules.internal.expr.EvaluationException;
 import io.github.dhluong90.bpm.rules.internal.expr.Evaluator;
 import io.github.dhluong90.bpm.rules.internal.expr.Expr;
 import io.github.dhluong90.bpm.rules.internal.expr.ExpressionException;
+import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.expr.Parser;
 import io.github.dhluong90.bpm.rules.internal.model.Cell;
 import io.github.dhluong90.bpm.rules.internal.model.DecisionTable;
@@ -56,14 +57,15 @@ public final class CompiledRuleSet {
     private final Evaluator evaluator;
     private final int maxOutputBytes;
 
-    private CompiledRuleSet(Definitions model, List<CompiledRule> rules, int maxOutputBytes, int maxStringLength) {
+    private CompiledRuleSet(Definitions model, List<CompiledRule> rules, int maxOutputBytes, int maxStringLength,
+            RegexLimits regexLimits) {
         DecisionTable table = model.decision().table();
         this.name = model.name();
         this.hitPolicy = table.hitPolicy();
         this.inputs = table.inputs();
         this.outputs = table.outputs();
         this.rules = List.copyOf(rules);
-        this.evaluator = new Evaluator(table.moneyRounding(), maxStringLength);
+        this.evaluator = new Evaluator(table.moneyRounding(), maxStringLength, regexLimits);
         this.maxOutputBytes = maxOutputBytes;
     }
 
@@ -88,6 +90,20 @@ public final class CompiledRuleSet {
      * @return the compiled rule set
      */
     public static CompiledRuleSet compile(Definitions model, int maxOutputBytes, int maxStringLength) {
+        return compile(model, maxOutputBytes, maxStringLength, RegexLimits.defaults());
+    }
+
+    /**
+     * Compiles a model with size limits and the bounds of {@code matches} (TR-SEC-02).
+     *
+     * @param model the decision model
+     * @param maxOutputBytes the largest estimated JSON size of one decision's outputs
+     * @param maxStringLength the longest string {@code +} may build
+     * @param regexLimits the length and time bounds of one regular expression match
+     * @return the compiled rule set
+     */
+    public static CompiledRuleSet compile(Definitions model, int maxOutputBytes, int maxStringLength,
+            RegexLimits regexLimits) {
         DecisionTable table = model.decision().table();
         for (OutputClause output : table.outputs()) {
             checkOutput(table.hitPolicy(), output);
@@ -127,7 +143,7 @@ public final class CompiledRuleSet {
         if (!problems.kept.isEmpty()) {
             throw new ValidationFailedException(problems.kept, problems.truncated);
         }
-        return new CompiledRuleSet(model, rules, maxOutputBytes, maxStringLength);
+        return new CompiledRuleSet(model, rules, maxOutputBytes, maxStringLength, regexLimits);
     }
 
     /**
@@ -165,19 +181,40 @@ public final class CompiledRuleSet {
      * @throws InputInvalidException when an input does not match its declared type
      */
     public DecisionResult.Outcome evaluate(DecisionInput input) {
+        return evaluateWithReason(input).outcome();
+    }
+
+    /**
+     * Evaluates the table and tells why a failed evaluation failed, for the decision row's {@code error_code}.
+     *
+     * @param input the inputs
+     * @return the outcome, and the reason of an {@code EVALUATION_ERROR} that has one (for example
+     *     {@code REGEX_TIMEOUT}), else null
+     * @throws InputInvalidException when an input does not match its declared type
+     */
+    public Evaluation evaluateWithReason(DecisionInput input) {
         Object[] slots = bind(input);
         try {
-            return switch (hitPolicy) {
+            return new Evaluation(switch (hitPolicy) {
                 case FIRST -> first(slots);
                 case UNIQUE -> unique(slots);
                 case COLLECT -> collect(slots);
-            };
+            }, null);
         } catch (EvaluationException e) {
-            return new DecisionResult.Failed("EVALUATION_ERROR", e.getMessage());
+            return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", e.getMessage()), e.reason());
         } catch (ArithmeticException e) {
             // Exponent overflow or underflow in DECIMAL128 arithmetic: a deterministic failure, never a 500.
-            return new DecisionResult.Failed("EVALUATION_ERROR", "Arithmetic out of range");
+            return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", "Arithmetic out of range"), null);
         }
+    }
+
+    /**
+     * An outcome and, for a failure, its reason code.
+     *
+     * @param outcome the outcome
+     * @param reason the reason of a failure that has one, else null
+     */
+    public record Evaluation(DecisionResult.Outcome outcome, String reason) {
     }
 
     /**
@@ -489,7 +526,7 @@ public final class CompiledRuleSet {
         String source = conditionSource(input, text);
         Expr expr;
         try {
-            expr = Parser.parse(source, name -> slots.getOrDefault(name, -1));
+            expr = Parser.parse(source, name -> slots.getOrDefault(name, -1), input);
         } catch (ExpressionException e) {
             problems.add(new Violation(ruleId, input, e.getMessage()));
             return new Expr.Literal(Boolean.FALSE);
