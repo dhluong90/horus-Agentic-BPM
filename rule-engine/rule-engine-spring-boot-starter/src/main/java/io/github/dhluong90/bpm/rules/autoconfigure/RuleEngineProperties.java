@@ -162,16 +162,17 @@ public record RuleEngineProperties(
      * @param additionalPersonalDataNames more names, added to the list
      * @param partitionsAhead how far ahead of the host clock monthly partitions are created, at start-up and daily;
      *     {@code PT0S} to {@code P366D}, default {@code P7D}. The current and the next month always exist
-     * @param retention how long decisions are kept, in whole months ({@code P12M}, {@code P120M} or {@code P10Y}); no
+     * @param retention {@code keep-forever}, or how long decisions are kept in whole months ({@code P12M},
+     *     {@code P120M} or {@code P10Y}); no
      *     default. When set, the daily partition job drops each monthly partition that lies wholly before the host
      *     clock minus this period, and records the drop in {@code rle_decision_log_drop}; rows are never deleted.
-     *     Never on by default: unset, every decision is kept forever, nothing is dropped and start-up is not affected
-     *     (PD-050). When set, at least {@code retention-floor}
+     *     Never on by default: unset, every decision is kept, nothing is dropped, start-up is not affected and a WARN
+     *     is logged at every start-up (PD-130). Required at 1.0 (PD-050). A period must be at least {@code retention-floor}
      * @param retentionFloor the shortest {@code retention} accepted, in whole months; default and lowest value
      *     {@code P12M}. A host may raise it to its own policy, so a shorter value set by mistake stops start-up
      */
     public record DecisionLog(Boolean maskDefault, Boolean requireExplicitMask, List<String> personalDataNames,
-            List<String> additionalPersonalDataNames, Duration partitionsAhead, Period retention,
+            List<String> additionalPersonalDataNames, Duration partitionsAhead, String retention,
             Period retentionFloor) {
 
         /** Validates the periods; an out-of-range value fails start-up naming the property. */
@@ -189,11 +190,44 @@ public record RuleEngineProperties(
                             + "P" + EngineDefaults.DECISION_LOG_RETENTION_FLOOR_MONTHS + "M, was " + retentionFloor);
                 }
             }
-            if (retention != null && wholeMonths("horus.bpm.rules.decision-log.retention", retention) < floor) {
-                throw new IllegalArgumentException("horus.bpm.rules.decision-log.retention must be at least "
-                        + "horus.bpm.rules.decision-log.retention-floor (P" + floor + "M), was " + retention);
+            if (retention != null && !retention.isBlank() && !KEEP_FOREVER.equals(retention.trim())) {
+                Period period;
+                try {
+                    period = Period.parse(retention.trim());
+                } catch (java.time.format.DateTimeParseException e) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.retention must be "
+                            + KEEP_FOREVER + " or an ISO 8601 period in whole months such as P12M, was " + retention,
+                            e);
+                }
+                if (wholeMonths("horus.bpm.rules.decision-log.retention", period) < floor) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.retention must be at least "
+                            + "horus.bpm.rules.decision-log.retention-floor (P" + floor + "M), was " + retention);
+                }
             }
         }
+
+        /**
+         * Returns the retention period in force.
+         *
+         * @return the period whose older monthly partitions are dropped, or null when retention is unset or
+         *     {@code keep-forever}: then nothing is ever dropped
+         */
+        public Period retentionPeriod() {
+            return retention == null || retention.isBlank() || KEEP_FOREVER.equals(retention.trim())
+                    ? null : Period.parse(retention.trim());
+        }
+
+        /**
+         * Tells whether the host chose {@code keep-forever} explicitly.
+         *
+         * @return true for the explicit value, false when unset or a period
+         */
+        public boolean keepForeverChosen() {
+            return retention != null && KEEP_FOREVER.equals(retention.trim());
+        }
+
+        /** The explicit value for "keep every decision", so a host can say so instead of leaving the setting unset. */
+        public static final String KEEP_FOREVER = "keep-forever";
 
         private static long wholeMonths(String property, Period value) {
             if (value.getDays() != 0 || value.toTotalMonths() <= 0) {

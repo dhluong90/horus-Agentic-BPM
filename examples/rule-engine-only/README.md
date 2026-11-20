@@ -63,15 +63,15 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  19      | V19__rle_decision_log_drop.sql
 ```
 
-Decision log retention is off by default: with `HORUS_DECISION_LOG_RETENTION` unset, every decision is kept forever, nothing is dropped, and the start-up log says so:
+Decision log retention is off by default: with `HORUS_DECISION_LOG_RETENTION` unset, every decision is kept, nothing is dropped, and every start-up logs a WARN saying so (set `keep-forever` to choose it on purpose; the warning then becomes an INFO):
 
 ```bash
 HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
-# INFO  DecisionLogRetention: Rule Engine decision log retention is off: horus.bpm.rules.decision-log.retention is not
-# set, so every decision is kept and no partition is dropped. Set an ISO period such as P12M to enable drops
+# WARN  DecisionLogRetention: Rule Engine decision log retention is unset (horus.bpm.rules.decision-log.retention), so
+# every decision is kept and none is dropped. The log grows by one row per decision, roughly 1 to 3 KB each ...
 ```
 
-Only an explicit ISO period in whole months, such as `P12M` (at least `decision-log.retention-floor`), turns drops on.
+Only an explicit ISO period in whole months, such as `P12M` (at least `decision-log.retention-floor`), turns drops on; `keep-forever` keeps everything explicitly.
 
 ### The cursor key
 
@@ -740,7 +740,7 @@ Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..
 | `HORUS_DB_USERNAME` | `horus` | Database user |
 | `HORUS_DB_PASSWORD` | none | Database password. Never put it in a file in the repository |
 | `PORT` | `8080` | HTTP port |
-| `HORUS_DECISION_LOG_RETENTION` | unset: keep forever | An ISO period in whole months, at least `P12M`, such as `P12M` (`horus.bpm.rules.decision-log.retention`). Monthly partitions older than this are dropped, and each drop is recorded in `rle_decision_log_drop`. Unset, nothing is dropped and the host starts normally |
+| `HORUS_DECISION_LOG_RETENTION` | unset: keeps everything, warns | `keep-forever`, or an ISO period in whole months of at least `P12M`, such as `P12M` (`horus.bpm.rules.decision-log.retention`). Monthly partitions older than this are dropped, and each drop is recorded in `rle_decision_log_drop`. Unset, nothing is dropped and the host starts normally |
 | `HORUS_BPM_RULES_MASKING_HMAC_KEY` | none | Base64 key, at least 32 bytes after decoding, for the fingerprints of inputs a rule set declares `mask: true`. Needed only once such a rule set is imported: without it the host refuses to start and names the setting. Create one with `openssl rand -base64 32` and keep it in a secret store |
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` | none | Issuer of the bearer tokens the host accepts. Unset: no bearer tokens, so only health answers outside `dev` |
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES` | none | Audience this host requires in every token, for example `rule-engine-only`. Required whenever an issuer, JWK set or public key is set: without it the host does not start (TR-SEC-12) |
@@ -816,7 +816,7 @@ The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=htt
 | `horus.bpm.rules.migrate-on-start` | `true` | `false` for hosts that run the `rle_*` migrations in a separate job. If the schema is not current, the `ruleEngine` health contributor is down and partitions are not created until it is |
 | `horus.bpm.rules.query.max-page-size` | `200` | Largest `limit` of `GET /rule-sets` and `GET .../versions`, 1 to 200; may be lowered, never raised |
 | `horus.bpm.rules.lifecycle.reason-max-length` | `2000` | Longest `:reject` reason in characters, 1 to 2000; may be lowered, never raised |
-| `horus.bpm.rules.decision-log.retention` | none: keep forever | How long decisions are kept, in whole months, at least `decision-log.retention-floor` (`P12M`). Unset, nothing is dropped and start-up is unaffected |
+| `horus.bpm.rules.decision-log.retention` | none: keeps everything, warns | `keep-forever`, or how long decisions are kept, in whole months, at least `decision-log.retention-floor` (`P12M`). Unset, nothing is dropped and start-up is unaffected |
 
 The full list of properties is on the wiki page Rule Engine Configuration. The starter adds them with the features that use them.
 

@@ -431,7 +431,7 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `readings.style` | `sentence` | Style of plain-language readings of rules and of explanation `text` (CK-F-44, PD-077): `sentence` (patterns from the message catalogue) or `shorthand` (`tier: GOLD, PLATINUM`). If sentences miss the M1 checkpoint of 8 Jan 2027, M1 ships with `shorthand` only and the property accepts only that value until sentences ship. Shown in `/api/bpm/meta` as `rules.readings.style` |
 | `explain.default-language` | `en` | Language of `text` when the request names none available (PD-027, PD-077) |
 | `publication.require-simulation-report` | `false` | From M3 (RE-F-23, PD-022): when `true`, per host or per rule set (`publication.require-simulation-report.rule-sets`), `:request-publish` is refused with `422 VALIDATION_FAILED` unless a stored simulation report of the draft is attached. Off by default; in M1 the approver runs the simulation herself |
-| `decision-log.retention` | none: off, keep forever | Whole months, ISO 8601 (`P12M`, `P120M`, `P10Y`). The daily partition job drops whole monthly partitions of `rle_decision` whose upper bound is at or before the host clock minus the retention, and records each drop in `rle_decision_log_drop` (ADR-0010, section 5). Retention is never on by default: a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). Unset, on every profile, nothing is ever dropped and start-up is not affected; it logs one INFO line saying retention is off. Only an explicit period enables drops (#104) |
+| `decision-log.retention` | none: unset keeps everything and warns | `keep-forever`, or whole months in ISO 8601 (`P12M`, `P120M`, `P10Y`). The daily partition job drops whole monthly partitions of `rle_decision` whose upper bound is at or before the host clock minus the retention, and records each drop in `rle_decision_log_drop` (ADR-0010, section 5). Retention is never on by default: a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). Unset, on every profile, nothing is ever dropped and start-up is not affected; it logs a WARN at every start-up saying the setting is unset, that everything is kept, the rough growth per row and the setting name (PD-130). `keep-forever` says the same choice explicitly and logs INFO. Only an explicit period enables drops. PD-050 stays the 1.0 rule: a later release requires the setting (#104) |
 | `decision-log.partitions-ahead` | `P7D` | How far ahead monthly partitions are created |
 | `cache.max-entries`, `cache.epoch-check-interval`, `cache.listen-notify` | `1000`, `PT5S`, `true` | ADR-0009 |
 | `evaluation.regex-max-reads` | `1000000` | Characters one `matches()` may read, `1` to `1000000`, lower only: the deterministic primary bound (`TR-SEC-02`, `RLE-007`, `TR-DET-05`). Past it the decision fails with `EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT` |
@@ -773,7 +773,7 @@ sequenceDiagram
     participant J as Partition job (horus-rle-partitions)
     participant P as DecisionLogPartitions
     participant DB as Host PostgreSQL
-    Note over J: Start-up logs that retention is off when decision-log.retention is unset; nothing is dropped
+    Note over J: Start-up warns when decision-log.retention is unset; nothing is dropped
     J->>P: ensureAhead(now, partitions-ahead)
     alt decision-log.retention is set
         J->>P: dropExpired(now, retention)

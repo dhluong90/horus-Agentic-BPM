@@ -20,19 +20,25 @@ final class DecisionLogRetention {
     }
 
     /**
-     * Returns the retention in force and logs one INFO line saying whether retention is on.
+     * Returns the retention in force. Unset logs a WARN, on every start-up, that everything is kept; {@code keep-forever}
+     * is the explicit choice and logs an INFO instead.
      *
-     * @param retention the bound property, already checked against the floor, or null
-     * @return the retention, or null when none is set: then nothing is ever dropped
+     * @param decisionLog the bound decision log settings
+     * @return the retention, or null when unset or {@code keep-forever}: then nothing is ever dropped
      */
-    static Period resolve(Period retention) {
+    static Period resolve(RuleEngineProperties.DecisionLog decisionLog) {
+        Period retention = decisionLog.retentionPeriod();
         if (retention != null) {
             LOG.info("Rule Engine keeps decisions for " + retention + " (" + PROPERTY + "); older monthly partitions "
                     + "are dropped and each drop is recorded in rle_decision_log_drop");
-            return retention;
+        } else if (decisionLog.keepForeverChosen()) {
+            LOG.info("Rule Engine keeps every decision: " + PROPERTY + " is keep-forever, so no partition is dropped");
+        } else {
+            LOG.warn("Rule Engine decision log retention is unset (" + PROPERTY + "), so every decision is kept and "
+                    + "none is dropped. The log grows by one row per decision, roughly 1 to 3 KB each depending on "
+                    + "inputs and outputs. Set " + PROPERTY + " to keep-forever or to whole months of at least 12, "
+                    + "such as P12M; a later release will require it");
         }
-        LOG.info("Rule Engine decision log retention is off: " + PROPERTY + " is not set, so every decision is kept "
-                + "and no partition is dropped. Set an ISO period such as P12M to enable drops");
-        return null;
+        return retention;
     }
 }

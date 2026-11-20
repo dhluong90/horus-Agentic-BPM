@@ -28,8 +28,8 @@ horus:
     rules:
       decision-log:
         # How long decisions are kept: the bank's choice, in whole months, at least 12 (P12M). Monthly partitions
-        # older than this are dropped and each drop is recorded in rle_decision_log_drop. Never on by default: left empty,
-        # every decision is kept and nothing is dropped.
+        # older than this are dropped and each drop is recorded in rle_decision_log_drop. Never on by default: left empty (or keep-forever),
+        # every decision is kept, nothing is dropped and start-up warns.
         retention: ${HORUS_DECISION_LOG_RETENTION:}
       enabled: true
       security:

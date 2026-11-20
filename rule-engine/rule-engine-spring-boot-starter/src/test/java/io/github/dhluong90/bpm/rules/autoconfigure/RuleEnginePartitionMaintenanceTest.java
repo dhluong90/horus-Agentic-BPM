@@ -62,14 +62,23 @@ class RuleEnginePartitionMaintenanceTest {
 
     @Test
     void RLE_017_retention_has_no_default_is_whole_months_and_at_least_the_floor() {
-        properties.run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retention())
+        properties.run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retentionPeriod())
                 .isNull());
         properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P12M")
-                .run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retention())
+                .run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retentionPeriod())
                         .isEqualTo(Period.ofMonths(12)));
         properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P10Y")
-                .run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retention()
+                .run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retentionPeriod()
                         .toTotalMonths()).isEqualTo(120));
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=keep-forever")
+                .run(context -> {
+                    RuleEngineProperties.DecisionLog log = context.getBean(RuleEngineProperties.class).decisionLog();
+                    assertThat(log.retentionPeriod()).isNull();
+                    assertThat(log.keepForeverChosen()).isTrue();
+                });
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=forever")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("keep-forever"));
         // Below the floor of 12 months, in days, or a floor lowered below 12 months: start-up stops naming the property
         properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P11M")
                 .run(context -> assertThat(context).hasFailed().getFailure()
@@ -88,9 +97,22 @@ class RuleEnginePartitionMaintenanceTest {
     }
 
     @Test
-    void RLE_017_retention_is_off_unless_set_and_never_stops_start_up() {
-        assertThat(DecisionLogRetention.resolve(null)).isNull();
-        assertThat(DecisionLogRetention.resolve(Period.ofMonths(120))).isEqualTo(Period.ofMonths(120));
+    void RLE_017_unset_retention_warns_every_start_up_and_keep_forever_is_explicit(CapturedOutput output) {
+        RuleEngineProperties.DecisionLog unset = new RuleEngineProperties.DecisionLog(
+                null, null, null, null, null, null, null);
+        assertThat(DecisionLogRetention.resolve(unset)).isNull();
+        assertThat(DecisionLogRetention.resolve(unset)).isNull();
+        assertThat(output.getAll().split("WARN", -1)).hasSize(3);
+        assertThat(output).contains("horus.bpm.rules.decision-log.retention", "every decision is kept", "KB");
+
+        RuleEngineProperties.DecisionLog explicit = new RuleEngineProperties.DecisionLog(
+                null, null, null, null, null, "keep-forever", null);
+        assertThat(DecisionLogRetention.resolve(explicit)).isNull();
+        assertThat(output.getAll().split("WARN", -1)).hasSize(3);
+
+        RuleEngineProperties.DecisionLog months = new RuleEngineProperties.DecisionLog(
+                null, null, null, null, null, "P120M", null);
+        assertThat(DecisionLogRetention.resolve(months)).isEqualTo(Period.ofMonths(120));
     }
 
     @Test

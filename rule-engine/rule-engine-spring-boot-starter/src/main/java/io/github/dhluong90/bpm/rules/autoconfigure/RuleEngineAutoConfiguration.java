@@ -85,7 +85,7 @@ public class RuleEngineAutoConfiguration {
             RuleEngineProperties properties, ObjectProvider<Clock> clock) {
         return new RuleEnginePartitionMaintenance(partitions, engineClock(clock),
                 properties.decisionLog().partitionsAheadOrDefault(), EngineDefaults.PARTITION_MAINTENANCE_INTERVAL,
-                DecisionLogRetention.resolve(properties.decisionLog().retention()));
+                DecisionLogRetention.resolve(properties.decisionLog()));
     }
 
     @Bean
