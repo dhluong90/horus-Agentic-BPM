@@ -4,7 +4,7 @@
 |---|---|
 | Type | Reference (decision record) |
 | Owner area | Product |
-| Last reviewed | 2026-11-19 |
+| Last reviewed | 2026-11-20 |
 
 This log records every product decision about the engines: scope, milestones, priorities, product rules and the acceptance of architecture decisions that change what ships. The product manager writes the question and a recommendation first; the product owner decides (PD-001). Since 2026-11-19 the product manager also decides business and use-case questions under delegated authority, while the product owner keeps release dates, licensing and commercial terms and can overrule any entry (PD-073). Every decision follows the principle "generic by design" (PD-074). A decision is never applied to the roadmap, the feature map, a PRD or a SPEC before its status here is Decided.
 
@@ -128,6 +128,18 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-104](#pd-104-approving-a-version-with-personal-data-warnings-needs-an-acknowledgement) | Approving a version with personal-data warnings needs an acknowledgement | Decided (product manager, delegated, PD-073) |
 | [PD-105](#pd-105-pending-rule-versions-with-no-recorded-author-cannot-be-approved) | Pending rule versions with no recorded author cannot be approved | Decided (product manager, delegated, PD-073) |
 | [PD-106](#pd-106-the-condition-builder-lens-moves-from-10-to-11) | The condition builder lens moves from 1.0 to 1.1 | Decided (product manager, delegated, PD-073) |
+| [PD-107](#pd-107-the-spreadsheet-round-trip-is-a-csv-format-of-the-engine) | The spreadsheet round-trip is a CSV format of the engine | Decided (product manager, delegated, PD-073) |
+| [PD-108](#pd-108-a-link-to-one-decision-names-the-host-and-the-decision-id-only) | A link to one decision names the host and the decision id only | Decided (product manager, delegated, PD-073) |
+| [PD-109](#pd-109-the-30-minute-start-is-measured-with-a-timed-newcomer-protocol) | The 30-minute start is measured with a timed newcomer protocol | Decided (product manager, delegated, PD-073) |
+| [PD-110](#pd-110-reassigning-a-task-needs-a-reason-and-the-manage-permission) | Reassigning a task needs a reason and the manage permission | Decided (product manager, delegated, PD-073) |
+| [PD-111](#pd-111-overdue-time-is-shown-in-clock-hours-computed-by-the-engine) | Overdue time is shown in clock hours, computed by the engine | Decided (product manager, delegated, PD-073) |
+| [PD-112](#pd-112-rule-set-templates-are-served-by-the-engine-and-a-host-can-add-its-own) | Rule set templates are served by the engine and a host can add its own | Decided (product manager, delegated, PD-073) |
+| [PD-113](#pd-113-grid-readings-and-cell-checks-come-from-a-non-storing-validate-call) | Grid readings and cell checks come from a non-storing validate call | Decided (product manager, delegated, PD-073) |
+| [PD-114](#pd-114-one-operator-runs-a-migration-after-a-fresh-dry-run-with-a-reason) | One operator runs a migration after a fresh dry run, with a reason | Decided (product manager, delegated, PD-073) |
+| [PD-115](#pd-115-a-simulation-report-is-run-and-stored-by-the-engine-and-bound-to-the-version) | A simulation report is run and stored by the engine and bound to the version | Decided (product manager, delegated, PD-073) |
+| [PD-116](#pd-116-evidence-exports-are-produced-by-the-engine-hashed-and-recorded) | Evidence exports are produced by the engine, hashed and recorded | Decided (product manager, delegated, PD-073) |
+| [PD-117](#pd-117-the-documentation-site-is-built-from-the-wiki-at-each-release) | The documentation site is built from the wiki at each release | Decided (product manager, delegated, PD-073) |
+| [PD-118](#pd-118-business-calendars-are-edited-in-the-cockpit-by-one-person-on-the-record) | Business calendars are edited in the cockpit by one person, on the record | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -3196,3 +3208,248 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Consequences.** CK-F-45 moves from M3 to after 1.0, targeted 1.1, and leaves the M3 cut list. Issue #190 is retargeted to 1.1 and stays open. The open question (nested groups, Or as rows, or one expression cell) is not decided here and must be decided before the lens is sized for 1.1; the DMN export must stay exact. The roadmap, the feature map and the cockpit PRD follow. PD-076 still holds for placement.
 
 **Follow-ups.** Product manager: the roadmap, feature map and cockpit PRD counts (M3 33 to 32, later 13 to 14). Architect: none for 1.0. Maintainers (engineering): retarget #190.
+
+### PD-107 The spreadsheet round-trip is a CSV format of the engine
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | The spreadsheet round-trip (CK-F-35, issue #39) needs a file layout and a place where the cells are read. Does the cockpit turn the CSV into a rule set document in the browser, or does the engine read and write CSV itself? Which layout and which Excel side effects are accepted? |
+| Raised by | Specification of issue #39; open question 7.7 of the rule engine DESIGN |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. The engine reads and writes CSV (chosen). Export gains `format=csv`; importing the next version accepts `text/csv` with a `base` version whose inputs, outputs, hit policy and masks the rows use. The cells go through the same shorthand reader as the cockpit cell editor, so one grammar and one message catalogue serve the file, the editor and the Java API. Consequence: a host that never runs the cockpit gets the same round-trip, and the cockpit never interprets rule content.
+2. The cockpit converts CSV to YAML in the browser. Consequence: no engine change, but a second shorthand reader in TypeScript that can drift from the engine's, and errors that name a YAML line instead of the spreadsheet row and column.
+
+**Recommendation and decision.** Option 1. "The engine decides, the cockpit shows" applies to files too, and the error must name the row and column the author sees in Excel.
+
+**Consequences.**
+- Layout: one header row, then one line per rule in table order. Columns: `Rule`, each input by name, each output by name, then an optional `Description`. Names, not translated labels, so one file works in both languages.
+- Export: UTF-8 with a byte order mark, comma separator, CRLF line ends, RFC 4180 quoting, amounts without thousands separators (`50000000 VND`), dates as ISO dates, `-` for "any". A version with no table form is refused as for DMN export, naming the rule.
+- Import: comma or semicolon separator (read from the header line), byte order mark optional, at most 1,048,576 bytes. A blank `Rule` cell gets the next free id; a duplicate id is refused. The header must list exactly the base version's inputs and outputs in its order; any added, missing or renamed column is refused, naming it.
+- Excel damage is refused, never read as another value: scientific notation (`5E+07`), thousands separators, dates that are not ISO dates, and text in a number column. Each refusal is a plain message naming the row and column, in English and Vietnamese.
+- `.xlsx` stays a later candidate (PD-043). Configurable: no; the format is part of the contract.
+
+**Follow-ups.** Architect: close DESIGN 7.7 with this layout; the rule engine SPEC statements and the OpenAPI change (`format=csv`, `text/csv` with `base`). Maintainers (engineering): the engine and cockpit work in #39. Documentation: the spreadsheet how-to.
+
+### PD-108 A link to one decision names the host and the decision id only
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | A host screen links to one decision in the cockpit (CK-F-34, issue #41). What may the link carry, and what does a user see when the decision is missing, belongs to another tenant, or is not theirs to read? |
+| Raised by | Specification of issue #41 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. The link is `<cockpit>/#/decisions/{decisionId}`, with `?host={hostId}` when the registry lists more than one host (chosen). Nothing else is read from it: no tenant, no customer data, no token. The route survives sign-in. A missing decision and another tenant's decision get the same message; a user without `rules:log:read` is told so and no decision is requested.
+2. The link also carries the tenant and a case reference, and the cockpit switches tenant on arrival. Consequence: one click fewer for a user with several tenants, but a link that changes the tenant is a way to make a user act in a tenant they did not choose, and a case reference in a URL lands in browser history and proxy logs.
+
+**Recommendation and decision.** Option 1. A deep link must not widen what a user can see or change, and a URL must carry no personal data.
+
+**Consequences.** A user with several allowed tenants who opens a decision of another tenant sees "not found for tenant X" and can switch with the tenant switcher, then reopen the link. A link without `host` while several hosts are registered asks which service logged the decision. An id that is not a decision id is refused before any request. Configurable: no.
+
+**Follow-ups.** Maintainers (engineering): the route and the tests in #41. Documentation: a how-to for host developers on building the link.
+
+### PD-109 The 30-minute start is measured with a timed newcomer protocol
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | X-F-16 promises a first logged decision in under 30 minutes for a newcomer (issue #43). Who counts as a newcomer, when does the clock start and stop, and what counts as a pass? |
+| Raised by | Specification of issue #43 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. A moderated, timed protocol (chosen). Three developers who know Java and Spring Boot and have never seen the project. A machine with JDK 21, Docker, Git and an IDE installed; downloads count against the time. The clock starts when the participant opens the getting-started guide and stops when their decision, with its explanation, shows in the cockpit's decision page. No help beyond the guide; the observer stays silent and notes every stall over two minutes. At least one run on macOS and one on Linux or Windows with WSL. Pass: every participant under 30 minutes. A failed run leads to a fix of the guide at the stall and a new run with a new participant.
+2. A maintainer times their own run. Consequence: cheap and repeatable, but a maintainer knows every step, so the number says nothing about a newcomer.
+
+**Recommendation and decision.** Option 1. The claim is about people who have never seen the project; only they can test it. An automated run of the guide's commands (in CI) guards the guide between the timed runs.
+
+**Consequences.** The run results (pseudonym, operating system, minutes, stalls) are recorded with the release notes of the milestone. Participants are found among developers outside the project; nothing about them but the pseudonym is recorded. Configurable: no.
+
+**Follow-ups.** Product manager: run the protocol before the M1 release. Maintainers (engineering): the CI job that runs the guide's commands from a fresh clone (#43). Documentation: the guide.
+
+### PD-110 Reassigning a task needs a reason and the manage permission
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | In the task queue (CK-F-13, issue #71), who may hand a task to a colleague, and is a reason recorded? The engine has `reassign` for open tasks and `delegate` for claimed ones, both under `processes:task:manage`, with no reason. |
+| Raised by | Specification of issue #71 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. One "Reassign" action for holders of `processes:task:manage`, with a required reason (chosen). The cockpit calls `reassign` for an open task and `delegate` for a claimed one; both take `{ assignee, reason }`, reason 1 to 500 characters, recorded in the task history and the event. An operator without the permission can release a claimed task back to the queue (`unclaim`).
+2. Any operator may hand their own task to a colleague, without a reason. Consequence: faster, but work moves without a supervisor and nothing explains why, which an operations audit asks for.
+
+**Recommendation and decision.** Option 1. Moving work between people is a supervisor act in bank operations, and the trail must say who moved it and why. Releasing a task covers the operator who cannot finish it.
+
+**Consequences.** Contract change in the process engine: `reason` required on `:reassign` and `:delegate`, recorded in history and in `processes.task.reassigned.v1` and `processes.task.delegated.v1`; a target the engine refuses (for example the requester of an approval task) is `409 ASSIGNEE_NOT_ALLOWED`. The assignee is entered as a user id; a user directory search is later. Configurable: no.
+
+**Follow-ups.** Architect: the process engine SPEC and OpenAPI change. Maintainers (engineering): #70 and #71.
+
+### PD-111 Overdue time is shown in clock hours, computed by the engine
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | The overdue filter (CK-F-17, issue #81) shows how late each task is. Is "overdue by" measured in clock time or in working hours of the task's calendar, and who computes it? |
+| Raised by | Specification of issue #81 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Clock time since the due time, computed by the engine at query time (chosen). Each task item carries `slaState` (`NONE`, `ON_TIME`, `DUE_SOON`, `BREACHED`) and `overdueBy` (an ISO 8601 duration in whole minutes, null unless breached). The deadline itself stays calendar-based (PE-F-11).
+2. Working hours since the due time. Consequence: consistent with how the deadline was set, but "overdue by 2 h" on a Monday morning for a task due on Friday afternoon misleads a supervisor about how long a customer waited.
+
+**Recommendation and decision.** Option 1. The deadline uses the calendar; lateness is what the customer feels, which is clock time. The browser never computes either (ux-design section 1).
+
+**Consequences.** Contract change in the process engine task schema (#70): `slaState` and `overdueBy`. The queue header counts overdue tasks. Configurable: no.
+
+**Follow-ups.** Architect: the process engine SPEC and OpenAPI change. Maintainers (engineering): #70 and #81.
+
+### PD-112 Rule set templates are served by the engine and a host can add its own
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | New rule sets start from a template (CK-F-36, issue #83). Where do templates live, and can a bank add its own? |
+| Raised by | Specification of issue #83 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. The engine serves templates through `GET /rule-set-templates` (chosen): four built in (fee by tier, eligibility with reason codes, limit by segment, blank) and any the host adds as files in a configured folder. A template is a rule set document without a name, with labels and a description in English and Vietnamese. The cockpit fills the grid from it and saves through the existing `POST /rule-sets`.
+2. Templates are built into the cockpit bundle. Consequence: no engine change, but a bank cannot add its own templates without a new cockpit build, which breaks "configure, not hard-code".
+
+**Recommendation and decision.** Option 1. Banks have house patterns (deposit rate by term, limit by channel) that should be one click away, and the same templates serve a host that builds its own screens.
+
+**Consequences.** Contract change in the rule engine: `GET /rule-set-templates` with `rules:author`. The new rule set is draft version 1 and follows the normal four-eyes approval. The screen says a developer connects it to the service before use (PD-043). Configurable: yes, the template folder (`horus.bpm.rules.templates.location`); the built-in four cannot be removed but can be hidden by the host.
+
+**Follow-ups.** Architect: the rule engine SPEC, OpenAPI and template file schema. Maintainers (engineering): #83.
+
+### PD-113 Grid readings and cell checks come from a non-storing validate call
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | In the grid (CK-F-37, issue #84) each row's plain-language reading updates as the author edits. Saving the draft on every cell would write a history entry per keystroke; building the sentence in the browser breaks "the engine decides". How does the reading update? |
+| Raised by | Specification of issue #84 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. A non-storing `POST /rule-sets/{name}/versions/{v}:validate` (chosen), the call `CKP-006` already names. The cockpit sends the edited table when a cell is committed (Enter or leaving the cell); the engine returns the cell problems and the readings of each rule in the requested language. Nothing is stored and no history entry is written until Save draft.
+2. Save the draft after each cell. Consequence: no new endpoint, but one `DRAFT_UPDATED` history entry per cell change, which buries the real changes in the audit trail.
+
+**Recommendation and decision.** Option 1. The trail stays readable and the browser never writes a reading.
+
+**Consequences.** Contract change in the rule engine: `:validate` with `rules:author`, the same body limit as import, no `Idempotency-Key`. Drop-downs come from the input's existing `allowed` list; no schema change. Configurable: no.
+
+**Follow-ups.** Architect: the rule engine SPEC and OpenAPI change. Maintainers (engineering): #84.
+
+### PD-114 One operator runs a migration after a fresh dry run, with a reason
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Running cases are moved to a new definition version from the cockpit (CK-F-19, issue #107). Does the execution need a second person, and what must happen before it? |
+| Raised by | Specification of issue #107 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. One holder of `processes:migration:manage` executes, only after a successful dry run of the same plan less than an hour old, and with a reason (chosen). The engine refuses an execution without such a dry run (`409 DRY_RUN_REQUIRED`). Every moved instance records who moved it, from which version to which, and why.
+2. Four-eyes: a second holder approves each migration. Consequence: stronger control, but a second approval flow in the process engine in the last milestone before 1.0, for an action that the dry run already makes predictable and that a reverse plan can undo.
+
+**Recommendation and decision.** Option 1 for 1.0. The risk of a migration is a surprise, and a fresh dry run of the exact plan removes it; the reason and the per-instance trail answer the audit. A four-eyes mode can follow as an option, as RE-F-49 does for retirement.
+
+**Consequences.** Contract change in the process engine (#106): `GET /migrations/{id}` for progress and per-instance outcomes, `reason` on `:execute`, the dry run bound to the plan's hash, setting `processes.migration.dry-run-validity` (default one hour, may be lowered only). Configurable: the validity period only.
+
+**Follow-ups.** Architect: the process engine SPEC and OpenAPI change. Maintainers (engineering): #106 and #107. Product manager: a four-eyes option as a candidate for 1.1.
+
+### PD-115 A simulation report is run and stored by the engine and bound to the version
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | The approver reads a simulation report attached to a publication request (RE-F-23, CK-F-20, issue #109). Who produces the report, what does the approver see, and when is it required? |
+| Raised by | Specification of issue #109 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. The engine runs the simulation and stores the report (chosen). The author asks for a report over sample inputs or a replay window; the engine runs it, stores the summary bound to the version's canonical hash, and the request carries the report id. The approver sees who ran it, when, over what, the counts (changed, unchanged, failed, not replayable because masked) and up to 50 changed rows as readings; the decisions behind them open only for holders of `rules:log:read`. A host can list rule sets that need a report before a request (off by default).
+2. The cockpit attaches the result it displayed. Consequence: no new storage, but the approver signs on numbers the browser produced, which a tampered or stale screen could change.
+
+**Recommendation and decision.** Option 1. Evidence an approver relies on must come from the engine and be tied to the exact content approved.
+
+**Consequences.** Contract change in the rule engine: `POST` and `GET .../versions/{v}/simulation-reports`, `simulationReportId` on `:request-publish`, `409 SIMULATION_REPORT_REQUIRED`, setting `rules.lifecycle.require-simulation-report` (list of rule set names, default empty, shown in `/api/bpm/meta`). A report whose hash no longer matches the draft is marked out of date and cannot be attached. Configurable: the list of rule sets.
+
+**Follow-ups.** Architect: the rule engine SPEC and OpenAPI change. Maintainers (engineering): #95 and #109.
+
+### PD-116 Evidence exports are produced by the engine, hashed and recorded
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | An auditor exports a rule set's version history with selected decisions as evidence (CK-F-38, issue #118). Does the cockpit assemble the file from API responses, or does the engine produce it? Is the export itself recorded? |
+| Raised by | Specification of issue #118 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. The engine produces the file (chosen): `POST /rule-sets/{name}/evidence` with the chosen versions and at most 100 decision ids, as CSV or JSON. The file states who exported it, when, for which tenant, and its SHA-256, which the response also carries. Masked inputs stay as their keyed hash. The export is recorded in the rule set's history and as an event.
+2. The cockpit assembles the file. Consequence: no engine change, but a file anyone could edit before handing it over, and no record that it was produced.
+
+**Recommendation and decision.** Option 1. Evidence must be reproducible and its handover traceable; an export of decision data is itself an act an auditor asks about.
+
+**Consequences.** Contract change in the rule engine: `GET /rule-sets/{name}/history` (all versions, newest first, cursor) and the evidence endpoint; history action `EVIDENCE_EXPORTED`; event `rules.evidence.exported.v1`. CSV is one file with a `Record` column (`version event` or `decision`). Decisions need `rules:log:read`. Configurable: no.
+
+**Follow-ups.** Architect: the rule engine SPEC and OpenAPI change. Maintainers (engineering): #118. Documentation: the audit how-to.
+
+### PD-117 The documentation site is built from the wiki at each release
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Evaluators expect a searchable documentation site (X-F-17, issue #119). What is it built from, when, where is it published, and what does it collect about readers? |
+| Raised by | Specification of issue #119 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. A static site built from the wiki at each release tag, one folder per release with a `latest` alias, published on the repository's GitHub Pages address, with search in the page and no analytics or cookies (chosen). English only in 1.0. The generator is the maintainers' choice, if it passes the licence allow-list (`TR-LIC-01`).
+2. A hosted documentation service with server-side search. Consequence: richer search, but a third party sees what readers look for, and a service to pay for and keep running.
+
+**Recommendation and decision.** Option 1. It costs nothing to run, needs no account, and keeps the wiki as the one source.
+
+**Consequences.** A wiki page that does not build, or a broken internal link, fails the release. A custom domain is not part of this decision. Configurable: no.
+
+**Follow-ups.** Maintainers (engineering): the release workflow in #119. Documentation: the sidebar order the site follows.
+
+### PD-118 Business calendars are edited in the cockpit by one person, on the record
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | An administrator edits working hours and holidays per tenant (CK-F-18, issue #125). Does a change need a second person, and what does it change? |
+| Raised by | Specification of issue #125 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. One holder of `processes:calendar:manage` edits, and every change is recorded with who, when, the old and the new value (chosen). A change applies to deadlines set after it; existing due times never move (PE-F-11). Past dates are read only. A host that replaces the `BusinessCalendar` extension point shows its calendars read only.
+2. Four-eyes on every calendar change. Consequence: a second approval for a public holiday date, a change with low risk and an obvious source; it delays a change that is often needed at short notice, such as an extra Tet day.
+
+**Recommendation and decision.** Option 1. The risk is a wrong deadline on future tasks, which the record makes visible and a second edit corrects.
+
+**Consequences.** Contract change in the process engine: calendar read and edit endpoints with `If-Match` and `Idempotency-Key`, a calendar history, event `processes.calendar.changed.v1`, and the `/meta` feature `processes.calendars.editable`. Creating or deleting a calendar stays configuration. Configurable: no.
+
+**Follow-ups.** Architect: the process engine SPEC and OpenAPI change. Maintainers (engineering): #72 and #125.
