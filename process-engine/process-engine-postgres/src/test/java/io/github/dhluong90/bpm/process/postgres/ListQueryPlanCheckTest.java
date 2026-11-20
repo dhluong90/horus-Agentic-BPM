@@ -146,6 +146,20 @@ class ListQueryPlanCheckTest {
         samples.put("replay-overrides", List.of("bank-a", new String[] {INSTANCE, "AIN" + "%023d".formatted(43)},
                 new String[] {"ATTEMPT1"}));
         samples.put("replay-cases", List.of("bank-a", "AREPLAY1", 0, 50));
+        samples.put("calendar-holidays", List.of("bank-a", "ACAL1"));
+        String[] both = {"CLAIMED", "OPEN"};
+        Timestamp end = Timestamp.from(Instant.parse("9999-12-31T00:00:00Z"));
+        Timestamp epoch = Timestamp.from(Instant.EPOCH);
+        samples.put("tasks-mine-dated", List.of("bank-a", "minh", both, epoch, "", end, 51));
+        samples.put("tasks-claimed-dated", List.of("bank-a", "minh", both, epoch, "", end, 51));
+        samples.put("tasks-role-dated", List.of("bank-a", "CREDIT_OFFICER", both, T, INSTANCE, end, 51));
+        samples.put("tasks-group-dated", List.of("bank-a", "branch-hcm-01", both, epoch, "", T, 51));
+        samples.put("tasks-any-dated", List.of("bank-a", both, epoch, "", end, 51));
+        samples.put("tasks-mine-undated", List.of("bank-a", "minh", both, "", 51));
+        samples.put("tasks-claimed-undated", List.of("bank-a", "minh", both, "", 51));
+        samples.put("tasks-role-undated", List.of("bank-a", "CREDIT_OFFICER", both, "", 51));
+        samples.put("tasks-group-undated", List.of("bank-a", "branch-hcm-01", both, "", 51));
+        samples.put("tasks-any-undated", List.of("bank-a", both, INSTANCE, 51));
         samples.put("instances-1", List.of("bank-a", "RUNNING", 50));
         samples.put("instances-3-key-range-after", List.of("bank-a", "RUNNING", "COMPLETED", "FAILED", "loan-origination",
                 from, T, T, INSTANCE, 50));

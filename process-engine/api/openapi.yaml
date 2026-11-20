@@ -5,7 +5,7 @@ info:
   description: |
     REST API of the Process Engine, served by the host application under `/api/bpm/processes/v1`.
     Preview: this file covers importing a BPMN document, reading and listing definitions, starting, listing,
-    reading and cancelling instances, reading, claiming, unclaiming and completing a user task, the live token
+    reading and cancelling instances, listing, reading, claiming, unclaiming and completing user tasks, the live token
     counts per node and the BPMN export of a version. From 0.2.0
     it also covers the definition lifecycle with four eyes: an import is a `DRAFT`; a person requests
     approval, optionally with an effective date; a second person approves it and it becomes the effective version
@@ -38,7 +38,7 @@ tags:
   - name: instances
     description: Start, list, read and cancel process instances
   - name: tasks
-    description: Read, claim, unclaim and complete user tasks
+    description: List, read, claim, unclaim and complete user tasks
   - name: async-steps
     description: Report the result of a remote step whose adapter handed the call off
   - name: agent-replays
@@ -613,6 +613,74 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /tasks:
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      summary: List the caller's tasks by assignment, due time and missed deadline
+      description: |
+        `assignment` is one or more of `mine` (declared to the caller or claimed by them), `candidate` (open tasks of
+        the caller's roles and groups) and `any` (every task of the tenant; needs `processes:task:manage`), comma
+        separated; `mine,candidate` when absent. `status` is one or more of `OPEN` and `CLAIMED`; both when absent.
+        `role` and `group` narrow `candidate` and `any` to one role or group; with `mine` alone they are
+        `400 QUERY_INVALID`. `dueBefore` keeps tasks due before that time; `slaBreached=true` keeps tasks whose due
+        time has passed on the engine clock. Ordered by `dueAt`, then `id`; tasks without a due time follow, by `id`.
+        Every range is read through its own index and stops after one page, so a long queue never slows the list.
+        Items carry no variables and no review context; read one task for those, masked. Permission
+        `processes:task:work`.
+      parameters:
+        - name: assignment
+          in: query
+          required: false
+          schema: { type: string, example: 'mine,candidate' }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, example: 'OPEN' }
+        - name: role
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 200 }
+        - name: group
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 200 }
+        - name: dueBefore
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: slaBreached
+          in: query
+          required: false
+          schema: { type: boolean }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of tasks
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskSummaryPage' }
+              example:
+                data:
+                  - id: 01JD2R7Q4M8S3N6V0B5C9X1Z2A
+                    instanceId: 01JD2R7Q0D3F6H9K2M5P8R1T4V
+                    definitionKey: loan-origination
+                    definitionVersion: 2
+                    businessKey: LN-2027-000123
+                    nodeId: credit-review
+                    name: Credit review
+                    assignee: 'role:credit-officer'
+                    status: OPEN
+                    lockVersion: 0
+                    createdAt: '2026-12-31T08:00:00Z'
+                    dueAt: '2027-01-04T03:00:00Z'
+                nextCursor: eyJhZnRlciI6Ii4uLiJ9
+                hasNext: true
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /tasks/{id}:
     get:
       tags: [tasks]
@@ -1078,6 +1146,10 @@ components:
         claimedBy: { type: [string, 'null'] }
         claimedAt: { type: [string, 'null'], format: date-time }
         createdAt: { type: string, format: date-time }
+        dueAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the task is due, counted in working time from its creation; fixed then, never moved
         completedBy: { type: [string, 'null'] }
         completedAt: { type: [string, 'null'], format: date-time }
         allowedActions:
@@ -1086,6 +1158,32 @@ components:
           items: { type: string, enum: [claim, unclaim, complete] }
         review:
           $ref: '#/components/schemas/ReviewContext'
+    TaskSummary:
+      type: object
+      required: [id, instanceId, definitionKey, definitionVersion, nodeId, assignee, status, lockVersion, createdAt]
+      properties:
+        id: { type: string }
+        instanceId: { type: string }
+        definitionKey: { type: string }
+        definitionVersion: { type: integer }
+        businessKey: { type: [string, 'null'] }
+        nodeId: { type: string }
+        name: { type: [string, 'null'] }
+        assignee: { type: string, description: 'user:<id>, role:<role> or group:<group>' }
+        status: { type: string, enum: [OPEN, CLAIMED] }
+        lockVersion: { type: integer }
+        claimedBy: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        dueAt: { type: [string, 'null'], format: date-time }
+    TaskSummaryPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/TaskSummary' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
     ReviewContext:
       type: object
       description: >-

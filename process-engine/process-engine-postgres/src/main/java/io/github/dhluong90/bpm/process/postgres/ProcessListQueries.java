@@ -31,7 +31,7 @@ final class ProcessListQueries {
 
     static final String TASK_COLUMNS = "tenant_id, id, instance_id, token_id, definition_id, node_id, name, "
             + "assignee_user, assignee_role, assignee_group, four_eyes, status, lock_version, claimed_by, claimed_at, "
-            + "completed_by, created_at, completed_at, review::text AS review";
+            + "completed_by, created_at, completed_at, review::text AS review, due_at";
 
     /** Live tokens per node of one definition version (PRE-028). */
     static final ListQuery LIVE_COUNTS = new ListQuery("live-token-counts",
@@ -140,6 +140,95 @@ final class ProcessListQueries {
                     + "code, overridden, masked_fields FROM pre_agent_replay_case "
                     + "WHERE tenant_id = ? AND replay_id = ? AND seq > ? ORDER BY seq LIMIT ?");
 
+    /** The holidays of one calendar (#72), at most {@code WorkingCalendar.MAX_HOLIDAYS}. */
+    static final ListQuery CALENDAR_HOLIDAYS = new ListQuery("calendar-holidays",
+            new Bound.ParentKey("calendar_id", "the holidays of one calendar, at most 2,000"),
+            "SELECT holiday_date, description FROM pre_holiday WHERE tenant_id = ? AND calendar_id = ? "
+                    + "ORDER BY holiday_date");
+
+    /** The columns of a task list item: the task and its instance's key, version and business key; no review. */
+    static final String TASK_SUMMARY_COLUMNS = "t.tenant_id, t.id, t.instance_id, t.node_id, t.name, t.assignee_user, "
+            + "t.assignee_role, t.assignee_group, t.status, t.lock_version, t.claimed_by, t.created_at, t.due_at, "
+            + "i.definition_key, i.definition_ver, i.business_key";
+
+    /**
+     * One range of the task query (#70, PRE-030; DESIGN section 8.2): the index that serves it and the predicate of
+     * that partial index, written exactly as in V22 so the planner can use it. The engine reads each range of a
+     * caller (their user, their claims, each role, each group) separately and merges the pages.
+     */
+    enum TaskRange {
+        /** Tasks declared to a user, open or claimed, on {@code idx_pre_task_mine}. */
+        MINE("assignee_user", "t.status IN ('OPEN','CLAIMED') AND t.assignee_user IS NOT NULL", "idx_pre_task_mine"),
+        /** Tasks a user claimed, on {@code idx_pre_task_claimed}. */
+        CLAIMED("claimed_by", "t.status = 'CLAIMED'", "idx_pre_task_claimed"),
+        /** Open tasks of one role, on {@code idx_pre_task_role_due}. */
+        ROLE("assignee_role", "t.status = 'OPEN' AND t.assignee_role IS NOT NULL", "idx_pre_task_role_due"),
+        /** Open tasks of one group, on {@code idx_pre_task_group}. */
+        GROUP("assignee_group", "t.status = 'OPEN' AND t.assignee_group IS NOT NULL", "idx_pre_task_group"),
+        /** Every open or claimed task of the tenant, on {@code idx_pre_task_open_due}. */
+        ANY(null, "t.status IN ('OPEN','CLAIMED')", "idx_pre_task_open_due");
+
+        private final String column;
+        private final String predicate;
+        private final String index;
+
+        TaskRange(String column, String predicate, String index) {
+            this.column = column;
+            this.predicate = predicate;
+            this.index = index;
+        }
+
+        /** @return whether the range takes a key: the user, role or group */
+        boolean keyed() {
+            return column != null;
+        }
+    }
+
+    /**
+     * The dated part of a range: tasks with a due time, by {@code (due_at, id)} after a key and before an upper
+     * bound. Parameters: tenant, [key], statuses (text array), after due time, after id, due before, limit.
+     */
+    static ListQuery datedTasks(TaskRange range) {
+        return new ListQuery("tasks-" + range.name().toLowerCase(java.util.Locale.ROOT) + "-dated",
+                new Bound.Page("earliest due first on " + range.index),
+                "SELECT " + TASK_SUMMARY_COLUMNS + " FROM pre_task t JOIN pre_instance i ON i.tenant_id = t.tenant_id "
+                        + "AND i.id = t.instance_id WHERE t.tenant_id = ? "
+                        + (range.keyed() ? "AND t." + range.column + " = ? " : "")
+                        + "AND " + range.predicate + " AND t.status = ANY (?) "
+                        + "AND (t.due_at, t.id) > (?, ?) AND t.due_at < ? ORDER BY t.due_at, t.id LIMIT ?");
+    }
+
+    /**
+     * The undated part of a range: tasks without a due time, which follow the dated ones, by id. Ordered by
+     * {@code (due_at, id)} like the index, all due times being null, so the plan reads the index in order and never
+     * sorts. Parameters: tenant, [key], statuses (text array), after id, limit.
+     */
+    static ListQuery undatedTasks(TaskRange range) {
+        return new ListQuery("tasks-" + range.name().toLowerCase(java.util.Locale.ROOT) + "-undated",
+                new Bound.Page("tasks without a due time, by id, on " + range.index),
+                "SELECT " + TASK_SUMMARY_COLUMNS + " FROM pre_task t JOIN pre_instance i ON i.tenant_id = t.tenant_id "
+                        + "AND i.id = t.instance_id WHERE t.tenant_id = ? "
+                        + (range.keyed() ? "AND t." + range.column + " = ? " : "")
+                        + "AND " + range.predicate + " AND t.status = ANY (?) "
+                        + "AND t.due_at IS NULL AND t.id > ? ORDER BY t.due_at, t.id LIMIT ?");
+    }
+
+    private static final java.util.Map<TaskRange, ListQuery> DATED = taskQueries(true);
+    private static final java.util.Map<TaskRange, ListQuery> UNDATED = taskQueries(false);
+
+    private static java.util.Map<TaskRange, ListQuery> taskQueries(boolean dated) {
+        java.util.EnumMap<TaskRange, ListQuery> queries = new java.util.EnumMap<>(TaskRange.class);
+        for (TaskRange range : TaskRange.values()) {
+            queries.put(range, dated ? datedTasks(range) : undatedTasks(range));
+        }
+        return java.util.Collections.unmodifiableMap(queries);
+    }
+
+    /** @return the registered query of one part of a range */
+    static ListQuery tasks(TaskRange range, boolean dated) {
+        return (dated ? DATED : UNDATED).get(range);
+    }
+
     /** Due timers, for every tenant: the poll of each replica. */
     static final ListQuery CLAIM_TIMERS = claim(ClaimKinds.TIMERS);
     /** Due remote steps, for every tenant: the poll of the async runner. */
@@ -152,11 +241,14 @@ final class ProcessListQueries {
 
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
-        return List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS, DEFINITION_KEYS,
+        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS, DEFINITION_KEYS,
                 DEFINITION_KEYS_AFTER, HISTORY_ACTORS, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND, OPEN_INCIDENTS,
                 stepResults(1), stepResults(3), REPLAY_ANSWERS, REPLAY_ANSWERS_AFTER, REPLAY_OVERRIDES, REPLAY_CASES,
                 instances(1, false, false, false, false),
-                instances(3, true, true, true, true));
+                instances(3, true, true, true, true), CALENDAR_HOLIDAYS));
+        all.addAll(DATED.values());
+        all.addAll(UNDATED.values());
+        return List.copyOf(all);
     }
 
     /**

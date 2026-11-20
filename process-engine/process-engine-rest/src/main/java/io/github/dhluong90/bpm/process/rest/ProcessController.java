@@ -10,6 +10,7 @@ import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import io.github.dhluong90.bpm.process.api.InstanceQuery;
+import io.github.dhluong90.bpm.process.api.TaskQuery;
 import io.github.dhluong90.bpm.process.api.Page;
 import io.github.dhluong90.bpm.process.api.PageRequest;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
@@ -243,6 +244,43 @@ public class ProcessController {
         InstanceQuery query = new InstanceQuery(statuses, definitionKey, instantOf("startedFrom", startedFrom),
                 instantOf("startedTo", startedTo), new PageRequest(limitOf(limit), cursor));
         return json(HttpStatus.OK, Views.page(queries.instances(query), Views::instanceSummary), null, null);
+    }
+
+    /**
+     * Lists tasks by assignment, status, role, group, due date and missed deadline ({@code processes:task:work};
+     * {@code assignment=any} needs {@code processes:task:manage}; PRE-030). Ordered by {@code dueAt}, then
+     * {@code id}; tasks without a due time follow. Items carry no variables and no review context.
+     */
+    @GetMapping("/tasks")
+    public ResponseEntity<byte[]> taskList(@RequestParam(value = "assignment", required = false) String assignment,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "role", required = false) String role,
+            @RequestParam(value = "group", required = false) String group,
+            @RequestParam(value = "dueBefore", required = false) String dueBefore,
+            @RequestParam(value = "slaBreached", required = false) String slaBreached,
+            @RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor) {
+        boolean breached;
+        if (slaBreached == null || slaBreached.strip().equals("false")) {
+            breached = false;
+        } else if (slaBreached.strip().equals("true")) {
+            breached = true;
+        } else {
+            throw new QueryInvalidException("slaBreached must be true or false");
+        }
+        TaskQuery query = new TaskQuery(csv(assignment), csv(status), role, group, instantOf("dueBefore", dueBefore),
+                breached, new PageRequest(limitOf(limit), cursor));
+        return json(HttpStatus.OK, Views.page(queries.tasks(query), Views::taskSummary), null, null);
+    }
+
+    private static Set<String> csv(String value) {
+        Set<String> parts = new LinkedHashSet<>();
+        if (value != null) {
+            for (String part : value.split(",", -1)) {
+                parts.add(part.strip());
+            }
+        }
+        return parts;
     }
 
     /**
