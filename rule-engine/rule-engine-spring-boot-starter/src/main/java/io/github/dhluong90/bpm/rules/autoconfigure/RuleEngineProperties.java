@@ -28,6 +28,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
  * @param decisionLog what the decision log records and how far ahead its partitions are created
  * @param simulation limits of {@code :simulate}
+ * @param explain the plain-language explanation of logged decisions
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -42,7 +43,29 @@ public record RuleEngineProperties(
         @DefaultValue Authoring authoring,
         @DefaultValue Masking masking,
         @DefaultValue DecisionLog decisionLog,
-        @DefaultValue Simulation simulation) {
+        @DefaultValue Simulation simulation,
+        @DefaultValue Explain explain) {
+
+    /**
+     * The plain-language explanation of logged decisions ({@code GET /decisions/{id}/explain}, RLE-030, PD-027).
+     * Sentences come from message catalogues: English and Vietnamese ship with the engine, and a host adds entries or
+     * whole languages with {@code horus-bpm/rules/explain_<language>.properties} files (UTF-8) on its class path. A
+     * {@code DecisionExplainer} bean replaces the renderer entirely.
+     *
+     * @param defaultLanguage the language of an explanation when the caller asks for none the host has, two or three
+     *     lower-case letters with a catalogue; default {@code en}
+     */
+    public record Explain(String defaultLanguage) {
+
+        /**
+         * Returns the language in force.
+         *
+         * @return the configured language, or {@code en}
+         */
+        public String defaultLanguageOrDefault() {
+            return defaultLanguage == null || defaultLanguage.isBlank() ? "en" : defaultLanguage.strip();
+        }
+    }
 
     /**
      * Limits of {@code POST .../versions/{v}:simulate} (RLE-016).

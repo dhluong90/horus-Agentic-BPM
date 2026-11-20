@@ -28,7 +28,7 @@ class OpenApiContractTest {
 
         Set<String> implemented = new TreeSet<>();
         for (Class<?> controller : new Class<?>[] {RuleSetController.class, DecisionController.class,
-                DecisionLogController.class, SimulationController.class}) {
+                DecisionLogController.class, SimulationController.class, RuleSetHistoryController.class}) {
             String base = controller.getAnnotation(RequestMapping.class).value()[0].replace(RestSupport.BASE, "");
             for (Method method : controller.getDeclaredMethods()) {
                 PostMapping post = method.getAnnotation(PostMapping.class);

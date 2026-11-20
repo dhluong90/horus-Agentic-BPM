@@ -25,7 +25,7 @@ import tools.jackson.databind.node.ObjectNode;
  * {@code detail} and {@code correlationId} (ADR-0010). Applies to the engine controllers only.
  */
 @RestControllerAdvice(assignableTypes = {RuleSetController.class, DecisionController.class,
-    DecisionLogController.class, SimulationController.class})
+    DecisionLogController.class, SimulationController.class, RuleSetHistoryController.class})
 public class ProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProblemDetails.class.getName());
@@ -63,6 +63,7 @@ public class ProblemDetails {
             Map.entry("RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("BATCH_TOO_LARGE", UNPROCESSABLE),
+            Map.entry("EVIDENCE_TOO_LARGE", UNPROCESSABLE),
             Map.entry("CMMN_UNSUPPORTED", UNPROCESSABLE),
             Map.entry("DMN_UNSUPPORTED_ELEMENT", UNPROCESSABLE),
             Map.entry("EXPRESSION_LANGUAGE_UNSUPPORTED", UNPROCESSABLE),

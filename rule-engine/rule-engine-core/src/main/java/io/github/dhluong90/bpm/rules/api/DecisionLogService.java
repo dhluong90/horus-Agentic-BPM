@@ -27,4 +27,18 @@ public interface DecisionLogService {
      *     name, or a tenant without a masking key
      */
     DecisionSearchResult findByMaskedInput(MaskedInputQuery query);
+
+    /**
+     * Explains one decision in plain language from its log entry and the stored version it names (RLE-030, RLE-031).
+     * Nothing is evaluated and nothing is written; masked inputs stay fingerprints. Needs {@code rules:log:read}.
+     *
+     * @param decisionId the decision id
+     * @param languages the caller's preferred languages, best first, for example {@code ["vi", "en"]}; the first one
+     *     the host has a catalogue for is used, else {@code explain.default-language}
+     * @return the explanation with its text
+     * @throws DecisionNotFoundException when the caller's tenant has no such decision
+     */
+    default DecisionExplanation explain(String decisionId, java.util.List<String> languages) {
+        throw new UnsupportedOperationException("explain is not supported by " + getClass().getName());
+    }
 }

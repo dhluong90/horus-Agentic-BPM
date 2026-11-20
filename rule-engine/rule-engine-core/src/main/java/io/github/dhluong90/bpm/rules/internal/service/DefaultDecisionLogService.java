@@ -57,6 +57,9 @@ public final class DefaultDecisionLogService implements DecisionLogService {
     private final EngineContext context;
     private final DecisionLog log;
     private final EventOutbox outbox;
+    /** Reads the stored version a decision names, for its explanation; null when explanations are not offered. */
+    private final io.github.dhluong90.bpm.rules.internal.store.RuleStore store;
+    private final io.github.dhluong90.bpm.rules.spi.DecisionExplainer explainer;
     /** Recent search times per tenant and caller, on this replica only. */
     private final java.util.concurrent.ConcurrentHashMap<String, java.util.ArrayDeque<Instant>> searches =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -69,9 +72,61 @@ public final class DefaultDecisionLogService implements DecisionLogService {
      * @param outbox where the audit entry of each masked-input search is written
      */
     public DefaultDecisionLogService(EngineContext context, DecisionLog log, EventOutbox outbox) {
+        this(context, log, outbox, null, null);
+    }
+
+    /**
+     * Creates the service with decision explanations (RLE-030).
+     *
+     * @param context shared engine context
+     * @param log the decision log
+     * @param outbox where the audit entry of each masked-input search is written
+     * @param store reads the stored version a decision names
+     * @param explainer writes the text of an explanation
+     */
+    public DefaultDecisionLogService(EngineContext context, DecisionLog log, EventOutbox outbox,
+            io.github.dhluong90.bpm.rules.internal.store.RuleStore store,
+            io.github.dhluong90.bpm.rules.spi.DecisionExplainer explainer) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.log = Objects.requireNonNull(log, "log must not be null");
         this.outbox = Objects.requireNonNull(outbox, "outbox must not be null");
+        this.store = store;
+        this.explainer = explainer;
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.rules.api.DecisionExplanation explain(String decisionId, List<String> languages) {
+        if (store == null || explainer == null) {
+            throw new UnsupportedOperationException("This decision log service was built without explanations");
+        }
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_LOG_READ);
+        if (decisionId == null || !DECISION_ID.matcher(decisionId).matches()) {
+            throw new DecisionNotFoundException("(invalid id)");
+        }
+        io.github.dhluong90.bpm.rules.api.DecisionExplanation explanation = context.withoutDooming(() -> {
+            DecisionRecord row = log.find(tenant, decisionId).orElseThrow(() -> new DecisionNotFoundException(decisionId));
+            // The version is read in the decision's tenant by name and number; versions are never deleted, so a logged
+            // decision always finds the version it used, however many versions came after it.
+            var version = store.findVersion(tenant, row.ruleSet(), row.version(), false).orElseThrow(() ->
+                    new IllegalStateException("Decision " + decisionId + " names a version that is not stored"));
+            return DecisionExplanations.explain(row, version);
+        });
+        String language = language(languages);
+        return explanation.withText(language, explainer.text(explanation, language));
+    }
+
+    /** The first preferred language the explainer writes, else its default. */
+    private String language(List<String> preferred) {
+        java.util.Set<String> available = explainer.languages();
+        if (preferred != null) {
+            for (String language : preferred) {
+                if (language != null && available.contains(language)) {
+                    return language;
+                }
+            }
+        }
+        return explainer.defaultLanguage();
     }
 
     @Override
@@ -210,7 +265,7 @@ public final class DefaultDecisionLogService implements DecisionLogService {
         }
     }
 
-    private static LoggedDecision view(DecisionRecord row) {
+    static LoggedDecision view(DecisionRecord row) {
         List<String> matched = new ArrayList<>();
         JsonNode ids = EngineValues.read(row.matchedRuleIdsJson());
         ids.forEach(id -> matched.add(id.stringValue()));

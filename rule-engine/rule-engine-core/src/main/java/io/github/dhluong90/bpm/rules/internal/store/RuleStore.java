@@ -190,6 +190,56 @@ public interface RuleStore {
     List<HistoryRow> history(String tenantId, String versionId);
 
     /**
+     * Lists the lifecycle columns of a rule set's versions by version number, descending, for the rule set history.
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     * @param beforeVersion only versions below this number, or null from the newest
+     * @param limit at most this many
+     * @return the versions
+     */
+    List<HistoryVersion> historyVersions(String tenantId, String ruleSetId, Integer beforeVersion, int limit);
+
+    /**
+     * Reads the lifecycle columns of chosen versions of a rule set, by version number ascending; a number the rule set
+     * does not have is absent.
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     * @param numbers the version numbers
+     * @return the versions found
+     */
+    List<HistoryVersion> versionsByNumber(String tenantId, String ruleSetId, java.util.Collection<Integer> numbers);
+
+    /**
+     * Reads the history of several versions in one query: for each version its oldest rows, at most
+     * {@code perVersionLimit}, oldest first, versions in the order of their ids.
+     *
+     * @param tenantId the tenant
+     * @param versionIds the version ids
+     * @param perVersionLimit the most rows returned per version
+     * @return the rows
+     */
+    List<HistoryRow> historyOf(String tenantId, java.util.Collection<String> versionIds, int perVersionLimit);
+
+    /**
+     * Appends one rule set event to the history (migration V24).
+     *
+     * @param row the row
+     */
+    void appendRuleSetEvent(RuleSetEventRow row);
+
+    /**
+     * Reads a rule set's own events, newest first.
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     * @param limit at most this many
+     * @return the rows
+     */
+    List<RuleSetEventRow> ruleSetEvents(String tenantId, String ruleSetId, int limit);
+
+    /**
      * Returns the engine key of a purpose, storing {@code candidate} first when none exists. Every replica gets the
      * same key: the first insert wins and later ones read it.
      *
