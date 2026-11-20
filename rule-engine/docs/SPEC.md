@@ -161,6 +161,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Caller with `rules:simulate` runs historical simulation of `v2` over those 100 decisions.
 - **Then:** Engine returns diff summary (e.g. `18 outcomes changed`) and writes `0` rows to `rle_decision`. Attaching the simulation report to a publication request is M3 and is not part of this statement.
 - **Example:** `Simulate v2 on 100 past decisions -> diff summary returned, 0 rle_decision inserts`.
+- **Delivery:** `POST /rule-sets/{name}/versions/{v}:simulate-history` and `RuleEngine.simulateHistory` (#95). The caller needs `rules:simulate` and `rules:log:read`, because the answer is built from logged inputs. The period is at most `query.max-range` and the run at most `simulation.max-inputs` decisions. A decision whose masked input had a value is counted as not replayable, naming the inputs only (DESIGN 4.2.2).
 - **Test ID:** `RLE_015_simulation_leaves_decision_log_untouched`
 
 ### RLE-016 Simulation of a draft over sample inputs returns outputs without writing decision rows
@@ -183,7 +184,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** The engine migration runs and the partition job runs in each case, with SQL captured.
 - **Then:** After migration `rle_decision` is range-partitioned with `rle_decision_default`, `rle_decision_2027_01` and `rle_decision_2027_02` (7 days ahead reaches February). In the retention run only `rle_decision_2027_01` is dropped (its upper bound `2027-02-01` is before `2027-02-03`); no `DELETE` statement on `rle_decision` appears. In the third run the straggler is moved into the new `2027_03` partition before `ATTACH` and the default partition is empty afterwards. With `decision-log.retention` unset, no partition is ever dropped.
 - **Example:** `retention P12M at 2028-02-03 -> drop rle_decision_2027_01 only; 0 DELETE statements`.
-- **Delivery:** creation ahead and the overflow case are tested by `RLE_017_*` in `DecisionLogPartitionMaintenanceIT` and `DecisionLogSearchIT`; the retention run lands with the retention slice (RE-F-31), and until then nothing is dropped.
+- **Delivery:** creation ahead and the overflow case are tested by `RLE_017_*` in `DecisionLogPartitionMaintenanceIT` and `DecisionLogSearchIT`. The retention run ships with #104 (RE-F-31, PD-050): each drop is recorded in the append-only `rle_decision_log_drop` (V19), and retention is off unless the host sets `decision-log.retention` to whole months of at least `decision-log.retention-floor` (`P12M`); unset, nothing is dropped, start-up is unaffected on every profile and a WARN is logged at every start-up (PD-130). `keep-forever` is the explicit keep-everything value. PD-050 stays the 1.0 rule.
 - **Test ID:** `RLE_017_decision_log_monthly_partitions_and_retention_by_drop`
 
 ### RLE-018 `X-Tenant-Id` is accepted only for a tenant in the token's allowed list

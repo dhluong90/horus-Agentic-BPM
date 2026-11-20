@@ -55,7 +55,7 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
         CursorKeys keys = new CursorKeys(store, context.transactions(), context.clock());
         CompiledCache cache = new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions());
         Supersession supersession = new Supersession(store, outbox, context.settings());
-        return new RuleEngines(new DefaultRuleEngine(context, store, log, cache),
+        return new RuleEngines(new DefaultRuleEngine(context, store, log, cache, querySettings),
                 new DefaultVersionService(context, store, outbox, keys, supersession, cache), keys,
                 new DefaultDecisionLogService(context, log, outbox), new MaskingStartupCheck(store, context.masking(),
                         context.transactions(), context.clock()),

@@ -100,7 +100,30 @@ Set `horus.bpm.rules.decision-log.mode`. To turn logging off entirely, set `deci
 
 ## Keep the log within retention
 
-Retention is the host's decision; no product default deletes audit data. The table `rle_decision` is partitioned by calendar month in every install (ADR-0010). From M3 you set `horus.bpm.rules.decision-log.retention` in whole months, at least `P12M`, and the engine's scheduler drops whole monthly partitions older than that period. Outside the `dev` profile the engine then refuses to start until the period is set. Before M3 the engine deletes nothing. Details: [[Rule Engine Configuration]].
+Retention is the host's decision; no product default deletes audit data. The table `rle_decision` is partitioned by calendar month in every install (ADR-0010). Set `horus.bpm.rules.decision-log.retention` in whole months, at least `P12M`:
+
+```yaml
+horus:
+  bpm:
+    rules:
+      decision-log:
+        retention: P120M   # keep decisions for 10 years
+```
+
+- **Off by default.** Left out, every decision is kept, nothing is dropped and the host starts as before, but a WARN at every start-up says the setting is unset, that everything is kept, roughly how the log grows per row (1 to 3 KB a decision) and names the setting. Set `keep-forever` to say it on purpose; that logs INFO. Only a period of at least `P12M` turns drops on.
+- **Upgrade note.** A host that upgrades without setting retention starts and keeps every decision, as before, and now sees the WARN. Before 1.0 nothing refuses start-up. At 1.0 the setting becomes required (PD-050, PD-130), so choose `keep-forever` or a period before then.
+- **Whole months only.** The daily partition job drops each monthly partition that ends at or before the host clock minus the retention. With `P12M` on 3 February 2028, `rle_decision_2027_01` (up to 1 February 2027) is dropped and `rle_decision_2027_02` stays. No row is ever deleted.
+- **Every drop is recorded.** In the transaction that drops a month, the engine writes to `rle_decision_log_drop` one row per tenant with its decision count, and one row with tenant `*` for the total. The rows also hold the partition, its range, the retention and the cutoff, and `dropped_at`. The table is append-only: the database refuses `UPDATE`, `DELETE` and `TRUNCATE` on it. Each drop is also logged at WARN.
+- **A floor of your own.** `decision-log.retention-floor` (default `P12M`) is the shortest retention accepted. Raise it to your policy, for example `P84M`, so that a shorter value set by mistake stops start-up.
+
+To see what was dropped:
+
+```sql
+SELECT partition_name, tenant_id, decision_count, retention, cutoff, dropped_at
+FROM rle_decision_log_drop ORDER BY dropped_at, partition_name, tenant_id;
+```
+
+Details: [[Rule Engine Configuration]].
 
 ## React to events
 
