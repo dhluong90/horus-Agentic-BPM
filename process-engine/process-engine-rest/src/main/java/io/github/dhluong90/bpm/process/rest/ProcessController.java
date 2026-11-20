@@ -1,6 +1,12 @@
 package io.github.dhluong90.bpm.process.rest;
 
 import io.github.dhluong90.bpm.process.api.DefinitionService;
+import io.github.dhluong90.bpm.process.api.DefinitionSummary;
+import io.github.dhluong90.bpm.process.api.InstanceQuery;
+import io.github.dhluong90.bpm.process.api.Page;
+import io.github.dhluong90.bpm.process.api.PageRequest;
+import io.github.dhluong90.bpm.process.api.ProcessQueryService;
+import io.github.dhluong90.bpm.process.api.QueryInvalidException;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.InputInvalidException;
@@ -18,6 +24,11 @@ import io.github.dhluong90.bpm.process.internal.service.Views;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -28,6 +39,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -47,20 +59,23 @@ public class ProcessController {
     private final DefinitionService definitions;
     private final ProcessEngine engine;
     private final TaskService tasks;
+    private final ProcessQueryService queries;
     private final int maxDefinitionBytes;
 
     /**
      * @param definitions definition service
      * @param engine process engine
      * @param tasks task service
+     * @param queries list queries
      * @param maxDefinitionBytes largest BPMN document accepted ({@code definitions.max-bytes})
      */
     public ProcessController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
-            int maxDefinitionBytes) {
+            ProcessQueryService queries, int maxDefinitionBytes) {
         this.maxDefinitionBytes = maxDefinitionBytes;
         this.definitions = definitions;
         this.engine = engine;
         this.tasks = tasks;
+        this.queries = queries;
     }
 
     /** Imports a BPMN 2.0 XML document ({@code processes:deploy}). */
@@ -72,6 +87,52 @@ public class ProcessController {
                 new ImportRequest(SourceFormat.BPMN_XML, body, idempotencyKey));
         return json(HttpStatus.CREATED, Views.definition(version), null,
                 BASE + "/definitions/" + version.key() + "/versions/" + version.version());
+    }
+
+    /** Lists the definition keys of the tenant ({@code processes:read}). */
+    @GetMapping("/definitions")
+    public ResponseEntity<byte[]> definitions(@RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor) {
+        Page<DefinitionSummary> page = queries.definitions(new PageRequest(limitOf(limit), cursor));
+        return json(HttpStatus.OK, Views.page(page, Views::definitionSummary), null, null);
+    }
+
+    /** Reads one version of a definition ({@code processes:read}); the {@code ETag} is its definition hash. */
+    @GetMapping("/definitions/{key}/versions/{version}")
+    public ResponseEntity<byte[]> definitionVersion(@PathVariable("key") String key,
+            @PathVariable("version") String version) {
+        int number;
+        try {
+            number = Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException("version must be a version number, for example 1");
+        }
+        DefinitionVersion found = definitions.version(key, number);
+        return ResponseEntity.status(HttpStatus.OK).contentType(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.ETAG, "\"" + found.definitionHash() + "\"")
+                .body(bytes(Views.definition(found)));
+    }
+
+    /**
+     * Lists instances, newest first ({@code processes:read}). {@code status} is one or more statuses, comma
+     * separated, {@code RUNNING} when absent.
+     */
+    @GetMapping("/instances")
+    public ResponseEntity<byte[]> instances(@RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "definitionKey", required = false) String definitionKey,
+            @RequestParam(value = "startedFrom", required = false) String startedFrom,
+            @RequestParam(value = "startedTo", required = false) String startedTo,
+            @RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor) {
+        Set<String> statuses = new LinkedHashSet<>();
+        if (status != null) {
+            for (String part : status.split(",", -1)) {
+                statuses.add(part.strip());
+            }
+        }
+        InstanceQuery query = new InstanceQuery(statuses, definitionKey, instantOf("startedFrom", startedFrom),
+                instantOf("startedTo", startedTo), new PageRequest(limitOf(limit), cursor));
+        return json(HttpStatus.OK, Views.page(queries.instances(query), Views::instanceSummary), null, null);
     }
 
     /**
@@ -114,6 +175,33 @@ public class ProcessController {
     @GetMapping("/instances/{id}")
     public ResponseEntity<byte[]> instance(@PathVariable("id") String id) {
         ProcessInstance instance = engine.instance(id);
+        return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
+    }
+
+    /**
+     * Cancels a running instance ({@code processes:cancel}, PD-103). Body: the required {@code reason}. {@code If-Match} carries
+     * the instance {@code lockVersion} (its {@code ETag}) and {@code Idempotency-Key} makes a retry safe; both are
+     * required ({@code 428 PRECONDITION_REQUIRED}).
+     */
+    @PostMapping(value = "/instances/{id}:cancel")
+    public ResponseEntity<byte[]> cancel(@PathVariable("id") String id, HttpServletRequest http,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new PreconditionRequiredException("Send If-Match with the instance's lockVersion (its ETag), for "
+                    + "example \"2\"");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot cancel twice");
+        }
+        byte[] body = boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
+        JsonNode request = body.length == 0 ? EngineJson.NODES.objectNode() : parse(body);
+        JsonNode reason = request.get("reason");
+        if (reason != null && !reason.isNull() && !reason.isString()) {
+            throw new InputInvalidException("reason must be a string");
+        }
+        ProcessInstance instance = engine.cancel(id, lockVersion(ifMatch),
+                reason == null || reason.isNull() ? null : reason.stringValue(), idempotencyKey);
         return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
     }
 
@@ -167,6 +255,29 @@ public class ProcessController {
         }
     }
 
+    private static Integer limitOf(String limit) {
+        if (limit == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(limit.strip());
+        } catch (NumberFormatException e) {
+            throw new QueryInvalidException("limit must be a whole number, for example 50");
+        }
+    }
+
+    private static Instant instantOf(String name, String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value.strip()).toInstant();
+        } catch (DateTimeParseException e) {
+            throw new QueryInvalidException(name + " must be an ISO 8601 time with an offset, for example "
+                    + "2027-02-01T00:00:00Z");
+        }
+    }
+
     private static long lockVersion(String ifMatch) {
         String value = ifMatch.strip();
         if (value.startsWith("W/")) {
@@ -187,6 +298,10 @@ public class ProcessController {
         if (location != null) {
             builder.header(HttpHeaders.LOCATION, location);
         }
-        return builder.body(EngineJson.JSON.writeValueAsString(body).getBytes(StandardCharsets.UTF_8));
+        return builder.body(bytes(body));
+    }
+
+    private static byte[] bytes(JsonNode body) {
+        return EngineJson.JSON.writeValueAsString(body).getBytes(StandardCharsets.UTF_8);
     }
 }

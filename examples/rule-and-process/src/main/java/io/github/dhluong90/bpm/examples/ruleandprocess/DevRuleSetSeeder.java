@@ -54,9 +54,11 @@ class DevRuleSetSeeder {
             LOG.info("Rule set " + RULE_SET + " exists; not seeded again");
             return;
         }
-        as("seed-author", "rules:author", () -> versions.requestPublish(RULE_SET, draft.version(), WriteOptions.none()));
+        RuleSetVersion requested = as("seed-author", "rules:author",
+                () -> versions.requestPublish(RULE_SET, draft.version(), WriteOptions.none()));
+        // An approval names the lock version it was decided on (#234): here, the version the seed author requested.
         RuleSetVersion published = as("seed-approver", "rules:approve",
-                () -> versions.approve(RULE_SET, draft.version(), WriteOptions.none()));
+                () -> versions.approve(RULE_SET, draft.version(), new WriteOptions(null, requested.lockVersion(), null)));
         LOG.info("Rule set " + RULE_SET + " v" + published.version() + " " + published.status()
                 + " (requested by seed-author, approved by seed-approver)");
     }

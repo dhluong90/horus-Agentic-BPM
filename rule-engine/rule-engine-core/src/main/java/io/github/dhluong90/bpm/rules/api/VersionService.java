@@ -13,7 +13,8 @@ import java.util.Optional;
  * {@code TenantResolver} and {@code CallerResolver}, never from an argument.
  *
  * <p>Permissions (ADR-0010) are checked here, not only over REST: import and {@code requestPublish} need
- * {@code rules:author}, {@code approve} and {@code reject} need {@code rules:approve}, every read and
+ * {@code rules:author}, {@code approve} and {@code reject} need {@code rules:approve}, {@code replaceDraft} needs {@code rules:author}
+ * and the draft's authorship, every read and
  * {@code export} need {@code rules:read}. A
  * caller without them gets {@link PermissionDeniedException}; an unresolved caller or tenant gets
  * {@link UnauthenticatedException}. The approver must be neither the requester nor the author of the version.
@@ -40,6 +41,42 @@ public interface VersionService {
      * @throws RuleSetNotFoundException when the tenant has no such rule set
      */
     RuleSetVersion importVersion(String ruleSet, ImportRequest request);
+
+    /**
+     * Replaces the document of a draft in place (RLE-047): the same reading, validation and violations as
+     * {@link #importVersion}, the canonical and source hashes recomputed, the version number, author and creation time
+     * kept, and the lock version incremented. Writes one {@code DRAFT_UPDATED} history row with the old and new
+     * canonical hash and one {@code rules.version.draft-updated.v1} event. Needs {@code rules:author}, the
+     * caller must be the draft's author, and the host must allow draft authoring
+     * ({@code horus.bpm.rules.authoring.cockpit-drafts}).
+     *
+     * @param ruleSet the rule set name; must equal the name in the document
+     * @param version the version number
+     * @param request the new source document
+     * @param options idempotency key and optimistic lock; the key of {@code options} wins over the request's
+     * @return the version with its new document
+     * @throws DraftAuthoringDisabledException when the host turned draft authoring off
+     * @throws PermissionDeniedException when the caller lacks {@code rules:author} or is not the draft's author
+     * @throws InvalidStateException when the version is not a draft
+     * @throws VersionConflictException when the lock version is stale
+     * @throws ValidationFailedException when the document cannot be read or compiled; nothing is stored
+     * @throws InputInvalidException when the document names another rule set
+     */
+    RuleSetVersion replaceDraft(String ruleSet, int version, ImportRequest request, WriteOptions options);
+
+    /**
+     * Compares two versions of a rule set row by row, from their canonical models (RLE-028, RLE-048). Writes nothing.
+     * Needs {@code rules:read}.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version compared
+     * @param base the version it is compared against; must differ from {@code version}
+     * @return the diff
+     * @throws InputInvalidException when {@code base} equals {@code version}
+     * @throws RuleSetNotFoundException when the tenant has no such rule set
+     * @throws VersionNotFoundException when either version does not exist
+     */
+    VersionDiff diff(String ruleSet, int version, int base);
 
     /**
      * Moves a draft to {@code PENDING_APPROVAL} and records the caller as requester.
