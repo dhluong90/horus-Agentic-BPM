@@ -14,6 +14,7 @@ import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.TaskService;
 import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnReader;
+import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.internal.exec.BehaviorCatalog;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
@@ -23,6 +24,8 @@ import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
+import io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService;
+import io.github.dhluong90.bpm.process.internal.service.ProcessQueries;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
@@ -208,6 +211,7 @@ public class ProcessEngineAutoConfiguration {
                 Limits.DEFAULTS.maxTextChars(), Limits.DEFAULTS.maxAttributeChars()));
         return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
+                Map.of(SourceFormat.BPMN_XML, new SubsetBpmnWriter()::write),
                 new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
                         engineWork(ruleEngines), properties.handlers().slowCallWarning()), publisher,
                 properties.toSettings(EngineSettings.ApproverRule.valueOf(ApproverMustDifferFrom.from(environment).name()),
@@ -293,6 +297,15 @@ public class ProcessEngineAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean
+    LiveNodeCountService processEngineLiveNodeCounts(ObjectProvider<TenantResolver> tenants,
+            ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
+            JdbcProcessStore store, ProcessEngineProperties properties) {
+        return new LiveNodeCountService(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
+                clock.getIfUnique(Clock::systemUTC), transactions, store, properties.stats().toSettings());
+    }
+
+    @Bean
     @ConditionalOnMissingBean(TaskService.class)
     TaskService processTaskService(ProcessServices services) {
         return services;
@@ -300,8 +313,8 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(ProcessQueryService.class)
-    ProcessQueryService processQueryService(ProcessServices services) {
-        return services;
+    ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts) {
+        return new ProcessQueries(services, liveCounts);
     }
 
     @Bean

@@ -5,24 +5,65 @@
   "description": "Written to the Rule Engine outbox in the transaction where a published version is retired: by hand (POST .../versions/{v}:retire, RLE-026), or as superseded once a newer approved version is in effect, at approval or by the lifecycle sweep (RLE-027). Written exactly once per retirement across replicas (ADR-0025 decision 2). The outbox row id is the event id. Additive changes only within v1 (DESIGN section 3.3).",
   "type": "object",
   "required": [
+    "eventId",
     "eventType",
+    "occurredAt",
+    "tenantId",
+    "correlationId",
+    "causationId",
+    "producer",
+    "schemaVersion",
     "ruleSet",
     "version",
-    "tenantId",
     "actor",
-    "occurredAt",
     "retiredBy",
     "reason",
     "supersededBy",
     "retiredAt",
+    "noVersionInEffect",
     "approvalMode",
-    "requestedBy",
-    "noVersionInEffect"
+    "requestedBy"
   ],
   "additionalProperties": true,
   "properties": {
+    "eventId": {
+      "description": "The event id, a ULID; equal to the outbox row id. Consumers de-duplicate by it.",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
     "eventType": {
       "const": "rules.version.retired.v1"
+    },
+    "occurredAt": {
+      "description": "When the state change committed, ISO 8601 UTC.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenantId": {
+      "description": "The tenant, from the authenticated context; never from a request body.",
+      "type": "string"
+    },
+    "correlationId": {
+      "description": "The caller's correlation id (X-Correlation-Id, or the one passed to the Java API). When the caller gave none, the event id: the event starts its own chain.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "causationId": {
+      "description": "The id of the command or event that caused this one, or null when a caller's command caused it directly.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "producer": {
+      "description": "rule-engine, a slash and the engine version that wrote the event.",
+      "type": "string",
+      "pattern": "^rule-engine/[0-9A-Za-z.+-]+$"
+    },
+    "schemaVersion": {
+      "description": "Version of the envelope layout; 1 for every .v1 type.",
+      "const": 1,
+      "type": "integer"
     },
     "ruleSet": {
       "description": "Rule set name, kebab-case.",
@@ -34,18 +75,9 @@
       "type": "integer",
       "minimum": 1
     },
-    "tenantId": {
-      "description": "The tenant, from the authenticated context; never from a request body.",
-      "type": "string"
-    },
     "actor": {
       "description": "Who retired it; always equal to retiredBy.",
       "type": "string"
-    },
-    "occurredAt": {
-      "description": "When the retirement committed, ISO 8601 UTC; equal to retiredAt.",
-      "type": "string",
-      "format": "date-time"
     },
     "retiredBy": {
       "description": "The identity that retired the version by hand, or lifecycle.system-actor (default system:supersession; the system: namespace is refused for callers) when it was superseded.",
@@ -70,6 +102,10 @@
       "type": "string",
       "format": "date-time"
     },
+    "noVersionInEffect": {
+      "description": "True when the retirement left the rule set with no version in effect, so evaluations fail until a new version is approved (PD-101); false when another version remains in effect or the version was superseded.",
+      "type": "boolean"
+    },
     "approvalMode": {
       "description": "single for a retirement by one rules:approve holder (lifecycle.retire-approval, PD-080), four-eyes when a second holder confirmed it (from M3), system when superseded.",
       "enum": [
@@ -84,42 +120,48 @@
         "string",
         "null"
       ]
-    },
-    "noVersionInEffect": {
-      "description": "True when the retirement left the rule set with no version in effect, so evaluations fail until a new version is approved (PD-101); false when another version remains in effect or the version was superseded.",
-      "type": "boolean"
     }
   },
   "examples": [
     {
+      "eventId": "01KBX9Q3M4R7T2V8W6Y0Z1A2B4",
       "eventType": "rules.version.retired.v1",
+      "occurredAt": "2027-02-17T08:00:00Z",
+      "tenantId": "bank-a",
+      "correlationId": "req-7f3a",
+      "causationId": null,
+      "producer": "rule-engine/0.2.0",
+      "schemaVersion": 1,
       "ruleSet": "tet-fee-waiver",
       "version": 1,
-      "tenantId": "bank-a",
       "actor": "bob",
-      "occurredAt": "2027-02-17T08:00:00Z",
       "retiredBy": "bob",
       "reason": "Tet promotion ended",
       "supersededBy": null,
       "retiredAt": "2027-02-17T08:00:00Z",
+      "noVersionInEffect": true,
       "approvalMode": "single",
-      "requestedBy": null,
-      "noVersionInEffect": true
+      "requestedBy": null
     },
     {
+      "eventId": "01KBX9Q3M4R7T2V8W6Y0Z1A2B3",
       "eventType": "rules.version.retired.v1",
+      "occurredAt": "2027-01-01T00:00:00Z",
+      "tenantId": "bank-a",
+      "correlationId": "req-7f3a",
+      "causationId": null,
+      "producer": "rule-engine/0.2.0",
+      "schemaVersion": 1,
       "ruleSet": "card-fee",
       "version": 1,
-      "tenantId": "bank-a",
       "actor": "system:supersession",
-      "occurredAt": "2026-12-01T00:00:01Z",
       "retiredBy": "system:supersession",
       "reason": "SUPERSEDED",
       "supersededBy": 2,
-      "retiredAt": "2026-12-01T00:00:01Z",
+      "retiredAt": "2027-01-01T00:00:00Z",
+      "noVersionInEffect": false,
       "approvalMode": "system",
-      "requestedBy": null,
-      "noVersionInEffect": false
+      "requestedBy": null
     }
   ]
 }

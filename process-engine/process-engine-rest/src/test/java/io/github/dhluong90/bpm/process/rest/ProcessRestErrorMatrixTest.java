@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
+import io.github.dhluong90.bpm.process.api.DefinitionExport;
 import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
@@ -18,6 +19,7 @@ import io.github.dhluong90.bpm.process.api.PageRequest;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessException;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
+import io.github.dhluong90.bpm.process.api.NodeCounts;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
@@ -332,6 +334,12 @@ class ProcessRestErrorMatrixTest {
         }
 
         @Override
+        public DefinitionExport exportDefinition(String key, int version, SourceFormat format) {
+            maybeFail();
+            return new DefinitionExport(key, version, "a".repeat(64), format, "<definitions/>");
+        }
+
+        @Override
         public ProcessInstance start(StartRequest request) {
             maybeFail();
             return instance(0, "RUNNING");
@@ -395,6 +403,12 @@ class ProcessRestErrorMatrixTest {
                     + query.page().limit() + " " + query.page().cursor());
             return new Page<>(List.of(new InstanceSummary(INSTANCE, "card-fee-review", 1, "APP-1001", "RUNNING", 1, "tuan",
                     STARTED, null)), "next");
+        }
+
+        @Override
+        public NodeCounts liveNodeCounts(String definitionKey, int version) {
+            maybeFail();
+            return new NodeCounts(definitionKey, version, STARTED, Map.of());
         }
     }
 }

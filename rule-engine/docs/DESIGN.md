@@ -93,20 +93,34 @@ Source: [`diagrams/version-lifecycle.mmd`](diagrams/version-lifecycle.mmd).
 | `PUBLISHED`, retirement pending | `confirmRetire()` | `rules:approve`; caller is not `retire_requested_by` (`403 SELF_APPROVAL_FORBIDDEN`); `lockVersion` matches; the last-version rule is checked again, so a confirmation that would now leave no version in effect needs `confirmNoVersionInEffect: true` unless the request carried it | `RETIRED` | Same effects as the `single` row, with actor the confirmer, the requester and reason from the request, and `approval_mode = four-eyes` |
 | `PUBLISHED`, retirement pending | `cancelRetire(reason)` | `rules:approve`; reason not blank | `PUBLISHED` | Request columns cleared; history row `RETIRE_CANCELLED` |
 
-Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` for this engine and `processes` for the Process Engine. The Rule Engine emits exactly these types: `rules.version.created.v1` (a draft was imported; minimal outbox row from #1), `rules.version.draft-updated.v1` (a draft's document was replaced in place, #165), `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`, `rules.version.withdrawn.v1` (PD-089), `rules.version.retire-requested.v1` (from M3, `four-eyes` mode), `rules.version.retired.v1` (with `approvalMode`: `single`, `four-eyes` or `system`), and `rules.decision.evaluated.v1` (off by default, `events.decision-evaluated`). A breaking payload change publishes a `.v2` type alongside `.v1`; additive fields stay in `.v1`.
+Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` for this engine and `processes` for the Process Engine. The Rule Engine emits exactly these types: `rules.version.created.v1` (a draft was imported), `rules.version.draft-updated.v1` (a draft was replaced in place, section 4.2), `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`, `rules.version.withdrawn.v1`, `rules.version.retire-requested.v1` (from M3, `four-eyes` mode), `rules.version.retired.v1` (with `approvalMode`: `single`, `four-eyes` or `system`), and `rules.decision.evaluated.v1` (off by default, `events.decision-evaluated`). A breaking payload change publishes a `.v2` type alongside `.v1`; additive fields stay in `.v1`.
 
 | Event | Payload beyond the envelope (`eventId`, `eventType`, `occurredAt`, `tenantId`, `correlationId`, `causationId`, `producer`, `schemaVersion`) |
 |---|---|
-| `rules.version.draft-updated.v1` | `ruleSet`, `version`, `updatedBy`, `canonicalHash`, `previousCanonicalHash` (schema `rule-engine/api/schema/rules.version.draft-updated.v1.schema.json`) |
+| `rules.version.created.v1` | `ruleSet`, `version`, `actor` (the author); schema `rule-engine/api/schema/rules.version.created.v1.schema.json` |
+| `rules.version.draft-updated.v1` | `ruleSet`, `version`, `canonicalHash` (after the replacement), `previousCanonicalHash`, `lockVersion` (after the update), `updatedBy`; schema `rule-engine/api/schema/rules.version.draft-updated.v1.schema.json` |
 | `rules.version.publish-requested.v1` | `ruleSet`, `version`, `canonicalHash`, `requestedBy`, `effectiveFrom` (null when the version takes effect at approval); schema `rule-engine/api/schema/rules.version.publish-requested.v1.schema.json` |
 | `rules.version.published.v1` | `ruleSet`, `version`, `canonicalHash`, `effectiveFrom`, `requestedBy`, `approvedBy`; schema `rule-engine/api/schema/rules.version.published.v1.schema.json` |
-| `rules.version.rejected.v1` | `ruleSet`, `version`, `rejectedBy`, `reason` |
-| `rules.version.withdrawn.v1` | `ruleSet`, `version`, `withdrawnBy`, `reason` (null when none was given) |
+| `rules.version.rejected.v1` | `ruleSet`, `version`, `rejectedBy`, `reason`; schema `rule-engine/api/schema/rules.version.rejected.v1.schema.json` |
+| `rules.version.withdrawn.v1` | `ruleSet`, `version`, `withdrawnBy`, `reason` (null when none was given); schema `rule-engine/api/schema/rules.version.withdrawn.v1.schema.json` |
 | `rules.version.retire-requested.v1` (M3, `four-eyes` mode) | `ruleSet`, `version`, `requestedBy`, `reason`; the request instant is the envelope's `occurredAt` |
-| `rules.version.retired.v1` | `ruleSet`, `version`, `retiredBy` (`lifecycle.system-actor`, `system:supersession` by default, when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version or null), `retiredAt`, `noVersionInEffect` (PD-101, section 3.3.4), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the four-eyes requester, else null) |
-| `rules.decision.evaluated.v1` | `decisionId`, `ruleSet`, `version`, `outcome` |
+| `rules.version.retired.v1` | `ruleSet`, `version`, `retiredBy` (`lifecycle.system-actor`, `system:supersession` by default, when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version or null), `retiredAt`, `noVersionInEffect` (PD-101, section 3.3.4), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the four-eyes requester, else null); schema `rule-engine/api/schema/rules.version.retired.v1.schema.json` |
+| `rules.decision.evaluated.v1` | `decisionId`, `ruleSet`, `version`, `outcome` (`MATCHED`, `NO_MATCH` or `FAILED`); no inputs or outputs, which stay in the decision log; schema `rule-engine/api/schema/rules.decision.evaluated.v1.schema.json` |
 
-Envelope in 0.1.0: every outbox payload carries `eventType`, `tenantId`, `occurredAt` and `actor` next to the fields above, and the event id is the outbox row id (`rle_decision_outbox.id`, a ULID). `eventId`, `correlationId`, `causationId`, `producer` and `schemaVersion` are not sent in 0.1.0; they arrive later as additive fields within each `.v1` type (#239).
+Envelope (0.2.0, #241). Every outbox payload carries the envelope as members next to the fields above, so the 0.1.0 fields (`eventType`, `tenantId`, `occurredAt` and, on lifecycle events, `actor`) keep their place and the additions stay within `.v1`:
+
+| Member | Value |
+|---|---|
+| `eventId` | The outbox row id (`rle_decision_outbox.id`), a ULID string. Consumers de-duplicate by it |
+| `eventType` | The type with its `.v<N>` suffix |
+| `occurredAt` | When the state change committed, ISO 8601 UTC |
+| `tenantId` | The tenant from the host security context, never from a request body |
+| `correlationId` | The caller's: the `X-Correlation-Id` header on REST (a missing or malformed header is replaced by a generated id, as on `:evaluate`), or `ImportRequest.withCorrelationId` and `WriteOptions.withCorrelationId` on the Java API, where a malformed id is `400 INPUT_INVALID`. When a Java caller passes none, the event id: the event starts its own chain. It is not part of the idempotent request, so a replay with another correlation id returns the original result and writes no event |
+| `causationId` | The id of the command or event that caused this one, or null. A caller's command has no id of its own, so it is null on every event the engine writes in 0.2.0 |
+| `producer` | `rule-engine/<engine version>`, for example `rule-engine/0.2.0` |
+| `schemaVersion` | `1`, the version of the envelope layout |
+
+Every type has a schema file in `rule-engine/api/schema/`, named `<eventType>.schema.json`, with `additionalProperties: true`. Core tests check every payload the engine writes against its file, and each file's example against the file itself, so the types whose emitting features come later are checked too.
 
 A host that wants tamper evidence for approvals relays these events to a store outside the database administrator's control (an append-only log or a separate audit system) and reconciles the stored versions against it, because rows in the host database, outbox included, can be changed by whoever administers it. The publication events carry `canonicalHash`, `effectiveFrom`, `requestedBy` and `approvedBy` for that purpose.
 
