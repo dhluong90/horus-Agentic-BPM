@@ -432,6 +432,40 @@ public final class EngineValues {
         return node;
     }
 
+    /**
+     * Writes a history simulation as the REST body of {@code :simulate-history} (RLE-015). Holds no logged input:
+     * a decision that cannot be replayed is named by its masked inputs only.
+     *
+     * @param result the result
+     * @return the body
+     */
+    public static ObjectNode historySimulation(io.github.dhluong90.bpm.rules.api.HistorySimulationResult result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.put("status", result.status().name());
+        node.put("from", result.from().toString());
+        node.put("to", result.to().toString());
+        node.put("decisionCount", result.items().size());
+        node.put("replayedCount", result.replayedCount());
+        node.put("changedCount", result.changedCount());
+        node.put("notReplayableCount", result.notReplayableCount());
+        node.put("truncated", result.truncated());
+        var items = node.putArray("results");
+        for (var decision : result.items()) {
+            ObjectNode item = items.addObject();
+            item.put("decisionId", decision.decisionId());
+            item.put("loggedVersion", decision.loggedVersion());
+            item.put("evalClock", decision.evalClock().toString());
+            item.put("changed", decision.changed());
+            item.set("maskedInputs", value(decision.maskedInputs()));
+            item.set("simulated", decision.simulated() == null ? EngineJson.NODES.nullNode()
+                    : outcome(decision.simulated()));
+            item.set("logged", decision.logged() == null ? EngineJson.NODES.nullNode() : outcome(decision.logged()));
+        }
+        return node;
+    }
+
     private static ObjectNode outcome(DecisionResult.Outcome outcome) {
         ObjectNode node = EngineJson.NODES.objectNode();
         switch (outcome) {

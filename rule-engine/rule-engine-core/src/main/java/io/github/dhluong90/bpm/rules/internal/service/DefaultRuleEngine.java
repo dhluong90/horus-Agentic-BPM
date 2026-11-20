@@ -5,10 +5,13 @@ import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
+import io.github.dhluong90.bpm.rules.api.HistorySimulation;
+import io.github.dhluong90.bpm.rules.api.HistorySimulationResult;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
 import io.github.dhluong90.bpm.rules.api.MaskingKey;
 import io.github.dhluong90.bpm.rules.api.NoEffectiveVersionException;
+import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
 import io.github.dhluong90.bpm.rules.api.ReplayNotPossibleException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
@@ -31,8 +34,10 @@ import io.github.dhluong90.bpm.rules.internal.store.DecisionLog;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionRecord;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
 import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -47,7 +52,7 @@ import tools.jackson.databind.node.ArrayNode;
 /**
  * Evaluates the version in force at the decision's clock, or a pinned approved version, and logs one decision row in
  * the caller's transaction (RLE-013); replays a logged decision without writing; simulates a stored version over
- * sample inputs without logging anything (RLE-016). Compiled versions are cached by version id and canonical hash, so
+ * sample inputs (RLE-016) or over the logged decisions of a period (RLE-015) without logging anything. Compiled versions are cached by version id and canonical hash, so
  * a cached entry is never served for other content and that map needs no invalidation; its size is bounded by
  * {@code cache.max-entries} and a full map is cleared. The selection of the version in force is served from the
  * {@link CompiledCache} while the evaluation instant lies inside the entry's window and its epoch holds, so a cached
@@ -78,6 +83,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     private final DecisionLog log;
     private final Map<String, CompiledRuleSet> compiled = new ConcurrentHashMap<>();
     private final CompiledCache cache;
+    private final DecisionQuerySettings querySettings;
     private final AtomicBoolean grantOpened = new AtomicBoolean();
 
     /**
@@ -92,10 +98,16 @@ public final class DefaultRuleEngine implements RuleEngine {
     }
 
     DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache) {
+        this(context, store, log, cache, DecisionQuerySettings.defaults());
+    }
+
+    DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache,
+            DecisionQuerySettings querySettings) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.log = Objects.requireNonNull(log, "log must not be null");
         this.cache = Objects.requireNonNull(cache, "cache must not be null");
+        this.querySettings = Objects.requireNonNull(querySettings, "querySettings must not be null");
     }
 
     /** @return true the first time only: at most one grant of the tenant-scoped entry point per engine (#336) */
@@ -206,6 +218,112 @@ public final class DefaultRuleEngine implements RuleEngine {
         }
         return new SimulationResult(simulated.ruleSet(), simulated.version(), simulated.status(),
                 effective == null ? null : effective.version(), now, results);
+    }
+
+    @Override
+    public HistorySimulationResult simulateHistory(String ruleSet, int version, HistorySimulation request) {
+        String tenant = context.tenant();
+        // Permissions first: without both, the engine reads and evaluates nothing (DESIGN 4.2.2).
+        context.callerWith(PERMISSION_SIMULATE);
+        context.callerWith(PERMISSION_LOG_READ);
+        int limit = historyLimit(request);
+        return context.withoutDooming(() -> doSimulateHistory(tenant, ruleSet, version, request, limit));
+    }
+
+    /** The period and the limit of a history simulation, checked before any read (RLE-015). */
+    private int historyLimit(HistorySimulation request) {
+        if (request == null || request.from() == null || request.to() == null) {
+            throw new QueryInvalidException("from and to are required");
+        }
+        if (!request.to().isAfter(request.from())) {
+            throw new QueryInvalidException("to must be after from");
+        }
+        Duration range = Duration.between(request.from(), request.to());
+        if (range.compareTo(querySettings.maxRange()) > 0) {
+            throw new QueryInvalidException("from and to may be at most " + querySettings.maxRange().toDays()
+                    + " days apart (query.max-range " + querySettings.maxRange() + "), were " + range);
+        }
+        int max = context.settings().simulationMaxInputs();
+        if (request.limit() == null) {
+            return max;
+        }
+        if (request.limit() < 1 || request.limit() > max) {
+            throw new QueryInvalidException("limit must be 1 to " + max + " (simulation.max-inputs), was "
+                    + request.limit());
+        }
+        return request.limit();
+    }
+
+    private HistorySimulationResult doSimulateHistory(String tenant, String ruleSet, int number,
+            HistorySimulation period, int limit) {
+        if (!RuleSetReader.isRuleSetName(ruleSet)) {
+            throw new VersionNotFoundException("(invalid name)", number);
+        }
+        // Any tenant but the caller's has no such version: the same answer whether or not the rule set exists, and
+        // no decision is read.
+        StoredVersion simulated = store.findVersion(tenant, ruleSet, number, false)
+                .orElseThrow(() -> new VersionNotFoundException(ruleSet, number));
+        CompiledRuleSet draftRules = validated(simulated);
+        Set<String> draftInputs = new HashSet<>();
+        draftRules.inputs().forEach(clause -> draftInputs.add(clause.name()));
+        // One read, tenant and rule set first and the period on the partition key, newest first; one row more than
+        // the limit tells whether the period held more.
+        List<DecisionRecord> rows = log.search(tenant, ruleSet, period.from(), period.to(), null, limit + 1,
+                querySettings.statementTimeout());
+        boolean truncated = rows.size() > limit;
+        Map<Integer, CompiledRuleSet> loggedVersions = new HashMap<>();
+        RequestReads request = context.settings().regexLimits().newRequest();
+        List<HistorySimulationResult.Item> items = new ArrayList<>(Math.min(rows.size(), limit));
+        boolean warned = false;
+        for (DecisionRecord row : rows.subList(0, Math.min(rows.size(), limit))) {
+            CompiledRuleSet loggedRules = loggedVersions.computeIfAbsent(row.version(),
+                    v -> loggedRules(tenant, ruleSet, v));
+            if (loggedRules == null) {
+                // The logged version no longer compiles or hashes: what was decided cannot be evaluated again.
+                DecisionResult.Outcome failed = new DecisionResult.Failed("EVALUATION_ERROR", "Logged version "
+                        + row.version() + " of " + ruleSet + " cannot be evaluated again");
+                items.add(new HistorySimulationResult.Item(row.id(), row.version(), row.evalClock(), null, failed,
+                        false, List.of()));
+                continue;
+            }
+            List<String> masked = maskedWithValue(row, loggedRules.inputs());
+            if (!masked.isEmpty()) {
+                items.add(new HistorySimulationResult.Item(row.id(), row.version(), row.evalClock(), null, null,
+                        false, masked));
+                continue;
+            }
+            DecisionInput input = EngineValues.inputsFromJson(EngineValues.read(row.maskedInputsJson()));
+            DecisionResult.Outcome logged = request.spent() ? notRun(request)
+                    : loggedRules.evaluateWithReason(input, row.evalClock(), request).outcome();
+            DecisionResult.Outcome draft = request.spent() ? notRun(request)
+                    : draftRules.evaluateWithReason(only(input, draftInputs), row.evalClock(), request).outcome();
+            if (request.spent() && !warned) {
+                warned = true;
+                System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.WARNING,
+                        "History simulation of " + ruleSet + " v" + number + " for tenant " + tenant + " stopped at "
+                                + "decision " + row.id() + ": evaluation.regex-max-reads-per-request ("
+                                + request.budget() + ") spent");
+            }
+            items.add(new HistorySimulationResult.Item(row.id(), row.version(), row.evalClock(), draft, logged,
+                    changed(draft, logged), List.of()));
+        }
+        return new HistorySimulationResult(simulated.ruleSet(), simulated.version(), simulated.status(),
+                period.from(), period.to(), truncated, items);
+    }
+
+    /** A logged version by number, never selected, as replay loads it; null when it cannot be evaluated again. */
+    private CompiledRuleSet loggedRules(String tenant, String ruleSet, int number) {
+        StoredVersion version = store.findVersion(tenant, ruleSet, number, false).orElse(null);
+        if (version == null) {
+            return null;
+        }
+        try {
+            return compiled(version);
+        } catch (IntegrityFailure failure) {
+            System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
+                    "ALERT rule set integrity: tenant " + tenant + ", " + failure.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -465,6 +583,15 @@ public final class DefaultRuleEngine implements RuleEngine {
      * tenant's default, which the version does not declare, is recognised by its fingerprint form.
      */
     private static DecisionInput loggedInput(String decisionId, DecisionRecord logged, List<InputClause> declared) {
+        List<String> masked = maskedWithValue(logged, declared);
+        if (!masked.isEmpty()) {
+            throw new ReplayNotPossibleException(decisionId, masked);
+        }
+        return EngineValues.inputsFromJson(EngineValues.read(logged.maskedInputsJson()));
+    }
+
+    /** The declared inputs a decision logged only as a fingerprint, so it cannot be evaluated again; names only. */
+    private static List<String> maskedWithValue(DecisionRecord logged, List<InputClause> declared) {
         JsonNode inputs = EngineValues.read(logged.maskedInputsJson());
         List<String> masked = new ArrayList<>();
         for (InputClause clause : declared) {
@@ -474,10 +601,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                 masked.add(clause.name());
             }
         }
-        if (!masked.isEmpty()) {
-            throw new ReplayNotPossibleException(decisionId, masked);
-        }
-        return EngineValues.inputsFromJson(inputs);
+        return masked;
     }
 
     private CompiledRuleSet compiled(StoredVersion version) {
