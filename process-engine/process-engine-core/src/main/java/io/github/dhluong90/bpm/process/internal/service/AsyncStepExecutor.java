@@ -354,7 +354,7 @@ public final class AsyncStepExecutor implements AutoCloseable {
                 ProcessServices.attemptId(job.id(), job.attempt()), claim.completionToken(), job.attempt(),
                 claimedAt.plus(timeoutOf(job)), inputs);
         try {
-            AdapterResult result = lane.runner().run(target, call);
+            AdapterResult result = lane.runner().run(target, call, java.util.Collections.unmodifiableMap(payload));
             return result == null ? new AdapterResult.Failed("ADAPTER_NULL_RESULT", "The adapter returned null", true)
                     : result;
         } catch (RuntimeException e) {

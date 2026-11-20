@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.process.internal.service;
 import io.github.dhluong90.bpm.process.api.AsyncStepNotFoundException;
 import io.github.dhluong90.bpm.process.api.AsyncStepService;
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
+import io.github.dhluong90.bpm.process.api.GuardrailContractInvalidException;
 import io.github.dhluong90.bpm.process.api.StepCompletion;
 import io.github.dhluong90.bpm.process.spi.AdapterResult;
 import io.github.dhluong90.bpm.process.internal.exec.Ids;
@@ -75,6 +76,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.store.JobStore;
 import io.github.dhluong90.bpm.process.internal.store.JobStore.JobRow;
@@ -434,6 +436,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         Process process = reader.apply(bytes);
         compiler.compile("validation", process);
         checkBindings(process);
+        checkGuardrailContracts(tenant, process);
         String canonical = CanonicalProcessWriter.canonicalText(process);
         String hash = Hashes.sha256(canonical);
         int nodeCount = (int) process.flowElements().stream().filter(FlowNode.class::isInstance).count();
@@ -495,6 +498,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             StoredDefinition current = locked.version();
             requireStatus(current, "DRAFT", "request approval of");
             requireLock(current, expectedLockVersion);
+            // PRE-016: the guardrail rule set may have changed since import; checked again before anything is written.
+            checkGuardrailContracts(tenant, storedProcess(current));
             Instant now = clock.instant();
             if (effectiveFrom != null && effectiveFrom.isBefore(now)) {
                 throw new InputInvalidException("effectiveFrom must not be in the past");
@@ -534,6 +539,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 + "(horus.bpm.lifecycle.approver-must-differ-from: makers)");
             }
             requireLock(current, expectedLockVersion);
+            // PRE-016: and again at approval, against the rule set version in effect now.
+            checkGuardrailContracts(tenant, storedProcess(current));
             // An older version never overtakes a newer active one (PRE-021).
             for (StoredDefinition other : locked.all()) {
                 if ("ACTIVE".equals(other.status()) && other.version() > current.version()) {
@@ -1075,6 +1082,52 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (!invoker.hasRuleEngine()) {
             problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "agentTask " + task.id() + " needs the Rule "
                     + "Engine for its guardrail, which this host does not have", "ServiceTask", task.id(), 0));
+        }
+    }
+
+    /**
+     * PRE-016: every agent step's guardrail rule set meets the guardrail contract ({@link GuardrailContract}), read in
+     * the caller's tenant at the engine clock. Runs after {@link #checkBindings}, so a host without a decision engine
+     * has already been refused. Problems name the step and the failed check; nothing has been written.
+     *
+     * @param tenant the tenant resolved from the authenticated context, or the start-up tenant
+     * @param process the definition
+     * @throws GuardrailContractInvalidException when any guardrail breaks the contract
+     */
+    private void checkGuardrailContracts(String tenant, Process process) {
+        java.util.Optional<DecisionPort> port = invoker.decisionPort();
+        if (port.isEmpty()) {
+            return;
+        }
+        List<DefinitionProblem> problems = new ArrayList<>();
+        Instant now = clock.instant();
+        for (FlowElement element : process.flowElements()) {
+            if (!(element instanceof ServiceTask task)) {
+                continue;
+            }
+            AgentTaskSpec agent = task.extensions().first(AgentTaskSpec.class).orElse(null);
+            GuardrailSpec guardrail = task.extensions().first(GuardrailSpec.class).orElse(null);
+            if (agent == null || guardrail == null || guardrail.decision() == null) {
+                continue;
+            }
+            DecisionSignature signature;
+            try {
+                signature = port.get().signature(tenant, guardrail.decision(), now);
+            } catch (RuntimeException e) {
+                // The class only: fail closed, the definition is refused.
+                signature = new DecisionSignature.Unavailable(e.getClass().getSimpleName(), "");
+            }
+            if (signature == null) {
+                signature = new DecisionSignature.Unavailable("SIGNATURE_UNAVAILABLE", "");
+            }
+            Map<String, Object> schema = agent.outputSchema() == null ? Map.of() : Values.readMap(agent.outputSchema());
+            for (String failure : GuardrailContract.check(guardrail.decision(), signature, schema)) {
+                problems.add(new DefinitionProblem(GuardrailContractInvalidException.CODE, failure, "ServiceTask",
+                        task.id(), 0));
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new GuardrailContractInvalidException(problems);
         }
     }
 

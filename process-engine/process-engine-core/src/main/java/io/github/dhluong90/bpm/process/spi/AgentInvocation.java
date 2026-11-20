@@ -1,7 +1,9 @@
 package io.github.dhluong90.bpm.process.spi;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -21,6 +23,15 @@ import java.util.Objects;
  *       it (a document store write, a ticket, a message), so a retry never repeats one (TR-IDEM-04).</li>
  * </ul>
  *
+ * <p>Evolution: the engine builds this record; a host only reads it. New components may be added in a minor release,
+ * so read it through its accessors and do not construct or deconstruct it in production code. Tests build one with
+ * {@code AgentInvocations.builder()} from the test-support module, which keeps compiling when a component is added.
+ *
+ * <p>Output schema: {@link #outputSchema()} is the step's {@code <horus:outputSchema>} with the engine's {@code mask}
+ * annotations removed, so an adapter can ask its model for structured output in that shape. It is read-only and
+ * informative: the engine still checks every answer against the full schema in the result transaction. The guardrail
+ * rule set is never passed to the adapter.
+ *
  * @param tenantId the instance's tenant
  * @param instanceId the instance id
  * @param nodeId the step id
@@ -32,9 +43,15 @@ import java.util.Objects;
  * @param attempt the attempt number, from 1
  * @param deadline when the engine abandons this attempt (claim time plus the step timeout)
  * @param inputs the resolved {@code horus:input} values
+ * @param outputSchema the step's output schema as a JSON object without {@code mask} annotations, deeply read-only;
+ *     empty when the engine has none to give
  */
 public record AgentInvocation(String tenantId, String instanceId, String nodeId, String businessKey, String jobId,
-        String attemptId, String completionToken, int attempt, Instant deadline, Map<String, Object> inputs) {
+        String attemptId, String completionToken, int attempt, Instant deadline, Map<String, Object> inputs,
+        Map<String, Object> outputSchema) {
+
+    /** The engine's annotation that masks a field's value in history; never shown to the adapter. */
+    private static final String MASK = "mask";
 
     public AgentInvocation {
         Objects.requireNonNull(tenantId, "tenantId must not be null");
@@ -43,6 +60,50 @@ public record AgentInvocation(String tenantId, String instanceId, String nodeId,
         Objects.requireNonNull(completionToken, "completionToken must not be null");
         Objects.requireNonNull(deadline, "deadline must not be null");
         inputs = Collections.unmodifiableMap(new LinkedHashMap<>(inputs == null ? Map.of() : inputs));
+        outputSchema = withoutMask(outputSchema == null ? Map.of() : outputSchema);
+    }
+
+    /**
+     * The form without an output schema, as built before the schema was passed on; kept so existing callers compile.
+     *
+     * @param tenantId see the record
+     * @param instanceId see the record
+     * @param nodeId see the record
+     * @param businessKey see the record
+     * @param jobId see the record
+     * @param attemptId see the record
+     * @param completionToken see the record
+     * @param attempt see the record
+     * @param deadline see the record
+     * @param inputs see the record
+     */
+    public AgentInvocation(String tenantId, String instanceId, String nodeId, String businessKey, String jobId,
+            String attemptId, String completionToken, int attempt, Instant deadline, Map<String, Object> inputs) {
+        this(tenantId, instanceId, nodeId, businessKey, jobId, attemptId, completionToken, attempt, deadline, inputs,
+                Map.of());
+    }
+
+    /** A deep, read-only copy of a schema node with every {@code mask} key removed. */
+    private static Map<String, Object> withoutMask(Map<?, ?> schema) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        schema.forEach((key, value) -> {
+            if (!MASK.equals(key)) {
+                copy.put(String.valueOf(key), copyValue(value));
+            }
+        });
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static Object copyValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return withoutMask(map);
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list.size());
+            list.forEach(item -> copy.add(copyValue(item)));
+            return Collections.unmodifiableList(copy);
+        }
+        return value;
     }
 
     /**

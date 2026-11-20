@@ -334,6 +334,31 @@ public final class DefaultRuleEngine implements RuleEngine {
         return value;
     }
 
+    /**
+     * The hit policy and declared inputs and outputs of the version effective at {@code at}; only
+     * {@link EngineScopedRuleEngine} calls it. Reads only.
+     *
+     * @param tenant the tenant
+     * @param ruleSet the rule set name
+     * @param at the instant that selects the version
+     * @return the signature
+     */
+    io.github.dhluong90.bpm.rules.embedded.RuleSetSignature signatureAs(String tenant, String ruleSet, Instant at) {
+        if (!io.github.dhluong90.bpm.rules.internal.read.RuleSetReader.isRuleSetName(ruleSet)) {
+            throw new RuleSetNotFoundException("(invalid name)");
+        }
+        return context.withoutDooming(() -> {
+            StoredVersion version = effective(tenant, ruleSet, at).version();
+            CompiledRuleSet rules = validated(version);
+            Map<String, String> inputs = new java.util.LinkedHashMap<>();
+            rules.inputs().forEach(clause -> inputs.put(clause.name(), clause.type().toString()));
+            Map<String, String> outputs = new java.util.LinkedHashMap<>();
+            rules.outputs().forEach(clause -> outputs.put(clause.name(), clause.type().toString()));
+            return new io.github.dhluong90.bpm.rules.embedded.RuleSetSignature(version.ruleSet(), version.version(),
+                    rules.hitPolicy().name(), inputs, outputs, context.settings().rejectUndeclaredInputs());
+        });
+    }
+
     private DecisionResult doEvaluate(String tenant, String caller, String onBehalfOf, DecisionRequest request) {
         Instant now = context.clock().instant();
         Instant at = request.clock() == null ? now : request.clock();

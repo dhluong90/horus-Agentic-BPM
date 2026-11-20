@@ -44,6 +44,16 @@ final class EngineScopedRuleEngine implements TenantScopedRuleEngine {
         return engine.evaluateAs(tenantId, engineId, onBehalfOf, evaluationTime, request);
     }
 
+    @Override
+    public io.github.dhluong90.bpm.rules.embedded.RuleSetSignature signature(String tenantId, String ruleSet,
+            Instant at) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new IllegalArgumentException("tenantId must not be blank");
+        }
+        Objects.requireNonNull(at, "at must not be null");
+        return engine.signatureAs(tenantId, ruleSet, at);
+    }
+
     private static void check(String tenantId, DecisionRequest request) {
         Objects.requireNonNull(request, "request must not be null");
         if (tenantId == null || tenantId.isBlank()) {

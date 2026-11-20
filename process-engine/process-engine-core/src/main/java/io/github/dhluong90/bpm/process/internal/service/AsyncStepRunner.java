@@ -27,4 +27,18 @@ public interface AsyncStepRunner {
      * @return the result, or {@link AdapterResult.Accepted} when the remote side reports it later
      */
     AdapterResult run(String target, AdapterCall call);
+
+    /**
+     * The same call, with the job's stored payload, for a runner that passes part of the step's published spec on to
+     * its adapter (the agent runner passes the output schema). The payload was written when the step parked, from the
+     * approved definition only; a runner reads it and never changes it. By default the payload is not used.
+     *
+     * @param target the adapter name the step names
+     * @param call the call
+     * @param payload the job payload, read-only
+     * @return the result
+     */
+    default AdapterResult run(String target, AdapterCall call, java.util.Map<String, Object> payload) {
+        return run(target, call);
+    }
 }
