@@ -216,9 +216,9 @@ class MigrationOrderTest(unittest.TestCase):
         self.assertIn("V11__late.sql", out)
         self.assertIn("highest rule-engine version on main, V12", out)
 
-    def test_retired_list_is_valid_and_holds_rule_engine_v7_to_v9_and_process_engine_v5(self) -> None:
+    def test_retired_list_is_valid_and_holds_rule_engine_v7_to_v9_and_v13_and_process_engine_v5(self) -> None:
         retired = check.read_retired(REAL_RETIRED)
-        self.assertEqual({(7,), (8,), (9,)}, set(retired["rule-engine"]))
+        self.assertEqual({(7,), (8,), (9,), (13,)}, set(retired["rule-engine"]))
         self.assertEqual({(5,)}, set(retired["process-engine"]))
 
     def test_retired_process_engine_v5_fails_and_next_free_number_skips_it(self) -> None:
