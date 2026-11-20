@@ -100,6 +100,14 @@ Every response under `/api/bpm/**` carries `Cache-Control: no-store`, so rule se
 | Elevation of privilege | Time travel | Caller sets `clock` to pick a future fee version | `clock` requires `rules:simulate`; `403 CLOCK_NOT_ALLOWED` | REST test |
 | Elevation of privilege | Agent output | Agent returns an output that skips approval | Guardrail rule set runs in-process after schema validation; `route-to-human` creates a task the triggering identity cannot approve | `PRE-010` |
 
+## Residual risks
+
+Known risks that are accepted for a limited time, each with a deadline and an issue that fixes it.
+
+| Risk | Exploit scenario | Interim control | Acceptance | Fix |
+|---|---|---|---|---|
+| Host code can reach the Rule Engine's tenant-scoped decision entry point | Host code that imports `io.github.dhluong90.bpm.rules.internal.service` injects the `RuleEngines` bean and calls `forEmbeddedEngine("system:process-engine")`, or calls `RuleEngines.create(...)`. The entry point it gets accepts any tenant id with no permission check, and the decision log records the Process Engine as the caller. A host controller that passes a tenant taken from a path parameter would let a user of tenant A read tenant B's rule outputs and write a decision row in tenant B. | Hosts must not import `rules.internal..` packages. Only the Process Engine wiring calls `forEmbeddedEngine`. | Interim only: accepted by the maintainer on 2026-11-20, must be fixed before 0.2.0. No release ships with it. | [#336](https://github.com/dhluong90/horus-Agentic-BPM/issues/336) |
+
 ## Supply chain
 
 Third-party dependencies carry Apache 2.0, MIT or BSD licences only; the build fails on anything else (`TR-LIC-01`). Every release ships a CycloneDX SBOM; high or critical vulnerabilities block it (`TR-SEC-06`). Example container images run as non-root and are scanned. Report vulnerabilities as described in the repository's `SECURITY.md`.
