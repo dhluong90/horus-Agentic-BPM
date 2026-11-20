@@ -18,11 +18,11 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 |---|---|---|---|---|---|
 | PRE-001 | `PRE_001_running_instance_pins_definition_version` | Integration | M2 | `TR-DET-01` | Planned |
 | PRE-002 | `PRE_002_business_key_and_idempotency_prevent_duplicate_starts` | Concurrent integration | M2 | `TR-IDEM-01`, `TR-IDEM-02` | Planned |
-| PRE-003 | `PRE_003_stale_task_completion_returns_conflict` | Concurrency | M2 | `TR-IDEM-03` | Planned |
+| PRE-003 | `PRE_003_stale_task_completion_returns_conflict` (`RuleAndProcessIT`), `PRE_003_*` in `TaskLifecycleIT` | Testcontainers host over HTTP, two concurrent completions | M2 | `TR-IDEM-03` | Done |
 | PRE-004 | `PRE_004_exclusive_gateway_routes_single_matching_branch` | Unit | M2 | `TR-DET-01` | Planned |
-| PRE-005 | `PRE_005_parallel_gateway_join_prevents_concurrent_lost_wakeup` | Two-replica Testcontainers, 1,000 iterations | M2 | `TR-PERF-05` | Planned |
-| PRE-006 | `PRE_006_timer_lease_recovers_after_worker_crash` | Two-replica fault injection | M2 | `TR-PERF-05` | Planned |
-| PRE-007 | `PRE_007_four_eyes_blocks_same_actor_approval` | Service, WebMvc | M2 | `TR-SEC-04` | Planned |
+| PRE-005 | `PRE_005_parallel_gateway_join_prevents_concurrent_lost_wakeup` | Two-replica Testcontainers, 1,000 iterations | M2 | `TR-PERF-05`, `TR-ASY-03` | Planned |
+| PRE-006 | `PRE_006_timer_lease_recovers_after_worker_crash`, `PRE_006_two_replicas_fire_each_timer_exactly_once` | Testcontainers, replicas as separate engines on one database, TestClock; stalled-claim fencing | M2 | `TR-PERF-05`, `TR-ASY-02` | Done (`ExactlyOnceTimersTest`) |
+| PRE-007 | `PRE_007_four_eyes_blocks_same_actor_approval` (`RuleAndProcessIT`, REST and Java API), `PRE_007_*` in `TaskLifecycleIT` | Testcontainers host over HTTP, Java API | M2 | `TR-SEC-04` | Done for claim and completion; delegate and reassign follow with their slice |
 | PRE-008 | `PRE_008_business_calendar_skips_holidays_and_weekends` | Unit across holidays and DST | M2 | `TR-CAL-01`, `TR-CAL-02` | Planned |
 | PRE-009 | `PRE_009_agent_task_executes_outside_db_transaction` | Testcontainers, 2-connection pool | M2 | `TR-AGT-03`, `TR-EMB-04` | Planned |
 | PRE-010 | `PRE_010_agent_task_guardrail_violation_routes_to_human` | Integration, stub adapter | M2 | `TR-AGT-01` | Planned |
@@ -33,11 +33,11 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-015 | `PRE_015_migration_execute_isolates_instance_failure` | Fault injection, 250 instances | M2 | `TR-MIG-02` | Planned |
 | PRE-016 | `PRE_016_deploy_rejects_guardrail_rule_set_breaking_contract` | WebMvc | M2 | `TR-AGT-01` | Planned |
 | PRE-017 | `PRE_017_async_lease_is_timeout_plus_margin` | Two-replica fault injection | M2 | `TR-AGT-03`, `TR-PERF-05` | Planned |
-| PRE-018 | `PRE_018_import_creates_draft_not_active_version` | WebMvc, integration | M2 | `TR-DEF-03`, `TR-DEF-04` | Planned |
-| PRE-019 | `PRE_019_definition_requester_cannot_approve` | Service, WebMvc | M2 | `TR-SEC-04`, `TR-DEF-03` | Planned |
-| PRE-020 | `PRE_020_effective_date_switches_version_and_retires_previous` | Integration, TestClock | M2 | `TR-DEF-03`, `TR-DET-01` | Planned |
-| PRE-021 | `PRE_021_reject_returns_draft_and_superseded_approval_refused` | WebMvc | M2 | `TR-DEF-03` | Planned |
-| PRE-022 | `PRE_022_dev_only_relaxations_refused_outside_dev` | Starter boot tests | M2 | `TR-SEC-11` | Planned |
+| PRE-018 | `PRE_018_import_creates_draft_not_active_version` | Testcontainers service test, REST integration (`DefinitionLifecycleIT`) | M2 | `TR-DEF-03`, `TR-DEF-04` | Done |
+| PRE-019 | `PRE_019_no_maker_of_a_definition_version_can_approve`, `PRE_019_the_requester_rule_lets_the_importer_approve_records_it_and_still_refuses_the_requester`, `PRE_019_shared_approver_setting_is_published_in_meta_for_the_process_module`, `PRE_019_start_up_logs_one_warn_for_the_requester_relaxation_and_none_for_makers`, `PRE_019_the_table_refuses_an_approver_equal_to_the_requester` | Java API and REST, table `CHECK`, `/api/bpm/meta`, start-up log capture | M2 | `TR-SEC-04`, `TR-DEF-03` | Done |
+| PRE-020 | `PRE_020_effective_date_switches_version_and_retires_previous` | Testcontainers, TestClock, effective-date job on two replicas | M2 | `TR-DEF-03`, `TR-DET-01` | Done |
+| PRE-021 | `PRE_021_reject_returns_draft_and_superseded_approval_refused` | Java API and REST | M2 | `TR-DEF-03` | Done |
+| PRE-022 | `PRE_022_dev_only_relaxations_refused_outside_dev`, `PRE_022_dev_only_relaxations_refused_outside_dev_for_each_start_up`, `PRE_022_dev_auto_approval_activates_imports_and_retires_the_previous_version` | Starter guard tests (cases a to e), service test (case c) | M2 | `TR-SEC-11` | Done |
 | PRE-023 | `PRE_023_cockpit_drafts_setting_blocks_authoring_only` | WebMvc | M2 | `TR-DEF-04` | Planned |
 | PRE-024 | `PRE_024_content_hash_excludes_diagram_and_matches_git` | Unit, RFC 8785 vectors, CI hash script | M2 | `TR-DEF-04`, `TR-DEF-02` | Planned |
 | PRE-025 | `PRE_025_graph_diff_reports_nodes_and_edges` | Unit | M2 | `TR-DEF-03` | Planned |
@@ -52,7 +52,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-034 | `PRE_034_bpmn_export_round_trip_preserves_hash` | Round trip over examples, XSD validation | M3 (cut candidate) | `TR-DEF-01` | Planned |
 | PRE-035 | `PRE_035_definition_size_limits_enforced` | WebMvc | M2 | `TR-DEF-05` | Planned |
 | PRE-036 | `PRE_036_list_queries_pass_query_plan_check` | Query-plan check on a seeded database | M2 | `TR-PERF-07` | Planned |
-| PRE-037 | `PRE_037_definition_events_published_in_transaction` | Integration, rollback | M2 | `TR-OBS-04`, `TR-OBS-06` | Planned |
+| PRE-037 | `PRE_037_definition_events_published_in_transaction`, `PRE_037_a_publisher_that_throws_rolls_the_approval_back` | Testcontainers, rollback | M2 | `TR-OBS-04`, `TR-OBS-06` | Done |
 | PRE-038 | `PRE_038_tenant_header_accepted_only_within_allowed_tenants` | WebMvc, log capture | M2 | `TR-SEC-03`, `TR-TEN-01` | Planned |
 | PRE-039 | `PRE_039_import_keeps_source_document_and_fixed_hash` | Integration, WebMvc | M2 | `TR-STD-01`, `TR-STD-03` | Planned |
 | PRE-040 | `PRE_040_business_error_result_opens_incident` | Integration | M2 | `TR-OPS-03`, `TR-IDEM-04` | Planned |
@@ -60,10 +60,22 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-042 | `PRE_042_bpmn_style_step_ids_kept` | Unit, integration | M2 | `TR-STD-03`, `TR-DEF-01` | Planned |
 | PRE-043 | `PRE_043_v1_definition_round_trips_through_bpmn_model` | Unit over every example definition, RFC 8785 vectors | M2 | `TR-STD-28`, `TR-STD-03`, `TR-DEF-04` | Planned |
 | PRE-044 | `PRE_044_joins_and_compensation_keyed_by_scope_token` | Testcontainers integration, SQL capture of `pre_token` and `pre_compensation_stack` | M2 | `TR-STD-29`, `TR-ASY-03`, `TR-COMP-01` | Planned |
-| PRE-045 | `PRE_045_engine_rest_bodies_ignore_host_json_settings` | WebMvc in the Spring Boot 4.x and 3.5 legs, dependency-tree check | M2 | `TR-EMB-07`, `TR-API-06` | Planned |
+| PRE-045 | `PRE_045_engine_rest_bodies_ignore_host_json_settings` in `EngineJsonSettingsIT` | Testcontainers host over HTTP in the Spring Boot 4.x and 3.5 legs, dependency-tree check of `examples/rule-and-process` in the 3.5 legs | M2 | `TR-EMB-07`, `TR-API-06` | Done |
 | PRE-046 | `PRE_046_decision_step_uses_the_instance_tenant_and_the_engine_identity` | Service with both engines, no-principal harness, Testcontainers two tenants | M2 | `TR-TEN-01`, `TR-IDEM-04` | Planned |
 | PRE-047 | `PRE_047_decision_port_refuses_a_request_tenant_other_than_the_instance_tenant` | Service, security log capture | M2 | `TR-TEN-01` | Planned |
 | PRE-048 | `PRE_048_kernel_runs_only_the_approved_source` | Testcontainers with a tampered row, event and audit capture | M2 | `TR-DEF-04`, `TR-STD-01` | Planned |
+| PRE-049 | `PRE_049_*` in `ProcessRestApiIT` | Testcontainers host over HTTP, two tenants | M2 | `TR-TEN-01`, `TR-PERF-07` | Done (the query-plan check of `TR-PERF-07` is still planned) |
+| PRE-050 | `PRE_050_*` in `ProcessRestApiIT` | Testcontainers host over HTTP, concurrent requests, event capture after commit | M2 | `TR-IDEM-01`, `TR-IDEM-03`, `TR-OBS-04` | Done |
+| PRE-051 | `PRE_051_*` in `TaskLifecycleIT` | Testcontainers host over HTTP, concurrent claims, event capture after commit, two tenants | M2 | `TR-IDEM-01`, `TR-IDEM-03`, `TR-SEC-04`, `TR-TEN-01` | Done |
+| PRE-052 | `PRE_052_requester_withdraws_own_pending_definition_to_draft` | Service, WebMvc, Testcontainers history and event capture | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Planned |
+| PRE-053 | `PRE_053_retire_stops_new_starts_keeps_running_instances_and_confirms_last_version` | Service, WebMvc, Testcontainers history, event and job capture | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Planned |
+| PRE-054 | `PRE_054_*` in `ProcessRestApiIT` and `QueryLimitsTest` | Testcontainers host over HTTP, history and event capture, `/api/bpm/me` | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Done |
+| PRE-055 | `PRE_055_decision_after_a_timer_runs_in_the_instance_tenant_as_the_engine` | Testcontainers, the real Rule Engine on the same database, two tenants, TestClock, a fallback tenant on the poller thread | M2 | `TR-TEN-01`, `TR-SEC-03` | Done (`DecisionAfterTimerTest`) |
+| PRE-056 | `PRE_056_decision_after_a_timer_never_reads_another_tenants_rule_set`, `PRE_056_a_rule_engine_without_an_explicit_tenant_cannot_run_a_decision_after_a_timer`, `PRE_056_a_decision_row_written_before_the_step_fails_rolls_back_with_the_firing` | Testcontainers, the real Rule Engine and a thread-bound host Rule Engine, TestClock | M2 | `TR-TEN-01` | Done (`DecisionAfterTimerTest`) |
+
+Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
+
+The error matrix of the REST layer (`TR-SEC-08`) is `ProcessRestErrorMatrixTest` in `process-engine-rest`: MockMvc over the controller with in-memory services, every code of `ProcessProblemDetails.STATUS` answered as `application/problem+json` with `code`, `correlationId` and `type`, and an injected failure answered `500 INTERNAL` with no message, class name or SQL. Tenant isolation over HTTP (`TR-TEN-01`) is `ProcessRestApiIT.TR_TEN_01_*`: another tenant's read, list and cancel are not found and write nothing, and a tenant header for another tenant is `403 TENANT_NOT_ALLOWED`.
 
 ## Known gaps
 | Gap | Plan |

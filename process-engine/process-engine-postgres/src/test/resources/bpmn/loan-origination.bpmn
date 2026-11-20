@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Loan origination routing (PRE-004): an amount of 100,000,000 VND or more goes to a senior credit officer, any
+     other amount takes the default flow to a credit officer. Exactly one branch is taken for every amount. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-origination"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-origination" name="Loan origination" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:exclusiveGateway id="amount-check" name="Amount at or above 100 million VND?" default="amount-check__auto"/>
+    <bpmn:userTask id="senior-approval" name="Senior credit approval" horus:assignee="role:SENIOR_CREDIT_OFFICER" horus:resultVariable="seniorReview"/>
+    <bpmn:userTask id="auto-approve" name="Standard credit approval" horus:assignee="role:CREDIT_OFFICER" horus:resultVariable="review"/>
+    <bpmn:endEvent id="end" name="Decided"/>
+
+    <bpmn:sequenceFlow id="start__amount-check" sourceRef="start" targetRef="amount-check"/>
+    <bpmn:sequenceFlow id="amount-check__senior" name="100 million VND or more" sourceRef="amount-check" targetRef="senior-approval">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">amount &gt;= 100000000 VND</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="amount-check__auto" name="below" sourceRef="amount-check" targetRef="auto-approve"/>
+    <bpmn:sequenceFlow id="senior-approval__end" sourceRef="senior-approval" targetRef="end"/>
+    <bpmn:sequenceFlow id="auto-approve__end" sourceRef="auto-approve" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

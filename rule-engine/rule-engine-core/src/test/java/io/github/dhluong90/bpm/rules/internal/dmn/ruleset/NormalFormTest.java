@@ -3,12 +3,12 @@ package io.github.dhluong90.bpm.rules.internal.dmn.ruleset;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.horus.bpm.rules.api.SourceFormat;
-import com.horus.bpm.rules.api.ValidationFailedException;
-import com.horus.bpm.rules.internal.eval.CompiledRuleSet;
-import com.horus.bpm.rules.internal.json.EngineJson;
-import com.horus.bpm.rules.internal.read.ParsedRuleSet;
-import com.horus.bpm.rules.internal.read.RuleSetReader;
+import io.github.dhluong90.bpm.rules.api.SourceFormat;
+import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
+import io.github.dhluong90.bpm.rules.internal.read.ParsedRuleSet;
+import io.github.dhluong90.bpm.rules.internal.read.RuleSetReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,7 +32,16 @@ class NormalFormTest {
     }
 
     static Stream<Golden> golden() {
-        String text = new String(DmnRuleSetTest.resource("/rules/normal-form.v1.txt"), StandardCharsets.UTF_8);
+        return golden("/rules/normal-form.v1.txt");
+    }
+
+    /** The clock readings, added in 0.2.0 in a file of their own so the 0.1.0 golden file stays as frozen (#22). */
+    static Stream<Golden> goldenClock() {
+        return golden("/rules/normal-form.v1.clock.txt");
+    }
+
+    static Stream<Golden> golden(String resource) {
+        String text = new String(DmnRuleSetTest.resource(resource), StandardCharsets.UTF_8);
         List<Golden> rows = new ArrayList<>();
         String[] lines = text.split("\n");
         for (int i = 0; i < lines.length; i++) {
@@ -43,6 +52,12 @@ class NormalFormTest {
             rows.add(new Golden(i + 1, f[0].strip(), f[1].strip(), f[2].strip(), f[3].strip()));
         }
         return rows.stream();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("goldenClock")
+    void RLE_022_the_v1_printer_keeps_clock_readings_as_written(Golden row) {
+        RLE_045_the_v1_printer_is_frozen_by_the_golden_file(row);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -221,7 +236,21 @@ class NormalFormTest {
         assertThat(sha).isEqualTo(GOLDEN_V1_SHA256);
     }
 
-    static final String GOLDEN_V1_SHA256 = "dc44beae55cd278fe820d7c9e22def959b854655946bbfa4711387ca6f7eb40f";
+    /**
+     * The pin of the schema version 1 golden file. Changed in 0.2.0 (#20) only by appending the three rows of
+     * {@code matches}, a production the 0.1.0 parser refused, so no stored 0.1.0 rule set contains one: appending rows
+     * for a new production is allowed within schema version 1 (architect ruling on #252, ADR-0026 decision 3).
+     */
+    static final String GOLDEN_V1_SHA256 = "ba6c05f2dd2ab459709727745e4a0e917dc64c7746c115708ae2bf6d1b6f9deb";
+
+    @Test
+    void RLE_022_the_clock_golden_file_is_pinned() throws Exception {
+        byte[] golden = DmnRuleSetTest.resource("/rules/normal-form.v1.clock.txt");
+        String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(golden));
+        assertThat(sha).isEqualTo(GOLDEN_V1_CLOCK_SHA256);
+    }
+
+    static final String GOLDEN_V1_CLOCK_SHA256 = "022393f7ebf2c722a65e3da335a124591162b72373dd20df5e559b27378beed2";
 
     // ------------------------------------------------------------------ helpers
 
