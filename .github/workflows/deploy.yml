@@ -305,10 +305,24 @@ jobs:
           path: released
           persist-credentials: false
 
+      # A release whose Dockerfile pins no JRE for this architecture never shipped an image for it (v0.1.0
+      # is linux/amd64 only): the leg says so and passes, and its bill of materials is still scanned on x64.
+      - name: Does the tag build an image for this architecture
+        id: arch
+        run: |
+          if grep -Eq "^[[:space:]]*${ARCH}\) arch=" released/deploy/docker/Dockerfile; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "The Dockerfile of ${{ steps.tag.outputs.tag }} pins no JRE for $ARCH: no image to rescan on this leg."
+          fi
+
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.arch.outputs.supported == 'true'
 
       # No layer cache: the image is rebuilt the way an adopter builds it from the tag.
       - name: Build the released example image from the tag's Dockerfile
+        if: steps.arch.outputs.supported == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: released
@@ -341,6 +355,7 @@ jobs:
 
       - name: Image gates on the released image, no secrets in layers and no high or critical vulnerability
         id: image
+        if: steps.arch.outputs.supported == 'true'
         continue-on-error: true
         run: deploy/scan-image.sh "$RELEASED_IMAGE"
 
@@ -373,9 +388,11 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           TAG: ${{ steps.tag.outputs.tag }}
+          SUPPORTED: ${{ steps.arch.outputs.supported }}
           IMAGE_OUTCOME: ${{ steps.image.outcome }}
           SBOM_OUTCOME: ${{ steps.sbom.outcome }}
         run: |
+          if [[ "$SUPPORTED" == false ]]; then IMAGE_OUTCOME="not released for $ARCH"; fi
           {
             echo "### Released tag rescan: $TAG ($ARCH)"
             echo
@@ -384,7 +401,7 @@ jobs:
             echo "| Example image built from $TAG, image gates | $IMAGE_OUTCOME |"
             echo "| bom-release.json of the $TAG release | ${SBOM_OUTCOME:-skipped} |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          if [[ "$IMAGE_OUTCOME" != success || ( "$ARCH" == amd64 && "$SBOM_OUTCOME" != success ) ]]; then
+          if [[ ( "$SUPPORTED" != false && "$IMAGE_OUTCOME" != success ) || ( "$ARCH" == amd64 && "$SBOM_OUTCOME" != success ) ]]; then
             echo "::error title=Released tag $TAG::the weekly rescan of $TAG failed ($ARCH): image gates $IMAGE_OUTCOME, release SBOM ${SBOM_OUTCOME:-skipped}. See the reports above and the released-tag-scan-$ARCH artifact."
             exit 1
           fi
