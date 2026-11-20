@@ -31,15 +31,15 @@ Needs JDK 21 or later and Docker. To run the host as a container beside PostgreS
 docker run -d --name horus-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
   -e POSTGRES_PASSWORD=change-me -p 5432:5432 postgres:16-alpine
 
-mvn -B -pl examples/rule-engine-only -am package -DskipTests      # from the repository root
-HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+mvn -B -pl examples/rule-engine-only -am package -DskipTests -Dcockpit.bundle.skip=true   # from the repository root, Java only
+HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 ```
 
 Check it (health is public; everything else needs a caller):
 
 ```bash
 curl -s localhost:8080/actuator/health
-# {"status":"UP"}   component names are shown to authorised callers only (show-components: when-authorized)
+# {"groups":["liveness","readiness"],"status":"UP"}   component names are shown to authorised callers only (show-components: when-authorized)
 
 docker exec horus-pg psql -U horus -d horus -c '\dt'
 # flyway_schema_history, loan_application, rle_decision (partitioned), rle_decision_YYYY_MM (this month and next),
@@ -80,7 +80,7 @@ On the `dev` profile the host has two demo users, Lan (role `PRICING_AUTHOR`) an
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=choose-one HORUS_DB_PASSWORD=change-me \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 
 # sign in as lan with the form, keeping the session cookie in ./jar
 CSRF=$(curl -s -c jar -b jar localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
@@ -117,11 +117,15 @@ This walkthrough uses the demo users of the `dev` profile, in tenant `bank-a` (t
 
 One more role is mapped and given to no demo user: `PRIVACY_OPS`, with `rules:log:read` and `rules:masked:search`. It is the only role that may look decisions up by a masked value such as a national id (`POST /decisions:find-by-masked-input`), at most 30 times a minute per person (`masking.search.max-per-minute`).
 
+A recording of steps 1 to 6 on a fresh start is in [`media/rule-lifecycle-walkthrough.gif`](media/rule-lifecycle-walkthrough.gif) (the same session as an [asciinema cast](media/rule-lifecycle-walkthrough.cast); play it with `asciinema play`). It shows the import, the self-approval refused with `403 SELF_APPROVAL_FORBIDDEN`, Minh's approval, the 0 VND fee for a Gold customer and the decision row.
+
+![Terminal recording of the rule lifecycle walkthrough](media/rule-lifecycle-walkthrough.gif)
+
 Start PostgreSQL as above, then start the host on the `dev` profile:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 H=localhost:8080/api/bpm/rules/v1
 ```
 
@@ -146,8 +150,9 @@ H=localhost:8080/api/bpm/rules/v1
 3. Hoa tries to approve her own request and is refused:
 
    ```bash
-   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
-   # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
+   curl -s -w '\nHTTP %{http_code}\n' -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
+   # {"type":"...","title":"Forbidden","status":403,"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester or author of card-fee v1 cannot approve it",...}
+   # HTTP 403
    ```
 
 4. Minh approves; the version is published and takes effect now. `If-Match` names the lock version he reviewed (the `ETag` of the version he read); without it the answer is `428 PRECONDITION_REQUIRED`, and if the version changed since, `409 VERSION_CONFLICT`:
@@ -184,18 +189,18 @@ H=localhost:8080/api/bpm/rules/v1
    # {..., "sourceDocument":"# Monthly card fee, the rule set of the Rule Engine walking skeleton (RLE-001).\n...", ...}
    ```
 
-9. Lists for an editor: rule sets by name and versions newest first, a page at a time (`limit` 1 to 200, default 50; pass `nextCursor` back as `cursor`). Each version carries `allowedActions` for the caller:
+9. Lists for an editor. Set up first: import `loan-pricing.yaml` and `risk-flags.yaml` as drafts the same way, and add a second `card-fee` version and request it with `curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee.yaml` and then `:request-publish` on version 2. Rule sets by name and versions newest first, rule sets by name and versions newest first, a page at a time (`limit` 1 to 200, default 50; pass `nextCursor` back as `cursor`). Each version carries `allowedActions` for the caller:
 
    ```bash
    curl -s -u minh:demo-only "$H/rule-sets?limit=2"
    # {"data":[{"ruleSet":"card-fee","latestVersion":2,"latestStatus":"PENDING_APPROVAL","publishedVersion":1,
-   #           "lastChangedAt":"..."},{"ruleSet":"fx-margin",...}],"nextCursor":"cnVsZS1zZXRzOmZ4LW1hcmdpbg","hasNext":true}
+   #           "lastChangedAt":"..."},{"ruleSet":"loan-pricing","latestVersion":1,"latestStatus":"DRAFT",...}],"nextCursor":"cnVsZS1zZXRzOmxvYW4tcHJpY2luZw.kO1EG8-56ZILiBWSL2lnrw","hasNext":true}
    curl -s -u minh:demo-only "$H/rule-sets/card-fee/versions"
    # {"data":[{"version":2,"status":"PENDING_APPROVAL","createdBy":"hoa","requestedBy":"hoa",
    #           "allowedActions":["approve","reject"],...},{"version":1,"status":"PUBLISHED","approvedBy":"minh",...}],...}
    ```
 
-10. Minh sends a pending version back with a reason; it is a draft again and the reason is in its history:
+10. With version 2 pending from step 9, Minh sends it back with a reason; it is a draft again and the reason is in its history:
 
     ```bash
     curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:reject -H 'Content-Type: application/json' \
@@ -218,12 +223,35 @@ H=localhost:8080/api/bpm/rules/v1
     #   "basePosition":2,"moved":false,"fields":[{"path":"/then/fee","from":{...},"to":{...},"nonAscii":false}]}],...}
     ```
 
-11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them:
+11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them. Save this as `bad.yaml` (rule `R2` compares the money input `balance` with a number, `R3` has no currency):
+
+    ```yaml
+    schemaVersion: 1
+    ruleSet: card-fee-bad
+    hitPolicy: first
+    inputs:
+      - { name: tier,    type: string }
+      - { name: balance, type: money }
+    outputs:
+      - { name: fee, type: money }
+    rules:
+      - id: R1
+        when: { tier: "== 'GOLD'" }
+        then: { fee: "0 VND" }
+      - id: R2
+        when: { balance: ">= 3" }
+        then: { fee: "10000 VND" }
+      - id: R3
+        when: {}
+        then: { fee: "30000" }
+    ```
 
     ```bash
-    # 422 {"code":"VALIDATION_FAILED","violations":[
+    curl -s -w '\nHTTP %{http_code}\n' -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' --data-binary @bad.yaml
+    # {"code":"VALIDATION_FAILED","violations":[
     #   {"ruleId":"R2","column":"balance","message":"compares a money with a number"},
     #   {"ruleId":"R3","column":"fee","message":"output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code"}]}
+    # HTTP 422
     ```
 
 ### Hit policies: exactly one row, or every matching row
@@ -467,9 +495,13 @@ The same steps run as `RetireVersionIT` against a Testcontainers database on eve
 
 A `.dmn` file goes through the same import endpoint as YAML, with `Content-Type: application/xml` (or `text/xml`, `application/dmn+xml`). It becomes a `DRAFT` that a second person approves before it evaluates. The sample is a hand-written table in the style a common DMN modeller writes: [`card-fee-modeller.dmn`](src/test/resources/rules/dmn/card-fee-modeller.dmn).
 
-Start the host on the `dev` profile as in [Host metadata with two demo users](#host-metadata-with-two-demo-users), then sign in `lan` (author), `minh` (approver) and `tuan` (teller), each with their own cookie jar, and send the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on every `POST`:
+Start the host on the `dev` profile as in [Host metadata with two demo users](#host-metadata-with-two-demo-users), on a fresh database (the YAML demo above already created `card-fee`), with `HORUS_DEMO_PASSWORD=demo-only`. Then sign in `lan` (author), `minh` (approver) and `tuan` (teller), each with their own cookie jar, and send the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on every `POST`:
 
 ```bash
+for u in lan minh tuan; do
+  CSRF=$(curl -s -c $u -b $u localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
+  curl -s -c $u -b $u -o /dev/null -d "username=$u&password=demo-only&_csrf=$CSRF" localhost:8080/login
+done
 DMN=examples/rule-engine-only/src/test/resources/rules/dmn/card-fee-modeller.dmn
 xsrf() { awk '$6=="XSRF-TOKEN"{print $7}' "$1"; }
 
@@ -518,13 +550,13 @@ The two passwords can also come as files: with `SPRING_CONFIG_IMPORT=configtree:
 
 ## Open the cockpit
 
-The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`), on the `dev` profile with the demo users. Build the cockpit bundle before packaging:
+The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`), on the `dev` profile with the demo users. Prerequisite: this section needs the cockpit bundle (Node and `npm`). The Java-only build used above does not include it. Build the bundle before packaging:
 
 ```bash
 npm --prefix cockpit/web ci && npm --prefix cockpit/web run build      # from the repository root
 mvn -B -pl examples/rule-engine-only -am package -DskipTests
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 ```
 
 Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
@@ -556,7 +588,7 @@ Draft editing in the cockpit is off by default in 0.1.0 (PD-094); this example t
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate' \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:evaluate'
 ```

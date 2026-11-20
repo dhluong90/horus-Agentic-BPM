@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.process.api.TenantNotAllowedException;
 import io.github.dhluong90.bpm.process.api.SelfApprovalForbiddenException;
 import io.github.dhluong90.bpm.process.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
+import io.github.dhluong90.bpm.process.api.DefinitionExport;
 import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
 import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
 import io.github.dhluong90.bpm.process.api.DefinitionRef;
@@ -19,7 +20,6 @@ import io.github.dhluong90.bpm.process.api.InstanceQuery;
 import io.github.dhluong90.bpm.process.api.InstanceSummary;
 import io.github.dhluong90.bpm.process.api.Page;
 import io.github.dhluong90.bpm.process.api.PageRequest;
-import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.QueryInvalidException;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.IdempotencyKeyReuseException;
@@ -98,7 +98,7 @@ import java.util.function.Function;
  * store state and history. {@code SYNC_LOCAL} invocations run in the transaction; {@code ASYNC} is not in this
  * release. Thread-safe.
  */
-public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService, ProcessQueryService {
+public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService {
 
     /**
      * The result of a start: the instance, and whether this request created it ({@code false} when an instance with
@@ -138,6 +138,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final TransactionRunner transactions;
     private final ProcessStore store;
     private final Map<SourceFormat, Function<byte[], Process>> readers;
+    private final Map<SourceFormat, Function<Process, byte[]>> writers;
     private final LocalServiceInvoker invoker;
     private final ProcessEventPublisher publisher;
     private final EngineSettings settings;
@@ -192,8 +193,31 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers, LocalServiceInvoker invoker,
             ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
             ExpressionEvaluator expressions) {
-        this(tenants, callers, clock, transactions, store, readers, invoker, publisher, settings, behaviors, expressions,
-                JobStore.NONE, JobSettings.defaults("unused"));
+        this(tenants, callers, clock, transactions, store, readers, Map.of(), invoker, publisher, settings, behaviors,
+                expressions, JobStore.NONE, JobSettings.defaults("unused"));
+    }
+
+    /**
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store storage
+     * @param readers definition readers by source format
+     * @param writers definition writers by export format (PRE-034)
+     * @param invoker local handlers and decisions
+     * @param publisher event publisher
+     * @param settings validated settings
+     * @param behaviors registered behaviours
+     * @param expressions expression evaluator
+     */
+    public ProcessServices(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers,
+            Map<SourceFormat, Function<Process, byte[]>> writers, LocalServiceInvoker invoker,
+            ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
+            ExpressionEvaluator expressions) {
+        this(tenants, callers, clock, transactions, store, readers, writers, invoker, publisher, settings, behaviors,
+                expressions, JobStore.NONE, JobSettings.defaults("unused"));
     }
 
     /**
@@ -215,6 +239,32 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers, LocalServiceInvoker invoker,
             ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
             ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings) {
+        this(tenants, callers, clock, transactions, store, readers, Map.of(), invoker, publisher, settings, behaviors,
+                expressions, jobs, jobSettings);
+    }
+
+    /**
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store storage
+     * @param readers definition readers by source format
+     * @param writers definition writers by export format (PRE-034)
+     * @param invoker local handlers and decisions
+     * @param publisher event publisher
+     * @param settings validated settings
+     * @param behaviors registered behaviours
+     * @param expressions expression evaluator
+     * @param jobs job storage ({@code pre_timer})
+     * @param jobSettings lease and attempts of the jobs this engine schedules
+     */
+    public ProcessServices(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers,
+            Map<SourceFormat, Function<Process, byte[]>> writers, LocalServiceInvoker invoker,
+            ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
+            ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings) {
+        this.writers = Map.copyOf(writers);
         this.jobs = Objects.requireNonNull(jobs);
         this.jobSettings = Objects.requireNonNull(jobSettings);
         this.tenants = Objects.requireNonNull(tenants);
@@ -688,9 +738,30 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 .orElseThrow(() -> new DefinitionNotFoundException("No definition " + key + " v" + version)));
     }
 
-    // ---- ProcessQueryService ------------------------------------------------------------------------------
-
     @Override
+    public DefinitionExport exportDefinition(String key, int version, SourceFormat format) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        Function<Process, byte[]> writer = format == null ? null : writers.get(format);
+        if (writer == null) {
+            throw new InputInvalidException("Export format " + format + " is not supported; supported: "
+                    + writers.keySet().stream().map(Enum::name).sorted().toList());
+        }
+        // Read-only: no transaction is opened and nothing is written (TR-TEN-01: the query filters by tenant, so
+        // another tenant's version is not found).
+        StoredDefinition definition = key == null ? null : store.definitionVersion(tenant, key, version).orElse(null);
+        if (definition == null) {
+            throw new DefinitionNotFoundException("No definition " + key + " version " + version + " in this tenant");
+        }
+        Process process = storedProcess(definition);
+        String document = Utf8.strict(writer.apply(process));
+        return new DefinitionExport(definition.key(), definition.version(), definition.definitionHash(), format,
+                document);
+    }
+
+    // ---- Lists, served as ProcessQueryService through ProcessQueries ---------------------------------------
+
+    /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#definitions(PageRequest)}. */
     public Page<DefinitionSummary> definitions(PageRequest page) {
         String tenant = tenant();
         callerWith(PERMISSION_READ);
@@ -709,7 +780,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return new Page<>(items, cursors().sign(tenant, "", "definitions", items.get(limit - 1).key()));
     }
 
-    @Override
+    /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#instances(InstanceQuery)}. */
     public Page<InstanceSummary> instances(InstanceQuery query) {
         String tenant = tenant();
         callerWith(PERMISSION_READ);
@@ -1332,22 +1403,29 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     private Compiled compiled(StoredDefinition definition) {
         return kernels.computeIfAbsent(definition.tenantId() + "/" + definition.id(), k -> {
-            Function<byte[], Process> reader = readers.get(SourceFormat.valueOf(definition.sourceFormat()));
-            // Interim form of ADR-0026 decision 4: the version runs from its stored source, so the source must be the
-            // one that was validated and hashed at import. Any difference refuses the version.
-            byte[] source = definition.sourceDocument().getBytes(StandardCharsets.UTF_8);
-            if (!Hashes.sha256(source).equals(definition.sourceHash())) {
-                throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
-                        + ": the stored source does not match its source hash");
-            }
-            Process process = reader.apply(source);
-            if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
-                throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
-                        + ": the stored source no longer gives the recorded definition hash");
-            }
+            Process process = storedProcess(definition);
             CompiledProcess compiledProcess = compiler.compile(definition.id(), process);
             return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions));
         });
+    }
+
+    /**
+     * Interim form of ADR-0026 decision 4: a version runs and exports from its stored source, so the source must be
+     * the one that was validated and hashed at import. Any difference refuses the version.
+     */
+    private Process storedProcess(StoredDefinition definition) {
+        Function<byte[], Process> reader = readers.get(SourceFormat.valueOf(definition.sourceFormat()));
+        byte[] source = definition.sourceDocument().getBytes(StandardCharsets.UTF_8);
+        if (!Hashes.sha256(source).equals(definition.sourceHash())) {
+            throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
+                    + ": the stored source does not match its source hash");
+        }
+        Process process = reader.apply(source);
+        if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
+            throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
+                    + ": the stored source no longer gives the recorded definition hash");
+        }
+        return process;
     }
 
     private ProcessInstance read(String tenant, InstanceRow row) {

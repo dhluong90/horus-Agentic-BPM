@@ -46,5 +46,11 @@
       <artifactId>spring-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Test scope only: checks live request and response bodies against api/openapi.yaml (Apache 2.0). -->
+    <dependency>
+      <groupId>com.networknt</groupId>
+      <artifactId>json-schema-validator</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 </project>
