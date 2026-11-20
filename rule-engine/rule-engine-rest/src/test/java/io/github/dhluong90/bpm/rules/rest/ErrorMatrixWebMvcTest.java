@@ -3,8 +3,10 @@ package io.github.dhluong90.bpm.rules.rest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
+import io.github.dhluong90.bpm.rules.api.DraftAuthoringDisabledException;
 import io.github.dhluong90.bpm.rules.api.IdempotencyInFlightException;
 import io.github.dhluong90.bpm.rules.api.IdempotencyKeyReuseException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
@@ -131,6 +133,10 @@ class ErrorMatrixWebMvcTest {
                             s.permissions = APPROVER;
                             s.thrown = new SelfApprovalForbiddenException("card-fee", 2);
                         }),
+                new Case("DRAFT_AUTHORING_DISABLED", 403,
+                        put("/api/bpm/rules/v1/rule-sets/card-fee/versions/2").contentType("application/yaml")
+                                .header("Idempotency-Key", "k-102").header("If-Match", "\"1\"").content(yaml),
+                        s -> s.thrown = new DraftAuthoringDisabledException("card-fee", 2)),
                 new Case("RULE_SET_NOT_FOUND", 404, get("/api/bpm/rules/v1/rule-sets/card-fee"), s -> { }),
                 new Case("VERSION_NOT_FOUND", 404, get("/api/bpm/rules/v1/rule-sets/card-fee/versions/9"), s -> { }),
                 new Case("NO_EFFECTIVE_VERSION", 404,
@@ -139,7 +145,8 @@ class ErrorMatrixWebMvcTest {
                 new Case("VERSION_CONFLICT", 409,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:request-publish").header("If-Match", "\"1\""),
                         s -> s.thrown = new VersionConflictException("Expected lock version 1, found 2")),
-                new Case("INVALID_STATE", 409, post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve"),
+                new Case("INVALID_STATE", 409,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve").header("If-Match", "\"1\""),
                         s -> {
                             s.permissions = APPROVER;
                             s.thrown = new InvalidStateException("card-fee", 2, VersionStatus.DRAFT, "approve");
@@ -153,7 +160,7 @@ class ErrorMatrixWebMvcTest {
                         s -> s.thrown = new RuleSetExistsException("card-fee")),
                 new Case("PAYLOAD_TOO_LARGE", 413,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve").contentType("application/json")
-                                .content(new byte[16_385]),
+                                .header("If-Match", "\"1\"").content(new byte[16_385]),
                         s -> s.permissions = APPROVER),
                 new Case("PRECONDITION_REQUIRED", 428,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:request-publish"),

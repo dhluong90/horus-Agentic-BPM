@@ -93,7 +93,9 @@ class OpenApiContractTest {
             String name = "POST " + path.getKey();
             boolean key = false;
             for (JsonNode parameter : operation.getValue().path("parameters")) {
-                key |= "#/components/parameters/IdempotencyKey".equals(parameter.path("$ref").asString());
+                String ref = parameter.path("$ref").asString();
+                key |= "#/components/parameters/IdempotencyKey".equals(ref)
+                        || "#/components/parameters/IdempotencyKeyRequired".equals(ref);
             }
             if (!key) {
                 findings.add(name + " does not accept Idempotency-Key");
