@@ -847,6 +847,8 @@ CREATE TABLE pre_holiday (
 
 Migration rules (`TR-OPS-01`, `TR-OPS-02`): forward-only scripts in `pre_schema_history`; every DDL statement runs with `SET lock_timeout = '5s'`; indexes on populated tables are created `CONCURRENTLY` in their own script; columns are added nullable or with a constant default, back-filled in batches of 10,000, then constrained in the next minor release. Partition creation creates the monthly table standalone with a matching `CHECK` constraint and then runs `ATTACH PARTITION`, which takes only `SHARE UPDATE EXCLUSIVE` on the parent.
 
+Migrations must run on a direct database connection, not through PgBouncer or another pooler in transaction mode: the Flyway migration lock is a session advisory lock (needed by the `CONCURRENTLY` scripts such as V9), and a transaction-mode pooler loses session locks between transactions. During a long concurrent index build, a replica waiting for that lock can run out of Flyway's lock retries (50 by default, one second apart), fail to start and be restarted by its orchestrator; it migrates normally once the build ends. On hosts with a large `pre_timer`, expect these restarts during the upgrade, or run the migration from a single replica or job before rolling out the others.
+
 ## 8. Read models, query limits and capacity math (ADR-0015)
 
 Targets, not measurements, on the reference shape of the architecture overview section 8: one replica with a 20-connection pool, PostgreSQL on 4 vCPU, 1 ms round trip.
