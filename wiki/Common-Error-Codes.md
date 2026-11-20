@@ -96,7 +96,10 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 ## Versions and approvals
 
 ### SELF_APPROVAL_FORBIDDEN
-`403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve.
+`403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve. A requester who rejects their own rule set request gets this code too, with a detail pointing to `:withdraw`: take the request back with `POST .../versions/{v}:withdraw` instead (PD-089).
+
+### PRECONDITION_REQUIRED
+`428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft, `:approve`, `:reject` or `:withdraw`. An approval must name the lock version of the content the approver reviewed. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
 
 ### PRECONDITION_REQUIRED
 `428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft, `:approve` or `:reject`. An approval must name the lock version of the content the approver reviewed. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
@@ -113,7 +116,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is the rule (row), `column` the input or output name, and either is `null` when the problem is outside them; `message` carries no location prefix. Every cell problem of the document is listed at once, in document order, up to 100 entries (`violationsTruncated: true` when there were more), so an editor can mark each cell; a structural problem (an unknown property, a missing key) stops reading and is the only entry. Example: `[{ "ruleId": "R3", "column": "fee", "message": "output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code" }]`.
 
 ### PAYLOAD_TOO_LARGE
-`413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve` and `:reject`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
+`413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve`, `:reject` and `:withdraw`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
 
 ### LAST_VERSION_IN_EFFECT
 `409`. The retirement would leave no version of the rule set or definition key in effect. After it, evaluations or new starts would fail until a new version is approved (PD-101).

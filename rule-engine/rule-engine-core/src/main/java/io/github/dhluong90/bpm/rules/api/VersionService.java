@@ -13,8 +13,8 @@ import java.util.Optional;
  * {@code TenantResolver} and {@code CallerResolver}, never from an argument.
  *
  * <p>Permissions (ADR-0010) are checked here, not only over REST: import and {@code requestPublish} need
- * {@code rules:author}, {@code approve} and {@code reject} need {@code rules:approve}, {@code replaceDraft} needs {@code rules:author}
- * and the draft's authorship, every read and
+ * {@code rules:author}, {@code approve} and {@code reject} need {@code rules:approve}, {@code withdraw} needs {@code rules:author} and
+ * the caller must be the requester, {@code replaceDraft} needs {@code rules:author} and the draft's authorship, every read and
  * {@code export} need {@code rules:read}. A
  * caller without them gets {@link PermissionDeniedException}; an unresolved caller or tenant gets
  * {@link UnauthenticatedException}. The approver must be neither the requester nor the author of the version.
@@ -114,6 +114,22 @@ public interface VersionService {
      * @throws SelfApprovalForbiddenException when the caller requested the publication
      */
     RuleSetVersion reject(String ruleSet, int version, WriteOptions options);
+
+    /**
+     * Takes the caller's own publication request back (PD-089, RLE-046): a pending version returns to {@code DRAFT},
+     * nothing is published and the version in effect does not change. Writes one {@code WITHDRAWN} history row and
+     * one {@code rules.version.withdrawn.v1} event. Needs {@code rules:author}, and the caller must be the requester.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key, optimistic lock and the optional reason in {@link WriteOptions#comment()}
+     * @return the version, now a draft
+     * @throws InputInvalidException when the reason is longer than {@code lifecycle.reason-max-length}
+     * @throws InvalidStateException when the version is not pending approval
+     * @throws PermissionDeniedException when the caller lacks {@code rules:author} or is not the requester
+     * @throws VersionConflictException when the lock version is stale
+     */
+    RuleSetVersion withdraw(String ruleSet, int version, WriteOptions options);
 
     /**
      * Lists the rule sets of the caller's tenant by name, a page at a time.

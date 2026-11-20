@@ -279,7 +279,7 @@ public final class JdbcRuleStore implements RuleStore {
                   occurred_at, canonical_hash, previous_canonical_hash
                 FROM rle_version_history
                 WHERE tenant_id = :tenant AND version_id = :versionId
-                  AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED','DRAFT_UPDATED')
+                  AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED','WITHDRAWN','DRAFT_UPDATED')
                 ORDER BY occurred_at, id
                 """)
                 .param("tenant", tenantId).param("versionId", versionId)
