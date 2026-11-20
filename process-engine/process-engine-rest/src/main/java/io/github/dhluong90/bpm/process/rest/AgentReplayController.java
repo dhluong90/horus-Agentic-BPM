@@ -118,6 +118,7 @@ public class AgentReplayController {
         summary.put("overriddenByReviewer", s.overriddenByReviewer());
         summary.put("notReplayed", s.notReplayed());
         summary.put("withMaskedFields", s.withMaskedFields());
+        summary.put("maskedInputRequired", s.maskedInputRequired());
         putNullable(node, "failureCode", r.failureCode());
         node.put("createdBy", r.createdBy());
         putTime(node, "createdAt", r.createdAt());

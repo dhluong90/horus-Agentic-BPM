@@ -393,7 +393,8 @@ public final class DefaultRuleEngine implements RuleEngine {
             Map<String, String> outputs = new LinkedHashMap<>();
             rules.outputs().forEach(clause -> outputs.put(clause.name(), clause.type().toString()));
             return new io.github.dhluong90.bpm.rules.embedded.RuleSetSignature(version.ruleSet(), version.version(),
-                    rules.hitPolicy().name(), inputs, outputs, context.settings().rejectUndeclaredInputs());
+                    rules.hitPolicy().name(), inputs, outputs, context.settings().rejectUndeclaredInputs(),
+                    rules.inputsRead());
         });
     }
 
@@ -562,7 +563,8 @@ public final class DefaultRuleEngine implements RuleEngine {
             Map<String, String> outputs = new java.util.LinkedHashMap<>();
             rules.outputs().forEach(clause -> outputs.put(clause.name(), clause.type().toString()));
             return new io.github.dhluong90.bpm.rules.embedded.RuleSetSignature(version.ruleSet(), version.version(),
-                    rules.hitPolicy().name(), inputs, outputs, context.settings().rejectUndeclaredInputs());
+                    rules.hitPolicy().name(), inputs, outputs, context.settings().rejectUndeclaredInputs(),
+                    rules.inputsRead());
         });
     }
 

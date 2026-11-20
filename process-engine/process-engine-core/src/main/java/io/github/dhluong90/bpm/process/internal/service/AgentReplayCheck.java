@@ -21,7 +21,10 @@ import java.util.Optional;
  *
  * <p>The recorded answer is the masked copy history keeps. A top-level field whose recorded value is the mask
  * ({@code ***}) was never kept in plain text: it is left out of the check, out of the schema's {@code required} list,
- * and counted on the line. A rule that reads such a field sees no value.
+ * and counted on the line. A rule that reads such a field sees no value, and neither does a schema keyword that
+ * tests it. So a line whose candidate guardrail reads a masked field, or whose candidate schema newly constrains its
+ * value, is {@code NOT_REPLAYED} with {@code MASKED_INPUT_REQUIRED} (PRE-092): only a check that never touches a
+ * masked field may report {@code UNCHANGED} or a change.
  */
 final class AgentReplayCheck {
 
@@ -33,6 +36,14 @@ final class AgentReplayCheck {
     static final String NEWLY_ALLOWED = "NEWLY_ALLOWED";
     static final String NEWLY_REFUSED = "NEWLY_REFUSED";
     static final String NEWLY_ROUTED_TO_REVIEW = "NEWLY_ROUTED_TO_REVIEW";
+    /** Why a line is {@code NOT_REPLAYED}: the candidate check needs the value of a field history keeps only masked. */
+    static final String MASKED_INPUT_REQUIRED = "MASKED_INPUT_REQUIRED";
+    /**
+     * Schema keywords that say nothing about a value: a masked field with only these is checked by presence, which the
+     * recorded answer shows. Any other keyword (an enum, a pattern, a bound, a format) tests the value.
+     */
+    private static final java.util.Set<String> ANNOTATIONS = java.util.Set.of("type", "mask", "description", "title",
+            "examples", "default", "deprecated", "readOnly", "writeOnly", "$comment");
     /**
      * Who the replay's simulated decisions are attributed to; the simulating port ignores it and nothing is logged.
      * Not engine work: a replay is requested by a person and never reaches the engine-scoped evaluation.
@@ -46,6 +57,7 @@ final class AgentReplayCheck {
     private final String candidateRuleSet;
     private final int candidateVersion;
     private final Map<String, Object> candidateSchema;
+    private DecisionSignature candidateSignature;
 
     /**
      * @param schemas the output schema validator of the result transaction
@@ -82,7 +94,14 @@ final class AgentReplayCheck {
         Map<String, Object> schema = candidateSchema != null ? copy(candidateSchema)
                 : guard.get("outputSchema") instanceof Map<?, ?> s ? copy(s) : null;
         Map<String, Object> output = details.get("output") instanceof Map<?, ?> o ? copy(o) : new LinkedHashMap<>();
-        int masked = dropMasked(output, schema);
+        List<String> maskedNames = maskedFields(output);
+        List<String> needed = needed(tenant, maskedNames, guard.get("outputSchema") instanceof Map<?, ?> r ? copy(r) : null);
+        if (!needed.isEmpty()) {
+            return new AgentReplayCase(answer.attemptId(), answer.instanceId(), answer.occurredAt(), recorded,
+                    NOT_REPLAYED, NOT_REPLAYED, recordedRules, List.of(), MASKED_INPUT_REQUIRED, overridden,
+                    maskedNames.size());
+        }
+        int masked = dropMasked(output, schema, maskedNames);
         if (schema != null) {
             guard.put("outputSchema", schema);
         }
@@ -146,14 +165,69 @@ final class AgentReplayCheck {
         };
     }
 
-    /** Leaves out top-level fields recorded as the mask, and their {@code required} entries; returns how many. */
-    private static int dropMasked(Map<String, Object> output, Map<String, Object> schema) {
+    /** The top-level fields recorded as the mask. */
+    private static List<String> maskedFields(Map<String, Object> output) {
         List<String> masked = new ArrayList<>();
         output.forEach((field, value) -> {
             if (ResultGuard.MASKED.equals(value)) {
                 masked.add(field);
             }
         });
+        return masked;
+    }
+
+    /**
+     * The masked fields the candidate check would read: read by a rule of the candidate rule set version, or
+     * constrained in value by a candidate schema that differs from the recorded one. A rule set that cannot be
+     * described reads none here; its evaluation reports its own error.
+     */
+    private List<String> needed(String tenant, List<String> masked, Map<String, Object> recorded) {
+        if (masked.isEmpty()) {
+            return List.of();
+        }
+        if (candidateSignature == null) {
+            candidateSignature = decisions.signature(tenant, candidateRuleSet, candidateVersion);
+        }
+        List<String> out = new ArrayList<>();
+        for (String field : masked) {
+            boolean byRule = candidateSignature instanceof DecisionSignature.Found found
+                    && found.readInputs().contains(field);
+            if (byRule || constrains(recorded, field)) {
+                out.add(field);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Whether the candidate schema tests a masked field's value in a way the recorded schema did not. A constraint both
+     * schemas share (a {@code maxLength} on a masked summary) was met by the recorded answer, which is how its outcome
+     * was reached, so it is no new input; one that is new or changed has never been checked against the value.
+     */
+    private boolean constrains(Map<String, Object> recorded, String field) {
+        if (candidateSchema == null) {
+            return false;
+        }
+        Map<String, Object> now = valueKeywords(candidateSchema, field);
+        return !now.isEmpty() && !now.equals(valueKeywords(recorded, field));
+    }
+
+    /** The keywords of a property that test its value: everything but the annotations. */
+    private static Map<String, Object> valueKeywords(Map<String, Object> schema, String field) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (schema != null && schema.get("properties") instanceof Map<?, ?> properties
+                && properties.get(field) instanceof Map<?, ?> definition) {
+            definition.forEach((k, v) -> {
+                if (!ANNOTATIONS.contains(String.valueOf(k))) {
+                    out.put(String.valueOf(k), v);
+                }
+            });
+        }
+        return out;
+    }
+
+    /** Leaves out the masked fields and their {@code required} entries; returns how many. */
+    private static int dropMasked(Map<String, Object> output, Map<String, Object> schema, List<String> masked) {
         masked.forEach(output::remove);
         if (schema != null && !masked.isEmpty() && schema.get("required") instanceof Collection<?> required) {
             List<Object> kept = new ArrayList<>(required);

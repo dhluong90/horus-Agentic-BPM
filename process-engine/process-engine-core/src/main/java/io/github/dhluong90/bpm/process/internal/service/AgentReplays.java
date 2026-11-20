@@ -354,6 +354,7 @@ public final class AgentReplays implements AgentReplayService {
         int overridden = s.overriddenByReviewer();
         int notReplayed = s.notReplayed();
         int masked = s.withMaskedFields();
+        int maskedInput = s.maskedInputRequired();
         for (AgentReplayCase line : lines) {
             cases++;
             switch (line.change()) {
@@ -366,13 +367,20 @@ public final class AgentReplays implements AgentReplayService {
                 }
                 case AgentReplayCheck.NEWLY_REFUSED -> refused++;
                 case AgentReplayCheck.NEWLY_ROUTED_TO_REVIEW -> review++;
-                default -> notReplayed++;
+                default -> {
+                    if (AgentReplayCheck.MASKED_INPUT_REQUIRED.equals(line.code())) {
+                        maskedInput++;
+                    } else {
+                        notReplayed++;
+                    }
+                }
             }
             if (line.maskedFields() > 0) {
                 masked++;
             }
         }
-        return new AgentReplayRun.Summary(cases, unchanged, allowed, refused, review, overridden, notReplayed, masked);
+        return new AgentReplayRun.Summary(cases, unchanged, allowed, refused, review, overridden, notReplayed, masked,
+                maskedInput);
     }
 
     private StoredRun find(String tenant, String runId) {

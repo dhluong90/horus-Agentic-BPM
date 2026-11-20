@@ -117,7 +117,7 @@ final class RuleEngineDecisionPort implements DecisionPort {
         try {
             RuleSetSignature found = engineWork.get().signature(tenantId, decisionRef, at);
             return new DecisionSignature.Found(found.ruleSet(), found.version(), found.hitPolicy(), found.inputs(),
-                    found.outputs(), found.rejectsUndeclaredInputs());
+                    found.outputs(), found.rejectsUndeclaredInputs(), found.readInputs());
         } catch (HorusBpmException e) {
             return new DecisionSignature.Unavailable(e.code(), e.getMessage());
         }
@@ -137,7 +137,7 @@ final class RuleEngineDecisionPort implements DecisionPort {
         try {
             RuleSetSignature found = engineWork.get().signature(tenantId, decisionRef, version);
             return new DecisionSignature.Found(found.ruleSet(), found.version(), found.hitPolicy(), found.inputs(),
-                    found.outputs(), found.rejectsUndeclaredInputs());
+                    found.outputs(), found.rejectsUndeclaredInputs(), found.readInputs());
         } catch (HorusBpmException e) {
             return new DecisionSignature.Unavailable(e.code(), e.getMessage());
         }
