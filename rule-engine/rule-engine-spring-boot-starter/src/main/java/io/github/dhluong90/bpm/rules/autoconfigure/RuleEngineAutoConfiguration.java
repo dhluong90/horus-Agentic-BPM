@@ -2,6 +2,8 @@ package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.host.autoconfigure.ApproverMustDifferFrom;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
+import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
+import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
@@ -123,6 +125,17 @@ public class RuleEngineAutoConfiguration {
         return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts(),
                 properties.toSettings(environment).retireApproval(),
                 properties.toSettings(environment).retireLastVersion());
+    }
+
+    /**
+     * The masking key status of the caller's tenant in the rules settings of {@code GET /api/bpm/meta}: {@code set}
+     * or {@code unset}, the key id and the check value, never the key. Reads the active {@code MaskingPolicy}, so a
+     * host bean is described as well as the default.
+     */
+    @Bean
+    @ConditionalOnMissingBean(name = "ruleEngineMaskingStatus")
+    ModuleTenantSettings ruleEngineMaskingStatus(ObjectProvider<MaskingPolicy> masking) {
+        return new RuleEngineMaskingStatus(masking::getIfAvailable);
     }
 
     /**
