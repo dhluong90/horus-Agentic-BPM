@@ -88,6 +88,9 @@
         <artifactId>maven-jar-plugin</artifactId>
         <configuration>
           <archive>
+            <manifest>
+              <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+            </manifest>
             <manifestSections>
               <manifestSection>
                 <name>io/github/dhluong90/bpm/process/internal/service/</name>

@@ -145,6 +145,9 @@
         <artifactId>maven-jar-plugin</artifactId>
         <configuration>
           <archive>
+            <manifest>
+              <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+            </manifest>
             <manifestSections>
               <manifestSection>
                 <name>io/github/dhluong90/bpm/rules/internal/service/</name>
