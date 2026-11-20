@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.process.internal.store;
 
 import io.github.dhluong90.bpm.process.internal.exec.HistoryEntry;
 import io.github.dhluong90.bpm.process.internal.exec.Token;
+import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -12,11 +13,69 @@ import java.util.Optional;
  */
 public interface ProcessStore {
 
-    /** Definition version as stored. */
+    /** Definition version as stored, with its lifecycle fields (DESIGN sections 3.2 and 7). */
     record StoredDefinition(String tenantId, String id, String key, int version, String status, String name,
             String definitionJson, String definitionHash, String sourceFormat, String sourceDocument, String sourceHash,
             int nodeCount, String source, Instant effectiveFrom, String createdBy, Instant createdAt, String approvedBy,
-            Instant approvedAt) {
+            Instant approvedAt, long lockVersion, String requestedBy, Instant requestedAt, String decisionComment,
+            String retiredBy, Instant retiredAt, Integer supersededBy) {
+
+        /** A new version as imported, lock version 0, no lifecycle fields beyond the approval of a dev import. */
+        public StoredDefinition(String tenantId, String id, String key, int version, String status, String name,
+                String definitionJson, String definitionHash, String sourceFormat, String sourceDocument,
+                String sourceHash, int nodeCount, String source, Instant effectiveFrom, String createdBy,
+                Instant createdAt, String approvedBy, Instant approvedAt) {
+            this(tenantId, id, key, version, status, name, definitionJson, definitionHash, sourceFormat, sourceDocument,
+                    sourceHash, nodeCount, source, effectiveFrom, createdBy, createdAt, approvedBy, approvedAt, 0, null,
+                    null, null, null, null, null);
+        }
+
+        /** @return a copy {@code PENDING_APPROVAL}, requested by the actor */
+        public StoredDefinition requested(String actor, Instant at, Instant requestedEffectiveFrom) {
+            return new StoredDefinition(tenantId, id, key, version, "PENDING_APPROVAL", name, definitionJson,
+                    definitionHash, sourceFormat, sourceDocument, sourceHash, nodeCount, source, requestedEffectiveFrom,
+                    createdBy, createdAt, null, null, lockVersion + 1, actor, at, null, null, null, null);
+        }
+
+        /** @return a copy {@code ACTIVE}, approved by the approver, effective from the given time */
+        public StoredDefinition approved(String approver, Instant at, Instant effective, String comment) {
+            return new StoredDefinition(tenantId, id, key, version, "ACTIVE", name, definitionJson, definitionHash,
+                    sourceFormat, sourceDocument, sourceHash, nodeCount, source, effective, createdBy, createdAt,
+                    approver, at, lockVersion + 1, requestedBy, requestedAt, comment, null, null, null);
+        }
+
+        /** @return a copy back in {@code DRAFT}, with the reason; the request is cleared */
+        public StoredDefinition rejected(String reason) {
+            return new StoredDefinition(tenantId, id, key, version, "DRAFT", name, definitionJson, definitionHash,
+                    sourceFormat, sourceDocument, sourceHash, nodeCount, source, null, createdBy, createdAt, null, null,
+                    lockVersion + 1, null, null, reason, null, null, null);
+        }
+
+        /** @return a copy {@code RETIRED} by the actor, superseded by a version number or null */
+        public StoredDefinition retired(String actor, Instant at, Integer superseded) {
+            return new StoredDefinition(tenantId, id, key, version, "RETIRED", name, definitionJson, definitionHash,
+                    sourceFormat, sourceDocument, sourceHash, nodeCount, source, effectiveFrom, createdBy, createdAt,
+                    approvedBy, approvedAt, lockVersion + 1, requestedBy, requestedAt, decisionComment, actor, at,
+                    superseded);
+        }
+    }
+
+    /**
+     * One lifecycle transition of a definition version ({@code pre_definition_history}, append-only).
+     *
+     * @param tenantId tenant
+     * @param id row id
+     * @param definitionId version id
+     * @param action IMPORTED, REQUESTED, APPROVED, REJECTED or RETIRED
+     * @param fromStatus status before, or null
+     * @param toStatus status after
+     * @param actorId who
+     * @param comment comment or reason, or null
+     * @param detailsJson further fields, for example the approved source hash
+     * @param occurredAt when
+     */
+    record DefinitionHistoryRow(String tenantId, String id, String definitionId, String action, String fromStatus,
+            String toStatus, String actorId, String comment, String detailsJson, Instant occurredAt) {
     }
 
     /** Instance row; {@code sequence} is the kernel's id counter. */
@@ -25,10 +84,10 @@ public interface ProcessStore {
             Instant startedAt, Instant endedAt) {
     }
 
-    /** User task row. */
+    /** User task row; {@code claimedBy} is set while it is {@code CLAIMED} and kept once completed or cancelled. */
     record TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId, String nodeId,
-            String name, String assignee, boolean fourEyes, String status, long lockVersion, String completedBy,
-            Instant createdAt, Instant completedAt) {
+            String name, String assignee, boolean fourEyes, String status, long lockVersion, String claimedBy,
+            Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt) {
     }
 
     /** Recorded answer to an idempotent write; {@code responseJson} is null while the claim is pending. */
@@ -42,7 +101,37 @@ public interface ProcessStore {
 
     Optional<StoredDefinition> definition(String tenant, String id);
 
+    Optional<StoredDefinition> definitionVersion(String tenant, String key, int version);
+
+    /**
+     * One row per key, ordered by key, after {@code afterKey} (exclusive) when it is not null.
+     *
+     * @param now the time that decides the effective version
+     */
+    List<DefinitionSummary> definitionKeys(String tenant, String afterKey, int limit, Instant now);
+
     void insertDefinition(StoredDefinition definition);
+
+    /**
+     * Locks every version row of a key ({@code FOR UPDATE}, in version order), so lifecycle commands and the
+     * effective-date job of one key serialise.
+     *
+     * @return the versions, oldest first; empty when the key has none in the tenant
+     */
+    List<StoredDefinition> lockDefinitions(String tenant, String key);
+
+    /**
+     * Writes the lifecycle fields and the incremented lock version of a version.
+     *
+     * @param updated the new state; its {@code lockVersion} is the expected one plus 1
+     * @return rows updated: 1, or 0 when the stored lock version is not {@code updated.lockVersion() - 1}
+     */
+    int updateDefinition(StoredDefinition updated);
+
+    void appendDefinitionHistory(DefinitionHistoryRow row);
+
+    /** @return the history of a version, oldest first */
+    List<DefinitionHistoryRow> definitionHistory(String tenant, String definitionId);
 
     /**
      * @return false when an instance with the same business key exists (a concurrent start committed first)
@@ -56,6 +145,18 @@ public interface ProcessStore {
 
     Optional<InstanceRow> findInstanceByBusinessKey(String tenant, String key, String businessKey);
 
+    /**
+     * Instances newest first ({@code started_at DESC, id DESC}), strictly after the keyset position when
+     * {@code afterStartedAt} is not null.
+     *
+     * @param statuses the statuses, never empty, each one of the instance statuses
+     * @param definitionKey null for every key
+     * @param from inclusive lower bound, or null
+     * @param to exclusive upper bound, or null
+     */
+    List<InstanceRow> instances(String tenant, List<String> statuses, String definitionKey, Instant from, Instant to,
+            Instant afterStartedAt, String afterId, int limit);
+
     /** Updates status, variables, sequence and end time, and increments the lock version. */
     void updateInstance(InstanceRow row);
 
@@ -68,8 +169,14 @@ public interface ProcessStore {
 
     Optional<TaskRow> findTask(String tenant, String id);
 
-    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not open */
+    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not claimed by {@code completedBy} */
     int completeTask(String tenant, String id, long expectedLockVersion, String completedBy, Instant at);
+
+    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not open */
+    int claimTask(String tenant, String id, long expectedLockVersion, String claimant, Instant at);
+
+    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not claimed by {@code claimant} */
+    int unclaimTask(String tenant, String id, long expectedLockVersion, String claimant);
 
     void cancelTask(String tenant, String id);
 
@@ -90,4 +197,16 @@ public interface ProcessStore {
 
     /** Stores the answer of a claimed key in the same transaction as the work. */
     void completeIdempotency(String tenant, String operation, String key, String responseJson);
+
+    /**
+     * Creates the engine secret of this purpose unless one exists, and returns the stored one. Not tenant data: one
+     * key per database serves every tenant (the cursor MAC covers the tenant). Concurrent first calls on two replicas
+     * neither fail nor differ.
+     *
+     * @param name the purpose, for example {@code cursor-hmac}
+     * @param candidate the key to store when none exists, at least 32 bytes
+     * @param now creation time
+     * @return the stored key
+     */
+    byte[] engineKey(String name, byte[] candidate, Instant now);
 }

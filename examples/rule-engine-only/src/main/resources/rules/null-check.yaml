@@ -1,0 +1,20 @@
+# Missing values follow FEEL (RLE-006): a condition matches only when it is true, never when it is null.
+# Evaluate with {"inputs":{"income":null,"tier":null}}: R2, R3, R5 and R7 match.
+schemaVersion: 1
+ruleSet: null-check
+description: Which rows match when the income and the tier are missing
+hitPolicy: collect
+inputs:
+  - { name: income, type: money }
+  - { name: tier,   type: string }
+outputs:
+  - { name: hit, type: list<string> }
+rules:
+  - { id: R1, when: { income: "< 5000000 VND" }, then: { hit: "'R1'" } }
+  - { id: R2, when: { income: "is null" }, then: { hit: "'R2'" } }
+  - { id: R3, when: { tier: "!= 'GOLD'" }, then: { hit: "'R3'" } }
+  - { id: R4, when: { income: "not (income < 5000000 VND)" }, then: { hit: "'R4'" } }
+  - { id: R5, when: { tier: "not in ['GOLD', 'PLATINUM']" }, then: { hit: "'R5'" } }
+  - { id: R6, when: { tier: "== 'GOLD'" }, then: { hit: "'R6'" } }
+  - { id: R7, when: { income: "income < 5000000 VND or tier is null" }, then: { hit: "'R7'" } }
+  - { id: R8, when: { income: "income < 5000000 VND and tier is null" }, then: { hit: "'R8'" } }

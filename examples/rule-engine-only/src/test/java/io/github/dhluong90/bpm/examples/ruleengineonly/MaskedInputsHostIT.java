@@ -41,7 +41,7 @@ class MaskedInputsHostIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     static final JsonMapper JSON = JsonMapper.builder().build();
     static final HttpClient HTTP = HttpClient.newHttpClient();
@@ -117,6 +117,20 @@ class MaskedInputsHostIT {
             assertThat(found.status()).isEqualTo(200);
             assertThat(found.json().path("data")).hasSize(2);
             assertThat(found.json().path("truncated").asBoolean()).isFalse();
+
+            // TR-EXT-08: /api/bpm/meta shows the key status of the caller's own tenant: set, its id and the check
+            // value of the tenant's subkey, computed here independently; never the key.
+            for (String[] tenant : new String[][] {{"bank-a", auditor}, {"tenant-b", otherTenantAuditor}}) {
+                HttpResponse<String> meta = HTTP.send(HttpRequest.newBuilder(
+                                URI.create("http://localhost:" + port + "/api/bpm/meta"))
+                        .header("Authorization", tenant[1]).GET().build(), HttpResponse.BodyHandlers.ofString());
+                bodies.add(meta.body());
+                JsonNode settings = JSON.readTree(meta.body()).path("modules").get(0).path("settings");
+                assertThat(settings.path("masking.hmac-key").asString()).isEqualTo("set");
+                assertThat(settings.path("masking.hmac-key-id").asString()).isEqualTo("k1");
+                assertThat(settings.path("masking.hmac-key-check").asString()).isEqualTo(
+                        checkValue(tenantSubkey(K32, tenant[0])));
+            }
 
             // Tenant isolation: another tenant's auditor neither reads nor finds bank-a's decision.
             Reply foreignRead = send(port, otherTenantAuditor, "GET", "/decisions/" + decisionId, null, null);
@@ -217,7 +231,7 @@ class MaskedInputsHostIT {
             request.header("Content-Type", contentType);
         }
         if (path.endsWith(":approve")) {
-            // An approval names the lock version it was based on: 1, just after the request (#234).
+            // An approval names the lock version it was decided on (#234); a version just requested is at 1.
             request.header("If-Match", "\"1\"");
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
@@ -245,6 +259,19 @@ class MaskedInputsHostIT {
         expand.update(("horus-bpm/masking/v1/tenant/" + tenant).getBytes(StandardCharsets.UTF_8));
         expand.update((byte) 1);
         return expand.doFinal();
+    }
+
+    /** The key check value: HKDF-SHA256 with info "horus-bpm/masking/v1/kcv", then the HMAC of nothing, 8 bytes. */
+    static String checkValue(byte[] key) throws Exception {
+        Mac extract = Mac.getInstance("HmacSHA256");
+        extract.init(new SecretKeySpec(new byte[32], "HmacSHA256"));
+        Mac expand = Mac.getInstance("HmacSHA256");
+        expand.init(new SecretKeySpec(extract.doFinal(key), "HmacSHA256"));
+        expand.update("horus-bpm/masking/v1/kcv".getBytes(StandardCharsets.UTF_8));
+        expand.update((byte) 1);
+        Mac check = Mac.getInstance("HmacSHA256");
+        check.init(new SecretKeySpec(expand.doFinal(), "HmacSHA256"));
+        return HexFormat.of().formatHex(check.doFinal(new byte[0])).substring(0, 16);
     }
 
     static String hmacHex(byte[] key, String value) throws Exception {

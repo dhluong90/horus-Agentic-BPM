@@ -19,7 +19,7 @@
 #   tools/rename-packages.sh && git commit -am "chore: apply package rename"
 #
 # Environment: MAVEN_REPO_LOCAL (optional, passed as -Dmaven.repo.local to flyway-check builds),
-#              POSTGRES_IMAGE (optional, default postgres:16-alpine).
+#              POSTGRES_IMAGE (optional, default postgres:16-alpine pinned by digest, as bpm.test.postgres.image).
 set -euo pipefail
 
 # The old name is kept in segments so that the leftover search does not find this script.
@@ -85,7 +85,7 @@ rewrite_references() {
   # database that has already applied them. verify fails if one still names the old root.
   # NUL-separated through a file: command substitution would drop the NUL bytes.
   list=$(mktemp)
-  git grep -I -l -z -E "$LEFTOVER_PATTERN" -- . "${HISTORY_EXCLUDES[@]}" ':(exclude)*.sql' > "$list" || true
+  git grep -I -l -z -E "$LEFTOVER_PATTERN" -- . ${HISTORY_EXCLUDES[@]+"${HISTORY_EXCLUDES[@]}"} ':(exclude)*.sql' > "$list" || true
   count=$(tr -cd "\\000" < "$list" | wc -c | tr -d " ")
   if [ "$count" = 0 ]; then
     rm -f "$list"
@@ -126,7 +126,7 @@ cmd_apply() {
 
 check_leftovers() {
   local hits paths
-  hits=$(git grep --untracked -n -I -E "$LEFTOVER_PATTERN" -- . "${HISTORY_EXCLUDES[@]}" || true)
+  hits=$(git grep --untracked -n -I -E "$LEFTOVER_PATTERN" -- . ${HISTORY_EXCLUDES[@]+"${HISTORY_EXCLUDES[@]}"} || true)
   if [ -n "$hits" ]; then
     printf '%s\n' "$hits" >&2
     fail "the old package root is still named in $(printf '%s\n' "$hits" | cut -d: -f1 | sort -u | wc -l | tr -d ' ') files (above)"
@@ -205,7 +205,7 @@ build_classpath() {
   local tree="$1" out="$2"
   local repo_args=()
   [ -z "${MAVEN_REPO_LOCAL:-}" ] || repo_args=("-Dmaven.repo.local=$MAVEN_REPO_LOCAL")
-  mvn -B -ntp -q -f "$tree/pom.xml" "${repo_args[@]}" -pl rule-engine/rule-engine-postgres -am \
+  mvn -B -ntp -q -f "$tree/pom.xml" ${repo_args[@]+"${repo_args[@]}"} -pl rule-engine/rule-engine-postgres -am \
     -DskipTests -Dcockpit.bundle.skip=true \
     package dependency:build-classpath -Dmdep.includeScope=test -Dmdep.outputFile="$out"
   printf ':%s' "$tree/rule-engine/rule-engine-postgres/target/classes" >> "$out"
@@ -241,7 +241,7 @@ cmd_flyway_check() {
   build_classpath "$ROOT" "$work/cp-new.txt"
 
   FC_CONTAINER=$(docker run -d -e POSTGRES_PASSWORD=rename -e POSTGRES_DB=host -p 127.0.0.1::5432 \
-    "${POSTGRES_IMAGE:-postgres:16-alpine}")
+    "${POSTGRES_IMAGE:-postgres@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857}")
   port=$(docker port "$FC_CONTAINER" 5432/tcp | head -1 | sed 's/.*://')
   for _ in $(seq 1 60); do docker exec "$FC_CONTAINER" pg_isready -U postgres -d host >/dev/null 2>&1 && break; sleep 1; done
   url="jdbc:postgresql://127.0.0.1:$port/host"

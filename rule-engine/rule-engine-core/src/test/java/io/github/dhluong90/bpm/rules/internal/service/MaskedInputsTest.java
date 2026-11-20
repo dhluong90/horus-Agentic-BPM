@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
+import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.DecisionSearchResult;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
@@ -130,9 +131,9 @@ class MaskedInputsTest {
     void publish(RuleEngines engines, String tenant, String yaml, String name) {
         caller.become(tenant, "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml.getBytes(StandardCharsets.UTF_8)));
-        engines.versionService().requestPublish(name, 1, WriteOptions.none());
+        long lock = engines.versionService().requestPublish(name, 1, WriteOptions.none()).lockVersion();
         caller.become(tenant, "bob");
-        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
+        engines.versionService().approve(name, 1, new WriteOptions(null, lock, null));
     }
 
     DecisionResult evaluate(RuleEngines engines, String tenant, String ruleSet, Map<String, Object> inputs) {
@@ -163,6 +164,52 @@ class MaskedInputsTest {
         assertThat(read.toString()).doesNotContain(NATIONAL_ID);
         assertThat(read.matchedRuleIds()).containsExactly("R1");
         assertThat(read.outcome()).isEqualTo("OK");
+    }
+
+    @Test
+    void RLE_008_pinned_and_chosen_clock_decisions_show_their_marks_in_the_log_read_and_the_masked_search() {
+        // Given minor-review in force from 1 Jan 2027, and three decisions on 15 Jan for the same national id:
+        // one at the host clock, one back-dated to 10 Jan (rules:simulate) and one pinned to version 1 (rules:pin)
+        RuleEngines engines = engines(MaskingPolicy.withKey(MaskingKey.of(KEY_A)));
+        publish(engines, "bank-a", MINOR_REVIEW.replace("hitPolicy: first",
+                "effectiveFrom: \"2027-01-01T00:00:00Z\"\nhitPolicy: first"), "minor-review");
+        DecisionInput minor = DecisionInput.of(Map.of("nationalId", NATIONAL_ID, "age", 16));
+        Instant tenthOfJanuary = Instant.parse("2027-01-10T09:00:00Z");
+        String normal = evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16))
+                .decisionId();
+        caller.become("bank-a", "pricing", Set.of("rules:evaluate", "rules:simulate"));
+        String backDated = engines.ruleEngine().evaluate(DecisionRequest.of("minor-review", minor)
+                .withClock(tenthOfJanuary)).decisionId();
+        caller.become("bank-a", "pricing", Set.of("rules:pin"));
+        String pinned = engines.ruleEngine().evaluate(DecisionRequest.of("minor-review", minor).withVersion(1))
+                .decisionId();
+
+        // When the auditor reads each decision back, and finds them by the plain national id
+        caller.become("bank-a", "auditor", AUDIT);
+        LoggedDecision readNormal = engines.decisionLog().get(normal);
+        LoggedDecision readBackDated = engines.decisionLog().get(backDated);
+        LoggedDecision readPinned = engines.decisionLog().get(pinned);
+        Map<String, LoggedDecision> found = new java.util.HashMap<>();
+        engines.decisionLog().findByMaskedInput(byNationalId(NATIONAL_ID)).items()
+                .forEach(d -> found.put(d.decisionId(), d));
+
+        // Then the back-dated one shows its clock, the pinned one its pin, and the normal one neither
+        assertThat(readNormal.clockChosen()).isFalse();
+        assertThat(readNormal.pinned()).isFalse();
+        assertThat(readNormal.evalClock()).isEqualTo(NOW).isEqualTo(readNormal.evaluatedAt());
+        assertThat(readBackDated.clockChosen()).isTrue();
+        assertThat(readBackDated.pinned()).isFalse();
+        assertThat(readBackDated.evalClock()).isEqualTo(tenthOfJanuary);
+        assertThat(readBackDated.evaluatedAt()).isEqualTo(NOW);
+        assertThat(readPinned.pinned()).isTrue();
+        assertThat(readPinned.clockChosen()).isFalse();
+        assertThat(found).containsOnlyKeys(normal, backDated, pinned);
+        for (LoggedDecision read : List.of(readNormal, readBackDated, readPinned)) {
+            LoggedDecision searched = found.get(read.decisionId());
+            assertThat(searched.evalClock()).isEqualTo(read.evalClock());
+            assertThat(searched.clockChosen()).isEqualTo(read.clockChosen());
+            assertThat(searched.pinned()).isEqualTo(read.pinned());
+        }
     }
 
     @Test
@@ -594,6 +641,41 @@ class MaskedInputsTest {
         assertThat(MaskingKey.of("k1", KEY_A).sameKeyAs(MaskingKey.of("k9", KEY_A))).isTrue();
         assertThat(MaskingKey.of("k1", KEY_A).sameKeyAs(MaskingKey.of("k1", KEY_B))).isFalse();
         assertThat(MaskingKey.of(KEY_A).sameKeyAs(MaskingKey.of(KEY_A).forTenant("bank-a"))).isFalse();
+    }
+
+    @Test
+    void TR_SEC_10_key_check_value_comes_from_a_key_derived_for_it_alone_and_never_the_key() throws Exception {
+        MaskingKey key = MaskingKey.of("k1", KEY_A);
+        String expected = kcvHex(KEY_A);
+        assertThat(key.checkValue()).isEqualTo(expected).matches("^[0-9a-f]{16}$");
+        // The id does not change it; the bytes do; a tenant subkey has a check value of its own.
+        assertThat(MaskingKey.of("k9", KEY_A).checkValue()).isEqualTo(expected);
+        assertThat(MaskingKey.of("k1", KEY_B).checkValue()).isNotEqualTo(expected);
+        assertThat(key.forTenant("bank-a").checkValue()).isNotEqualTo(expected);
+        assertThat(key.checkValue()).doesNotContain(HexFormat.of().formatHex(KEY_A).substring(0, 16));
+        // A separate domain: the token of an input whose value is the derivation label is not the check value.
+        assertThat(key.fingerprint(MaskingKey.CHECK_VALUE_INFO)).doesNotContain(expected);
+        assertThat(hmacHex(KEY_A, MaskingKey.CHECK_VALUE_INFO)).doesNotStartWith(expected);
+        // The documented vector: host key 00 01 .. 1f.
+        byte[] host = new byte[32];
+        for (int i = 0; i < 32; i++) {
+            host[i] = (byte) i;
+        }
+        assertThat(MaskingKey.of(host).checkValue()).isEqualTo("471be5b6391b902f");
+    }
+
+    /** The check value computed here, apart from MaskingKey: HKDF-SHA256 with the kcv info, then HMAC of nothing. */
+    static String kcvHex(byte[] key) throws Exception {
+        Mac extract = Mac.getInstance("HmacSHA256");
+        extract.init(new SecretKeySpec(new byte[32], "HmacSHA256"));
+        byte[] prk = extract.doFinal(key);
+        Mac expand = Mac.getInstance("HmacSHA256");
+        expand.init(new SecretKeySpec(prk, "HmacSHA256"));
+        expand.update("horus-bpm/masking/v1/kcv".getBytes(StandardCharsets.UTF_8));
+        expand.update((byte) 1);
+        Mac check = Mac.getInstance("HmacSHA256");
+        check.init(new SecretKeySpec(expand.doFinal(), "HmacSHA256"));
+        return HexFormat.of().formatHex(check.doFinal(new byte[0])).substring(0, 16);
     }
 
     static String hmacHex(byte[] key, String value) throws Exception {

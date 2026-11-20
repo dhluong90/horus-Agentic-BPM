@@ -1,0 +1,21 @@
+# Tet fee waiver (RLE-026): card transactions pay no fee while the Lunar New Year promotion runs. The promotion ends
+# by hand: an approver retires the version with a reason, and from that instant no replica serves it.
+schemaVersion: 1
+ruleSet: tet-fee-waiver
+description: Waive the card fee during the Tet promotion
+effectiveFrom: "2026-11-01T00:00:00Z"
+hitPolicy: first
+
+inputs:
+  - { name: channel, type: string, description: "CARD, ATM or BRANCH" }
+
+outputs:
+  - { name: waiveFee, type: boolean }
+
+rules:
+  - id: R1                  # every card transaction during the promotion
+    when: { channel: "== 'CARD'" }
+    then: { waiveFee: true }
+  - id: R2                  # other channels keep their fee
+    when: {}
+    then: { waiveFee: false }

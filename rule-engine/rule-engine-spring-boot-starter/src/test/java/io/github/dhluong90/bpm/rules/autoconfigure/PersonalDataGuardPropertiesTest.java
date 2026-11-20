@@ -2,7 +2,7 @@ package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.dhluong90.bpm.host.spi.TenantModuleSettings;
+import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -98,7 +98,7 @@ class PersonalDataGuardPropertiesTest {
                         "horus.bpm.rules.masking.tenants.bank-b.mask-default=true",
                         "horus.bpm.rules.masking.tenants.bank-b.require-explicit-mask=true")
                 .run(context -> {
-                    TenantModuleSettings settings =
+                    ModuleTenantSettings settings =
                             RuleEngineModule.tenantSettings(context.getBean(PropertyMaskingPolicy.class));
                     assertThat(settings.module()).isEqualTo("rules");
                     assertThat(settings.settings("bank-a")).containsExactly(

@@ -55,7 +55,7 @@ class HostMetadataIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @DynamicPropertySource
     static void databaseAndTokenValidation(DynamicPropertyRegistry registry) throws Exception {
@@ -91,15 +91,22 @@ class HostMetadataIT {
         // PD-094: off by default; this profile (no dev) leaves it unset, so the engine publishes false.
         assertThat(metaBody.path("modules").get(0).path("settings").path("authoring.cockpit-drafts").isBoolean()).isTrue();
         assertThat(metaBody.path("modules").get(0).path("settings").path("authoring.cockpit-drafts").asBoolean()).isFalse();
+        assertThat(metaBody.path("modules").get(0).path("settings").path("lifecycle.approver-must-differ-from").asString())
+                .isEqualTo("makers");
+        // TR-EXT-08: this host configures no masking key, so the caller's tenant shows unset and no key id.
+        assertThat(metaBody.path("modules").get(0).path("settings").path("masking.hmac-key").asString()).isEqualTo("unset");
+        assertThat(metaBody.path("modules").get(0).path("settings").has("masking.hmac-key-id")).isFalse();
+        assertThat(meta.headers().allValues("Vary")).isNotEmpty();
         assertThat(metaBody.path("modules").get(0).path("engineVersion").asString())
                 .isEqualTo(System.getProperty("rule-engine.version"));
-        assertThat(meta.headers().firstValue("Cache-Control")).hasValue("private, max-age=60");
+        // The Rule Engine publishes the caller's tenant's masking status, so /meta revalidates every time, as /me.
+        assertThat(meta.headers().firstValue("Cache-Control")).hasValue("private, no-cache");
         assertThat(meta.headers().firstValue("ETag")).isPresent();
 
         // And the two callers get different permission lists from their roles; /me is revalidated each time
         assertThat(strings(lan, "permissions")).containsExactly("rules:read", "rules:author");
         assertThat(strings(lan, "roles")).containsExactly("ROLE_PRICING_AUTHOR");
-        assertThat(strings(minh, "permissions")).containsExactly("rules:read", "rules:approve");
+        assertThat(strings(minh, "permissions")).containsExactly("rules:read", "rules:approve", "rules:simulate");
         assertThat(JSON.readTree(lan.body()).path("tenant").path("current").asString()).isEqualTo("bank-a");
         assertThat(lan.headers().firstValue("Cache-Control")).hasValue("private, no-cache");
     }
@@ -154,8 +161,8 @@ class HostMetadataIT {
                     .containsExactly("no-store");
         }
 
-        // And the metadata endpoint keeps its own private caching
-        assertThat(get("/api/bpm/meta", lan).headers().firstValue("Cache-Control")).hasValue("private, max-age=60");
+        // And the metadata endpoint keeps its own private caching: tenant settings make it revalidate, as /me
+        assertThat(get("/api/bpm/meta", lan).headers().firstValue("Cache-Control")).hasValue("private, no-cache");
     }
 
     @Test

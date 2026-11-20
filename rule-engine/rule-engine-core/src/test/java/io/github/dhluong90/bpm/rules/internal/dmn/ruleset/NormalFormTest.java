@@ -32,7 +32,16 @@ class NormalFormTest {
     }
 
     static Stream<Golden> golden() {
-        String text = new String(DmnRuleSetTest.resource("/rules/normal-form.v1.txt"), StandardCharsets.UTF_8);
+        return golden("/rules/normal-form.v1.txt");
+    }
+
+    /** The clock readings, added in 0.2.0 in a file of their own so the 0.1.0 golden file stays as frozen (#22). */
+    static Stream<Golden> goldenClock() {
+        return golden("/rules/normal-form.v1.clock.txt");
+    }
+
+    static Stream<Golden> golden(String resource) {
+        String text = new String(DmnRuleSetTest.resource(resource), StandardCharsets.UTF_8);
         List<Golden> rows = new ArrayList<>();
         String[] lines = text.split("\n");
         for (int i = 0; i < lines.length; i++) {
@@ -43,6 +52,12 @@ class NormalFormTest {
             rows.add(new Golden(i + 1, f[0].strip(), f[1].strip(), f[2].strip(), f[3].strip()));
         }
         return rows.stream();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("goldenClock")
+    void RLE_022_the_v1_printer_keeps_clock_readings_as_written(Golden row) {
+        RLE_045_the_v1_printer_is_frozen_by_the_golden_file(row);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -221,7 +236,37 @@ class NormalFormTest {
         assertThat(sha).isEqualTo(GOLDEN_V1_SHA256);
     }
 
-    static final String GOLDEN_V1_SHA256 = "dc44beae55cd278fe820d7c9e22def959b854655946bbfa4711387ca6f7eb40f";
+    /**
+     * The pin of the schema version 1 golden file. Changed in 0.2.0 only by appending the rows of two new productions,
+     * {@code matches} (#20) and the function calls round and daysBetween (#19): appending rows for a new production is allowed within schema version 1,
+     * by the architect's ruling on pull request #252 (ADR-0026 decision 3); editing a shipped row is not, and
+     * {@link #RLE_045_the_golden_lines_of_0_1_0_are_an_unchanged_prefix} proves no 0.1.0 row changed.
+     */
+    static final String GOLDEN_V1_SHA256 = "9ceeb15c518cdde9d78ce42c2e0374d5cf014fedcb6a98ea1514271d2c9927cb";
+
+    @Test
+    void RLE_045_the_golden_lines_of_0_1_0_are_an_unchanged_prefix() throws Exception {
+        // A later release may append golden lines for a new production (0.2.0: round and daysBetween, #19); it may never
+        // change a line that 0.1.0 shipped. The first GOLDEN_0_1_0_LENGTH bytes are the 0.1.0 file, byte for byte.
+        byte[] golden = DmnRuleSetTest.resource("/rules/normal-form.v1.txt");
+        byte[] prefix = java.util.Arrays.copyOf(golden, GOLDEN_0_1_0_LENGTH);
+        String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(prefix));
+        assertThat(sha).isEqualTo(GOLDEN_0_1_0_SHA256);
+    }
+
+    /** The golden file as 0.1.0 shipped it: its length and SHA-256, the pin of that release. */
+    static final int GOLDEN_0_1_0_LENGTH = 4003;
+
+    static final String GOLDEN_0_1_0_SHA256 = "dc44beae55cd278fe820d7c9e22def959b854655946bbfa4711387ca6f7eb40f";
+
+    @Test
+    void RLE_022_the_clock_golden_file_is_pinned() throws Exception {
+        byte[] golden = DmnRuleSetTest.resource("/rules/normal-form.v1.clock.txt");
+        String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(golden));
+        assertThat(sha).isEqualTo(GOLDEN_V1_CLOCK_SHA256);
+    }
+
+    static final String GOLDEN_V1_CLOCK_SHA256 = "022393f7ebf2c722a65e3da335a124591162b72373dd20df5e559b27378beed2";
 
     // ------------------------------------------------------------------ helpers
 

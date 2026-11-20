@@ -106,11 +106,11 @@ The workflow's job "Release tag guard tests" proves each refusal on every pull r
 
 ## GitHub Release
 
-On a tag run that passed the release build, the job `github-release` publishes the GitHub Release for the tag. It uses the archive `release-dry-run-success` of the same run and rebuilds nothing. It is the only job with a write token (`contents: write`). It has no checkout, no Maven and no npm, and uses one action, `actions/download-artifact`, pinned by commit SHA. Pull request and dispatch runs skip it.
+On a tag run that passed the release build, the job `github-release` publishes the GitHub Release for the tag. It uses the archive `release-dry-run-success` of the same run and rebuilds nothing. It runs only after the job `attest` has signed the archive (see [Provenance and SBOM attestations](#provenance-and-sbom-attestations)), so no Release exists without its attestations. It is the only job with `contents: write`. It has no checkout, no Maven and no npm, and uses one action, `actions/download-artifact`, pinned by commit SHA. Pull request and dispatch runs skip it.
 
 | Step | What happens | Fails when, and what is left |
 |---|---|---|
-| 1 | Download `release-dry-run-success` of this run | The release build failed: the job does not start |
+| 1 | Download `release-dry-run-success` of this run | The release build or the attestations failed: the job does not start |
 | 2 | `shasum -a 256 -c SHA256SUMS` over the archive, and every file in it must be listed | A file differs from `SHA256SUMS`, or is not listed: no draft |
 | 3 | `BUILD-INFO.json` must say `"trial": false`, `"workingTree": "clean"`, and the tag and commit of this run | Any field differs: no draft |
 | 4 | Assets: every jar and POM under `maven-repo` (no `maven-metadata`, no checksum side files), `bom-release.json`, `SHA256SUMS`, `BUILD-INFO.json` | Two assets share a file name, or there is no jar: no draft |
@@ -120,7 +120,7 @@ On a tag run that passed the release build, the job `github-release` publishes t
 The release notes link this page and give the check adopters run in the folder of their downloads:
 
 ```
-while read -r hash path; do name="${path##*/}"; [ -f "$name" ] && printf '%s  %s\n' "$hash" "$name"; done < SHA256SUMS | shasum -a 256 -c -
+while read -r hash path; do name="${path##*/}"; if [ -f "$name" ]; then printf '%s  %s\n' "$hash" "$name"; fi; done < SHA256SUMS | shasum -a 256 -c -
 ```
 
 Each downloaded file prints `<name>: OK`. Step 6 runs the same command on the draft's downloads, reading the archive's `SHA256SUMS`.
@@ -129,6 +129,70 @@ The text of steps 2 to 4 sits between `# BEGIN release-archive-check` and `# END
 
 To recover from a run that left only a draft, delete the draft (`gh release delete v0.1.0`), fix the cause, and re-run the workflow for the tag. Once a Release is published, never re-tag: fix it with the next patch release, `v0.1.1` (PD-091, see Tags).
 
+## Provenance and SBOM attestations
+
+On a tag run that passed the release build, the job `attest` signs two kinds of statement, which GitHub keeps with the repository (`TR-SEC-06`):
+
+- **Build provenance** (SLSA, `https://slsa.dev/provenance/v1`) for every jar and POM under `maven-repo`: this repository, `.github/workflows/release.yml`, the tag and the commit built them.
+- **SBOM** (CycloneDX, `https://cyclonedx.org/bom`): `bom-release.json` describes every staged jar.
+
+The signature is keyless. Sigstore issues a short-lived certificate to this workflow's identity, so there is no key to store or leak. The job downloads `release-dry-run-success` of the same run, checks it against `SHA256SUMS` (every file listed, every listed file present), and attests those exact bytes; it builds nothing. It is the only job with `id-token: write` and `attestations: write`. Every other job, and every pull request and dispatch run, has a `contents: read` token, and pull request and dispatch runs skip `attest`. It uses `actions/download-artifact` and `actions/attest` (provenance mode, then SBOM mode with `sbom-path`), both pinned by commit SHA.
+
+### Verify a download
+
+With the [GitHub CLI](https://cli.github.com/), in the folder of the downloaded files. The example is the cockpit starter of `v0.2.0`:
+
+```bash
+R=dhluong90/horus-Agentic-BPM
+gh release download v0.2.0 --repo $R --pattern 'cockpit-spring-boot-starter-0.2.0.jar' --pattern SHA256SUMS
+gh attestation verify cockpit-spring-boot-starter-0.2.0.jar --repo $R \
+  --signer-workflow $R/.github/workflows/release.yml --source-ref refs/tags/v0.2.0
+```
+
+`--signer-workflow` accepts only statements signed by the release workflow, and `--source-ref` only those of that tag. The output has this form:
+
+```
+Loaded digest sha256:<sha256 of the jar> for file://cockpit-spring-boot-starter-0.2.0.jar
+Loaded 1 attestation from GitHub API
+
+The following policy criteria will be enforced:
+- Predicate type must match:................ https://slsa.dev/provenance/v1
+- Source Repository Owner URI must match:... https://github.com/dhluong90
+- Source Repository URI must match:......... https://github.com/dhluong90/horus-Agentic-BPM
+- Subject Alternative Name must match regex: ^https://github\.com/dhluong90/horus-Agentic-BPM/\.github/workflows/release\.yml(@(refs/.*|[0-9a-fA-F]+))?$
+- OIDC Issuer must match:................... https://token.actions.githubusercontent.com
+
+✓ Verification succeeded!
+
+The following 1 attestation matched the policy criteria
+
+- Attestation #1
+  - Build repo:..... dhluong90/horus-Agentic-BPM
+  - Build workflow:. .github/workflows/release.yml@refs/tags/v0.2.0
+  - Signer repo:.... dhluong90/horus-Agentic-BPM
+  - Signer workflow: .github/workflows/release.yml@refs/tags/v0.2.0
+```
+
+The command exits `0`. A file that differs by one byte has another digest, so no statement matches it:
+
+```
+Error: no attestations found
+```
+
+and the command exits `1`. Off a terminal the CLI prints nothing on success; check the exit status, or add `--format json`.
+
+The SBOM statement: the same command with `--predicate-type https://cyclonedx.org/bom`. Its subjects are every staged jar, and their digests are the ones in `SHA256SUMS`; this prints nothing when they match:
+
+```bash
+gh attestation verify cockpit-spring-boot-starter-0.2.0.jar --repo $R \
+  --signer-workflow $R/.github/workflows/release.yml --source-ref refs/tags/v0.2.0 \
+  --predicate-type https://cyclonedx.org/bom --format json \
+  --jq '.[0].verificationResult.statement.subject[] | "\(.digest.sha256)  \(.name)"' | sort > sbom-subjects.txt
+grep '\.jar$' SHA256SUMS | sed -E 's#  .*/#  #' | sort | diff - sbom-subjects.txt
+```
+
+For every release, run both commands on the cockpit starter jar from the published Release, plus the first one on a copy with one byte changed, and record the output in the release issue.
+
 ## Local trial
 
 `BPM_RELEASE_TRIAL=true tools/release/release-build.sh` accepts another Node version and a dirty working tree. `BUILD-INFO.json` and the SBOM then record `"trial": true`, and the log ends with "TRIAL build, not a release". The script refuses trial mode when `CI` or `GITHUB_ACTIONS` is `true`.
@@ -136,6 +200,5 @@ To recover from a run that left only a draft, delete the draft (`gh release dele
 ## Not yet
 
 - Signing, sources and Javadoc jars, and the upload to Maven Central arrive with the publishing slice. GitHub Releases are published (see GitHub Release).
-- Provenance and SBOM attestations on tag runs before publishing: `actions/attest-build-provenance` for the staged jars and POMs, and `actions/attest-sbom` for `bom-release.json`, with `id-token: write` and `attestations: write` granted to that job only.
 - Real publishing lives in its own workflow with no `pull_request` trigger, behind a protected environment that holds the Central credentials. Pull requests from branches of this repository receive secrets, so publishing never shares a workflow with that trigger.
 - The standalone cockpit archive comes with standalone mode (#11).
