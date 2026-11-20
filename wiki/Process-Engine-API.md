@@ -28,7 +28,8 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `POST /agent-replays` | `AgentReplayService.start(AgentReplayRequest)` | `processes:agent:replay` | Replays one agent step's recorded answers over a period of at most 31 days against a candidate guardrail version, usually a draft, and an optional candidate output schema. Body `{"definitionKey": "kyc-onboarding", "nodeId": "assess-documents", "from": "2026-11-01", "to": "2026-11-30", "candidate": {"ruleSet": "kyc-document-guardrails", "version": 3}}`. Answers `202` with the queued run; the job poller replays it in pages. Calls no model or adapter and writes no history or decision. See [[Guarded Agent Steps]]. M3 |
 | `GET /agent-replays/{id}`, `GET /agent-replays/{id}/cases` | `AgentReplayService.run(id)`, `.cases(id, page)` | `processes:agent:replay` | The run's status and summary, and its report: one line per recorded answer with the attempt id, the recorded and the candidate outcome, the change, the matched rule ids and the `OVERRIDDEN_BY_REVIEWER` flag, never an output value. M3 |
 | `GET /agent-replays/{id}/cases/{attemptId}/answer` | `AgentReplayService.recordedAnswer(id, attemptId)` | `processes:agent:replay` | One case's recorded answer as history keeps it: masked output fields as `***`, masked inputs as keyed hashes. M3 |
-| `GET /tasks/{id}` | `TaskService.task(id)` | `processes:task:work` | The task with its instance, step, assignment, `fourEyes`, claim and completion, and `allowedActions` for this caller (`claim`, `unclaim`, `complete`). The review task of a refused agent answer also has `review`: the code, reasons, matched rule ids, guardrail decision id, the refused attempt and who reported it, the inputs the agent saw (a masked input as its keyed fingerprint) and the answer masked by the output schema. `ETag` is the task `lockVersion`. Since 0.2.0 |
+| `GET /tasks` | `ProcessQueryService.tasks(TaskQuery)` | `processes:task:work`; `assignment=any` also needs `processes:task:manage` | `assignment`: one or more of `mine` (declared to you or claimed by you), `candidate` (open tasks of your roles and groups), `any` (the whole tenant); `mine,candidate` when absent. `status`: `OPEN`, `CLAIMED` or both (default). `role`, `group`: narrow `candidate` and `any` to one role or group (with `mine` alone, `400 QUERY_INVALID`). `dueBefore`, and `slaBreached=true` for tasks whose due time has passed. Ordered by `dueAt`, then `id`; tasks without a due time come last, by `id`. At most 200 per page (`limit` above 200 is `400 QUERY_INVALID`). Items carry no variables and no review context. See [Task lists](#task-lists). Since 0.2.0 |
+| `GET /tasks/{id}` | `TaskService.task(id)` | `processes:task:work` | The task with its instance, step, assignment, `fourEyes`, claim and completion, `dueAt` (since 0.2.0), and `allowedActions` for this caller (`claim`, `unclaim`, `complete`). The review task of a refused agent answer also has `review`: the code, reasons, matched rule ids, guardrail decision id, the refused attempt and who reported it, the inputs the agent saw (a masked input as its keyed fingerprint) and the answer masked by the output schema. `ETag` is the task `lockVersion`. Since 0.2.0 |
 | `POST /tasks/{id}:claim` | `TaskService.claim(id, lockVersion, idempotencyKey)` | `processes:task:work` | `OPEN` to `CLAIMED` by the caller, who must be an assignee (`403 TASK_NOT_ASSIGNED`); a four-eyes task refuses the starter and earlier completers (`403 SELF_APPROVAL_FORBIDDEN`). `If-Match` and `Idempotency-Key` required (`428`). Since 0.2.0 |
 | `POST /tasks/{id}:unclaim` | `TaskService.unclaim(id, lockVersion, idempotencyKey)` | `processes:task:work` | `CLAIMED` to `OPEN`; only the claimant (`403 TASK_NOT_ASSIGNED`). Same headers. Since 0.2.0 |
 | `POST /tasks/{id}:complete` | `TaskService.complete(id, result, lockVersion, idempotencyKey)`, or with a `reason` | `processes:task:work` | Body `{"result": {...}, "reason": "..."}`; `reason` is optional and recorded only on the review task of a refused agent answer, with the reviewer's answer and what changed (`HUMAN_OVERRIDE`, since 0.2.0). Only the claimant completes: an `OPEN` task is `409 INVALID_STATE` (claim it first, since 0.2.0), a task claimed by someone else is `403 TASK_NOT_ASSIGNED`. `If-Match` (the task's `lockVersion`) and `Idempotency-Key` are required (`428`). A stale `If-Match` is `409 VERSION_CONFLICT` and writes nothing. A four-eyes task refuses the starter and earlier completers (`403 SELF_APPROVAL_FORBIDDEN`) |
@@ -117,6 +118,49 @@ stateDiagram-v2
 ```
 
 Every change carries the task's `lockVersion` as `If-Match` and advances it by one: a claim of a task at `"0"` answers `ETag: "1"`, which the completion then sends. Two officers who read the same version and act at once get one `200` and one `409 VERSION_CONFLICT`, and only one transition and history entry is written. Read `GET /tasks/{id}` for the current `ETag` and the actions this caller may take.
+
+## Task lists
+
+A team lead and an officer see their queues from `GET /tasks`. Example: Minh holds the roles `credit-officer` and `ops` and the group `branch-hcm-01`.
+
+```
+GET /api/bpm/processes/v1/tasks?assignment=candidate&limit=50          # open tasks of both roles and the group
+GET /api/bpm/processes/v1/tasks?assignment=candidate&slaBreached=true  # the ones already late
+GET /api/bpm/processes/v1/tasks?assignment=mine                        # the ones he claimed
+```
+
+```json
+{
+  "data": [
+    {"id": "01JD2R7Q4M8S3N6V0B5C9X1Z2A", "instanceId": "01JD2R7Q0D3F6H9K2M5P8R1T4V",
+     "definitionKey": "loan-credit-review", "definitionVersion": 2, "businessKey": "LN-2027-000123",
+     "nodeId": "credit-review", "name": "Credit review", "assignee": "role:credit-officer",
+     "status": "OPEN", "lockVersion": 0, "claimedBy": null,
+     "createdAt": "2026-12-31T08:00:00Z", "dueAt": "2027-01-04T03:00:00Z"}
+  ],
+  "nextCursor": "eyJ...",
+  "hasNext": true
+}
+```
+
+Each range (your user, your claims, each role, each group) is read through its own index for one page and the pages are merged, so a queue of 30,000 tasks answers as fast as one of 30. Pass `nextCursor` back as `cursor`; it is signed for your tenant and these filters, so another tenant's cursor, or one from other filters, is `400 QUERY_INVALID`.
+
+![Task query ranges](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/task-query.svg)
+
+## Due times on working hours
+
+A user task with `horus:sla` is due after that much working time in the tenant's calendar named by `horus:calendar`:
+
+```xml
+<bpmn:userTask id="credit-review" name="Credit review" horus:assignee="role:credit-officer"
+               horus:resultVariable="review" horus:sla="PT4H" horus:calendar="vn-banking-hours"/>
+```
+
+With `vn-banking-hours` set to Monday to Friday 08:00 to 17:00 Asia/Ho_Chi_Minh and 1 January 2027 off, a task created on Thursday 31 December 2026 at 15:00 +07:00 is due on Monday 4 January 2027 at 10:00 +07:00: two hours count on Thursday, Friday is a holiday, the weekend is skipped, and two more hours count on Monday. The due time is set once, with the engine clock, and is never moved by a later calendar change. Without `horus:calendar` the SLA counts elapsed time. A calendar your tenant does not have fails the step (`422 STEP_FAILED`, reason `CALENDAR_NOT_FOUND`) and nothing is written.
+
+Calendars are stored per tenant and changed through `CalendarService` in Java: a holder of `processes:calendar:manage` proposes the whole calendar, with a reason, against the version they read (0 for a new one); a second holder approves it. The proposer cannot approve (`403 SELF_APPROVAL_FORBIDDEN`), and an approval over a calendar that changed since the proposal is `409 VERSION_CONFLICT`. The approval emits `processes.calendar.changed.v1` naming both people, and the change record keeps the old and the new value. `horus.bpm.processes.calendar.approval: single` lets one person apply a change and is accepted only in the `dev` profile. The calendar endpoints and the cockpit editor follow in a later release. A host that keeps calendars in its own system registers a `BusinessCalendar` bean instead.
+
+![Calendar change and task due time](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/calendar-change.svg)
 
 ## Live counts per step
 

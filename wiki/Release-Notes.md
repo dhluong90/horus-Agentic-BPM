@@ -38,6 +38,10 @@ A result that arrives after its attempt timed out, after another attempt took ov
 
 An agent step can declare `<horus:memory>` to receive declared fields of earlier agent steps' results in the same instance (#101). Process Engine migration `V14__pre_step_result` adds one table. New settings: `agents.memory.max-entries` (16) and `agents.memory.max-bytes` (16384). `AgentInvocation` gains the `memory()` component.
 
+### Task lists and due times on working hours
+
+`GET /tasks` lists a caller's tasks by assignment (`mine`, `candidate`, `any`), status, role, group, due date and missed deadline, at most 200 to a page, each range read through its own index (#70). A user task with `horus:sla` and `horus:calendar` is due after that much working time in the tenant's calendar, set once at creation and never moved by a later calendar change; tasks and list items carry `dueAt` (#72). Calendars change through `CalendarService` under four eyes; `horus.bpm.processes.calendar.approval: single` is accepted in the `dev` profile only. New permission in the default mapping: `processes:calendar:manage`, and `processes:task:manage` for `assignment=any`. Process Engine migrations: `V20__pre_calendar` (three new tables), `V21__pre_task_due_at` (a nullable column), `V22__pre_task_query_indexes` (five partial indexes on `pre_task`, built `CONCURRENTLY`, and V1's `idx_pre_task_role` dropped `CONCURRENTLY`). On a host with many tasks, run V22 from one replica first: other replicas wait for the Flyway lock while the indexes build.
+
 ## 0.1.0
 
 The first release: the Rule Engine with four-eyes publication, the embedded cockpit to edit and approve rules, and an example host that starts with one command. It is a 0.x release, so it makes no compatibility promise; 1.0 is the release with a frozen API.
