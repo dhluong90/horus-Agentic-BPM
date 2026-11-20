@@ -5,7 +5,9 @@ info:
   description: |
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
-    export, replace a draft, diff two versions, request publication, approve, reject, withdraw, history and evaluate. The remaining endpoints of
+    export, replace a draft, diff two versions, request publication, approve, reject, withdraw, history,
+    evaluate, and decision-log reads (one decision, and the search by a masked input's plain value).
+    The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
     The tenant is never part of a request: it comes from the host's authenticated context
@@ -679,6 +681,95 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /decisions/{id}:
+    get:
+      tags: [decisions]
+      operationId: getDecision
+      summary: Read one logged decision of the caller's tenant
+      description: |
+        Permission `rules:log:read`. Returns the `rle_decision` row as stored. An input declared
+        `mask: true` (or masked by the host's or tenant's `decision-log.mask-default`) appears as
+        `hmac:<keyId>:<hex>`, the HMAC-SHA256 of its plain value under the tenant's masking key; the plain
+        value is not available anywhere after evaluation (RLE-012). A decision of another tenant is
+        `404 DECISION_NOT_FOUND`. Writes nothing.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The decision as logged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoggedDecision'
+              example:
+                decisionId: 01KF2Q8Z0RQ6V2Y8M1C4N5P7T9
+                ruleSet: minor-review
+                version: 1
+                hitPolicy: FIRST
+                outcome: OK
+                errorCode: null
+                inputs:
+                  nationalId: hmac:k1:7d8c2f0a9b6e4d1c3a5f7e9b0d2c4a6e8f1b3d5c7a9e0f2b4d6c8a0e2f4b6d8c
+                  age: 16
+                outputs:
+                  route: MANUAL
+                matchedRuleIds: [R1]
+                callerId: teller
+                correlationId: 7f3c2a10-5b2e-4f7a-9c1d-2e6b8a4d0f13
+                evaluatedAt: '2027-01-15T02:00:00Z'
+                durationMicros: 41
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /decisions:find-by-masked-input:
+    post:
+      tags: [decisions]
+      operationId: findDecisionsByMaskedInput
+      summary: Find the decisions whose masked input had a given plain value
+      description: |
+        Permission `rules:masked:search`, which `rules:log:read` does not imply. At most
+        `masking.search.max-per-minute` searches per caller per minute on one replica (default 30,
+        at least 1); past it `429 RATE_LIMITED` with `Retry-After`, and the refusal is audited. The engine fingerprints `value` with the caller's tenant key
+        and returns the decisions of `ruleSet` between `from` (inclusive) and `to` (exclusive)
+        whose input `input` holds that fingerprint, newest first. The plain value travels in the
+        body, so it never appears in a URL or an access log, and it is never stored or echoed.
+        The period is at most 31 days and `limit` (default 50) at most `query.max-page-size`
+        (200); `truncated` is true when more decisions match, so narrow the period. A tenant
+        without a masking key, a period over 31 days or an unknown member is `400 QUERY_INVALID`.
+        The value is fingerprinted with every key the tenant holds, so rows written before a key
+        rotation are found. Writes nothing to the decision log; each search writes one audit entry,
+        `rules.decision-log.masked-input-searched.v1`, without the value or its fingerprint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MaskedInputSearch'
+            example:
+              ruleSet: minor-review
+              input: nationalId
+              value: '079090001234'
+              from: '2027-01-01T00:00:00Z'
+              to: '2027-02-01T00:00:00Z'
+              limit: 50
+      responses:
+        '200':
+          description: The matching decisions, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionSearchResult'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     hostAuth:
@@ -1144,6 +1235,64 @@ components:
         outputs:
           type: object
           additionalProperties: true
+    LoggedDecision:
+      type: object
+      required: [decisionId, ruleSet, version, hitPolicy, outcome, inputs, matchedRuleIds, evaluatedAt, durationMicros]
+      properties:
+        decisionId: { type: string }
+        ruleSet: { type: string }
+        version: { type: integer }
+        hitPolicy: { type: string, enum: [FIRST, UNIQUE, COLLECT] }
+        outcome:
+          type: string
+          enum: [OK, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR]
+          description: OK with an empty matchedRuleIds is a no-match
+        errorCode:
+          type: [string, 'null']
+          description: |
+            Why a decision failed: `EVALUATION_ERROR`, `UNIQUE_HIT_VIOLATION`, or
+            `MASKING_KEY_MISSING` when the rule set masks an input and the tenant has no masking
+            key, or `MASKED_INPUT_IN_OUTPUT` when an output reads an input masked by the tenant
+            default (the decision was refused and no input was logged)
+        inputs:
+          type: object
+          additionalProperties: true
+          description: |
+            The declared inputs as logged. A masked input with a value is a string
+            `hmac:<keyId>:<64 hex digits>`; money is `Money`
+        outputs:
+          type: [object, 'null']
+          additionalProperties: true
+        matchedRuleIds:
+          type: array
+          items: { type: string }
+        callerId: { type: [string, 'null'] }
+        correlationId: { type: [string, 'null'] }
+        evaluatedAt: { type: string, format: date-time }
+        durationMicros: { type: integer, format: int64 }
+    MaskedInputSearch:
+      type: object
+      additionalProperties: false
+      required: [ruleSet, input, value, from, to]
+      properties:
+        ruleSet: { type: string }
+        input: { type: string, description: The masked input's name }
+        value:
+          description: The plain value as it was passed to evaluation; a string, number, boolean or `Money`
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        limit: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    DecisionSearchResult:
+      type: object
+      required: [data, truncated]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoggedDecision'
+        truncated:
+          type: boolean
+          description: True when more decisions match than the limit
     Problem:
       type: object
       required: [type, title, status, code, detail, correlationId]
@@ -1154,11 +1303,11 @@ components:
         code:
           type: string
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
-            SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION,
+            SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, DECISION_NOT_FOUND,
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
             IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
-            DRAFT_AUTHORING_DISABLED]
+            DRAFT_AUTHORING_DISABLED, RATE_LIMITED]
         detail: { type: string }
         correlationId: { type: string }
         violations:

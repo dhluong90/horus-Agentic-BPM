@@ -24,6 +24,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
  * @param authoring how rule changes may be made on this host
+ * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
+ * @param decisionLog what the decision log records
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -35,7 +37,75 @@ public record RuleEngineProperties(
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle,
         @DefaultValue Security security,
-        @DefaultValue Authoring authoring) {
+        @DefaultValue Authoring authoring,
+        @DefaultValue Masking masking,
+        @DefaultValue DecisionLog decisionLog) {
+
+    /**
+     * Keys of the keyed fingerprints (HMAC-SHA256) of masked inputs (RLE-012, RLE-035). Supply every key from an
+     * environment variable or a secret store, never from a file in the repository. A host that needs a key per
+     * tenant from a vault declares its own {@code MaskingPolicy} bean instead.
+     *
+     * @param hmacKey Base64 key of at least 32 bytes after decoding, for every tenant without its own key. When
+     *     unset, the shared {@code horus.bpm.masking.hmac-key} is used. Start-up fails when a rule set masks an input
+     *     and its tenant has no valid key
+     * @param hmacKeyId the id stored in every fingerprint of {@code hmacKey} ({@code hmac:<keyId>:<hex>}), 1 to 32
+     *     letters, digits, {@code _} or {@code -}; default {@code k1}. Not secret. Change it together with the key
+     * @param tenants per-tenant settings, by tenant id; a tenant listed here with a key never uses the host key
+     * @param search limits of the masked-input search
+     */
+    public record Masking(String hmacKey, String hmacKeyId, Map<String, TenantMasking> tenants,
+            @DefaultValue Search search) {
+
+        /** Copies the tenants; unset is empty. */
+        public Masking {
+            tenants = tenants == null ? Map.of() : Map.copyOf(tenants);
+        }
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "Masking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", hmacKeyId=" + hmacKeyId + ", tenants="
+                    + tenants.keySet() + "]";
+        }
+    }
+
+    /**
+     * Limits of the masked-input search ({@code POST /decisions:find-by-masked-input}).
+     *
+     * @param maxPerMinute searches one caller may run per minute on one replica, at least 1; default 30. It cannot be
+     *     switched off. Past it the search is refused with {@code 429 RATE_LIMITED} and the refusal is audited
+     */
+    public record Search(Integer maxPerMinute) {
+    }
+
+    /**
+     * Masking settings of one tenant.
+     *
+     * @param hmacKey the tenant's Base64 key of at least 32 bytes after decoding; unset uses the host key
+     * @param hmacKeyId the id stored in every fingerprint of the tenant's key; default {@code k1}
+     * @param maskDefault whether this tenant's inputs that declare no {@code mask} are masked; unset uses
+     *     {@code decision-log.mask-default}
+     * @param search the tenant's own search limit; unset uses {@code masking.search}
+     */
+    public record TenantMasking(String hmacKey, String hmacKeyId, Boolean maskDefault, Search search) {
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "TenantMasking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", hmacKeyId=" + hmacKeyId
+                    + ", maskDefault=" + maskDefault + "]";
+        }
+    }
+
+    /**
+     * What the decision log records.
+     *
+     * @param maskDefault whether inputs that declare no {@code mask} are masked, for every tenant without its own
+     *     setting; default false. An input with {@code mask: false} is never masked by this default
+     */
+    public record DecisionLog(Boolean maskDefault) {
+    }
 
     /**
      * How rule changes may be made on this host (PD-075, PD-094).

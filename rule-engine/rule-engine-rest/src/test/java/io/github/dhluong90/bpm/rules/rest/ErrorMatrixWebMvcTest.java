@@ -5,6 +5,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
+import io.github.dhluong90.bpm.rules.api.DecisionLogService;
+import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.DraftAuthoringDisabledException;
 import io.github.dhluong90.bpm.rules.api.IdempotencyInFlightException;
@@ -12,6 +14,7 @@ import io.github.dhluong90.bpm.rules.api.IdempotencyKeyReuseException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
 import io.github.dhluong90.bpm.rules.api.NoEffectiveVersionException;
 import io.github.dhluong90.bpm.rules.api.PreconditionRequiredException;
+import io.github.dhluong90.bpm.rules.api.RateLimitedException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.RuleSetExistsException;
 import io.github.dhluong90.bpm.rules.api.SchemaNotReadyException;
@@ -112,7 +115,8 @@ class ErrorMatrixWebMvcTest {
         };
         mvc = MockMvcBuilders.standaloneSetup(
                         new RuleSetController(standIn(VersionService.class), callers),
-                        new DecisionController(standIn(RuleEngine.class), callers))
+                        new DecisionController(standIn(RuleEngine.class), callers),
+                        new DecisionLogController(standIn(DecisionLogService.class), callers))
                 .setControllerAdvice(new ProblemDetails())
                 .build();
     }
@@ -139,6 +143,11 @@ class ErrorMatrixWebMvcTest {
                         s -> s.thrown = new DraftAuthoringDisabledException("card-fee", 2)),
                 new Case("RULE_SET_NOT_FOUND", 404, get("/api/bpm/rules/v1/rule-sets/card-fee"), s -> { }),
                 new Case("VERSION_NOT_FOUND", 404, get("/api/bpm/rules/v1/rule-sets/card-fee/versions/9"), s -> { }),
+                new Case("DECISION_NOT_FOUND", 404, get("/api/bpm/rules/v1/decisions/01KDG7Z0RQ6V2Y8M1C4N5P7T9W"),
+                        s -> {
+                            s.permissions = Set.of("rules:log:read");
+                            s.thrown = new DecisionNotFoundException("01KDG7Z0RQ6V2Y8M1C4N5P7T9W");
+                        }),
                 new Case("NO_EFFECTIVE_VERSION", 404,
                         post("/api/bpm/rules/v1/decisions/card-fee:evaluate").contentType("application/json").content(gold),
                         s -> s.thrown = new NoEffectiveVersionException("card-fee")),
@@ -165,6 +174,14 @@ class ErrorMatrixWebMvcTest {
                 new Case("PRECONDITION_REQUIRED", 428,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:request-publish"),
                         s -> s.thrown = new PreconditionRequiredException(":request-publish")),
+                new Case("RATE_LIMITED", 429,
+                        post("/api/bpm/rules/v1/decisions:find-by-masked-input").contentType("application/json")
+                                .content("{\"ruleSet\":\"minor-review\",\"input\":\"nationalId\",\"value\":\"079203001234\","
+                                        + "\"from\":\"2027-01-01T00:00:00Z\",\"to\":\"2027-01-31T00:00:00Z\"}"),
+                        s -> {
+                            s.permissions = Set.of("rules:masked:search");
+                            s.thrown = new RateLimitedException("At most 30 masked-input searches per minute", 30);
+                        }),
                 new Case("VALIDATION_FAILED", 422,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/yaml").content(yaml),
                         s -> s.thrown = new ValidationFailedException(List.of(new Violation("R3", "fee",
@@ -205,7 +222,12 @@ class ErrorMatrixWebMvcTest {
         assertThat(problem.path("title").asString()).isNotBlank();
         assertThat(problem.path("detail").asString()).isNotBlank();
         assertThat(problem.path("correlationId").asString()).isNotBlank();
-        assertThat(response.getHeader("Retry-After")).isEqualTo("IDEMPOTENCY_IN_FLIGHT".equals(row.code()) ? "1" : null);
+        String retryAfter = switch (row.code()) {
+            case "IDEMPOTENCY_IN_FLIGHT" -> "1";
+            case "RATE_LIMITED" -> "30";
+            default -> null;
+        };
+        assertThat(response.getHeader("Retry-After")).isEqualTo(retryAfter);
         String body = response.getContentAsString(StandardCharsets.UTF_8);
         assertThat(body).doesNotContain("Exception", "\tat ", "java.", "SQL", "rle_");
     }

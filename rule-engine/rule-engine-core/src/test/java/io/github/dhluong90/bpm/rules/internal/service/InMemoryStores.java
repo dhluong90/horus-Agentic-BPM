@@ -13,6 +13,7 @@ import io.github.dhluong90.bpm.rules.internal.store.IdempotencyStore;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
 import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
 import io.github.dhluong90.bpm.rules.internal.store.TransactionRunner;
+import io.github.dhluong90.bpm.rules.internal.store.VersionInputs;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -122,6 +123,34 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     @Override
     public void append(DecisionRecord record) {
         decisions.add(record);
+    }
+
+    @Override
+    public Optional<DecisionRecord> find(String tenantId, String id) {
+        return decisions.stream().filter(d -> d.tenantId().equals(tenantId) && d.id().equals(id)).findFirst();
+    }
+
+    @Override
+    public List<DecisionRecord> findByLoggedInput(String tenantId, String ruleSet, String input, List<String> texts,
+            Instant from, Instant to, int limit) {
+        return decisions.stream()
+                .filter(d -> d.tenantId().equals(tenantId) && d.ruleSet().equals(ruleSet)
+                        && !d.createdAt().isBefore(from) && d.createdAt().isBefore(to))
+                .filter(d -> {
+                    var value = io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(d.maskedInputsJson()).get(input);
+                    return value != null && value.isString() && texts.contains(value.stringValue());
+                })
+                .sorted(Comparator.comparing(DecisionRecord::createdAt).thenComparing(DecisionRecord::id).reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public List<VersionInputs> liveVersionInputs() {
+        return versions.stream().filter(v -> v.status() != VersionStatus.RETIRED)
+                .map(v -> new VersionInputs(v.tenantId(), v.ruleSet(), v.version(),
+                        io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(v.canonicalJson()).get("inputs").toString()))
+                .toList();
     }
 
     @Override
