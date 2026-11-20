@@ -53,6 +53,9 @@ final class AgentResultGuard implements ResultGuard {
     static final String SPEC_INVALID = "GUARD_SPEC_INVALID";
     /** Code of a failed attempt whose output breaks the output schema. */
     static final String SCHEMA_INVALID = "AGENT_SCHEMA_INVALID";
+    /** Marks the node part of a guardrail decision's key; a BPMN node id holds no colon, so no decision step has it. */
+    static final String GUARD_KEY_PREFIX = "guard:";
+
     /** Most reasons kept from a guardrail decision. */
     static final int MAX_REASONS = 20;
     /** Longest reason kept, in characters. */
@@ -134,9 +137,10 @@ final class AgentResultGuard implements ResultGuard {
         if (decisions.isEmpty()) {
             return refused(spec, EVALUATION_ERROR, List.of("RULE_ENGINE_MISSING"), List.of(), null);
         }
-        DecisionOutcome outcome = decisions.get().evaluate(request.tenantId(),
-                request.caller(), spec.decision(), request.output(),
-                request.instanceId());
+        // The engine clock and a key of its own per attempt: the guardrail decision never shares a key with a decision
+        // step, and a retried result transaction for the same attempt replays the logged decision.
+        DecisionOutcome outcome = decisions.get().evaluate(request.tenantId(), request.caller(), spec.decision(),
+                request.output(), clock.instant(), guardKey(request), request.instanceId());
         return switch (outcome) {
             case DecisionOutcome.Matched m when Boolean.TRUE.equals(m.outputs().get("allow")) ->
                     new Verdict.Allow(m.decisionId(), m.ruleIds());
@@ -150,6 +154,14 @@ final class AgentResultGuard implements ResultGuard {
                     refused(spec, EVALUATION_ERROR, List.of(f.code() == null ? "DECISION_FAILED" : f.code()), List.of(),
                             null);
         };
+    }
+
+    /**
+     * @param request the result being checked
+     * @return the idempotency key of the guardrail decision for this attempt
+     */
+    static String guardKey(Request request) {
+        return DecisionKeys.forStep(request.instanceId(), GUARD_KEY_PREFIX + request.nodeId(), request.attemptId());
     }
 
     private static Verdict.Refused refused(Spec spec, String code, List<String> reasons, List<String> ruleIds,

@@ -1007,8 +1007,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             + " is registered in this host", task.id()));
                 }
             } else if (element instanceof BusinessRuleTask task && !invoker.hasRuleEngine()) {
-                problems.add(DefinitionProblem.of("RULE_ENGINE_MISSING", "A businessRuleTask needs the Rule Engine",
-                        task.id()));
+                // ADR-0027: refused at activation, naming the step, so nothing fails at run time.
+                problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "businessRuleTask " + task.id()
+                        + " needs the Rule Engine, which this host does not have", "BusinessRuleTask", task.id(), 0));
             }
         }
         if (!problems.isEmpty()) {
@@ -1348,7 +1349,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         switch (result) {
             case StepResult.Completed completed -> {
                 // The only authoritative check of a result, whichever path reported it (#363).
-                ResultGuard.Verdict verdict = guard(row, job, completed);
+                ResultGuard.Verdict verdict = guard(row, job, attemptId, completed);
                 if (verdict instanceof ResultGuard.Verdict.Invalid invalid) {
                     int allowed = async.runner(job.jobKind(), jobSettings).schemaRetries();
                     int used = schemaRetriesUsed(job);
@@ -1398,14 +1399,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * The tenant is the locked instance row's. Anything the guard throws refuses the result: the check fails closed,
      * and the step's job fails because no reviewer can be read from a guard that broke.
      */
-    private ResultGuard.Verdict guard(InstanceRow row, JobRow job, StepResult.Completed completed) {
+    private ResultGuard.Verdict guard(InstanceRow row, JobRow job, String attemptId, StepResult.Completed completed) {
         ResultGuard guard = guards.getOrDefault(job.jobKind(), ResultGuard.NONE);
         if (guard == ResultGuard.NONE) {
             return new ResultGuard.Verdict.Allow(null, List.of());
         }
         try {
             ResultGuard.Verdict verdict = guard.check(new ResultGuard.Request(row.tenantId(), row.id(), job.nodeId(),
-                    job.jobKind(), Values.readMap(job.payloadJson()), completed.output(),
+                    attemptId, job.jobKind(), Values.readMap(job.payloadJson()), completed.output(),
                     new DecisionCaller.Engine(ASYNC_ACTOR)),
                     async.runner(job.jobKind(), jobSettings).guardBudget());
             return verdict == null ? failClosed("GUARD_NULL_VERDICT") : verdict;
@@ -1913,11 +1914,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         case Effect.CancelJob cancel -> cancelledJobs.add(cancel.jobId());
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             DecisionCaller decisionCaller = switch (as) {
-                                case RunAs.CallerRequest r -> new DecisionCaller.Request();
+                                case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
+                                        callers.currentCallerId());
                                 case RunAs.EngineWork w -> new DecisionCaller.Engine(w.actor());
                             };
                             if (call.kind() == ServiceKind.DECISION) {
-                                // A request evaluates as its caller, so the caller's tenant must be the instance's.
+                                // A request's tenant must be the instance's; the decision adapter checks it again.
                                 // Engine work has no caller: the tenant it fires for must be the instance's. Defence
                                 // in depth only: the row was locked with the job's tenant, so the two are equal; the
                                 // real control is the instance tenant passed explicitly to the decision port.
@@ -1930,7 +1932,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 }
                             }
                             var result = invoker.invoke(state.tenantId(), state.instanceId(), state.businessKey(), call,
-                                    decisionCaller);
+                                    decisionCaller, clock.instant());
                             if (call.kind() == ServiceKind.DECISION
                                     && result instanceof io.github.dhluong90.bpm.process.internal.exec.StepResult.Completed c) {
                                 history.add(new HistoryEntry("DECISION_EVALUATED", call.nodeId(), call.tokenId(),

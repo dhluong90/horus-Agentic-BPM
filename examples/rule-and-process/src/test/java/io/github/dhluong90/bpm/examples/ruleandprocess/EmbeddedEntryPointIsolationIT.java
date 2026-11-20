@@ -9,16 +9,12 @@ import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
-import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import java.lang.reflect.Modifier;
-import java.time.Duration;
 import java.util.Arrays;
-import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -85,10 +81,15 @@ class EmbeddedEntryPointIsolationIT {
         assertThatThrownBy(() -> grant.claim("system:process-engine", new HostController()))
                 .isInstanceOf(SecurityException.class);
 
-        // And a host that builds the Process Engine's own invoker over the grant is refused: it was claimed once
-        RuleEngine ruleEngine = context.getBean(RuleEngine.class);
-        assertThatThrownBy(() -> new LocalServiceInvoker(Map.of(), Optional.of(ruleEngine), Optional.of(grant),
-                Duration.ofSeconds(5))).isInstanceOf(IllegalStateException.class);
+        // And the registered claimant is the process starter's decision port, which host code cannot create: the class
+        // and its constructor are package-private (ADR-0027)
+        assertThat(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.REGISTERED_CLAIMANTS)
+                .containsEntry("system:process-engine", "io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort");
+        Class<?> claimant = assertDoesNotThrowClass("io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort");
+        assertThat(Modifier.isPublic(claimant.getModifiers())).isFalse();
+        assertThat(Arrays.stream(claimant.getDeclaredConstructors())
+                .noneMatch(c -> Modifier.isPublic(c.getModifiers()) || Modifier.isProtected(c.getModifiers())))
+                .isTrue();
     }
 
     @Test
@@ -100,6 +101,8 @@ class EmbeddedEntryPointIsolationIT {
         assertThat(DecisionCaller.class.getPackage().isSealed()).isTrue();
         assertThat(RuleEngines.class.getPackage().isSealed()).isTrue();
         assertThat(TenantScopedRuleEngine.class.getPackage().isSealed()).isTrue();
+        Class<?> claimant = assertDoesNotThrowClass("io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort");
+        assertThat(claimant.getPackage().isSealed()).as("the decision port's package in the process starter jar").isTrue();
 
         // When host code in process.internal.service, which would build the decision port over a grant of its own
         // and ask for engine work in bank-b, is loaded
@@ -107,6 +110,21 @@ class EmbeddedEntryPointIsolationIT {
                 "io.github.dhluong90.bpm.process.internal.service.SplitPackageAttacker"))
                 .isInstanceOf(SecurityException.class)
                 .hasMessageContaining("sealing violation");
+
+        // And host code beside the decision port in the starter's package, which would build the registered claimant
+        // over a grant of its own and evaluate in bank-b, is refused too
+        assertThatThrownBy(() -> Class.forName(
+                "io.github.dhluong90.bpm.process.autoconfigure.ClaimantSplitPackageAttacker"))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("sealing violation");
+    }
+
+    private static Class<?> assertDoesNotThrowClass(String name) {
+        try {
+            return Class.forName(name, false, EmbeddedEntryPointIsolationIT.class.getClassLoader());
+        } catch (ClassNotFoundException e) {
+            throw new AssertionError(name + " is not on the class path", e);
+        }
     }
 
     @Test
@@ -119,14 +137,15 @@ class EmbeddedEntryPointIsolationIT {
                 java.time.Clock.systemUTC(), io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults());
         EmbeddedEngineGrant grant = own.openEmbeddedEngineGrant();
 
-        // When the host claims it, then it is refused: only the Process Engine's sealed, package-private port can
+        // When the host claims it, then it is refused: only the process starter's sealed, package-private port can
         assertThatThrownBy(() -> grant.claim("system:process-engine", new HostController()))
                 .isInstanceOf(SecurityException.class);
     }
 
     @Test
     void TR_TEN_01_host_code_cannot_ask_for_engine_work() {
-        // Only the engine's timer path builds an engine caller, so an invoker in host hands cannot use the entry point
+        // Only the engine's timer path builds an engine caller (defence in depth: no invoker in host hands holds the
+        // decision port, which only the process starter builds)
         assertThat(Arrays.stream(DecisionCaller.Engine.class.getDeclaredConstructors())
                 .noneMatch(c -> Modifier.isPublic(c.getModifiers()) || Modifier.isProtected(c.getModifiers())))
                 .isTrue();

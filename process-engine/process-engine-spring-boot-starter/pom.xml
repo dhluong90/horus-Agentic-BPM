@@ -17,6 +17,16 @@
       <artifactId>process-engine-core</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!--
+      ADR-0027: optional. With it and a RuleEngine bean, business rule tasks evaluate through the decision port;
+      without it, the Process Engine runs alone and a definition with a business rule task is refused at activation.
+    -->
+    <dependency>
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>rule-engine-core</artifactId>
+      <version>${project.version}</version>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>io.github.dhluong90.bpm</groupId>
       <artifactId>process-engine-bpmn</artifactId>
@@ -84,6 +94,49 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <!--
+      Decision steps on PostgreSQL with this starter's decision port (PRE-046, PRE-055, PRE-056): the storage module's
+      test harness, the real Rule Engine and the test clock. Tests only.
+    -->
+    <dependency>
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>process-engine-postgres</artifactId>
+      <version>${project.version}</version>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>process-engine-test</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>rule-engine-postgres</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
   <build>
     <resources>
@@ -105,6 +158,43 @@
       </resource>
     </resources>
     <plugins>
+      <!--
+        The decision tests on PostgreSQL run after the package phase, against the starter jar: the Rule Engine grants
+        its entry point only to a decision port from a sealed jar of its own version (#336).
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <!-- This module's own jar, not target/classes (the parent's default): sealing and the version are in it. -->
+          <classesDirectory>${project.build.directory}/${project.build.finalName}.jar</classesDirectory>
+        </configuration>
+      </plugin>
+      <plugin>
+        <!--
+          #336: sealed package. The decision port is the registered claimant of the Rule Engine's tenant-scoped entry
+          point; on a class path the JVM refuses a class in this package from any other jar or directory, so host code
+          cannot define a class beside it to reach its package-private constructor.
+        -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <!-- The Rule Engine grants its entry point only to a claimant whose jar carries its own version (#336). -->
+            <manifest>
+              <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+            </manifest>
+            <manifestSections>
+              <manifestSection>
+                <name>io/github/dhluong90/bpm/process/autoconfigure/</name>
+                <manifestEntries>
+                  <Sealed>true</Sealed>
+                </manifestEntries>
+              </manifestSection>
+            </manifestSections>
+          </archive>
+        </configuration>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>

@@ -126,10 +126,10 @@ class RuleEngineAutoConfigurationTest {
 
     @Test
     void TR_TEN_01_a_same_named_decision_port_in_an_unsealed_package_gets_no_grant_and_the_host_keeps_running() {
-        // Given a class named like the Process Engine's decision port, from this module's test class directory: its
+        // Given a class named like the process starter's decision port, from this module's test class directory: its
         // package is not sealed and it carries no Implementation-Version, as in a host with only the Rule Engine
         // starter that defines the class itself
-        assertThat(io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort.class.getPackage().isSealed())
+        assertThat(io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort.class.getPackage().isSealed())
                 .isFalse();
 
         runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
@@ -144,7 +144,7 @@ class RuleEngineAutoConfigurationTest {
     void TR_TEN_01_without_the_process_engine_there_is_no_grant() {
         runner.withUserConfiguration(HostWithEngineStandIns.class)
                 .withClassLoader(new org.springframework.boot.test.context.FilteredClassLoader(
-                        io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort.class))
+                        io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort.class))
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class);

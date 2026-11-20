@@ -4,12 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-import io.github.dhluong90.bpm.rules.api.Money;
-import io.github.dhluong90.bpm.rules.internal.expr.EvaluationException;
-import io.github.dhluong90.bpm.rules.internal.expr.Evaluator;
-import io.github.dhluong90.bpm.rules.internal.expr.ExpressionError;
-import io.github.dhluong90.bpm.rules.internal.expr.ExpressionException;
-import io.github.dhluong90.bpm.rules.internal.expr.Parser;
+import io.github.dhluong90.bpm.expr.api.Money;
+import io.github.dhluong90.bpm.expr.internal.EvaluationException;
+import io.github.dhluong90.bpm.expr.internal.Evaluator;
+import io.github.dhluong90.bpm.expr.internal.ExpressionError;
+import io.github.dhluong90.bpm.expr.internal.ExpressionException;
+import io.github.dhluong90.bpm.expr.internal.Parser;
 import io.github.dhluong90.bpm.rules.internal.model.InputClause;
 import io.github.dhluong90.bpm.rules.internal.model.ValueType;
 import io.github.dhluong90.bpm.testing.property.Gen;

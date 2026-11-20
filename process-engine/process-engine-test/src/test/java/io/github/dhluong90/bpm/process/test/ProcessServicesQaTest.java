@@ -3,7 +3,7 @@ package io.github.dhluong90.bpm.process.test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
@@ -18,6 +18,8 @@ import io.github.dhluong90.bpm.process.internal.exec.Token;
 import io.github.dhluong90.bpm.process.internal.exec.TokenStatus;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
+import io.github.dhluong90.bpm.process.internal.service.DecisionOutcome;
+import io.github.dhluong90.bpm.process.internal.service.DecisionPort;
 import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
@@ -185,21 +187,100 @@ class ProcessServicesQaTest {
                 .build();
     }
 
-    private static io.github.dhluong90.bpm.rules.api.RuleEngine ruleEngine(AtomicInteger evaluations) {
-        return new io.github.dhluong90.bpm.rules.api.RuleEngine() {
+    /** A decision engine stand-in: every evaluation matches with a zero fee. */
+    private static DecisionPort ruleEngine(AtomicInteger evaluations) {
+        return (tenantId, caller, decisionRef, inputs, evaluationTime, idempotencyKey, correlationId) -> {
+            evaluations.incrementAndGet();
+            return new DecisionOutcome.Matched("01JDDECISION00000000000000", Map.of("fee", Money.ofMinor("VND", 0)));
+        };
+    }
+
+    // ---- a host with the Process Engine only (ADR-0027) -------------------------------------------------------
+
+    @Test
+    void a_host_with_the_process_engine_only_runs_gateway_conditions_with_no_rule_engine_class() {
+        // Given a host whose class path has no Rule Engine at all
+        assertThatThrownBy(() -> Class.forName("io.github.dhluong90.bpm.rules.api.RuleEngine"))
+                .isInstanceOf(ClassNotFoundException.class);
+        List<String> visited = new ArrayList<>();
+        ServiceTaskHandler record = new ServiceTaskHandler() {
             @Override
-            public io.github.dhluong90.bpm.rules.api.DecisionResult evaluate(String ruleSet, io.github.dhluong90.bpm.rules.api.DecisionInput input) {
-                return evaluate(io.github.dhluong90.bpm.rules.api.DecisionRequest.of(ruleSet, input));
+            public String name() {
+                return "review.record";
             }
 
             @Override
-            public io.github.dhluong90.bpm.rules.api.DecisionResult evaluate(io.github.dhluong90.bpm.rules.api.DecisionRequest request) {
-                evaluations.incrementAndGet();
-                return new io.github.dhluong90.bpm.rules.api.DecisionResult("01JDDECISION00000000000000", request.ruleSet(), 1,
-                        Instant.parse("2027-01-04T09:00:00Z"), new io.github.dhluong90.bpm.rules.api.DecisionResult.Matched(
-                                List.of("R1"), Map.of("fee", Money.ofMinor("VND", 0))));
+            public HandlerResult handle(ServiceCall call) {
+                visited.add(call.nodeId());
+                return HandlerResult.completed(Map.of());
             }
         };
+        // and a card limit review: 100,000,000 VND or more for a customer who is not GOLD goes to a senior reviewer
+        Process review = BpmnModelBuilder.process("card-limit-review")
+                .startEvent("start")
+                .exclusiveGateway("amount-check", "amount-check__standard")
+                .serviceTask("senior-review", "review.record", Map.of(), "senior")
+                .serviceTask("standard-review", "review.record", Map.of(), "standard")
+                .endEvent("end")
+                .chain("start", "amount-check")
+                .flow("amount-check__senior", "amount-check", "senior-review",
+                        "amount >= 100000000 VND and customer.tier != 'GOLD'")
+                .flow("amount-check__standard", "amount-check", "standard-review")
+                .chain("senior-review", "end")
+                .chain("standard-review", "end")
+                .build();
+        ProcessServices services = services(review, record);
+
+        // When the definition is activated and two instances run
+        services.importAtStartup("bank-a", new ImportRequest(SourceFormat.BPMN_XML,
+                "review".getBytes(StandardCharsets.UTF_8), null));
+        services.start(StartRequest.of("card-limit-review").withVariables(Map.of(
+                "amount", Money.ofMinor("VND", 150_000_000), "customer", Map.of("tier", "SILVER"))));
+        services.start(StartRequest.of("card-limit-review").withVariables(Map.of(
+                "amount", Money.ofMinor("VND", 150_000_000), "customer", Map.of("tier", "GOLD"))));
+
+        // Then the conditions are evaluated by the shared expression library: SILVER to senior, GOLD to standard
+        assertThat(visited).containsExactly("senior-review", "standard-review");
+    }
+
+    @Test
+    void a_business_rule_task_without_a_rule_engine_is_refused_at_activation_naming_the_step() {
+        // Given a host with no decision engine, When a definition with a business rule task is activated
+        ProcessServices services = services(pricing(), () -> "bank-a", Optional.empty(), event -> { });
+
+        // Then it is refused with BPMN_NOT_EXECUTABLE naming the step and the reason, so nothing fails at run time
+        assertThatThrownBy(() -> services.importAtStartup("bank-a", new ImportRequest(SourceFormat.BPMN_XML,
+                "p".getBytes(StandardCharsets.UTF_8), null)))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.ValidationFailedException.class)
+                .satisfies(e -> assertThat(((io.github.dhluong90.bpm.process.api.ValidationFailedException) e)
+                        .problems()).singleElement().satisfies(problem -> {
+                            assertThat(problem.code()).isEqualTo("BPMN_NOT_EXECUTABLE");
+                            assertThat(problem.elementId()).isEqualTo("price");
+                            assertThat(problem.message()).contains("price").contains("Rule Engine");
+                        }));
+    }
+
+    @Test
+    void a_decision_step_gets_the_engine_clock_and_a_key_from_instance_node_and_attempt() {
+        List<Object[]> calls = new ArrayList<>();
+        DecisionPort recording = (tenantId, caller, decisionRef, inputs, evaluationTime, idempotencyKey,
+                correlationId) -> {
+            calls.add(new Object[] {tenantId, caller, evaluationTime, idempotencyKey, correlationId});
+            return new DecisionOutcome.Matched("01JDDECISION00000000000000", Map.of("fee", Money.ofMinor("VND", 0)));
+        };
+        ProcessServices services = services(pricing(), () -> "bank-a", Optional.of(recording), event -> { });
+        services.importAtStartup("bank-a", new ImportRequest(SourceFormat.BPMN_XML, "p".getBytes(StandardCharsets.UTF_8), null));
+
+        String instanceId = services.start(StartRequest.of("pricing").withIdempotencyKey("k-clock")).id();
+
+        assertThat(calls).singleElement().satisfies(call -> {
+            assertThat(call[0]).isEqualTo("bank-a");
+            assertThat(call[1]).isEqualTo(new io.github.dhluong90.bpm.process.internal.service.DecisionCaller.Request(
+                    "bank-a", "tuan"));
+            assertThat(call[2]).isEqualTo(clock.instant());
+            assertThat((String) call[3]).startsWith("pe:" + instanceId + ":price:").hasSizeLessThanOrEqualTo(200);
+            assertThat(call[4]).isEqualTo(instanceId);
+        });
     }
 
     @Test
@@ -315,7 +396,7 @@ class ProcessServicesQaTest {
     // ---- wiring ---------------------------------------------------------------------------------------------
 
     private ProcessServices services(Process process, io.github.dhluong90.bpm.process.spi.TenantResolver tenants,
-            Optional<io.github.dhluong90.bpm.rules.api.RuleEngine> rules, io.github.dhluong90.bpm.process.spi.ProcessEventPublisher events) {
+            Optional<DecisionPort> rules, io.github.dhluong90.bpm.process.spi.ProcessEventPublisher events) {
         CallerResolver caller = new CallerResolver() {
             @Override
             public String currentCallerId() {

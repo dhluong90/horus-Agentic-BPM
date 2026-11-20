@@ -7,7 +7,7 @@ import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
@@ -123,6 +123,46 @@ class TenantScopedEvaluationTest {
         // Then the decision is logged as the engine, not as the thread's caller
         assertThat(stores.decisions).singleElement()
                 .satisfies(row -> assertThat(row.callerId()).isEqualTo("system:process-engine"));
+    }
+
+    @Test
+    void PRE_046_a_process_step_is_logged_on_behalf_of_its_user_at_the_engine_clock_and_replayed_on_retry() {
+        // Given card-fee in bank-a, and a thread with no caller
+        publishCardFee("bank-a");
+        caller.become(null, null, Set.of());
+        Instant step = Instant.parse("2026-12-15T02:00:00Z");
+        DecisionRequest keyed = gold.withIdempotencyKey("pe:01JD2X5K9T1Q4N8V2M7B3C6D0E:price:01JD2X5K9T1Q4N8V2M7B3C6D0F");
+
+        // When the step evaluates on behalf of tuan at the engine clock, and is retried an hour later with the same key
+        DecisionResult first = scoped.evaluate("bank-a", "tuan", step, keyed);
+        DecisionResult retried = scoped.evaluate("bank-a", "tuan", step.plusSeconds(3600), keyed);
+
+        // Then one row, as the engine on behalf of tuan, reasoning about the step's instant; the retry replays it
+        assertThat(stores.decisions).singleElement().satisfies(row -> {
+            assertThat(row.callerId()).isEqualTo("system:process-engine");
+            assertThat(row.onBehalfOf()).isEqualTo("tuan");
+            assertThat(row.evalClock()).isEqualTo(step);
+            assertThat(row.pinned()).isFalse();
+        });
+        assertThat(retried.decisionId()).isEqualTo(first.decisionId());
+        assertThat(retried.clock()).isEqualTo(step);
+    }
+
+    @Test
+    void PRE_046_a_step_after_a_timer_is_on_behalf_of_nobody_and_a_chosen_clock_or_pin_is_still_refused() {
+        publishCardFee("bank-a");
+        Instant step = Instant.parse("2026-12-15T02:00:00Z");
+
+        scoped.evaluate("bank-a", null, step, gold);
+
+        assertThat(stores.decisions).singleElement().satisfies(row -> assertThat(row.onBehalfOf()).isNull());
+        assertThatThrownBy(() -> scoped.evaluate("bank-a", "tuan", step, gold.withClock(step)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scoped.evaluate("bank-a", "tuan", step, gold.withVersion(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scoped.evaluate("bank-a", " ", step, gold))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(stores.decisions).hasSize(1);
     }
 
     @Test

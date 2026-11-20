@@ -54,18 +54,22 @@ interface ResultGuard {
      * @param tenantId the instance's tenant, read from the locked instance row
      * @param instanceId the instance
      * @param nodeId the step
+     * @param attemptId the attempt whose result this is; a guardrail decision's idempotency key is derived from it,
+     *     so a result transaction retried for the same attempt replays the logged decision
      * @param jobKind the job kind
      * @param payload the job payload written when the step parked, with its {@code guard} spec
      * @param output the result
      * @param caller who a guardrail decision runs for: always engine work, built by {@link ProcessServices} from the
      *     locked row (#336), never the completion API's caller
      */
-    record Request(String tenantId, String instanceId, String nodeId, String jobKind, Map<String, Object> payload,
-            Map<String, Object> output, DecisionCaller caller) {
+    record Request(String tenantId, String instanceId, String nodeId, String attemptId, String jobKind,
+            Map<String, Object> payload, Map<String, Object> output, DecisionCaller caller) {
 
         public Request {
             Objects.requireNonNull(tenantId, "tenantId must not be null");
             Objects.requireNonNull(instanceId, "instanceId must not be null");
+            Objects.requireNonNull(nodeId, "nodeId must not be null");
+            Objects.requireNonNull(attemptId, "attemptId must not be null");
             Objects.requireNonNull(caller, "caller must not be null");
             payload = payload == null ? Map.of() : payload;
             output = output == null ? Map.of() : output;

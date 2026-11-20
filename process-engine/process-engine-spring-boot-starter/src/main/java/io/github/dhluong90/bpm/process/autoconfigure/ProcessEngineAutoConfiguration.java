@@ -5,8 +5,6 @@ import io.github.dhluong90.bpm.host.autoconfigure.RetireApproval;
 import io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
-import io.github.dhluong90.bpm.rules.api.RuleEngine;
-import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
@@ -17,7 +15,7 @@ import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.internal.exec.BehaviorCatalog;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
-import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
+import io.github.dhluong90.bpm.process.internal.service.DecisionPort;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
@@ -51,6 +49,7 @@ import java.util.Optional;
 import javax.sql.DataSource;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -256,7 +255,9 @@ public class ProcessEngineAutoConfiguration {
 
     /**
      * The engine's services. Never lazy: the decision port inside claims the Rule Engine's tenant-scoped entry point
-     * while beans are created, before the Rule Engine starter closes unclaimed identities (#336).
+     * while beans are created, before the Rule Engine starter closes unclaimed identities (#336). The claim and the
+     * start-up check that it happened are in {@link RuleEngineDecisions}, the only class here that names Rule Engine
+     * types.
      */
     @Bean
     @Lazy(false)
@@ -264,8 +265,8 @@ public class ProcessEngineAutoConfiguration {
     ProcessServices processEngineServices(ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
             JdbcJobStore jobs, JobSettings jobSettings, AsyncSettings async, ObjectProvider<ServiceAdapter> adapters,
-            ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
-            ObjectProvider<EmbeddedEngineGrant> ruleEngineGrant, ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
+            ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
+            ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
             OutputSchemaValidator outputSchemas) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
@@ -281,14 +282,10 @@ public class ProcessEngineAutoConfiguration {
         SubsetBpmnReader reader = new SubsetBpmnReader(new Limits(properties.definitions().maxBytes(),
                 Limits.DEFAULTS.maxDepth(), Limits.DEFAULTS.maxElements(), Limits.DEFAULTS.maxForeignFragmentBytes(),
                 Limits.DEFAULTS.maxTextChars(), Limits.DEFAULTS.maxAttributeChars()));
-        EmbeddedEngineGrant grant = ruleEngineGrant.getIfUnique();
-        LocalServiceInvoker invoker = new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
-                Optional.ofNullable(grant), properties.handlers().slowCallWarning());
-        requireEngineWorkClaimed(grant);
         return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
                 Map.of(SourceFormat.BPMN_XML, new SubsetBpmnWriter()::write),
-                invoker, publisher,
+                new LocalServiceInvoker(byName, decisions(beans), properties.handlers().slowCallWarning()), publisher,
                 properties.toSettings(EngineSettings.ApproverRule.valueOf(ApproverMustDifferFrom.from(environment).name()),
                         EngineSettings.RetireLastVersionRule.valueOf(RetireLastVersion.from(environment).name())),
                 BehaviorCatalog.registry(),
@@ -334,17 +331,16 @@ public class ProcessEngineAutoConfiguration {
     }
 
     /**
-     * With the Rule Engine's grant present, the decision port must have claimed the tenant-scoped entry point. If it
-     * did not, because no {@code RuleEngine} bean exists or another party claimed first, start-up fails (#336).
-     *
-     * @param grant the Rule Engine's grant, or null without one
+     * The decision port over the Rule Engine when it is on the class path and the host has a {@code RuleEngine}
+     * (ADR-0027); empty otherwise, and a definition with a business rule task is then refused at activation. The Rule
+     * Engine dependency is optional: {@link RuleEngineDecisions} is loaded only once its class is known to exist.
      */
-    static void requireEngineWorkClaimed(EmbeddedEngineGrant grant) {
-        if (grant != null && !grant.isClaimed(DecisionCaller.ENGINE_IDENTITY)) {
-            throw new IllegalStateException("The Rule Engine offers the tenant-scoped entry point, but the Process "
-                    + "Engine did not claim it; decisions after a timer could not run (#336). Is a RuleEngine bean "
-                    + "defined?");
+    private static Optional<DecisionPort> decisions(BeanFactory beans) {
+        ClassLoader loader = ProcessEngineAutoConfiguration.class.getClassLoader();
+        if (!org.springframework.util.ClassUtils.isPresent(RuleEngineDecisions.RULE_ENGINE_CLASS, loader)) {
+            return Optional.empty();
         }
+        return RuleEngineDecisions.from(beans);
     }
 
     /**
