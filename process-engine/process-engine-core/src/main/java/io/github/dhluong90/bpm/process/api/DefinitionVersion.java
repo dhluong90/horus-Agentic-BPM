@@ -16,12 +16,14 @@ import java.util.Objects;
  * @param sourceHash SHA-256 of the source bytes
  * @param nodeCount number of flow nodes
  * @param approvedBy approver, {@code system:dev-auto-approve} on the dev profile, or null
+ * @param approvedAt when it was approved, or null
+ * @param effectiveFrom when it takes effect, or null while not approved
  * @param createdBy the importing identity
  * @param createdAt when it was imported
  */
 public record DefinitionVersion(String id, String key, int version, String status, String name,
         String definitionHash, SourceFormat sourceFormat, String sourceHash, int nodeCount, String approvedBy,
-        String createdBy, Instant createdAt) {
+        Instant approvedAt, Instant effectiveFrom, String createdBy, Instant createdAt) {
 
     public DefinitionVersion {
         Objects.requireNonNull(id, "id must not be null");
