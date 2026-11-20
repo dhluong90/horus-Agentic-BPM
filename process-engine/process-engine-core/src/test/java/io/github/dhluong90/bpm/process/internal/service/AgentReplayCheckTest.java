@@ -243,6 +243,62 @@ class AgentReplayCheckTest {
     }
 
     @Test
+    void PRE_092_a_type_change_on_a_masked_field_is_not_replayed() {
+        // Given a candidate schema that changes only the type of the masked summary
+        Map<String, Object> retyped = new LinkedHashMap<>(SCHEMA);
+        retyped.put("properties", Map.of("documentType", Map.of("type", "string"), "confidence",
+                Map.of("type", "number"), "summary", Map.of("type", "integer", "mask", true)));
+
+        // When an allowed answer is checked
+        AgentReplayCase line = check(retyped).check("bank-a", accepted("0.95",
+                Map.of("guard", guard("route-to-human"))), false);
+
+        // Then the check never saw the summary's type, so the line is not replayed
+        assertThat(line.change()).isEqualTo("NOT_REPLAYED");
+        assertThat(line.code()).isEqualTo("MASKED_INPUT_REQUIRED");
+    }
+
+    @Test
+    void PRE_092_a_combinator_or_pattern_rule_that_could_match_a_masked_field_is_not_replayed() {
+        // Given candidate schemas that add allOf, patternProperties and propertyNames rules without touching properties
+        for (Map.Entry<String, Object> rule : Map.<String, Object>of(
+                "allOf", List.of(Map.of("properties", Map.of("summary", Map.of("minLength", 20)))),
+                "patternProperties", Map.of("^sum.*", Map.of("minLength", 20)),
+                "propertyNames", Map.of("maxLength", 12)).entrySet()) {
+            Map<String, Object> candidateSchema = new LinkedHashMap<>(SCHEMA);
+            candidateSchema.put(rule.getKey(), rule.getValue());
+
+            // When an allowed answer with the masked summary is checked
+            AgentReplayCase line = check(candidateSchema).check("bank-a", accepted("0.95",
+                    Map.of("guard", guard("route-to-human"))), false);
+
+            // Then it is not replayed
+            assertThat(line.code()).as(rule.getKey()).isEqualTo("MASKED_INPUT_REQUIRED");
+            assertThat(line.change()).as(rule.getKey()).isEqualTo("NOT_REPLAYED");
+        }
+    }
+
+    @Test
+    void PRE_092_an_answer_the_recorded_schema_refused_is_not_replayed_with_masked_fields() {
+        // Given an answer recorded as refused by the schema (a summary too long), with the summary masked in history
+        RecordedAnswer answer = new RecordedAnswer(NOV_3, "01H0000000000000000000000D", "I-4", "ASYNC_RESULT_REFUSED",
+                "A-4", Map.of("route", "review", "code", "AGENT_SCHEMA_INVALID", "output", Map.of("documentType",
+                        "PASSPORT", "confidence", new BigDecimal("0.95"), "summary", "***")),
+                Map.of("guard", guard("route-to-human")));
+
+        // When it is checked against the same schema, with and without a candidate schema
+        AgentReplayCase same = check(null).check("bank-a", answer, false);
+        AgentReplayCase candidateSchema = check(SCHEMA).check("bank-a", answer, false);
+
+        // Then it is not NEWLY_ALLOWED: the refusing field is unknown, so the line is not replayed
+        assertThat(List.of(same, candidateSchema)).allSatisfy(line -> {
+            assertThat(line.change()).isEqualTo("NOT_REPLAYED");
+            assertThat(line.code()).isEqualTo("MASKED_INPUT_REQUIRED");
+        });
+        assertThat(simulated).isEmpty();
+    }
+
+    @Test
     void PRE_092_an_answer_with_nothing_masked_is_replayed_whatever_the_candidate_reads() {
         // Given a candidate that reads the summary and an answer whose summary was kept in plain text
         Map<String, Object> plain = new LinkedHashMap<>(Map.of("documentType", "PASSPORT", "confidence",
