@@ -61,7 +61,16 @@ public final class CanonicalProcessWriter {
                 case EndEvent e -> step.put("type", "end");
                 case ServiceTask t -> {
                     step.put("type", "serviceTask");
-                    t.extensions().first(HandlerRef.class).ifPresent(h -> step.put("handler", h.handler()));
+                    t.extensions().first(HandlerRef.class).ifPresent(h -> {
+                        step.put("handler", h.handler());
+                        // Only a remote step adds keys, so the hash of every local step stays what it was.
+                        if ("remote".equals(h.mode())) {
+                            step.put("mode", "remote");
+                            if (h.timeout() != null) {
+                                step.put("timeout", h.timeout().toString());
+                            }
+                        }
+                    });
                 }
                 case BusinessRuleTask t -> {
                     step.put("type", "decision");

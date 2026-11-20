@@ -19,15 +19,19 @@ import java.time.temporal.ChronoUnit;
  * a {@code matches} past one of its bounds ({@link BoundedRegex}).
  * An evaluator made by a constructor is stateless and thread-safe, and gives each {@code matches} a decision budget
  * of its own. An evaluator made by {@link #forDecision()} charges every {@code matches} it runs to one budget of
- * {@code evaluation.regex-max-reads-per-decision} and belongs to the thread evaluating that decision.
+ * {@code evaluation.regex-max-reads-per-decision} and belongs to the thread evaluating that decision; it also charges
+ * every node it visits to the decision's step budget ({@link EvaluationLimits}, {@code EVALUATION_BUDGET_EXCEEDED}).
  */
 public final class Evaluator {
 
     private final RoundingMode moneyRounding;
     private final int maxStringLength;
     private final RegexLimits regexLimits;
+    private final EvaluationLimits evaluationLimits;
     /** The read budget of the decision this evaluator is scoped to, or null for a shared evaluator. */
     private final DecisionReads decision;
+    /** The step budget of the decision this evaluator is scoped to, or null for a shared evaluator. */
+    private final EvaluationLimits.DecisionSteps steps;
 
     /**
      * Creates an evaluator with the default string bound.
@@ -56,28 +60,47 @@ public final class Evaluator {
      * @param regexLimits the length and time bounds of {@code matches}
      */
     public Evaluator(RoundingMode moneyRounding, int maxStringLength, RegexLimits regexLimits) {
+        this(moneyRounding, maxStringLength, regexLimits, EvaluationLimits.defaults());
+    }
+
+    /**
+     * Creates an evaluator with regular expression bounds and the step budget of a decision.
+     *
+     * @param moneyRounding rounding of money multiplication and division
+     * @param maxStringLength the longest string {@code +} may build; longer is {@link EvaluationException}
+     * @param regexLimits the length and time bounds of {@code matches}
+     * @param evaluationLimits the step budget and time backstop of one decision, applied by {@link #forDecision()}
+     */
+    public Evaluator(RoundingMode moneyRounding, int maxStringLength, RegexLimits regexLimits,
+            EvaluationLimits evaluationLimits) {
         this.moneyRounding = moneyRounding;
         this.maxStringLength = maxStringLength;
         this.regexLimits = java.util.Objects.requireNonNull(regexLimits, "regexLimits must not be null");
+        this.evaluationLimits = java.util.Objects.requireNonNull(evaluationLimits, "evaluationLimits must not be null");
         this.decision = null;
+        this.steps = null;
     }
 
-    private Evaluator(Evaluator shared, DecisionReads decision) {
+    private Evaluator(Evaluator shared, DecisionReads decision, EvaluationLimits.DecisionSteps steps) {
         this.moneyRounding = shared.moneyRounding;
         this.maxStringLength = shared.maxStringLength;
         this.regexLimits = shared.regexLimits;
+        this.evaluationLimits = shared.evaluationLimits;
         this.decision = decision;
+        this.steps = steps;
     }
 
     /**
      * Returns an evaluator for one decision: every {@code matches} it runs reads from one budget of
-     * {@code evaluation.regex-max-reads-per-decision} characters (RLE-007). Use it on one thread, for one decision.
+     * {@code evaluation.regex-max-reads-per-decision} characters (RLE-007), and every node it visits is charged to
+     * one step budget ({@link EvaluationLimits}). Use it on one thread, for one decision.
      *
      * @return an evaluator scoped to a fresh decision budget
      */
     public Evaluator forDecision() {
-        return new Evaluator(this, regexLimits.newDecision());
+        return new Evaluator(this, regexLimits.newDecision(), evaluationLimits.newDecision());
     }
+
 
     /**
      * Returns an evaluator for one decision of a request of many decisions: every {@code matches} it runs reads from
@@ -88,7 +111,7 @@ public final class Evaluator {
      * @return an evaluator scoped to a fresh decision budget that charges the request
      */
     public Evaluator forDecision(RequestReads request) {
-        return new Evaluator(this, regexLimits.newDecision(request));
+        return new Evaluator(this, regexLimits.newDecision(request), evaluationLimits.newDecision());
     }
 
     /**
@@ -100,6 +123,9 @@ public final class Evaluator {
      * @throws EvaluationException on a deterministic failure
      */
     public Object evaluate(Expr expr, Object[] slots) {
+        if (steps != null) {
+            steps.charge();
+        }
         return switch (expr) {
             case Expr.Literal literal -> literal.value();
             case Expr.Var var -> slots[var.slot()];

@@ -1,0 +1,28 @@
+# The card fee table with three mistakes, for the validation demo (RLE-004). Importing it is refused with
+# 422 VALIDATION_FAILED and three violations, one per row; nothing is stored.
+#   R1 reads creditScoreX, which is not an input         -> UNKNOWN_INPUT
+#   R2 adds 100 (a number) to balance (money)            -> TYPE_MISMATCH
+#   R3 holds a Java method call                          -> FORBIDDEN_CONSTRUCT, never evaluated
+schemaVersion: 1
+ruleSet: card-fee-broken
+description: Monthly card fee, with three authoring mistakes
+hitPolicy: first
+
+inputs:
+  - { name: tier,        type: string }
+  - { name: creditScore, type: integer }
+  - { name: balance,     type: money }
+
+outputs:
+  - { name: fee, type: money }
+
+rules:
+  - id: R1
+    when: { creditScore: "creditScoreX > 600" }
+    then: { fee: "0 VND" }
+  - id: R2
+    when: { balance: "balance + 100 > 0" }
+    then: { fee: "10000 VND" }
+  - id: R3
+    when: { tier: "T(java.lang.Runtime).getRuntime()" }
+    then: { fee: "50000 VND" }

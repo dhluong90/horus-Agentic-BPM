@@ -1,6 +1,6 @@
 # ADR-0008: External steps run as Async Wait-State with a lease, never inside a database transaction
 
-- Status: accepted, 2026-11-19
+- Status: accepted, 2026-11-19; amended 2026-11-20
 - Date: 2026-11-18 (proposed), 2026-11-19 (accepted)
 - Deciders: maintainers; accepted by the product owner (PD-029)
 - Module: process-engine
@@ -26,9 +26,19 @@ Lease length, within option 1:
 
 B is chosen because the timeout already bounds every call, so a lease derived from it is correct without extra writes. The longer crash recovery for long steps is acceptable: the same step legitimately takes up to its timeout. C is revisited only if steps with timeouts above about 15 minutes appear, where crash recovery latency would matter. Timers and SLA escalations make no external call and keep a fixed lease (`jobs.timer-lease`, default 60 s).
 
+## Amendment, 2026-11-20 (#51)
+The first implementation, for the remote `serviceTask`, differs from the decision above in five points. They replace the matching text above.
+
+1. **Clock.** Lease ends and due times come from the engine `Clock` the host provides (the same clock as every other engine timestamp), passed into the claim and result statements, not from the database's `now()`. All replicas of a host must run on synchronised clocks; the lease margin absorbs small skew.
+2. **Matching a result to its claim.** TX2 locks the instance row, then the job row, and accepts a result only when the job is `CLAIMED` under the same attempt (the attempt id is derived from the job id and the attempt number) and its lease has not ended. It does not require `locked_by = me`, so a result reported through the completion API is accepted on any replica.
+3. **Hand-off.** An adapter may answer `Accepted`: its thread is freed at once and the job keeps its lease while the remote side works. The remote side reports the result through `AsyncStepService.complete` or `POST /async-steps/{jobId}:complete` before the lease ends; after it ends, the step is claimed and called again.
+4. **Completion credential and scope.** The attempt id can be derived from public ids, so it is not a credential. Each claim issues a completion token of 256 random bits; only its SHA-256 is stored, and the completion API compares it in constant time. The caller also needs `processes:step:complete` and a role listed for the step's adapter in `adapters.completer-roles`.
+5. **Idempotency key.** The remote side deduplicates by the job id (`AdapterCall.idempotencyKey()`), which every retry keeps, not by the attempt id, which changes on each attempt. Compensation handlers will follow the same rule.
+
 ## Consequences
-Adapters must be idempotent by `attemptId` (`TR-IDEM-04`): with option B a takeover only happens after a crash or a stall longer than the margin, but then a late result is discarded while its side effect may have happened. Changing a step's `timeout` changes its lease and its crash recovery time together. The engine part of an async step costs about 10 ms of database time. Hosts size adapter thread pools, not the connection pool, for agent concurrency. Verified by `TR-ASY-01`, `TR-ASY-02`, `PRE-009` and `PRE-017`; documented in `wiki/Architecture.md` section 4.
+Adapters must be idempotent by the job id (`TR-IDEM-04`; the attempt id before the 2026-11-20 amendment): with option B a takeover only happens after a crash or a stall longer than the margin, but then a late result is discarded while its side effect may have happened. Changing a step's `timeout` changes its lease and its crash recovery time together. The engine part of an async step costs about 10 ms of database time. Hosts size adapter thread pools, not the connection pool, for agent concurrency. Verified by `TR-ASY-01`, `TR-ASY-02`, `PRE-009` and `PRE-017`; documented in `wiki/Architecture.md` section 4.
 
 ## History
 - 2026-11-18: proposed by the maintainers.
 - 2026-11-19: accepted by the product owner without change (PD-029).
+- 2026-11-20: amended to match the implementation: engine clock, matching by attempt, the `Accepted` hand-off, the completion token and adapter scope, and the job id as idempotency key (#51).

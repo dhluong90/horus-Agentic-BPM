@@ -14,8 +14,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
-import java.util.List;
 import java.util.HexFormat;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -200,6 +200,30 @@ class RuleLifecycleIT {
         assertThat(send("dave", "POST", "/decisions/secret-tier:evaluate",
                 "{\"inputs\":{\"score\":820}}".getBytes(StandardCharsets.UTF_8), "application/json", null)
                 .json().path("outputs").path("tier").asString()).isEqualTo("PLATINUM");
+    }
+
+    @Test
+    void RLE_004_importing_the_broken_card_fee_file_lists_three_located_violations() throws Exception {
+        // Given the demo file with an unknown input in R1, money + number in R2 and a method call in R3
+        byte[] file = resource("/rules/card-fee-broken.yaml");
+
+        // When
+        Reply refused = send("alice", "POST", "/rule-sets", file, "application/yaml", null);
+
+        // Then
+        assertThat(refused.status()).isEqualTo(422);
+        assertThat(refused.contentType()).startsWith("application/problem+json");
+        assertThat(refused.json().path("code").asString()).isEqualTo("VALIDATION_FAILED");
+        JsonNode violations = refused.json().path("violations");
+        assertThat(violations.size()).isEqualTo(3);
+        assertThat(List.of(violations.get(0).path("ruleId").asString(), violations.get(1).path("ruleId").asString(),
+                violations.get(2).path("ruleId").asString())).containsExactly("R1", "R2", "R3");
+        assertThat(List.of(violations.get(0).path("code").asString(), violations.get(1).path("code").asString(),
+                violations.get(2).path("code").asString()))
+                .containsExactly("UNKNOWN_INPUT", "TYPE_MISMATCH", "FORBIDDEN_CONSTRUCT");
+        assertThat(violations.get(1).path("position").asInt()).isEqualTo(8);
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_rule_set WHERE name = 'card-fee-broken'").query(Long.class).single())
+                .isZero();
     }
 
     @Test

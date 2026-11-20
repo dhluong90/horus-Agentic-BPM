@@ -45,6 +45,7 @@ public class ProcessProblemDetails {
             Map.entry("NO_EFFECTIVE_VERSION", HttpStatus.NOT_FOUND),
             Map.entry("DEFINITION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("INSTANCE_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("ASYNC_STEP_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("TASK_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("VERSION_SUPERSEDED", HttpStatus.CONFLICT),
             Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),

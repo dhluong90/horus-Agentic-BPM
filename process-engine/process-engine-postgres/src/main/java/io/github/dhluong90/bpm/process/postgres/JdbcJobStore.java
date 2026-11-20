@@ -46,10 +46,27 @@ public final class JdbcJobStore implements JobStore {
 
     @Override
     public List<JobRow> claimDue(String replicaId, Instant now, int limit) {
+        return claim("NOT IN", replicaId, now, limit);
+    }
+
+    @Override
+    public List<JobRow> claimDueAsync(String replicaId, Instant now, int limit) {
+        return limit < 1 ? List.of() : claim("IN", replicaId, now, limit);
+    }
+
+    @Override
+    public Optional<JobRow> lockJob(String tenant, String id) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM pre_timer WHERE tenant_id = ? AND id = ? FOR UPDATE")
+                .params(tenant, id).query(JdbcJobStore::job).optional();
+    }
+
+    /** One claim statement; {@code kinds} is {@code IN} or {@code NOT IN} the async kinds, never caller text. */
+    private List<JobRow> claim(String kinds, String replicaId, Instant now, int limit) {
         return jdbc.sql("WITH due AS ("
                         + "SELECT tenant_id, id FROM pre_timer "
                         + "WHERE status IN ('DUE','CLAIMED') AND next_fire_at <= ? "
                         + "AND (status = 'DUE' OR locked_until <= ?) "
+                        + "AND job_kind " + kinds + " ('" + ASYNC_SERVICE + "','" + ASYNC_AGENT + "') "
                         + "ORDER BY next_fire_at, id LIMIT ? FOR UPDATE SKIP LOCKED) "
                         + "UPDATE pre_timer t SET status = 'CLAIMED', locked_by = ?, "
                         + "locked_until = ?::timestamptz + t.lease_duration, attempt = t.attempt + 1 "
@@ -102,6 +119,26 @@ public final class JdbcJobStore implements JobStore {
                         + "WHERE tenant_id = ? AND definition_id = ? AND job_kind = 'DEFINITION_EFFECTIVE' "
                         + "AND status IN ('DUE','CLAIMED')")
                 .params(ts(now), tenant, definitionId).update();
+    }
+
+    @Override
+    public boolean issueCompletionToken(String tenant, String id, int attempt, byte[] tokenHash) {
+        return jdbc.sql("UPDATE pre_timer SET completion_token_hash = ? "
+                        + "WHERE tenant_id = ? AND id = ? AND status = 'CLAIMED' AND attempt = ?")
+                .params(tokenHash, tenant, id, attempt).update() == 1;
+    }
+
+    @Override
+    public Optional<byte[]> completionTokenHash(String tenant, String id) {
+        return jdbc.sql("SELECT completion_token_hash FROM pre_timer WHERE tenant_id = ? AND id = ? "
+                        + "AND completion_token_hash IS NOT NULL")
+                .params(tenant, id).query((rs, row) -> rs.getBytes(1)).optional();
+    }
+
+    @Override
+    public boolean markLateResult(String tenant, String id, Instant now) {
+        return jdbc.sql("UPDATE pre_timer SET late_result_at = ? WHERE tenant_id = ? AND id = ? AND late_result_at IS NULL")
+                .params(ts(now), tenant, id).update() == 1;
     }
 
     @Override

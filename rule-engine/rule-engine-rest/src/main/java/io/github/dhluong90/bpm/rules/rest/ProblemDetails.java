@@ -91,6 +91,9 @@ public class ProblemDetails {
                 item.set("ruleId", EngineValues.value(v.ruleId()));
                 item.set("column", EngineValues.value(v.column()));
                 item.put("message", v.message());
+                // RLE-004: a stable code and the character position in the cell, null when the problem has none.
+                item.set("code", EngineValues.value(v.code()));
+                item.set("position", EngineValues.value(v.position()));
             }
             body.put("violationsTruncated", failed.truncated());
         }

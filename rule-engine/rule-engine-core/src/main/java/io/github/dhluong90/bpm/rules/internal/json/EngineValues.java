@@ -367,7 +367,10 @@ public final class EngineValues {
                 node.put("outcome", "FAILED");
                 node.set("matchedRuleIds", value(failed.matchedRuleIds()));
                 node.putObject("outputs");
-                node.putObject("error").put("code", failed.code()).put("detail", failed.detail());
+                ObjectNode error = node.putObject("error").put("code", failed.code()).put("detail", failed.detail());
+                if (failed.limit() != null) {
+                    error.put("limit", failed.limit());
+                }
             }
         }
         return node;
@@ -448,7 +451,10 @@ public final class EngineValues {
                 node.put("outcome", "FAILED");
                 node.set("matchedRuleIds", value(failed.matchedRuleIds()));
                 node.putObject("outputs");
-                node.putObject("error").put("code", failed.code()).put("detail", failed.detail());
+                ObjectNode error = node.putObject("error").put("code", failed.code()).put("detail", failed.detail());
+                if (failed.limit() != null) {
+                    error.put("limit", failed.limit());
+                }
             }
         }
         return node;
@@ -478,8 +484,9 @@ public final class EngineValues {
             default -> {
                 List<String> ids = new ArrayList<>();
                 node.get("matchedRuleIds").forEach(id -> ids.add(id.stringValue()));
-                yield new DecisionResult.Failed(node.get("error").get("code").stringValue(),
-                        node.get("error").get("detail").stringValue(), ids);
+                JsonNode error = node.get("error");
+                yield new DecisionResult.Failed(error.get("code").stringValue(), error.get("detail").stringValue(), ids,
+                        error.has("limit") ? error.get("limit").stringValue() : null);
             }
         };
         Instant evaluatedAt = Instant.parse(node.get("evaluatedAt").stringValue());

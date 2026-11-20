@@ -6,6 +6,7 @@ public final class EvaluationException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 
     private final String reason;
+    private final String limit;
 
     /**
      * Creates the exception.
@@ -24,8 +25,21 @@ public final class EvaluationException extends RuntimeException {
      * @param message the detail, without input values
      */
     public EvaluationException(String reason, String message) {
+        this(reason, null, message);
+    }
+
+    /**
+     * Creates the exception with a reason code and the limit that was reached.
+     *
+     * @param reason the reason code, for example {@code EVALUATION_BUDGET_EXCEEDED}, or null
+     * @param limit the limit that was reached, {@code STEPS} or {@code TIME} for {@code EVALUATION_BUDGET_EXCEEDED},
+     *     or null
+     * @param message the detail, without input values
+     */
+    public EvaluationException(String reason, String limit, String message) {
         super(reason == null ? message : reason + ": " + message);
         this.reason = reason;
+        this.limit = limit;
     }
 
     /**
@@ -35,5 +49,14 @@ public final class EvaluationException extends RuntimeException {
      */
     public String reason() {
         return reason;
+    }
+
+    /**
+     * Returns the limit that was reached.
+     *
+     * @return {@code STEPS} or {@code TIME} for {@code EVALUATION_BUDGET_EXCEEDED}, else null
+     */
+    public String limit() {
+        return limit;
     }
 }

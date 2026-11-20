@@ -39,6 +39,8 @@ tags:
     description: Start, list, read and cancel process instances
   - name: tasks
     description: Read, claim, unclaim and complete user tasks
+  - name: async-steps
+    description: Report the result of a remote step whose adapter handed the call off
 paths:
   /definitions:
     post:
@@ -46,7 +48,8 @@ paths:
       operationId: importDefinition
       summary: Import a BPMN 2.0 document as the next version of its process key
       description: |
-        Reads the executable subset (none start and end events, local `serviceTask`, `businessRuleTask`,
+        Reads the executable subset (none start and end events, local `serviceTask`, remote `serviceTask`
+        (`horus:mode="remote"`, optional `horus:timeout`, run as an Async Wait-State), `businessRuleTask`,
         `userTask` with `horus:resultVariable`, `exclusiveGateway` with conditions and a default flow, and an
         intermediate timer catch event with `timeDuration` or `timeDate`) from a UTF-8
         document. DTDs and entities are refused (`BPMN_UNSAFE_XML`), every element outside the subset is named with
@@ -541,6 +544,56 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /async-steps/{jobId}:complete:
+    post:
+      tags: [async-steps]
+      operationId: completeAsyncStep
+      summary: Report the result of a remote step attempt
+      description: |
+        For a remote `serviceTask` whose `ServiceAdapter` answered `Accepted`: the remote side, or the host service
+        that receives its callback, reports the result of the attempt it was given. Recorded in one transaction, and
+        only while the attempt is current: the job is `CLAIMED` under that attempt and its lease (step timeout plus
+        `jobs.lease-margin`) has not ended (ADR-0008). The caller presents the attempt id and the attempt's
+        `completionToken` (`AdapterCall.completionToken`); the attempt id is derived from public ids and is not a
+        credential, and a token that does not match the attempt is `403 PERMISSION_DENIED` with nothing written. A
+        repeat of an accepted result answers `DUPLICATE` and writes nothing. A result after the lease ended or after another attempt took
+        the step over answers `DISCARDED` and changes nothing; for a cancelled instance it also records
+        `LATE_RESULT_DISCARDED`, once per job however often it is repeated. A failed result makes the job due again after `jobs.retry-backoff` times the attempt,
+        with a new attempt id, until `jobs.max-attempts`; a business error or a failure with `retryable: false` fails
+        the job; `retryable` and the reporting caller are recorded in history. Permission `processes:step:complete`,
+        plus one of the roles `horus.bpm.processes.adapters.completer-roles` lists for the step's adapter, otherwise
+        `403 PERMISSION_DENIED`. The tenant comes from the caller, and a job of another tenant is
+        `404 ASYNC_STEP_NOT_FOUND` with nothing written. The remote call itself is deduplicated by the job id
+        (`AdapterCall.idempotencyKey`), which a retry keeps; the attempt id changes on every attempt.
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          description: The job id the adapter received (`AdapterCall.jobId`)
+          schema: { type: string, minLength: 1, maxLength: 26 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AsyncStepResult' }
+            examples:
+              completed:
+                value: { attemptId: 4S2Q8M0Z7XK1D9V3B6N5R2T8WA, completionToken: q3V9tYc0mB7xKpL2sWfN8rUeHjD4aZ6oG1iE5vQyT0k, status: COMPLETED, output: { score: 705, band: A } }
+              failed:
+                value: { attemptId: 4S2Q8M0Z7XK1D9V3B6N5R2T8WA, completionToken: q3V9tYc0mB7xKpL2sWfN8rUeHjD4aZ6oG1iE5vQyT0k, status: FAILED, errorCode: BUREAU_UNAVAILABLE, retryable: true }
+      responses:
+        '200':
+          description: What the engine did with the result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncStepCompletion' }
+              example: { jobId: 01JD3K7Q9X2M4N6P8R0S2T4V6W, attemptId: 4S2Q8M0Z7XK1D9V3B6N5R2T8WA, outcome: ACCEPTED }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /tasks/{id}:
     get:
       tags: [tasks]
@@ -762,7 +815,7 @@ components:
       description: >-
         RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `400` is `INPUT_INVALID`
         or `QUERY_INVALID` (a list limit, cursor or range). `404` is `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`,
-        `INSTANCE_NOT_FOUND` or `TASK_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
+        `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `ASYNC_STEP_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
         carries a `WWW-Authenticate` challenge. `403` is `PERMISSION_DENIED` (missing engine permission),
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
@@ -783,6 +836,49 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    AsyncStepResult:
+      type: object
+      required: [attemptId, completionToken, status]
+      properties:
+        attemptId:
+          type: string
+          maxLength: 26
+          description: The attempt id the adapter received (`AdapterCall.attemptId`); a correlation id, not a credential
+        completionToken:
+          type: string
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+          description: |
+            The completion token the adapter received (`AdapterCall.completionToken`): 256 random bits, base64url, new
+            for every attempt. The engine stores only its SHA-256; never log it
+        status:
+          type: string
+          enum: [COMPLETED, FAILED, BUSINESS_ERROR]
+        output:
+          type: object
+          additionalProperties: true
+          description: For `COMPLETED`; stored in the step's result variable
+        errorCode:
+          type: string
+          maxLength: 100
+          description: Required for `FAILED` and `BUSINESS_ERROR`; recorded in history
+        retryable:
+          type: boolean
+          default: true
+          description: For `FAILED`; `false` fails the job without a retry
+    AsyncStepCompletion:
+      type: object
+      required: [jobId, attemptId, outcome]
+      properties:
+        jobId: { type: string }
+        attemptId: { type: string }
+        outcome:
+          type: string
+          enum: [ACCEPTED, DUPLICATE, DISCARDED]
+          description: |
+            `ACCEPTED`: recorded. `DUPLICATE`: the attempt was already completed; nothing written. `DISCARDED`: the
+            attempt is no longer current; nothing changed in the process.
     Money:
       type: object
       required: [currency, amount]
@@ -992,7 +1088,7 @@ components:
         code:
           type: string
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED,
-            SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND,
+            SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND, ASYNC_STEP_NOT_FOUND,
             TASK_NOT_FOUND, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
             BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, PRECONDITION_REQUIRED,

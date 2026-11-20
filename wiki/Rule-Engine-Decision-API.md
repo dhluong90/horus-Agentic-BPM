@@ -215,7 +215,7 @@ Every draft response carries `version` in the body and `ETag: "<version>"`. `PUT
 | 413 | `PAYLOAD_TOO_LARGE` | Body over the endpoint's limit: 16,384 bytes for `:approve`, `:reject` and `:withdraw`, 1,048,576 bytes for `:evaluate` and imports | `:approve`, `:reject`, `:withdraw`, `:evaluate`, imports |
 | 422 | `VALIDATION_FAILED` | Parse or type errors; `violations` lists every cell problem with `ruleId` and `column` (`TR-DET-02`) | `PUT`, `:validate`, `:request-publish`, `:import` |
 | 422 | `UNIQUE_HIT_VIOLATION` | `unique` table matched several rows (`TR-DET-04`). An authoring defect, so retrying does not help (ADR-0010) | `:evaluate`, item error in `:evaluate-batch` |
-| 422 | `EVALUATION_ERROR` | Currency mismatch, division by zero, regex timeout; `detail` names the reason (`CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT`, `FUNCTION_ERROR`) | `:evaluate` |
+| 422 | `EVALUATION_ERROR` | Currency mismatch, division by zero, regex timeout; `detail` names the reason (`CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT`, `EVALUATION_BUDGET_EXCEEDED`, `FUNCTION_ERROR`) | `:evaluate` |
 | 422 | `IDEMPOTENCY_KEY_REUSE_MISMATCH` | Same key, different payload | all with `Idempotency-Key` |
 | 422 | `BATCH_TOO_LARGE` | More than 1 000 items | `:evaluate-batch` |
 | 428 | `PRECONDITION_REQUIRED` | A command that must be conditional was sent without `If-Match` | `PUT`, `:approve`, `:reject`, `:withdraw` |

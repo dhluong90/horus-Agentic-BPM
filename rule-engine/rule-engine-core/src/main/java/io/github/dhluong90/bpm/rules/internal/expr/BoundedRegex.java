@@ -67,16 +67,16 @@ public final class BoundedRegex {
      */
     static Pattern compile(String pattern, int position) {
         if (pattern.length() > MAX_PATTERN_LENGTH) {
-            throw new ExpressionException("Pattern longer than " + MAX_PATTERN_LENGTH + " characters", position);
+            throw new ExpressionException(ExpressionError.INVALID_PATTERN, "Pattern longer than " + MAX_PATTERN_LENGTH + " characters", position);
         }
         String refused = unsupportedConstruct(pattern);
         if (refused != null) {
-            throw new ExpressionException("Pattern " + refused, position);
+            throw new ExpressionException(ExpressionError.INVALID_PATTERN, "Pattern " + refused, position);
         }
         try {
             return Pattern.compile(pattern);
         } catch (PatternSyntaxException e) {
-            throw new ExpressionException("Invalid pattern: " + e.getDescription(), position);
+            throw new ExpressionException(ExpressionError.INVALID_PATTERN, "Invalid pattern: " + e.getDescription(), position);
         }
     }
 

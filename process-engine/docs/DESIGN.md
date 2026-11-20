@@ -192,6 +192,32 @@ Guards run in this order under the `pre_instance` row lock, and a refused comman
 
 Source: [`diagrams/async-wait-state.mmd`](diagrams/async-wait-state.mmd). TX2 requires `status = 'CLAIMED'` as well as the lease, so a job cancelled meanwhile is never completed (DN-10). The worker claims a job only when an adapter executor slot is free, so time spent queued inside the JVM never consumes the lease. The lease is the step timeout plus `jobs.lease-margin` (default 30 s), stored per row in `pre_timer.lease_duration` so a batch claim computes `locked_until` per job in SQL.
 
+#### Async steps as built in 0.2.0 (#51, `PRE-009`, `PRE-017`, `PRE-041`, `TR-ASY-01`, `TR-ASY-02`)
+
+The first async step is the remote `serviceTask` (`horus:mode="remote"`, optional `horus:timeout`, default `adapters.default-timeout`); `agentTask` (#52) runs on the same executor with its own job kind.
+
+- **Park.** The step transaction moves the token to `WAITING_ASYNC` and inserts one `ASYNC_SERVICE` job, `DUE` now, whose id is the token's activity instance id, with `lease_duration = timeout + jobs.lease-margin` and a payload of the adapter name, the timeout, the business key and the bounded inputs. History records `ASYNC_STEP_SCHEDULED`. Cancelling the token cancels the job in the same transaction. Nothing is called.
+- **TX1.** `AsyncStepExecutor` claims due async jobs, `FOR UPDATE SKIP LOCKED`, at most as many as adapter slots are free (`adapters.executor-threads`); the timer claim of section 4.4 never returns async jobs. Each claim increments `attempt`, and the attempt id is derived from the job id and the attempt number, so every claim has a new one. The attempt id is a correlation id and the history key, not a credential: anyone who can read an instance can derive it. TX1 therefore also issues each claim a completion token, 256 random bits from `SecureRandom`, and stores only its SHA-256 in `pre_timer.completion_token_hash` (migration V8).
+- **Call.** `ServiceAdapter.execute(AdapterCall)` runs on the adapter executor with no transaction (the executor refuses to call when one is active, and an ArchUnit rule allows no other caller). The call carries tenant, instance, node, business key, job id, attempt id, completion token, attempt number and deadline. The remote side deduplicates by the job id (`AdapterCall.idempotencyKey()`, `TR-IDEM-04`), which every retry of the step keeps; the attempt id changes on each attempt and is never an idempotency key. `AdapterCall.toString()` masks the token. The guard counts the engine's own transactions on the thread through `TransactionRunner.tracked`, whatever the runner, and also asks the runner (Spring: `TransactionSynchronizationManager`) about a host transaction; a host transaction a non-Spring runner cannot see is not detected. At the deadline the executor interrupts the call and records `ADAPTER_TIMEOUT`.
+- **TX2.** `ProcessServices.recordAttempt` locks the instance row, then the job row, and accepts the result only when the job is `CLAIMED` under that attempt with an unexpired lease. A completed result appends `ASYNC_RESULT_ACCEPTED`, delivers the result to the token and marks the job `DONE`. A failed result appends `ASYNC_ATTEMPT_FAILED` with the code, `retryable` and the reporter (never the detail) and sets the job `DUE` after `jobs.retry-backoff` times the attempt, or `FAILED` when it is not retryable, is a business error, or used `jobs.max-attempts`; the token stays on the step until incidents exist. A job claimed more often than `jobs.max-attempts` (its attempts kept dying with their replica) is failed without a call and records `ASYNC_ATTEMPT_FAILED` with `MAX_ATTEMPTS_REACHED`.
+- **Hand-off.** An adapter may answer `Accepted`: the slot is freed, no thread waits, and the job keeps its lease while the remote side works. The remote side reports the result through `AsyncStepService.complete(jobId, attemptId, completionToken, result)` or `POST /async-steps/{jobId}:complete`, on any replica. The tenant comes from the resolver and another tenant's job is `404 ASYNC_STEP_NOT_FOUND` with nothing written. The caller needs `processes:step:complete` and one of the roles `adapters.completer-roles` lists for the job's adapter (the adapter scope, checked before any lock); an adapter without an entry cannot be completed from outside. When the attempt id is the job's latest claim, the presented token is hashed and compared with the stored hash in constant time (`MessageDigest.isEqual`); a mismatch is `403 PERMISSION_DENIED` and writes nothing. The scope is a role list per adapter rather than a permission per adapter because permissions are a closed list that host metadata validates at start-up, while roles are what the identity provider already assigns to a callback client. If no result arrives before the lease ends, the job is claimed again and the adapter called with a new attempt id.
+- **Outcomes.** `ACCEPTED`; `DUPLICATE` for a repeat of an attempt that is already `DONE` (writes nothing); `DISCARDED` for a lease that ended or an attempt that was taken over (writes nothing) and for a cancelled job (writes `LATE_RESULT_DISCARDED` with the attempt id once per job, fenced by `pre_timer.late_result_at`; repeats are logged at DEBUG only).
+
+```mermaid
+stateDiagram-v2
+    [*] --> DUE: step reached, token WAITING_ASYNC
+    DUE --> CLAIMED: TX1, free adapter slot, attempt + 1
+    CLAIMED --> DONE: TX2 accepts a completed result
+    CLAIMED --> DUE: TX2 failed attempt, retry after back-off
+    CLAIMED --> FAILED: not retryable, business error, or last attempt
+    CLAIMED --> CLAIMED: lease ended, another replica claims, attempt + 1
+    DUE --> CANCELLED: instance cancelled
+    CLAIMED --> CANCELLED: instance cancelled, late result discarded
+    DONE --> [*]
+    FAILED --> [*]
+    CANCELLED --> [*]
+```
+
 ### 4.1 `agentTask` guardrail pipeline (`TR-AGT-01` to `TR-AGT-03`)
 
 1. Bounded inputs: `${instance.<path>}` references (schema `$defs/variableRef`) resolve into an explicit input map; fields marked `mask: true` are hashed before any history write.
@@ -393,6 +419,7 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `GET /tasks?assignment=&status=&role=&group=&dueBefore=&slaBreached=` | `processes:task:work`; `any` needs `processes:task:manage` | Task query (section 8.2): `assignment` is one or more of `mine`, `candidate`, `any`; `status` one or more of `OPEN`, `CLAIMED`; ordered by `(dueAt, id)` | Cursor, at most 200, `ETag` | `400 QUERY_INVALID` | M2 |
 | `GET /tasks/{id}`, `GET /tasks/{id}/form` | `processes:task:work` | Task context and resolved form | `ETag` | `404 TASK_NOT_FOUND` | M2 |
 | `POST /tasks/{id}:claim`, `:unclaim`, `:complete` | `processes:task:work` | Section 3.5 | `Idempotency-Key`, `If-Match` | `403 SELF_APPROVAL_FORBIDDEN`, `422 FORM_VALIDATION_FAILED` | M2 |
+| `POST /async-steps/{jobId}:complete` | `processes:step:complete` | Report the result of a remote step attempt whose adapter answered `Accepted`; body `attemptId`, `completionToken`, `status` (`COMPLETED`, `FAILED`, `BUSINESS_ERROR`), `output` or `errorCode` and `retryable`; answers `outcome` `ACCEPTED`, `DUPLICATE` or `DISCARDED` (section 4); the caller also needs a completer role of the step's adapter | A repeat is `DUPLICATE`; the lease fences late results; the remote call is deduplicated by the job id | `403 PERMISSION_DENIED` (no completer role, wrong token), `404 ASYNC_STEP_NOT_FOUND` | M2 (0.2.0) |
 | `POST /tasks/{id}:delegate`, `:reassign` | `processes:task:manage` | Section 3.5 | `Idempotency-Key`, `If-Match` | | M2 |
 | `GET /incidents?status=OPEN&definitionKey=&nodeId=` | `processes:read` | Incident list | Cursor, at most 200, `ETag` | | M2 |
 | `POST /incidents/{id}:retry`, `:resolve` | `processes:incident:manage` | Retry or resolve | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
@@ -404,7 +431,7 @@ Common set on every endpoint: `400 INPUT_INVALID`, `401`, `403 FORBIDDEN` (permi
 
 ### 6.3 Permissions
 
-From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage`.
+From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:step:complete` (report the result of a remote step attempt, for the integration that receives a partner's callback; 0.2.0), `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage`.
 
 ### 6.4 Events
 
@@ -453,6 +480,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `jobs.replica-id` | host name plus a random suffix | Name a replica claims jobs under (`pre_timer.locked_by`); must differ between running copies |
 | `jobs.max-attempts`, `jobs.retry-backoff` | `3`, `10s` | A firing that fails rolls back and is due again after the back-off times the attempt number; after the last attempt the job is `FAILED` (incidents for jobs follow with `pre_incident`) |
 | `adapters.executor-threads` | `16` | Adapter executor size per replica; a job is claimed only when a slot is free (section 4) |
+| `adapters.completer-roles` | none | Per adapter name, the roles that may complete its steps through the completion API on top of `processes:step:complete` (section 4); an adapter without an entry cannot be completed from outside; a name that is no registered adapter stops start-up |
 | `migration.batch-size` | `100` | Instances per migration batch, one instance lock at a time (section 4.3); may be lowered only |
 | `tokens.cleanup-after`, `tokens.cleanup-batch` | unset (keep), `10000` | When set, the scheduler deletes `pre_token` rows of instances ended longer ago, in batches; history keeps every transition (open question 11.3) |
 | `stats.live-cache-large-threshold` | `100000` | Token count above which `stats.live-cache-ttl-large` applies |
@@ -646,6 +674,8 @@ CREATE TABLE pre_timer (
   payload         JSONB       NOT NULL DEFAULT '{}',
   created_at      TIMESTAMPTZ NOT NULL,
   completed_at    TIMESTAMPTZ,                   -- DONE, FAILED or CANCELLED
+  completion_token_hash BYTEA,                   -- 0.2.0 (#51, V8): SHA-256 of the latest claim's completion token
+  late_result_at  TIMESTAMPTZ,                   -- 0.2.0 (#51, V8): first late result of a cancelled job, so history gets one row
   PRIMARY KEY (tenant_id, id),
   FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id),
   FOREIGN KEY (tenant_id, definition_id) REFERENCES pre_definition (tenant_id, id),
@@ -858,7 +888,7 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | Concurrent layout saves | One layout | Duplicate primary key on `revision` | `409 VERSION_CONFLICT`; the cockpit reloads and shows the newer revision |
 | Malicious BPMN (entity expansion, deep nesting) | One request | Reader limits, DTD refused | `422 BPMN_UNSAFE_XML`; no transaction was opened |
 | Host database restored to an earlier point in time (PD-044, `TR-DR-01`, `TR-DR-02`) | Every instance changed after the restore point | Jobs `CLAIMED` with `locked_until` from before the restore; adapter calls whose TX2 was lost | No engine step: start-up adds at most 5 s; expired leases are reclaimed by the normal poller and retried with a new `attemptId`, so adapters must be idempotent by `attemptId`; the host reconciles side effects and consumers tolerate events for state the restore removed. Proven by the 1.0 restore test |
-| Instance cancelled while an adapter call runs | One step | TX2 finds the job `CANCELLED` | Result discarded and recorded as `LATE_RESULT_DISCARDED` with the attempt id; the external effect, if any, is the host's to reconcile by `attemptId` (DN-10) |
+| Instance cancelled while an adapter call runs | One step | TX2 finds the job `CANCELLED` | Result discarded and recorded once as `LATE_RESULT_DISCARDED` with the attempt id; the external effect, if any, is the host's to reconcile by the job id (DN-10) |
 | Handler returns a business error before S1 | One step | `HandlerResult.BusinessError` | Incident `UNHANDLED_BUSINESS_ERROR` with the code; retry or resolve as any incident (DN-09) |
 | Rollup slice times out | Statistics only | `statement_timeout` | Rollback; watermark unchanged; next run repeats; metric `horus_pre_rollup_lag_seconds` alerts above 15 min |
 | Rollup partition for next month missing | Rollup inserts | Default partition receives rows | Partition job creates months 7 days ahead and moves stragglers |

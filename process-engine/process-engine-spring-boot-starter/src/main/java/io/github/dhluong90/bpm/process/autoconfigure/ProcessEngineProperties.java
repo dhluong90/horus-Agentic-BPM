@@ -25,6 +25,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param query read limits of the list endpoints
  * @param lifecycle definition and instance lifecycle settings
  * @param stats live count settings
+ * @param adapters remote step settings (Async Wait-State, ADR-0008)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -38,7 +39,8 @@ public record ProcessEngineProperties(
         @DefaultValue MakerChecker makerChecker,
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle,
-        @DefaultValue Stats stats) {
+        @DefaultValue Stats stats,
+        @DefaultValue Adapters adapters) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -127,6 +129,8 @@ public record ProcessEngineProperties(
      *     replica stopped
      * @param maxAttempts claims after which a job that keeps failing is marked {@code FAILED}
      * @param retryBackoff a failed firing is due again after this times the attempt number
+     * @param leaseMargin added to a remote step's timeout to give the lease of its job, so a live attempt is never
+     *     taken over (ADR-0008, PRE-017)
      */
     public record Jobs(
             @DefaultValue("true") boolean enabled,
@@ -135,9 +139,13 @@ public record ProcessEngineProperties(
             @DefaultValue("32") int batchSize,
             @DefaultValue("60s") Duration timerLease,
             @DefaultValue("3") int maxAttempts,
-            @DefaultValue("10s") Duration retryBackoff) {
+            @DefaultValue("10s") Duration retryBackoff,
+            @DefaultValue("30s") Duration leaseMargin) {
 
         public Jobs {
+            if (leaseMargin.compareTo(Duration.ofSeconds(1)) < 0) {
+                throw new IllegalArgumentException("horus.bpm.processes.jobs.lease-margin must be at least 1s");
+            }
             if (pollInterval.compareTo(Duration.ofMillis(10)) < 0 || pollInterval.compareTo(Duration.ofMinutes(10)) > 0) {
                 throw new IllegalArgumentException("horus.bpm.processes.jobs.poll-interval must be 10ms to 10m");
             }
@@ -162,6 +170,43 @@ public record ProcessEngineProperties(
             return new JobSettings(replicaId.isBlank() ? defaultReplicaId : replicaId, timerLease, batchSize, maxAttempts,
                     retryBackoff);
         }
+    }
+
+    /**
+     * Remote steps ({@code serviceTask horus:mode="remote"}), run as an Async Wait-State (ADR-0008, DESIGN section 4).
+     *
+     * @param defaultTimeout timeout of a remote step that declares no {@code horus:timeout}; the lease of its job is
+     *     this plus {@code jobs.lease-margin}
+     * @param executorThreads adapter calls in flight per replica; a job is claimed only when one of these is free
+     * @param completerRoles per adapter name (the {@code horus:handler} value; write a name with dots as
+     *     {@code "[creditBureau.score]"}), the roles that may complete its steps through
+     *     {@code POST /async-steps/{jobId}:complete}, on top of {@code processes:step:complete}. An adapter without an
+     *     entry cannot be completed from outside. A name that is no registered adapter stops start-up
+     */
+    public record Adapters(
+            @DefaultValue("PT30S") Duration defaultTimeout,
+            @DefaultValue("16") int executorThreads,
+            @DefaultValue Map<String, List<String>> completerRoles) {
+
+        public Adapters {
+            if (defaultTimeout.isNegative() || defaultTimeout.isZero()) {
+                throw new IllegalArgumentException("horus.bpm.processes.adapters.default-timeout must be positive");
+            }
+            if (executorThreads < 1 || executorThreads > 1_000) {
+                throw new IllegalArgumentException("horus.bpm.processes.adapters.executor-threads must be 1 to 1000");
+            }
+        }
+    }
+
+    /**
+     * @return the async step settings
+     */
+    io.github.dhluong90.bpm.process.internal.service.AsyncSettings toAsyncSettings() {
+        Map<String, java.util.Set<String>> roles = new java.util.LinkedHashMap<>();
+        (adapters.completerRoles() == null ? Map.<String, List<String>>of() : adapters.completerRoles())
+                .forEach((adapter, names) -> roles.put(adapter, java.util.Set.copyOf(names == null ? List.of() : names)));
+        return new io.github.dhluong90.bpm.process.internal.service.AsyncSettings(jobs.leaseMargin(),
+                adapters.defaultTimeout(), adapters.executorThreads(), roles);
     }
 
     /**

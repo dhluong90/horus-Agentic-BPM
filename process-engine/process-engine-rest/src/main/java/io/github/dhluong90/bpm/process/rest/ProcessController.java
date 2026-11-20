@@ -1,5 +1,9 @@
 package io.github.dhluong90.bpm.process.rest;
 
+import io.github.dhluong90.bpm.process.api.AsyncStepService;
+import io.github.dhluong90.bpm.process.api.StepCompletion;
+import io.github.dhluong90.bpm.process.spi.AdapterResult;
+
 import io.github.dhluong90.bpm.process.api.DefinitionExport;
 import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
 import io.github.dhluong90.bpm.process.api.DefinitionRef;
@@ -347,6 +351,50 @@ public class ProcessController {
     public ResponseEntity<byte[]> task(@PathVariable("id") String id) {
         TaskView task = tasks.task(id);
         return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
+    }
+
+    /**
+     * Completes an attempt of a remote step whose adapter handed the call off ({@code processes:step:complete}),
+     * for example a credit bureau's callback. The caller also needs a completer role of the step's adapter
+     * ({@code adapters.completer-roles}). Body: {@code attemptId}, {@code completionToken}, {@code status}
+     * ({@code COMPLETED}, {@code FAILED} or {@code BUSINESS_ERROR}), and {@code output} for a completed attempt or
+     * {@code errorCode} (and {@code retryable} for a failure). A repeat answers {@code DUPLICATE} and writes nothing;
+     * a result after the lease ended answers {@code DISCARDED} (ADR-0008).
+     */
+    @PostMapping(value = "/async-steps/{jobId}:complete", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<byte[]> completeAsyncStep(@PathVariable("jobId") String jobId, HttpServletRequest http)
+            throws IOException {
+        if (!(engine instanceof AsyncStepService steps)) {
+            throw new InputInvalidException("This engine does not run remote steps");
+        }
+        JsonNode request = parse(boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES));
+        String attemptId = text(request, "attemptId");
+        String completionToken = text(request, "completionToken");
+        String status = text(request, "status");
+        if (attemptId == null || completionToken == null || status == null) {
+            throw new InputInvalidException("attemptId, completionToken and status are required");
+        }
+        AdapterResult result = switch (status) {
+            case "COMPLETED" -> AdapterResult.completed(Views.variables(request.get("output")));
+            case "FAILED", "BUSINESS_ERROR" -> {
+                String code = text(request, "errorCode");
+                if (code == null || code.isBlank() || code.length() > 100) {
+                    throw new InputInvalidException("errorCode is required for " + status + ", at most 100 characters");
+                }
+                JsonNode retryable = request.get("retryable");
+                yield "FAILED".equals(status)
+                        ? new AdapterResult.Failed(code, "reported by the completion API",
+                                retryable == null || retryable.asBoolean(true))
+                        : new AdapterResult.BusinessError(code, "reported by the completion API");
+            }
+            default -> throw new InputInvalidException("status must be COMPLETED, FAILED or BUSINESS_ERROR");
+        };
+        StepCompletion completion = steps.complete(jobId, attemptId, completionToken, result);
+        tools.jackson.databind.node.ObjectNode body = EngineJson.NODES.objectNode();
+        body.put("jobId", completion.jobId());
+        body.put("attemptId", completion.attemptId());
+        body.put("outcome", completion.outcome().name());
+        return json(HttpStatus.OK, body, null, null);
     }
 
     /**

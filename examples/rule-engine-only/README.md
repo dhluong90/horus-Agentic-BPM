@@ -345,10 +345,30 @@ Money never mixes currencies. A cell that adds 5 USD to a balance and compares i
 curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
   --data-binary @examples/rule-engine-only/src/test/resources/rules/mixed-currency.yaml
 # 422 {"code":"VALIDATION_FAILED","violations":[
-#   {"ruleId":"R1","column":"balance","message":"mixes the currencies USD and VND"}]}
+#   {"ruleId":"R1","column":"balance","message":"mixes the currencies USD and VND",
+#    "code":"TYPE_MISMATCH","position":null}]}
 ```
 
 `RuleLifecycleFailurePathsIT` runs both, and `RLE_005_money_currency_mismatch_is_rejected` the run-time case (`422 EVALUATION_ERROR`, no outputs, logged).
+
+### A broken table never reaches an approver
+
+[`card-fee-broken.yaml`](src/main/resources/rules/card-fee-broken.yaml) has three authoring mistakes: `R1` reads `creditScoreX`, which is not an input; `R2` adds the number `100` to the money input `balance`; `R3` holds a Java method call. Importing it is refused with one violation per row, each with a stable `code` and the character `position` in the cell, and nothing is stored:
+
+```bash
+curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+  --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee-broken.yaml
+# 422 {"code":"VALIDATION_FAILED","violations":[
+#   {"ruleId":"R1","column":"creditScore","message":"Unknown input 'creditScoreX' at position 0",
+#    "code":"UNKNOWN_INPUT","position":0},
+#   {"ruleId":"R2","column":"balance","message":"+ is not defined for money and number: write the number
+#    with a currency, for example 100 VND at position 8","code":"TYPE_MISMATCH","position":8},
+#   {"ruleId":"R3","column":"tier","message":"'.' is not part of the expression language: there is no
+#    member access, method call, class reference or statement at position 6","code":"FORBIDDEN_CONSTRUCT",
+#    "position":6}],...}
+```
+
+The method call is refused while the text is read, before any name in it is looked up, so nothing is evaluated and no class is loaded. A draft stored by an earlier release is checked again at `:request-publish` and stays a draft if it no longer passes. `RuleLifecycleIT.RLE_004_importing_the_broken_card_fee_file_lists_three_located_violations` runs this import.
 
 ## Demo: two copies of the host, one approval
 

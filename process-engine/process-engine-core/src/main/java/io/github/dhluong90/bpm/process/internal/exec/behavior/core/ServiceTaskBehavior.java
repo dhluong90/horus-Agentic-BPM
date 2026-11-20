@@ -11,8 +11,9 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 
 /**
- * Service task bound to a registered host handler ({@code horus:handler}). Local mode only in this release: the
- * shell runs the handler in the current transaction and returns the result at once.
+ * Service task bound to a host handler ({@code horus:handler}). Local mode runs the registered handler in the current
+ * transaction and returns the result at once; remote mode ({@code horus:mode="remote"}) parks the token in
+ * {@code WAITING_ASYNC} and the shell calls the host's {@code ServiceAdapter} outside any transaction (ADR-0008).
  */
 final class ServiceTaskBehavior implements FlowNodeBehavior<ServiceTask> {
 
@@ -24,6 +25,12 @@ final class ServiceTaskBehavior implements FlowNodeBehavior<ServiceTask> {
     @Override
     public void enter(ServiceTask node, Token token, ExecutionContext ctx) {
         HandlerRef handler = node.extensions().first(HandlerRef.class).orElseThrow(() -> new NotExecutableException(node));
+        if ("remote".equals(handler.mode())) {
+            // Async Wait-State: the token waits, the shell stores a job, and the call runs outside any transaction.
+            InvocationSupport.invoke(node, token, ctx, ServiceKind.HANDLER, handler.handler(), ExecutionMode.ASYNC,
+                    handler.timeout());
+            return;
+        }
         if (handler.mode() != null && !"local".equals(handler.mode())) {
             throw new NotExecutableException(node.id(), "serviceTask horus:mode=" + handler.mode());
         }

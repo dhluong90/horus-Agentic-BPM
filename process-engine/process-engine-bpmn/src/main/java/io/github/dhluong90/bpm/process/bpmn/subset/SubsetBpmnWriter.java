@@ -112,7 +112,8 @@ public final class SubsetBpmnWriter {
             case ServiceTask t -> {
                 tag = "bpmn:serviceTask";
                 t.extensions().first(HandlerRef.class).ifPresent(h -> attributes.append(optional("horus:handler",
-                        h.handler())).append(optional("horus:mode", h.mode())));
+                        h.handler())).append(optional("horus:mode", h.mode()))
+                        .append(optional("horus:timeout", h.timeout() == null ? null : h.timeout().toString())));
                 inputs = t.extensions().all(InputMapping.class);
             }
             case BusinessRuleTask t -> {

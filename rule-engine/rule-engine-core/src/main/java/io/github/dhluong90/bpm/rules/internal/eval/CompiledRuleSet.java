@@ -7,8 +7,10 @@ import io.github.dhluong90.bpm.rules.api.Money;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.api.Violation;
 import io.github.dhluong90.bpm.rules.internal.expr.EvaluationException;
+import io.github.dhluong90.bpm.rules.internal.expr.EvaluationLimits;
 import io.github.dhluong90.bpm.rules.internal.expr.Evaluator;
 import io.github.dhluong90.bpm.rules.internal.expr.Expr;
+import io.github.dhluong90.bpm.rules.internal.expr.ExpressionError;
 import io.github.dhluong90.bpm.rules.internal.expr.ExpressionException;
 import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.expr.Parser;
@@ -50,6 +52,12 @@ public final class CompiledRuleSet {
      */
     public static final int MAX_VIOLATIONS = 100;
 
+    /** Code of a {@code then} cell naming an output the table does not declare. */
+    public static final String UNKNOWN_OUTPUT = "UNKNOWN_OUTPUT";
+
+    /** Code of an output cell that reads a masked input (RLE-012). */
+    public static final String MASKED_INPUT_IN_OUTPUT = "MASKED_INPUT_IN_OUTPUT";
+
     private final String name;
     private final HitPolicy hitPolicy;
     private final List<InputClause> inputs;
@@ -60,9 +68,14 @@ public final class CompiledRuleSet {
     private final int maxOutputBytes;
     private final java.time.ZoneId timeZone;
     private final Set<String> inputsInOutputs;
+    private final EvaluationLimits evaluationLimits;
+    /** The most steps one decision on this table can take (no loops: a sum of node counts). */
+    private final long worstCaseSteps;
+    /** The first rule from which the worst case is over the step budget, or null when it never is. */
+    private final String overBudgetFrom;
 
     private CompiledRuleSet(Definitions model, List<CompiledRule> rules, int maxOutputBytes, int maxStringLength,
-            RegexLimits regexLimits) {
+            RegexLimits regexLimits, EvaluationLimits evaluationLimits) {
         DecisionTable table = model.decision().table();
         this.name = model.name();
         this.timeZone = model.timeZone();
@@ -73,8 +86,38 @@ public final class CompiledRuleSet {
         Set<String> referenced = new java.util.TreeSet<>();
         rules.forEach(rule -> rule.thens().forEach(then -> collectInputs(then, referenced)));
         this.inputsInOutputs = java.util.Collections.unmodifiableSet(referenced);
-        this.shared = new Evaluator(table.moneyRounding(), maxStringLength, regexLimits);
+        this.shared = new Evaluator(table.moneyRounding(), maxStringLength, regexLimits, evaluationLimits);
         this.maxOutputBytes = maxOutputBytes;
+        this.evaluationLimits = evaluationLimits;
+        // Worst case over the rules seen so far, by hit policy: first stops at the first match (or reads every
+        // condition and matches none); unique reads every condition and the outputs of one rule; collect reads every
+        // condition and the outputs of every rule.
+        long conditions = 0;
+        long collected = 0;
+        long widestRow = 0;
+        long firstMatch = 0;
+        long worst = 0;
+        String over = null;
+        for (CompiledRule rule : this.rules) {
+            long row = 0;
+            for (Expr then : rule.thens()) {
+                row += EvaluationLimits.worstCase(then);
+            }
+            conditions += EvaluationLimits.worstCase(rule.condition());
+            collected += row;
+            widestRow = Math.max(widestRow, row);
+            firstMatch = Math.max(firstMatch, conditions + row);
+            worst = switch (hitPolicy) {
+                case FIRST -> Math.max(conditions, firstMatch);
+                case UNIQUE -> conditions + widestRow;
+                case COLLECT -> conditions + collected;
+            };
+            if (over == null && worst > evaluationLimits.stepBudget()) {
+                over = rule.id();
+            }
+        }
+        this.worstCaseSteps = worst;
+        this.overBudgetFrom = over;
     }
 
     /**
@@ -112,6 +155,22 @@ public final class CompiledRuleSet {
      */
     public static CompiledRuleSet compile(Definitions model, int maxOutputBytes, int maxStringLength,
             RegexLimits regexLimits) {
+        return compile(model, maxOutputBytes, maxStringLength, regexLimits, EvaluationLimits.defaults());
+    }
+
+    /**
+     * Compiles a model with size limits, the bounds of {@code matches} (TR-SEC-02) and the step budget of one
+     * decision (TR-SEC-01).
+     *
+     * @param model the decision model
+     * @param maxOutputBytes the largest estimated JSON size of one decision's outputs
+     * @param maxStringLength the longest string {@code +} may build
+     * @param regexLimits the length and time bounds of one regular expression match
+     * @param evaluationLimits the step budget and time backstop of one decision
+     * @return the compiled rule set
+     */
+    public static CompiledRuleSet compile(Definitions model, int maxOutputBytes, int maxStringLength,
+            RegexLimits regexLimits, EvaluationLimits evaluationLimits) {
         DecisionTable table = model.decision().table();
         for (OutputClause output : table.outputs()) {
             checkOutput(table.hitPolicy(), output);
@@ -140,7 +199,8 @@ public final class CompiledRuleSet {
             for (Map.Entry<String, Cell> cell : rule.then().entrySet()) {
                 OutputClause output = declared.get(cell.getKey());
                 if (output == null) {
-                    problems.add(new Violation(rule.id(), cell.getKey(), "unknown output '" + cell.getKey() + "'"));
+                    problems.add(new Violation(rule.id(), cell.getKey(), "unknown output '" + cell.getKey() + "'",
+                            UNKNOWN_OUTPUT));
                 } else {
                     written.put(output.name(), output(cell.getValue(), output, slots, table.inputs(), rule.id(), problems));
                 }
@@ -154,7 +214,39 @@ public final class CompiledRuleSet {
         if (!problems.kept.isEmpty()) {
             throw new ValidationFailedException(problems.kept, problems.truncated);
         }
-        return new CompiledRuleSet(model, rules, maxOutputBytes, maxStringLength, regexLimits);
+        return new CompiledRuleSet(model, rules, maxOutputBytes, maxStringLength, regexLimits, evaluationLimits);
+    }
+
+    /**
+     * Returns the most evaluation steps one decision on this table can take. The language has no loops, so this is
+     * a sum of node counts: every condition, plus the outputs of the rules a hit policy can evaluate. The count of a
+     * given table may change in a minor release; the guarantee is the step budget and the reason code.
+     *
+     * @return the worst-case steps
+     */
+    public long worstCaseSteps() {
+        return worstCaseSteps;
+    }
+
+    /**
+     * Refuses a table that could fail every evaluation with {@code EVALUATION_BUDGET_EXCEEDED}: one whose worst case
+     * is over the step budget. Import and request-publish call it, so the failure shows at authoring time and not
+     * in production. Evaluation does not: a version already in effect keeps the runtime bound.
+     *
+     * @throws ValidationFailedException with one violation, code {@code EVALUATION_BUDGET_EXCEEDED}, on the first rule
+     *     from which the worst case is over the budget
+     */
+    public void requireWithinStepBudget() {
+        if (overBudgetFrom == null) {
+            return;
+        }
+        String policy = hitPolicy.name().toLowerCase(java.util.Locale.ROOT);
+        throw new ValidationFailedException(List.of(new Violation(overBudgetFrom, null, String.format(
+                java.util.Locale.ROOT, "the table can take up to %,d evaluation steps under hit policy %s, more than"
+                        + " the step budget of %,d; from this rule on, a decision could fail with"
+                        + " EVALUATION_BUDGET_EXCEEDED. Split the table or simplify its cells",
+                worstCaseSteps, policy, evaluationLimits.stepBudget()), EvaluationLimits.EVALUATION_BUDGET_EXCEEDED)),
+                false);
     }
 
     /**
@@ -278,7 +370,8 @@ public final class CompiledRuleSet {
                 case COLLECT -> collect(decision, slots);
             }, null);
         } catch (EvaluationException e) {
-            return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", e.getMessage()), e.reason());
+            return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", e.getMessage(), List.of(), e.limit()),
+                    e.reason());
         } catch (ArithmeticException e) {
             // Exponent overflow or underflow in DECIMAL128 arithmetic: a deterministic failure, never a 500.
             return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", "Arithmetic out of range"), null);
@@ -598,24 +691,35 @@ public final class CompiledRuleSet {
     private static Expr condition(String input, String text, Map<String, Integer> slots, List<InputClause> inputs,
             String ruleId, Problems problems) {
         if (!slots.containsKey(input)) {
-            problems.add(new Violation(ruleId, input, "unknown input '" + input + "'"));
+            problems.add(new Violation(ruleId, input, "unknown input '" + input + "'",
+                    ExpressionError.UNKNOWN_INPUT.name()));
             return new Expr.Literal(Boolean.FALSE);
         }
         if (text == null) {
-            problems.add(new Violation(ruleId, input, "the condition must be a non-empty string"));
+            problems.add(new Violation(ruleId, input, "the condition must be a non-empty string",
+                    ExpressionError.SYNTAX_ERROR.name()));
             return new Expr.Literal(Boolean.FALSE);
         }
         String source = conditionSource(input, text);
-        Expr expr;
+        // A shorthand cell such as "< 18" is parsed as "age < 18"; positions are reported in the cell as written.
+        int shift = source.equals(text.strip()) ? -leadingSpaces(text) : input.length() + 1 - leadingSpaces(text);
+        Parser.Located located;
         try {
-            expr = Parser.parse(source, name -> slots.getOrDefault(name, -1), input);
+            located = Parser.parseLocated(source, name -> slots.getOrDefault(name, -1), input);
         } catch (ExpressionException e) {
-            problems.add(new Violation(ruleId, input, e.getMessage()));
+            problems.add(located(ruleId, input, e.error(), e.problem(), e.position() - shift));
             return new Expr.Literal(Boolean.FALSE);
+        }
+        Expr expr = located.expr();
+        ConditionTypes.TypeProblem operands = ConditionTypes.operandProblem(expr, inputs);
+        if (operands != null) {
+            problems.add(located(ruleId, input, ExpressionError.TYPE_MISMATCH, operands.message(),
+                    located.position(operands.node()) - shift));
+            return expr;
         }
         String problem = ConditionTypes.conditionProblem(expr, inputs);
         if (problem != null) {
-            problems.add(new Violation(ruleId, input, problem));
+            problems.add(new Violation(ruleId, input, problem, ExpressionError.TYPE_MISMATCH.name()));
         }
         return expr;
     }
@@ -670,34 +774,62 @@ public final class CompiledRuleSet {
         }
     }
 
+    /**
+     * A violation at a character of a cell. The position goes in the message too, as the parser has always written
+     * it; a position that falls before the cell (the input name of a shorthand) is reported as the cell's start.
+     */
+    private static Violation located(String ruleId, String column, ExpressionError error, String problem, int position) {
+        int at = Math.max(0, position);
+        return new Violation(ruleId, column, problem + " at position " + at, error.name(), at);
+    }
+
+    private static int leadingSpaces(String text) {
+        int i = 0;
+        while (i < text.length() && Character.isWhitespace(text.charAt(i))) {
+            i++;
+        }
+        return i;
+    }
+
     /** Parses one output cell (or an output default, with no rule id) and checks it against the output's type. */
     private static Expr output(Cell cell, OutputClause output, Map<String, Integer> slots, List<InputClause> inputs,
             String ruleId, Problems problems) {
         Expr expr = switch (cell) {
             case Cell.Literal literal -> new Expr.Literal(literal.value());
             case Cell.Expression expression when expression.source() == null -> {
-                problems.add(new Violation(ruleId, output.name(), "a cell must be a string, number, boolean or null"));
+                problems.add(new Violation(ruleId, output.name(), "a cell must be a string, number, boolean or null",
+                        ExpressionError.SYNTAX_ERROR.name()));
                 yield new Expr.Literal(null);
             }
             case Cell.Expression expression -> {
                 try {
-                    yield Parser.parse(expression.source(), name -> slots.getOrDefault(name, -1));
+                    Parser.Located located = Parser.parseLocated(expression.source(),
+                            name -> slots.getOrDefault(name, -1), null);
+                    ConditionTypes.TypeProblem operands = ConditionTypes.operandProblem(located.expr(), inputs);
+                    if (operands != null) {
+                        problems.add(located(ruleId, output.name(), ExpressionError.TYPE_MISMATCH,
+                                "output " + output.name() + ": " + operands.message(),
+                                located.position(operands.node())));
+                        yield new Expr.Literal(null);
+                    }
+                    yield located.expr();
                 } catch (ExpressionException e) {
-                    problems.add(new Violation(ruleId, output.name(), e.getMessage()));
+                    problems.add(located(ruleId, output.name(), e.error(), e.problem(), e.position()));
                     yield new Expr.Literal(null);
                 }
             }
         };
         String problem = ConditionTypes.outputProblem(expr, output, inputs);
         if (problem != null) {
-            problems.add(new Violation(ruleId, output.name(), problem));
+            problems.add(new Violation(ruleId, output.name(), problem, ExpressionError.TYPE_MISMATCH.name()));
         }
         Set<String> read = new java.util.TreeSet<>();
         collectInputs(expr, read);
         for (InputClause input : inputs) {
             if (input.masked() && read.contains(input.name())) {
                 problems.add(new Violation(ruleId, output.name(), "output " + output.name() + " uses input "
-                        + input.name() + ", which is masked; a masked input can never be copied to an output"));
+                        + input.name() + ", which is masked; a masked input can never be copied to an output",
+                        MASKED_INPUT_IN_OUTPUT));
             }
         }
         return expr;

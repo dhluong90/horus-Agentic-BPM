@@ -48,4 +48,25 @@ class JobPropertiesTest {
         assertThatThrownBy(() -> bind(java.util.Map.of("horus.bpm.processes.jobs.poll-interval", "1ms")))
                 .hasStackTraceContaining("horus.bpm.processes.jobs.poll-interval");
     }
+
+    @Test
+    void PRE_017_async_defaults_are_a_30_second_margin_a_30_second_timeout_and_16_adapter_slots() {
+        io.github.dhluong90.bpm.process.internal.service.AsyncSettings async = bind(java.util.Map.of()).toAsyncSettings();
+        assertThat(async.leaseMargin()).isEqualTo(Duration.ofSeconds(30));
+        assertThat(async.defaultTimeout()).isEqualTo(Duration.ofSeconds(30));
+        assertThat(async.executorThreads()).isEqualTo(16);
+        assertThat(async.lease(Duration.ofSeconds(2))).isEqualTo(Duration.ofSeconds(32));
+        assertThat(async.lease(null)).isEqualTo(Duration.ofSeconds(60));
+
+        io.github.dhluong90.bpm.process.internal.service.AsyncSettings tuned = bind(java.util.Map.of(
+                "horus.bpm.processes.jobs.lease-margin", "45s", "horus.bpm.processes.adapters.default-timeout", "PT5M",
+                "horus.bpm.processes.adapters.executor-threads", "64")).toAsyncSettings();
+        assertThat(tuned.lease(null)).isEqualTo(Duration.ofSeconds(345));
+        assertThat(tuned.executorThreads()).isEqualTo(64);
+
+        assertThatThrownBy(() -> bind(java.util.Map.of("horus.bpm.processes.jobs.lease-margin", "0s")))
+                .hasStackTraceContaining("horus.bpm.processes.jobs.lease-margin");
+        assertThatThrownBy(() -> bind(java.util.Map.of("horus.bpm.processes.adapters.executor-threads", "0")))
+                .hasStackTraceContaining("horus.bpm.processes.adapters.executor-threads");
+    }
 }
