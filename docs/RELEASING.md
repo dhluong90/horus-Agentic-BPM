@@ -120,7 +120,7 @@ On a tag run that passed the release build, the job `github-release` publishes t
 The release notes link this page and give the check adopters run in the folder of their downloads:
 
 ```
-while read -r hash path; do name="${path##*/}"; [ -f "$name" ] && printf '%s  %s\n' "$hash" "$name"; done < SHA256SUMS | shasum -a 256 -c -
+while read -r hash path; do name="${path##*/}"; if [ -f "$name" ]; then printf '%s  %s\n' "$hash" "$name"; fi; done < SHA256SUMS | shasum -a 256 -c -
 ```
 
 Each downloaded file prints `<name>: OK`. Step 6 runs the same command on the draft's downloads, reading the archive's `SHA256SUMS`.
