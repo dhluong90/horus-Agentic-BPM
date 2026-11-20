@@ -68,7 +68,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-053 | `PRE_053_retire_stops_new_starts_keeps_running_instances_and_confirms_last_version` | Service, WebMvc, Testcontainers history, event and job capture | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Planned |
 | PRE-054 | `PRE_054_cancel_needs_processes_cancel_and_a_reason` | Service, WebMvc, Testcontainers history and event capture | M2 | `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01` | Planned |
 | PRE-055 | `PRE_055_decision_after_a_timer_runs_in_the_instance_tenant_as_the_engine` | Testcontainers, the real Rule Engine on the same database, two tenants, TestClock, a fallback tenant on the poller thread | M2 | `TR-TEN-01`, `TR-SEC-03` | Done (`DecisionAfterTimerTest`) |
-| PRE-056 | `PRE_056_decision_after_a_timer_never_reads_another_tenants_rule_set`, `PRE_056_a_rule_engine_without_an_explicit_tenant_cannot_run_a_decision_after_a_timer` | Testcontainers, the real Rule Engine and a thread-bound host Rule Engine, TestClock | M2 | `TR-TEN-01` | Done (`DecisionAfterTimerTest`) |
+| PRE-056 | `PRE_056_decision_after_a_timer_never_reads_another_tenants_rule_set`, `PRE_056_a_rule_engine_without_an_explicit_tenant_cannot_run_a_decision_after_a_timer`, `PRE_056_a_decision_row_written_before_the_step_fails_rolls_back_with_the_firing` | Testcontainers, the real Rule Engine and a thread-bound host Rule Engine, TestClock | M2 | `TR-TEN-01` | Done (`DecisionAfterTimerTest`) |
 
 ## Known gaps
 | Gap | Plan |

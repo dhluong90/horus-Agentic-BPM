@@ -3,6 +3,8 @@ package io.github.dhluong90.bpm.process.autoconfigure;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
+import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
+import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
@@ -11,6 +13,7 @@ import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnReader;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.internal.exec.BehaviorCatalog;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
+import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
@@ -181,7 +184,7 @@ public class ProcessEngineAutoConfiguration {
     ProcessServices processEngineServices(ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
             JdbcJobStore jobs, JobSettings jobSettings, ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
-            ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
+            ObjectProvider<RuleEngines> ruleEngines, ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
         if (properties.definitions().autoApprove()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");
         }
@@ -201,9 +204,19 @@ public class ProcessEngineAutoConfiguration {
         return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
                 new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
-                        properties.handlers().slowCallWarning()), publisher,
+                        engineWork(ruleEngines), properties.handlers().slowCallWarning()), publisher,
                 properties.toSettings(), BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings);
+    }
+
+    /**
+     * The Rule Engine's tenant-scoped entry point for this engine's own work, bound to {@code system:process-engine}
+     * (ADR-0027). Built here and handed only to the decision port; never registered as a bean, so no host code can
+     * inject it.
+     */
+    private static Optional<TenantScopedRuleEngine> engineWork(ObjectProvider<RuleEngines> ruleEngines) {
+        return Optional.ofNullable(ruleEngines.getIfUnique())
+                .map(engines -> engines.forEmbeddedEngine(DecisionCaller.ENGINE_IDENTITY));
     }
 
     /**

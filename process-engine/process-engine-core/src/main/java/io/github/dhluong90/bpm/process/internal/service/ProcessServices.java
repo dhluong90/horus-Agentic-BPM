@@ -527,7 +527,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             };
                             if (call.kind() == ServiceKind.DECISION) {
                                 // A request evaluates as its caller, so the caller's tenant must be the instance's.
-                                // Engine work has no caller: the tenant it fires for must be the instance's.
+                                // Engine work has no caller: the tenant it fires for must be the instance's. Defence
+                                // in depth only: the row was locked with the job's tenant, so the two are equal; the
+                                // real control is the instance tenant passed explicitly to the decision port.
                                 String allowed = switch (as) {
                                     case RunAs.CallerRequest r -> tenants.currentTenantId();
                                     case RunAs.EngineWork w -> w.tenantId();

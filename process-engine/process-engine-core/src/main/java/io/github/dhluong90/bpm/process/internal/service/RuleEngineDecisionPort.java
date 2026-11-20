@@ -5,17 +5,19 @@ import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.HorusBpmException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
-import io.github.dhluong90.bpm.rules.api.TenantScopedRuleEngine;
+import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * The {@link DecisionPort} over the embedded Rule Engine.
  * <ul>
  *   <li>Engine-owned work ({@link DecisionCaller.Engine}) calls the tenant-scoped entry point with the instance's
- *       tenant and {@link DecisionCaller#ENGINE_IDENTITY}. A Rule Engine without that entry point fails the step
- *       closed with {@code TENANT_NOT_ALLOWED}: it could only resolve a tenant from the thread, which is not the
- *       instance's.</li>
+ *       tenant. That entry point is handed to the engine's wiring by the Rule Engine, bound to
+ *       {@link DecisionCaller#ENGINE_IDENTITY}; it is never looked up from, or cast out of, the host's
+ *       {@link RuleEngine}. Without it the step fails closed with {@code TENANT_NOT_ALLOWED}: the host's Rule Engine
+ *       could only resolve a tenant from the thread, which is not the instance's.</li>
  *   <li>A request ({@link DecisionCaller.Request}) evaluates as the host's caller, whose tenant the engine has
  *       already checked against the instance's.</li>
  * </ul>
@@ -25,10 +27,23 @@ import java.util.Objects;
 public final class RuleEngineDecisionPort implements DecisionPort {
 
     private final RuleEngine ruleEngine;
+    private final Optional<TenantScopedRuleEngine> engineWork;
 
-    /** @param ruleEngine the host's Rule Engine */
-    public RuleEngineDecisionPort(RuleEngine ruleEngine) {
+    /**
+     * @param ruleEngine the host's Rule Engine, for steps inside a request
+     * @param engineWork the tenant-scoped entry point for engine-owned work, or empty when the Rule Engine has none
+     * @throws IllegalArgumentException when the entry point is bound to another identity than
+     *     {@link DecisionCaller#ENGINE_IDENTITY}
+     */
+    public RuleEngineDecisionPort(RuleEngine ruleEngine, Optional<TenantScopedRuleEngine> engineWork) {
         this.ruleEngine = Objects.requireNonNull(ruleEngine, "ruleEngine must not be null");
+        this.engineWork = Objects.requireNonNull(engineWork, "engineWork must not be null");
+        engineWork.ifPresent(scoped -> {
+            if (!DecisionCaller.ENGINE_IDENTITY.equals(scoped.engineId())) {
+                throw new IllegalArgumentException("The tenant-scoped entry point is bound to " + scoped.engineId()
+                        + ", not " + DecisionCaller.ENGINE_IDENTITY);
+            }
+        });
     }
 
     @Override
@@ -36,7 +51,7 @@ public final class RuleEngineDecisionPort implements DecisionPort {
             Map<String, Object> inputs, String correlationId) {
         DecisionRequest request = DecisionRequest.of(decisionRef, DecisionInput.of(inputs))
                 .withCorrelationId(correlationId);
-        if (caller instanceof DecisionCaller.Engine && !(ruleEngine instanceof TenantScopedRuleEngine)) {
+        if (caller instanceof DecisionCaller.Engine && engineWork.isEmpty()) {
             return new DecisionOutcome.Failed("TENANT_NOT_ALLOWED", "The host's Rule Engine cannot evaluate in an "
                     + "explicit tenant, so a decision step with no caller cannot run");
         }
@@ -44,7 +59,7 @@ public final class RuleEngineDecisionPort implements DecisionPort {
         try {
             result = switch (caller) {
                 case DecisionCaller.Engine ignored ->
-                        ((TenantScopedRuleEngine) ruleEngine).evaluate(tenantId, DecisionCaller.ENGINE_IDENTITY, request);
+                        engineWork.get().evaluate(tenantId, request);
                 case DecisionCaller.Request ignored -> ruleEngine.evaluate(request);
             };
         } catch (HorusBpmException e) {

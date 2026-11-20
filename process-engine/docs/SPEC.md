@@ -587,5 +587,6 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:**
   - `bank-c`: the decision fails with `RULE_SET_NOT_FOUND` in `bank-c` and the firing rolls back: no `rle_decision` row in `bank-c` or `bank-d`, no task, no `TIMER_FIRED` or `DECISION_EVALUATED`, no result variable; the token still waits at the timer and the job is `DUE` again with attempt 1 after `jobs.retry-backoff`, and `FAILED` after `jobs.max-attempts`.
   - `bank-e`: the step fails closed with `TENANT_NOT_ALLOWED` without calling the Rule Engine, and the firing rolls back the same way.
+  - Separately, `card-reminder-fee` in `bank-f` prices Gold cards only and a Classic card's timer fires: the Rule Engine writes the decision row, the step fails with `DECISION_NO_MATCH`, and that row rolls back with the firing (no `rle_decision` row for the instance, job `DUE` with attempt 1).
 - **Example:** `rule set only in bank-d, bank-c timer fires -> RULE_SET_NOT_FOUND, nothing written, job DUE attempt 1`.
-- **Test ID:** `PRE_056_decision_after_a_timer_never_reads_another_tenants_rule_set`, `PRE_056_a_rule_engine_without_an_explicit_tenant_cannot_run_a_decision_after_a_timer`
+- **Test ID:** `PRE_056_decision_after_a_timer_never_reads_another_tenants_rule_set`, `PRE_056_a_rule_engine_without_an_explicit_tenant_cannot_run_a_decision_after_a_timer`, `PRE_056_a_decision_row_written_before_the_step_fails_rolls_back_with_the_firing`

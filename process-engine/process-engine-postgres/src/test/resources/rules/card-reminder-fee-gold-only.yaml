@@ -1,0 +1,16 @@
+# Reminder fee for an overdue card fee at a bank that prices only Gold cards here: a Classic card matches no row.
+schemaVersion: 1
+ruleSet: card-reminder-fee
+description: Reminder fee for an overdue card fee, Gold cards only
+hitPolicy: first
+
+inputs:
+  - { name: tier, type: string }
+
+outputs:
+  - { name: fee, type: money }
+
+rules:
+  - id: R1                  # Gold customers are not charged
+    when: { tier: "== 'GOLD'" }
+    then: { fee: "0 VND" }

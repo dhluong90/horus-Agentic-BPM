@@ -15,7 +15,12 @@ import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -68,6 +73,37 @@ class DecisionAfterTimerTest {
 
     private static String text(String sql, Object... params) {
         return TestEngine.jdbc().sql(sql).params(params).query(String.class).single();
+    }
+
+    /** The {@code reason=} codes of the job executor's failure log while {@code fire} runs. */
+    private static List<String> failureReasons(Runnable fire) {
+        List<String> reasons = new CopyOnWriteArrayList<>();
+        Logger logger = Logger.getLogger(io.github.dhluong90.bpm.process.internal.service.JobExecutor.class.getName());
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                String message = java.text.MessageFormat.format(record.getMessage(),
+                        record.getParameters() == null ? new Object[0] : record.getParameters());
+                if (message.startsWith("process.job.fire.failed")) {
+                    reasons.add(message.substring(message.indexOf("reason=") + "reason=".length()));
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        logger.addHandler(handler);
+        try {
+            fire.run();
+        } finally {
+            logger.removeHandler(handler);
+        }
+        return reasons;
     }
 
     @Test
@@ -159,13 +195,40 @@ class DecisionAfterTimerTest {
         // When the timer fires
         clock.set(DUE);
         pollerThreadContext(pod);
-        int fired = pod.jobs.pollOnce();
+        int[] fired = new int[1];
+        List<String> reasons = failureReasons(() -> fired[0] = pod.jobs.pollOnce());
 
-        // Then the step failed closed without calling the Rule Engine, and nothing moved
-        assertThat(fired).isZero();
+        // Then the step failed closed for want of an explicit tenant, without calling the Rule Engine, and nothing moved
+        assertThat(fired[0]).isZero();
+        assertThat(reasons).containsExactly("TENANT_NOT_ALLOWED");
         assertThat(evaluations).hasValue(0);
         assertThat(count("SELECT count(*) FROM pre_task WHERE instance_id = ?", inBankE.id())).isZero();
         assertThat(text("SELECT status || ' ' || attempt FROM pre_timer WHERE instance_id = ?", inBankE.id()))
+                .isEqualTo("DUE 1");
+    }
+
+    @Test
+    void PRE_056_a_decision_row_written_before_the_step_fails_rolls_back_with_the_firing() {
+        // Given card-reminder-fee in bank-f prices Gold cards only, and an overdue Classic card in bank-f
+        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine().retryBackoff(Duration.ofSeconds(30)).build();
+        publishReminderFee(pod, "bank-f", "/rules/card-reminder-fee-gold-only.yaml");
+        ProcessInstance inBankF = overdue(pod, "bank-f", "CARD-F-4111");
+
+        // When the timer fires: the Rule Engine appends the decision row, then the step fails on no match
+        clock.set(DUE);
+        pollerThreadContext(pod);
+        int[] fired = new int[1];
+        List<String> reasons = failureReasons(() -> fired[0] = pod.jobs.pollOnce());
+
+        // Then the decision row rolled back with the firing: the log, the instance and the job are as before
+        assertThat(fired[0]).isZero();
+        assertThat(reasons).containsExactly("DECISION_NO_MATCH");
+        assertThat(count("SELECT count(*) FROM rle_decision WHERE correlation_id = ?", inBankF.id())).isZero();
+        assertThat(count("SELECT count(*) FROM rle_decision WHERE tenant_id = 'bank-f'")).isZero();
+        assertThat(count("SELECT count(*) FROM pre_task WHERE instance_id = ?", inBankF.id())).isZero();
+        assertThat(count("SELECT count(*) FROM pre_history WHERE instance_id = ? AND event_type IN "
+                + "('TIMER_FIRED', 'DECISION_EVALUATED')", inBankF.id())).isZero();
+        assertThat(text("SELECT status || ' ' || attempt FROM pre_timer WHERE instance_id = ?", inBankF.id()))
                 .isEqualTo("DUE 1");
     }
 }
