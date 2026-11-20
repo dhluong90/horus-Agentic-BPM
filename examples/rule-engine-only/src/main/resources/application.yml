@@ -26,6 +26,11 @@ horus:
     # Shown by clients for this host; returned by GET /api/bpm/meta.
     host-id: rule-engine-only
     rules:
+      decision-log:
+        # How long decisions are kept: the bank's choice, in whole months, at least 12 (P12M). Monthly partitions
+        # older than this are dropped and each drop is recorded in rle_decision_log_drop. Required outside the dev
+        # profile; the engine refuses to start without it.
+        retention: ${HORUS_DECISION_LOG_RETENTION:P120M}
       enabled: true
       security:
         # The host's roles mapped to engine permissions, listed by GET /api/bpm/me.

@@ -124,7 +124,7 @@ class RuleEngineOnlyHostIT {
 
         assertThat(engine.path("status").asString()).isEqualTo("UP");
         assertThat(engine.path("details").path("historyTable").asString()).isEqualTo("rle_schema_history");
-        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("16");
+        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("18");
         assertThat(engine.path("details").path("pendingMigrations").asInt()).isZero();
         assertThat(engine.path("details").path("nextMonthPartition").asString()).isEqualTo("rle_decision_2027_02");
         assertThat(engine.path("details").path("nextMonthPartitionPresent").asBoolean()).isTrue();
@@ -200,14 +200,15 @@ class RuleEngineOnlyHostIT {
                 .query(String.class).list();
 
         assertThat(hostHistory).containsExactly("1 V1__create_loan_application.sql");
-        // The host's tables existed first, so the engine baselines at 0 and still applies V1 to V6, V10 to V12 and V14 to V16.
+        // The host's tables existed first, so the engine baselines at 0 and applies V1 to V6, V10 to V12, V14 to V16, V18.
         assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__rle_baseline.sql",
                 "2 V2__rle_version_created_by.sql", "3 V3__rle_version_history.sql",
                 "4 V4__rle_version_history_append_only.sql", "5 V5__rle_engine_key.sql",
                 "6 V6__rle_version_history_draft_updated.sql", "10 V10__rle_decision_pinned.sql",
                 "11 V11__rle_version_retired_at.sql",
                 "12 V12__rle_version_four_eyes_no_exemption.sql", "14 V14__rle_setting_seen.sql",
-                "15 V15__rle_version_history_acknowledged_warnings.sql", "16 V16__rle_masking_key_check.sql");
+                "15 V15__rle_version_history_acknowledged_warnings.sql", "16 V16__rle_masking_key_check.sql",
+                "18 V18__rle_decision_log_drop.sql");
     }
 
     @Test

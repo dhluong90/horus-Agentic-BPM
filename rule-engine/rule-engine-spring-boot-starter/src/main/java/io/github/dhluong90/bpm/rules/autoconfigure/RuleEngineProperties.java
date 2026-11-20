@@ -5,6 +5,7 @@ import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import java.time.Duration;
+import java.time.Period;
 import java.util.List;
 import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -26,7 +27,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param security how host authorities map to engine permissions
  * @param authoring how rule changes may be made on this host
  * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
- * @param decisionLog what the decision log records and how far ahead its partitions are created
+ * @param decisionLog what the decision log records, how far ahead its partitions are created and how long it is kept
  * @param simulation limits of {@code :simulate}
  */
 @ConfigurationProperties("horus.bpm.rules")
@@ -161,17 +162,45 @@ public record RuleEngineProperties(
      * @param additionalPersonalDataNames more names, added to the list
      * @param partitionsAhead how far ahead of the host clock monthly partitions are created, at start-up and daily;
      *     {@code PT0S} to {@code P366D}, default {@code P7D}. The current and the next month always exist
+     * @param retention how long decisions are kept, in whole months ({@code P12M}, {@code P120M} or {@code P10Y}); no
+     *     default. When set, the daily partition job drops each monthly partition that lies wholly before the host
+     *     clock minus this period, and records the drop in {@code rle_decision_log_drop}; rows are never deleted.
+     *     Unset, nothing is ever dropped. Required outside the {@code dev} profile: without it the host does not start
+     *     (PD-050). At least {@code retention-floor}
+     * @param retentionFloor the shortest {@code retention} accepted, in whole months; default and lowest value
+     *     {@code P12M}. A host may raise it to its own policy, so a shorter value set by mistake stops start-up
      */
     public record DecisionLog(Boolean maskDefault, Boolean requireExplicitMask, List<String> personalDataNames,
-            List<String> additionalPersonalDataNames, Duration partitionsAhead) {
+            List<String> additionalPersonalDataNames, Duration partitionsAhead, Period retention,
+            Period retentionFloor) {
 
-        /** Validates the period; an out-of-range value fails start-up naming the property. */
+        /** Validates the periods; an out-of-range value fails start-up naming the property. */
         public DecisionLog {
             if (partitionsAhead != null && (partitionsAhead.isNegative()
                     || partitionsAhead.compareTo(EngineDefaults.PARTITIONS_AHEAD_MAX) > 0)) {
                 throw new IllegalArgumentException("horus.bpm.rules.decision-log.partitions-ahead must be PT0S to "
                         + "P366D, was " + partitionsAhead);
             }
+            long floor = EngineDefaults.DECISION_LOG_RETENTION_FLOOR_MONTHS;
+            if (retentionFloor != null) {
+                floor = wholeMonths("horus.bpm.rules.decision-log.retention-floor", retentionFloor);
+                if (floor < EngineDefaults.DECISION_LOG_RETENTION_FLOOR_MONTHS) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.retention-floor must be at least "
+                            + "P" + EngineDefaults.DECISION_LOG_RETENTION_FLOOR_MONTHS + "M, was " + retentionFloor);
+                }
+            }
+            if (retention != null && wholeMonths("horus.bpm.rules.decision-log.retention", retention) < floor) {
+                throw new IllegalArgumentException("horus.bpm.rules.decision-log.retention must be at least "
+                        + "horus.bpm.rules.decision-log.retention-floor (P" + floor + "M), was " + retention);
+            }
+        }
+
+        private static long wholeMonths(String property, Period value) {
+            if (value.getDays() != 0 || value.toTotalMonths() <= 0) {
+                throw new IllegalArgumentException(property + " must be a positive number of whole months, such as "
+                        + "P12M or P10Y, was " + value);
+            }
+            return value.toTotalMonths();
         }
 
         /**

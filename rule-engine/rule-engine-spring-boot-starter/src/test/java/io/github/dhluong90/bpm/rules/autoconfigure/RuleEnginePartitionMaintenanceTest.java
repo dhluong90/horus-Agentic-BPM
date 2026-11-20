@@ -2,7 +2,9 @@ package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,8 +14,10 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.Period;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -22,10 +26,12 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.mock.env.MockEnvironment;
 
 /**
  * The running host's side of RLE-017: the period ahead from configuration, the repeated run, a lock timeout that
- * waits for the next run, and the default-partition gauge.
+ * waits for the next run, the default-partition gauge, and retention: whole months, at least the floor, required
+ * outside {@code dev}, and never a drop without a setting (PD-050).
  */
 @ExtendWith(OutputCaptureExtension.class)
 class RuleEnginePartitionMaintenanceTest {
@@ -53,6 +59,75 @@ class RuleEnginePartitionMaintenanceTest {
                         .hasStackTraceContaining("horus.bpm.rules.decision-log.partitions-ahead"));
         properties.withPropertyValues("horus.bpm.rules.decision-log.partitions-ahead=-P1D")
                 .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void RLE_017_retention_has_no_default_is_whole_months_and_at_least_the_floor() {
+        properties.run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retention())
+                .isNull());
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P12M")
+                .run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retention())
+                        .isEqualTo(Period.ofMonths(12)));
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P10Y")
+                .run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retention()
+                        .toTotalMonths()).isEqualTo(120));
+        // Below the floor of 12 months, in days, or a floor lowered below 12 months: start-up stops naming the property
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P11M")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("horus.bpm.rules.decision-log.retention must be at least"));
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P400D")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("whole months"));
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention-floor=P6M")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("horus.bpm.rules.decision-log.retention-floor must be at least P12M"));
+        // A host that raises the floor to its own policy refuses a shorter retention set by mistake
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention-floor=P84M",
+                        "horus.bpm.rules.decision-log.retention=P60M")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("retention-floor (P84M)"));
+    }
+
+    @Test
+    void RLE_017_start_up_is_refused_outside_dev_until_a_retention_is_set() {
+        MockEnvironment production = new MockEnvironment();
+        production.setActiveProfiles("prod");
+        assertThatThrownBy(() -> DecisionLogRetention.required(null, production))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("horus.bpm.rules.decision-log.retention is not set");
+        assertThatThrownBy(() -> DecisionLogRetention.required(null, new MockEnvironment()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(DecisionLogRetention.required(Period.ofMonths(120), production)).isEqualTo(Period.ofMonths(120));
+
+        MockEnvironment dev = new MockEnvironment();
+        dev.setActiveProfiles("dev");
+        assertThat(DecisionLogRetention.required(null, dev)).isNull();
+    }
+
+    @Test
+    void RLE_017_without_a_retention_the_job_never_drops_a_partition() {
+        DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
+        when(partitions.ensureAhead(JAN_26_2027, Duration.ofDays(7))).thenReturn(List.of());
+
+        new RuleEnginePartitionMaintenance(partitions, clock, Duration.ofDays(7), Duration.ofDays(1), null).runOnce();
+
+        verify(partitions, never()).dropExpired(any(), any());
+    }
+
+    @Test
+    void RLE_017_with_a_retention_each_run_drops_expired_months_and_logs_each_drop(CapturedOutput output) {
+        DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
+        when(partitions.ensureAhead(JAN_26_2027, Duration.ofDays(7))).thenReturn(List.of());
+        when(partitions.dropExpired(JAN_26_2027, Period.ofMonths(12))).thenReturn(List.of(
+                new DecisionLogPartitions.Dropped("rle_decision_2025_12", Instant.parse("2025-12-01T00:00:00Z"),
+                        Instant.parse("2026-01-01T00:00:00Z"), Map.of("bank-a", 3L), 3L)));
+
+        new RuleEnginePartitionMaintenance(partitions, clock, Duration.ofDays(7), Duration.ofDays(1),
+                Period.ofMonths(12)).runOnce();
+
+        verify(partitions).dropExpired(JAN_26_2027, Period.ofMonths(12));
+        assertThat(output).contains("dropped decision log partition rle_decision_2025_12",
+                "decision-log.retention=P12M", "3 decisions {bank-a=3}", "recorded in rle_decision_log_drop");
     }
 
     @Test

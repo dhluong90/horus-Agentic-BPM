@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -51,11 +52,16 @@ class RuleEngineAutoConfigurationTest {
 
     private static final String PACKAGE = RuleEngineAutoConfiguration.class.getPackageName();
 
+    /** The retention every host outside the dev profile sets (PD-050). */
+    static final String RETENTION = "horus.bpm.rules.decision-log.retention=P120M";
+
     private static final Instant JAN_26_2027 = Instant.parse("2027-01-26T00:00:00Z");
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(
-                    RuleEngineAutoConfiguration.class, RuleEngineInactiveAutoConfiguration.class));
+                    RuleEngineAutoConfiguration.class, RuleEngineInactiveAutoConfiguration.class))
+            // Outside the dev profile a host sets how long decisions are kept (PD-050).
+            .withPropertyValues(RuleEngineAutoConfigurationTest.RETENTION);
 
     @Test
     void TR_EMB_04_engine_binds_to_the_host_datasource_and_transaction_manager() {
@@ -234,6 +240,35 @@ class RuleEngineAutoConfigurationTest {
             order.verify(migrator).migrate();
             order.verify(partitions).ensureAhead(JAN_26_2027, java.time.Duration.ofDays(7));
         });
+    }
+
+    @Test
+    void RLE_017_a_host_outside_dev_without_a_retention_does_not_start_and_dev_does() {
+        ApplicationContextRunner withoutRetention = new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(
+                        RuleEngineAutoConfiguration.class, RuleEngineInactiveAutoConfiguration.class))
+                .withUserConfiguration(HostWithEngineStandIns.class, FixedClock.class);
+
+        withoutRetention.run(context -> assertThat(context).hasFailed().getFailure()
+                .hasStackTraceContaining("horus.bpm.rules.decision-log.retention is not set"));
+        withoutRetention.withPropertyValues("spring.profiles.active=prod").run(context -> assertThat(context)
+                .hasFailed());
+        withoutRetention.withPropertyValues("spring.profiles.active=dev").run(context -> {
+            assertThat(context).hasNotFailed();
+            verify(context.getBean(DecisionLogPartitions.class), never()).dropExpired(any(), any());
+        });
+    }
+
+    @Test
+    void RLE_017_start_up_drops_expired_months_after_creating_the_months_ahead() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class, FixedClock.class)
+                .withPropertyValues("horus.bpm.rules.decision-log.retention=P12M")
+                .run(context -> {
+                    DecisionLogPartitions partitions = context.getBean(DecisionLogPartitions.class);
+                    InOrder order = inOrder(partitions);
+                    order.verify(partitions).ensureAhead(JAN_26_2027, java.time.Duration.ofDays(7));
+                    order.verify(partitions).dropExpired(JAN_26_2027, java.time.Period.ofMonths(12));
+                });
     }
 
     @Test

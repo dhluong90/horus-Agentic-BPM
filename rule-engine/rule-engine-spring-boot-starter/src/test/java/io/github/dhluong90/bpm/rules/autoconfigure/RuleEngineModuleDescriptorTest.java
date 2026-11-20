@@ -23,7 +23,9 @@ class RuleEngineModuleDescriptorTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(RuleEngineAutoConfiguration.class))
-            .withUserConfiguration(RuleEngineAutoConfigurationTest.HostWithEngineStandIns.class);
+            .withUserConfiguration(RuleEngineAutoConfigurationTest.HostWithEngineStandIns.class)
+            // Outside the dev profile a host sets how long decisions are kept (PD-050).
+            .withPropertyValues(RuleEngineAutoConfigurationTest.RETENTION);
 
     @Test
     void RLE_019_rules_entry_has_api_v1_the_build_version_and_the_seven_permissions() {

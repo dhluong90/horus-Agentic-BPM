@@ -28,7 +28,9 @@ class RuleEngineMaskingStatusTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(RuleEngineAutoConfiguration.class))
-            .withUserConfiguration(RuleEngineAutoConfigurationTest.HostWithEngineStandIns.class);
+            .withUserConfiguration(RuleEngineAutoConfigurationTest.HostWithEngineStandIns.class)
+            // Outside the dev profile a host sets how long decisions are kept (PD-050).
+            .withPropertyValues(RuleEngineAutoConfigurationTest.RETENTION);
 
     @Test
     void TR_EXT_08_a_host_key_with_id_k1_shows_set_and_k1_and_never_the_key() {

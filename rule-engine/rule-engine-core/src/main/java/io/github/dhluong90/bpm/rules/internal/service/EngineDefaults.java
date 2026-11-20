@@ -89,6 +89,12 @@ public final class EngineDefaults {
     /** Largest {@code decision-log.partitions-ahead}: one year of months. */
     public static final Duration PARTITIONS_AHEAD_MAX = Duration.ofDays(366);
 
+    /**
+     * Lowest {@code decision-log.retention-floor}, and its default, in months (PD-050): no host keeps decisions for
+     * less than a year.
+     */
+    public static final int DECISION_LOG_RETENTION_FLOOR_MONTHS = 12;
+
     /** How often partition maintenance runs after start-up: daily. */
     public static final Duration PARTITION_MAINTENANCE_INTERVAL = Duration.ofDays(1);
 
