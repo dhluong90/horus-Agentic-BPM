@@ -63,6 +63,7 @@ public class ProblemDetails {
             Map.entry("RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("BATCH_TOO_LARGE", UNPROCESSABLE),
+            Map.entry("HISTORY_TOO_LARGE", UNPROCESSABLE),
             Map.entry("EVIDENCE_TOO_LARGE", UNPROCESSABLE),
             Map.entry("CMMN_UNSUPPORTED", UNPROCESSABLE),
             Map.entry("DMN_UNSUPPORTED_ELEMENT", UNPROCESSABLE),
@@ -119,6 +120,18 @@ public class ProblemDetails {
                     body.put("violationsTruncated", true);
                 }
             }
+        }
+        if (e instanceof io.github.dhluong90.bpm.rules.api.HistoryTooLargeException large) {
+            // RLE-077: how many decisions the period holds and the setting that bounds it
+            body.put("found", large.found());
+            body.put("atLeast", large.atLeast());
+            body.put("maxHistoryDecisions", large.limit());
+        }
+        if (e instanceof io.github.dhluong90.bpm.rules.api.VersionConflictException conflict
+                && conflict.currentCanonicalHash() != null) {
+            // RLE-084: what is stored now, so a client can say "changed since you opened it" and offer the new content
+            body.put("currentCanonicalHash", conflict.currentCanonicalHash());
+            body.put("currentLockVersion", conflict.currentLockVersion());
         }
         if (e instanceof io.github.dhluong90.bpm.rules.api.WarningsNotAcknowledgedException unacknowledged) {
             // RLE-053: the client shows these again and the approver resends with the codes; never retried on its own.

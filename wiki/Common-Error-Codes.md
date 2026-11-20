@@ -51,6 +51,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [EVALUATION_ERROR](#evaluation_error) | rules | M1 |
 | 422 | [REPLAY_NOT_POSSIBLE](#replay_not_possible) | rules | M1 (0.2.0) |
 | 422 | [BATCH_TOO_LARGE](#batch_too_large) | rules | M1 |
+| 422 | [HISTORY_TOO_LARGE](#history_too_large) | rules | M3 |
 | 422 | [EVIDENCE_TOO_LARGE](#evidence_too_large) | rules | M3 |
 | 422 | [DEFINITION_TOO_LARGE](#definition_too_large) | processes | M2 |
 | 422 | [GUARDRAIL_CONTRACT_INVALID](#guardrail_contract_invalid) | processes | M2 |
@@ -91,7 +92,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `422`. The `Idempotency-Key` was used before with a different request body. This is a client defect, so retrying the same request never helps. Use a new key for a new request.
 
 ### VERSION_CONFLICT
-`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again. A client that receives `409 VERSION_CONFLICT` on `:approve` or `:reject` must show the approver the current version (its content and diff) again and let them decide; it must never retry automatically with the new `ETag`, because that would approve content nobody reviewed.
+`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again. On `:approve` and `:reject` the body can also carry `expectedCanonicalHash`, the hash of the content the approver reviewed; a version that was withdrawn, replaced and requested again under the same number has another hash, so the decision is refused even with the new lock version, and the problem carries `currentCanonicalHash` and `currentLockVersion`. A client that receives `409 VERSION_CONFLICT` on `:approve` or `:reject` must show the approver the current version (its content and diff) again and let them decide; it must never retry automatically with the new `ETag`, because that would approve content nobody reviewed.
 
 ### INVALID_STATE
 `409`. The action does not fit the current state, for example `:approve` on a `DRAFT`. Follow the lifecycle order.
@@ -195,6 +196,9 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 
 ### BATCH_TOO_LARGE
 `422`. `:evaluate-batch` with more than `evaluation.max-batch` items (1,000 at most). Split the batch; nothing was evaluated or written.
+
+### HISTORY_TOO_LARGE
+`422`. `POST /rule-sets/{name}:compare` over a period that holds more logged decisions than `simulation.max-history-decisions` (default 50,000, at most 200,000). `found` says how many the period holds (with `atLeast: true` when the count stopped at 200,000) and `maxHistoryDecisions` the setting in force. The comparison never takes a sample, so totals are never partial; narrow the period. Nothing was evaluated or written.
 
 ### EVIDENCE_TOO_LARGE
 `422`. `POST /rule-sets/{name}/evidence` would produce a file over 8,388,608 bytes, or a chosen version has more than 10,000 history events. Export fewer decisions or versions at a time; nothing was written and no export was recorded.

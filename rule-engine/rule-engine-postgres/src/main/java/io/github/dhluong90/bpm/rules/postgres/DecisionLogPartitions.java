@@ -104,7 +104,7 @@ public final class DecisionLogPartitions {
         return transactions.inNewTransaction(status -> {
             jdbc.sql("SET LOCAL lock_timeout = '5s'").update();
             jdbc.sql("SELECT pg_advisory_xact_lock(:key)").param("key", ADVISORY_LOCK_KEY)
-                    .query((rs, rowNum) -> rowNum).list();
+                    .query((rs, rowNum) -> rowNum).single();
             List<String> created = new ArrayList<>();
             for (YearMonth month : months) {
                 if (!exists(month)) {

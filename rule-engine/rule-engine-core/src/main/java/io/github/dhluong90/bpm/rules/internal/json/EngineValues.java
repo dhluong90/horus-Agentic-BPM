@@ -506,6 +506,54 @@ public final class EngineValues {
         return node;
     }
 
+    /**
+     * Converts a comparison over a past period to the response of {@code POST /rule-sets/{name}:compare} (RLE-075). It
+     * holds counts, totals and output transitions only. A total is an exact decimal written as text, because a sum of
+     * many amounts can pass what a JSON number holds without loss.
+     *
+     * @param result the comparison
+     * @return the object
+     */
+    public static ObjectNode comparison(io.github.dhluong90.bpm.rules.api.ComparisonResult result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("base", result.base());
+        node.put("candidate", result.candidate());
+        node.put("from", result.from().toString());
+        node.put("to", result.to().toString());
+        node.put("baseCanonicalHash", result.baseCanonicalHash());
+        node.put("candidateCanonicalHash", result.candidateCanonicalHash());
+        node.put("decisionsCompared", result.decisionsCompared());
+        node.put("changedCount", result.changedCount());
+        ObjectNode outcomes = node.putObject("outcomes");
+        counts(outcomes.putObject("base"), result.baseOutcomes());
+        counts(outcomes.putObject("candidate"), result.candidateOutcomes());
+        ArrayNode totals = node.putArray("totals");
+        for (var total : result.totals()) {
+            ObjectNode item = totals.addObject();
+            item.put("output", total.output());
+            item.set("currency", value(total.currency()));
+            item.put("base", total.base().toPlainString());
+            item.put("candidate", total.candidate().toPlainString());
+            item.put("difference", total.difference().toPlainString());
+        }
+        ArrayNode transitions = node.putArray("transitions");
+        for (var transition : result.transitions()) {
+            ObjectNode item = transitions.addObject();
+            item.put("output", transition.output());
+            item.set("from", value(transition.from()));
+            item.set("to", value(transition.to()));
+            item.put("count", transition.count());
+        }
+        counts(node.putObject("skipped"), result.skipped());
+        return node;
+    }
+
+    private static void counts(ObjectNode into, java.util.Map<String, Long> counts) {
+        counts.entrySet().stream().sorted(java.util.Map.Entry.comparingByKey())
+                .forEach(entry -> into.put(entry.getKey(), entry.getValue()));
+    }
+
     private static ObjectNode outcome(DecisionResult.Outcome outcome) {
         ObjectNode node = EngineJson.NODES.objectNode();
         switch (outcome) {

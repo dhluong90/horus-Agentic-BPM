@@ -116,6 +116,7 @@ class ErrorMatrixWebMvcTest {
         mvc = MockMvcBuilders.standaloneSetup(
                         new RuleSetController(standIn(VersionService.class), callers),
                         new DecisionController(standIn(RuleEngine.class), standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers),
+                        new SimulationController(standIn(RuleEngine.class), callers),
                         new DecisionLogController(standIn(DecisionLogService.class),
                         standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers),
                         new RuleSetHistoryController(standIn(io.github.dhluong90.bpm.rules.api.RuleSetHistoryService.class),
@@ -221,6 +222,15 @@ class ErrorMatrixWebMvcTest {
                         post("/api/bpm/rules/v1/decisions/card-fee:evaluate-batch").contentType("application/json")
                                 .content("{\"items\":[{\"inputs\":{\"tier\":\"GOLD\",\"txCount\":5}}]}"),
                         s -> s.thrown = new io.github.dhluong90.bpm.rules.api.BatchTooLargeException(1001, 1000)),
+                new Case("HISTORY_TOO_LARGE", 422,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee:compare").contentType("application/json")
+                                .content("{\"base\":1,\"candidate\":2,\"from\":\"2027-01-01T00:00:00Z\","
+                                        + "\"to\":\"2027-02-01T00:00:00Z\"}"),
+                        s -> {
+                            s.permissions = Set.of("rules:read", "rules:simulate", "rules:log:read");
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.HistoryTooLargeException("card-fee", 10_000,
+                                    false, 5_000);
+                        }),
                 new Case("EVIDENCE_TOO_LARGE", 422,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/evidence").contentType("application/json")
                                 .content("{\"format\":\"csv\",\"versions\":[1]}"),

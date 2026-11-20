@@ -346,9 +346,15 @@ public final class DefaultVersionService implements VersionService {
         String actor = context.callerWith(PERMISSION_APPROVE);
         requireLockVersion(opts, ":approve");
         requireCommentLength(opts.comment());
+        requireHashShape(opts.expectedCanonicalHash());
         java.util.Set<AcknowledgedWarning> acknowledged = acknowledgedPairs(opts.acknowledgedWarnings());
-        String requestHash = Hashes.sha256Parts("approve", actor, ruleSet, Integer.toString(version),
-                String.valueOf(opts.expectedLockVersion()), opts.comment(), sortedPairs(acknowledged));
+        // The hash joins the request hash only when named, so a request stored before this field existed still replays.
+        String requestHash = opts.expectedCanonicalHash() == null
+                ? Hashes.sha256Parts("approve", actor, ruleSet, Integer.toString(version),
+                        String.valueOf(opts.expectedLockVersion()), opts.comment(), sortedPairs(acknowledged))
+                : Hashes.sha256Parts("approve", actor, ruleSet, Integer.toString(version),
+                        String.valueOf(opts.expectedLockVersion()), opts.comment(), sortedPairs(acknowledged),
+                        opts.expectedCanonicalHash());
         return context.idempotent(tenant, "approve", opts.idempotencyKey(), requestHash, 200, () -> {
             StoredVersion current = load(tenant, ruleSet, version);
             if (current.status() != VersionStatus.PENDING_APPROVAL) {
@@ -362,8 +368,10 @@ public final class DefaultVersionService implements VersionService {
             if (current.createdBy() == null) {
                 throw new AuthorUnknownException(ruleSet, version);
             }
-            // DESIGN 3.3.5 order: permission, If-Match present, status, four eyes, lock, strict mode, acknowledgement.
+            // DESIGN 3.3.5 order: permission, If-Match present, status, four eyes, lock, reviewed content, strict
+            // mode, acknowledgement.
             checkLock(current, opts);
+            checkContent(current, opts);
             // A version requested before strict mode was turned on is checked again, so it never reaches the
             // append-only decision log with an undeclared input (security review of #308).
             requireMaskDeclarations(tenant, current.canonicalJson());
@@ -405,8 +413,12 @@ public final class DefaultVersionService implements VersionService {
         String actor = context.callerWith(PERMISSION_APPROVE);
         requireLockVersion(opts, ":reject");
         String reason = requireReason(opts.comment());
-        String requestHash = Hashes.sha256Parts("reject", actor, ruleSet, Integer.toString(version),
-                String.valueOf(opts.expectedLockVersion()), reason);
+        requireHashShape(opts.expectedCanonicalHash());
+        String requestHash = opts.expectedCanonicalHash() == null
+                ? Hashes.sha256Parts("reject", actor, ruleSet, Integer.toString(version),
+                        String.valueOf(opts.expectedLockVersion()), reason)
+                : Hashes.sha256Parts("reject", actor, ruleSet, Integer.toString(version),
+                        String.valueOf(opts.expectedLockVersion()), reason, opts.expectedCanonicalHash());
         return context.idempotent(tenant, "reject", opts.idempotencyKey(), requestHash, 200, () -> {
             StoredVersion current = load(tenant, ruleSet, version);
             if (current.status() != VersionStatus.PENDING_APPROVAL) {
@@ -418,6 +430,7 @@ public final class DefaultVersionService implements VersionService {
                 throw SelfApprovalForbiddenException.selfReject(ruleSet, version);
             }
             checkLock(current, opts);
+            checkContent(current, opts);
             Instant now = context.clock().instant();
             StoredVersion updated = current.rejected();
             store.updateVersion(updated, current.lockVersion());
@@ -845,7 +858,31 @@ public final class DefaultVersionService implements VersionService {
     private static void checkLock(StoredVersion current, WriteOptions options) {
         if (options.expectedLockVersion() != null && options.expectedLockVersion() != current.lockVersion()) {
             throw new VersionConflictException("Expected lock version " + options.expectedLockVersion()
-                    + " but " + current.ruleSet() + " v" + current.version() + " is at " + current.lockVersion());
+                    + " but " + current.ruleSet() + " v" + current.version() + " is at " + current.lockVersion(),
+                    current.canonicalHash(), current.lockVersion());
+        }
+    }
+
+    /**
+     * An approval or a rejection binds to the content the approver reviewed (RLE-084, #275). A version number can
+     * carry other content over time (withdraw, replace in place, request again), and a client that refreshed the lock
+     * version can still hold a decision made on older content, so when the caller names the hash it reviewed the
+     * stored hash must equal it. The refusal writes nothing and names the content now stored.
+     */
+    private static void checkContent(StoredVersion current, WriteOptions options) {
+        String expected = options.expectedCanonicalHash();
+        if (expected != null && !expected.equals(current.canonicalHash())) {
+            throw new VersionConflictException("The content of " + current.ruleSet() + " v" + current.version()
+                    + " changed since it was reviewed: expected canonical hash " + expected + " but it is now "
+                    + current.canonicalHash() + ", at lock version " + current.lockVersion(),
+                    current.canonicalHash(), current.lockVersion());
+        }
+    }
+
+    /** A hash the caller names is 64 lower-case hexadecimal characters, as {@code canonicalHash} is shown. */
+    private static void requireHashShape(String hash) {
+        if (hash != null && !hash.matches("[0-9a-f]{64}")) {
+            throw new InputInvalidException("expectedCanonicalHash must be 64 lower-case hexadecimal characters");
         }
     }
 

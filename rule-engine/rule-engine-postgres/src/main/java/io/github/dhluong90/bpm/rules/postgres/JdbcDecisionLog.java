@@ -54,16 +54,7 @@ public final class JdbcDecisionLog implements DecisionLog {
                 .update();
     }
 
-    private static final String COLUMNS = """
-            tenant_id, id, created_at, rule_set_name, version_num, hit_policy, outcome, error_code,
-            masked_inputs::text AS inputs, outputs::text AS outputs, matched_rule_ids::text AS matched, caller_id,
-            correlation_id, eval_clock, duration_micros, pinned, on_behalf_of
-            """;
-
-    private static final String SEARCH = "SELECT " + COLUMNS + """
-             FROM rle_decision
-            WHERE tenant_id = :tenant AND rule_set_name = :ruleSet AND created_at >= :from AND created_at < :to
-            """;
+    private static final String COLUMNS = RuleListQueries.DECISION_COLUMNS;
 
     /**
      * Reads a decision by id. The id is a ULID whose first 48 bits are the millisecond of {@code created_at}, the
@@ -97,18 +88,9 @@ public final class JdbcDecisionLog implements DecisionLog {
             Instant from, Instant to, int limit) {
         // Range on idx_rle_decision_lookup within at most two monthly partitions (ADR-0015); the input is compared
         // as text, so a masked input is found by its fingerprints only, one per key the tenant holds.
-        return jdbc.sql("SELECT " + COLUMNS + """
-                 FROM rle_decision
-                WHERE tenant_id = :tenant AND rule_set_name = :ruleSet
-                  AND created_at >= :from AND created_at < :to
-                  AND masked_inputs ->> CAST(:input AS text) IN (:texts)
-                ORDER BY created_at DESC, id DESC
-                LIMIT :limit
-                """)
-                .param("tenant", tenantId).param("ruleSet", ruleSet)
-                .param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
-                .param("input", input).param("texts", texts).param("limit", limit)
-                .query(JdbcDecisionLog::record).list();
+        return RuleListQueries.DECISIONS_BY_LOGGED_INPUT.list(jdbc, ListQuery.params("tenant", tenantId,
+                "ruleSet", ruleSet, "from", Timestamp.from(from), "to", Timestamp.from(to), "input", input,
+                "texts", texts, "limit", limit), JdbcDecisionLog::record);
     }
 
     /**
@@ -123,14 +105,13 @@ public final class JdbcDecisionLog implements DecisionLog {
     public List<DecisionRecord> search(String tenantId, String ruleSet, Instant from, Instant to, Position after,
             int limit, Duration statementTimeout) {
         return withTimeout(statementTimeout, () -> {
-            var statement = jdbc.sql(searchSql(after != null))
-                    .param("tenant", tenantId).param("ruleSet", ruleSet)
-                    .param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
-                    .param("limit", limit);
+            var params = ListQuery.params("tenant", tenantId, "ruleSet", ruleSet, "from", Timestamp.from(from),
+                    "to", Timestamp.from(to), "limit", limit);
             if (after != null) {
-                statement = statement.param("afterAt", Timestamp.from(after.createdAt())).param("afterId", after.id());
+                params.put("afterAt", Timestamp.from(after.createdAt()));
+                params.put("afterId", after.id());
             }
-            return statement.query(JdbcDecisionLog::record).list();
+            return RuleListQueries.decisionSearch(after != null).list(jdbc, params, JdbcDecisionLog::record);
         });
     }
 
@@ -144,17 +125,17 @@ public final class JdbcDecisionLog implements DecisionLog {
     public List<DecisionRecord> searchByCorrelationId(String tenantId, String correlationId, String ruleSet,
             Instant from, Instant to, Position after, int limit, Duration statementTimeout) {
         return withTimeout(statementTimeout, () -> {
-            var statement = jdbc.sql(correlationSql(ruleSet != null, after != null))
-                    .param("tenant", tenantId).param("correlation", correlationId)
-                    .param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
-                    .param("limit", limit);
+            var params = ListQuery.params("tenant", tenantId, "correlation", correlationId,
+                    "from", Timestamp.from(from), "to", Timestamp.from(to), "limit", limit);
             if (ruleSet != null) {
-                statement = statement.param("ruleSet", ruleSet);
+                params.put("ruleSet", ruleSet);
             }
             if (after != null) {
-                statement = statement.param("afterAt", Timestamp.from(after.createdAt())).param("afterId", after.id());
+                params.put("afterAt", Timestamp.from(after.createdAt()));
+                params.put("afterId", after.id());
             }
-            return statement.query(JdbcDecisionLog::record).list();
+            return RuleListQueries.byCorrelation(ruleSet != null, after != null).list(jdbc, params,
+                    JdbcDecisionLog::record);
         });
     }
 
@@ -168,16 +149,29 @@ public final class JdbcDecisionLog implements DecisionLog {
     public List<DecisionRecord> searchByPlainInput(String tenantId, String ruleSet, String input, String valueJson,
             Instant from, Instant to, Position after, int limit, Duration statementTimeout) {
         return withTimeout(statementTimeout, () -> {
-            var statement = jdbc.sql(inputSql(after != null))
-                    .param("tenant", tenantId).param("ruleSet", ruleSet)
-                    .param("input", input).param("value", valueJson)
-                    .param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
-                    .param("limit", limit);
+            var params = ListQuery.params("tenant", tenantId, "ruleSet", ruleSet, "input", input,
+                    "value", valueJson, "from", Timestamp.from(from), "to", Timestamp.from(to), "limit", limit);
             if (after != null) {
-                statement = statement.param("afterAt", Timestamp.from(after.createdAt())).param("afterId", after.id());
+                params.put("afterAt", Timestamp.from(after.createdAt()));
+                params.put("afterId", after.id());
             }
-            return statement.query(JdbcDecisionLog::record).list();
+            return RuleListQueries.byInput(after != null).list(jdbc, params, JdbcDecisionLog::record);
         });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>A subquery with {@code LIMIT} over the same tenant, rule set and period as {@link #search}, so PostgreSQL
+     * prunes the monthly partitions outside the period and stops reading at {@code atMost} index entries.
+     */
+    @Override
+    public long countInPeriod(String tenantId, String ruleSet, Instant from, Instant to, int atMost,
+            Duration statementTimeout) {
+        return withTimeout(statementTimeout, () -> RuleListQueries.DECISION_COUNT.list(jdbc,
+                ListQuery.params("tenant", tenantId, "ruleSet", ruleSet, "from", Timestamp.from(from),
+                        "to", Timestamp.from(to), "limit", atMost),
+                (rs, row) -> rs.getLong("found")).getFirst());
     }
 
     /**
@@ -203,11 +197,8 @@ public final class JdbcDecisionLog implements DecisionLog {
      * @return the SQL with named parameters
      */
     static String searchSql(boolean afterPosition) {
-        return SEARCH + (afterPosition ? KEYSET : "") + PAGE;
+        return RuleListQueries.decisionSearch(afterPosition).sql();
     }
-
-    private static final String KEYSET = "  AND (created_at, id) < (:afterAt, :afterId)\n";
-    private static final String PAGE = "ORDER BY created_at DESC, id DESC\nLIMIT :limit\n";
 
     /**
      * Returns the correlation search statement, for the query plan check of RLE-070.
@@ -217,11 +208,7 @@ public final class JdbcDecisionLog implements DecisionLog {
      * @return the SQL with named parameters
      */
     static String correlationSql(boolean ruleSet, boolean afterPosition) {
-        return "SELECT " + COLUMNS + """
-                 FROM rle_decision
-                WHERE tenant_id = :tenant AND correlation_id = :correlation
-                  AND created_at >= :from AND created_at < :to
-                """ + (ruleSet ? "  AND rule_set_name = :ruleSet\n" : "") + (afterPosition ? KEYSET : "") + PAGE;
+        return RuleListQueries.byCorrelation(ruleSet, afterPosition).sql();
     }
 
     /**
@@ -231,8 +218,7 @@ public final class JdbcDecisionLog implements DecisionLog {
      * @return the SQL with named parameters
      */
     static String inputSql(boolean afterPosition) {
-        return SEARCH + "  AND masked_inputs -> CAST(:input AS text) = CAST(:value AS jsonb)\n"
-                + (afterPosition ? KEYSET : "") + PAGE;
+        return RuleListQueries.byInput(afterPosition).sql();
     }
 
     private static DecisionRecord record(ResultSet rs, int row) throws SQLException {

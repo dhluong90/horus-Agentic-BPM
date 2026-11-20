@@ -68,6 +68,7 @@ public final class CompiledRuleSet {
     private final int maxOutputBytes;
     private final java.time.ZoneId timeZone;
     private final Set<String> inputsInOutputs;
+    private final Set<String> inputsRead;
     private final EvaluationLimits evaluationLimits;
     /** The most steps one decision on this table can take (no loops: a sum of node counts). */
     private final long worstCaseSteps;
@@ -86,6 +87,9 @@ public final class CompiledRuleSet {
         Set<String> referenced = new java.util.TreeSet<>();
         rules.forEach(rule -> rule.thens().forEach(then -> collectInputs(then, referenced)));
         this.inputsInOutputs = java.util.Collections.unmodifiableSet(referenced);
+        Set<String> read = new java.util.TreeSet<>(referenced);
+        rules.forEach(rule -> collectInputs(rule.condition(), read));
+        this.inputsRead = java.util.Collections.unmodifiableSet(read);
         this.shared = new Evaluator(table.moneyRounding(), maxStringLength, regexLimits, evaluationLimits);
         this.maxOutputBytes = maxOutputBytes;
         this.evaluationLimits = evaluationLimits;
@@ -746,6 +750,16 @@ public final class CompiledRuleSet {
      */
     public Set<String> inputsInOutputs() {
         return inputsInOutputs;
+    }
+
+    /**
+     * Returns the inputs any rule condition or output cell reads. An input a table declares but never reads is not in
+     * it, so a logged value of that input (a masked one, say) does not stop the table being evaluated again (RLE-076).
+     *
+     * @return the input names, sorted
+     */
+    public Set<String> inputsRead() {
+        return inputsRead;
     }
 
     /** Adds the input names an expression reads. Exhaustive on purpose: a new node type must say what it reads. */

@@ -73,8 +73,12 @@ public record RuleEngineProperties(
      *
      * @param maxInputs the most sample input sets one simulation accepts, 1 to 1000; default 1000. May be lowered,
      *     never raised
+     * @param maxHistoryDecisions the most logged decisions one comparison over a past period
+     *     ({@code POST /rule-sets/{name}:compare}, RLE-077) reads, 1 to 200000; default 50000 (about 100000
+     *     evaluations, a few seconds of one thread). A larger period is refused with {@code 422 HISTORY_TOO_LARGE},
+     *     never sampled, so totals are never partial (PD-124). May be lowered or raised up to the ceiling
      */
-    public record Simulation(Integer maxInputs) {
+    public record Simulation(Integer maxInputs, Integer maxHistoryDecisions) {
     }
 
     /**
@@ -418,6 +422,8 @@ public record RuleEngineProperties(
                 .withMaxBatch(evaluation.maxBatch() == null ? EngineDefaults.BATCH_MAX_ITEMS : evaluation.maxBatch())
                 .withSimulationMaxInputs(
                         simulation.maxInputs() == null ? EngineDefaults.SIMULATION_MAX_SAMPLES : simulation.maxInputs())
+                .withSimulationMaxHistoryDecisions(simulation.maxHistoryDecisions() == null
+                        ? EngineDefaults.SIMULATION_MAX_HISTORY_DECISIONS : simulation.maxHistoryDecisions())
                 .withAcknowledgeWarnings(lifecycle.acknowledgeWarnings() == null
                         ? EngineDefaults.ACKNOWLEDGE_WARNINGS : lifecycle.acknowledgeWarnings());
     }
