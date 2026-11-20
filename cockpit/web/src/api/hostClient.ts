@@ -1,7 +1,8 @@
 import type { z } from 'zod';
 import { bpmMeV1, type BpmMeV1 } from './generated/bpm-me.v1';
-import { bpmMetaV1, type BpmMetaV1 } from './generated/bpm-meta.v1';
+import type { BpmMetaV1 } from './generated/bpm-meta.v1';
 import { HostCallError, readProblem } from './hostError';
+import { createSkippedModulesWarner, readMeta } from './metaReader';
 
 export interface HostClient {
   readonly baseUrl: string;
@@ -10,6 +11,19 @@ export interface HostClient {
 }
 
 type Fetch = typeof fetch;
+
+/** Turns a response body into the typed value, or undefined when it does not match the contract. */
+type Reader<T> = (body: unknown) => T | undefined;
+
+function strict<T>(schema: z.ZodType<T>): Reader<T> {
+  return (body) => {
+    const parsed = schema.safeParse(body);
+    return parsed.success ? parsed.data : undefined;
+  };
+}
+
+/** One warner per page load, shared by every client, so a skipped module is noted once. */
+const warnSkippedModules = createSkippedModulesWarner();
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -27,10 +41,11 @@ export function csrfHeaders(method: string, cookies: string = document.cookie): 
 /**
  * The one place the cockpit calls a host. This release supports host-session authentication only:
  * the host's own session cookie on the same origin (embedded mode). Every response is validated against the generated schema;
- * a body that does not match is an error, never rendered partially (cockpit DESIGN section 12).
+ * a body that does not match is an error, never rendered partially (cockpit DESIGN section 12). The one exception is
+ * a /meta module this cockpit does not know, which is skipped before validation (cockpit DESIGN section 5.2).
  */
-export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): HostClient {
-  async function requestJson<T>(method: string, path: string, schema: z.ZodType<T>, signal: AbortSignal | undefined): Promise<T> {
+export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch, onSkippedModules: (skipped: readonly string[]) => void = warnSkippedModules): HostClient {
+  async function requestJson<T>(method: string, path: string, read: Reader<T>, signal: AbortSignal | undefined): Promise<T> {
     let response: Response;
     try {
       response = await fetchImpl(`${baseUrl}${path}`, {
@@ -60,17 +75,25 @@ export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): Hos
     } catch {
       throw new HostCallError({ kind: 'unexpected-response', status: response.status, correlationId });
     }
-    const parsed = schema.safeParse(body);
-    if (!parsed.success) {
+    const value = read(body);
+    if (value === undefined) {
       throw new HostCallError({ kind: 'unexpected-response', status: response.status, correlationId });
     }
-    return parsed.data;
+    return value;
   }
+
+  /** /meta is read tolerantly: a module this cockpit does not know is skipped and noted (cockpit DESIGN 5.2). */
+  const readMetaNoting: Reader<BpmMetaV1> = (body) => {
+    const reading = readMeta(body);
+    if (!reading.ok) return undefined;
+    onSkippedModules(reading.skipped);
+    return reading.meta;
+  };
 
   return {
     baseUrl,
-    getMeta: (signal) => requestJson('GET', '/api/bpm/meta', bpmMetaV1, signal),
-    getMe: (signal) => requestJson('GET', '/api/bpm/me', bpmMeV1, signal),
+    getMeta: (signal) => requestJson('GET', '/api/bpm/meta', readMetaNoting, signal),
+    getMe: (signal) => requestJson('GET', '/api/bpm/me', strict(bpmMeV1), signal),
   };
 }
 

@@ -147,6 +147,8 @@ Source: [`diagrams/signin-sequence.mmd`](diagrams/signin-sequence.mmd).
 
 A cockpit release `0.N` supports hosts whose engine minor is `0.N` or `0.(N-1)`; from 1.0 the same rule applies to `1.N` (`TR-UI-08`). A host older than that is `UNSUPPORTED_VERSION`: it stays in the host list with its version and the supported range, and none of its screens are offered. Within the supported range, screens turn on by the feature flags in `/api/bpm/meta`, never by comparing version numbers, so a host that has not enabled a feature simply does not show it.
 
+A host can also report an engine module this cockpit does not know, for example a future case module. The cockpit skips that `modules[]` entry before it validates `/api/bpm/meta` and notes the skipped names once per page load in the browser console (at most 10 names, each cut to 64 characters and escaped). The engines it knows keep the strict schema, so a malformed `rules` or `processes` entry is still an unexpected response (section 12), and so is a host left with no known module. The reader is `cockpit/web/src/api/metaReader.ts`; the published JSON Schema stays strict.
+
 ### 5.3 Host connection states
 
 ![Host connection states](images/host-connection-states.svg)
