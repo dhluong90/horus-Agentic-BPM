@@ -7,6 +7,7 @@ import io.github.dhluong90.bpm.process.api.InstanceSummary;
 import io.github.dhluong90.bpm.process.api.Page;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
+import io.github.dhluong90.bpm.process.api.TaskView;
 import io.github.dhluong90.bpm.process.internal.json.EngineJson;
 import io.github.dhluong90.bpm.process.internal.json.Values;
 import java.time.Instant;
@@ -71,6 +72,8 @@ public final class Views {
             ObjectNode tn = tasks.addObject().put("id", t.id()).put("nodeId", t.nodeId());
             putNullable(tn, "name", t.name());
             tn.put("assignee", t.assignee()).put("status", t.status()).put("lockVersion", t.lockVersion());
+            putNullable(tn, "claimedBy", t.claimedBy());
+            putNullable(tn, "claimedAt", t.claimedAt() == null ? null : t.claimedAt().toString());
             putNullable(tn, "completedBy", t.completedBy());
         }
         o.put("lockVersion", i.lockVersion());
@@ -93,7 +96,8 @@ public final class Views {
         List<ProcessInstance.Task> tasks = new ArrayList<>();
         n.get("tasks").forEach(t -> tasks.add(new ProcessInstance.Task(t.get("id").stringValue(),
                 t.get("nodeId").stringValue(), text(t, "name"), t.get("assignee").stringValue(),
-                t.get("status").stringValue(), t.get("lockVersion").longValue(), text(t, "completedBy"))));
+                t.get("status").stringValue(), t.get("lockVersion").longValue(), text(t, "claimedBy"),
+                instant(t, "claimedAt"), text(t, "completedBy"))));
         @SuppressWarnings("unchecked")
         Map<String, Object> variables = (Map<String, Object>) Values.fromJson(n.get("variables"));
         String ended = text(n, "endedAt");
@@ -149,6 +153,47 @@ public final class Views {
         } else {
             o.put(name, value);
         }
+    }
+
+    /** @param t task @return JSON tree, with {@code allowedActions} */
+    public static ObjectNode task(TaskView t) {
+        ObjectNode o = EngineJson.NODES.objectNode();
+        o.put("id", t.id()).put("instanceId", t.instanceId()).put("definitionKey", t.definitionKey())
+                .put("definitionVersion", t.definitionVersion());
+        putNullable(o, "businessKey", t.businessKey());
+        o.put("nodeId", t.nodeId());
+        putNullable(o, "name", t.name());
+        o.put("assignee", t.assignee()).put("fourEyes", t.fourEyes()).put("status", t.status())
+                .put("lockVersion", t.lockVersion());
+        putNullable(o, "claimedBy", t.claimedBy());
+        putNullable(o, "claimedAt", t.claimedAt() == null ? null : t.claimedAt().toString());
+        o.put("createdAt", t.createdAt().toString());
+        putNullable(o, "completedBy", t.completedBy());
+        putNullable(o, "completedAt", t.completedAt() == null ? null : t.completedAt().toString());
+        ArrayNode actions = o.putArray("allowedActions");
+        for (String action : List.of("claim", "unclaim", "complete")) {
+            if (t.allowedActions().contains(action)) {
+                actions.add(action);
+            }
+        }
+        return o;
+    }
+
+    /** The stored answer of a claim or unclaim: the task without the caller's actions. */
+    static String taskToJson(TaskView t) {
+        ObjectNode o = task(t);
+        o.remove("allowedActions");
+        return EngineJson.JSON.writeValueAsString(o);
+    }
+
+    static TaskView taskFromJson(String json) {
+        JsonNode n = EngineJson.JSON.readTree(json);
+        return new TaskView(n.get("id").stringValue(), n.get("instanceId").stringValue(),
+                n.get("definitionKey").stringValue(), n.get("definitionVersion").intValue(), text(n, "businessKey"),
+                n.get("nodeId").stringValue(), text(n, "name"), n.get("assignee").stringValue(),
+                n.get("fourEyes").booleanValue(), n.get("status").stringValue(), n.get("lockVersion").longValue(),
+                text(n, "claimedBy"), instant(n, "claimedAt"), Instant.parse(n.get("createdAt").stringValue()),
+                text(n, "completedBy"), instant(n, "completedAt"), java.util.Set.of());
     }
 
     /** @param d summary @return JSON tree */

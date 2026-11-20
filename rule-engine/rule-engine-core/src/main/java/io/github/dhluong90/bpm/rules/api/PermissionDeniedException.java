@@ -19,6 +19,18 @@ public final class PermissionDeniedException extends HorusBpmException {
     }
 
     /**
+     * Returns the refusal of a withdrawal by anyone but the requester (PD-089, RLE-046): an approver rejects instead.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @return the exception
+     */
+    public static PermissionDeniedException notRequester(String ruleSet, int version) {
+        return new PermissionDeniedException("Only the requester of " + ruleSet + " v" + version
+                + " may withdraw it; an approver sends it back with :reject", true);
+    }
+
+    /**
      * Returns the refusal of a draft replacement by anyone but its author (RLE-047): otherwise a second author could
      * replace the content and then approve it, because four eyes compares the approver with the author.
      *

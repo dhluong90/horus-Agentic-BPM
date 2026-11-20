@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.rules.api.VersionDiff;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
 import io.github.dhluong90.bpm.rules.api.PayloadTooLargeException;
+import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.rules.api.LifecycleAction;
 import io.github.dhluong90.bpm.rules.api.Page;
 import io.github.dhluong90.bpm.rules.api.PageRequest;
@@ -61,6 +62,7 @@ public final class DefaultVersionService implements VersionService {
     static final String EVENT_PUBLISHED = "rules.version.published.v1";
     static final String EVENT_REJECTED = "rules.version.rejected.v1";
     static final String EVENT_DRAFT_UPDATED = "rules.version.draft-updated.v1";
+    static final String EVENT_WITHDRAWN = "rules.version.withdrawn.v1";
 
     private static final String CURSOR_RULE_SETS = "rule-sets";
     private static final String CURSOR_VERSIONS = "versions";
@@ -331,6 +333,36 @@ public final class DefaultVersionService implements VersionService {
     }
 
     @Override
+    public RuleSetVersion withdraw(String ruleSet, int version, WriteOptions options) {
+        WriteOptions opts = options == null ? WriteOptions.none() : options;
+        String tenant = context.tenant();
+        String actor = context.callerWith(PERMISSION_AUTHOR);
+        String reason = optionalReason(opts.comment());
+        String requestHash = Hashes.sha256Parts("withdraw", actor, ruleSet, Integer.toString(version),
+                String.valueOf(opts.expectedLockVersion()), reason);
+        return context.idempotent(tenant, "withdraw", opts.idempotencyKey(), requestHash, 200, () -> {
+            StoredVersion current = load(tenant, ruleSet, version);
+            if (current.status() != VersionStatus.PENDING_APPROVAL) {
+                throw new InvalidStateException(ruleSet, version, current.status(), "withdraw");
+            }
+            // PD-089: only the identity that requested publication takes it back; an approver rejects instead, so
+            // the history never records an approver's refusal as the author's own withdrawal.
+            if (!actor.equals(current.requestedBy())) {
+                throw PermissionDeniedException.notRequester(ruleSet, version);
+            }
+            checkLock(current, opts);
+            Instant now = context.clock().instant();
+            StoredVersion updated = current.withdrawn();
+            store.updateVersion(updated, current.lockVersion());
+            history(updated, LifecycleAction.WITHDRAWN, current.status(), actor, reason, now);
+            event(tenant, EVENT_WITHDRAWN, updated, actor, now, payload -> payload
+                    .put("withdrawnBy", actor)
+                    .put("reason", reason));
+            return updated.toView(false);
+        }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
+    }
+
+    @Override
     public Page<RuleSetSummary> listRuleSets(PageRequest page) {
         String tenant = context.tenant();
         context.callerWith(PERMISSION_READ);
@@ -407,6 +439,18 @@ public final class DefaultVersionService implements VersionService {
     private String requireReason(String reason) {
         if (reason == null || reason.isBlank()) {
             throw new InputInvalidException("reason is required and must not be blank");
+        }
+        int max = context.settings().reasonMaxLength();
+        if (reason.length() > max) {
+            throw new InputInvalidException("reason must be at most " + max + " characters, was " + reason.length());
+        }
+        return reason;
+    }
+
+    /** A withdrawal reason is optional (PD-089); a blank one is stored as none. It has the reject reason's bound. */
+    private String optionalReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return null;
         }
         int max = context.settings().reasonMaxLength();
         if (reason.length() > max) {

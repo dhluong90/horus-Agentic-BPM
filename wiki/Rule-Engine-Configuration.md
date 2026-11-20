@@ -166,7 +166,7 @@ The engine's default beans are `@ConditionalOnMissingBean`, so a host bean repla
 |---|---|
 | `rules:evaluate` | `:evaluate`, `:evaluate-batch` on published versions |
 | `rules:read` | Read rule sets, versions, diffs, exports |
-| `rules:author` | Create and edit drafts, validate, import, `:request-publish` |
+| `rules:author` | Create and edit drafts, validate, import, `:request-publish`, `:withdraw` of one's own request |
 | `rules:approve` | `:approve`, `:reject`, `:retire`. Approval by the requester is refused regardless |
 | `rules:simulate` | `:simulate`, set `clock` on `:evaluate` |
 | `rules:pin` | Evaluate one named approved version (`/versions/{v}:evaluate`). No role holds it by default; grant it only to a service identity such as the Process Engine's. A retired version is refused unless `evaluation.pin-retired` is `true` |

@@ -241,8 +241,8 @@ public final class JdbcProcessStore implements ProcessStore {
     // ---- tasks --------------------------------------------------------------------------------------------
 
     private static final String TASK_COLUMNS = "tenant_id, id, instance_id, token_id, definition_id, node_id, name, "
-            + "assignee_user, assignee_role, assignee_group, four_eyes, status, lock_version, completed_by, created_at, "
-            + "completed_at";
+            + "assignee_user, assignee_role, assignee_group, four_eyes, status, lock_version, claimed_by, claimed_at, "
+            + "completed_by, created_at, completed_at";
 
     @Override
     public void insertTask(TaskRow t) {
@@ -266,10 +266,27 @@ public final class JdbcProcessStore implements ProcessStore {
 
     @Override
     public int completeTask(String tenant, String id, long expectedLockVersion, String completedBy, Instant at) {
+        // Only the claimant completes, and only at the version it read (PRE-003): zero rows changes nothing.
         return jdbc.sql("UPDATE pre_task SET status = 'COMPLETED', completed_by = ?, completed_at = ?, "
                         + "lock_version = lock_version + 1 WHERE tenant_id = ? AND id = ? AND lock_version = ? "
-                        + "AND status IN ('OPEN','CLAIMED')")
-                .params(completedBy, ts(at), tenant, id, expectedLockVersion).update();
+                        + "AND status = 'CLAIMED' AND claimed_by = ?")
+                .params(completedBy, ts(at), tenant, id, expectedLockVersion, completedBy).update();
+    }
+
+    @Override
+    public int claimTask(String tenant, String id, long expectedLockVersion, String claimant, Instant at) {
+        return jdbc.sql("UPDATE pre_task SET status = 'CLAIMED', claimed_by = ?, claimed_at = ?, "
+                        + "lock_version = lock_version + 1 WHERE tenant_id = ? AND id = ? AND lock_version = ? "
+                        + "AND status = 'OPEN'")
+                .params(claimant, ts(at), tenant, id, expectedLockVersion).update();
+    }
+
+    @Override
+    public int unclaimTask(String tenant, String id, long expectedLockVersion, String claimant) {
+        return jdbc.sql("UPDATE pre_task SET status = 'OPEN', claimed_by = NULL, claimed_at = NULL, "
+                        + "lock_version = lock_version + 1 WHERE tenant_id = ? AND id = ? AND lock_version = ? "
+                        + "AND status = 'CLAIMED' AND claimed_by = ?")
+                .params(tenant, id, expectedLockVersion, claimant).update();
     }
 
     @Override
@@ -293,7 +310,8 @@ public final class JdbcProcessStore implements ProcessStore {
         return new TaskRow(rs.getString("tenant_id"), rs.getString("id"), rs.getString("instance_id"),
                 rs.getString("token_id"), rs.getString("definition_id"), rs.getString("node_id"), rs.getString("name"),
                 assignee, rs.getBoolean("four_eyes"), rs.getString("status"), rs.getLong("lock_version"),
-                rs.getString("completed_by"), instant(rs, "created_at"), instant(rs, "completed_at"));
+                rs.getString("claimed_by"), instant(rs, "claimed_at"), rs.getString("completed_by"),
+                instant(rs, "created_at"), instant(rs, "completed_at"));
     }
 
     // ---- history and idempotency --------------------------------------------------------------------------

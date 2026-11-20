@@ -114,6 +114,9 @@ jobs:
       - name: Image gates, no secrets in layers and no high or critical vulnerability
         run: deploy/scan-image.sh "$IMAGE"
 
+      - name: Secrets gate canaries, a planted key file and a value inside a jar must fail
+        run: deploy/scan-image-canaries.sh "$IMAGE"
+
       - name: A missing secret file stops compose before any container starts
         run: |
           set -euo pipefail

@@ -5,7 +5,7 @@ info:
   description: |
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
-    export, replace a draft, diff two versions, request publication, approve, reject, history and evaluate. The remaining endpoints of
+    export, replace a draft, diff two versions, request publication, approve, reject, withdraw, history and evaluate. The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
     The tenant is never part of a request: it comes from the host's authenticated context
@@ -413,7 +413,7 @@ paths:
       summary: Read the lifecycle history of one version, oldest first
       description: |
         Permission `rules:read`. One entry per transition (`CREATED`, `REQUESTED`, `APPROVED`,
-        `REJECTED`) and per replacement of a draft (`DRAFT_UPDATED`, with both canonical hashes), with actor, reason or comment, statuses before and after and the
+        `REJECTED`, `WITHDRAWN`) and per replacement of a draft (`DRAFT_UPDATED`, with both canonical hashes), with actor, reason or comment, statuses before and after and the
         `lockVersion` after (DESIGN section 3.3.3). A version created before the history table
         existed starts with a backfilled `CREATED` entry; its earlier request and approval have
         no entries.
@@ -548,6 +548,51 @@ paths:
               $ref: '#/components/schemas/RejectRequest'
             example:
               reason: R2 waiver needs pricing committee minutes
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:withdraw:
+    post:
+      tags: [rule-sets]
+      operationId: withdraw
+      summary: Take back your own publication request; the version returns to DRAFT
+      description: |
+        Permission `rules:author`, checked before the body is read. Only the identity that requested
+        publication (`requestedBy`) may withdraw it; anyone else, an approver included, gets
+        `403 PERMISSION_DENIED` (an approver uses `:reject`). Only a `PENDING_APPROVAL` version can be
+        withdrawn; any other status is `409 INVALID_STATE` (PD-089, DESIGN section 3.3, `RLE-046`).
+
+        The version returns to `DRAFT` with `requestedBy` and `requestedAt` cleared and `lockVersion`
+        incremented, one history entry `WITHDRAWN` and one `rules.version.withdrawn.v1` event
+        (`rule-engine/api/schema/rules.version.withdrawn.v1.schema.json`). Nothing is published and
+        the version in effect does not change. The draft can be edited and requested again, which
+        starts a new approval.
+
+        `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
+        `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`. The reason is
+        optional; one longer than `lifecycle.reason-max-length` (default 2,000 characters) is
+        `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawRequest'
+            example:
+              reason: Wrong fee for GOLD
       responses:
         '200':
           $ref: '#/components/responses/Version'
@@ -732,8 +777,8 @@ components:
         RFC 9457 problem; see the wiki page Common Error Codes. `401 UNAUTHENTICATED` carries a
         `WWW-Authenticate` challenge (the host's `horus.bpm.security.challenge`, `Bearer` by default, with
         `error="invalid_token"` when no tenant could be resolved for the caller). `403` is
-        `PERMISSION_DENIED` when the caller lacks the endpoint's permission, `SELF_APPROVAL_FORBIDDEN` for a
-        maker approving their own version, `DRAFT_AUTHORING_DISABLED` when the host turned draft editing off, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
+        `PERMISSION_DENIED` when the caller lacks the endpoint's permission (or, on `:withdraw`, is not the
+        requester), `SELF_APPROVAL_FORBIDDEN` for a maker approving or rejecting their own version, `DRAFT_AUTHORING_DISABLED` when the host turned draft editing off, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
         another tenant than the caller's while tenant switching is off, or the principal's tenant attribute
         contradicts the resolved tenant (RLE-018, RLE-037).
       headers:
@@ -804,11 +849,12 @@ components:
         caller's permissions and the four-eyes rule: `request-publish` on a `DRAFT` with
         `rules:author`; `approve` on a `PENDING_APPROVAL` with `rules:approve` when the caller is
         neither the requester nor the author; `reject` on a `PENDING_APPROVAL` with
-        `rules:approve` when the caller is not the requester. A hint for screens only: the engine
-        checks again on every command.
+        `rules:approve` when the caller is not the requester; `withdraw` on a `PENDING_APPROVAL`
+        with `rules:author` for its requester only (PD-089), who never gets `approve` or `reject`.
+        A hint for screens only: the engine checks again on every command.
       items:
         type: string
-        enum: [request-publish, approve, reject]
+        enum: [request-publish, approve, reject, withdraw]
     RuleSetSummary:
       type: object
       required: [ruleSet, latestVersion, latestStatus, publishedVersion, lastChangedAt]
@@ -883,7 +929,7 @@ components:
       properties:
         action:
           type: string
-          enum: [CREATED, REQUESTED, APPROVED, REJECTED, DRAFT_UPDATED]
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED]
         fromStatus:
           type: [string, 'null']
           enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, null]
@@ -893,7 +939,7 @@ components:
         actor: { type: string }
         reason:
           type: [string, 'null']
-          description: The rejection reason or the approval comment
+          description: The rejection or withdrawal reason, or the approval comment
         lockVersion: { type: integer }
         occurredAt: { type: string, format: date-time }
         canonicalHash:
@@ -921,6 +967,13 @@ components:
           minLength: 1
           maxLength: 2000
           description: Why the version goes back to its author; stored in the history and the event
+    WithdrawRequest:
+      type: object
+      properties:
+        reason:
+          type: [string, 'null']
+          maxLength: 2000
+          description: Optional; why the requester takes the request back. Stored in the history and the event
     FieldChange:
       type: object
       required: [path, from, to, nonAscii]
