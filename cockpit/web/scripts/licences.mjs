@@ -1,6 +1,6 @@
-// Licence rule for the shipped cockpit bundle (TR-LIC-01): Apache 2.0, MIT and BSD only,
+// Licence rule for the shipped cockpit bundle (TR-LIC-01): Apache 2.0, MIT, BSD and ISC only,
 // and the packages the cockpit design rejects by name are refused even if relicensed.
-export const ALLOWED = new Set(['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', '0BSD']);
+export const ALLOWED = new Set(['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', '0BSD', 'ISC']);
 export const REJECTED_BY_NAME = new Set(['bpmn-js', 'diagram-js', 'elkjs', 'jointjs', '@joint/core']);
 
 /** SPDX expression to the identifiers it allows: "(MIT OR Apache-2.0)" passes if any branch passes. */

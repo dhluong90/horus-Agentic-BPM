@@ -4,7 +4,7 @@
 |---|---|
 | Type | Reference (decision record) |
 | Owner area | Product |
-| Last reviewed | 2026-11-20 |
+| Last reviewed | 2026-11-21 |
 
 This log records every product decision about the engines: scope, milestones, priorities, product rules and the acceptance of architecture decisions that change what ships. The product manager writes the question and a recommendation first; the product owner decides (PD-001). Since 2026-11-19 the product manager also decides business and use-case questions under delegated authority, while the product owner keeps release dates, licensing and commercial terms and can overrule any entry (PD-073). Every decision follows the principle "generic by design" (PD-074). A decision is never applied to the roadmap, the feature map, a PRD or a SPEC before its status here is Decided.
 
@@ -153,6 +153,12 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-129](#pd-129-the-example-model-adapters-are-openai-compatible-and-anthropic-messages) | The example model adapters are OpenAI-compatible and Anthropic Messages | Decided (product manager, delegated, PD-073) |
 | [PD-130](#pd-130-decision-log-retention-is-required-from-10-0x-warns-and-keeps-everything) | Decision log retention is required from 1.0; 0.x warns and keeps everything | Decided (product manager, delegated, PD-073) |
 | [PD-131](#pd-131-migrating-running-instances-and-editing-business-calendars-are-four-eyes-by-default) | Migrating running instances and editing business calendars are four-eyes by default | Decided (product manager, delegated, PD-073); amends PD-114 and PD-118 |
+| [PD-132](#pd-132-masking-stays-not-masked-unless-declared) | Masking stays not masked unless declared | Decided (maintainer, 2026-11-21) |
+| [PD-133](#pd-133-issues-#44-and-#212-are-delivered-by-release-0.1.0) | Issues #44 and #212 are delivered by release 0.1.0 | Decided (maintainer, 2026-11-21) |
+| [PD-134](#pd-134-interim-0.x-tags-are-kept-before-1.0) | Interim 0.x tags are kept before 1.0 | Decided (maintainer, 2026-11-21) |
+| [PD-135](#pd-135-the-1.0-api-freeze-date-is-5-february-2027) | The 1.0 API freeze date is 5 February 2027 | Decided (maintainer, 2026-11-21) |
+| [PD-136](#pd-136-isc-licence-is-allowed-for-the-diagram-library-dependencies) | ISC licence is allowed for the diagram library dependencies | Decided (maintainer, 2026-11-21) |
+| [PD-137](#pd-137-tag-0.2.0-for-the-process-engine-and-cockpit-0.2-release) | Tag 0.2.0 for the Process Engine and Cockpit 0.2 release | Decided (maintainer, 2026-11-21) |
 
 ---
 
@@ -3756,3 +3762,80 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 
 **Follow-ups.** Architect: the process engine SPEC and OpenAPI change for both proposals. Maintainers (engineering): #106 and #107 (migration), #125 (calendars). If four-eyes for migration misses its milestone, migration execution does not ship; it never ships with one person outside `dev`. Product manager: the roadmap and feature map notes for CK-F-18 and CK-F-19.
 
+### PD-132 Masking stays not masked unless declared
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | The question of making strict masking the default outside `dev` (issue #311) is open after PD-099, whose kill criterion has not fired. |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** Keep the default off (option 1 of #311); guidance and the publish-time warning stay as the mitigation. `decision-log.require-explicit-mask` stays `false` outside `dev` until a pilot bank finds unmasked personal data in the decision log; that finding reopens this decision.
+
+**Consequences.** Issue #311 closes with a comment pointing here. No change to DESIGN 4.4.
+
+### PD-133 Issues #44 and #212 are delivered by release 0.1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issues #44 and #212 asked for the Rule Engine and Cockpit 0.1 release and for the release review with the 0.1.0 tag. Are they done? |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** Yes. Release v0.1.0 (published 2026-11-20) delivers both. Each issue is closed as completed with a pointer to the release.
+
+**Consequences.** None.
+
+### PD-134 Interim 0.x tags are kept before 1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issue #89 asked whether tags between 0.1.0 and 1.0 are kept, or whether only 1.0 is tagged. |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** Interim 0.x tags are kept. Each milestone release before 1.0 is tagged and published; 0.x versions may change contracts, as the release notes of each state.
+
+**Consequences.** Issue #89 comment records it.
+
+### PD-135 The 1.0 API freeze date is 5 February 2027
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issue #115 needs a date for the 1.0 API freeze and deprecation policy. |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** The API freeze date is 5 February 2027, signed by the architect. After it, changes to the frozen APIs follow the deprecation policy.
+
+**Consequences.** Issue #115 comment records it.
+
+### PD-136 ISC licence is allowed for the diagram library dependencies
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | React Flow, the diagram library, pulls in ISC-licensed d3 packages. Is ISC acceptable? |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** Allowed. ISC is a permissive licence equivalent to MIT. The dependency licence check accepts ISC alongside the other permissive licences.
+
+**Consequences.** The licence allow-list in the dependency check includes ISC.
+
+### PD-137 Tag 0.2.0 for the Process Engine and Cockpit 0.2 release
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Does the Process Engine and Cockpit 0.2 release get its own 0.2.0 tag? |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** Yes. The release is tagged 0.2.0, following PD-134.
+
+**Consequences.** None beyond the release itself.
