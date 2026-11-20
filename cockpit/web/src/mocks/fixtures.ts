@@ -37,6 +37,9 @@ export const meMinh: BpmMeV1 = {
   roles: ['PRICING_APPROVER'],
 };
 
+/** A permission name from a newer host that does not match this cockpit's pattern (a hyphen in the action). */
+export const UNREADABLE_PERMISSION = 'rules:log:search-masked';
+
 const ERROR_TYPE = 'https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#';
 
 export const problemPermissionDenied = {
@@ -72,7 +75,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'me-unknown-permission'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -125,6 +128,9 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
     }
     case 'me-unauthenticated':
       return { ...ok, meta: problem(problemUnauthenticated), me: problem(problemUnauthenticated) };
+    case 'me-unknown-permission':
+      // A newer host lists a permission name this cockpit cannot read; the cockpit drops it and signs Lan in.
+      return { ...ok, me: json({ ...meLan, permissions: [...meLan.permissions, UNREADABLE_PERMISSION] }) };
     case 'me-bad-shape':
       return { ...ok, me: json({ schemaVersion: 1, user: { id: '' }, permissions: [] }) };
     case 'meta-not-found':
