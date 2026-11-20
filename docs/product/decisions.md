@@ -125,6 +125,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-102](#pd-102-process-definitions-follow-the-rule-engines-retirement-rules) | Process definitions follow the Rule Engine's retirement rules | Decided (product manager, delegated, PD-073) |
 | [PD-103](#pd-103-cancelling-a-process-instance-needs-its-own-permission) | Cancelling a process instance needs its own permission | Decided (product manager, delegated, PD-073) |
 | [PD-104](#pd-104-approving-a-version-with-personal-data-warnings-needs-an-acknowledgement) | Approving a version with personal-data warnings needs an acknowledgement | Decided (product manager, delegated, PD-073) |
+| [PD-105](#pd-105-pending-rule-versions-with-no-recorded-author-cannot-be-approved) | Pending rule versions with no recorded author cannot be approved | Decided (product manager, delegated, PD-073) |
+| [PD-106](#pd-106-the-condition-builder-lens-moves-from-10-to-11) | The condition builder lens moves from 1.0 to 1.1 | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -3123,3 +3125,43 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Amended 2026-11-20 (security finding, architect's ruling).** The approve request carries the exact `{code, input}` pairs the approver was shown, not codes alone. A mismatch with the set the engine recomputes at approval is refused with `409 WARNINGS_NOT_ACKNOWLEDGED`, so a changed pattern list can never let one code cover inputs the approver never saw.
 
 **Follow-ups.** Architect: a statement in the rule engine SPEC for the approve request, the error code and the history and event fields, and the setting in DESIGN 4.4. Maintainers (engineering): the implementation issue (engine and cockpit). Documentation: the approval how-to.
+
+### PD-105 Pending rule versions with no recorded author cannot be approved
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Rule versions written before the author column existed (migration V2) have no recorded author. If one is still pending at upgrade, its importer could approve it, which breaks the four-eyes rule that PD-096 sets: the approver differs from everyone who made the change. Is approval refused, or are such versions given an author at upgrade? |
+| Raised by | Maintainers (engineering), issue #320 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Refuse approval of any pending version that has no recorded author (chosen). The refusal states the reason: the author is unknown, so the change must be submitted again. Rejecting or withdrawing such a version stays allowed, and so does importing it again, which records the importer as author. Consequence: four-eyes holds without exception, and no author is invented. The cost falls only on installations that hold a pending version written before V2 at upgrade. 0.1.0 is the first release, so such installations are unlikely, and for them the cost is one re-import.
+2. Assign an author to such versions at upgrade. Consequence: the check applies, but the assigned name is a guess presented as a fact in an audit trail. Any choice (a system user, the approver, a host-supplied name) either hides a gap or lets the wrong person pass the check. It also adds an upgrade step that the 0.1.0 adopters do not need.
+
+**Recommendation and decision.** Option 1. A control that cannot identify the maker must fail closed, and an audit trail must not hold a name nobody recorded. The migration cost for adopters is near zero because the first release has no earlier installed base to carry.
+
+**Consequences.** Under the `makers` setting and under any other approver setting, approving a pending version with no recorded author is refused with a clear error. A test with an author-less pending version shows the refusal. The upgrade notes say that pending versions written before V2 must be submitted again. Configurable: no.
+
+**Follow-ups.** Architect: a statement in the rule engine SPEC and the error code. Maintainers (engineering): the test for issue #320. Documentation: a line in the upgrade notes.
+
+### PD-106 The condition builder lens moves from 1.0 to 1.1
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | The condition builder lens (CK-F-45, issue #190) is the first item on the 1.0 cut list. It is sized L, priority P2, blocked by the grid editor (#82) and the plain-language readings (CK-F-44), and has an open design question (nested groups or one level of And per row). Does it stay in 1.0 or move to 1.1? |
+| Raised by | Maintainers (engineering), issue #190 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 2 |
+
+**Options considered**
+
+1. Keep it in 1.0. Consequence: the largest, lowest-priority cockpit item competes with the editor and readings it depends on, in the last milestone before the 1.0 candidate. A late or rushed lens risks the 1.0 promise (a frozen API and every Must green) for a feature that is optional and off by default.
+2. Move it to 1.1 (chosen). Consequence: 1.0 ships the grid editor, the plain-language readings and the spreadsheet round-trip, which already let a business user read and change a rule row. The lens follows as an addition on the same draft and validation path, so it needs no change to a frozen API.
+
+**Recommendation and decision.** Option 2. The lens adds convenience, not a capability: every condition it can write can already be written in the table, and it is off by default (PD-076). It is the largest item on the cut list, with the lowest priority and an unanswered design question, so its value per week of 1.0 effort is the lowest of the cockpit scope.
+
+**Consequences.** CK-F-45 moves from M3 to after 1.0, targeted 1.1, and leaves the M3 cut list. Issue #190 is retargeted to 1.1 and stays open. The open question (nested groups, Or as rows, or one expression cell) is not decided here and must be decided before the lens is sized for 1.1; the DMN export must stay exact. The roadmap, the feature map and the cockpit PRD follow. PD-076 still holds for placement.
+
+**Follow-ups.** Product manager: the roadmap, feature map and cockpit PRD counts (M3 33 to 32, later 13 to 14). Architect: none for 1.0. Maintainers (engineering): retarget #190.

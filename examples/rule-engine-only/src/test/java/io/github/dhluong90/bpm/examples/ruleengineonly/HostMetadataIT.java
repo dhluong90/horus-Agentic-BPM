@@ -55,7 +55,7 @@ class HostMetadataIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @DynamicPropertySource
     static void databaseAndTokenValidation(DynamicPropertyRegistry registry) throws Exception {

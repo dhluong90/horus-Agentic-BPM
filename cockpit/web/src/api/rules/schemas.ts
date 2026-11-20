@@ -146,3 +146,56 @@ export const decisionResult = z
   })
   .loose();
 export type DecisionResult = z.infer<typeof decisionResult>;
+
+/*
+ * The engine's row-level diff of two versions (operation diffVersions, RLE-028 and RLE-048, rule-engine DESIGN
+ * section 4.5). A value is the canonical node: Money for a money literal in a `then` cell or an output default,
+ * the canonical text for any other cell, null when the member is absent on that side.
+ */
+export const fieldChange = z
+  .object({ path: z.string(), from: z.unknown(), to: z.unknown(), nonAscii: z.boolean() })
+  .loose();
+export type FieldChange = z.infer<typeof fieldChange>;
+
+const columnChanges = z
+  .object({
+    added: z.array(z.string()),
+    removed: z.array(z.string()),
+    changed: z.array(z.object({ name: z.string(), fields: z.array(fieldChange) }).loose()),
+    reordered: z.boolean(),
+  })
+  .loose();
+export type ColumnChanges = z.infer<typeof columnChanges>;
+
+export const ROW_CHANGES = ['ADDED', 'REMOVED', 'CHANGED', 'MOVED'] as const;
+export type RowChangeKind = (typeof ROW_CHANGES)[number];
+
+const rowChange = z
+  .object({
+    ruleId: z.string(),
+    change: z.enum(ROW_CHANGES),
+    position: z.number().int().min(1).optional(),
+    basePosition: z.number().int().min(1).optional(),
+    moved: z.boolean().optional(),
+    fields: z.array(fieldChange).optional(),
+  })
+  .loose();
+export type RowChange = z.infer<typeof rowChange>;
+
+export const versionDiff = z
+  .object({
+    ruleSet: z.string(),
+    version: z.number().int().min(1),
+    base: z.number().int().min(1),
+    canonicalHash: z.string(),
+    baseCanonicalHash: z.string(),
+    sourceHashChanged: z.boolean(),
+    effectiveFrom: z.object({ from: z.string().nullable(), to: z.string().nullable() }).loose(),
+    header: z.array(fieldChange),
+    inputs: columnChanges,
+    outputs: columnChanges,
+    rows: z.array(rowChange),
+    unchangedCount: z.number().int().min(0),
+  })
+  .loose();
+export type VersionDiff = z.infer<typeof versionDiff>;

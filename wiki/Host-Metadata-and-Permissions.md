@@ -41,7 +41,7 @@ sequenceDiagram
         M->>R: tenant of this caller
         R-->>M: tenant attribute of the principal, session or token
         M->>E: engine entries (version, features, permissions)
-        M-->>C: 200 meta, Cache-Control private, no-cache with tenant settings, else max-age=60, ETag
+        M-->>C: 200 meta, Cache-Control private, max-age=60, ETag
     end
     C->>M: GET /api/bpm/me
     alt no tenant for the caller
@@ -79,7 +79,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
 | `modules[]` | One entry per engine in the host. The Rule Engine contributes `rules`; no `processes` entry until the Process Engine 0.1 |
 | `engineVersion` | The version of the engine starter the host was built with |
 | `features` | Empty: a flag such as `rules.simulation` is added with the feature it announces, so a client never offers a screen whose endpoints are missing |
-| `settings` | Omitted when the engine has none. Fixed host settings, then settings of the caller's own tenant (0.2.0): the Rule Engine publishes `masking.hmac-key` (`set` or `unset`), and when set `masking.hmac-key-id` (the current key id) and `masking.hmac-key-check` (the key check value), for the key the caller's tenant writes with. A key is never shown, and no other tenant is ever described. Tenants that share the host key see different check values, but the same key id: a tenant key may not reuse a host key id, so two tenants that both see `masking.hmac-key-id: k1` can tell that they share the host key. If that matters, give the host key an opaque id, such as one generated at random, and give each tenant key its own. An engine's tenant settings that fail are left out of the response and logged; `/meta` still answers `200` |
+| `settings` | Omitted when the engine has none |
 | `tenancy.switching` | `false`: tenant switching arrives in M2 |
 | `limits.maxPageSize` | `200`, the largest page of any engine list |
 
@@ -123,7 +123,7 @@ horus.bpm.rules.security.role-permissions:
   ROLE_PRICING_APPROVER: [rules:read, rules:approve]
 ```
 
-Only the permissions of the engines installed in the host are ever listed: `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read`, `rules:masked:search` and `rules:pin` for the Rule Engine, and the `processes:*` permissions of [[Process Engine Overview]], `processes:cancel` included, for the Process Engine. A misspelt authority (`rules:delete`), a process permission on a host without the Process Engine, or an OAuth2 scope never appears. A role mapping that grants an unknown permission, such as `rules:aprove`, stops the host at start-up with a message naming it.
+Only the permissions of the engines installed in the host are ever listed: `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read`, `rules:pin` and `rules:masked:search` for the Rule Engine, and the `processes:*` permissions of [[Process Engine Overview]], `processes:cancel` included, for the Process Engine. A misspelt authority (`rules:delete`), a process permission on a host without the Process Engine, or an OAuth2 scope never appears. A role mapping that grants an unknown permission, such as `rules:aprove`, stops the host at start-up with a message naming it.
 
 `/me` and the engine endpoints apply the mapping in one place, described next.
 
@@ -200,9 +200,9 @@ tenant.switch.refused reason=switching-off user=lan%40bank-a.vn tokenTenant=bank
 
 | Header | Value |
 |---|---|
-| `Cache-Control` | `/meta`: `private, max-age=60`, or `private, no-cache` when an engine publishes settings of the caller's tenant (the Rule Engine does from 0.2.0). `/me`: `private, no-cache`, so the browser asks again every time (cheaply, with `If-None-Match`) and a revoked role or a sign-out is never shown from cache. Errors: `no-store` |
+| `Cache-Control` | `/meta`: `private, max-age=60`. `/me`: `private, no-cache`, so the browser asks again every time (cheaply, with `If-None-Match`) and a revoked role or a sign-out is never shown from cache. Errors: `no-store` |
 | `ETag` | A weak validator of the body; send it back as `If-None-Match` to get `304` |
-| `Vary` | On `/me`: `Authorization, Cookie, X-Tenant-Id`. On `/meta` too when an engine publishes settings of the caller's tenant (the Rule Engine does from 0.2.0) |
+| `Vary` | On `/me`: `Authorization, Cookie, X-Tenant-Id` |
 | `X-Correlation-Id` | A ULID issued by the host for every request, also in every problem body. A caller's own `X-Correlation-Id` is never adopted; it is logged as `clientCorrelationId` |
 | `WWW-Authenticate` | On every `401`. `Bearer` by default (`horus.bpm.security.challenge`); for a caller without a tenant a bearer challenge adds `error="invalid_token"` |
 

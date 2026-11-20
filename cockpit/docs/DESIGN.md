@@ -147,6 +147,18 @@ Source: [`diagrams/signin-sequence.mmd`](diagrams/signin-sequence.mmd).
 
 A cockpit release `0.N` supports hosts whose engine minor is `0.N` or `0.(N-1)`; from 1.0 the same rule applies to `1.N` (`TR-UI-08`). A host older than that is `UNSUPPORTED_VERSION`: it stays in the host list with its version and the supported range, and none of its screens are offered. Within the supported range, screens turn on by the feature flags in `/api/bpm/meta`, never by comparing version numbers, so a host that has not enabled a feature simply does not show it.
 
+Within that range a host can still be newer than the cockpit, so the cockpit reads `/api/bpm/me` and `/api/bpm/meta` as a tolerant reader: it ignores names it does not know instead of rejecting the answer. The published JSON Schemas stay strict; only the cockpit's reading is lenient, and only where a newer host is expected to add names.
+
+| Field | What the cockpit does with a name it does not know |
+|---|---|
+| `/me` `permissions[]` | A well-formed name the cockpit has no screen for is kept and never checked. A string outside the pattern `^(rules\|processes)(:[a-z]+){1,2}$` is dropped before validation, with one browser console warning per page load for each distinct set of dropped names. The warning prints at most 10 names, each cut to 64 characters and quoted with control and bidi characters escaped, so a host cannot flood the console or disguise a name. The user signs in and the cockpit offers nothing for that name |
+| `/meta` `features[]` | A well-formed flag the cockpit does not know is ignored; screens turn on only for flags the cockpit knows |
+| `/meta` `settings` | An unknown key is ignored |
+| Extra properties on either object | Kept and ignored |
+| Everything else | Validated exactly as published. A missing or empty user id, a missing tenant, a repeated permission, a permission that is not a string, a feature flag outside its pattern or another `schemaVersion` makes the answer an unexpected response (section 12), never a partial render |
+
+The `/me` reader is `cockpit/web/src/api/meReader.ts`. `contract.test.ts` records the one place it reads more leniently than the JSON Schema validates: a permission name outside the pattern.
+
 ### 5.3 Host connection states
 
 ![Host connection states](images/host-connection-states.svg)
@@ -280,6 +292,7 @@ Source: [`diagrams/diagram-render.mmd`](diagrams/diagram-render.mmd).
 
 | Screen | Behaviour | Milestone |
 |---|---|---|
+| Rule version diff | The Changes view of a version compares it with the newest earlier published version through the engine's `GET /rule-sets/{name}/versions/{v}/diff?base={w}` (`RLE-028`, `RLE-048`); the cockpit never computes a stored version's diff. Both versions are read in full and shown side by side in one table, one rule id per line, the removed rows after their former neighbour; changed cells come from the diff's JSON Pointer paths and use the editor's labels and formats. Each side's header carries its version, effective date (`effectiveFrom.from` and `.to`) and content hash; header and column changes read as sentences above the table. The view takes the full width, and the four-eyes decision docks at the bottom of the viewport so Approve stays visible while the diff is read. Approve is enabled only for what is on screen: the diff query is keyed by the version's content hash and lock version, Approve needs the diff's `canonicalHash` to equal the version's, and a version whose hash moved on since the user opened it shows "Version N changed while you had it open. Check the table again." with Approve off until the user confirms "I've checked it"; the lock version sent is the one of the content shown. The engine half (approve carrying the expected hash) is a separate Rule Engine issue (`CKP-002`) | M1 |
 | Process approvals | Pending definition versions from every `READY` host; graph diff (`GET .../diff`) drawn on the diagram (added, removed, changed nodes and edges marked in text and colour) and as a list; Approve disabled with a tooltip when `/me` user equals `requestedBy`; the API returns `403 SELF_APPROVAL_FORBIDDEN` regardless (CK-F-31) | M3 |
 | Content hash | Every version shows `definitionHash` and its source (`IMPORT`, `STARTUP`, `AUTHORED`, `BPMN`), so an operator can compare production with the hash a pipeline computed from Git | M2 |
 | Cockpit drafts off | When `/meta` reports `processes.authoring.cockpit-drafts: false` (process definitions) or `rules.authoring.cockpit-drafts: false` (rule sets, from M1, PD-075; property `horus.bpm.rules.authoring.cockpit-drafts`), the cockpit hides "New draft", "Edit" and the modeller or cell editor for that host and shows "Changes to this environment arrive through your release pipeline". Approval, diff, hash and layout saving stay available | M2 (flag), M3 (screens) |

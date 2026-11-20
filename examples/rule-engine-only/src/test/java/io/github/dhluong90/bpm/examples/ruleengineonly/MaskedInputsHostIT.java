@@ -41,7 +41,7 @@ class MaskedInputsHostIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     static final JsonMapper JSON = JsonMapper.builder().build();
     static final HttpClient HTTP = HttpClient.newHttpClient();
@@ -229,6 +229,10 @@ class MaskedInputsHostIT {
                         : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
         if (contentType != null) {
             request.header("Content-Type", contentType);
+        }
+        if (path.endsWith(":approve")) {
+            // An approval names the lock version it was decided on (#234); a version just requested is at 1.
+            request.header("If-Match", "\"1\"");
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.body());

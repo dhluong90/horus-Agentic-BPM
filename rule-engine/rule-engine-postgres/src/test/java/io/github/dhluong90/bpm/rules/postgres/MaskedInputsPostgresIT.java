@@ -47,7 +47,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class MaskedInputsPostgresIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant NOW = Instant.parse("2027-01-15T02:00:00Z");
     static final String NATIONAL_ID = "079090001234";
@@ -156,9 +156,9 @@ class MaskedInputsPostgresIT {
     void publish(String tenant) {
         caller.as(tenant, "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(MINOR_REVIEW.getBytes(StandardCharsets.UTF_8)));
-        engines.versionService().requestPublish("minor-review", 1, WriteOptions.none());
+        long lock = engines.versionService().requestPublish("minor-review", 1, WriteOptions.none()).lockVersion();
         caller.as(tenant, "bob");
-        engines.versionService().approve("minor-review", 1, WriteOptions.none());
+        engines.versionService().approve("minor-review", 1, new WriteOptions(null, lock, null));
     }
 
     String evaluate(String tenant, int age) {

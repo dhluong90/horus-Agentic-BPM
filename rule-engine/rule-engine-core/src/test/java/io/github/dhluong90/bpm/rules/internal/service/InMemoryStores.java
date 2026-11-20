@@ -98,6 +98,21 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     @Override
+    public void replaceDraft(StoredVersion updated, long expectedLockVersion) {
+        for (int i = 0; i < versions.size(); i++) {
+            StoredVersion v = versions.get(i);
+            if (v.tenantId().equals(updated.tenantId()) && v.id().equals(updated.id())) {
+                if (v.lockVersion() != expectedLockVersion || v.status() != io.github.dhluong90.bpm.rules.api.VersionStatus.DRAFT) {
+                    throw new VersionConflictException("stale");
+                }
+                versions.set(i, updated);
+                return;
+            }
+        }
+        throw new IllegalStateException("no such version");
+    }
+
+    @Override
     public Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at) {
         return versions.stream()
                 .filter(v -> v.tenantId().equals(tenantId) && v.ruleSet().equals(ruleSet)
