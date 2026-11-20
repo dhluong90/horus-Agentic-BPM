@@ -9,12 +9,25 @@ import java.util.Objects;
  * @param format the source format; only {@link SourceFormat#YAML} is accepted in this release
  * @param source the document bytes, stored byte for byte and never executed (TR-STD-01)
  * @param idempotencyKey optional key; a replay returns the original version
+ * @param correlationId optional correlation id carried by the {@code rules.version.created.v1} event; not part of
+ *     the idempotent request, so a replay with another correlation id still returns the original version
  */
-public record ImportRequest(SourceFormat format, byte[] source, String idempotencyKey) {
+public record ImportRequest(SourceFormat format, byte[] source, String idempotencyKey, String correlationId) {
 
     public ImportRequest {
         Objects.requireNonNull(format, "format must not be null");
         source = Objects.requireNonNull(source, "source must not be null").clone();
+    }
+
+    /**
+     * Creates a request without correlation id.
+     *
+     * @param format the source format
+     * @param source the document bytes
+     * @param idempotencyKey optional key
+     */
+    public ImportRequest(SourceFormat format, byte[] source, String idempotencyKey) {
+        this(format, source, idempotencyKey, null);
     }
 
     /**
@@ -34,7 +47,17 @@ public record ImportRequest(SourceFormat format, byte[] source, String idempoten
      * @return the new request
      */
     public ImportRequest withIdempotencyKey(String key) {
-        return new ImportRequest(format, source, key);
+        return new ImportRequest(format, source, key, correlationId);
+    }
+
+    /**
+     * Returns a copy with a correlation id for the event this import writes.
+     *
+     * @param id the correlation id, 1 to 128 characters of {@code A-Z a-z 0-9 . _ : -}
+     * @return the new request
+     */
+    public ImportRequest withCorrelationId(String id) {
+        return new ImportRequest(format, source, idempotencyKey, id);
     }
 
     /**
@@ -54,12 +77,13 @@ public record ImportRequest(SourceFormat format, byte[] source, String idempoten
     @Override
     public boolean equals(Object other) {
         return other instanceof ImportRequest that && format == that.format
-                && Arrays.equals(source, that.source) && Objects.equals(idempotencyKey, that.idempotencyKey);
+                && Arrays.equals(source, that.source) && Objects.equals(idempotencyKey, that.idempotencyKey)
+                && Objects.equals(correlationId, that.correlationId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(format, Arrays.hashCode(source), idempotencyKey);
+        return Objects.hash(format, Arrays.hashCode(source), idempotencyKey, correlationId);
     }
 
     @Override

@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.rules.autoconfigure;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
+import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
@@ -70,12 +71,47 @@ class RuleEngineSettingsTest {
     }
 
     @Test
+    void TR_EXT_03_simulation_max_inputs_may_be_lowered() {
+        runner.withPropertyValues("horus.bpm.rules.simulation.max-inputs=100")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).simulationMaxInputs()).isEqualTo(100));
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class).simulationMaxInputs())
+                .isEqualTo(EngineDefaults.SIMULATION_MAX_SAMPLES));
+    }
+
+    @Test
     void RLE_047_cockpit_drafts_setting_reaches_the_engine_and_is_off_by_default() {
         runner.run(context -> assertThat(context.getBean(EngineSettings.class).draftAuthoring()).isFalse());
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=true")
                 .run(context -> assertThat(context.getBean(EngineSettings.class).draftAuthoring()).isTrue());
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=false")
                 .run(context -> assertThat(context.getBean(EngineSettings.class).draftAuthoring()).isFalse());
+    }
+
+    @org.junit.jupiter.api.Test
+    void RLE_027_lifecycle_settings_default_to_system_single_and_one_minute() {
+        runner.run(context -> {
+            assertThat(context.getBean(EngineSettings.class))
+                    .extracting(EngineSettings::systemActor, EngineSettings::retireApproval)
+                    .containsExactly("system:supersession", "single");
+            assertThat(context.getBean(RuleEngineProperties.class).lifecycle().sweepIntervalOrDefault())
+                    .isEqualTo(Duration.ofMinutes(1));
+        });
+        runner.withPropertyValues("horus.bpm.rules.lifecycle.system-actor=system:pricing-sweeper",
+                        "horus.bpm.rules.lifecycle.sweep-interval=PT1S")
+                .run(context -> {
+                    assertThat(context.getBean(EngineSettings.class).systemActor()).isEqualTo("system:pricing-sweeper");
+                    assertThat(context.getBean(RuleEngineProperties.class).lifecycle().sweepIntervalOrDefault())
+                            .isEqualTo(Duration.ofSeconds(1));
+                });
+    }
+
+    @ParameterizedTest
+    @CsvSource({"PT0.5S", "PT1H0.001S", "PT2H"})
+    void RLE_027_a_sweep_interval_outside_one_second_to_one_hour_is_refused(String interval) {
+        runner.withPropertyValues("horus.bpm.rules.lifecycle.sweep-interval=" + interval)
+                .run(context -> org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                                context.getBean(RuleEngineProperties.class).lifecycle().sweepIntervalOrDefault())
+                        .hasMessageContaining("horus.bpm.rules.lifecycle.sweep-interval"));
     }
 
     @org.junit.jupiter.api.Test
@@ -101,10 +137,57 @@ class RuleEngineSettingsTest {
         "horus.bpm.rules.query.max-page-size=0, horus.bpm.rules.query.max-page-size",
         "horus.bpm.rules.query.max-page-size=201, horus.bpm.rules.query.max-page-size",
         "horus.bpm.rules.lifecycle.reason-max-length=0, horus.bpm.rules.lifecycle.reason-max-length",
-        "horus.bpm.rules.lifecycle.reason-max-length=2001, horus.bpm.rules.lifecycle.reason-max-length"
+        "horus.bpm.rules.lifecycle.reason-max-length=2001, horus.bpm.rules.lifecycle.reason-max-length",
+        "horus.bpm.rules.evaluation.regex-timeout-ms=0, horus.bpm.rules.evaluation.regex-timeout-ms",
+        "horus.bpm.rules.evaluation.regex-timeout-ms=1001, horus.bpm.rules.evaluation.regex-timeout-ms",
+        "horus.bpm.rules.evaluation.regex-max-input-length=0, horus.bpm.rules.evaluation.regex-max-input-length",
+        "horus.bpm.rules.evaluation.regex-max-input-length=65537, horus.bpm.rules.evaluation.regex-max-input-length",
+        "horus.bpm.rules.evaluation.regex-max-reads=0, horus.bpm.rules.evaluation.regex-max-reads",
+        "horus.bpm.rules.evaluation.regex-max-reads=1000001, horus.bpm.rules.evaluation.regex-max-reads",
+        "horus.bpm.rules.evaluation.regex-max-reads-per-decision=0, horus.bpm.rules.evaluation.regex-max-reads-per-decision",
+        "horus.bpm.rules.evaluation.regex-max-reads-per-decision=5000001, horus.bpm.rules.evaluation.regex-max-reads-per-decision",
+        "horus.bpm.rules.simulation.max-inputs=0, horus.bpm.rules.simulation.max-inputs",
+        "horus.bpm.rules.simulation.max-inputs=1001, horus.bpm.rules.simulation.max-inputs"
     })
     void TR_EXT_03_an_invalid_value_fails_start_up_naming_the_property(String property, String name) {
         runner.withPropertyValues(property).run(context -> assertThat(context).hasFailed()
                 .getFailure().rootCause().hasMessageContaining(name));
+    }
+
+    @Test
+    void RLE_007_the_decision_read_budget_defaults_to_five_million_and_may_only_be_lowered() {
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits().maxReadsPerDecision())
+                .isEqualTo(5_000_000));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-max-reads-per-decision=250000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits())
+                        .isEqualTo(new RegexLimits(50, 4096, 1_000_000, 250_000)));
+        // Lowering max-string-length keeps the decision budget the host chose.
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-max-reads-per-decision=250000",
+                        "horus.bpm.rules.evaluation.max-string-length=1000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits().maxReadsPerDecision())
+                        .isEqualTo(250_000));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-max-reads-per-decision=5000001")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.evaluation.regex-max-reads-per-decision")
+                        .hasMessageContaining("never raised"));
+    }
+
+    @Test
+    void TR_SEC_02_regex_bounds_default_to_a_million_reads_50_ms_and_4096_characters_and_may_be_tightened() {
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits())
+                .isEqualTo(new RegexLimits(50, 4096, 1_000_000)));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-timeout-ms=20",
+                        "horus.bpm.rules.evaluation.regex-max-input-length=64",
+                        "horus.bpm.rules.evaluation.regex-max-reads=10000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits())
+                        .isEqualTo(new RegexLimits(20, 64, 10_000)));
+        // A host that lowers max-string-length lowers the default regex length with it, and may not exceed it.
+        runner.withPropertyValues("horus.bpm.rules.evaluation.max-string-length=1000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits().maxInputLength())
+                        .isEqualTo(1000));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.max-string-length=1000",
+                        "horus.bpm.rules.evaluation.regex-max-input-length=2000")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("regex-max-input-length").hasMessageContaining("max-string-length"));
     }
 }

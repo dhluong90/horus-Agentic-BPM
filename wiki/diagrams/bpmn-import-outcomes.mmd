@@ -1,0 +1,36 @@
+flowchart TD
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef db fill:#FFF8E1,stroke:#F9A825,color:#16231F
+
+  A["1. POST /api/bpm/processes/v1/definitions<br/>Content-Type: application/xml"]:::client
+  B{"2. At most 1 MB?"}:::engine
+  C{"3. Safe XML?<br/>no DOCTYPE, no entities,<br/>depth and element limits"}:::engine
+  D{"4. Every element<br/>in the subset?"}:::engine
+  E{"5. Required horus<br/>attributes present?"}:::engine
+  F{"6. Same document as<br/>the latest version?"}:::engine
+  G[("7. New version stored as DRAFT")]:::db
+  H{"8. dev profile and<br/>auto-approve on?"}:::engine
+  I[("ACTIVE: instances can start")]:::db
+  J[("DRAFT: cannot start in 0.1.0")]:::db
+
+  R413["413 PAYLOAD_TOO_LARGE"]:::client
+  RUX["422 BPMN_UNSAFE_XML"]:::client
+  RUE["422 BPMN_UNSUPPORTED_ELEMENT<br/>element, id, line for each"]:::client
+  RVF["422 VALIDATION_FAILED<br/>problems with element, id, line"]:::client
+  RSAME["201 with the existing version"]:::client
+
+  A --> B
+  B -- no --> R413
+  B -- yes --> C
+  C -- no --> RUX
+  C -- yes --> D
+  D -- no --> RUE
+  D -- yes --> E
+  E -- no --> RVF
+  E -- yes --> F
+  F -- yes --> RSAME
+  F -- no --> G
+  G --> H
+  H -- yes --> I
+  H -- no --> J

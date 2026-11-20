@@ -1,11 +1,15 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
+import io.github.dhluong90.bpm.host.autoconfigure.ApproverMustDifferFrom;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
+import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
+import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
 import java.time.Clock;
 import javax.sql.DataSource;
+import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -18,6 +22,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
@@ -81,9 +86,10 @@ public class RuleEngineAutoConfiguration {
             RuleEngineProperties properties,
             ObjectProvider<Clock> clock,
             ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys,
-            ObjectProvider<RuleEngineMaskingCheck> maskingCheck) {
+            ObjectProvider<RuleEngineMaskingCheck> maskingCheck,
+            ObjectProvider<RuleEngineLifecycleSweeper> sweeper) {
         return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
-                cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable());
+                cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable(), sweeper.getIfAvailable());
     }
 
     /**
@@ -92,8 +98,42 @@ public class RuleEngineAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(name = "ruleEngineModuleDescriptor")
-    ModuleDescriptor ruleEngineModuleDescriptor(RuleEngineProperties properties) {
-        return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts());
+    ModuleDescriptor ruleEngineModuleDescriptor(RuleEngineProperties properties,
+            org.springframework.core.env.Environment environment) {
+        return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts(),
+                properties.toSettings(environment).retireApproval(),
+                properties.toSettings(environment).retireLastVersion());
+    }
+
+    /**
+     * The masking key status of the caller's tenant in the rules settings of {@code GET /api/bpm/meta}: {@code set}
+     * or {@code unset}, the key id and the check value, never the key. Reads the active {@code MaskingPolicy}, so a
+     * host bean is described as well as the default.
+     */
+    @Bean
+    @ConditionalOnMissingBean(name = "ruleEngineMaskingStatus")
+    ModuleTenantSettings ruleEngineMaskingStatus(ObjectProvider<MaskingPolicy> masking) {
+        return new RuleEngineMaskingStatus(masking::getIfAvailable);
+    }
+
+    /**
+     * Reads the shared approver setting on every start, so a host that replaces the descriptor still gets the
+     * start-up failure for an unknown value and the WARN for {@code requester}. The engine applies makers regardless.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    ApproverSettingCheck ruleEngineApproverSettingCheck(Environment environment) {
+        ApproverMustDifferFrom setting = ApproverMustDifferFrom.from(environment);
+        if (setting == ApproverMustDifferFrom.REQUESTER) {
+            LogFactory.getLog(RuleEngineAutoConfiguration.class).warn(ApproverMustDifferFrom.PROPERTY
+                    + "=requester: the Rule Engine keeps makers; its database constraint rle_version_four_eyes"
+                    + " refuses an approval by the author. The setting applies to the Process Engine only.");
+        }
+        return new ApproverSettingCheck(setting);
+    }
+
+    /** Marker for the validated setting; the Rule Engine never acts on it. */
+    record ApproverSettingCheck(ApproverMustDifferFrom setting) {
     }
 
     /** The host's unique {@code Clock} bean if it has one, otherwise system UTC. Never registered as a bean. */

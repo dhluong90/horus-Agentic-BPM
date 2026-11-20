@@ -80,7 +80,11 @@ public interface RuleStore {
     void replaceDraft(StoredVersion updated, long expectedLockVersion);
 
     /**
-     * Finds the published version effective at an instant: the latest {@code effectiveFrom} at or before it.
+     * Finds the version in force at an instant (ADR-0025 decision 3, DESIGN section 3.3.1): the highest version number
+     * among the approved versions ({@code approvedAt} set) whose {@code effectiveFrom} is at or before it and that were
+     * not retired at it ({@code retiredAt} null or after it). The status is not read, so a newer version takes over at
+     * its effective date whether or not the older one's status has changed yet, and a clock before a retirement still
+     * selects the retired version.
      *
      * @param tenantId the tenant
      * @param ruleSet the rule set name
@@ -88,6 +92,54 @@ public interface RuleStore {
      * @return the version, or empty
      */
     Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at);
+
+    /**
+     * Locks the rule set row for this transaction ({@code SELECT ... FOR UPDATE}), so two retirements of its last
+     * versions run one after the other and the second sees that it is now the last (PD-101).
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     */
+    void lockRuleSet(String tenantId, String ruleSetId);
+
+    /**
+     * Finds the approved, not retired version that starts soonest after an instant, other than one version.
+     *
+     * @param tenantId the tenant
+     * @param ruleSetId the rule set id
+     * @param after the instant
+     * @param excludingVersionId the version left out, usually the one being retired
+     * @return the version, or empty when none is scheduled
+     */
+    Optional<StoredVersion> nextScheduled(String tenantId, String ruleSetId, Instant after, String excludingVersionId);
+
+    /**
+     * Retires every {@code PUBLISHED} version that a newer {@code PUBLISHED} version of its rule set, in effect at
+     * {@code now}, has superseded (DESIGN section 3.3.2): one conditional {@code UPDATE ... WHERE status = 'PUBLISHED'
+     * ... RETURNING}, so across replicas each version is returned exactly once, with no advisory lock. Sets status
+     * {@code RETIRED}, {@code retiredAt = now} and the lock version plus one. The caller writes the history row and the
+     * event for the returned rows only, in the same transaction.
+     *
+     * @param tenantId the tenant, or null for every tenant (the engine's sweep)
+     * @param ruleSetId the rule set, or null for every rule set of the tenant; requires a tenant
+     * @param now the engine clock
+     * @return the retired versions, each with the version in force that superseded it
+     */
+    List<Superseded> retireSuperseded(String tenantId, String ruleSetId, Instant now);
+
+    /**
+     * A version retired because a newer one is in effect.
+     *
+     * @param tenantId the tenant
+     * @param versionId the retired version's id
+     * @param ruleSet the rule set name
+     * @param version the retired version's number
+     * @param lockVersion its lock version after the retirement
+     * @param supersededBy the number of the newer version in force, the highest one in effect
+     */
+    record Superseded(String tenantId, String versionId, String ruleSet, int version, long lockVersion,
+            int supersededBy) {
+    }
 
     /**
      * Lists rule set summaries by name, ascending.

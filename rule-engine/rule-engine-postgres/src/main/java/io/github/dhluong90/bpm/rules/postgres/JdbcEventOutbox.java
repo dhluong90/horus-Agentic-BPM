@@ -9,8 +9,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * Writes {@code PENDING} rows to {@code rle_decision_outbox} in the caller's transaction. The payload
- * is the minimal event of this release (event type, rule set, version, tenant, actor, time); the relay
- * and the standard event envelope come later.
+ * is the event with its full envelope (DESIGN section 3.3); its {@code eventId} is the row id. The relay
+ * comes later.
  */
 public final class JdbcEventOutbox implements EventOutbox {
 

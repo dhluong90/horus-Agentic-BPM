@@ -431,4 +431,113 @@ class EngineAccessTest {
                     assertThat(json(result).path("code").asString()).isEqualTo("TENANT_NOT_ALLOWED");
                 });
     }
+
+    /** Entries of the reserved-identity refusal in the captured output for one correlation id. */
+    private static long reservedRefusals(CapturedOutput output, String correlationId) {
+        return Pattern.compile("caller\\.reserved\\.refused .*correlationId=" + correlationId)
+                .matcher(output.getAll()).results().count();
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_me_with_one_security_log_entry(CapturedOutput output) {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).run(context -> {
+            // Given a person signed in with the id the Rule Engine records supersessions under
+            JwtRequestPostProcessor impostor = caller("system:supersession", "bank-a", "rules:read", "rules:approve");
+
+            // When they call /me
+            MvcResult result = call(TestHosts.mockMvc(context), get("/api/bpm/me").with(impostor));
+
+            // Then 403 PERMISSION_DENIED as a problem, naming neither the id nor the tenant
+            String correlationId = result.getResponse().getHeader("X-Correlation-Id");
+            assertThat(result.getResponse().getStatus()).isEqualTo(403);
+            assertThat(result.getResponse().getContentType()).startsWith("application/problem+json");
+            assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+            assertThat(json(result).path("code").asString()).isEqualTo("PERMISSION_DENIED");
+            assertThat(json(result).path("correlationId").asString()).isEqualTo(correlationId);
+            assertThat(result.getResponse().getContentAsString()).doesNotContain("system", "supersession", "bank-a");
+
+            // And exactly one security log entry, with the id encoded as the tenant refusal encodes it
+            assertThat(output).contains("caller.reserved.refused user=system%3Asupersession correlationId="
+                    + correlationId + " clientCorrelationId=-");
+            assertThat(reservedRefusals(output, correlationId)).isEqualTo(1);
+        });
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_an_engine_endpoint_and_starts_no_engine_work(
+            CapturedOutput output) {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, CountingHostTenant.class,
+                        WithProbeEngineEndpoint.class)
+                .run(context -> {
+                    // Given a person signed in as the process engine's timer, holding every rules permission
+                    JwtRequestPostProcessor impostor = caller("system:timer", "bank-a",
+                            TestHosts.RULES_PERMISSIONS.toArray(String[]::new));
+                    CountingHostTenant.CALLS.set(0);
+
+                    // When an engine operation asks for the caller twice, as the controller and the service do
+                    MvcResult result = call(TestHosts.mockMvc(context), get("/api/bpm/rules/v1/probe-twice")
+                            .param("permission", "rules:approve").with(impostor));
+
+                    // Then 403 PERMISSION_DENIED, and the endpoint never answered
+                    String correlationId = result.getResponse().getHeader("X-Correlation-Id");
+                    assertThat(result.getResponse().getStatus()).isEqualTo(403);
+                    assertThat(json(result).path("code").asString()).isEqualTo("PERMISSION_DENIED");
+                    assertThat(result.getResponse().getContentAsString()).doesNotContain("bank-a", "system");
+
+                    // And no tenant was resolved: the refusal came before any other work
+                    assertThat(CountingHostTenant.CALLS).hasValue(0);
+
+                    // And one security log entry for the request, not one per lookup, and no permission entry
+                    assertThat(reservedRefusals(output, correlationId)).isEqualTo(1);
+                    assertThat(output).doesNotContain("permission.denied permission=rules:approve user=system");
+                });
+    }
+
+    @Test
+    void TR_SEC_03_a_near_miss_name_is_an_ordinary_caller(CapturedOutput output) {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, WithProbeEngineEndpoint.class)
+                .run(context -> {
+                    MockMvc mvc = TestHosts.mockMvc(context);
+                    for (String name : List.of("systems-admin", "system", "System:ops", "ops:system:1")) {
+                        JwtRequestPostProcessor who = caller(name, "bank-a", "rules:read");
+
+                        // When a user whose name only resembles the reserved prefix calls /me and an engine endpoint
+                        JsonNode me = json(call(mvc, get("/api/bpm/me").with(who)));
+                        MvcResult engine = call(mvc, get("/api/bpm/rules/v1/probe").param("permission", "rules:read")
+                                .with(who));
+
+                        // Then both serve them as usual
+                        assertThat(me.path("user").path("id").asString()).as(name).isEqualTo(name);
+                        assertThat(engine.getResponse().getStatus()).as(name).isEqualTo(200);
+                        assertThat(engine.getResponse().getContentAsString()).isEqualTo("bank-a");
+                    }
+                    // And nothing was refused
+                    assertThat(output).doesNotContain("caller.reserved.refused");
+                });
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_outside_a_request() {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).run(context -> {
+            EngineAccess access = context.getBean(EngineAccess.class);
+            // Given a host job running under a token whose subject is the start-up import identity
+            Jwt token = Jwt.withTokenValue("t").header("alg", "none").subject("system:startup")
+                    .claim("tenant_id", "bank-a").build();
+            SecurityContextHolder.getContext().setAuthentication(
+                    new JwtAuthenticationToken(token, List.of(new SimpleGrantedAuthority("rules:evaluate"))));
+            try {
+                // When the job asks for the caller, then it is refused with a fresh correlation id
+                assertThatThrownBy(access::currentCaller).isInstanceOfSatisfying(EngineAccessDeniedException.class,
+                        refused -> {
+                            assertThat(refused.reason()).isEqualTo(EngineAccessDeniedException.Reason.PERMISSION_DENIED);
+                            assertThat(refused.status()).isEqualTo(403);
+                            assertThat(refused.challenge()).isNull();
+                            assertThat(refused.correlationId()).matches(HostMetadataEndpointsTest.ULID);
+                            assertThat(refused.getMessage()).doesNotContain("system");
+                        });
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        });
+    }
 }

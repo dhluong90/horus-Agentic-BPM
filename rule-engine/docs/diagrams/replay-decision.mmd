@@ -1,0 +1,33 @@
+sequenceDiagram
+  autonumber
+  box rgb(232,245,233) Host service
+    participant A as Auditor or host code
+  end
+  box rgb(224,242,241) Rule Engine, in process
+    participant E as RuleEngine
+    participant C as Compiled cache
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as rle_decision, rle_version
+  end
+  rect rgb(255,248,225)
+    Note over A,DB: Read-only transaction, writes nothing
+    A->>E: replay(decisionId), tenant from resolver, needs rules:log:read
+    alt not a ULID
+      E-->>A: 404 DECISION_NOT_FOUND, no query
+    end
+    E->>DB: SELECT rle_decision by tenant, id, created_at in the ULID's millisecond
+    alt not found in that millisecond
+      E->>DB: SELECT by tenant, id, created_at up to that millisecond (clock went back)
+    end
+    alt no row in this tenant
+      E-->>A: 404 DECISION_NOT_FOUND
+    end
+    E->>DB: SELECT rle_version by rule set and logged version number, never selecting
+    E->>C: compiled version, hash checked (ADR-0026)
+    alt a masked input had a value
+      E-->>A: 422 REPLAY_NOT_POSSIBLE, names the inputs, never the values
+    end
+    E->>E: evaluate logged inputs at the logged clock, today() in the version's timeZone
+    E-->>A: DecisionResult with the logged decisionId and clock
+  end

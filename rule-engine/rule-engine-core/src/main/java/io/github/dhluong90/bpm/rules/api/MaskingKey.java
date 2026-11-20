@@ -32,6 +32,16 @@ public final class MaskingKey {
     /** Key id of a key configured without one. */
     public static final String DEFAULT_KEY_ID = "k1";
 
+    /**
+     * HKDF {@code info} of the check value key. The check value is computed under a key derived for that purpose
+     * only, never under the key itself, so it lives in a domain of its own: no token, which is always an HMAC under the
+     * key or a tenant subkey, can equal a check value. Like {@link #TENANT_INFO_PREFIX}, it never changes.
+     */
+    public static final String CHECK_VALUE_INFO = "horus-bpm/masking/v1/kcv";
+
+    /** Bytes of the HMAC kept in a check value. */
+    public static final int CHECK_VALUE_BYTES = 8;
+
     private static final String ALGORITHM = "HmacSHA256";
     private static final java.util.regex.Pattern KEY_ID = java.util.regex.Pattern.compile("^[A-Za-z0-9_-]{1,32}$");
     private static final java.util.regex.Pattern FINGERPRINT =
@@ -172,6 +182,30 @@ public final class MaskingKey {
             return okm;
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("HmacSHA256 is not available in this JVM", e);
+        }
+    }
+
+    /**
+     * Returns the key check value: {@code HMAC-SHA256(HKDF-SHA256(key, salt = none, info =
+     * "horus-bpm/masking/v1/kcv", 32 bytes), empty message)}, its first {@value #CHECK_VALUE_BYTES} bytes as 16
+     * lower-case hex digits. Not secret: it tells two keys apart without revealing either, so it may be stored,
+     * compared and shown beside the key id. Two keys with one id but different check values are two different keys.
+     * The key is used for derivation only, so a check value is never a token.
+     *
+     * @return the check value, 16 hex digits
+     */
+    public String checkValue() {
+        byte[] ikm = key.getEncoded();
+        byte[] checkKey = hkdfSha256(ikm, new byte[0], CHECK_VALUE_INFO.getBytes(StandardCharsets.UTF_8), MIN_BYTES);
+        try {
+            Mac mac = Mac.getInstance(ALGORITHM);
+            mac.init(new SecretKeySpec(checkKey, ALGORITHM));
+            return HexFormat.of().formatHex(mac.doFinal(new byte[0]), 0, CHECK_VALUE_BYTES);
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("HmacSHA256 is not available in this JVM", e);
+        } finally {
+            java.util.Arrays.fill(ikm, (byte) 0);
+            java.util.Arrays.fill(checkKey, (byte) 0);
         }
     }
 
