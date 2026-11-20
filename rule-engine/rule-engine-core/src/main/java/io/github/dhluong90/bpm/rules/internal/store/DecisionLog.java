@@ -61,6 +61,43 @@ public interface DecisionLog {
             Duration statementTimeout);
 
     /**
+     * Returns the decisions of a tenant with one correlation id and {@code from <= createdAt < to}, newest first by
+     * {@code (createdAt, id)}, strictly after the keyset position when one is given, from at most the monthly
+     * partitions of the period (RLE-070).
+     *
+     * @param tenantId the tenant
+     * @param correlationId the correlation id
+     * @param ruleSet the rule set name, or null for every rule set of the tenant
+     * @param from the first instant, inclusive
+     * @param to the end, exclusive
+     * @param after the last row of the previous page, or null for the first page
+     * @param limit the most rows to return
+     * @param statementTimeout the longest the read may run
+     * @return the rows, at most {@code limit}
+     */
+    List<DecisionRecord> searchByCorrelationId(String tenantId, String correlationId, String ruleSet, Instant from,
+            Instant to, Position after, int limit, Duration statementTimeout);
+
+    /**
+     * Returns the decisions of one rule set and tenant in a period whose logged input has exactly a value, newest
+     * first, keyset-paged as {@link #search}. The input must not be masked: the caller checked that, and a masked
+     * input holds a fingerprint here, never the value (RLE-071).
+     *
+     * @param tenantId the tenant
+     * @param ruleSet the rule set name
+     * @param input the input name
+     * @param valueJson the value as logged, JSON text; compared as JSON, so {@code 30000} equals {@code 30000.00}
+     * @param from the first instant, inclusive
+     * @param to the end, exclusive
+     * @param after the last row of the previous page, or null for the first page
+     * @param limit the most rows to return
+     * @param statementTimeout the longest the read may run
+     * @return the rows, at most {@code limit}
+     */
+    List<DecisionRecord> searchByPlainInput(String tenantId, String ruleSet, String input, String valueJson,
+            Instant from, Instant to, Position after, int limit, Duration statementTimeout);
+
+    /**
      * A keyset position in the decision log.
      *
      * @param createdAt the row time

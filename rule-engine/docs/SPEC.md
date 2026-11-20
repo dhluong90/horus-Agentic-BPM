@@ -341,6 +341,76 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `explain D11 -> nationalId shown as hmac:k1:9f4a... (masked), age 16 < 18, route MANUAL; plain value in 0 fields and 0 log lines`.
 - **Test ID:** `RLE_031_explanation_masks_inputs_and_covers_no_match_null_and_failure`
 
+### RLE-070 Decisions are found by the host's case reference across the tenant's rule sets
+- **Traces to:** `TR-OBS-01`, `TR-TEN-01`, `TR-SEC-05`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`. Loan application `LA-2027-000123` was decided on 2027-01-10 by `kyc-risk` (1 decision), `loan-pricing` (1) and `card-fee` (2), all with `correlation_id = LA-2027-000123`, and with input `nationalId` (`mask: true`) on `kyc-risk`. 500 other `bank-a` decisions in January have other correlation ids. Tenant `bank-b` has one decision with the same correlation id. Caller `dan` holds `rules:log:read`.
+- **When:** `dan` sends `GET /api/bpm/rules/v1/decisions?correlationId=LA-2027-000123&from=2027-01-01T00:00:00Z&to=2027-02-01T00:00:00Z`. Failure cases: no `from`/`to`; a 32-day period; an empty `correlationId`; one outside the stored format `[A-Za-z0-9._:-]{1,128}` (for example `LA 2027/123`); a caller without `rules:log:read`; the same query by a `bank-b` caller.
+- **Then:**
+  - `200` with the 4 `bank-a` decisions, newest first, each with `decisionId`, `ruleSet`, `version`, `outcome`, `matchedRuleIds`, `evalClock`, `clockChosen` and `pinned`. `nationalId` shows as `hmac:<keyId>:<hex>`. No other decision and no `bank-b` row appears.
+  - The query reads at most the 2 monthly partitions of the period through an index led by tenant and correlation id (migration `V20`), within `query.statement-timeout` (2 s).
+  - The missing period, the 32-day period and the bad ids are `400 QUERY_INVALID` naming the parameter. The caller without the permission gets `403 PERMISSION_DENIED`. The `bank-b` caller gets only its own decision.
+  - Adding `ruleSet=card-fee` narrows the result to the 2 `card-fee` decisions. The search writes nothing.
+  - The search covers all rule sets of the caller's tenant, because one application touches several. A REST call without `X-Correlation-Id` gets a generated id, so a host that wants case search sends its own reference. A correlation id is a business reference and may appear in a URL; a host must not use a national id as one. Paging is as in `RLE-029`; the cursor is signed and bound to tenant, reference and period (`RLE-039`).
+- **Example:** `correlationId=LA-2027-000123, January 2027 -> 4 decisions across 3 rule sets; 32 days -> 400 QUERY_INVALID; bank-b -> its own 1 decision`.
+- **Test ID:** `RLE_070_decisions_are_found_by_correlation_id_across_rule_sets`
+
+### RLE-071 Decisions are found by the exact value of a plain input, never of a masked one
+- **Traces to:** `TR-SEC-05`, `TR-OBS-01`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`; `loan-pricing` declares `productCode` (string, `mask: false`), `amount` (money) and `nationalId` (`mask: true`). In January 2027 it has 30 decisions with `productCode = "HOME-30Y"`, 2 of them with `amount = 2500000000 VND`.
+- **When:** `dan` posts `POST /api/bpm/rules/v1/decisions:find-by-input` with `{ "ruleSet": "loan-pricing", "input": "productCode", "value": "HOME-30Y", "from": "2027-01-01T00:00:00Z", "to": "2027-02-01T00:00:00Z" }`, then with `"input": "amount", "value": { "currency": "VND", "amount": 2500000000 }`. Failure cases: `"input": "nationalId"`; an input no version of `loan-pricing` declares; an input that a tenant default masks (`decision-log.mask-default: true`, `RLE-052`); a value of the wrong type; a body over 16,384 bytes.
+- **Then:**
+  - `200` with the 30 decisions, then with the 2 decisions. Values compare by their canonical form: money by currency and minor units, a number by exact value (`30000` equals `30000.00`), a string by code point, with no case folding or trimming.
+  - `nationalId` and the input masked by the tenant default are `400 QUERY_INVALID` with a detail pointing to `POST /decisions:find-by-masked-input` and the `rules:masked:search` permission, so a plain-value search can never be used to test a masked value.
+  - The unknown input and the wrong type are `400 QUERY_INVALID` naming `input` or `value`. The large body is `413 PAYLOAD_TOO_LARGE`.
+  - Paging and the 31-day bound are as in `RLE-070`. The search writes nothing to the decision log. It needs `rules:log:read`; the masked search keeps its own permission and rate limit (`RLE-012`).
+- **Example:** `productCode = HOME-30Y -> 30 decisions; amount = 2500000000 VND -> 2; nationalId -> 400 QUERY_INVALID, use find-by-masked-input`.
+- **Test ID:** `RLE_071_decisions_are_found_by_a_plain_input_value_and_never_by_a_masked_one`
+
+---
+
+## Batch Evaluation (RE-F-26)
+
+### RLE-067 A batch returns one result per item in order, and a failing item does not stop the rest
+- **Traces to:** `TR-DET-01`, `TR-OBS-01`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`; `card-fee` v1 (`first`) published as in `RLE-001`; `loan-pricing` v1 (`unique`, overlapping rows) as in `RLE-002`; caller `svc-eod` holds `rules:evaluate`.
+- **When:** `svc-eod` posts `POST /api/bpm/rules/v1/decisions/card-fee:evaluate-batch` with four items: (0) `{ tier: GOLD, txCount: 5 }`, (1) `{ tier: SILVER, txCount: 4 }`, (2) `{ tier: SILVER, txCount: "four" }`, (3) `{ tier: STANDARD, txCount: 0 }`, each with `correlationId` `eod-2027-01-31-000<n>`. Then it posts two `loan-pricing` items: one matching `R1` only, and one matching `R1` and `R2`.
+- **Then:**
+  - The `card-fee` call answers `200` with `results` in index order. Item 0 is `R1`, fee 0 VND. Item 1 is `R2`, fee 10000 VND. Item 2 is a `problem` with `code: INPUT_INVALID` naming `txCount`. Item 3 is `R3`, fee 50000 VND. Every result carries `version: 1` and the same `evalClock`.
+  - Items 0, 1 and 3 each have their own `decisionId` and one `rle_decision` row carrying that item's `correlation_id`. Item 2 writes no row, because an input that fails validation is not a decision, as on `:evaluate`.
+  - The `loan-pricing` call answers `200`: the first item is `Matched`, and the second is a `problem` with `code: UNIQUE_HIT_VIOLATION` and `matchedRuleIds [R1, R2]`, which is logged as a decision row with that outcome (`RLE-002`).
+  - The response carries `succeeded: 3, failed: 1` and `succeeded: 1, failed: 1`.
+  - One version is selected for the whole batch, at the request clock, and items run in order. A `correlationId` outside `[A-Za-z0-9._:-]{1,128}` fails its own item with `INPUT_INVALID`.
+- **Example:** `4 card-fee items -> [R1 0 VND, R2 10000 VND, INPUT_INVALID txCount, R3 50000 VND]; succeeded 3, failed 1; 3 rows`.
+- **Test ID:** `RLE_067_batch_returns_one_result_per_item_and_a_failing_item_does_not_stop_the_rest`
+
+### RLE-068 A batch is bounded as a whole and per item
+- **Traces to:** `TR-SEC-02`, `TR-SEC-07`
+- **Milestone:** M2
+- **Given:** `evaluation.max-batch` at 1,000, and `evaluation.regex-max-reads-per-request` lowered in a test so that it runs out at item 3 of 5.
+- **When:** Posting 0 items; 1,001 items; a body over the batch limit (4,194,304 bytes); a batch for a rule set with no version in effect; a batch whose item 3 trips the request regex budget; a batch whose item 1 exceeds the step budget.
+- **Then:**
+  - 0 items is `400 INPUT_INVALID`. 1,001 items is `422 BATCH_TOO_LARGE` (`evaluation.max-batch` may be lowered, never raised). The oversized body is `413 PAYLOAD_TOO_LARGE`, refused before the body is read when `Content-Length` declares it. No effective version is `404 NO_EFFECTIVE_VERSION`, an unknown rule set `404 RULE_SET_NOT_FOUND`. In these cases nothing is evaluated or written.
+  - The regex case follows `RLE-007`: items 0 to 2 keep their results, item 3 fails with `EVALUATION_ERROR` / `REGEX_TIMEOUT` naming `evaluation.regex-max-reads-per-request`, and item 4 is reported failed and "not evaluated", with no decision row.
+  - The step budget is per item: item 1 fails with `EVALUATION_BUDGET_EXCEEDED`, and the others succeed.
+- **Example:** `1,001 items -> 422 BATCH_TOO_LARGE; 5 long references, budget for 3 -> 3 results, 1 REGEX_TIMEOUT, 1 not evaluated, 4 rows`.
+- **Test ID:** `RLE_068_a_batch_is_bounded_as_a_whole_and_per_item`
+
+### RLE-069 A batch is idempotent, commits with its transaction and stays in the caller's tenant
+- **Traces to:** `TR-IDEM-01`, `TR-EMB-04`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:** The batch of `RLE-067` with `Idempotency-Key: k-701`.
+- **When:** It is repeated with `k-701` and the same body, then sent with `k-701` and a changed item. A Java host calls `evaluateBatch` inside `@Transactional` and rolls back. A caller of `bank-b` posts the batch with `"tenantId": "bank-a"` in the body. A caller sends `"clock"` without `rules:simulate`.
+- **Then:**
+  - The repeat returns the same `200` body, decision ids included, and writes no row. The changed body is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. The stored response holds outputs and ids only, never inputs.
+  - The rolled-back host transaction leaves 0 rows. Over REST the batch's rows commit in one transaction: all of them or none.
+  - The `bank-b` caller is served from `bank-b` (`404 RULE_SET_NOT_FOUND` if `bank-b` has no `card-fee`), and the body tenant is ignored.
+  - The clock without the permission is `403 CLOCK_NOT_ALLOWED`. Masked inputs are fingerprinted per item exactly as on `:evaluate` (`RLE-012`), and results never echo inputs.
+- **Example:** `repeat with k-701 -> same body, 0 new rows; changed item -> 422; host rollback -> 0 rows; bank-b -> 404`.
+- **Test ID:** `RLE_069_batch_is_idempotent_transactional_and_tenant_scoped`
+
 ---
 
 ## Import and Export (RE-F-25)

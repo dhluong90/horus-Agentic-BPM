@@ -122,10 +122,7 @@ public final class JdbcDecisionLog implements DecisionLog {
     @Override
     public List<DecisionRecord> search(String tenantId, String ruleSet, Instant from, Instant to, Position after,
             int limit, Duration statementTimeout) {
-        String previous = jdbc.sql("SELECT current_setting('statement_timeout')").query(String.class).single();
-        jdbc.sql("SELECT set_config('statement_timeout', :timeout, true)")
-                .param("timeout", statementTimeout.toMillis() + "ms").query(String.class).single();
-        try {
+        return withTimeout(statementTimeout, () -> {
             var statement = jdbc.sql(searchSql(after != null))
                     .param("tenant", tenantId).param("ruleSet", ruleSet)
                     .param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
@@ -134,6 +131,65 @@ public final class JdbcDecisionLog implements DecisionLog {
                 statement = statement.param("afterAt", Timestamp.from(after.createdAt())).param("afterId", after.id());
             }
             return statement.query(JdbcDecisionLog::record).list();
+        });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>One statement led by tenant and correlation id, the period on the partition key: PostgreSQL prunes every
+     * monthly partition outside the period and reads {@code idx_rle_decision_correlation} in at most two (RLE-070).
+     */
+    @Override
+    public List<DecisionRecord> searchByCorrelationId(String tenantId, String correlationId, String ruleSet,
+            Instant from, Instant to, Position after, int limit, Duration statementTimeout) {
+        return withTimeout(statementTimeout, () -> {
+            var statement = jdbc.sql(correlationSql(ruleSet != null, after != null))
+                    .param("tenant", tenantId).param("correlation", correlationId)
+                    .param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
+                    .param("limit", limit);
+            if (ruleSet != null) {
+                statement = statement.param("ruleSet", ruleSet);
+            }
+            if (after != null) {
+                statement = statement.param("afterAt", Timestamp.from(after.createdAt())).param("afterId", after.id());
+            }
+            return statement.query(JdbcDecisionLog::record).list();
+        });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Tenant and rule set first and the period on the partition key, as {@link #search}; the value is compared as
+     * JSON, so a number equals the same number at another scale and a string is compared by code point.
+     */
+    @Override
+    public List<DecisionRecord> searchByPlainInput(String tenantId, String ruleSet, String input, String valueJson,
+            Instant from, Instant to, Position after, int limit, Duration statementTimeout) {
+        return withTimeout(statementTimeout, () -> {
+            var statement = jdbc.sql(inputSql(after != null))
+                    .param("tenant", tenantId).param("ruleSet", ruleSet)
+                    .param("input", input).param("value", valueJson)
+                    .param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
+                    .param("limit", limit);
+            if (after != null) {
+                statement = statement.param("afterAt", Timestamp.from(after.createdAt())).param("afterId", after.id());
+            }
+            return statement.query(JdbcDecisionLog::record).list();
+        });
+    }
+
+    /**
+     * Runs one read with a statement timeout of its own. The timeout is set for this statement only and the previous
+     * value is restored, so a host transaction the read joins keeps its own.
+     */
+    private <T> T withTimeout(Duration statementTimeout, java.util.function.Supplier<T> read) {
+        String previous = jdbc.sql("SELECT current_setting('statement_timeout')").query(String.class).single();
+        jdbc.sql("SELECT set_config('statement_timeout', :timeout, true)")
+                .param("timeout", statementTimeout.toMillis() + "ms").query(String.class).single();
+        try {
+            return read.get();
         } finally {
             jdbc.sql("SELECT set_config('statement_timeout', :timeout, true)")
                     .param("timeout", previous).query(String.class).single();
@@ -147,8 +203,36 @@ public final class JdbcDecisionLog implements DecisionLog {
      * @return the SQL with named parameters
      */
     static String searchSql(boolean afterPosition) {
-        return SEARCH + (afterPosition ? "  AND (created_at, id) < (:afterAt, :afterId)\n" : "")
-                + "ORDER BY created_at DESC, id DESC\nLIMIT :limit\n";
+        return SEARCH + (afterPosition ? KEYSET : "") + PAGE;
+    }
+
+    private static final String KEYSET = "  AND (created_at, id) < (:afterAt, :afterId)\n";
+    private static final String PAGE = "ORDER BY created_at DESC, id DESC\nLIMIT :limit\n";
+
+    /**
+     * Returns the correlation search statement, for the query plan check of RLE-070.
+     *
+     * @param ruleSet whether the search is narrowed to one rule set
+     * @param afterPosition whether the statement continues after a keyset position
+     * @return the SQL with named parameters
+     */
+    static String correlationSql(boolean ruleSet, boolean afterPosition) {
+        return "SELECT " + COLUMNS + """
+                 FROM rle_decision
+                WHERE tenant_id = :tenant AND correlation_id = :correlation
+                  AND created_at >= :from AND created_at < :to
+                """ + (ruleSet ? "  AND rule_set_name = :ruleSet\n" : "") + (afterPosition ? KEYSET : "") + PAGE;
+    }
+
+    /**
+     * Returns the plain input search statement, for the query plan check of RLE-071.
+     *
+     * @param afterPosition whether the statement continues after a keyset position
+     * @return the SQL with named parameters
+     */
+    static String inputSql(boolean afterPosition) {
+        return SEARCH + "  AND masked_inputs -> CAST(:input AS text) = CAST(:value AS jsonb)\n"
+                + (afterPosition ? KEYSET : "") + PAGE;
     }
 
     private static DecisionRecord record(ResultSet rs, int row) throws SQLException {

@@ -62,6 +62,7 @@ public class ProblemDetails {
             Map.entry("DRAFT_AUTHORING_DISABLED", HttpStatus.FORBIDDEN),
             Map.entry("RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
+            Map.entry("BATCH_TOO_LARGE", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
             Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE),
