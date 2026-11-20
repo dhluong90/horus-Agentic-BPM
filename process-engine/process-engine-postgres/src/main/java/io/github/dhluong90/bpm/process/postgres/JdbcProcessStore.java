@@ -312,7 +312,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     private static final String TASK_COLUMNS = "tenant_id, id, instance_id, token_id, definition_id, node_id, name, "
             + "assignee_user, assignee_role, assignee_group, four_eyes, status, lock_version, claimed_by, claimed_at, "
-            + "completed_by, created_at, completed_at";
+            + "completed_by, created_at, completed_at, review::text AS review";
 
     @Override
     public void insertTask(TaskRow t) {
@@ -320,11 +320,12 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         String kind = t.assignee().substring(0, colon);
         String value = t.assignee().substring(colon + 1);
         jdbc.sql("INSERT INTO pre_task (tenant_id, id, instance_id, token_id, definition_id, node_id, name, assignee_user, "
-                        + "assignee_role, assignee_group, four_eyes, status, lock_version, created_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                        + "assignee_role, assignee_group, four_eyes, status, lock_version, created_at, review) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)")
                 .params(t.tenantId(), t.id(), t.instanceId(), t.tokenId(), t.definitionId(), t.nodeId(), t.name(),
                         kind.equals("user") ? value : null, kind.equals("role") ? value : null,
-                        kind.equals("group") ? value : null, t.fourEyes(), t.status(), t.lockVersion(), ts(t.createdAt()))
+                        kind.equals("group") ? value : null, t.fourEyes(), t.status(), t.lockVersion(), ts(t.createdAt()),
+                        t.reviewJson())
                 .update();
     }
 
@@ -381,7 +382,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 rs.getString("token_id"), rs.getString("definition_id"), rs.getString("node_id"), rs.getString("name"),
                 assignee, rs.getBoolean("four_eyes"), rs.getString("status"), rs.getLong("lock_version"),
                 rs.getString("claimed_by"), instant(rs, "claimed_at"), rs.getString("completed_by"),
-                instant(rs, "created_at"), instant(rs, "completed_at"));
+                instant(rs, "created_at"), instant(rs, "completed_at"), rs.getString("review"));
     }
 
     // ---- history and idempotency --------------------------------------------------------------------------

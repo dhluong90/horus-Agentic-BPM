@@ -217,7 +217,7 @@
       "properties": {
         "agent": { "description": "Adapter registered in the host.", "type": "string", "minLength": 1 },
         "inputs": { "$ref": "#/$defs/inputs" },
-        "outputSchema": { "description": "Path of the JSON Schema the agent output must satisfy.", "type": "string", "minLength": 1 },
+        "outputSchema": { "description": "The JSON Schema the agent output must satisfy, inline, so the definition hash and its approval cover it. The engine default supports a subset (type, properties, required, additionalProperties true or false, enum, const, the numeric bounds, minLength, maxLength, items, minItems, maxItems, and the annotations title, description, default, examples and mask); any other keyword is refused at import.", "type": "object" },
         "guardrails": {
           "type": "object",
           "required": ["decision", "onViolation"],
@@ -227,8 +227,8 @@
               "description": "Rule set evaluated on the agent output. It must have hitPolicy first or unique, output allow: boolean and may output reasons: list<string>; checked at deploy time.",
               "$ref": "#/$defs/kebabId"
             },
-            "onViolation": { "enum": ["route-to-human", "fail"] },
-            "reviewer": { "$ref": "#/$defs/assignee" }
+            "onViolation": { "description": "route-to-human (needs reviewer) opens a four-eyes review task; fail fails the step's job.", "enum": ["route-to-human", "fail"] },
+            "reviewer": { "description": "Who reviews a refused answer. The review is always four-eyes and cannot be switched off.", "$ref": "#/$defs/assignee" }
           }
         },
         "resultVariable": { "$ref": "#/$defs/identifier" },

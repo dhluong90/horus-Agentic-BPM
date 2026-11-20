@@ -87,7 +87,15 @@ public interface ProcessStore {
     /** User task row; {@code claimedBy} is set while it is {@code CLAIMED} and kept once completed or cancelled. */
     record TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId, String nodeId,
             String name, String assignee, boolean fourEyes, String status, long lockVersion, String claimedBy,
-            Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt) {
+            Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt, String reviewJson) {
+
+        /** A task without review context. */
+        public TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId,
+                String nodeId, String name, String assignee, boolean fourEyes, String status, long lockVersion,
+                String claimedBy, Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt) {
+            this(tenantId, id, instanceId, tokenId, definitionId, nodeId, name, assignee, fourEyes, status,
+                    lockVersion, claimedBy, claimedAt, completedBy, createdAt, completedAt, null);
+        }
     }
 
     /** Recorded answer to an idempotent write; {@code responseJson} is null while the claim is pending. */

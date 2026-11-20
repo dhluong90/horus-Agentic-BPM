@@ -36,7 +36,8 @@ class KernelContractArchitectureTest {
 
     @Test
     void TR_ASY_01_only_the_async_executor_calls_an_adapter_and_it_opens_no_transaction_around_the_call() {
-        // The one caller of ServiceAdapter.execute is the remote service runner, and the one caller of a runner is
+        // The one caller of ServiceAdapter.execute is the remote service runner, the one caller of AgentAdapter.execute
+        // is the agent runner (#52), and the one caller of a runner is
         // AsyncStepExecutor, which reaches the database only through TransactionRunner (claim, result) and refuses to
         // call while a transaction is active (ADR-0008, #363).
         noClasses().that().doNotHaveFullyQualifiedName(
@@ -45,6 +46,14 @@ class KernelContractArchitectureTest {
                         com.tngtech.archunit.base.DescribedPredicate.describe("ServiceAdapter.execute",
                                 call -> call.getTargetOwner().isAssignableTo(
                                         io.github.dhluong90.bpm.process.spi.ServiceAdapter.class)
+                                        && call.getName().equals("execute"))))
+                .check(CORE);
+        noClasses().that().doNotHaveFullyQualifiedName(
+                        "io.github.dhluong90.bpm.process.internal.service.AgentStepRunner")
+                .should(com.tngtech.archunit.lang.conditions.ArchConditions.callMethodWhere(
+                        com.tngtech.archunit.base.DescribedPredicate.describe("AgentAdapter.execute",
+                                call -> call.getTargetOwner().isAssignableTo(
+                                        io.github.dhluong90.bpm.process.spi.AgentAdapter.class)
                                         && call.getName().equals("execute"))))
                 .check(CORE);
         noClasses().that().doNotHaveFullyQualifiedName(
@@ -74,6 +83,8 @@ class KernelContractArchitectureTest {
                         "java.nio.file..", "java.sql..", "javax.sql..", "java.lang.reflect..", "javax.script..")
                 .orShould().dependOnClassesThat().belongToAnyOf(io.github.dhluong90.bpm.process.spi.ServiceAdapter.class,
                         io.github.dhluong90.bpm.process.spi.AdapterCall.class,
+                        io.github.dhluong90.bpm.process.spi.AgentAdapter.class,
+                        io.github.dhluong90.bpm.process.spi.AgentInvocation.class,
                         io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner.class,
                         io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor.class,
                         Thread.class)

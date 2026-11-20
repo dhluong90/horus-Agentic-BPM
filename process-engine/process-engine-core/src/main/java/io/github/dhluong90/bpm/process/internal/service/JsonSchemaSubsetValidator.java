@@ -46,6 +46,65 @@ public final class JsonSchemaSubsetValidator implements OutputSchemaValidator {
                 : List.copyOf(violations);
     }
 
+    /**
+     * Walks the schema alone: every keyword is in the subset, {@code type} names known types, {@code properties} is
+     * an object of schemas, {@code items} a schema, {@code required} and {@code enum} lists,
+     * {@code additionalProperties} a boolean, every bound a number, and nesting at most {@value #MAX_DEPTH} levels.
+     */
+    @Override
+    public List<String> checkSchema(Map<String, Object> schema) {
+        List<String> problems = new ArrayList<>();
+        if (schema == null) {
+            problems.add("$: no output schema");
+        } else {
+            checkNode(schema, "$", 0, problems);
+        }
+        return problems.size() > MAX_VIOLATIONS ? List.copyOf(problems.subList(0, MAX_VIOLATIONS))
+                : List.copyOf(problems);
+    }
+
+    private static final Set<String> BOUNDS = Set.of("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+            "minLength", "maxLength", "minItems", "maxItems");
+
+    private static void checkNode(Object node, String path, int depth, List<String> out) {
+        if (out.size() > MAX_VIOLATIONS || node instanceof Boolean) {
+            return;
+        }
+        if (depth > MAX_DEPTH) {
+            out.add(path + ": schema nested deeper than " + MAX_DEPTH);
+            return;
+        }
+        if (!(node instanceof Map<?, ?> schema)) {
+            out.add(path + ": schema is not an object");
+            return;
+        }
+        for (Map.Entry<?, ?> e : schema.entrySet()) {
+            String key = String.valueOf(e.getKey());
+            Object value = e.getValue();
+            if (!KEYWORDS.contains(key) && !ANNOTATIONS.contains(key)) {
+                out.add(path + ": unsupported schema keyword " + key);
+            } else if (key.equals("type")) {
+                List<?> names = value instanceof Collection<?> c ? List.copyOf(c) : List.of(String.valueOf(value));
+                names.stream().filter(n -> !TYPES.contains(String.valueOf(n)))
+                        .forEach(n -> out.add(path + ": unsupported type " + n));
+            } else if (key.equals("properties")) {
+                if (value instanceof Map<?, ?> properties) {
+                    properties.forEach((name, child) -> checkNode(child, path + "." + name, depth + 1, out));
+                } else {
+                    out.add(path + ": properties is not an object");
+                }
+            } else if (key.equals("items")) {
+                checkNode(value, path + "[]", depth + 1, out);
+            } else if ((key.equals("required") || key.equals("enum")) && !(value instanceof Collection<?>)) {
+                out.add(path + ": " + key + " is not a list");
+            } else if (key.equals("additionalProperties") && !(value instanceof Boolean)) {
+                out.add(path + ": additionalProperties must be true or false in this subset");
+            } else if (BOUNDS.contains(key) && !(value instanceof Number)) {
+                out.add(path + ": " + key + " is not a number");
+            }
+        }
+    }
+
     private void check(Object schemaNode, Object value, String path, int depth, List<String> out) {
         if (out.size() > MAX_VIOLATIONS) {
             return;

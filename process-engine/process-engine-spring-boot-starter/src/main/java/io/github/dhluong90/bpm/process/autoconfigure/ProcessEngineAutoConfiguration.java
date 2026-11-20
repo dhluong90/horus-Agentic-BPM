@@ -21,9 +21,11 @@ import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
 import io.github.dhluong90.bpm.process.internal.service.AsyncSettings;
 import io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor;
+import io.github.dhluong90.bpm.process.internal.service.AgentStepRunner;
 import io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner;
 import io.github.dhluong90.bpm.process.internal.service.JsonSchemaSubsetValidator;
 import io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner;
+import io.github.dhluong90.bpm.process.spi.AgentAdapter;
 import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.spi.ServiceAdapter;
@@ -167,7 +169,7 @@ public class ProcessEngineAutoConfiguration {
 
     /**
      * Runs async steps outside any transaction, one runner per job kind with its own slots (#363): remote service
-     * steps today, agent steps once their runner exists (#52). The pool has as many daemon threads as all runners have
+     * steps through the host's {@code ServiceAdapter}s and agent steps through its {@code AgentAdapter}s (#52). The pool has as many daemon threads as all runners have
      * slots, so no claimed call waits for a thread; one daemon thread abandons calls at their timeout. Closed with the
      * context.
      */
@@ -175,9 +177,10 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnMissingBean
     AsyncStepExecutor processEngineAsyncStepExecutor(JdbcJobStore jobs, ProcessEngineTransactions transactions,
             ObjectProvider<Clock> clock, JobSettings settings, AsyncSettings async,
-            ObjectProvider<ServiceAdapter> adapters, ProcessServices services) {
+            ObjectProvider<ServiceAdapter> adapters, ObjectProvider<AgentAdapter> agents, ProcessServices services) {
         java.util.concurrent.atomic.AtomicInteger n = new java.util.concurrent.atomic.AtomicInteger();
-        List<AsyncStepRunner> runners = List.of(new ServiceStepRunner(adaptersByName(adapters)));
+        List<AsyncStepRunner> runners = List.of(new ServiceStepRunner(adaptersByName(adapters)),
+                new AgentStepRunner(agentsByName(agents)));
         int threads = AsyncStepExecutor.threadsNeeded(async, settings,
                 runners.stream().map(AsyncStepRunner::jobKind).toList());
         return new AsyncStepExecutor(jobs, transactions, clock.getIfUnique(Clock::systemUTC), settings, async,
@@ -191,6 +194,16 @@ public class ProcessEngineAutoConfiguration {
                     t.setDaemon(true);
                     return t;
                 }));
+    }
+
+    static Map<String, AgentAdapter> agentsByName(ObjectProvider<AgentAdapter> agents) {
+        Map<String, AgentAdapter> byName = new LinkedHashMap<>();
+        agents.orderedStream().forEach(a -> {
+            if (byName.putIfAbsent(a.name(), a) != null) {
+                throw new IllegalStateException("Two AgentAdapter beans are named " + a.name());
+            }
+        });
+        return byName;
     }
 
     static Map<String, ServiceAdapter> adaptersByName(ObjectProvider<ServiceAdapter> adapters) {
@@ -265,7 +278,7 @@ public class ProcessEngineAutoConfiguration {
     ProcessServices processEngineServices(ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
             JdbcJobStore jobs, JobSettings jobSettings, AsyncSettings async, ObjectProvider<ServiceAdapter> adapters,
-            ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
+            ObjectProvider<AgentAdapter> agents, ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
             OutputSchemaValidator outputSchemas) {
         requireDevOnlyRelaxations(environment, properties);
@@ -290,7 +303,7 @@ public class ProcessEngineAutoConfiguration {
                         EngineSettings.RetireLastVersionRule.valueOf(RetireLastVersion.from(environment).name())),
                 BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings, async,
-                adaptersByName(adapters).keySet(), outputSchemas);
+                adaptersByName(adapters).keySet(), agentsByName(agents).keySet(), outputSchemas);
     }
 
     /**

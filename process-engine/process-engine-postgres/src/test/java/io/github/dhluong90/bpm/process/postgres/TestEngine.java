@@ -146,11 +146,17 @@ final class TestEngine {
                 publisher, settings, BehaviorCatalog.registry(), new V1ExpressionEvaluator(100), jobStore, jobSettings,
                 b.asyncSettings, java.util.stream.Stream.concat(b.adapters.stream()
                         .map(io.github.dhluong90.bpm.process.spi.ServiceAdapter::name), b.extraAdapterNames.stream())
-                        .collect(Collectors.toSet()), b.outputSchemas);
+                        .collect(Collectors.toSet()), b.agents.stream()
+                        .map(io.github.dhluong90.bpm.process.spi.AgentAdapter::name).collect(Collectors.toSet()),
+                b.outputSchemas);
         this.jobs = new JobExecutor(jobStore, tx, b.clock, jobSettings, services.jobHandlers());
         List<io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner> runners = new java.util.ArrayList<>();
         runners.add(new io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner(b.adapters.stream()
                 .collect(Collectors.toMap(io.github.dhluong90.bpm.process.spi.ServiceAdapter::name, a -> a))));
+        if (!b.agents.isEmpty()) {
+            runners.add(new io.github.dhluong90.bpm.process.internal.service.AgentStepRunner(b.agents.stream()
+                    .collect(Collectors.toMap(io.github.dhluong90.bpm.process.spi.AgentAdapter::name, a -> a))));
+        }
         runners.addAll(b.runners);
         this.async = new io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor(jobStore, tx, b.clock,
                 jobSettings, b.asyncSettings, runners, services,
@@ -188,6 +194,7 @@ final class TestEngine {
                 io.github.dhluong90.bpm.process.internal.service.DecisionPort> decisionPort;
         private List<io.github.dhluong90.bpm.process.spi.ServiceAdapter> adapters = List.of();
         private List<io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner> runners = List.of();
+        private List<io.github.dhluong90.bpm.process.spi.AgentAdapter> agents = List.of();
         private java.util.Set<String> extraAdapterNames = java.util.Set.of();
         private io.github.dhluong90.bpm.process.internal.service.AsyncSettings asyncSettings =
                 io.github.dhluong90.bpm.process.internal.service.AsyncSettings.DEFAULTS;
@@ -246,7 +253,7 @@ final class TestEngine {
         }
 
         /**
-         * Adds runners of other async kinds, for example a stub agent runner until the agent step exists (#52).
+         * Adds runners of other async kinds, for example a stub agent runner that answers a rewritten job.
          *
          * @param adapterNames the adapter names those runners call, which completer roles may name
          * @param value the runners
@@ -255,6 +262,12 @@ final class TestEngine {
                 io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner... value) {
             runners = List.of(value);
             extraAdapterNames = java.util.Set.copyOf(adapterNames);
+            return this;
+        }
+
+        /** The host's agent adapters, run by the engine's agent runner (#52). */
+        Builder agents(io.github.dhluong90.bpm.process.spi.AgentAdapter... value) {
+            agents = List.of(value);
             return this;
         }
 

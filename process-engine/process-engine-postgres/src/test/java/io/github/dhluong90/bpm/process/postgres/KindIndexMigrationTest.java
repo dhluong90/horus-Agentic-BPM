@@ -48,7 +48,8 @@ class KindIndexMigrationTest {
         flyway(ds, "8").migrate();
         twoDueJobsOfOneKind(jdbc);
 
-        int applied = new ProcessEngineSchemaMigrator(ds).migrate();
+        // V9 alone, with the migrator's settings; later migrations (V10 onwards) are not under test here
+        int applied = flyway(ds, "9").migrate().migrationsExecuted;
 
         assertThat(applied).isEqualTo(1);
         assertThat(index(jdbc, INDEX)).containsEntry("valid", true);
@@ -70,7 +71,7 @@ class KindIndexMigrationTest {
         assertThat(index(jdbc, INDEX)).containsEntry("valid", false);
 
         // When V9 runs again
-        int applied = new ProcessEngineSchemaMigrator(ds).migrate();
+        int applied = flyway(ds, "9").migrate().migrationsExecuted;
 
         // Then the invalid index is gone and the real one is built and valid
         assertThat(applied).isEqualTo(1);

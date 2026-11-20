@@ -13,7 +13,9 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
@@ -59,6 +61,28 @@ public final class CanonicalProcessWriter {
             switch (node) {
                 case StartEvent s -> step.put("type", "start");
                 case EndEvent e -> step.put("type", "end");
+                case ServiceTask t when t.extensions().first(AgentTaskSpec.class).isPresent() -> {
+                    // process-definition.v1 agentTaskStep: the whole guard spec is part of the hash (#52).
+                    AgentTaskSpec agent = t.extensions().first(AgentTaskSpec.class).orElseThrow();
+                    step.put("type", "agentTask");
+                    step.put("agent", agent.agent());
+                    if (agent.outputSchema() != null) {
+                        step.set("outputSchema", EngineJson.JSON.readTree(agent.outputSchema()));
+                    }
+                    t.extensions().first(GuardrailSpec.class).ifPresent(g -> {
+                        ObjectNode guard = step.putObject("guardrails");
+                        guard.put("decision", g.decision());
+                        guard.put("onViolation", g.onViolation());
+                        if (g.reviewer() != null) {
+                            int colon = g.reviewer().indexOf(':');
+                            guard.putObject("reviewer").put(g.reviewer().substring(0, colon),
+                                    g.reviewer().substring(colon + 1));
+                        }
+                    });
+                    if (agent.timeout() != null) {
+                        step.put("timeout", agent.timeout().toString());
+                    }
+                }
                 case ServiceTask t -> {
                     step.put("type", "serviceTask");
                     t.extensions().first(HandlerRef.class).ifPresent(h -> {

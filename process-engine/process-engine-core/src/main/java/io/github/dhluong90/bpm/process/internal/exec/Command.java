@@ -73,15 +73,33 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
      * @param fourEyes whether the review task follows the four-eyes rule
      * @param code why the result was refused, for example {@code GUARDRAIL_VIOLATION}
      * @param reasons the guardrail's reasons
+     * @param context what the review task carries for the reviewer (#52); the kernel passes it through unread
      */
     record RouteToReview(String tokenId, String attemptId, String assignee, boolean fourEyes, String code,
-            java.util.List<String> reasons) implements Command {
+            java.util.List<String> reasons, java.util.Map<String, Object> context) implements Command {
         public RouteToReview {
             Objects.requireNonNull(tokenId, "tokenId must not be null");
             Objects.requireNonNull(attemptId, "attemptId must not be null");
             Objects.requireNonNull(assignee, "assignee must not be null");
             Objects.requireNonNull(code, "code must not be null");
             reasons = reasons == null ? java.util.List.of() : java.util.List.copyOf(reasons);
+            context = context == null ? null : java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(context));
+        }
+
+        /**
+         * A route whose task carries the code and reasons only.
+         *
+         * @param tokenId the waiting token
+         * @param attemptId the refused attempt
+         * @param assignee the reviewer
+         * @param fourEyes whether four eyes apply
+         * @param code why the result was refused
+         * @param reasons the reasons
+         */
+        public RouteToReview(String tokenId, String attemptId, String assignee, boolean fourEyes, String code,
+                java.util.List<String> reasons) {
+            this(tokenId, attemptId, assignee, fourEyes, code, reasons, null);
         }
     }
 

@@ -56,4 +56,35 @@ class JsonSchemaSubsetValidatorTest {
                 .containsExactly("$: unsupported schema keyword $ref");
         assertThat(validator.validate(null, Map.of())).containsExactly("$: no output schema");
     }
+    @Test
+    void PRE_061_a_schema_in_the_subset_passes_the_import_check() {
+        assertThat(validator.checkSchema(ASSESSMENT)).isEmpty();
+        assertThat(validator.checkSchema(Map.of("type", "object", "properties", Map.of("summary",
+                Map.of("type", "string", "mask", true, "description", "free text"))))).isEmpty();
+    }
+
+    @Test
+    void PRE_061_a_schema_outside_the_subset_is_refused_at_import_naming_the_path() {
+        Map<String, Object> schema = Map.of("type", "object", "properties", Map.of(
+                "nationalId", Map.of("type", "string", "pattern", "^[0-9]{12}$"),
+                "address", Map.of("$ref", "#/$defs/address"),
+                "riskScore", Map.of("type", "decimal", "minimum", "zero"),
+                "documents", Map.of("type", "array", "items", Map.of("type", "string", "format", "uri"))),
+                "additionalProperties", Map.of("type", "string"), "required", "riskScore");
+
+        List<String> problems = validator.checkSchema(schema);
+
+        assertThat(problems).contains("$.nationalId: unsupported schema keyword pattern",
+                "$.address: unsupported schema keyword $ref", "$.riskScore: unsupported type decimal",
+                "$.riskScore: minimum is not a number", "$.documents[]: unsupported schema keyword format",
+                "$: additionalProperties must be true or false in this subset", "$: required is not a list");
+        assertThat(String.join(" ", problems)).doesNotContain("^[0-9]{12}$");
+    }
+
+    @Test
+    void PRE_061_a_host_validator_accepts_every_schema_at_import_unless_it_says_otherwise() {
+        io.github.dhluong90.bpm.process.spi.OutputSchemaValidator host = (schema, output) -> List.of();
+
+        assertThat(host.checkSchema(Map.of("pattern", "^x$"))).isEmpty();
+    }
 }

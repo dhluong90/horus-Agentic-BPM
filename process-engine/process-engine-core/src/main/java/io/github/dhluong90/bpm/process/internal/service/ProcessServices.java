@@ -74,6 +74,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.store.JobStore;
 import io.github.dhluong90.bpm.process.internal.store.JobStore.JobRow;
@@ -161,6 +162,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final JobSettings jobSettings;
     private final AsyncSettings async;
     private final java.util.Set<String> adapters;
+    private final java.util.Set<String> agents;
     /** The result check of each async job kind, run in the result transaction (#363); a kind without one has none. */
     private final Map<String, ResultGuard> guards;
     /** Checks the reviewer's answer to the review task of a refused result against the step's output schema. */
@@ -339,15 +341,48 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
             ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings, AsyncSettings async,
             java.util.Set<String> adapters, io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas) {
+        this(tenants, callers, clock, transactions, store, readers, writers, invoker, publisher, settings, behaviors,
+                expressions, jobs, jobSettings, async, adapters, java.util.Set.of(), outputSchemas);
+    }
+
+    /**
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store storage
+     * @param readers definition readers by source format
+     * @param writers definition writers by export format (PRE-034)
+     * @param invoker local handlers and decisions
+     * @param publisher event publisher
+     * @param settings validated settings
+     * @param behaviors registered behaviours
+     * @param expressions expression evaluator
+     * @param jobs job storage ({@code pre_timer})
+     * @param jobSettings lease and attempts of the jobs this engine schedules
+     * @param async lease margin, default timeout and runner settings of async steps (ADR-0008, #363)
+     * @param adapters names of the host's {@code ServiceAdapter}s; a remote step naming another is refused at import
+     * @param agents names of the host's {@code AgentAdapter}s; an agent step naming another is refused at import (#52)
+     * @param outputSchemas checks async results against their output schema in the result transaction (#363), and
+     *     agent steps' schemas at import (#52)
+     */
+    public ProcessServices(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers,
+            Map<SourceFormat, Function<Process, byte[]>> writers, LocalServiceInvoker invoker,
+            ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
+            ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings, AsyncSettings async,
+            java.util.Set<String> adapters, java.util.Set<String> agents,
+            io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas) {
         this.async = Objects.requireNonNull(async);
         // Agent results are never accepted unchecked; remote service results keep their behaviour (#363).
         this.outputSchemas = Objects.requireNonNull(outputSchemas, "outputSchemas must not be null");
         this.guards = Map.of(JobStore.ASYNC_AGENT, new AgentResultGuard(outputSchemas, invoker.decisionPort(), clock));
         this.adapters = java.util.Set.copyOf(adapters);
+        this.agents = java.util.Set.copyOf(agents);
         for (String adapter : async.completerRoles().keySet()) {
-            if (!this.adapters.contains(adapter)) {
+            if (!this.adapters.contains(adapter) && !this.agents.contains(adapter)) {
                 throw new IllegalArgumentException("adapters.completer-roles names " + adapter
-                        + ", which is no registered ServiceAdapter");
+                        + ", which is no registered ServiceAdapter or AgentAdapter");
             }
         }
         this.writers = Map.copyOf(writers);
@@ -994,7 +1029,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private void checkBindings(Process process) {
         List<DefinitionProblem> problems = new ArrayList<>();
         for (FlowElement element : process.flowElements()) {
-            if (element instanceof ServiceTask task) {
+            if (element instanceof ServiceTask task && task.extensions().first(AgentTaskSpec.class).isPresent()) {
+                agentBindings(task, problems);
+            } else if (element instanceof ServiceTask task) {
                 HandlerRef ref = task.extensions().first(HandlerRef.class).orElse(null);
                 String handler = ref == null ? null : ref.handler();
                 if (handler != null && ref != null && "remote".equals(ref.mode())) {
@@ -1014,6 +1051,30 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         if (!problems.isEmpty()) {
             throw new ValidationFailedException(problems);
+        }
+    }
+
+    /**
+     * The host side of an agent step's guard spec (#52); its shape was checked by the reader. The adapter must be
+     * registered, the output schema must be one the host's validator can evaluate (the engine default refuses any
+     * keyword outside its subset), and the guardrail needs the Rule Engine. Problems name the step and the rule, never
+     * a schema value.
+     */
+    private void agentBindings(ServiceTask task, List<DefinitionProblem> problems) {
+        AgentTaskSpec agent = task.extensions().first(AgentTaskSpec.class).orElseThrow();
+        if (agent.agent() != null && !agents.contains(agent.agent())) {
+            problems.add(DefinitionProblem.of("AGENT_NOT_REGISTERED", "No AgentAdapter named " + agent.agent()
+                    + " is registered in this host", task.id()));
+        }
+        if (agent.outputSchema() != null) {
+            List<String> schemaProblems = outputSchemas.checkSchema(Values.readMap(agent.outputSchema()));
+            for (String problem : schemaProblems == null ? List.<String>of() : schemaProblems) {
+                problems.add(DefinitionProblem.of("GUARD_SPEC_INVALID", "horus:outputSchema " + problem, task.id()));
+            }
+        }
+        if (!invoker.hasRuleEngine()) {
+            problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "agentTask " + task.id() + " needs the Rule "
+                    + "Engine for its guardrail, which this host does not have", "ServiceTask", task.id(), 0));
         }
     }
 
@@ -1375,6 +1436,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     details.put("guardrailDecisionId", allow.decisionId());
                     details.put("ruleIds", allow.ruleIds());
                 }
+                ResultGuard kindGuard = guards.getOrDefault(job.jobKind(), ResultGuard.NONE);
+                if (kindGuard != ResultGuard.NONE) {
+                    // An accepted agent answer is history too: masked by the same policy as a refused one (#52).
+                    Map<String, Object> output = completed.output() == null ? Map.of() : completed.output();
+                    details.put("output", kindGuard.auditOutput(Values.readMap(job.payloadJson()), output));
+                    details.put("outputFields", output.size());
+                }
                 try {
                     store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry(
                             "ASYNC_RESULT_ACCEPTED", job.nodeId(), job.tokenId(), attemptId, reportedBy, clock.instant(),
@@ -1455,7 +1523,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             try {
                 // Always four eyes: the reviewer is never the reporter of the result (participants) or the starter.
                 run(definition, row, state, new Command.RouteToReview(job.tokenId(), job.id(), refused.reviewer(),
-                        true, refused.code(), refused.reasons()), new RunAs.EngineWork(tenant, ASYNC_ACTOR));
+                        true, refused.code(), refused.reasons(), reviewContext(job, details)),
+                        new RunAs.EngineWork(tenant, ASYNC_ACTOR));
             } catch (RuntimeException e) {
                 throw new RefusalNotRouted(e, details);
             }
@@ -1467,6 +1536,24 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (!jobs.release(tenant, job.id(), job.lockedBy(), job.attempt(), job.nextFireAt(), true, now)) {
             throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
         }
+    }
+
+    /**
+     * What the reviewer of a refused result sees on the review task (#52, PRE-010): why it was refused, the inputs the
+     * agent saw, and the answer as the refusal recorded it, masked by the output schema's masking policy.
+     */
+    private static Map<String, Object> reviewContext(JobRow job, Map<String, Object> refusal) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        for (String key : List.of("code", "reasons", "ruleIds", "guardrailDecisionId")) {
+            if (refusal.get(key) != null) {
+                context.put(key, refusal.get(key));
+            }
+        }
+        Object inputs = Values.readMap(job.payloadJson()).get("inputs");
+        context.put("inputs", inputs instanceof Map<?, ?> ? inputs : Map.of());
+        context.put("output", refusal.get("output"));
+        context.put("outputFields", refusal.get("outputFields"));
+        return context;
     }
 
     /**
@@ -1745,7 +1832,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private static TaskView taskView(TaskRow t, InstanceRow row) {
         return new TaskView(t.id(), t.instanceId(), row.definitionKey(), row.definitionVersion(), row.businessKey(),
                 t.nodeId(), t.name(), t.assignee(), t.fourEyes(), t.status(), t.lockVersion(), t.claimedBy(),
-                t.claimedAt(), t.createdAt(), t.completedBy(), t.completedAt(), java.util.Set.of());
+                t.claimedAt(), t.createdAt(), t.completedBy(), t.completedAt(), java.util.Set.of(),
+                t.reviewJson() == null ? null : Values.readMap(t.reviewJson()));
     }
 
     /** What this caller may do now; computed per caller, never stored with an idempotent answer. */
@@ -1905,7 +1993,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     switch (effect) {
                         case Effect.CreateUserTask task -> newTasks.add(new TaskRow(state.tenantId(), task.taskId(),
                                 state.instanceId(), task.tokenId(), definition.id(), task.nodeId(), task.name(),
-                                task.assignee(), task.fourEyes(), "OPEN", 0, null, null, null, clock.instant(), null));
+                                task.assignee(), task.fourEyes(), "OPEN", 0, null, null, null, clock.instant(), null,
+                                task.context().isEmpty() ? null : Values.write(task.context())));
                         case Effect.CancelUserTask cancel -> cancelledTasks.add(cancel.taskId());
                         case Effect.ScheduleJob job -> newJobs.add(JobRow.due(state.tenantId(), job.jobId(),
                                 state.instanceId(), definition.id(), job.tokenId(), job.jobKind(), job.nodeId(),
@@ -1962,6 +2051,31 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             history.add(new HistoryEntry("ASYNC_STEP_SCHEDULED", call.nodeId(), call.tokenId(),
                                     call.attemptId(), null, clock.instant(), Map.of("jobId", call.attemptId(),
                                     "target", call.target(), "leaseMs", lease.toMillis())));
+                        }
+                        case Effect.InvokeService call when call.mode() == ExecutionMode.ASYNC
+                                && call.kind() == ServiceKind.AGENT -> {
+                            // Agent step (#52): the same park as a remote step, as an agent job whose guard spec is
+                            // read from the node of the version being run, never from the request or the caller.
+                            String kind = JobStore.ASYNC_AGENT;
+                            RunnerSettings runner = async.runner(kind, jobSettings);
+                            Duration timeout = async.timeout(kind, call.timeout(), jobSettings);
+                            FlowNode node = compiled.process().node(call.nodeId()).orElseThrow(() ->
+                                    new ExecutionException("NODE_NOT_FOUND", call.nodeId(), "No such step"));
+                            Map<String, Object> payload = new LinkedHashMap<>();
+                            payload.put("target", call.target());
+                            payload.put("timeoutMs", timeout.toMillis());
+                            if (state.businessKey() != null) {
+                                payload.put("businessKey", state.businessKey());
+                            }
+                            payload.put("inputs", call.inputs());
+                            payload.put("guard", AgentGuardSpecs.payload(node));
+                            Duration lease = timeout.plus(async.leaseMargin());
+                            newJobs.add(JobRow.due(state.tenantId(), call.attemptId(), state.instanceId(),
+                                    definition.id(), call.tokenId(), kind, call.nodeId(),
+                                    clock.instant(), lease, runner.maxAttempts(), Values.write(payload)));
+                            history.add(new HistoryEntry("ASYNC_STEP_SCHEDULED", call.nodeId(), call.tokenId(),
+                                    call.attemptId(), null, clock.instant(), Map.of("jobId", call.attemptId(),
+                                    "target", call.target(), "leaseMs", lease.toMillis(), "jobKind", kind)));
                         }
                         case Effect.EmitEvent event -> {
                             Map<String, Object> payload = new LinkedHashMap<>(event.payload());

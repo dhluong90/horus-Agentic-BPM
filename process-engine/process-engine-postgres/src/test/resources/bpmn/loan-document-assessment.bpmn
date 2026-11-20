@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- A loan application's documents are assessed by an automated assessor that answers in seconds or calls back later.
      Its answer is checked against an output schema and the bank's guardrail rule set before the loan moves on to
-     underwriting; a refused answer goes to a compliance reviewer. Until the agent step type exists, the tests run this
-     step's job as a stub agent job (ASYNC_AGENT) with the guard spec in its payload. -->
+     underwriting; a refused answer goes to a compliance reviewer. The result-check tests (RunnerPerKindIT) park this
+     step as a remote step and rewrite its job into an agent job (ASYNC_AGENT) with a guard spec of their choosing, so
+     they can also check payloads the agent step never writes (no spec, fourEyes false). The agent step itself is
+     loan-agent-assessment.bpmn (#52). -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                   xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
                   id="Definitions_loan-document-assessment"

@@ -93,11 +93,11 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-009 `agentTask` releases DB connections before invoking adapter (Async Wait-State)
 - **Traces to:** `TR-AGT-03`, `TR-EMB-04`, `TR-ASY-01`
 - **Milestone:** M2
-- **Given:** Host configured with a 2-connection HikariCP pool (borrow timeout 500 ms); an async step calls a stub adapter that holds every call until all 10 are in flight. The async step is a remote `serviceTask` (`horus:mode="remote"`) `bureau-score` of `loan-bureau-check`; `agentTask` runs on the same executor from #52.
+- **Given:** Host configured with a 2-connection HikariCP pool (borrow timeout 500 ms); an async step calls a stub adapter that holds every call until all 10 are in flight. The async step is a remote `serviceTask` (`horus:mode="remote"`) `bureau-score` of `loan-bureau-check`. Agent case (#52): the agent step `assess-documents` of `loan-agent-assessment`, through a stub agent adapter, with the guardrail rule set published.
 - **When:** 10 instances reach the step, one poll starts all 10 calls, and while they are in flight another thread runs 20 queries on the same pool.
 - **Then:** All 10 adapters run concurrently with 0 pool connections active and no adapter call inside a transaction; all 20 queries get a connection; after the calls return, each instance records the result once (`TX 1` committed the claim before the call; `TX 2` commits the result after it).
 - **Example:** `10 concurrent bureau calls on a 2-connection pool -> 0 active connections while calling, 0 pool timeouts, 10 instances on underwrite`.
-- **Test ID:** `PRE_009_remote_step_executes_outside_db_transaction`
+- **Test ID:** `PRE_009_remote_step_executes_outside_db_transaction`, `PRE_009_agent_step_executes_outside_db_transaction` (the agent case; each loan's answer is allowed by the guardrail and recorded once)
 
 ### PRE-010 `agentTask` validates JSON Schema and evaluates Rule Engine guardrail before advancing
 - **Traces to:** `TR-AGT-01`
@@ -106,7 +106,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Adapter returns `{ riskScore: 85, recommendation: "APPROVE" }`.
 - **Then:** Output passes schema validation, Rule Engine returns `allow = false`, `reasons = ["HIGH_RISK_SCORE"]` and matched rule `R2`, and engine creates a maker-checker `userTask` carrying inputs, agent output, `reasons`, and matched rule IDs instead of auto-advancing.
 - **Example:** `riskScore=85 -> allow=false, R2, HIGH_RISK_SCORE -> userTask created for compliance-reviewer`.
-- **Test ID:** `PRE_010_agent_task_guardrail_violation_routes_to_human`
+- **Test ID:** `PRE_010_agent_task_guardrail_violation_routes_to_human`, `PRE_010_an_answer_the_guardrail_allows_moves_the_loan_on_without_a_review` (example host over HTTP, `GuardedAgentTaskIT`: the review task's `review` object carries the code, reasons, rule ids, guardrail decision id, inputs and the masked answer; the starter of the loan cannot claim it)
 
 ### PRE-011 `agentTask` invalid JSON output or timeout retries with backoff then raises incident
 - **Traces to:** `TR-AGT-01`, `TR-AGT-03`, `TR-OPS-03`
@@ -177,7 +177,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Pod 2 polls continuously from the claim instant `T0`.
 - **Then:** TX1 sets `locked_until = T0 + 32s`. In the first run Pod 2 never claims the job, and Pod 1's TX2 records the result once. In the crash run Pod 2 skips the job until `T0 + 32s`, then reclaims it with `attempt = 2` and a new `attemptId`.
 - **Example:** `timeout PT2S -> lease 32s; live attempt completes at 1.9s untouched; after crash reclaimed at T0+32s`.
-- **Test ID:** `PRE_017_async_lease_is_timeout_plus_margin`, `PRE_017_a_crashed_attempt_is_reclaimed_at_the_end_of_its_lease_with_a_new_attempt_id` (both on the remote `serviceTask` `bureau-score`, the same executor `agentTask` uses)
+- **Test ID:** `PRE_017_async_lease_is_timeout_plus_margin`, `PRE_017_a_crashed_attempt_is_reclaimed_at_the_end_of_its_lease_with_a_new_attempt_id` (both on the remote `serviceTask` `bureau-score`); agent case (#52): `PRE_017_agent_lease_is_timeout_plus_margin`, `PRE_017_a_crashed_agent_attempt_is_reclaimed_at_the_end_of_its_lease_with_a_new_model_call_key` (the reclaimed attempt's model call key is the new attempt id; its idempotency key is still the job id)
 
 ---
 
@@ -418,7 +418,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** `POST /instances/I1:cancel` commits after 0.5 s, and the adapter answers at 2 s.
 - **Then:** The cancel transaction sets the instance `CANCELLED`, the token `CANCELLED`, the job `CANCELLED` and writes `TOKEN_CANCELLED`; replica A's TX2 selects no row for `status = 'CLAIMED'`, writes only `LATE_RESULT_DISCARDED` with the attempt id, and does not advance, retry or open an incident; no connection was held during the adapter call.
 - **Example:** `cancel at 0.5 s, adapter result at 2 s -> LATE_RESULT_DISCARDED, instance CANCELLED`.
-- **Test ID:** `PRE_041_cancel_during_adapter_call_discards_late_result`
+- **Test ID:** `PRE_041_cancel_during_adapter_call_discards_late_result` (remote step), `PRE_041_cancel_during_agent_call_discards_late_result` (agent case, #52: no guardrail decision is evaluated for the late answer)
 
 ### PRE-042 BPMN-style step ids are accepted and kept everywhere
 - **Traces to:** `TR-STD-03`, `TR-DEF-01`
@@ -668,3 +668,35 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** Every one is `REFUSED` and nothing of it is accepted. The code is `GUARDRAIL_EVALUATION_ERROR` with the cause as reason (`RULE_ENGINE_MISSING`, `IllegalStateException`, `GUARD_BUDGET_EXCEEDED`, `GUARDRAIL_CONTRACT_INVALID`, `DECISION_NO_MATCH`, the decision's code), and the step goes to its reviewer. The budget is checked after the schema check, so a schema check that uses it up never reaches the decision, and again after the decision. A missing or malformed guard spec is `GUARD_SPEC_INVALID` and fails the job, because no reviewer can be trusted from it. An unsupported schema keyword is a violation, never skipped.
 - **Example:** `rule set missing -> REFUSED, GUARDRAIL_EVALUATION_ERROR, review task; no guard spec -> REFUSED, GUARD_SPEC_INVALID, job FAILED`.
 - **Test ID:** `PRE_060_a_missing_guardrail_rule_set_fails_closed_to_review`, `PRE_060_a_host_without_a_rule_engine_refuses_every_agent_answer`, `PRE_060_a_check_that_breaks_or_overruns_its_budget_fails_closed`, `PRE_060_an_agent_job_without_a_guard_spec_fails_and_is_never_accepted`, `PRE_060_a_guardrail_that_cannot_decide_fails_closed`, `PRE_060_without_a_rule_engine_the_result_is_refused`, `PRE_060_a_check_slower_than_the_budget_refuses_even_an_allowed_result`, `PRE_060_a_missing_or_malformed_guard_spec_fails_the_job`, `PRE_060_a_schema_check_that_uses_up_the_budget_never_reaches_the_decision`, `PRE_060_an_unsupported_keyword_fails_closed`
+
+### PRE-061 An agent step's guard spec is validated at import, and an invalid one never becomes a draft
+- **Traces to:** `TR-AGT-01`, `TR-SEC-04`, `TR-DEF-04`, #52
+- **Milestone:** M2
+- **Given:** `loan-agent-assessment` with a `serviceTask` `assess-documents`, `horus:type="agentTask"`, `horus:agent="documents.assess"`, `horus:timeout="PT2S"`, inputs `applicationId` and `requestedAmount`, a `<horus:outputSchema>` holding `{ riskScore: integer 0..100, recommendation: APPROVE | REFER | DECLINE, summary?: string, mask: true }` and `<horus:guardrail decision="agent-output-guardrails" onViolation="route-to-human" reviewer="role:COMPLIANCE_REVIEWER"/>`. The host registers the agent adapter `documents.assess` and has the Rule Engine. Variants: no schema; a schema that is not JSON or not an object; a schema with `pattern`; no guardrail; a guardrail without `decision`, with `onViolation: ignore`, with `route-to-human` and no or a malformed reviewer, with `fail` and a reviewer, or with `fourEyes="false"`; two guardrails; no `horus:agent`; `horus:handler` or `horus:mode` on the step; `horus:timeout="PT0S"`; an agent `documents.summarise` the host does not register; a host without the Rule Engine.
+- **When:** Each document is imported.
+- **Then:** The valid one is a draft whose canonical form carries `type: agentTask`, `agent`, the schema as canonical JSON, `guardrails` (`decision`, `onViolation`, `reviewer`) and `timeout`, so the definition hash covers the whole guard spec and a change of the reviewer, the rule set or a schema bound is a new version; its BPMN export reads back to the same hash. `onViolation` defaults to `route-to-human`. Each variant is `422 VALIDATION_FAILED` with a problem naming `assess-documents`: `GUARD_SPEC_INVALID` for the schema and guardrail faults (a schema keyword outside the host validator's subset is refused here, not only when an answer arrives), `AGENT_MISSING`, `AGENT_TASK_INVALID`, `TIMEOUT_INVALID`, `AGENT_NOT_REGISTERED`, and `BPMN_NOT_EXECUTABLE` without the Rule Engine. No `pre_definition` row is written. A problem never echoes the schema text. Four-eyes cannot be switched off: a review is always four-eyes. The guardrail rule set's own contract is checked by `PRE-016`.
+- **Example:** `fourEyes="false" -> 422 GUARD_SPEC_INVALID at assess-documents, nothing written`.
+- **Test ID:** `PRE_061_an_agent_step_reads_with_its_agent_schema_guardrail_inputs_and_timeout`, `PRE_061_the_canonical_form_carries_the_whole_guard_spec_so_the_hash_covers_it`, `PRE_061_on_violation_defaults_to_route_to_human_and_fail_needs_no_reviewer`, `PRE_061_an_invalid_guard_spec_is_refused_naming_the_step`, `PRE_061_an_agent_step_needs_its_agent_and_takes_no_handler_mode_or_bad_timeout`, `PRE_061_a_schema_in_the_subset_passes_the_import_check`, `PRE_061_a_schema_outside_the_subset_is_refused_at_import_naming_the_path`, `PRE_061_a_host_validator_accepts_every_schema_at_import_unless_it_says_otherwise`, `PRE_061_an_invalid_guard_spec_or_an_unknown_agent_is_refused_at_import_and_nothing_is_written`, `PRE_061_a_host_without_a_rule_engine_cannot_import_an_agent_step`
+
+### PRE-062 An agent step parks an agent job with the published guard spec, and its model call is keyed by the attempt id
+- **Traces to:** `TR-AGT-01`, `TR-AGT-03`, `TR-ASY-01`, `TR-IDEM-04`, `TR-TEN-01`, #52
+- **Milestone:** M2
+- **Given:** `loan-agent-assessment` v1 active, the guardrail rule set published, the stub agent adapter `documents.assess`, `runners.async-agent.schema-retries` unset (1), `jobs.retry-backoff` 10 s. Loan `LOAN-2027-0902` asks for 250,000,000 VND; the agent first answers `riskScore: "high"`, then `{ riskScore: 20, recommendation: APPROVE }`. Separately the agent answers `riskScore: 140` twice; and the agent hands a call off and a callback client of tenant `bank-other` reports an answer for it.
+- **When:** A loan reaches the step, and the replica runs its attempts.
+- **Then:**
+  - The step transaction parks the token in `WAITING_ASYNC` and inserts one `ASYNC_AGENT` job leased for the step timeout plus `jobs.lease-margin` (32 s) with the agent runner's attempts, and a payload of `target`, `timeoutMs`, `businessKey`, the bounded `inputs` and `guard` (`outputSchema`, `decision`, `onViolation`, `reviewer`, `fourEyes: true`), read from the node of the definition version being run, never from a request. `ASYNC_STEP_SCHEDULED` records `jobKind: ASYNC_AGENT`.
+  - The agent runner calls the host's `AgentAdapter` with an `AgentInvocation` whose `modelCallKey()` is the attempt id and whose `idempotencyKey()` is the job id. The bad first answer is given back once (`ASYNC_ATTEMPT_FAILED`, `AGENT_SCHEMA_INVALID`, `schemaRetry: 1`, `max_attempts` 3 to 4); the retry after the back-off is a new model call key with the same idempotency key, its answer is allowed (`R3`), and the loan moves on to `underwrite`.
+  - Two bad answers: the second is `REFUSED` with `AGENT_SCHEMA_INVALID`, no guardrail decision is evaluated, and the token waits on a four-eyes review task for `role:COMPLIANCE_REVIEWER` that the loan's starter cannot claim (`SELF_APPROVAL_FORBIDDEN`).
+  - The other tenant's callback is `404 ASYNC_STEP_NOT_FOUND` and writes nothing; the job stays `CLAIMED`.
+  - Only the agent runner calls `AgentAdapter.execute` (an ArchUnit rule); a name with no adapter fails the attempt with `AGENT_NOT_REGISTERED`, not retryable.
+- **Example:** `riskScore "high" then 20 -> attempt 1 key A1, attempt 2 key A2, both idempotency key = job id -> underwrite`.
+- **Test ID:** `PRE_062_an_agent_step_parks_an_agent_job_with_the_guard_spec_of_the_published_version`, `PRE_062_the_model_call_is_keyed_by_the_attempt_id_and_one_bad_answer_is_asked_again`, `PRE_062_a_second_bad_answer_is_refused_to_the_four_eyes_review_which_the_starter_cannot_take`, `PRE_062_another_tenants_agent_job_is_not_found_and_nothing_is_written`, `PRE_062_the_model_call_is_keyed_by_the_attempt_id_and_side_effects_by_the_job_id`
+
+### PRE-063 An agent answer is recorded masked, and its review task carries why it was refused
+- **Traces to:** `TR-AGT-02`, `TR-SEC-05`, `TR-OBS-01`, #52
+- **Milestone:** M2
+- **Given:** The output schema of `assess-documents` marks `summary` `mask: true`. The agent answers `{ riskScore: 20, recommendation: APPROVE, summary: "Applicant Nguyen Van An, national id 079088001234, ..." }` for one loan and the same with `riskScore: 85` for another.
+- **When:** Each answer is recorded.
+- **Then:** The allowed answer is the step result as given, and `ASYNC_RESULT_ACCEPTED` records it masked by the policy of `ASYNC_RESULT_REFUSED` (`PRE-059`): `{ riskScore: 20, recommendation: APPROVE, summary: "***" }`, `outputFields: 3`, with `guardrailDecisionId`; no history row of the loan contains the national id. The refused answer opens the review task, whose `review` object (task view, `GET /tasks/{id}`, migration V10 `pre_task.review`) carries `code: GUARDRAIL_VIOLATION`, `reasons: [HIGH_RISK_SCORE]`, `ruleIds: [R2]`, `guardrailDecisionId`, the `inputs` the agent saw and the masked `output` with `outputFields`; every other task has no `review`. The reviewer's answer `{ riskScore: 85, recommendation: REFER }` completes the step and the loan moves on to `underwrite`.
+- **Example:** `summary with a national id -> history "***", review task output.summary "***"`.
+- **Test ID:** `PRE_063_an_accepted_agent_answer_is_recorded_masked_by_the_output_schema`, `PRE_063_the_review_task_carries_why_the_answer_was_refused_and_the_masked_answer`

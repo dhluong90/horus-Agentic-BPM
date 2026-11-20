@@ -81,3 +81,34 @@ ServiceAdapter creditBureau(BureauClient client) {
 | `horus.bpm.processes.jobs.lease-margin` | `30s` | Added to the timeout to give the lease, so a live attempt is never taken over |
 
 The proof is `AsyncWaitStateTest`: ten bureau calls in flight on a 2-connection pool with no connection active, a crashed attempt reclaimed exactly at the end of its lease, late and duplicate results that change nothing, a cancelled loan whose late answer is recorded as discarded once however often it is repeated, and a forged completion with a derived attempt id, a token of another job or a client of another adapter refused. `AsyncStepCompletionIT` in `examples/rule-and-process` runs the completion API over HTTP. `RunnerPerKindIT` proves the runner per kind and the result check: an agent backlog that leaves the bureau call unaffected, and refused answers through both paths, with the review task and the fail-closed cases.
+
+## Guarded agent steps
+
+A `serviceTask` with `horus:type="agentTask"` asks an `AgentAdapter` bean (named by `horus:agent`) and lets its answer move the process on only after two checks in the result transaction: the step's output schema and the guardrail rule set. A refused answer opens a four-eyes review task for the named reviewer, or fails the step with `onViolation="fail"`. The guard spec lives in the definition, so the definition hash and its approval cover it; an invalid spec is refused at import with problems naming the step. See the wiki page Guarded Agent Steps and process DESIGN section 4.1.
+
+```xml
+<bpmn:serviceTask id="assess-documents" horus:type="agentTask" horus:agent="documents.assess" horus:resultVariable="assessment">
+  <bpmn:extensionElements>
+    <horus:input name="applicationId" value="${instance.applicationId}"/>
+    <horus:outputSchema>{"type": "object", "required": ["riskScore", "recommendation"],
+      "properties": {"riskScore": {"type": "integer", "minimum": 0, "maximum": 100},
+                     "recommendation": {"type": "string", "enum": ["APPROVE", "REFER", "DECLINE"]}}}</horus:outputSchema>
+    <horus:guardrail decision="agent-output-guardrails" onViolation="route-to-human" reviewer="role:COMPLIANCE_REVIEWER"/>
+  </bpmn:extensionElements>
+</bpmn:serviceTask>
+```
+
+```java
+@Bean
+AgentAdapter documentAssessor(AssessorClient client) {
+    return new AgentAdapter() {
+        public String name() { return "documents.assess"; }
+        public AdapterResult execute(AgentInvocation call) {
+            // A retry is a new generation: key the model call by the attempt id, side effects by the job id.
+            return AdapterResult.completed(client.assess(call.inputs(), call.modelCallKey()));
+        }
+    };
+}
+```
+
+The agent runs on its own runner (`runners.async-agent.*` above). An answer that breaks the schema is asked again once (`schema-retries`, default 1) and then refused with `AGENT_SCHEMA_INVALID`. The history keeps the answer masked: a value is kept only where the schema declares the field and does not mark it `mask: true`. The review task carries why the answer was refused, the inputs and the masked answer (`review` in the task view). `StubAgentAdapter` in `process-engine-test` answers with canned outputs for tests and demos. The proof is `AgentTaskIT` and, end to end over HTTP, `GuardedAgentTaskIT` in `examples/rule-and-process`.

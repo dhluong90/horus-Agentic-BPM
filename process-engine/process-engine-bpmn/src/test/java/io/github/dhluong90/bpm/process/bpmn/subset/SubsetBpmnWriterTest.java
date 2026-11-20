@@ -51,7 +51,8 @@ class SubsetBpmnWriterTest {
         }
         assertThat(examples).as("example definitions under examples/").isNotEmpty();
         return Stream.concat(examples.stream(), Stream.of("classpath:card-fee-review.bpmn",
-                "classpath:kyc-onboarding.bpmn", "classpath:modeller-annotated.bpmn"));
+                "classpath:kyc-onboarding.bpmn", "classpath:modeller-annotated.bpmn",
+                "classpath:loan-agent-assessment.bpmn"));
     }
 
     @ParameterizedTest
