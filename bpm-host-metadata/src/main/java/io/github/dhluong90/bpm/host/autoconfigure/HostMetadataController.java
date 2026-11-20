@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException;
 import io.github.dhluong90.bpm.host.spi.EngineCaller;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
+import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -11,9 +12,11 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -26,8 +29,9 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>Both need an authenticated caller and no other permission. Responses follow
  * {@code cockpit/api/schema/bpm-meta.v1.schema.json} and {@code bpm-me.v1.schema.json} field for field,
- * carry a weak {@code ETag} and answer {@code 304} to a matching {@code If-None-Match}. {@code /meta}, the
- * same for every caller of the host, is {@code private, max-age=60}; {@code /me}, which carries the
+ * carry a weak {@code ETag} and answer {@code 304} to a matching {@code If-None-Match}. {@code /meta} is
+ * {@code private, max-age=60}; when an engine contributes {@link ModuleTenantSettings}, its settings follow the
+ * caller's tenant, so {@code /meta} then also varies by the caller's credentials. {@code /me}, which carries the
  * caller's permissions, is {@code private, no-cache}, so a revoked role or a sign-out on a shared machine
  * is never served from the browser cache without asking the host. Bodies are built as ordered maps and
  * written by the host's own JSON converter, so absent optional fields are omitted rather than written as
@@ -47,20 +51,54 @@ final class HostMetadataController {
     static final int MAX_PAGE_SIZE = 200;
 
     private final List<ModuleDescriptor> modules;
+    private final List<ModuleTenantSettings> tenantSettings;
     private final HostMetadataProperties properties;
     private final EngineAccess access;
     /** {@code /me} depends on the caller's credentials and on the switch request header. */
     static final String[] ME_VARY = {HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE, DefaultEngineAccess.TENANT_SWITCH_HEADER};
 
     HostMetadataController(List<ModuleDescriptor> modules, HostMetadataProperties properties, EngineAccess access) {
+        this(modules, List.of(), properties, access);
+    }
+
+    HostMetadataController(List<ModuleDescriptor> modules, List<ModuleTenantSettings> tenantSettings,
+            HostMetadataProperties properties, EngineAccess access) {
         this.modules = List.copyOf(modules);
+        this.tenantSettings = List.copyOf(tenantSettings);
         this.properties = properties;
         this.access = access;
+        checkTenantSettings(this.modules, this.tenantSettings);
+    }
+
+    /**
+     * Stops the host when tenant settings name a module without an entry, repeat a name, or reuse the name of a
+     * fixed setting, so a response never holds two values for one name.
+     */
+    static void checkTenantSettings(List<ModuleDescriptor> modules, List<ModuleTenantSettings> tenantSettings) {
+        Map<String, Set<String>> taken = new LinkedHashMap<>();
+        modules.forEach(module -> taken.put(module.module(), new HashSet<>(module.settings().keySet())));
+        for (ModuleTenantSettings contributor : tenantSettings) {
+            Set<String> names = taken.get(contributor.module());
+            if (names == null) {
+                throw new IllegalStateException("Tenant settings for module '" + contributor.module()
+                        + "', which has no engine entry. Installed modules: " + taken.keySet());
+            }
+            if (contributor.names().isEmpty()) {
+                throw new IllegalStateException("Tenant settings for module '" + contributor.module()
+                        + "' declare no setting name.");
+            }
+            for (String name : contributor.names()) {
+                if (name == null || name.isBlank() || !names.add(name)) {
+                    throw new IllegalStateException("Tenant setting '" + name + "' of module '" + contributor.module()
+                            + "' is blank or already a setting of that module.");
+                }
+            }
+        }
     }
 
     @GetMapping("/meta")
     ResponseEntity<Map<String, Object>> meta(HttpServletRequest request) {
-        access.currentCaller();
+        EngineCaller caller = access.currentCaller();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("schemaVersion", 1);
         if (properties.hostId() != null) {
@@ -73,15 +111,35 @@ final class HostMetadataController {
             entry.put("engineVersion", module.engineVersion());
             entry.put("apiVersion", module.apiVersion());
             entry.put("features", module.features());
-            if (!module.settings().isEmpty()) {
-                entry.put("settings", module.settings());
+            Map<String, Object> settings = settings(module, caller.tenant());
+            if (!settings.isEmpty()) {
+                entry.put("settings", settings);
             }
             entries.add(entry);
         }
         body.put("modules", entries);
         body.put("tenancy", Map.of("switching", false));
         body.put("limits", Map.of("maxPageSize", MAX_PAGE_SIZE));
-        return cacheable(request, body, META_CACHE_CONTROL, new String[0]);
+        return cacheable(request, body, META_CACHE_CONTROL, tenantSettings.isEmpty() ? new String[0] : ME_VARY);
+    }
+
+    /** The module's fixed settings, then the declared tenant settings of the caller's tenant. */
+    private Map<String, Object> settings(ModuleDescriptor module, String tenant) {
+        Map<String, Object> settings = new LinkedHashMap<>(module.settings());
+        for (ModuleTenantSettings contributor : tenantSettings) {
+            if (!contributor.module().equals(module.module())) {
+                continue;
+            }
+            Map<String, Object> values = contributor.settings(tenant);
+            for (String name : contributor.names()) {
+                Object value = values == null ? null : values.get(name);
+                if (value instanceof Boolean || value instanceof Integer || value instanceof Long
+                        || value instanceof String) {
+                    settings.put(name, value);
+                }
+            }
+        }
+        return settings;
     }
 
     @GetMapping("/me")

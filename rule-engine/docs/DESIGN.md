@@ -242,7 +242,7 @@ A caller without the endpoint's permission gets `403 PERMISSION_DENIED`; an unau
 
 ### 4.3 Host metadata
 
-The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version, API version `v1`, feature flags such as `rules.simulation`, `rules.replay`, `rules.grid-editor`) and the `rules:*` permissions the caller holds to `GET /api/bpm/me`. Both endpoints and their contract are owned by [`cockpit/docs/DESIGN.md`](../../cockpit/docs/DESIGN.md) section 6 and ship in M1 (X-F-22, `RLE-019`).
+The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version, API version `v1`, feature flags such as `rules.simulation`, `rules.replay`, `rules.grid-editor`) and the `rules:*` permissions the caller holds to `GET /api/bpm/me`. Both endpoints and their contract are owned by [`cockpit/docs/DESIGN.md`](../../cockpit/docs/DESIGN.md) section 6 and ship in M1 (X-F-22, `RLE-019`). From 0.2.0 (#282) the starter also contributes a `ModuleTenantSettings` bean, `RuleEngineMaskingStatus`: for the caller's own tenant, as `EngineAccess` resolved it, the rules settings carry `masking.hmac-key` (`set` or `unset`) and, when set, `masking.hmac-key-id` and `masking.hmac-key-check` (`MaskingKey.checkValue()`), read from the active `MaskingPolicy.hmacKey(tenant)`: the key the tenant writes with, its own or its HKDF subkey of the host key. No other tenant is described, the key is never returned, and `/meta` then varies by `Authorization, Cookie, X-Tenant-Id` (`TR-EXT-08`, `TR-SEC-10`).
 
 ### 4.4 Configuration (`horus.bpm.rules.*`)
 

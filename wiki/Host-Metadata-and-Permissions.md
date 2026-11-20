@@ -79,7 +79,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
 | `modules[]` | One entry per engine in the host. The Rule Engine contributes `rules`; no `processes` entry until the Process Engine 0.1 |
 | `engineVersion` | The version of the engine starter the host was built with |
 | `features` | Empty: a flag such as `rules.simulation` is added with the feature it announces, so a client never offers a screen whose endpoints are missing |
-| `settings` | Omitted when the engine has none |
+| `settings` | Omitted when the engine has none. Fixed host settings, then settings of the caller's own tenant (0.2.0): the Rule Engine publishes `masking.hmac-key` (`set` or `unset`), and when set `masking.hmac-key-id` (the current key id) and `masking.hmac-key-check` (the key check value), for the key the caller's tenant writes with. A key is never shown, and no other tenant is ever described |
 | `tenancy.switching` | `false`: tenant switching arrives in M2 |
 | `limits.maxPageSize` | `200`, the largest page of any engine list |
 
@@ -202,7 +202,7 @@ tenant.switch.refused reason=switching-off user=lan%40bank-a.vn tokenTenant=bank
 |---|---|
 | `Cache-Control` | `/meta`: `private, max-age=60`. `/me`: `private, no-cache`, so the browser asks again every time (cheaply, with `If-None-Match`) and a revoked role or a sign-out is never shown from cache. Errors: `no-store` |
 | `ETag` | A weak validator of the body; send it back as `If-None-Match` to get `304` |
-| `Vary` | On `/me`: `Authorization, Cookie, X-Tenant-Id` |
+| `Vary` | On `/me`: `Authorization, Cookie, X-Tenant-Id`. On `/meta` too when an engine publishes settings of the caller's tenant (the Rule Engine does from 0.2.0) |
 | `X-Correlation-Id` | A ULID issued by the host for every request, also in every problem body. A caller's own `X-Correlation-Id` is never adopted; it is logged as `clientCorrelationId` |
 | `WWW-Authenticate` | On every `401`. `Bearer` by default (`horus.bpm.security.challenge`); for a caller without a tenant a bearer challenge adds `error="invalid_token"` |
 

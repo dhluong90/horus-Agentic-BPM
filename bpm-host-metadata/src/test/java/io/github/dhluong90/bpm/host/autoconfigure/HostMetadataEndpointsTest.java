@@ -198,6 +198,49 @@ class HostMetadataEndpointsTest {
     }
 
     @Test
+    void TR_EXT_08_tenant_settings_follow_the_callers_tenant_and_meta_then_varies_by_credentials() {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, TestHosts.MaskingStatus.class)
+                .run(context -> {
+                    MockMvc mvc = TestHosts.mockMvc(context);
+                    MvcResult bankA = call(mvc, get("/api/bpm/meta").with(lan()));
+                    MvcResult bankB = call(mvc, get("/api/bpm/meta").with(caller("vy", "bank-b", "rules:read")));
+
+                    JsonNode a = json(bankA).path("modules").get(0).path("settings");
+                    JsonNode b = json(bankB).path("modules").get(0).path("settings");
+                    assertThat(a.path("masking.hmac-key").asString()).isEqualTo("set");
+                    assertThat(a.path("masking.hmac-key-id").asString()).isEqualTo("a1");
+                    assertThat(b.path("masking.hmac-key").asString()).isEqualTo("unset");
+                    assertThat(b.has("masking.hmac-key-id")).isFalse();
+                    // An undeclared name is never published, and one tenant never sees another's values.
+                    assertThat(bankA.getResponse().getContentAsString()).doesNotContain("undeclared", "bank-b");
+                    assertThat(bankB.getResponse().getContentAsString()).doesNotContain("undeclared", "a1");
+                    assertThat(String.join(", ", bankA.getResponse().getHeaders("Vary")))
+                            .isEqualTo("Authorization, Cookie, X-Tenant-Id");
+                    assertThat(bankA.getResponse().getHeader("Cache-Control")).isEqualTo("private, max-age=60");
+                    assertThat(bankA.getResponse().getHeader("ETag")).isNotEqualTo(bankB.getResponse().getHeader("ETag"));
+                });
+        // Without tenant settings /meta is the same for every caller and does not vary.
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).run(context ->
+                assertThat(call(TestHosts.mockMvc(context), get("/api/bpm/meta").with(lan())).getResponse()
+                        .getHeaders("Vary")).isEmpty());
+    }
+
+    @Test
+    void TR_EXT_08_tenant_settings_for_a_missing_module_or_a_fixed_setting_name_stop_the_host() {
+        var rules = new io.github.dhluong90.bpm.host.spi.ModuleDescriptor("rules", "0.1.3", "v1", List.of(),
+                java.util.Map.of("authoring.cockpit-drafts", false), TestHosts.RULES_PERMISSIONS, java.util.Map.of());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> HostMetadataController.checkTenantSettings(
+                        List.of(rules), List.of(TestHosts.tenantSettings("rules", "authoring.cockpit-drafts"))))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("authoring.cockpit-drafts");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> HostMetadataController.checkTenantSettings(
+                        List.of(rules), List.of(TestHosts.tenantSettings("processes", "x"))))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("processes");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> HostMetadataController.checkTenantSettings(
+                        List.of(rules), List.of(TestHosts.tenantSettings("rules", "a"), TestHosts.tenantSettings("rules", "a"))))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("'a'");
+    }
+
+    @Test
     void responses_carry_a_host_issued_correlation_id_whatever_the_caller_sends() {
         TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).run(context -> {
             MockMvc mvc = TestHosts.mockMvc(context);

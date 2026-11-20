@@ -91,6 +91,10 @@ class HostMetadataIT {
         // PD-094: off by default; this profile (no dev) leaves it unset, so the engine publishes false.
         assertThat(metaBody.path("modules").get(0).path("settings").path("authoring.cockpit-drafts").isBoolean()).isTrue();
         assertThat(metaBody.path("modules").get(0).path("settings").path("authoring.cockpit-drafts").asBoolean()).isFalse();
+        // TR-EXT-08: this host configures no masking key, so the caller's tenant shows unset and no key id.
+        assertThat(metaBody.path("modules").get(0).path("settings").path("masking.hmac-key").asString()).isEqualTo("unset");
+        assertThat(metaBody.path("modules").get(0).path("settings").has("masking.hmac-key-id")).isFalse();
+        assertThat(meta.headers().allValues("Vary")).isNotEmpty();
         assertThat(metaBody.path("modules").get(0).path("engineVersion").asString())
                 .isEqualTo(System.getProperty("rule-engine.version"));
         assertThat(meta.headers().firstValue("Cache-Control")).hasValue("private, max-age=60");
