@@ -73,6 +73,8 @@ public final class DefaultVersionService implements VersionService {
     private final EventOutbox outbox;
     /** The cursor key in memory, loaded at start-up (RLE-039). */
     private final CursorKeys cursorKeys;
+    /** This replica's compiled versions; an approval evicts its rule set after commit (ADR-0009). */
+    private final CompiledCache cache;
     private final Supersession supersession;
 
     /**
@@ -83,14 +85,16 @@ public final class DefaultVersionService implements VersionService {
      * @param outbox event outbox
      * @param cursorKeys the cursor key, loaded at start-up; the only constructor, so a hand-wired engine always
      *     shares the holder that {@link RuleEngines#cursorKeys()} exposes for loading
+     * @param cache the compiled cache the evaluation of the same replica uses
      * @param supersession retires superseded versions, shared with the lifecycle sweep
      */
     DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox, CursorKeys cursorKeys,
-            Supersession supersession) {
+            Supersession supersession, CompiledCache cache) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.outbox = Objects.requireNonNull(outbox, "outbox must not be null");
         this.cursorKeys = Objects.requireNonNull(cursorKeys, "cursorKeys must not be null");
+        this.cache = Objects.requireNonNull(cache, "cache must not be null");
         this.supersession = Objects.requireNonNull(supersession, "supersession must not be null");
     }
 
@@ -310,6 +314,10 @@ public final class DefaultVersionService implements VersionService {
             StoredVersion updated = current.approved(actor, now, opts.comment());
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.APPROVED, current.status(), actor, opts.comment(), now);
+            // ADR-0009: the epoch moves and every replica is notified in this transaction; this replica evicts
+            // once the approval is committed, so it never reloads the version before others can see it.
+            long epoch = store.advanceCacheEpoch(tenant, updated.ruleSetId(), updated.ruleSet());
+            context.transactions().afterCommit(() -> cache.evict(tenant, updated.ruleSet(), epoch));
             // DESIGN 3.3: the publication names what was approved, from when, and both people of the four eyes.
             event(tenant, EVENT_PUBLISHED, updated, actor, now, opts.correlationId(), payload -> {
                 payload.put("canonicalHash", updated.canonicalHash());
@@ -411,6 +419,10 @@ public final class DefaultVersionService implements VersionService {
             supersession.retire(tenant, current.ruleSetId(), now, opts.correlationId());
             StoredVersion updated = current.retired(now);
             store.updateVersion(updated, current.lockVersion());
+            // ADR-0009: as on approve, the epoch moves and every replica is notified in this transaction; this replica
+            // evicts once the retirement is committed.
+            long epoch = store.advanceCacheEpoch(tenant, updated.ruleSetId(), updated.ruleSet());
+            context.transactions().afterCommit(() -> cache.evict(tenant, updated.ruleSet(), epoch));
             String mode = context.settings().retireApproval();
             store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.RETIRED,
                     current.status(), updated.status(), actor, reason, updated.lockVersion(), now, null, mode, last));

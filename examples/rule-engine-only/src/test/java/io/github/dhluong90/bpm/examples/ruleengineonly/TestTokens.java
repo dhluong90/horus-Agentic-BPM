@@ -49,6 +49,11 @@ final class TestTokens {
         properties().forEach((name, value) -> registry.add(name, () -> value));
     }
 
+    /** The same settings as command-line arguments, for hosts started with {@code SpringApplicationBuilder}. */
+    static List<String> arguments() {
+        return properties().entrySet().stream().map(e -> "--" + e.getKey() + "=" + e.getValue()).toList();
+    }
+
     /** The token-validation properties of the host, for a host started with command-line arguments. */
     static Map<String, String> properties() {
         try {
