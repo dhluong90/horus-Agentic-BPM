@@ -970,8 +970,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             + " is registered in this host", task.id()));
                 }
             } else if (element instanceof BusinessRuleTask task && !invoker.hasRuleEngine()) {
-                problems.add(DefinitionProblem.of("RULE_ENGINE_MISSING", "A businessRuleTask needs the Rule Engine",
-                        task.id()));
+                // ADR-0027: refused at activation, naming the step, so nothing fails at run time.
+                problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "businessRuleTask " + task.id()
+                        + " needs the Rule Engine, which this host does not have", "BusinessRuleTask", task.id(), 0));
             }
         }
         if (!problems.isEmpty()) {
@@ -1680,11 +1681,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         case Effect.CancelJob cancel -> cancelledJobs.add(cancel.jobId());
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             DecisionCaller decisionCaller = switch (as) {
-                                case RunAs.CallerRequest r -> new DecisionCaller.Request();
+                                case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
+                                        callers.currentCallerId());
                                 case RunAs.EngineWork w -> new DecisionCaller.Engine(w.actor());
                             };
                             if (call.kind() == ServiceKind.DECISION) {
-                                // A request evaluates as its caller, so the caller's tenant must be the instance's.
+                                // A request's tenant must be the instance's; the decision adapter checks it again.
                                 // Engine work has no caller: the tenant it fires for must be the instance's. Defence
                                 // in depth only: the row was locked with the job's tenant, so the two are equal; the
                                 // real control is the instance tenant passed explicitly to the decision port.
@@ -1697,7 +1699,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 }
                             }
                             var result = invoker.invoke(state.tenantId(), state.instanceId(), state.businessKey(), call,
-                                    decisionCaller);
+                                    decisionCaller, clock.instant());
                             if (call.kind() == ServiceKind.DECISION
                                     && result instanceof io.github.dhluong90.bpm.process.internal.exec.StepResult.Completed c) {
                                 history.add(new HistoryEntry("DECISION_EVALUATED", call.nodeId(), call.tokenId(),

@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.api;
 
+import io.github.dhluong90.bpm.expr.api.Money;
 import java.time.Instant;
 import java.util.Objects;
 

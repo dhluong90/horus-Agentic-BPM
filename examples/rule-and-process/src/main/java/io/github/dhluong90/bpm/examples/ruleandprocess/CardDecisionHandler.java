@@ -1,6 +1,6 @@
 package io.github.dhluong90.bpm.examples.ruleandprocess;
 
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.process.spi.HandlerResult;
 import io.github.dhluong90.bpm.process.spi.ServiceCall;
 import io.github.dhluong90.bpm.process.spi.ServiceTaskHandler;

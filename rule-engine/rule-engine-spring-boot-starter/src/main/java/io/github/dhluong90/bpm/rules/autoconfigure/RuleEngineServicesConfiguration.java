@@ -168,7 +168,7 @@ class RuleEngineServicesConfiguration {
 
     /**
      * The one-time hand-off of the tenant-scoped entry point to the Process Engine (ADR-0027, #336). Registered only
-     * when the Process Engine's decision port, its one registered claimant, resolves to a class in a sealed package of a
+     * when the process starter's decision port, its one registered claimant, resolves to a class in a sealed package of a
      * jar with this Rule Engine's {@code Implementation-Version} ({@link EmbeddedEngineClaimantCondition}). Otherwise
      * there is no grant, and the host keeps running without it. The Process Engine claims it while its beans are
      * created; when start-up finishes, any identity still unclaimed is closed for good. A host that injects it is
@@ -204,14 +204,14 @@ class RuleEngineServicesConfiguration {
             }
             if (!refusal.get().endsWith("is not on the class path")) {
                 LOG.warn("No tenant-scoped entry point is granted to the Process Engine: " + refusal.get()
-                        + ". Decision steps with no caller, such as after a timer, fail (#336).");
+                        + ". Decision steps of processes fail closed (#336).");
             }
             return ConditionOutcome.noMatch(refusal.get());
         }
     }
 
     /**
-     * The engine identity whose registered claimant is the Process Engine's decision port; see
+     * The engine identity whose registered claimant is the process starter's decision port; see
      * {@link EmbeddedEngineGrant#REGISTERED_CLAIMANTS}.
      */
     static final String EMBEDDED_ENGINE_ID = "system:process-engine";

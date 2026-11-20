@@ -47,6 +47,11 @@
       </dependency>
       <dependency>
         <groupId>io.github.dhluong90.bpm</groupId>
+        <artifactId>bpm-expression</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.dhluong90.bpm</groupId>
         <artifactId>rule-engine-core</artifactId>
         <version>${project.version}</version>
       </dependency>

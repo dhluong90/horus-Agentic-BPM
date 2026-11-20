@@ -1,7 +1,7 @@
 package io.github.dhluong90.bpm.rules.internal.eval;
 
-import io.github.dhluong90.bpm.rules.api.Money;
-import io.github.dhluong90.bpm.rules.internal.expr.EvaluationException;
+import io.github.dhluong90.bpm.expr.api.Money;
+import io.github.dhluong90.bpm.expr.internal.EvaluationException;
 import io.github.dhluong90.bpm.rules.internal.model.OutputClause;
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -126,7 +126,7 @@ final class Aggregates {
                 }
                 yield Long.compare(x.minorUnits(), y.minorUnits());
             }
-            case String x -> io.github.dhluong90.bpm.rules.internal.expr.Evaluator.compareCodePoints(x, (String) b);
+            case String x -> io.github.dhluong90.bpm.expr.internal.Evaluator.compareCodePoints(x, (String) b);
             case LocalDate x -> x.compareTo((LocalDate) b);
             case Instant x -> x.compareTo((Instant) b);
             default -> throw new EvaluationException("Output " + output + ": values cannot be ordered");

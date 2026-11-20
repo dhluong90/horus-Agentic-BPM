@@ -1,6 +1,6 @@
 package io.github.dhluong90.bpm.process.internal.json;
 
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.Instant;

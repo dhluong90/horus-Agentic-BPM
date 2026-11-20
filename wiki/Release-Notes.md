@@ -5,9 +5,30 @@ What shipped in each release. The project has one version for every module, and 
 | Release | Tag | Date | Modules | Notes |
 |---|---|---|---|---|
 | 0.1.0 | `v0.1.0` | 20 Nov 2026 | The 13 artifacts pinned by `bpm-bom` 0.1.0, all at `0.1.0`: `bpm-host-metadata`, the Rule Engine (`rule-engine-core`, `-postgres`, `-rest`, `-spring-boot-starter`), the Process Engine preview (`process-engine-core`, `-bpmn`, `-test`, `-postgres`, `-rest`, `-spring-boot-starter`), `cockpit-spring-boot-starter`, and `bpm-bom` itself | First release, published as a GitHub Release with its bill of materials and checksums |
-| 0.2.0 | `v0.2.0` | 15 Jan 2027 (planned) | As 0.1.0, at `0.2.0` | **Upgrade note (PD-104): finish a rolling upgrade before relying on approval acknowledgements.** A replica still on 0.1.x approves without asking for an acknowledgement and writes no `acknowledged_warnings` or `masked_by_default_inputs`, so until every replica runs 0.2.0 an approval can reach the decision log without the acknowledgement on the record. **Upgrade note (PD-105): a pending rule set version written before V2 has no recorded author and can no longer be approved** (`409 AUTHOR_UNKNOWN`); import the change again, have it approved, and reject or withdraw the old version. Migrations: `rle_setting_seen` and the two acknowledgement columns on `rle_version_history` (numbered at merge, after V13) |
+| 0.2.0 | `v0.2.0` | 15 Jan 2027 (planned) | As 0.1.0, at `0.2.0`, plus the new `bpm-expression` (14 artifacts) | **Breaking change of a 0.x release: `Money` and the expression types moved to `bpm-expression`** (see [0.2.0](#020)). **Upgrade note (PD-104): finish a rolling upgrade before relying on approval acknowledgements.** A replica still on 0.1.x approves without asking for an acknowledgement and writes no `acknowledged_warnings` or `masked_by_default_inputs`, so until every replica runs 0.2.0 an approval can reach the decision log without the acknowledgement on the record. **Upgrade note (PD-105): a pending rule set version written before V2 has no recorded author and can no longer be approved** (`409 AUTHOR_UNKNOWN`); import the change again, have it approved, and reject or withdraw the old version. Migrations: `rle_setting_seen` and the two acknowledgement columns on `rle_version_history` (numbered at merge, after V13), and `V17__rle_decision_on_behalf_of` |
 
 Every release note lists the database migrations it adds (TR-OPS-01) and the "should" requirements it meets ([[Technical Requirements]]).
+
+## 0.2.0
+
+Planned for 15 Jan 2027. Still a 0.x release, so it makes no compatibility promise; the changes below need a code change in a host that uses the moved types.
+
+### Breaking changes
+
+**Expressions and value types moved to `bpm-expression` (ADR-0027).** The new artifact `io.github.dhluong90.bpm:bpm-expression` holds money, the value mapping and the expression language, and depends on the JDK only. Both engines depend on it, and `process-engine-core` no longer depends on `rule-engine-core`. `bpm-bom` pins it, so a host that imports the BOM needs no new version.
+
+| Moved from (0.1.0) | To (0.2.0) |
+|---|---|
+| `io.github.dhluong90.bpm.rules.api.Money` | `io.github.dhluong90.bpm.expr.api.Money` |
+| `io.github.dhluong90.bpm.rules.internal.expr.*` (parser, tree, evaluator, bounded regular expressions) | `io.github.dhluong90.bpm.expr.internal.*` |
+
+New in the same artifact: `expr.spi.ExpressionLanguage`, `CompiledExpression`, `TypeEnvironment`, `EvaluationContext`, `ValueType` and `EvaluationProfile`, the extension point both engines compile expressions through; `expr.api.ExpressionValues`, `ExpressionInvalidException` and `ExpressionEvaluationException`. To upgrade, replace the import of `Money`; nothing else in the Rule Engine API changes.
+
+**A host with the Process Engine alone.** The process starter declares `rule-engine-core` as optional. Without it, gateway conditions still run, and activating a definition with a business rule task is refused with `422 VALIDATION_FAILED` and the problem `BPMN_NOT_EXECUTABLE`, naming the step (was `RULE_ENGINE_MISSING`).
+
+### Decision steps of a process
+
+A business rule task is evaluated as the engine identity `system:process-engine`, on behalf of the user who triggered the step (none after a timer), in the instance's tenant, at the engine clock of the step, with an idempotency key derived from the instance, the step and the attempt. The task worker needs no `rules:evaluate`. A retried step replays the logged decision and writes no second row. The decision log shows the user as `onBehalfOf` (Java `DecisionLogEntry` and `LoggedDecision`, and the REST decision log). Migration `V17__rle_decision_on_behalf_of` adds the nullable column `rle_decision.on_behalf_of`.
 
 ## 0.1.0
 

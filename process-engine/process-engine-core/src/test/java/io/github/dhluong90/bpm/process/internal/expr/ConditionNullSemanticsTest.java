@@ -3,7 +3,7 @@ package io.github.dhluong90.bpm.process.internal.expr;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.expr.api.Money;
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;

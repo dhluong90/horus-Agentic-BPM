@@ -7,8 +7,8 @@ import java.util.Map;
  *
  * <p>The grant is a capability, not the entry point. {@link #claim(String, Object)} returns the entry point once per
  * engine identity, and only to the claimant registered for that identity in {@link #REGISTERED_CLAIMANTS}: for
- * {@code system:process-engine}, the Process Engine's decision port, which keeps the entry point to itself and uses it
- * only for steps reached after a timer. Any other claimant, any other identity, and a second claim are refused.
+ * {@code system:process-engine}, the process starter's decision port, which keeps the entry point to itself and uses
+ * it for every decision step of a process (ADR-0027). Any other claimant, any other identity, and a second claim are refused.
  *
  * <p>Host code that holds this object therefore cannot get the entry point. The claimant is checked by class identity,
  * and the registered claimant is a package-private class in a sealed package, so host code can neither create one nor
@@ -22,7 +22,7 @@ public interface EmbeddedEngineGrant {
      * {@link TenantScopedRuleEngine#REGISTERED_ENGINE_IDS}.
      */
     Map<String, String> REGISTERED_CLAIMANTS = Map.of("system:process-engine",
-            "io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort");
+            "io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort");
 
     /**
      * Hands the entry point for {@code engineId} to its registered claimant, once.
