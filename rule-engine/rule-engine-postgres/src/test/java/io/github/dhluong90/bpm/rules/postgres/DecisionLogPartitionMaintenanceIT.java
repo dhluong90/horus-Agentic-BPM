@@ -275,7 +275,7 @@ class DecisionLogPartitionMaintenanceIT {
     }
 
     @Test
-    void RLE_017_the_drop_record_is_append_only_and_the_V18_rollback_step_runs() {
+    void RLE_017_the_drop_record_is_append_only_and_the_V19_rollback_step_runs() {
         // Given one recorded drop
         DataSource db = migratedDatabase();
         DecisionLogPartitions partitions = partitions(db);
@@ -291,7 +291,7 @@ class DecisionLogPartitionMaintenanceIT {
         }
         assertThat(jdbc.sql("SELECT count(*) FROM rle_decision_log_drop").query(Long.class).single()).isEqualTo(1L);
 
-        // When the documented rollback step of V18 runs, Then the table and its function are gone
+        // When the documented rollback step of V19 runs, Then the table and its function are gone
         jdbc.sql("DROP TRIGGER rle_decision_log_drop_no_truncate ON rle_decision_log_drop").update();
         jdbc.sql("DROP TRIGGER rle_decision_log_drop_no_change ON rle_decision_log_drop").update();
         jdbc.sql("DROP TABLE rle_decision_log_drop").update();

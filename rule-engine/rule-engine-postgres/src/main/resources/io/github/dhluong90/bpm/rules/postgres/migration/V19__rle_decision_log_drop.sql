@@ -24,7 +24,7 @@
 --   DROP FUNCTION rle_decision_log_drop_append_only();
 -- which loses the record of earlier drops, so export it first.
 --
--- Numbering: V17 is held by an open change; this takes the next free number.
+-- Numbering: main holds V17 and an open change on batch/s3 also takes V17, so this takes V19.
 
 SET LOCAL lock_timeout = '5s';
 

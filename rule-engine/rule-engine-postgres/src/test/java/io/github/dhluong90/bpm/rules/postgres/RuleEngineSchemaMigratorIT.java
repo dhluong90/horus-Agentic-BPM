@@ -35,7 +35,7 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.initialVersion()).isNull();
-        assertThat(result.currentVersion()).isEqualTo("18");
+        assertThat(result.currentVersion()).isEqualTo("19");
         assertThat(result.migrationsExecuted()).isEqualTo(13);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
@@ -124,10 +124,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
-        assertThat(result.currentVersion()).isEqualTo("18");
+        assertThat(result.currentVersion()).isEqualTo("19");
         assertThat(result.migrationsExecuted()).isEqualTo(13);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3", "4", "5", "6", "10", "11", "12", "14", "15", "16", "18");
+                .containsExactly("0", "1", "2", "3", "4", "5", "6", "10", "11", "12", "14", "15", "16", "19");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -140,10 +140,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult second = migrator.migrate();
 
-        assertThat(second.initialVersion()).isEqualTo("18");
-        assertThat(second.currentVersion()).isEqualTo("18");
+        assertThat(second.initialVersion()).isEqualTo("19");
+        assertThat(second.currentVersion()).isEqualTo("19");
         assertThat(second.migrationsExecuted()).isZero();
-        assertThat(migrator.currentVersion()).contains("18");
+        assertThat(migrator.currentVersion()).contains("19");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
                 .isEqualTo(13L);
     }
@@ -219,7 +219,7 @@ class RuleEngineSchemaMigratorIT {
 
         migrator.migrate();
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus("18", 0));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus("19", 0));
         assertThat(migrator.status().isCurrent()).isTrue();
     }
 

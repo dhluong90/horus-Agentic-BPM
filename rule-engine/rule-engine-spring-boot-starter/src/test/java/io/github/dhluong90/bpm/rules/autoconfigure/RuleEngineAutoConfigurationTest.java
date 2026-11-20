@@ -52,7 +52,7 @@ class RuleEngineAutoConfigurationTest {
 
     private static final String PACKAGE = RuleEngineAutoConfiguration.class.getPackageName();
 
-    /** The retention every host outside the dev profile sets (PD-050). */
+    /** An explicit retention; without one the engine drops nothing (PD-050). */
     static final String RETENTION = "horus.bpm.rules.decision-log.retention=P120M";
 
     private static final Instant JAN_26_2027 = Instant.parse("2027-01-26T00:00:00Z");
@@ -243,20 +243,21 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
-    void RLE_017_a_host_outside_dev_without_a_retention_does_not_start_and_dev_does() {
+    void RLE_017_a_host_without_a_retention_starts_on_every_profile_keeps_everything_and_logs_it(CapturedOutput output) {
         ApplicationContextRunner withoutRetention = new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(
                         RuleEngineAutoConfiguration.class, RuleEngineInactiveAutoConfiguration.class))
                 .withUserConfiguration(HostWithEngineStandIns.class, FixedClock.class);
 
-        withoutRetention.run(context -> assertThat(context).hasFailed().getFailure()
-                .hasStackTraceContaining("horus.bpm.rules.decision-log.retention is not set"));
-        withoutRetention.withPropertyValues("spring.profiles.active=prod").run(context -> assertThat(context)
-                .hasFailed());
-        withoutRetention.withPropertyValues("spring.profiles.active=dev").run(context -> {
-            assertThat(context).hasNotFailed();
-            verify(context.getBean(DecisionLogPartitions.class), never()).dropExpired(any(), any());
-        });
+        for (String profile : List.of("none", "prod", "dev")) {
+            ApplicationContextRunner host = "none".equals(profile)
+                    ? withoutRetention : withoutRetention.withPropertyValues("spring.profiles.active=" + profile);
+            host.run(context -> {
+                assertThat(context).hasNotFailed();
+                verify(context.getBean(DecisionLogPartitions.class), never()).dropExpired(any(), any());
+            });
+        }
+        assertThat(output).contains("decision log retention is off");
     }
 
     @Test

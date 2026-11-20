@@ -26,7 +26,6 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.dao.CannotAcquireLockException;
-import org.springframework.mock.env.MockEnvironment;
 
 /**
  * The running host's side of RLE-017: the period ahead from configuration, the repeated run, a lock timeout that
@@ -89,19 +88,9 @@ class RuleEnginePartitionMaintenanceTest {
     }
 
     @Test
-    void RLE_017_start_up_is_refused_outside_dev_until_a_retention_is_set() {
-        MockEnvironment production = new MockEnvironment();
-        production.setActiveProfiles("prod");
-        assertThatThrownBy(() -> DecisionLogRetention.required(null, production))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("horus.bpm.rules.decision-log.retention is not set");
-        assertThatThrownBy(() -> DecisionLogRetention.required(null, new MockEnvironment()))
-                .isInstanceOf(IllegalStateException.class);
-        assertThat(DecisionLogRetention.required(Period.ofMonths(120), production)).isEqualTo(Period.ofMonths(120));
-
-        MockEnvironment dev = new MockEnvironment();
-        dev.setActiveProfiles("dev");
-        assertThat(DecisionLogRetention.required(null, dev)).isNull();
+    void RLE_017_retention_is_off_unless_set_and_never_stops_start_up() {
+        assertThat(DecisionLogRetention.resolve(null)).isNull();
+        assertThat(DecisionLogRetention.resolve(Period.ofMonths(120))).isEqualTo(Period.ofMonths(120));
     }
 
     @Test

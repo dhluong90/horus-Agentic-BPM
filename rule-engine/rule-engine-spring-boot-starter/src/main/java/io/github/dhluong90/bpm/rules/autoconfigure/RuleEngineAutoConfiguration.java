@@ -82,10 +82,10 @@ public class RuleEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     RuleEnginePartitionMaintenance ruleEnginePartitionMaintenance(DecisionLogPartitions partitions,
-            RuleEngineProperties properties, ObjectProvider<Clock> clock, Environment environment) {
+            RuleEngineProperties properties, ObjectProvider<Clock> clock) {
         return new RuleEnginePartitionMaintenance(partitions, engineClock(clock),
                 properties.decisionLog().partitionsAheadOrDefault(), EngineDefaults.PARTITION_MAINTENANCE_INTERVAL,
-                DecisionLogRetention.required(properties.decisionLog().retention(), environment));
+                DecisionLogRetention.resolve(properties.decisionLog().retention()));
     }
 
     @Bean

@@ -60,19 +60,18 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  14      | V14__rle_setting_seen.sql
 #  15      | V15__rle_version_history_acknowledged_warnings.sql
 #  16      | V16__rle_masking_key_check.sql
-#  18      | V18__rle_decision_log_drop.sql
+#  19      | V19__rle_decision_log_drop.sql
 ```
 
-Outside the `dev` profile the host needs a decision log retention. This example sets `P120M` (10 years) in [`application.yml`](src/main/resources/application.yml), overridable with `HORUS_DECISION_LOG_RETENTION`. Without any value the host refuses to start:
+Decision log retention is off by default: with `HORUS_DECISION_LOG_RETENTION` unset, every decision is kept forever, nothing is dropped, and the start-up log says so:
 
 ```bash
-HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar \
-  --horus.bpm.rules.decision-log.retention=
-# ... threw exception with message: horus.bpm.rules.decision-log.retention is not set. The decision log is an audit
-# trail, and how long it is kept is the host's decision: set it in whole months, at least
-# horus.bpm.rules.decision-log.retention-floor (P12M), for example horus.bpm.rules.decision-log.retention=P120M.
-# Only the dev profile starts without it.
+HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
+# INFO  DecisionLogRetention: Rule Engine decision log retention is off: horus.bpm.rules.decision-log.retention is not
+# set, so every decision is kept and no partition is dropped. Set an ISO period such as P12M to enable drops
 ```
+
+Only an explicit ISO period in whole months, such as `P12M` (at least `decision-log.retention-floor`), turns drops on.
 
 ### The cursor key
 
@@ -89,7 +88,7 @@ REVOKE UPDATE, DELETE, TRUNCATE ON rle_version_history FROM horus_app;   -- your
 REVOKE UPDATE, DELETE, TRUNCATE ON rle_decision_log_drop FROM horus_app;
 ```
 
-`rle_decision_log_drop`, the record of every decision log month dropped by retention, is append-only in the same way (migration `V18`).
+`rle_decision_log_drop`, the record of every decision log month dropped by retention, is append-only in the same way (migration `V19`).
 
 ### Upgrading to the release with lifecycle history
 
@@ -741,7 +740,7 @@ Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..
 | `HORUS_DB_USERNAME` | `horus` | Database user |
 | `HORUS_DB_PASSWORD` | none | Database password. Never put it in a file in the repository |
 | `PORT` | `8080` | HTTP port |
-| `HORUS_DECISION_LOG_RETENTION` | `P120M` here | How long decisions are kept, in whole months, at least `P12M` (`horus.bpm.rules.decision-log.retention`). Monthly partitions older than this are dropped, and each drop is recorded in `rle_decision_log_drop`. A host outside the `dev` profile refuses to start without a value |
+| `HORUS_DECISION_LOG_RETENTION` | unset: keep forever | An ISO period in whole months, at least `P12M`, such as `P12M` (`horus.bpm.rules.decision-log.retention`). Monthly partitions older than this are dropped, and each drop is recorded in `rle_decision_log_drop`. Unset, nothing is dropped and the host starts normally |
 | `HORUS_BPM_RULES_MASKING_HMAC_KEY` | none | Base64 key, at least 32 bytes after decoding, for the fingerprints of inputs a rule set declares `mask: true`. Needed only once such a rule set is imported: without it the host refuses to start and names the setting. Create one with `openssl rand -base64 32` and keep it in a secret store |
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` | none | Issuer of the bearer tokens the host accepts. Unset: no bearer tokens, so only health answers outside `dev` |
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES` | none | Audience this host requires in every token, for example `rule-engine-only`. Required whenever an issuer, JWK set or public key is set: without it the host does not start (TR-SEC-12) |
@@ -817,7 +816,7 @@ The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=htt
 | `horus.bpm.rules.migrate-on-start` | `true` | `false` for hosts that run the `rle_*` migrations in a separate job. If the schema is not current, the `ruleEngine` health contributor is down and partitions are not created until it is |
 | `horus.bpm.rules.query.max-page-size` | `200` | Largest `limit` of `GET /rule-sets` and `GET .../versions`, 1 to 200; may be lowered, never raised |
 | `horus.bpm.rules.lifecycle.reason-max-length` | `2000` | Longest `:reject` reason in characters, 1 to 2000; may be lowered, never raised |
-| `horus.bpm.rules.decision-log.retention` | none; `P120M` here | How long decisions are kept, in whole months, at least `decision-log.retention-floor` (`P12M`). Required outside the `dev` profile |
+| `horus.bpm.rules.decision-log.retention` | none: keep forever | How long decisions are kept, in whole months, at least `decision-log.retention-floor` (`P12M`). Unset, nothing is dropped and start-up is unaffected |
 
 The full list of properties is on the wiki page Rule Engine Configuration. The starter adds them with the features that use them.
 

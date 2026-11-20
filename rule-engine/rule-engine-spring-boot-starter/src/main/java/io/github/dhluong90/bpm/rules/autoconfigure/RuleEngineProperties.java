@@ -165,8 +165,8 @@ public record RuleEngineProperties(
      * @param retention how long decisions are kept, in whole months ({@code P12M}, {@code P120M} or {@code P10Y}); no
      *     default. When set, the daily partition job drops each monthly partition that lies wholly before the host
      *     clock minus this period, and records the drop in {@code rle_decision_log_drop}; rows are never deleted.
-     *     Unset, nothing is ever dropped. Required outside the {@code dev} profile: without it the host does not start
-     *     (PD-050). At least {@code retention-floor}
+     *     Never on by default: unset, every decision is kept forever, nothing is dropped and start-up is not affected
+     *     (PD-050). When set, at least {@code retention-floor}
      * @param retentionFloor the shortest {@code retention} accepted, in whole months; default and lowest value
      *     {@code P12M}. A host may raise it to its own policy, so a shorter value set by mistake stops start-up
      */

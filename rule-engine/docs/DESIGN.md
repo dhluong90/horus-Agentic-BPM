@@ -431,7 +431,7 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `readings.style` | `sentence` | Style of plain-language readings of rules and of explanation `text` (CK-F-44, PD-077): `sentence` (patterns from the message catalogue) or `shorthand` (`tier: GOLD, PLATINUM`). If sentences miss the M1 checkpoint of 8 Jan 2027, M1 ships with `shorthand` only and the property accepts only that value until sentences ship. Shown in `/api/bpm/meta` as `rules.readings.style` |
 | `explain.default-language` | `en` | Language of `text` when the request names none available (PD-027, PD-077) |
 | `publication.require-simulation-report` | `false` | From M3 (RE-F-23, PD-022): when `true`, per host or per rule set (`publication.require-simulation-report.rule-sets`), `:request-publish` is refused with `422 VALIDATION_FAILED` unless a stored simulation report of the draft is attached. Off by default; in M1 the approver runs the simulation herself |
-| `decision-log.retention` | none; required outside `dev` | Whole months, ISO 8601 (`P12M`, `P120M`, `P10Y`). The daily partition job drops whole monthly partitions of `rle_decision` whose upper bound is at or before the host clock minus the retention, and records each drop in `rle_decision_log_drop` (ADR-0010, section 5). Outside the `dev` profile start-up is refused until it is set; a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). Unset, which only `dev` allows, nothing is ever dropped and start-up logs a note. A value set on `dev` is honoured, so the drop can be shown locally (#104) |
+| `decision-log.retention` | none: off, keep forever | Whole months, ISO 8601 (`P12M`, `P120M`, `P10Y`). The daily partition job drops whole monthly partitions of `rle_decision` whose upper bound is at or before the host clock minus the retention, and records each drop in `rle_decision_log_drop` (ADR-0010, section 5). Retention is never on by default: a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). Unset, on every profile, nothing is ever dropped and start-up is not affected; it logs one INFO line saying retention is off. Only an explicit period enables drops (#104) |
 | `decision-log.partitions-ahead` | `P7D` | How far ahead monthly partitions are created |
 | `cache.max-entries`, `cache.epoch-check-interval`, `cache.listen-notify` | `1000`, `PT5S`, `true` | ADR-0009 |
 | `evaluation.regex-max-reads` | `1000000` | Characters one `matches()` may read, `1` to `1000000`, lower only: the deterministic primary bound (`TR-SEC-02`, `RLE-007`, `TR-DET-05`). Past it the decision fails with `EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT` |
@@ -742,7 +742,7 @@ CREATE TABLE rle_masking_key_check (
   PRIMARY KEY (tenant_id, key_id)
 );
 
--- Record of every decision log partition dropped by retention (V18, #104, PD-050): one row per tenant with decisions
+-- Record of every decision log partition dropped by retention (V19, #104, PD-050): one row per tenant with decisions
 -- in the month and one with tenant_id '*' for the total, written in the transaction that drops it. Append-only:
 -- triggers refuse UPDATE, DELETE and TRUNCATE (SQLSTATE 55000). Counts only, never decision data.
 CREATE TABLE rle_decision_log_drop (
@@ -773,7 +773,7 @@ sequenceDiagram
     participant J as Partition job (horus-rle-partitions)
     participant P as DecisionLogPartitions
     participant DB as Host PostgreSQL
-    Note over J: Start-up refuses a host outside dev with no decision-log.retention
+    Note over J: Start-up logs that retention is off when decision-log.retention is unset; nothing is dropped
     J->>P: ensureAhead(now, partitions-ahead)
     alt decision-log.retention is set
         J->>P: dropExpired(now, retention)
@@ -803,7 +803,7 @@ sequenceDiagram
 | Creation | Daily and at start-up, months up to `now() + decision-log.partitions-ahead` (7 days), and always the current and the next month; one replica at a time through a transaction-scoped advisory lock (no session state, `TR-OPS-05`); `lock_timeout = 5s`, retried on the next run. Runs on the starter's daemon thread `horus-rle-partitions` (`DecisionLogPartitions.ensureAhead`) |
 | Default partition | Should stay empty. If it holds rows of a month being created, they are copied into the new partition and removed from the default in the same transaction before `ATTACH`; this moves rows without losing any, and the bounded `DELETE` names `rle_decision_default` only, never `rle_decision`. Gauge `horus_rle_partition_default_rows` alerts above 0; it is read from `rle_decision_default` when the registry asks and is bound only when the host has Micrometer |
 | Retention | PD-050, #104: after creating the months ahead, the same job drops each monthly partition whose upper bound is at or before the cutoff, the host clock minus `decision-log.retention` in UTC calendar months (`P12M` at `2028-02-03` is `2027-02-03`, so `rle_decision_2027_01` goes and `2027_02` stays). One transaction under the same advisory lock, `lock_timeout = 2s`: per expired month, `LOCK` the partition in `SHARE` mode, count its rows per tenant, insert the record into `rle_decision_log_drop`, then `DROP TABLE`. Either every expired month is dropped and recorded, or none is and the next run retries. The default partition is never dropped. Each drop is logged at WARN with its counts. The period is required outside `dev`, in whole months, at least `decision-log.retention-floor` (`P12M`); without it nothing is ever dropped. No row is ever deleted by date (`TR-OBS-01`) |
-| Drop record | `rle_decision_log_drop` (V18), append-only: triggers refuse `UPDATE`, `DELETE` and `TRUNCATE` (SQLSTATE `55000`). One row per tenant that had decisions in the month, with its count, and one row with `tenant_id = '*'` holding the total, so an empty month is recorded too; each row carries the partition, its range, the retention and the cutoff in force and `dropped_at`. It holds counts only, never decision data, and no API returns it |
+| Drop record | `rle_decision_log_drop` (V19), append-only: triggers refuse `UPDATE`, `DELETE` and `TRUNCATE` (SQLSTATE `55000`). One row per tenant that had decisions in the month, with its count, and one row with `tenant_id = '*'` holding the total, so an empty month is recorded too; each row carries the partition, its range, the retention and the cutoff in force and `dropped_at`. It holds counts only, never decision data, and no API returns it |
 | Lock impact | `ATTACH` takes `SHARE UPDATE EXCLUSIVE` on the parent and does not block inserts. `DROP TABLE` of a partition takes `ACCESS EXCLUSIVE` on the parent; inserts queue behind it for at most the 2 s `lock_timeout`, once a month |
 
 ## 6. Runtime mechanics and capacity math
