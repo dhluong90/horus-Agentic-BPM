@@ -156,8 +156,10 @@ class RetireVersionPostgresIT {
         assertThat(jdbc.sql("SELECT payload->>'noVersionInEffect' FROM rle_decision_outbox"
                 + " WHERE payload->>'eventType' = 'rules.version.retired.v1'").query(String.class).single()).isEqualTo("true");
         assertThat(retiredEvents()).isEqualTo(1);
-        // and 5 s later neither replica serves it; a clock before the retirement still selects it on pod B
+        // and 5 s later, once pod B's epoch check has run (ADR-0009; these pods start no notification listener),
+        // neither replica serves it; a clock before the retirement still selects it on pod B
         clock.set(Instant.parse("2027-02-17T08:00:05Z"));
+        assertThat(podB.cache().checkEpochs()).isEqualTo(1);
         assertThatThrownBy(() -> evaluate(podA, "tet-fee-waiver")).isInstanceOf(NoEffectiveVersionException.class);
         assertThatThrownBy(() -> evaluate(podB, "tet-fee-waiver")).isInstanceOf(NoEffectiveVersionException.class);
         clock.set(Instant.parse("2027-02-01T09:00:00Z"));

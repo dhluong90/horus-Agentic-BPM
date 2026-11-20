@@ -67,6 +67,14 @@ final class Supersession {
                     row.tenantId(), row.ruleSet(), row.version(), actor, EngineDefaults.REASON_SUPERSEDED,
                     row.supersededBy(), now, MODE_SYSTEM, false)), now);
         }
+        // ADR-0009: a retirement moves the rule set's epoch and every replica is notified after commit. The approve and
+        // retire commands move it themselves, once per command; the sweep (no tenant) moves it here, once per rule set.
+        if (tenantId != null) {
+            return retired.size();
+        }
+        retired.stream().map(row -> java.util.List.of(row.tenantId(), row.ruleSet())).distinct().forEach(key ->
+                store.findRuleSetId(key.get(0), key.get(1))
+                        .ifPresent(id -> store.advanceCacheEpoch(key.get(0), id, key.get(1))));
         return retired.size();
     }
 

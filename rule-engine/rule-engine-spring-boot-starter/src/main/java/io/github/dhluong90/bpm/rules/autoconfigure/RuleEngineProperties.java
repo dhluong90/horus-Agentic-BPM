@@ -170,9 +170,43 @@ public record RuleEngineProperties(
     /**
      * The compiled-version cache.
      *
-     * @param maxEntries compiled versions kept per replica, 1 to 100000; default 1000
+     * @param maxEntries compiled versions kept per replica, 1 to 100000; default 1000. The least recently used
+     *     entry leaves first, counted by {@code horus.rle.cache.evictions{cause=size}}
+     * @param epochCheckInterval how often each replica compares its cached rule sets with their {@code cache_epoch},
+     *     {@code PT0.1S} to {@code PT5M}; default {@code PT5S}. The longest a replica serves a version after another
+     *     replica's approval when no notification arrives (ADR-0009)
+     * @param listenNotify hold one session connection from the pool for {@code LISTEN horus_rle_cache}, so replicas
+     *     refresh within a second; default true. Set false behind a transaction-mode connection pooler, which drops
+     *     notifications; the epoch check alone then keeps the bound
      */
-    public record Cache(Integer maxEntries) {
+    public record Cache(Integer maxEntries, Duration epochCheckInterval, Boolean listenNotify) {
+
+        /** Validates the interval; an out-of-range value fails start-up naming the property. */
+        public Cache {
+            if (epochCheckInterval != null && (epochCheckInterval.compareTo(Duration.ofMillis(100)) < 0
+                    || epochCheckInterval.compareTo(Duration.ofMinutes(5)) > 0)) {
+                throw new IllegalArgumentException("horus.bpm.rules.cache.epoch-check-interval must be PT0.1S to PT5M, "
+                        + "was " + epochCheckInterval);
+            }
+        }
+
+        /**
+         * Returns the interval in force.
+         *
+         * @return the configured interval, or {@code PT5S}
+         */
+        public Duration epochCheckIntervalOrDefault() {
+            return epochCheckInterval == null ? EngineDefaults.CACHE_EPOCH_CHECK_INTERVAL : epochCheckInterval;
+        }
+
+        /**
+         * Returns whether the listener runs.
+         *
+         * @return the configured value, or true
+         */
+        public boolean listenNotifyOrDefault() {
+            return listenNotify == null || listenNotify;
+        }
     }
 
     /**
