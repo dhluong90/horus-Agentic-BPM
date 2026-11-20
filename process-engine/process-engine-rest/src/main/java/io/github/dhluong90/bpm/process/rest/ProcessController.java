@@ -246,6 +246,98 @@ public class ProcessController {
     }
 
     /**
+     * Compares two stored versions of one key ({@code processes:read}, PRE-025, PRE-176): steps and links added,
+     * removed and changed, by BPMN id and name, never layout or XML. {@code base} defaults to the effective version.
+     * The {@code ETag} is derived from both definition hashes, so {@code If-None-Match} with it answers {@code 304}.
+     */
+    @GetMapping("/definitions/{key}/versions/{version}/diff")
+    public ResponseEntity<byte[]> diff(@PathVariable("key") String key, @PathVariable("version") String version,
+            @RequestParam(value = "base", required = false) String base,
+            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
+        int target = versionNumber("version", version);
+        io.github.dhluong90.bpm.process.api.GraphDiff diff = base == null
+                ? definitions.diffFromEffective(DefinitionRef.of(key, target))
+                : definitions.diff(DefinitionRef.of(key, versionNumber("base", base)), DefinitionRef.of(key, target));
+        String etag = "\"" + io.github.dhluong90.bpm.process.internal.json.Hashes.sha256Parts("graph-diff.v1",
+                diff.base().definitionHash(), diff.target().definitionHash()) + "\"";
+        if (etag.equals(ifNoneMatch == null ? null : ifNoneMatch.strip())) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).header(HttpHeaders.ETAG, etag).build();
+        }
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.ETAG, etag)
+                .body(bytes(graphDiff(diff)));
+    }
+
+    private static int versionNumber(String name, String value) {
+        int number;
+        try {
+            number = Integer.parseInt(value.strip());
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException(name + " must be a version number, for example 1");
+        }
+        if (number < 1) {
+            throw new InputInvalidException(name + " must be a version number, for example 1");
+        }
+        return number;
+    }
+
+    static ObjectNode graphDiff(io.github.dhluong90.bpm.process.api.GraphDiff d) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("definitionKey", d.definitionKey());
+        side(node.putObject("base"), d.base());
+        side(node.putObject("target"), d.target());
+        node.put("identical", d.identical());
+        tools.jackson.databind.node.ArrayNode added = node.putArray("nodesAdded");
+        d.nodesAdded().forEach(n -> step(added.addObject(), n));
+        tools.jackson.databind.node.ArrayNode removed = node.putArray("nodesRemoved");
+        d.nodesRemoved().forEach(n -> step(removed.addObject(), n));
+        tools.jackson.databind.node.ArrayNode changed = node.putArray("nodesChanged");
+        for (io.github.dhluong90.bpm.process.api.GraphDiff.NodeChange c : d.nodesChanged()) {
+            ObjectNode change = changed.addObject();
+            change.put("id", c.id());
+            putNullable(change, "name", c.name());
+            putNullable(change, "type", c.type());
+            change.put("path", c.path());
+            change.set("from", io.github.dhluong90.bpm.process.internal.json.Values.toJson(c.from()));
+            change.set("to", io.github.dhluong90.bpm.process.internal.json.Values.toJson(c.to()));
+        }
+        tools.jackson.databind.node.ArrayNode edgesAdded = node.putArray("edgesAdded");
+        d.edgesAdded().forEach(e -> edge(edgesAdded.addObject(), e));
+        tools.jackson.databind.node.ArrayNode edgesRemoved = node.putArray("edgesRemoved");
+        d.edgesRemoved().forEach(e -> edge(edgesRemoved.addObject(), e));
+        node.put("truncated", d.truncated());
+        return node;
+    }
+
+    private static void side(ObjectNode node, io.github.dhluong90.bpm.process.api.GraphDiff.Side side) {
+        node.put("version", side.version());
+        node.put("status", side.status());
+        node.put("definitionHash", side.definitionHash());
+    }
+
+    private static void step(ObjectNode node, io.github.dhluong90.bpm.process.api.GraphDiff.Node step) {
+        node.put("id", step.id());
+        putNullable(node, "name", step.name());
+        node.put("type", step.type());
+    }
+
+    private static void edge(ObjectNode node, io.github.dhluong90.bpm.process.api.GraphDiff.Edge edge) {
+        putNullable(node, "id", edge.id());
+        node.put("from", edge.from());
+        putNullable(node, "fromName", edge.fromName());
+        node.put("to", edge.to());
+        putNullable(node, "toName", edge.toName());
+        node.put("kind", edge.kind());
+    }
+
+    private static void putNullable(ObjectNode node, String name, String value) {
+        if (value == null) {
+            node.putNull(name);
+        } else {
+            node.put(name, value);
+        }
+    }
+
+    /**
      * Exports a definition version of the caller's tenant ({@code processes:read}, PRE-034). {@code format=bpmn}
      * returns BPMN 2.0 XML that imports back to the same {@code definitionHash}, which is also the {@code ETag}.
      */

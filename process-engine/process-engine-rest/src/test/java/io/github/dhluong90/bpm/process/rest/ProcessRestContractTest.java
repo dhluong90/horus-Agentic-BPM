@@ -121,6 +121,38 @@ class ProcessRestContractTest {
     }
 
     @Test
+    void PRE_025_the_graph_diff_body_and_its_etag_match_the_contract() throws Exception {
+        MvcResult result = exchange(get(BASE + "/definitions/kyc-onboarding/versions/2/diff").param("base", "1"));
+
+        assertThat(result.getResponse().getStatus()).isEqualTo(200);
+        String body = result.getResponse().getContentAsString();
+        assertThat(body).contains("\"nodesAdded\":[{\"id\":\"fraud-check\",\"name\":\"Fraud check\"")
+                .contains("\"path\":\"/assignee/role\",\"from\":\"ops\",\"to\":\"credit-officer\"")
+                .contains("\"path\":\"/fourEyes\",\"from\":null,\"to\":true")
+                .contains("\"kind\":\"next\"").doesNotContain("<").doesNotContain("Bounds");
+        String etag = result.getResponse().getHeader("ETag");
+        assertThat(etag).matches("\"[0-9a-f]{64}\"");
+
+        MvcResult again = mvc.perform(get(BASE + "/definitions/kyc-onboarding/versions/2/diff").param("base", "1")
+                .header("If-None-Match", etag)).andReturn();
+        assertThat(again.getResponse().getStatus()).isEqualTo(304);
+        assertThat(again.getResponse().getContentAsByteArray()).isEmpty();
+        assertThat(exchange(get(BASE + "/definitions/kyc-onboarding/versions/2/diff")).getResponse()
+                .getHeader("ETag")).as("base defaults to the effective version").isEqualTo(etag);
+    }
+
+    @Test
+    void PRE_176_graph_diff_problems_match_the_contract() throws Exception {
+        assertProblem(get(BASE + "/definitions/no-effective/versions/2/diff"), 404, "NO_EFFECTIVE_VERSION");
+        assertProblem(get(BASE + "/definitions/kyc-onboarding/versions/3/diff").param("base", "1"), 404,
+                "DEFINITION_NOT_FOUND");
+        MvcResult bad = mvc.perform(get(BASE + "/definitions/kyc-onboarding/versions/2/diff").param("base", "zero"))
+                .andReturn();
+        BODIES.assertResponseOf(bad);
+        assertThat(bad.getResponse().getStatus()).isEqualTo(400);
+    }
+
+    @Test
     void TR_SEC_08_every_problem_the_rest_layer_writes_matches_the_contract() throws Exception {
         // 428: neither businessKey nor Idempotency-Key.
         assertProblem(post(BASE + "/instances").contentType(MediaType.APPLICATION_JSON)
@@ -200,6 +232,43 @@ class ProcessRestContractTest {
         @Override
         public DefinitionVersion version(String key, int version) {
             throw new DefinitionNotFoundException("No definition " + key + " v" + version);
+        }
+
+        /** kyc-onboarding v1 to v2: a fraud check added, the approver's role changed, one link replaced by two. */
+        @Override
+        public io.github.dhluong90.bpm.process.api.GraphDiff diff(DefinitionRef base, DefinitionRef target) {
+            if (!"kyc-onboarding".equals(target.key()) || target.version() != 2 || base.version() != 1) {
+                throw new DefinitionNotFoundException("No definition " + target.key() + " in this tenant");
+            }
+            return kycDiff();
+        }
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.GraphDiff diffFromEffective(DefinitionRef target) {
+            if ("no-effective".equals(target.key())) {
+                throw new NoEffectiveVersionException("Definition no-effective has no effective version");
+            }
+            return diff(DefinitionRef.of(target.key(), 1), target);
+        }
+
+        static io.github.dhluong90.bpm.process.api.GraphDiff kycDiff() {
+            return new io.github.dhluong90.bpm.process.api.GraphDiff("kyc-onboarding",
+                    new io.github.dhluong90.bpm.process.api.GraphDiff.Side(1, "ACTIVE", "a".repeat(64)),
+                    new io.github.dhluong90.bpm.process.api.GraphDiff.Side(2, "PENDING_APPROVAL", "b".repeat(64)),
+                    List.of(new io.github.dhluong90.bpm.process.api.GraphDiff.Node("fraud-check", "Fraud check",
+                            "serviceTask")),
+                    List.of(),
+                    List.of(new io.github.dhluong90.bpm.process.api.GraphDiff.NodeChange("approve", "Approve", "userTask",
+                            "/assignee/role", "ops", "credit-officer"),
+                            new io.github.dhluong90.bpm.process.api.GraphDiff.NodeChange("approve", "Approve",
+                                    "userTask", "/fourEyes", null, true)),
+                    List.of(new io.github.dhluong90.bpm.process.api.GraphDiff.Edge("fraud__approve", "fraud-check",
+                            "Fraud check", "approve", "Approve", "next"),
+                            new io.github.dhluong90.bpm.process.api.GraphDiff.Edge("verify__fraud", "verify-docs",
+                                    "Verify documents", "fraud-check", "Fraud check", "next")),
+                    List.of(new io.github.dhluong90.bpm.process.api.GraphDiff.Edge("verify__approve", "verify-docs",
+                            "Verify documents", "approve", "Approve", "next")),
+                    false);
         }
 
         @Override

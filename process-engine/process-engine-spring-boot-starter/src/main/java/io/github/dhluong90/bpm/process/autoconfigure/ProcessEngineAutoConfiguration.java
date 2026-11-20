@@ -6,6 +6,8 @@ import io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
+import io.github.dhluong90.bpm.process.api.MigrationPlan;
+import io.github.dhluong90.bpm.process.api.MigrationService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
@@ -33,14 +35,17 @@ import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.spi.ServiceAdapter;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
 import io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService;
+import io.github.dhluong90.bpm.process.internal.service.Migrations;
 import io.github.dhluong90.bpm.process.internal.service.ProcessQueries;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.postgres.JdbcAgentReplayStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
+import io.github.dhluong90.bpm.process.postgres.JdbcMigrationStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineSchemaMigrator;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineTransactions;
 import io.github.dhluong90.bpm.process.rest.AgentReplayController;
+import io.github.dhluong90.bpm.process.rest.MigrationController;
 import io.github.dhluong90.bpm.process.rest.ProcessController;
 import io.github.dhluong90.bpm.process.rest.ProcessProblemDetails;
 import io.github.dhluong90.bpm.process.spi.CallerResolver;
@@ -96,7 +101,9 @@ public class ProcessEngineAutoConfiguration {
     static final String DEV_PROFILE = "dev";
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
             "processes:approve", "processes:start", "processes:cancel", "processes:task:work",
-            "processes:step:complete", "processes:agent:replay");
+            "processes:step:complete", "processes:agent:replay", "processes:migration:manage");
+    /** Setting published in {@code /api/bpm/meta}: the approval a migration plan's execution needs (PD-131). */
+    static final String MIGRATION_APPROVAL_SETTING = "migration.approval";
     /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
     static final String REMOVED_AUTO_APPROVE = "horus.bpm.processes.definitions-auto-approve";
     private static final Log LOG = LogFactory.getLog(ProcessEngineAutoConfiguration.class);
@@ -358,6 +365,12 @@ public class ProcessEngineAutoConfiguration {
             LOG.warn(ApproverMustDifferFrom.PROPERTY + "=requester relaxes four eyes for process definitions: the "
                     + "importer of a version may approve it (PD-096). Every approval records this.");
         }
+        // PD-131: migrating running instances is four-eyes; one person may act alone only on the dev profile.
+        if (MigrationPlan.Approval.of(properties.migration().approval()) == MigrationPlan.Approval.SINGLE) {
+            requireDevProfileOnly(environment, "horus.bpm.processes.migration.approval=single");
+            LOG.warn("Migration plans are executed by one person (horus.bpm.processes.migration.approval=single, dev "
+                    + "profile): no second person approves moving running instances.");
+        }
         if (!properties.makerChecker().enabled()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.maker-checker.enabled=false");
             LOG.warn("Maker-checker for process definitions is off (horus.bpm.processes.maker-checker.enabled, dev "
@@ -431,6 +444,27 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    JdbcMigrationStore processEngineMigrationStore(DataSource dataSource) {
+        return new JdbcMigrationStore(dataSource);
+    }
+
+    /**
+     * Migration plans and their dry run (#74). A plan records the approval its execution needs, four-eyes unless the
+     * dev profile allows {@code single} (PD-131); the dry run only reads.
+     */
+    @Bean
+    @ConditionalOnMissingBean(MigrationService.class)
+    MigrationService processEngineMigrations(ObjectProvider<TenantResolver> tenants,
+            ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
+            JdbcProcessStore store, JdbcMigrationStore migrations, ProcessServices services,
+            ProcessEventPublisher publisher, ProcessEngineProperties properties) {
+        return new Migrations(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
+                clock.getIfUnique(Clock::systemUTC), transactions, store, migrations, services::storedModel, publisher,
+                properties.migration().toSettings(), properties.idempotencyRetention());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     LiveNodeCountService processEngineLiveNodeCounts(ObjectProvider<TenantResolver> tenants,
             ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
             JdbcProcessStore store, ProcessEngineProperties properties) {
@@ -463,7 +497,8 @@ public class ProcessEngineAutoConfiguration {
         return new ModuleDescriptor("processes", ProcessEngineModule.engineVersion(), "v1", List.of(),
                 Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value(),
                         RetireApproval.META_SETTING, RetireApproval.from(environment).value(),
-                        RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value()),
+                        RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value(),
+                        MIGRATION_APPROVAL_SETTING, properties.migration().approval()),
                 PERMISSIONS, properties.security().rolePermissions());
     }
 
@@ -500,6 +535,12 @@ public class ProcessEngineAutoConfiguration {
         @ConditionalOnMissingBean
         AgentReplayController processEngineAgentReplayController(AgentReplays replays) {
             return new AgentReplayController(replays);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        MigrationController processEngineMigrationController(MigrationService migrations) {
+            return new MigrationController(migrations);
         }
 
         @Bean

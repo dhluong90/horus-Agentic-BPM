@@ -36,6 +36,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [INSTANCE_NOT_FOUND](#instance_not_found) | processes | M2 |
 | 404 | [TASK_NOT_FOUND](#task_not_found) | processes | M2 |
 | 404 | [REPLAY_NOT_FOUND](#replay_not_found) | processes | M3 |
+| 404 | [MIGRATION_NOT_FOUND](#migration_not_found) | processes | 0.3.0 |
 | 409 | [VERSION_CONFLICT](#version_conflict) | both | M1 |
 | 409 | [INVALID_STATE](#invalid_state) | both | M1 |
 | 409 | [IDEMPOTENCY_IN_FLIGHT](#idempotency_in_flight) | both | M1 |
@@ -212,6 +213,9 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 
 ### REPLAY_NOT_FOUND
 `404`. Unknown agent replay run, a run of another tenant, or a case the run does not have. Runs are deleted `replay.retention` (30 days) after they were created.
+
+### MIGRATION_NOT_FOUND
+`404`. Unknown migration plan id, or a plan of another tenant (`GET /migrations/{id}`, `POST /migrations/{id}:validate`). Nothing is written.
 
 ### REPLAY_TOO_LARGE
 `422`. The period of an agent replay holds more recorded answers than `horus.bpm.processes.replay.max-cases` (50,000). The body carries `cases` and `limit`. Nothing is written. Choose a shorter period.

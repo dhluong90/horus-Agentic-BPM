@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings;
+import io.github.dhluong90.bpm.process.internal.service.MigrationSettings;
 import io.github.dhluong90.bpm.process.internal.service.ReplaySettings;
 import java.time.Duration;
 import java.util.List;
@@ -31,6 +32,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *     and {@code jobs.*}
  * @param agents agent step settings (#59)
  * @param replay offline replay of agent answers (#98)
+ * @param migration migration plans of running instances (#74)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -48,7 +50,8 @@ public record ProcessEngineProperties(
         @DefaultValue Adapters adapters,
         @DefaultValue Runners runners,
         @DefaultValue Agents agents,
-        @DefaultValue Replay replay) {
+        @DefaultValue Replay replay,
+        @DefaultValue Migration migration) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -414,6 +417,39 @@ public record ProcessEngineProperties(
 
         ReplaySettings toSettings() {
             return new ReplaySettings(pageSize, maxCases, retention);
+        }
+    }
+
+    /**
+     * Migration plans of running instances (#74, PD-114, PD-131).
+     *
+     * @param approval the approval a new plan records for its execution: {@code four-eyes} (the default), or
+     *     {@code single}, which start-up accepts only when the {@code dev} profile is active on its own
+     * @param dryRunSampleSize most instance ids a dry run lists per conflict and for the instances that would move,
+     *     1 to 500; may be lowered, never raised
+     * @param dryRunValidity how long an execution may rely on a dry run of the same plan, at most {@code PT1H}; may be
+     *     lowered only
+     */
+    public record Migration(
+            @DefaultValue("four-eyes") String approval,
+            @DefaultValue("100") int dryRunSampleSize,
+            @DefaultValue("PT1H") Duration dryRunValidity) {
+
+        public Migration {
+            try {
+                toSettings(approval, dryRunSampleSize, dryRunValidity);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("horus.bpm.processes." + e.getMessage(), e);
+            }
+        }
+
+        MigrationSettings toSettings() {
+            return toSettings(approval, dryRunSampleSize, dryRunValidity);
+        }
+
+        private static MigrationSettings toSettings(String approval, int sampleSize, Duration validity) {
+            return new MigrationSettings(io.github.dhluong90.bpm.process.api.MigrationPlan.Approval.of(approval),
+                    sampleSize, validity);
         }
     }
 

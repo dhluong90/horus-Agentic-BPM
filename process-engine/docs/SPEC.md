@@ -146,7 +146,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Call `POST /api/bpm/processes/v1/migrations/{id}:validate` without mapping `legacy-review`.
 - **Then:** Returns dry-run report listing 50 unmapped instances at `legacy-review` and marks plan invalid; 0 rows in `pre_instance` are modified. Resolving them by an explicit mapping for a renamed step or by cancellation is M3 (`TR-MIG-03`) and is not part of this statement.
 - **Example:** `Validate v1->v2 missing legacy-review -> conflict report, 0 instances mutated`.
-- **Test ID:** `PRE_014_migration_validate_reports_unmapped_steps_without_mutation`
+- **Test ID:** `PRE_014_migration_validate_reports_unmapped_steps_without_mutation`, `PRE_014_a_step_kept_under_its_id_as_another_step_type_is_a_conflict`, `PRE_014_a_plan_whose_steps_all_map_is_valid_and_lists_every_instance_that_would_move`, `PRE_014_every_registered_dry_run_query_is_answered_by_an_index_on_a_seeded_database`, `PRE_014_the_dry_run_counts_are_answered_by_an_index_on_a_seeded_database`, `PRE_014_the_dry_run_reads_return_the_seeded_rows_of_one_tenant_and_version`, `PRE_014_the_dry_run_report_matches_the_contract`
 
 ### PRE-015 Batched migration isolates per-instance failures without stalling healthy instances
 - **Traces to:** `TR-MIG-02`
@@ -253,7 +253,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** `GET /definitions/kyc-onboarding/versions/2/diff?base=1`.
 - **Then:** `nodesAdded: [fraud-check]`; `nodesChanged: [{id: approve, path: /assignee/role, from: ops, to: credit-officer}]`; `edgesRemoved: [verify-docs->approve]`; `edgesAdded: [verify-docs->fraud-check, fraud-check->approve]`; nothing about positions.
 - **Example:** `diff v1..v2 -> +fraud-check, ~approve.assignee.role, -1 edge, +2 edges`.
-- **Test ID:** `PRE_025_graph_diff_reports_nodes_and_edges`
+- **Test ID:** `PRE_025_graph_diff_reports_nodes_and_edges`, `PRE_025_the_diff_of_two_stored_drafts_lists_the_added_step_the_changed_role_and_the_links`, `PRE_025_the_graph_diff_body_and_its_etag_match_the_contract`
 
 ### PRE-026 Layout revisions are append-only, need no approval and never change the definition
 - **Traces to:** `TR-DEF-02`
@@ -881,3 +881,44 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - C: refused at import. Memory reads only the recorded results of steps in the same instance, in the instance's tenant. Two loans of the same definition each receive their own facts, and a result recorded under another tenant with the same ids is never read.
 - **Example:** `idNumber without includeMasked -> 422; with it -> sent, hashed in history, visible in the approval diff`.
 - **Test ID:** `PRE_102_a_masked_field_without_include_masked_is_refused_at_import`, `PRE_102_a_masked_field_without_include_masked_is_refused_by_the_import_check`, `PRE_102_include_masked_sends_the_plain_value_and_the_audit_copy_keeps_only_the_fingerprint`, `PRE_102_include_masked_sends_the_plain_value_hashes_it_in_history_and_shows_in_the_canonical_form`, `PRE_102_memory_is_in_the_canonical_form_and_the_export_reads_back_to_the_same_hash`, `PRE_102_memory_reads_only_the_results_of_its_own_instance_and_tenant`, `PRE_102_memory_that_reads_a_variable_or_another_instance_is_refused_at_import`
+
+---
+
+## Migration Plans and Graph Diff (#74, #76)
+
+### PRE-174 A migration plan records four-eyes for its execution; one person only on the dev profile
+- **Traces to:** `TR-MIG-01`, `TR-SEC-04`, `TR-SEC-11`, PD-114, PD-131, #74
+- **Milestone:** M2
+- **Given:** `loan-review` v1 retired with running loans, v2 active; `thu` holds `processes:migration:manage`.
+- **When:** `thu` creates a plan v1 to v2 with `Idempotency-Key: plan-1`, repeats it, reuses the key for v2 to v1, and a host starts with `migration.approval=single` on the `prod` profile and on the `dev` profile alone.
+- **Then:**
+  - The plan is `PLANNED` with `approval: four-eyes` and `secondPersonRequired: true`; one `pre_migration` row, one `PLANNED` history row naming `thu` and the approval, and `processes.migration.planned.v1` are written in one transaction. No instance, token, task or history row changes.
+  - Its dry run reports the same approval. The repeat returns the first plan and writes nothing; the reused key is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+  - Start-up on `prod` is refused naming `horus.bpm.processes.migration.approval=single` and the dev profile; on `dev` alone it starts with a WARN and plans record `single`.
+  - A retired target is `409 INVALID_STATE`, the same version twice `400 INPUT_INVALID`, and a caller without `processes:migration:manage` `403 PERMISSION_DENIED`; nothing is written.
+  - `migration.dry-run-sample-size` (default 100, at most 500) and `migration.dry-run-validity` (default and at most `PT1H`) may be lowered only.
+- **Example:** `plan v1->v2 -> approval four-eyes, 1 plan row, 1 history row, 0 instance rows changed; single on prod -> start-up refused`.
+- **Test ID:** `PRE_174_a_plan_records_four_eyes_with_its_history_row_and_event_and_moves_nothing`, `PRE_174_a_single_person_plan_is_recorded_only_with_the_dev_setting`, `PRE_174_a_plan_needs_an_active_target_another_version_and_the_permission`, `PRE_174_migration_defaults_are_four_eyes_100_ids_and_one_hour`, `PRE_174_single_person_migration_is_refused_at_start_up_outside_the_dev_profile`, `PRE_174_an_unknown_approval_and_raised_dry_run_bounds_are_refused_naming_the_property`, `PRE_174_a_plan_answers_201_with_the_four_eyes_approval`
+
+### PRE-175 Another tenant can neither plan, dry-run nor read a migration, and nothing is written
+- **Traces to:** `TR-TEN-01`, `TR-MIG-01`, #74
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`'s plan over its running `loan-review` loans; tenant `bank-b` has its own `loan-review` loans.
+- **When:** A client of `bank-b` with `processes:migration:manage` and `processes:read` reads and dry-runs `bank-a`'s plan and plans `bank-a`'s versions; each tenant then dry-runs its own plan.
+- **Then:** The read and the dry run are `404 MIGRATION_NOT_FOUND`, and the plan is `404 DEFINITION_NOT_FOUND`. Every engine table holds the same rows and no event is published. Each tenant's report counts and lists only its own instances. A body naming a tenant, or a step mapping, is `400 INPUT_INVALID`. A plan row cannot reference another tenant's definition, and the plan history refuses `UPDATE`, `DELETE` and `TRUNCATE`.
+- **Example:** `bank-b validates bank-a's plan -> 404, 0 rows; bank-a 4 running, bank-b 7 running, each sees its own`.
+- **Test ID:** `PRE_175_another_tenant_can_neither_plan_dry_run_nor_read_a_plan_and_nothing_is_written`, `PRE_175_each_tenant_dry_runs_only_its_own_instances`, `PRE_175_plan_rows_are_tenant_keyed_and_the_history_is_append_only`, `PRE_175_migration_problems_match_the_contract`
+
+### PRE-176 The graph diff is deterministic and bounded, names steps by id and name, and never crosses tenants
+- **Traces to:** `TR-DEF-03`, `TR-TEN-01`, #76
+- **Milestone:** M2
+- **Given:** `kyc-onboarding` v1 and v2 of `PRE-025` in tenant `bank-a`; the same v2 with its flows written first and every box moved again; a loan gateway whose branch condition changes from 500 million to 1 billion VND and whose default moves to the committee; two versions of 600 review steps, each renamed and given to another role.
+- **When:** The diff is computed again, with the inputs swapped, for each pair, and by a client of `bank-b`.
+- **Then:**
+  - The same pair always gives the same diff; element order and layout change nothing. Swapping the versions gives the mirror image.
+  - Every step carries its BPMN id, readable name and type, and every link its sequence flow id, both step ids and names, and its kind; no XML or position is returned.
+  - The changed condition is `/branches/0/when` on the gateway; the moved default is one link removed and one added, of kind `default`.
+  - At most 1,000 changed values are listed, sorted by step id then path, with `truncated: true` beyond.
+  - `bank-b` gets `404 DEFINITION_NOT_FOUND` for `bank-a`'s versions, `404 NO_EFFECTIVE_VERSION` without a base when its key has no effective version, and `403 PERMISSION_DENIED` without `processes:read`. A stored source that no longer gives its hash is `DEFINITION_INTEGRITY_FAILED`. Nothing is written.
+- **Example:** `diff(v1, v2) == diff(v1, v2 reordered); 1,200 changes -> 1,000 listed, truncated`.
+- **Test ID:** `PRE_176_the_same_versions_always_give_the_same_diff_whatever_the_element_order_or_layout`, `PRE_176_swapping_the_versions_gives_the_mirror_image`, `PRE_176_branches_are_links_by_kind_and_a_changed_condition_is_a_value_of_the_gateway`, `PRE_176_at_most_a_thousand_changed_values_are_listed_and_the_rest_set_truncated`, `PRE_176_another_tenants_versions_are_not_found_and_nothing_is_written`, `PRE_176_a_diff_needs_the_read_permission_one_key_and_an_untampered_source`, `PRE_176_graph_diff_problems_match_the_contract`

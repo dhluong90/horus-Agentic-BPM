@@ -979,6 +979,46 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     @Override
+    public io.github.dhluong90.bpm.process.api.GraphDiff diff(DefinitionRef base, DefinitionRef target) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        Objects.requireNonNull(base, "base must not be null");
+        Objects.requireNonNull(target, "target must not be null");
+        if (!base.key().equals(target.key())) {
+            throw new InputInvalidException("A diff compares two versions of one definition key");
+        }
+        // Read-only (PRE-176): no transaction is opened and nothing is written; every read filters by tenant, so
+        // another tenant's version is not found.
+        StoredDefinition from = storedVersion(tenant, base);
+        StoredDefinition to = storedVersion(tenant, target);
+        return GraphDiffs.diff(to.key(), side(from), storedProcess(from), side(to), storedProcess(to));
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.GraphDiff diffFromEffective(DefinitionRef target) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        Objects.requireNonNull(target, "target must not be null");
+        StoredDefinition to = storedVersion(tenant, target);
+        StoredDefinition from = store.effectiveDefinition(tenant, target.key(), clock.instant())
+                .orElseThrow(() -> new NoEffectiveVersionException("Definition " + target.key()
+                        + " has no effective version to compare with; pass base"));
+        return GraphDiffs.diff(to.key(), side(from), storedProcess(from), side(to), storedProcess(to));
+    }
+
+    private StoredDefinition storedVersion(String tenant, DefinitionRef ref) {
+        if (!isKey(ref.key())) {
+            throw new DefinitionNotFoundException("No definition " + safe(ref.key()) + " v" + ref.version());
+        }
+        return store.definitionVersion(tenant, ref.key(), ref.version()).orElseThrow(() ->
+                new DefinitionNotFoundException("No definition " + ref.key() + " v" + ref.version() + " in this tenant"));
+    }
+
+    private static io.github.dhluong90.bpm.process.api.GraphDiff.Side side(StoredDefinition d) {
+        return new io.github.dhluong90.bpm.process.api.GraphDiff.Side(d.version(), d.status(), d.definitionHash());
+    }
+
+    @Override
     public DefinitionExport exportDefinition(String key, int version, SourceFormat format) {
         String tenant = tenant();
         callerWith(PERMISSION_READ);
@@ -2617,6 +2657,18 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * Interim form of ADR-0026 decision 4: a version runs and exports from its stored source, so the source must be
      * the one that was validated and hashed at import. Any difference refuses the version.
      */
+    /**
+     * The model of a stored version, read through the same integrity check as a run or an export. Engine-internal:
+     * the migration dry run reads both versions of a plan with it.
+     *
+     * @param definition the stored version
+     * @return its model
+     * @throws DefinitionIntegrityException when the stored source no longer gives its recorded hash
+     */
+    public Process storedModel(StoredDefinition definition) {
+        return storedProcess(definition);
+    }
+
     private Process storedProcess(StoredDefinition definition) {
         Function<byte[], Process> reader = readers.get(SourceFormat.valueOf(definition.sourceFormat()));
         byte[] source = definition.sourceDocument().getBytes(StandardCharsets.UTF_8);

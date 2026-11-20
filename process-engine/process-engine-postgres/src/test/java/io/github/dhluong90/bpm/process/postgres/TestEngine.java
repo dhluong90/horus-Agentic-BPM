@@ -116,6 +116,7 @@ final class TestEngine {
     private final ProcessEngineTransactions replicaTransactions;
     private final TestClock replicaClock;
     private final io.github.dhluong90.bpm.process.spi.OutputSchemaValidator replicaSchemas;
+    private final ProcessEventPublisher replicaPublisher;
 
     private TestEngine(Builder b) {
         DataSource ds = b.dataSource != null ? b.dataSource : dataSource();
@@ -136,6 +137,7 @@ final class TestEngine {
                 b.retireLastVersion);
         Identity id = identity;
         ProcessEventPublisher publisher = b.publisher != null ? b.publisher : events::add;
+        this.replicaPublisher = publisher;
         if (b.withRuleEngine) {
             migrateRuleEngine(ds, transactionManager, b.clock.instant());
             this.rules = io.github.dhluong90.bpm.rules.postgres.PostgresRuleEngines.create(ds,
@@ -188,6 +190,20 @@ final class TestEngine {
         return new io.github.dhluong90.bpm.process.internal.service.AgentReplays(() -> id.tenant, id, replicaClock,
                 replicaTransactions, new JdbcAgentReplayStore(replicaDataSource), decisions, replicaSchemas, settings,
                 io.github.dhluong90.bpm.process.internal.service.EngineDefaults.MAX_RANGE);
+    }
+
+    /**
+     * The migration plans of this replica (#74), on the same store, transactions, clock and event publisher.
+     *
+     * @param settings migration settings
+     * @return the migration service
+     */
+    io.github.dhluong90.bpm.process.internal.service.Migrations migrations(
+            io.github.dhluong90.bpm.process.internal.service.MigrationSettings settings) {
+        Identity id = identity;
+        return new io.github.dhluong90.bpm.process.internal.service.Migrations(() -> id.tenant, id, replicaClock,
+                replicaTransactions, new JdbcProcessStore(replicaDataSource), new JdbcMigrationStore(replicaDataSource),
+                services::storedModel, replicaPublisher, settings, EngineDefaults.IDEMPOTENCY_RETENTION);
     }
 
     /** Stops this replica's adapter executor. */
@@ -431,7 +447,7 @@ final class TestEngine {
         // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary
         // triggers off for this one statement batch, on one connection.
         jdbc().sql("SET session_replication_role = replica; "
-                + "TRUNCATE pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
+                + "TRUNCATE pre_migration_history, pre_migration, pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
                 + "pre_task, pre_token, pre_instance, pre_idempotency, "
                 + "pre_definition_history, pre_definition CASCADE; "
                 + "SET session_replication_role = origin").update();
