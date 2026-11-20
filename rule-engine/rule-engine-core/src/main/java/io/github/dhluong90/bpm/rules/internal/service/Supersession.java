@@ -43,30 +43,45 @@ final class Supersession {
      * @return the number of versions retired by this call
      */
     int retire(String tenantId, String ruleSetId, Instant now) {
+        return retire(tenantId, ruleSetId, now, null);
+    }
+
+    /**
+     * Retires what is superseded at {@code now} inside a caller's command, whose correlation id the events carry.
+     *
+     * @param tenantId the tenant, or null for the sweep
+     * @param ruleSetId the rule set, or null
+     * @param now the engine clock
+     * @param correlationId the command's correlation id, or null to start a chain at each event
+     * @return the number of versions retired by this call
+     */
+    int retire(String tenantId, String ruleSetId, Instant now, String correlationId) {
         List<RuleStore.Superseded> retired = store.retireSuperseded(tenantId, ruleSetId, now);
         String actor = settings.systemActor();
         for (RuleStore.Superseded row : retired) {
             store.appendHistory(new HistoryRow(row.tenantId(), Ulid.next(now), row.versionId(), LifecycleAction.RETIRED,
                     VersionStatus.PUBLISHED, VersionStatus.RETIRED, actor, EngineDefaults.REASON_SUPERSEDED,
                     row.lockVersion(), now, row.supersededBy(), MODE_SYSTEM, false));
-            outbox.append(row.tenantId(), Ulid.next(now), EngineValues.write(retiredEvent(row.tenantId(), row.ruleSet(),
-                    row.version(), actor, EngineDefaults.REASON_SUPERSEDED, row.supersededBy(), now, MODE_SYSTEM, false)),
-                    now);
+            String eventId = Ulid.next(now);
+            outbox.append(row.tenantId(), eventId, EngineValues.write(retiredEvent(eventId, correlationId,
+                    row.tenantId(), row.ruleSet(), row.version(), actor, EngineDefaults.REASON_SUPERSEDED,
+                    row.supersededBy(), now, MODE_SYSTEM, false)), now);
         }
         return retired.size();
     }
 
-    /** The payload of {@code rules.version.retired.v1} (DESIGN section 3.3, the event schema of the same name). */
-    static tools.jackson.databind.node.ObjectNode retiredEvent(String tenant, String ruleSet, int version,
-            String retiredBy, String reason, Integer supersededBy, Instant at, String approvalMode,
-            boolean noVersionInEffect) {
-        tools.jackson.databind.node.ObjectNode payload = EngineJson.NODES.objectNode()
-                .put("eventType", EVENT_RETIRED)
+    /**
+     * The payload of {@code rules.version.retired.v1} with the full envelope (DESIGN section 3.3, the event schema of
+     * the same name). The event id is the outbox row id.
+     */
+    static tools.jackson.databind.node.ObjectNode retiredEvent(String eventId, String correlationId, String tenant,
+            String ruleSet, int version, String retiredBy, String reason, Integer supersededBy, Instant at,
+            String approvalMode, boolean noVersionInEffect) {
+        tools.jackson.databind.node.ObjectNode payload = EventEnvelope.start(eventId, EVENT_RETIRED, tenant, at,
+                        correlationId, null)
                 .put("ruleSet", ruleSet)
                 .put("version", version)
-                .put("tenantId", tenant)
                 .put("actor", retiredBy)
-                .put("occurredAt", at.toString())
                 .put("retiredBy", retiredBy)
                 .put("reason", reason);
         if (supersededBy == null) {

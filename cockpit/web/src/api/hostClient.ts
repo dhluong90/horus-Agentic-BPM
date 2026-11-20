@@ -1,7 +1,8 @@
 import type { BpmMeV1 } from './generated/bpm-me.v1';
-import { bpmMetaV1, type BpmMetaV1 } from './generated/bpm-meta.v1';
+import type { BpmMetaV1 } from './generated/bpm-meta.v1';
 import { HostCallError, readProblem } from './hostError';
 import { createDroppedPermissionsWarner, readMe } from './meReader';
+import { createSkippedModulesWarner, readMeta } from './metaReader';
 
 export interface HostClient {
   readonly baseUrl: string;
@@ -14,11 +15,6 @@ type Fetch = typeof fetch;
 /** Turns a response body into the typed value, or undefined when it does not match the contract. */
 type Reader<T> = (body: unknown) => T | undefined;
 
-const readMeta: Reader<BpmMetaV1> = (body) => {
-  const parsed = bpmMetaV1.safeParse(body);
-  return parsed.success ? parsed.data : undefined;
-};
-
 /** One warner for the page: the same dropped names are noted once, however often /me is read. */
 const warnDroppedPermissions = createDroppedPermissionsWarner();
 
@@ -29,6 +25,9 @@ const readMeTolerantly: Reader<BpmMeV1> = (body) => {
   warnDroppedPermissions(reading.dropped);
   return reading.me;
 };
+
+/** One warner per page load, shared by every client, so a skipped module is noted once. */
+const warnSkippedModules = createSkippedModulesWarner();
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -46,10 +45,10 @@ export function csrfHeaders(method: string, cookies: string = document.cookie): 
 /**
  * The one place the cockpit calls a host. This release supports host-session authentication only:
  * the host's own session cookie on the same origin (embedded mode). Every response is validated against the generated schema;
- * a body that does not match is an error, never rendered partially (cockpit DESIGN section 12). The one tolerance is in
- * /me, which drops a permission name it cannot read instead of failing (cockpit DESIGN section 5.2).
+ * a body that does not match is an error, never rendered partially (cockpit DESIGN section 12). Two readings are tolerant
+ * (cockpit DESIGN section 5.2): /me drops a permission name it cannot read, and /meta skips a module this cockpit does not know.
  */
-export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): HostClient {
+export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch, onSkippedModules: (skipped: readonly string[]) => void = warnSkippedModules): HostClient {
   async function requestJson<T>(method: string, path: string, read: Reader<T>, signal: AbortSignal | undefined): Promise<T> {
     let response: Response;
     try {
@@ -87,9 +86,17 @@ export function createHostClient(baseUrl: string, fetchImpl: Fetch = fetch): Hos
     return value;
   }
 
+  /** /meta is read tolerantly: a module this cockpit does not know is skipped and noted (cockpit DESIGN 5.2). */
+  const readMetaNoting: Reader<BpmMetaV1> = (body) => {
+    const reading = readMeta(body);
+    if (!reading.ok) return undefined;
+    onSkippedModules(reading.skipped);
+    return reading.meta;
+  };
+
   return {
     baseUrl,
-    getMeta: (signal) => requestJson('GET', '/api/bpm/meta', readMeta, signal),
+    getMeta: (signal) => requestJson('GET', '/api/bpm/meta', readMetaNoting, signal),
     getMe: (signal) => requestJson('GET', '/api/bpm/me', readMeTolerantly, signal),
   };
 }

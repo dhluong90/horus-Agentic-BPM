@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Imports process definitions and moves their versions through the lifecycle with four eyes (ADR-0012, DESIGN
+ * Imports and exports process definitions and moves their versions through the lifecycle with four eyes (ADR-0012, DESIGN
  * section 3.2): {@code DRAFT -> PENDING_APPROVAL -> ACTIVE -> RETIRED}, and back to {@code DRAFT} on a reject. Safe
  * for concurrent use.
  *
@@ -130,4 +130,20 @@ public interface DefinitionService {
      * @throws DefinitionNotFoundException when the tenant has no such version
      */
     DefinitionVersion version(String key, int version);
+
+    /**
+     * Writes a stored version of the caller's tenant as a document of the given format (PRE-034). Needs
+     * {@code processes:read}. The stored source is read again and must still give the recorded definition hash
+     * before anything is written; importing the result gives a version with the same hash. Read-only: nothing is
+     * stored and no event is published.
+     *
+     * @param key the definition key
+     * @param version the version number within the key
+     * @param format the document format; {@link SourceFormat#BPMN_XML} in this release
+     * @return the document
+     * @throws DefinitionNotFoundException when the tenant has no such version (also for another tenant's version)
+     * @throws InputInvalidException when the format cannot be exported
+     * @throws DefinitionIntegrityException when the stored source no longer gives the recorded hash
+     */
+    DefinitionExport exportDefinition(String key, int version, SourceFormat format);
 }

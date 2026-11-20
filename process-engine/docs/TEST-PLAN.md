@@ -49,7 +49,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-031 | `PRE_031_task_form_resolved_and_completion_validated` | Service, WebMvc | M2 | `TR-UI-02`, `TR-SEC-05` | Planned |
 | PRE-032 | `PRE_032_step_catalogue_lists_registered_steps_only` | WebMvc | M3 | `TR-SEC-01` | Planned |
 | PRE-033 | `PRE_033_bpmn_subset_import_rejects_unsupported_by_name` | Unit, adversarial XML | M3 | `TR-DEF-01` | Planned |
-| PRE-034 | `PRE_034_bpmn_export_round_trip_preserves_hash` | Round trip over examples, XSD validation | M3 (cut candidate) | `TR-DEF-01` | Planned |
+| PRE-034 | `PRE_034_bpmn_export_round_trip_preserves_hash` | Unit round trip over every importable example and fixture, BPMN 2.0 XSD validation (OMG schema files as test resources, no network), service tenant isolation, Testcontainers REST export then import | M3 (cut candidate) | `TR-DEF-01` | Implemented for the subset |
 | PRE-035 | `PRE_035_definition_size_limits_enforced` | WebMvc | M2 | `TR-DEF-05` | Planned |
 | PRE-036 | `PRE_036_list_queries_pass_query_plan_check` | Query-plan check on a seeded database | M2 | `TR-PERF-07` | Planned |
 | PRE-037 | `PRE_037_definition_events_published_in_transaction`, `PRE_037_a_publisher_that_throws_rolls_the_approval_back` | Testcontainers, rollback | M2 | `TR-OBS-04`, `TR-OBS-06` | Done |
