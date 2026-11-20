@@ -526,11 +526,13 @@ class RunnerPerKindTest {
         String brokenLoan = assess(pod1, "LOAN-2027-0832");
         String slowLoan = assess(pod1, "LOAN-2027-0833");
 
-        // When each replica records an answer the guardrail would allow
-        StepCompletion.Outcome first = pod1.async.runNow(pod1.async.claim(JobStore.ASYNC_AGENT, 1).get(0))
+        // When each replica records an answer the guardrail would allow (a result is accepted on any replica)
+        List<Claim> claims = pod1.async.claim(JobStore.ASYNC_AGENT, 2);
+        Claim brokenClaim = claims.stream().filter(c -> c.job().instanceId().equals(brokenLoan)).findFirst()
                 .orElseThrow();
-        StepCompletion.Outcome second = pod2.async.runNow(pod2.async.claim(JobStore.ASYNC_AGENT, 1).get(0))
-                .orElseThrow();
+        Claim slowClaim = claims.stream().filter(c -> c.job().instanceId().equals(slowLoan)).findFirst().orElseThrow();
+        StepCompletion.Outcome first = pod1.async.runNow(brokenClaim).orElseThrow();
+        StepCompletion.Outcome second = pod2.async.runNow(slowClaim).orElseThrow();
 
         // Then both are refused: a check that breaks or overruns never lets a result through
         assertThat(List.of(first, second)).containsOnly(StepCompletion.Outcome.REFUSED);
