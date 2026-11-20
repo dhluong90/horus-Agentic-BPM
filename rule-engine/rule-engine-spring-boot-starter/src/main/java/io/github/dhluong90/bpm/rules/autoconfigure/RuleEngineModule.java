@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
+import io.github.dhluong90.bpm.host.autoconfigure.ApproverMustDifferFrom;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import java.io.IOException;
 import java.io.InputStream;
@@ -51,9 +52,11 @@ final class RuleEngineModule {
     static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
             String retireApproval, String retireLastVersion) {
         // Always published, so clients never guess: draft editing false unless the host turns it on (PD-094), and
-        // the retirement mode in force (PD-080).
+        // the retirement mode in force (PD-080). The approver rule is always makers here, whatever the host sets
+        // (#273): V2 rle_version_four_eyes refuses an approval by the author in the database.
         Map<String, Object> settings = new java.util.LinkedHashMap<>();
         settings.put(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
+        settings.put(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.MAKERS.value());
         settings.put(RETIRE_APPROVAL, retireApproval);
         settings.put(RETIRE_LAST_VERSION, retireLastVersion);
         return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);

@@ -6,13 +6,19 @@ import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 
 /**
  * The rules entry the starter contributes to {@code /api/bpm/meta} and {@code /api/bpm/me} (RLE-019), and
  * the role mapping property {@code horus.bpm.rules.security.role-permissions}.
  */
+@ExtendWith(OutputCaptureExtension.class)
 class RuleEngineModuleDescriptorTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
@@ -80,6 +86,7 @@ class RuleEngineModuleDescriptorTest {
         // PD-080: the mode in force is always in /api/bpm/meta, after the draft-editing setting
         runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
                 .containsExactly(Map.entry("authoring.cockpit-drafts", false),
+                        Map.entry("lifecycle.approver-must-differ-from", "makers"),
                         Map.entry("lifecycle.retire-approval", "single"),
                         Map.entry("lifecycle.retire-last-version", "confirm")));
         runner.withPropertyValues("horus.bpm.lifecycle.retire-approval=single")
@@ -114,5 +121,44 @@ class RuleEngineModuleDescriptorTest {
     void no_rules_entry_when_the_engine_is_disabled() {
         runner.withPropertyValues("horus.bpm.rules.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(ModuleDescriptor.class));
+    }
+
+    @Test
+    void RLE_009_meta_reports_makers_by_default_and_whatever_the_host_sets(CapturedOutput output) {
+        runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                .containsEntry("lifecycle.approver-must-differ-from", "makers"));
+        assertThat(output).doesNotContain("the Rule Engine keeps makers");
+        runner.withPropertyValues("horus.bpm.lifecycle.approver-must-differ-from=requester")
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                        .containsEntry("lifecycle.approver-must-differ-from", "makers"));
+        assertThat(output.toString().split("the Rule Engine keeps makers", -1)).hasSize(2);
+    }
+
+    @Test
+    void RLE_009_an_unknown_approver_setting_stops_start_up_naming_the_property() {
+        runner.withPropertyValues("horus.bpm.lifecycle.approver-must-differ-from=nobody")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.lifecycle.approver-must-differ-from")
+                        .hasMessageContaining("makers").hasMessageContaining("requester"));
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class HostDescriptor {
+        @Bean
+        ModuleDescriptor ruleEngineModuleDescriptor() {
+            return RuleEngineModule.descriptor(Map.of(), false, "single", "confirm");
+        }
+    }
+
+    @Test
+    void RLE_009_a_host_that_replaces_the_descriptor_still_gets_the_failure_and_the_warning(CapturedOutput output) {
+        runner.withUserConfiguration(HostDescriptor.class)
+                .withPropertyValues("horus.bpm.lifecycle.approver-must-differ-from=nobody")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.lifecycle.approver-must-differ-from"));
+        runner.withUserConfiguration(HostDescriptor.class)
+                .withPropertyValues("horus.bpm.lifecycle.approver-must-differ-from=requester")
+                .run(context -> assertThat(context).hasNotFailed());
+        assertThat(output.toString().split("the Rule Engine keeps makers", -1)).hasSize(2);
     }
 }

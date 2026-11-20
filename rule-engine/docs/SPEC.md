@@ -100,7 +100,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** User `alice` (`rules:author`, `rules:approve`) creates `card-fee` v2 and calls `:request-publish`.
 - **When:** `alice` invokes `VersionService.approve(...)` directly OR calls `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve`.
-- **Then:** Both Java API and REST (`403 SELF_APPROVAL_FORBIDDEN`) reject the approval; version remains `PENDING_APPROVAL`. Only distinct identity `bob` (`rules:approve`) succeeds.
+- **Then:** Both Java API and REST (`403 SELF_APPROVAL_FORBIDDEN`) reject the approval; version remains `PENDING_APPROVAL`. Only distinct identity `bob` (`rules:approve`) succeeds. The Rule Engine always applies `makers`: the same refusal holds when the host sets `lifecycle.approver-must-differ-from` to `requester`, and `/api/bpm/meta` reports `makers`.
 - **Example:** `requester=alice, approver=alice -> 403; approver=bob -> 200 PUBLISHED`.
 - **Test ID:** `RLE_009_maker_checker_blocks_self_approval`
 
