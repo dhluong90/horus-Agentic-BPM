@@ -102,8 +102,8 @@ Demo users on the `dev` profile, all with the password from `HORUS_DEMO_PASSWORD
 |---|---|---|
 | `tuan` | `TELLER` | `processes:start`, `processes:read`, `rules:evaluate` |
 | `an` | `CARD_OFFICER` | `processes:read`, `processes:task:work`, `rules:evaluate` |
-| `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:read`; `rules:evaluate` on `dev` only |
-| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve`; `rules:evaluate` on `dev` only |
+| `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER`, `PROCESS_APPROVER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:approve`, `processes:read`; `rules:evaluate` on `dev` only |
+| `minh` | `PRICING_APPROVER`, `PROCESS_APPROVER` | `rules:read`, `rules:approve`, `processes:approve`, `processes:read`; `rules:evaluate` on `dev` only |
 | `hoa` | `TELLER`, `CARD_OFFICER`, `BRANCH_SUPERVISOR` | both of the above sets plus `processes:cancel`; the four-eyes review refuses her on applications she submitted |
 
 On the `dev` profile the author and the approver may also evaluate, so the cockpit's Try it works for them ([`application-dev.yml`](src/main/resources/application-dev.yml)).
@@ -239,6 +239,29 @@ curl -s -u tuan:$P -H 'Content-Type: application/json' \
 # GET the instance: pricing.fee is {"currency":"VND","amount":5000} and the token waits at officer-review;
 # rle_decision holds the evaluation with version_num 2.
 ```
+
+## Approve a process definition change with four eyes
+
+The `dev` profile of this sample auto-approves imports; start it with `--horus.bpm.processes.definitions.auto-approve=false` to see the lifecycle every other profile has. An imported definition is then a draft, and the effective version changes only when a second person approves it. `lan` and `minh` both hold `processes:approve`; the one who requests can never approve:
+
+```bash
+D=localhost:8080/api/bpm/processes/v1/definitions
+sed 's/Officer reviews the fee/Officer reviews the fee and the limit/' \
+  examples/rule-and-process/src/main/resources/processes/card-fee-review.bpmn > /tmp/card-fee-review-v2.bpmn
+curl -s -u lan:$P -H 'Content-Type: application/xml' --data-binary @/tmp/card-fee-review-v2.bpmn $D
+# {"key":"card-fee-review","version":2,"status":"DRAFT","source":"IMPORT","lockVersion":0,...}
+curl -s -u lan:$P -H 'If-Match: "0"' -H 'Content-Type: application/json' \
+  -d '{"effectiveFrom":"2027-04-01T00:00:00+07:00"}' -X POST $D/card-fee-review/versions/2:request-approval
+# {"version":2,"status":"PENDING_APPROVAL","requestedBy":"lan","lockVersion":1,...}
+curl -s -u lan:$P -H 'If-Match: "1"' -X POST $D/card-fee-review/versions/2:approve
+# {"status":403,"code":"SELF_APPROVAL_FORBIDDEN",...}
+curl -s -u minh:$P -H 'If-Match: "1"' -X POST $D/card-fee-review/versions/2:approve
+# {"version":2,"status":"ACTIVE","approvedBy":"minh","effectiveFrom":"2027-03-31T17:00:00Z",...}
+curl -s -u minh:$P $D/card-fee-review/versions/2/history
+# {"items":[{"action":"IMPORTED",...},{"action":"REQUESTED","actor":"lan",...},{"action":"APPROVED","actor":"minh",...}]}
+```
+
+Version 1 stays the effective version until 1 April 00:00 (+07:00); then the effective-date job retires it once, whichever copy of the host runs the job, and publishes `processes.definition.retired.v1` with `supersededBy: 2`. A reject (`:reject` with `{"reason":"missing fraud check"}`) returns a version to draft; approving an older version while a newer one is active is `409 VERSION_SUPERSEDED`.
 
 The supervisor `hoa` may submit and may review, but not both on one application:
 

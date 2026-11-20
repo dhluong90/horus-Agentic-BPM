@@ -51,7 +51,10 @@ import tools.jackson.databind.json.JsonMapper;
  * idempotent and optimistically locked cancellation (also under concurrency), the permission checks, and tenant
  * isolation, where another tenant's request is refused and writes nothing.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "HORUS_DEMO_PASSWORD=it-pass")
+// minh approves process definitions in the demo; here his approver role grants processes:approve only, so he is the
+// caller without processes:read in a_caller_without_processes_read_is_refused_every_read.
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"HORUS_DEMO_PASSWORD=it-pass",
+        "horus.bpm.processes.security.role-permissions[ROLE_PROCESS_APPROVER]=processes:approve"})
 @ActiveProfiles("dev")
 @Testcontainers
 class ProcessRestApiIT {
