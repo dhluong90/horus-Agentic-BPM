@@ -7,7 +7,6 @@ import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.NoEffectiveVersionException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
-import io.github.dhluong90.bpm.rules.api.TenantScopedRuleEngine;
 import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
 import io.github.dhluong90.bpm.rules.internal.json.CanonicalJson;
 import io.github.dhluong90.bpm.rules.internal.json.CorrelationIds;
@@ -33,7 +32,7 @@ import tools.jackson.databind.node.ArrayNode;
  * Compiled versions are cached by version id: a stored version never changes, so the cache needs no
  * invalidation. Its size is bounded by {@code cache.max-entries}; a full cache is cleared. Thread-safe.
  */
-public final class DefaultRuleEngine implements RuleEngine, TenantScopedRuleEngine {
+public final class DefaultRuleEngine implements RuleEngine {
 
     private final EngineContext context;
     private final RuleStore store;
@@ -66,20 +65,11 @@ public final class DefaultRuleEngine implements RuleEngine, TenantScopedRuleEngi
         return evaluateAs(tenant, caller, request);
     }
 
-    @Override
-    public DecisionResult evaluate(String tenantId, String systemCallerId, DecisionRequest request) {
-        Objects.requireNonNull(request, "request must not be null");
-        if (tenantId == null || tenantId.isBlank()) {
-            throw new IllegalArgumentException("tenantId must not be blank");
-        }
-        if (systemCallerId == null || !systemCallerId.startsWith(SYSTEM_CALLER_PREFIX)
-                || systemCallerId.length() == SYSTEM_CALLER_PREFIX.length()) {
-            throw new IllegalArgumentException("systemCallerId must be a system identity (system:...)");
-        }
-        return evaluateAs(tenantId, systemCallerId, request);
-    }
-
-    private DecisionResult evaluateAs(String tenant, String caller, DecisionRequest request) {
+    /**
+     * Evaluates in an explicit tenant as an explicit caller; only {@link EngineScopedRuleEngine} calls it, with a
+     * registered engine identity.
+     */
+    DecisionResult evaluateAs(String tenant, String caller, DecisionRequest request) {
         if (request.correlationId() != null && !CorrelationIds.isValid(request.correlationId())) {
             throw new InputInvalidException("correlationId must be 1 to " + EngineDefaults.CORRELATION_ID_MAX_LENGTH
                     + " characters of A-Z, a-z, 0-9, '.', '_', ':' or '-'");

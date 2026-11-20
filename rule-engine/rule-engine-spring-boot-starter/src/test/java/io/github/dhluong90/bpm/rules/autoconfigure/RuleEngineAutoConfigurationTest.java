@@ -93,6 +93,16 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    void TR_TEN_01_the_rule_engine_bean_is_not_the_tenant_scoped_entry_point() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(io.github.dhluong90.bpm.rules.api.RuleEngine.class))
+                    .isNotInstanceOf(io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine.class);
+            assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine.class);
+        });
+    }
+
+    @Test
     void TR_EXT_03_an_out_of_range_setting_stops_start_up() {
         runner.withUserConfiguration(HostWithEngineStandIns.class)
                 .withPropertyValues("horus.bpm.rules.cache.max-entries=0")

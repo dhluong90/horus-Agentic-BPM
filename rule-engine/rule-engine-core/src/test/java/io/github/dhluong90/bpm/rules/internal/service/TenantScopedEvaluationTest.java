@@ -9,8 +9,9 @@ import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.Money;
 import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
-import io.github.dhluong90.bpm.rules.api.TenantScopedRuleEngine;
+import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
+import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -30,7 +31,7 @@ class TenantScopedEvaluationTest {
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
                     stores, stores, EngineSettings.defaults()),
             stores, stores, stores);
-    final TenantScopedRuleEngine scoped = (TenantScopedRuleEngine) engines.ruleEngine();
+    final TenantScopedRuleEngine scoped = engines.forEmbeddedEngine("system:process-engine");
     final DecisionRequest gold = DecisionRequest.of("card-fee", DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5)))
             .withCorrelationId("01JD2X5K9T1Q4N8V2M7B3C6D0E");
 
@@ -49,7 +50,7 @@ class TenantScopedEvaluationTest {
         caller.become(null, null, Set.of());
 
         // When
-        DecisionResult result = scoped.evaluate("bank-a", "system:process-engine", gold);
+        DecisionResult result = scoped.evaluate("bank-a", gold);
 
         // Then
         assertThat(result.outputs()).containsEntry("fee", Money.ofMinor("VND", 0));
@@ -67,7 +68,7 @@ class TenantScopedEvaluationTest {
         caller.become("bank-a", "teller-01");
 
         // When bank-b is asked for, then bank-b's (missing) rule set is the one looked up
-        assertThatThrownBy(() -> scoped.evaluate("bank-b", "system:process-engine", gold))
+        assertThatThrownBy(() -> scoped.evaluate("bank-b", gold))
                 .isInstanceOf(RuleSetNotFoundException.class);
 
         // Then
@@ -75,18 +76,49 @@ class TenantScopedEvaluationTest {
     }
 
     @Test
-    void TR_TEN_01_tenant_scoped_evaluation_refuses_a_blank_tenant_or_a_person_as_caller() {
+    void TR_TEN_01_tenant_scoped_evaluation_refuses_a_blank_tenant() {
         // Given
         publishCardFee("bank-a");
 
         // When, then
-        assertThatThrownBy(() -> scoped.evaluate(" ", "system:process-engine", gold))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> scoped.evaluate(null, "system:process-engine", gold))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> scoped.evaluate("bank-a", "tuan", gold)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> scoped.evaluate("bank-a", "system:", gold)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> scoped.evaluate("bank-a", null, gold)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scoped.evaluate(" ", gold)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scoped.evaluate(null, gold)).isInstanceOf(IllegalArgumentException.class);
         assertThat(stores.decisions).isEmpty();
+    }
+
+    @Test
+    void TR_TEN_01_only_a_registered_engine_identity_gets_the_entry_point() {
+        // Given the one registered engine identity
+        assertThat(TenantScopedRuleEngine.REGISTERED_ENGINE_IDS).containsExactly("system:process-engine");
+        assertThat(scoped.engineId()).isEqualTo("system:process-engine");
+
+        // When a host picks another identity, reserved or invented, then it is refused
+        for (String forged : new String[] {"system:timer", "system:dev-auto-approve", "system:effective-date",
+                "system:anything", "system:", "tuan", " "}) {
+            assertThatThrownBy(() -> engines.forEmbeddedEngine(forged))
+                    .as(forged).isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThatThrownBy(() -> engines.forEmbeddedEngine(null)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void TR_TEN_01_the_caller_written_to_the_log_is_the_identity_fixed_at_build_time() {
+        // Given card-fee in bank-a, and a thread signed in as a teller
+        publishCardFee("bank-a");
+        caller.become("bank-a", "teller-01");
+
+        // When the process engine's entry point evaluates
+        scoped.evaluate("bank-a", gold);
+
+        // Then the decision is logged as the engine, not as the thread's caller
+        assertThat(stores.decisions).singleElement()
+                .satisfies(row -> assertThat(row.callerId()).isEqualTo("system:process-engine"));
+    }
+
+    @Test
+    void TR_TEN_01_the_host_facing_rule_engine_is_not_the_tenant_scoped_entry_point() {
+        RuleEngine hostFacing = engines.ruleEngine();
+        assertThat(hostFacing).isNotInstanceOf(TenantScopedRuleEngine.class);
+        assertThat(scoped).isNotInstanceOf(RuleEngine.class);
     }
 }
