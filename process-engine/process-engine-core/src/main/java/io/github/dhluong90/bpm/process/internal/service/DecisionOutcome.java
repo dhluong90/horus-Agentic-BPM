@@ -10,11 +10,24 @@ public sealed interface DecisionOutcome {
      *
      * @param decisionId the logged decision
      * @param outputs the outputs
+     * @param ruleIds the ids of the matched rules, in rule order
      */
-    record Matched(String decisionId, Map<String, Object> outputs) implements DecisionOutcome {
+    record Matched(String decisionId, Map<String, Object> outputs, java.util.List<String> ruleIds)
+            implements DecisionOutcome {
         public Matched {
             // Outputs may hold null values, which Map.copyOf refuses.
             outputs = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(outputs));
+            ruleIds = ruleIds == null ? java.util.List.of() : java.util.List.copyOf(ruleIds);
+        }
+
+        /**
+         * A match whose rule ids are not known.
+         *
+         * @param decisionId the logged decision
+         * @param outputs the outputs
+         */
+        public Matched(String decisionId, Map<String, Object> outputs) {
+            this(decisionId, outputs, java.util.List.of());
         }
     }
 

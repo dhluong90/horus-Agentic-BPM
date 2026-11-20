@@ -27,6 +27,12 @@ public record StepCompletion(String jobId, String attemptId, Outcome outcome) {
          * The attempt is no longer current: its lease ended, another attempt took the step over, or the instance was
          * cancelled. Nothing changed in the process; a cancelled step records {@code LATE_RESULT_DISCARDED}.
          */
-        DISCARDED
+        DISCARDED,
+        /**
+         * The result was checked and refused (#363): it broke the step's output schema, its guardrail said no, or the
+         * guardrail could not be evaluated. Nothing of the result was accepted. A malformed result counts as a failed
+         * attempt and the retry policy applies; a refused one sends the step to a review task or fails its job.
+         */
+        REFUSED
     }
 }

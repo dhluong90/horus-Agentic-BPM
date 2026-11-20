@@ -118,6 +118,20 @@ public interface JobStore {
     List<JobRow> claimDueAsync(String replicaId, Instant now, int limit);
 
     /**
+     * Claims due async step jobs of one kind, the same way as {@link #claimDueAsync(String, Instant, int)}. The async
+     * executor claims each kind separately, up to the free slots of that kind's runner, so a backlog of one kind
+     * never takes the claims or the slots of another (#363).
+     *
+     * @param replicaId the claiming replica
+     * @param now the claim time
+     * @param jobKind an async kind, {@link #ASYNC_SERVICE} or {@link #ASYNC_AGENT}
+     * @param limit at most this many rows
+     * @return the claimed rows, oldest due first
+     * @throws IllegalArgumentException when the kind is not an async kind
+     */
+    List<JobRow> claimDueAsync(String replicaId, Instant now, String jobKind, int limit);
+
+    /**
      * Locks a job row ({@code FOR UPDATE}) whatever its status, for the result transaction of an async step, which
      * decides from the status, attempt and lease whether the result is current.
      *
@@ -241,6 +255,11 @@ public interface JobStore {
 
         @Override
         public List<JobRow> claimDueAsync(String replicaId, Instant now, int limit) {
+            return List.of();
+        }
+
+        @Override
+        public List<JobRow> claimDueAsync(String replicaId, Instant now, String jobKind, int limit) {
             return List.of();
         }
 

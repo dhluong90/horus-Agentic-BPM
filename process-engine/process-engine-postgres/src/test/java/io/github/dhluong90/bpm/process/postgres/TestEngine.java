@@ -150,13 +150,21 @@ final class TestEngine {
                 new LocalServiceInvoker(b.handlers.stream().collect(Collectors.toMap(ServiceTaskHandler::name, h -> h)),
                         ruleEngine, grant, Duration.ofSeconds(5)),
                 publisher, settings, BehaviorCatalog.registry(), new V1ExpressionEvaluator(100), jobStore, jobSettings,
-                b.asyncSettings, b.adapters.stream().map(io.github.dhluong90.bpm.process.spi.ServiceAdapter::name)
-                        .collect(Collectors.toSet()));
+                b.asyncSettings, java.util.stream.Stream.concat(b.adapters.stream()
+                        .map(io.github.dhluong90.bpm.process.spi.ServiceAdapter::name), b.extraAdapterNames.stream())
+                        .collect(Collectors.toSet()), b.outputSchemas);
         this.jobs = new JobExecutor(jobStore, tx, b.clock, jobSettings, services.jobHandlers());
+        List<io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner> runners = new java.util.ArrayList<>();
+        runners.add(new io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner(b.adapters.stream()
+                .collect(Collectors.toMap(io.github.dhluong90.bpm.process.spi.ServiceAdapter::name, a -> a))));
+        runners.addAll(b.runners);
         this.async = new io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor(jobStore, tx, b.clock,
-                jobSettings, b.asyncSettings, b.adapters.stream().collect(Collectors.toMap(
-                        io.github.dhluong90.bpm.process.spi.ServiceAdapter::name, a -> a)), services,
-                java.util.concurrent.Executors.newFixedThreadPool(b.asyncSettings.executorThreads()),
+                jobSettings, b.asyncSettings, runners, services,
+                java.util.concurrent.Executors.newFixedThreadPool(
+                        io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor.threadsNeeded(
+                                b.asyncSettings, jobSettings, runners.stream().map(
+                                        io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner::jobKind)
+                                        .toList())),
                 java.util.concurrent.Executors.newSingleThreadScheduledExecutor());
     }
 
@@ -184,9 +192,13 @@ final class TestEngine {
         private boolean withRuleEngine;
         private io.github.dhluong90.bpm.rules.api.RuleEngine ruleEngine;
         private List<io.github.dhluong90.bpm.process.spi.ServiceAdapter> adapters = List.of();
+        private List<io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner> runners = List.of();
+        private java.util.Set<String> extraAdapterNames = java.util.Set.of();
         private io.github.dhluong90.bpm.process.internal.service.AsyncSettings asyncSettings =
                 io.github.dhluong90.bpm.process.internal.service.AsyncSettings.DEFAULTS;
         private DataSource dataSource;
+        private io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas =
+                new io.github.dhluong90.bpm.process.internal.service.JsonSchemaSubsetValidator();
 
         private Builder(String replicaId, TestClock clock) {
             this.replicaId = replicaId;
@@ -238,6 +250,19 @@ final class TestEngine {
             return this;
         }
 
+        /**
+         * Adds runners of other async kinds, for example a stub agent runner until the agent step exists (#52).
+         *
+         * @param adapterNames the adapter names those runners call, which completer roles may name
+         * @param value the runners
+         */
+        Builder runners(java.util.Set<String> adapterNames,
+                io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner... value) {
+            runners = List.of(value);
+            extraAdapterNames = java.util.Set.copyOf(adapterNames);
+            return this;
+        }
+
         Builder async(io.github.dhluong90.bpm.process.internal.service.AsyncSettings value) {
             asyncSettings = value;
             return this;
@@ -246,6 +271,11 @@ final class TestEngine {
         /** Uses this data source (already migrated through {@link TestEngine#dataSource()}) instead of the shared one. */
         Builder dataSource(DataSource value) {
             dataSource = value;
+            return this;
+        }
+
+        Builder outputSchemas(io.github.dhluong90.bpm.process.spi.OutputSchemaValidator value) {
+            outputSchemas = value;
             return this;
         }
 

@@ -55,6 +55,13 @@ public final class LocalServiceInvoker implements ServiceInvoker {
         return handlers.containsKey(name);
     }
 
+    /**
+     * @return the decision port, for the guardrails of the result transaction (#363); empty without a Rule Engine
+     */
+    Optional<DecisionPort> decisionPort() {
+        return decisions;
+    }
+
     /** @return whether a Rule Engine is present */
     public boolean hasRuleEngine() {
         return decisions.isPresent();

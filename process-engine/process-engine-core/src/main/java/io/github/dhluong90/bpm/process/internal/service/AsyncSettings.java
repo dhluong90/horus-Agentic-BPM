@@ -20,9 +20,11 @@ import java.util.stream.Collectors;
  *     steps through the completion API, on top of {@code processes:step:complete}. An adapter without an entry has
  *     no completer: nobody can complete its steps from outside. Role names as the caller resolver returns them; a
  *     {@code ROLE_} prefix is removed
+ * @param runners {@code runners.<kind>.*}: per async job kind ({@code ASYNC_SERVICE}, {@code ASYNC_AGENT}), what the
+ *     host set for that kind's runner; unset values fall back to the engine-wide keys ({@link #runner})
  */
 public record AsyncSettings(Duration leaseMargin, Duration defaultTimeout, int executorThreads,
-        Map<String, Set<String>> completerRoles) {
+        Map<String, Set<String>> completerRoles, Map<String, RunnerSettings.Overrides> runners) {
 
     /** Default {@code jobs.lease-margin}. */
     public static final Duration DEFAULT_LEASE_MARGIN = Duration.ofSeconds(30);
@@ -43,6 +45,19 @@ public record AsyncSettings(Duration leaseMargin, Duration defaultTimeout, int e
      */
     public AsyncSettings(Duration leaseMargin, Duration defaultTimeout, int executorThreads) {
         this(leaseMargin, defaultTimeout, executorThreads, Map.of());
+    }
+
+    /**
+     * Settings with no per-kind runner settings: every kind runs with the engine-wide values.
+     *
+     * @param leaseMargin the lease margin
+     * @param defaultTimeout the default timeout
+     * @param executorThreads the adapter slots of each kind
+     * @param completerRoles completer roles per adapter
+     */
+    public AsyncSettings(Duration leaseMargin, Duration defaultTimeout, int executorThreads,
+            Map<String, Set<String>> completerRoles) {
+        this(leaseMargin, defaultTimeout, executorThreads, completerRoles, Map.of());
     }
 
     public AsyncSettings {
@@ -68,6 +83,56 @@ public record AsyncSettings(Duration leaseMargin, Duration defaultTimeout, int e
                     .collect(Collectors.toUnmodifiableSet()));
         });
         completerRoles = Map.copyOf(roles);
+        Map<String, RunnerSettings.Overrides> kinds = new LinkedHashMap<>();
+        (runners == null ? Map.<String, RunnerSettings.Overrides>of() : runners).forEach((kind, overrides) -> {
+            if (!io.github.dhluong90.bpm.process.internal.store.JobStore.isAsync(kind)) {
+                throw new IllegalArgumentException("runners names " + kind + ", which is no async job kind");
+            }
+            kinds.put(kind, overrides == null ? RunnerSettings.Overrides.NONE : overrides);
+        });
+        runners = Map.copyOf(kinds);
+    }
+
+    /**
+     * The settings of one kind's runner: what the host set under {@code runners.<kind>.*}, and for every value it
+     * did not set, the engine-wide key. With nothing set, every kind gets {@code adapters.executor-threads} slots,
+     * {@code adapters.default-timeout}, {@code jobs.max-attempts} and {@code jobs.retry-backoff}, as before #363.
+     *
+     * @param jobKind an async job kind
+     * @param jobs the engine-wide job settings
+     * @return the resolved settings
+     */
+    public RunnerSettings runner(String jobKind, JobSettings jobs) {
+        Objects.requireNonNull(jobs, "jobs must not be null");
+        RunnerSettings.Overrides set = runners.getOrDefault(jobKind, RunnerSettings.Overrides.NONE);
+        return new RunnerSettings(
+                set.slots() != null ? set.slots() : executorThreads,
+                set.defaultTimeout() != null ? set.defaultTimeout() : defaultTimeout,
+                set.maxAttempts() != null ? set.maxAttempts() : jobs.maxAttempts(),
+                set.retryBackoff() != null ? set.retryBackoff() : jobs.retryBackoff(),
+                set.guardBudget() != null ? set.guardBudget() : RunnerSettings.DEFAULT_GUARD_BUDGET);
+    }
+
+    /**
+     * The lease of an async job of a kind: the step timeout, or that kind's default timeout, plus the margin.
+     *
+     * @param jobKind the async job kind
+     * @param stepTimeout the step's own timeout, or null
+     * @param jobs the engine-wide job settings
+     * @return the lease
+     */
+    public Duration lease(String jobKind, Duration stepTimeout, JobSettings jobs) {
+        return timeout(jobKind, stepTimeout, jobs).plus(leaseMargin);
+    }
+
+    /**
+     * @param jobKind the async job kind
+     * @param stepTimeout the step's own timeout, or null
+     * @param jobs the engine-wide job settings
+     * @return the timeout that applies
+     */
+    public Duration timeout(String jobKind, Duration stepTimeout, JobSettings jobs) {
+        return stepTimeout == null ? runner(jobKind, jobs).defaultTimeout() : stepTimeout;
     }
 
     /**

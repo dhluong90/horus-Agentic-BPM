@@ -565,6 +565,13 @@ paths:
         `403 PERMISSION_DENIED`. The tenant comes from the caller, and a job of another tenant is
         `404 ASYNC_STEP_NOT_FOUND` with nothing written. The remote call itself is deduplicated by the job id
         (`AdapterCall.idempotencyKey`), which a retry keeps; the attempt id changes on every attempt.
+
+        The result is checked in the same transaction, whichever path reports it: a result reported here passes the
+        same output-schema and guardrail checks as one the engine's own executor records. An agent step's result that
+        breaks its output schema, that its guardrail refuses, or whose guardrail cannot be evaluated answers
+        `REFUSED`, and nothing of it is accepted: a malformed result is a failed attempt and the retry policy applies;
+        a refused one opens a review task for the step's reviewer or fails the job. Remote `serviceTask` results have
+        no such check.
       parameters:
         - name: jobId
           in: path
@@ -875,10 +882,12 @@ components:
         attemptId: { type: string }
         outcome:
           type: string
-          enum: [ACCEPTED, DUPLICATE, DISCARDED]
+          enum: [ACCEPTED, DUPLICATE, DISCARDED, REFUSED]
           description: |
             `ACCEPTED`: recorded. `DUPLICATE`: the attempt was already completed; nothing written. `DISCARDED`: the
-            attempt is no longer current; nothing changed in the process.
+            attempt is no longer current; nothing changed in the process. `REFUSED`: the result broke the step's
+            output schema or guardrail, or the guardrail could not be evaluated; nothing of it was accepted, and the
+            refusal is recorded in the history.
     Money:
       type: object
       required: [currency, amount]
