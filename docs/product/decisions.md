@@ -135,11 +135,11 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-111](#pd-111-overdue-time-is-shown-in-clock-hours-computed-by-the-engine) | Overdue time is shown in clock hours, computed by the engine | Decided (product manager, delegated, PD-073) |
 | [PD-112](#pd-112-rule-set-templates-are-served-by-the-engine-and-a-host-can-add-its-own) | Rule set templates are served by the engine and a host can add its own | Decided (product manager, delegated, PD-073) |
 | [PD-113](#pd-113-grid-readings-and-cell-checks-come-from-a-non-storing-validate-call) | Grid readings and cell checks come from a non-storing validate call | Decided (product manager, delegated, PD-073) |
-| [PD-114](#pd-114-one-operator-runs-a-migration-after-a-fresh-dry-run-with-a-reason) | One operator runs a migration after a fresh dry run, with a reason | Decided (product manager, delegated, PD-073) |
+| [PD-114](#pd-114-one-operator-runs-a-migration-after-a-fresh-dry-run-with-a-reason) | One operator runs a migration after a fresh dry run, with a reason | Decided (product manager, delegated, PD-073); amended by PD-131 |
 | [PD-115](#pd-115-a-simulation-report-is-run-and-stored-by-the-engine-and-bound-to-the-version) | A simulation report is run and stored by the engine and bound to the version | Decided (product manager, delegated, PD-073) |
 | [PD-116](#pd-116-evidence-exports-are-produced-by-the-engine-hashed-and-recorded) | Evidence exports are produced by the engine, hashed and recorded | Decided (product manager, delegated, PD-073) |
 | [PD-117](#pd-117-the-documentation-site-is-built-from-the-wiki-at-each-release) | The documentation site is built from the wiki at each release | Decided (product manager, delegated, PD-073) |
-| [PD-118](#pd-118-business-calendars-are-edited-in-the-cockpit-by-one-person-on-the-record) | Business calendars are edited in the cockpit by one person, on the record | Decided (product manager, delegated, PD-073) |
+| [PD-118](#pd-118-business-calendars-are-edited-in-the-cockpit-by-one-person-on-the-record) | Business calendars are edited in the cockpit by one person, on the record | Decided (product manager, delegated, PD-073); amended by PD-131 |
 | [PD-119](#pd-119-host-functions-are-pure-calculations-and-a-changed-function-version-warns-by-default) | Host functions are pure calculations, and a changed function version warns by default | Decided (product manager, delegated, PD-073) |
 | [PD-120](#pd-120-rule-coverage-reports-by-default-and-fails-the-build-only-when-the-host-asks) | Rule coverage reports by default and fails the build only when the host asks | Decided (product manager, delegated, PD-073) |
 | [PD-121](#pd-121-restoring-an-earlier-version-is-allowed-when-cockpit-drafts-are-off) | Restoring an earlier version is allowed when cockpit drafts are off | Decided (product manager, delegated, PD-073) |
@@ -151,6 +151,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-127](#pd-127-a-completed-child-process-is-undone-only-by-its-call-steps-handler) | A completed child process is undone only by its call step's handler | Decided (product manager, delegated, PD-073) |
 | [PD-128](#pd-128-offline-replay-covers-guardrail-and-schema-changes-prompt-replay-is-a-host-harness) | Offline replay covers guardrail and schema changes; prompt replay is a host harness | Decided (product manager, delegated, PD-073) |
 | [PD-129](#pd-129-the-example-model-adapters-are-openai-compatible-and-anthropic-messages) | The example model adapters are OpenAI-compatible and Anthropic Messages | Decided (product manager, delegated, PD-073) |
+| [PD-130](#pd-130-decision-log-retention-is-required-from-10-0x-warns-and-keeps-everything) | Decision log retention is required from 1.0; 0.x warns and keeps everything | Decided (product manager, delegated, PD-073) |
+| [PD-131](#pd-131-migrating-running-instances-and-editing-business-calendars-are-four-eyes-by-default) | Migrating running instances and editing business calendars are four-eyes by default | Decided (product manager, delegated, PD-073); amends PD-114 and PD-118 |
 
 ---
 
@@ -1596,6 +1598,8 @@ The architect reviewed the technical, non-functional and developer requirements 
 **Follow-ups.** Architect: the warning and the 12-month floor in DESIGN. Documentation: retention guidance in the decision log page.
 
 **Applied, 2026-11-19.** The product owner chose option 3, the stricter option: retention is required. Outside the `dev` profile the engine refuses to start until a retention period is set; the minimum is 12 months, in whole months. The `dev` profile needs no setting, so the 30-minute Getting Started path is unaffected; this answers the objection in the rationale above, which assumed demos run outside `dev`. No audit data is deleted by a product default, because the bank always chooses the period. Feature RE-F-31 in the [feature map](feature-map.md) is reworded. Timing, settled by [PD-020](#pd-020-conflict-partitioning-milestone-on-the-roadmap) (option 2, decided the same day): the setting, the start-up refusal and the purge arrive together with RE-F-31 in M3; before M3 nothing is deleted. Not applied here: `TR-OPS-04` in [requirements.md](requirements.md) (architecture and QA), DESIGN (architect, which now needs the refusal rather than a warning), the decision log wiki page (documentation).
+
+**Amended, 2026-11-20 by [PD-130](#pd-130-decision-log-retention-is-required-from-10-0x-warns-and-keeps-everything).** The requirement stands as the 1.0 rule. Before 1.0, an unset period warns at start-up and keeps everything instead of refusing to start.
 
 ### PD-051 Tenant exit: export and purge
 
@@ -3369,6 +3373,8 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 
 ### PD-114 One operator runs a migration after a fresh dry run, with a reason
 
+**Amended, 2026-11-21 by [PD-131](#pd-131-migrating-running-instances-and-editing-business-calendars-are-four-eyes-by-default).** Execution now needs a second holder of `processes:migration:manage` who approves it. Option 2 (four-eyes) is adopted, and `single` is accepted only in the `dev` profile. The fresh dry run and the reason still apply.
+
 | Field | Value |
 |---|---|
 | Date | 2026-11-20 |
@@ -3448,6 +3454,8 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Follow-ups.** Maintainers (engineering): the release workflow in #119. Documentation: the sidebar order the site follows.
 
 ### PD-118 Business calendars are edited in the cockpit by one person, on the record
+
+**Amended, 2026-11-21 by [PD-131](#pd-131-migrating-running-instances-and-editing-business-calendars-are-four-eyes-by-default).** A calendar change now needs a second holder of `processes:calendar:manage` who approves it. Option 2 (four-eyes) is adopted, and `single` is accepted only in the `dev` profile. The record of who, when, old and new value still applies.
 
 | Field | Value |
 |---|---|
@@ -3695,3 +3703,56 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Consequences.** The examples say they are examples, not endorsements or supported artifacts; no vendor SDK is used; keys come from the environment. Configurable: the endpoint and model in each example's configuration.
 
 **Follow-ups.** Maintainers (engineering): #100. Documentation: the adapter how-to.
+
+### PD-130 Decision log retention is required from 1.0; 0.x warns and keeps everything
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | PD-050 requires a host to set decision log retention and refuses start-up outside `dev` without it. The retention change for issue #104 (PR #371) first did that, then was changed so an unset period keeps everything with an INFO line, without checking PD-050. Keep PD-050, or replace it with "keep forever by default"? |
+| Raised by | Maintainers (engineering), issue #104 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1: keep PD-050 as the 1.0 rule, with a warn-and-keep transition in 0.x |
+
+**Options considered**
+
+1. Keep PD-050 and add an upgrade path (chosen). Consequence: 0.x hosts that upgrade from 0.1.0, which has no retention setting, keep running and lose nothing. Enforcement arrives at 1.0, a major version, with a release note.
+2. Replace PD-050 with "keep forever by default". Consequence: no upgrade friction, but a bank can run for years without ever choosing a period. Storage grows without notice, and a later switch to a finite period drops the oldest months in one step.
+
+**Recommendation and decision.** Option 1. Banks must keep decision records for a minimum period set by their regulator and often longer for credit decisions, while data-protection law (GDPR, PDPD) pushes the other way for personal data. Both are the bank's call and neither has a safe product default, so the product must make the bank choose. A dropped partition cannot be undone, so the transition must never delete: an unset period deletes nothing, ever. The audit trail stays immutable between the bank's explicit choices. Retention is not an erasure mechanism for one person's data; that stays with the tenant exit and personal-data decisions.
+
+**Consequences.**
+
+- Until 1.0, with no period set: start-up succeeds outside `dev`, nothing is dropped, and a WARN line (not INFO) says that retention is unset, that everything is kept, the growth per row (PD-045) and the setting name. The line repeats on every start-up.
+- From 1.0, outside `dev`: start-up is refused with a message naming the setting, as PD-050 says. The `dev` profile needs no setting.
+- The set of valid values stays whole months, minimum 12 (PD-050), plus an explicit `keep-forever` value. An explicit `keep-forever` satisfies the 1.0 requirement, so a bank that must keep everything makes that choice on purpose and is not forced to invent a long number.
+- No purge runs unless a period is set. The first purge for a host that sets a period follows the existing drop rules for whole monthly partitions; nothing in this decision changes them.
+- The 1.0 release notes and the upgrade guide state the new required setting.
+
+**Follow-ups.** Maintainers (engineering): issue #104 and PR #371 (change the INFO line to WARN, add `keep-forever`, add the 1.0 enforcement as a tracked item, test that an unset period never drops a partition). Architect: DESIGN follows. Product manager: roadmap and feature map RE-F-31 wording. Documentation: retention guidance and the upgrade note.
+
+### PD-131 Migrating running instances and editing business calendars are four-eyes by default
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | PD-126 makes maker-checker non-negotiable for resolving an incident. PD-114 (instance migration) and PD-118 (business calendars) let one person act alone. Both change how money processes run. Do they follow PD-126? |
+| Raised by | Product manager, consistency review after PD-107 to PD-129 merged |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-21, option 1; amends PD-114 and PD-118 |
+
+**Options considered**
+
+1. Four-eyes by default for both, one person only in the `dev` profile (chosen). Consequence: a second holder confirms every migration and every calendar change. A little more effort for the bank, no new rule to explain.
+2. Keep one person for both. Consequence: one person can move live instances to another version, or move a working-day boundary that sets deadlines, with no second check. This is the gap PD-126 closed for incidents.
+3. Four-eyes for migration, one person for calendars. Consequence: no exception is needed for calendars that is strong enough to keep. A wrong working day changes the due time of every future task, and an extra holiday is not so urgent that a second holder cannot confirm it. No exception is kept.
+
+**Recommendation and decision.** Option 1. The earlier reasons were speed and low risk. A fresh dry run makes a migration predictable, but it does not replace a second person who reads the plan, and a calendar change is not risk-free just because its source is obvious. No exception is kept, so no reason for one is recorded.
+
+**Consequences.**
+- Migration: the holder of `processes:migration:manage` proposes an execution with a reason, against a dry run of the same plan less than an hour old (PD-114). A second holder, never the proposer, approves or rejects it. Only the approval moves instances. The dry run must still be fresh when the second person approves, otherwise `409 DRY_RUN_REQUIRED`. History records proposer, approver, reason and each moved instance.
+- Calendars: the holder of `processes:calendar:manage` proposes a change; a second holder, never the proposer, approves or rejects it. Only the approval applies it, to deadlines set after it (PE-F-11). History records proposer, approver, the old and the new value.
+- Settings `processes.migration.approval` and `processes.calendar.approval`: `four-eyes` by default. `single` is accepted only in the `dev` profile; start-up is refused with it in any other profile, as in PD-126.
+- Contract changes follow in the process engine: proposal state, approve and reject commands, and the events carry both people. The cockpit screens show a pending proposal.
+- Configurable: only the `dev` relaxation.
+
+**Follow-ups.** Architect: the process engine SPEC and OpenAPI change for both proposals. Maintainers (engineering): #106 and #107 (migration), #125 (calendars). If four-eyes for migration misses its milestone, migration execution does not ship; it never ships with one person outside `dev`. Product manager: the roadmap and feature map notes for CK-F-18 and CK-F-19.
+
