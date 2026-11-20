@@ -85,7 +85,7 @@ rewrite_references() {
   # database that has already applied them. verify fails if one still names the old root.
   # NUL-separated through a file: command substitution would drop the NUL bytes.
   list=$(mktemp)
-  git grep -I -l -z -E "$LEFTOVER_PATTERN" -- . "${HISTORY_EXCLUDES[@]}" ':(exclude)*.sql' > "$list" || true
+  git grep -I -l -z -E "$LEFTOVER_PATTERN" -- . ${HISTORY_EXCLUDES[@]+"${HISTORY_EXCLUDES[@]}"} ':(exclude)*.sql' > "$list" || true
   count=$(tr -cd "\\000" < "$list" | wc -c | tr -d " ")
   if [ "$count" = 0 ]; then
     rm -f "$list"
@@ -126,7 +126,7 @@ cmd_apply() {
 
 check_leftovers() {
   local hits paths
-  hits=$(git grep --untracked -n -I -E "$LEFTOVER_PATTERN" -- . "${HISTORY_EXCLUDES[@]}" || true)
+  hits=$(git grep --untracked -n -I -E "$LEFTOVER_PATTERN" -- . ${HISTORY_EXCLUDES[@]+"${HISTORY_EXCLUDES[@]}"} || true)
   if [ -n "$hits" ]; then
     printf '%s\n' "$hits" >&2
     fail "the old package root is still named in $(printf '%s\n' "$hits" | cut -d: -f1 | sort -u | wc -l | tr -d ' ') files (above)"
@@ -205,7 +205,7 @@ build_classpath() {
   local tree="$1" out="$2"
   local repo_args=()
   [ -z "${MAVEN_REPO_LOCAL:-}" ] || repo_args=("-Dmaven.repo.local=$MAVEN_REPO_LOCAL")
-  mvn -B -ntp -q -f "$tree/pom.xml" "${repo_args[@]}" -pl rule-engine/rule-engine-postgres -am \
+  mvn -B -ntp -q -f "$tree/pom.xml" ${repo_args[@]+"${repo_args[@]}"} -pl rule-engine/rule-engine-postgres -am \
     -DskipTests -Dcockpit.bundle.skip=true \
     package dependency:build-classpath -Dmdep.includeScope=test -Dmdep.outputFile="$out"
   printf ':%s' "$tree/rule-engine/rule-engine-postgres/target/classes" >> "$out"
