@@ -31,15 +31,15 @@ Needs JDK 21 or later and Docker.
 docker run -d --name horus-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
   -e POSTGRES_PASSWORD=change-me -p 5432:5432 postgres:16-alpine
 
-mvn -B -pl examples/rule-engine-only -am package -DskipTests      # from the repository root
-HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+mvn -B -pl examples/rule-engine-only -am package -DskipTests -Dcockpit.bundle.skip=true   # from the repository root, Java only
+HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 ```
 
 Check it (health is public; everything else needs a caller):
 
 ```bash
 curl -s localhost:8080/actuator/health
-# {"status":"UP"}   component names are shown to authorised callers only (show-components: when-authorized)
+# {"groups":["liveness","readiness"],"status":"UP"}   component names are shown to authorised callers only (show-components: when-authorized)
 
 docker exec horus-pg psql -U horus -d horus -c '\dt'
 # flyway_schema_history, loan_application, rle_decision (partitioned), rle_decision_YYYY_MM (this month and next),
@@ -77,7 +77,7 @@ On the `dev` profile the host has two demo users, Lan (role `PRICING_AUTHOR`) an
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=choose-one HORUS_DB_PASSWORD=change-me \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 
 # sign in as lan with the form, keeping the session cookie in ./jar
 CSRF=$(curl -s -c jar -b jar localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
@@ -112,11 +112,15 @@ This walkthrough uses the demo users of the `dev` profile, in tenant `bank-a` (t
 | `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
 | `tuan` | `TELLER` | `rules:evaluate` |
 
+A recording of steps 1 to 6 on a fresh start is in [`media/rule-lifecycle-walkthrough.gif`](media/rule-lifecycle-walkthrough.gif) (the same session as an [asciinema cast](media/rule-lifecycle-walkthrough.cast); play it with `asciinema play`). It shows the import, the self-approval refused with `403 SELF_APPROVAL_FORBIDDEN`, Minh's approval, the 0 VND fee for a Gold customer and the decision row.
+
+![Terminal recording of the rule lifecycle walkthrough](media/rule-lifecycle-walkthrough.gif)
+
 Start PostgreSQL as above, then start the host on the `dev` profile:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 H=localhost:8080/api/bpm/rules/v1
 ```
 
@@ -141,8 +145,9 @@ H=localhost:8080/api/bpm/rules/v1
 3. Hoa tries to approve her own request and is refused:
 
    ```bash
-   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
-   # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
+   curl -s -w '\nHTTP %{http_code}\n' -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
+   # {"type":"...","title":"Forbidden","status":403,"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester or author of card-fee v1 cannot approve it",...}
+   # HTTP 403
    ```
 
 4. Minh approves; the version is published and takes effect now:
@@ -311,7 +316,7 @@ The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`Host
 npm --prefix cockpit/web ci && npm --prefix cockpit/web run build      # from the repository root
 mvn -B -pl examples/rule-engine-only -am package -DskipTests
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 ```
 
 Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
@@ -343,7 +348,7 @@ Draft editing in the cockpit is off by default in 0.1.0 (PD-094); this example t
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate' \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:evaluate'
 ```
