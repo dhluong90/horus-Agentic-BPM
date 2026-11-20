@@ -21,6 +21,7 @@ import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
 import io.github.dhluong90.bpm.process.api.StepFailedException;
 import io.github.dhluong90.bpm.process.api.TaskService;
+import io.github.dhluong90.bpm.process.api.TaskView;
 import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.internal.json.EngineJson;
 import java.nio.charset.StandardCharsets;
@@ -29,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -212,6 +214,37 @@ class ProcessRestErrorMatrixTest {
         assertThat(json(bad).get("code").stringValue()).isEqualTo("INPUT_INVALID");
     }
 
+    @Test
+    void TR_IDEM_03_claim_and_unclaim_need_if_match_and_an_idempotency_key_before_the_engine_runs() throws Exception {
+        String task = "01JD2X5K9T1Q4N8V2M7B3C6D0G";
+        for (String action : List.of(":claim", ":unclaim")) {
+            assertThat(perform(post(BASE + "/tasks/" + task + action).header("Idempotency-Key", "k")).getStatus())
+                    .as(action).isEqualTo(428);
+            assertThat(perform(post(BASE + "/tasks/" + task + action).header("If-Match", "\"0\"")).getStatus())
+                    .as(action).isEqualTo(428);
+        }
+        assertThat(fake.calls).isEmpty();
+    }
+
+    @Test
+    void a_claim_answers_the_task_with_its_lock_version_as_etag_and_the_callers_actions_in_a_fixed_order()
+            throws Exception {
+        String task = "01JD2X5K9T1Q4N8V2M7B3C6D0G";
+
+        MockHttpServletResponse claimed = perform(post(BASE + "/tasks/" + task + ":claim").header("If-Match", "\"0\"")
+                .header("Idempotency-Key", "claim-1"));
+        MockHttpServletResponse read = perform(get(BASE + "/tasks/" + task));
+
+        assertThat(claimed.getStatus()).isEqualTo(200);
+        assertThat(claimed.getHeader("ETag")).isEqualTo("\"1\"");
+        JsonNode body = json(claimed);
+        assertThat(body.get("claimedBy").stringValue()).isEqualTo("an");
+        assertThat(body.get("allowedActions").toString()).isEqualTo("[\"unclaim\",\"complete\"]");
+        assertThat(read.getHeader("ETag")).isEqualTo("\"0\"");
+        assertThat(json(read).get("fourEyes").booleanValue()).isTrue();
+        assertThat(fake.calls).containsExactly("claim " + task + " 0 claim-1");
+    }
+
     // ---- helpers ------------------------------------------------------------------------------------------
 
     private MockHttpServletResponse perform(RequestBuilder request) throws Exception {
@@ -272,6 +305,29 @@ class ProcessRestErrorMatrixTest {
             maybeFail();
             calls.add("cancel " + instanceId + " " + expectedLockVersion + " " + reason + " " + idempotencyKey);
             return instance(expectedLockVersion + 1, "CANCELLED");
+        }
+
+        @Override
+        public TaskView task(String taskId) {
+            maybeFail();
+            return new TaskView(taskId, INSTANCE, "card-fee-review", 1, "APP-1001", "officer-review", "Officer reviews",
+                    "role:CARD_OFFICER", true, "OPEN", 0, null, null, STARTED, null, null, Set.of("claim"));
+        }
+
+        @Override
+        public TaskView claim(String taskId, long expectedLockVersion, String idempotencyKey) {
+            maybeFail();
+            calls.add("claim " + taskId + " " + expectedLockVersion + " " + idempotencyKey);
+            return new TaskView(taskId, INSTANCE, "card-fee-review", 1, "APP-1001", "officer-review", "Officer reviews",
+                    "role:CARD_OFFICER", true, "CLAIMED", expectedLockVersion + 1, "an", STARTED, STARTED, null, null,
+                    Set.of("complete", "unclaim"));
+        }
+
+        @Override
+        public TaskView unclaim(String taskId, long expectedLockVersion, String idempotencyKey) {
+            maybeFail();
+            calls.add("unclaim " + taskId + " " + expectedLockVersion + " " + idempotencyKey);
+            return task(taskId);
         }
 
         @Override

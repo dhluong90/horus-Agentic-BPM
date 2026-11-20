@@ -33,6 +33,7 @@ import io.github.dhluong90.bpm.process.api.StepFailedException;
 import io.github.dhluong90.bpm.process.api.TaskNotAssignedException;
 import io.github.dhluong90.bpm.process.api.TaskNotFoundException;
 import io.github.dhluong90.bpm.process.api.TaskService;
+import io.github.dhluong90.bpm.process.api.TaskView;
 import io.github.dhluong90.bpm.process.api.UnauthenticatedException;
 import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.api.VersionConflictException;
@@ -482,6 +483,79 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     // ---- TaskService --------------------------------------------------------------------------------------
 
     @Override
+    public TaskView task(String taskId) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_TASK_WORK);
+        return transactions.inTransaction(() -> {
+            TaskRow task = store.findTask(tenant, taskId).orElseThrow(() -> new TaskNotFoundException("No task " + taskId));
+            InstanceRow row = store.findInstance(tenant, task.instanceId()).orElseThrow();
+            return withActions(taskView(task, row), caller, participants(tenant, row));
+        });
+    }
+
+    @Override
+    public TaskView claim(String taskId, long expectedLockVersion, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_TASK_WORK);
+        if (idempotencyKey == null) {
+            throw new PreconditionRequiredException("Claiming a task needs an Idempotency-Key");
+        }
+        String requestHash = Hashes.sha256Parts("claim", caller, taskId, String.valueOf(expectedLockVersion));
+        TaskView claimed = transactions.inTransaction(() -> idempotent(tenant, "claim", idempotencyKey, requestHash, () -> {
+            Locked locked = lockTask(tenant, taskId, expectedLockVersion);
+            TaskRow task = locked.task();
+            if (!"OPEN".equals(task.status())) {
+                throw new InvalidStateException("Task " + taskId + " is " + task.status());
+            }
+            if (!assigned(task.assignee(), caller)) {
+                throw new TaskNotAssignedException("The caller is not an assignee of task " + taskId);
+            }
+            if (task.fourEyes() && participants(tenant, locked.instance()).contains(caller)) {
+                throw new SelfApprovalForbiddenException("The identity that started this instance or completed an earlier"
+                        + " task of it cannot claim this four-eyes task");
+            }
+            Instant now = clock.instant();
+            if (store.claimTask(tenant, taskId, task.lockVersion(), caller, now) != 1) {
+                throw new VersionConflictException("Task " + taskId + " changed concurrently");
+            }
+            recordTaskChange(locked, "TASK_CLAIMED", "processes.task.claimed.v1", caller, now,
+                    Map.of("claimedBy", caller));
+            return taskView(store.findTask(tenant, taskId).orElseThrow(), locked.instance());
+        }, Views::taskToJson, Views::taskFromJson));
+        return withActions(claimed, caller, transactions.inTransaction(() -> participants(tenant,
+                store.findInstance(tenant, claimed.instanceId()).orElseThrow())));
+    }
+
+    @Override
+    public TaskView unclaim(String taskId, long expectedLockVersion, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_TASK_WORK);
+        if (idempotencyKey == null) {
+            throw new PreconditionRequiredException("Unclaiming a task needs an Idempotency-Key");
+        }
+        String requestHash = Hashes.sha256Parts("unclaim", caller, taskId, String.valueOf(expectedLockVersion));
+        TaskView open = transactions.inTransaction(() -> idempotent(tenant, "unclaim", idempotencyKey, requestHash, () -> {
+            Locked locked = lockTask(tenant, taskId, expectedLockVersion);
+            TaskRow task = locked.task();
+            if (!"CLAIMED".equals(task.status())) {
+                throw new InvalidStateException("Task " + taskId + " is " + task.status());
+            }
+            if (!caller.equals(task.claimedBy())) {
+                throw new TaskNotAssignedException("Only the claimant can hand task " + taskId + " back");
+            }
+            Instant now = clock.instant();
+            if (store.unclaimTask(tenant, taskId, task.lockVersion(), caller) != 1) {
+                throw new VersionConflictException("Task " + taskId + " changed concurrently");
+            }
+            recordTaskChange(locked, "TASK_UNCLAIMED", "processes.task.unclaimed.v1", caller, now,
+                    Map.of("unclaimedBy", caller));
+            return taskView(store.findTask(tenant, taskId).orElseThrow(), locked.instance());
+        }, Views::taskToJson, Views::taskFromJson));
+        return withActions(open, caller, transactions.inTransaction(() -> participants(tenant,
+                store.findInstance(tenant, open.instanceId()).orElseThrow())));
+    }
+
+    @Override
     public ProcessInstance complete(String taskId, Map<String, Object> result, long expectedLockVersion,
             String idempotencyKey) {
         String tenant = tenant();
@@ -493,14 +567,17 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String requestHash = Hashes.sha256Parts("complete", caller, taskId, boundedJson(values, "result"),
                 String.valueOf(expectedLockVersion));
         return transactions.inTransaction(() -> idempotent(tenant, "complete", idempotencyKey, requestHash, () -> {
-            TaskRow task = store.findTask(tenant, taskId).orElseThrow(() -> new TaskNotFoundException("No task " + taskId));
-            InstanceRow row = store.lockInstance(tenant, task.instanceId()).orElseThrow();
-            task = store.findTask(tenant, taskId).orElseThrow();
-            if (expectedLockVersion != task.lockVersion()) {
-                throw new VersionConflictException("Task " + taskId + " is at lock version " + task.lockVersion());
+            Locked locked = lockTask(tenant, taskId, expectedLockVersion);
+            TaskRow task = locked.task();
+            InstanceRow row = locked.instance();
+            if ("OPEN".equals(task.status())) {
+                throw new InvalidStateException("Task " + taskId + " is OPEN; claim it first");
             }
-            if (!"OPEN".equals(task.status()) && !"CLAIMED".equals(task.status())) {
+            if (!"CLAIMED".equals(task.status())) {
                 throw new InvalidStateException("Task " + taskId + " is " + task.status());
+            }
+            if (!caller.equals(task.claimedBy())) {
+                throw new TaskNotAssignedException("Task " + taskId + " is claimed by another user");
             }
             if (!assigned(task.assignee(), caller)) {
                 throw new TaskNotAssignedException("The caller is not an assignee of task " + taskId);
@@ -521,6 +598,72 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             run(definition, row, state, new Command.CompleteTask(taskId, task.tokenId(), values, caller));
             return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
         }, Views::instanceToJson, Views::instanceFromJson));
+    }
+
+    /** A task and its instance, read under the instance row lock, with the expected lock version checked. */
+    private record Locked(TaskRow task, InstanceRow instance) {
+    }
+
+    /**
+     * Takes the instance row lock, so every change of one instance's tasks serialises with its completions and its
+     * cancellation, then rereads the task and checks the lock version first: a stale request is
+     * {@code VERSION_CONFLICT} whatever else changed (PRE-003).
+     */
+    private Locked lockTask(String tenant, String taskId, long expectedLockVersion) {
+        TaskRow found = store.findTask(tenant, taskId).orElseThrow(() -> new TaskNotFoundException("No task " + taskId));
+        InstanceRow row = store.lockInstance(tenant, found.instanceId()).orElseThrow();
+        TaskRow task = store.findTask(tenant, taskId).orElseThrow();
+        if (expectedLockVersion != task.lockVersion()) {
+            throw new VersionConflictException("Task " + taskId + " is at lock version " + task.lockVersion());
+        }
+        return new Locked(task, row);
+    }
+
+    /** The audit entry and the event of a claim or an unclaim, in the transaction of the change. */
+    private void recordTaskChange(Locked locked, String historyType, String eventType, String actor, Instant now,
+            Map<String, Object> extra) {
+        TaskRow task = locked.task();
+        InstanceRow row = locked.instance();
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("taskId", task.id());
+        details.putAll(extra);
+        store.appendHistory(task.tenantId(), row.id(), row.definitionId(), List.of(new HistoryEntry(historyType,
+                task.nodeId(), task.tokenId(), null, actor, now, details)));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("taskId", task.id());
+        payload.put("instanceId", row.id());
+        payload.put("nodeId", task.nodeId());
+        payload.put("assignee", task.assignee());
+        payload.putAll(extra);
+        payload.put("definitionKey", row.definitionKey());
+        payload.put("version", row.definitionVersion());
+        if (row.businessKey() != null) {
+            payload.put("businessKey", row.businessKey());
+        }
+        // One event per task transition, so its id is derived from the task and the lock version it reaches.
+        publish(new ProcessEventPublisher.Event(io.github.dhluong90.bpm.process.internal.exec.Ids.child(task.id(),
+                task.lockVersion() + 1), eventType, task.tenantId(), now, payload), row.id());
+    }
+
+    private static TaskView taskView(TaskRow t, InstanceRow row) {
+        return new TaskView(t.id(), t.instanceId(), row.definitionKey(), row.definitionVersion(), row.businessKey(),
+                t.nodeId(), t.name(), t.assignee(), t.fourEyes(), t.status(), t.lockVersion(), t.claimedBy(),
+                t.claimedAt(), t.createdAt(), t.completedBy(), t.completedAt(), java.util.Set.of());
+    }
+
+    /** What this caller may do now; computed per caller, never stored with an idempotent answer. */
+    private TaskView withActions(TaskView task, String caller, java.util.Set<String> participants) {
+        java.util.Set<String> actions = new java.util.LinkedHashSet<>();
+        boolean refusedByFourEyes = task.fourEyes() && participants.contains(caller);
+        if ("OPEN".equals(task.status()) && assigned(task.assignee(), caller) && !refusedByFourEyes) {
+            actions.add("claim");
+        } else if ("CLAIMED".equals(task.status()) && caller.equals(task.claimedBy())) {
+            actions.add("unclaim");
+            if (assigned(task.assignee(), caller) && !refusedByFourEyes) {
+                actions.add("complete");
+            }
+        }
+        return task.withAllowedActions(actions);
     }
 
     /**
@@ -608,7 +751,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     switch (effect) {
                         case Effect.CreateUserTask task -> newTasks.add(new TaskRow(state.tenantId(), task.taskId(),
                                 state.instanceId(), task.tokenId(), definition.id(), task.nodeId(), task.name(),
-                                task.assignee(), task.fourEyes(), "OPEN", 0, null, clock.instant(), null));
+                                task.assignee(), task.fourEyes(), "OPEN", 0, null, null, null, clock.instant(), null));
                         case Effect.CancelUserTask cancel -> cancelledTasks.add(cancel.taskId());
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             if (call.kind() == ServiceKind.DECISION && !state.tenantId().equals(tenants.currentTenantId())) {
@@ -694,7 +837,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 .toList();
         List<ProcessInstance.Task> tasks = store.tasks(tenant, row.id()).stream()
                 .map(t -> new ProcessInstance.Task(t.id(), t.nodeId(), t.name(), t.assignee(), t.status(), t.lockVersion(),
-                        t.completedBy()))
+                        t.claimedBy(), t.claimedAt(), t.completedBy()))
                 .toList();
         return new ProcessInstance(row.id(), row.definitionKey(), row.definitionVersion(), row.businessKey(), row.status(),
                 Values.readMap(row.variablesJson()), tokens, tasks, row.lockVersion(), row.startedBy(), row.startedAt(),
