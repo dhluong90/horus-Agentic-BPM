@@ -294,6 +294,13 @@ public final class JdbcRuleStore implements RuleStore {
     }
 
     @Override
+    public java.util.Set<String> maskingKeyScopes(String keyId) {
+        // Engine-internal, across tenants on purpose: the start-up key id check runs outside any request.
+        return new java.util.TreeSet<>(jdbc.sql("SELECT tenant_id FROM rle_masking_key_check WHERE key_id = :keyId")
+                .param("keyId", keyId).query(String.class).list());
+    }
+
+    @Override
     public List<VersionInputs> liveVersionInputs() {
         // Engine-internal, across tenants on purpose: the start-up masking check (RLE-035) runs outside any request.
         return jdbc.sql("""

@@ -19,9 +19,13 @@ sequenceDiagram
       E-->>H: start-up fails naming horus.bpm.rules.masking.hmac-key and the rule set
     end
     E->>P: configuredKeys(), current and previous, host keys under scope *
-    E->>DB: INSERT check value per scope and key id ON CONFLICT DO NOTHING, then SELECT, one transaction
-    alt a known key id comes back with a different check value
-      E-->>H: start-up fails naming the key id and both check values, never the key
+    E->>P: searchKeys(tenant) for every tenant with live rule sets
+    alt a key in use is not declared in configuredKeys()
+      E-->>H: start-up fails naming the policy class, the tenant and the key id, never the key
+    end
+    E->>DB: INSERT check value per scope and key id, in scope then key id order, ON CONFLICT DO NOTHING, then SELECT, one transaction
+    alt a known key id comes back with a different check value, or a key id moves between the host and a tenant
+      E-->>H: start-up fails naming the key id and the check values, never the key, and records nothing
     end
   end
   rect rgb(232,245,233)

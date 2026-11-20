@@ -80,10 +80,60 @@ class MaskedInputsPostgresIT {
         new RuleEngineSchemaMigrator(db).migrate();
         RuleEngineTransactions transactions = new RuleEngineTransactions(new DataSourceTransactionManager(db));
         new DecisionLogPartitions(db, transactions).ensureCurrentAndNextMonth(NOW);
-        MaskingPolicy perTenant = tenant -> Optional.ofNullable(Map.of("bank-a", KEY_A, "bank-b", KEY_B).get(tenant))
-                .map(MaskingKey::of);
-        engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
-                EngineSettings.defaults(), perTenant);
+        engines = engines(declared(Map.of("bank-a", List.of(MaskingKey.of(KEY_A)),
+                "bank-b", List.of(MaskingKey.of(KEY_B)))));
+    }
+
+    RuleEngines engines(MaskingPolicy policy) {
+        RuleEngineTransactions transactions = new RuleEngineTransactions(new DataSourceTransactionManager(db));
+        return PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
+                EngineSettings.defaults(), policy);
+    }
+
+    /** A host policy with one key per tenant, each declared under its tenant, as a vault-backed policy would. */
+    static MaskingPolicy declared(Map<String, List<MaskingKey>> keys) {
+        return new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenant) {
+                return Optional.ofNullable(keys.get(tenant)).map(List::getFirst);
+            }
+
+            @Override
+            public Map<String, List<MaskingKey>> configuredKeys() {
+                return keys;
+            }
+        };
+    }
+
+    @Test
+    void TR_SEC_10_key_ids_never_move_between_the_host_and_a_tenant_and_a_refused_start_records_nothing() {
+        // bank-a wrote under the host key k1; the host has moved to k2 and dropped k1.
+        engines(MaskingPolicy.withKey(MaskingKey.of("k1", KEY_A))).maskingCheck().verify(List.of());
+        MaskingPolicy reused = new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenant) {
+                return Optional.empty();
+            }
+
+            @Override
+            public Map<String, List<MaskingKey>> configuredKeys() {
+                return Map.of(HOST_SCOPE, List.of(MaskingKey.of("k2", KEY_B)),
+                        "bank-a", List.of(MaskingKey.of("k1", seeded(33L))));
+            }
+        };
+        assertThatThrownBy(() -> engines(reused).maskingCheck().verify(List.of()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("masking key id k1 of tenant bank-a")
+                .hasMessageContaining("already recorded as a host key id");
+        // Rolled back: neither the new host key k2 nor bank-a's k1 was recorded.
+        assertThat(JdbcClient.create(db).sql("SELECT tenant_id || ' ' || key_id FROM rle_masking_key_check")
+                .query(String.class).list()).containsExactly("* k1");
+        // The reverse: bank-b's own key t1, then a host key with id t1.
+        engines(declared(Map.of("bank-b", List.of(MaskingKey.of("t1", KEY_B))))).maskingCheck().verify(List.of());
+        assertThatThrownBy(() -> engines(MaskingPolicy.withKey(MaskingKey.of("t1", seeded(34L)))).maskingCheck()
+                .verify(List.of()))
+                .hasMessageContaining("host masking key id t1")
+                .hasMessageContaining("already recorded as a key id of tenant bank-b");
     }
 
     @Test

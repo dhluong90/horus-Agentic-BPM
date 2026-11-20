@@ -165,4 +165,13 @@ public interface RuleStore {
      * @return the recorded check value
      */
     String maskingKeyCheck(String scope, String keyId, String checkValue, Instant now);
+
+    /**
+     * Returns every scope under which a masking key id is recorded, so start-up can refuse an id that a host key and a
+     * tenant key would share over time. Engine-internal, across tenants on purpose, used once at start-up.
+     *
+     * @param keyId the key id
+     * @return the scopes ({@code *} for the host, otherwise tenant ids), possibly empty
+     */
+    java.util.Set<String> maskingKeyScopes(String keyId);
 }

@@ -3,11 +3,13 @@
 -- back with different key bytes would make earlier tokens unfindable and two keys indistinguishable. At start-up,
 -- after the migrations and outside any request, the starter records the check value of every configured key,
 -- current and previous (INSERT ... ON CONFLICT DO NOTHING, then SELECT, in one short transaction), and refuses to
--- start when a known key id comes back with a different check value. The runtime user therefore needs SELECT and
--- INSERT on this table. Rows are never updated or deleted by the engine: a retired key id stays reserved.
+-- start when a known key id comes back with a different check value, or when a key id recorded for the host comes
+-- back for a tenant or the reverse. The runtime user therefore needs SELECT and INSERT on this table. Rows are never
+-- updated or deleted by the engine: a retired key id stays reserved.
 --
--- check_value is the first 8 bytes of HMAC-SHA256(key, 'horus-bpm/masking/v1/kcv') in hex. It is not secret and
--- reveals nothing about the key or any token. tenant_id is the tenant of a tenant's own key, or '*' for a host key
+-- check_value is the first 8 bytes of HMAC-SHA256(HKDF-SHA256(key, info 'horus-bpm/masking/v1/kcv'), empty message)
+-- in hex: a key derived for the check value alone, so it is never a token. It is not secret and reveals nothing about
+-- the key or any token. tenant_id is the tenant of a tenant's own key, or '*' for a host key
 -- shared by every tenant without its own key (a host key is recorded once, before any tenant derivation).
 --
 -- Additive and forward-only. Rollback, if ever needed, is a new forward migration: DROP TABLE rle_masking_key_check;

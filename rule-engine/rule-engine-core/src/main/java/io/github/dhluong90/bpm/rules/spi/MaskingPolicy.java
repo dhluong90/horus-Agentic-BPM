@@ -42,10 +42,17 @@ public interface MaskingPolicy {
      * Returns every key this policy is configured with, current and earlier, by scope: {@value #HOST_SCOPE} for the
      * host keys as configured (before any tenant derivation) and a tenant id for a tenant's own keys. At start-up the
      * engine records each key's check value ({@link MaskingKey#checkValue()}) by scope and key id, and refuses to
-     * start when a known key id comes back with a different check value, so one id never names two keys. A tenant
-     * must not be named {@value #HOST_SCOPE}.
+     * start when a known key id comes back with a different check value, or when a key id moves between the host and
+     * a tenant, so one id never names two keys.
      *
-     * @return the keys by scope; the default is empty, which leaves the check value check out
+     * <p>Returning keys here is how a policy of the host's own takes part in that check, and it must: at start-up,
+     * every key that {@link #hmacKey(String)} or {@link #searchKeys(String)} returns for a tenant with live rule sets
+     * must be declared here, either under the tenant id as it is or as a host key under {@value #HOST_SCOPE} whose
+     * {@link MaskingKey#forTenant(String) tenant subkey} it is; otherwise the engine does not start. The map must
+     * include the previous keys too: a key left out is never checked, so a reused id would go unnoticed. A tenant must
+     * not be named {@value #HOST_SCOPE}. Called once at start-up, outside any request.
+     *
+     * @return the keys by scope; the default is empty, which only a policy without keys may keep
      */
     default java.util.Map<String, java.util.List<MaskingKey>> configuredKeys() {
         return java.util.Map.of();
@@ -87,13 +94,24 @@ public interface MaskingPolicy {
 
     /**
      * Returns a policy with one host key shared by every tenant. The key is never used directly: each tenant gets its
-     * own subkey, {@link MaskingKey#forTenant(String)}, so two tenants never get the same token for one value.
+     * own subkey, {@link MaskingKey#forTenant(String)}, so two tenants never get the same token for one value. The
+     * host key is declared under {@value #HOST_SCOPE} in {@link #configuredKeys()}.
      *
      * @param hostKey the host key
      * @return the policy
      */
     static MaskingPolicy withKey(MaskingKey hostKey) {
         java.util.Objects.requireNonNull(hostKey, "hostKey must not be null");
-        return tenantId -> Optional.of(hostKey.forTenant(tenantId));
+        return new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenantId) {
+                return Optional.of(hostKey.forTenant(tenantId));
+            }
+
+            @Override
+            public java.util.Map<String, java.util.List<MaskingKey>> configuredKeys() {
+                return java.util.Map.of(HOST_SCOPE, java.util.List.of(hostKey));
+            }
+        };
     }
 }

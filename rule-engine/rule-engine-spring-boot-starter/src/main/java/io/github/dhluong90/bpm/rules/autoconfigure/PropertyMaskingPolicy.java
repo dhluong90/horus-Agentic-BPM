@@ -77,6 +77,12 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
             if (settings == null) {
                 return;
             }
+            if (HOST_SCOPE.equals(tenant)) {
+                // '*' is the scope of the host keys in rle_masking_key_check; a tenant so named would share its rows.
+                invalid.add(PREFIX + "tenants.[" + HOST_SCOPE + "] (the tenant id " + HOST_SCOPE
+                        + " is reserved for the host keys; give the tenant its real id)");
+                return;
+            }
             List<Entry> tenantSet = new ArrayList<>();
             if (settings.hmacKey() != null) {
                 String property = PREFIX + "tenants." + tenant + ".hmac-key";
@@ -226,33 +232,44 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
         if (tenantKeys.containsKey(tenantId)) {
             return tenantKeys.get(tenantId);
         }
-        return hostKey.map(host -> {
-            MaskingKey cached = derived.get(tenantId);
-            if (cached != null) {
-                return cached;
-            }
-            MaskingKey subkey = host.forTenant(tenantId);
-            if (derived.size() < DERIVED_CACHE_MAX) {
-                derived.put(tenantId, subkey);
-            }
-            return subkey;
-        });
+        return hostKey.map(host -> hostSubkey(host, tenantId));
+    }
+
+    private MaskingKey hostSubkey(MaskingKey host, String tenantId) {
+        MaskingKey cached = derived.get(tenantId);
+        if (cached != null) {
+            return cached;
+        }
+        MaskingKey subkey = host.forTenant(tenantId);
+        if (derived.size() < DERIVED_CACHE_MAX) {
+            derived.put(tenantId, subkey);
+        }
+        return subkey;
     }
 
     /**
-     * The current key first, then the earlier ones: for a tenant on the host key, its subkey of each previous host
-     * key; then the tenant's own previous keys as configured. Never used for writing.
+     * The current key first, then the earlier ones. A tenant on the host key: its subkey of each previous host key,
+     * then its own previous keys as configured. A tenant with its own key: its own previous keys, then its subkey of
+     * the current host key and of each previous host key, so the rows it wrote before it moved off the host key stay
+     * findable. Host key ids and tenant key ids never overlap, so a host subkey only ever matches the tenant's rows
+     * from its time on the host key. Never used for writing.
      */
     @Override
     public List<MaskingKey> searchKeys(String tenantId) {
         List<MaskingKey> keys = new ArrayList<>();
         hmacKey(tenantId).ifPresent(keys::add);
-        if (!tenantKeys.containsKey(tenantId)) {
-            for (MaskingKey previous : hostPrevious) {
-                keys.add(previous.forTenant(tenantId));
-            }
+        boolean ownKey = tenantKeys.containsKey(tenantId);
+        List<MaskingKey> ownPrevious = tenantPrevious.getOrDefault(tenantId, List.of());
+        if (ownKey) {
+            keys.addAll(ownPrevious);
+            hostKey.ifPresent(host -> keys.add(hostSubkey(host, tenantId)));
         }
-        keys.addAll(tenantPrevious.getOrDefault(tenantId, List.of()));
+        for (MaskingKey previous : hostPrevious) {
+            keys.add(previous.forTenant(tenantId));
+        }
+        if (!ownKey) {
+            keys.addAll(ownPrevious);
+        }
         return List.copyOf(keys);
     }
 
