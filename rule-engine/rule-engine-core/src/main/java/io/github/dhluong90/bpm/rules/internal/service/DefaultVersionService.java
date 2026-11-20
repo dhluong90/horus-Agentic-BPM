@@ -79,6 +79,7 @@ public final class DefaultVersionService implements VersionService {
     private final CursorKeys cursorKeys;
     /** This replica's compiled versions; an approval evicts its rule set after commit (ADR-0009). */
     private final CompiledCache cache;
+    private final EngineMeters meters;
     private final Supersession supersession;
 
     /**
@@ -93,13 +94,14 @@ public final class DefaultVersionService implements VersionService {
      * @param supersession retires superseded versions, shared with the lifecycle sweep
      */
     DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox, CursorKeys cursorKeys,
-            Supersession supersession, CompiledCache cache) {
+            Supersession supersession, CompiledCache cache, EngineMeters meters) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.outbox = Objects.requireNonNull(outbox, "outbox must not be null");
         this.cursorKeys = Objects.requireNonNull(cursorKeys, "cursorKeys must not be null");
         this.cache = Objects.requireNonNull(cache, "cache must not be null");
         this.supersession = Objects.requireNonNull(supersession, "supersession must not be null");
+        this.meters = Objects.requireNonNull(meters, "meters must not be null");
     }
 
     @Override
@@ -443,6 +445,7 @@ public final class DefaultVersionService implements VersionService {
             // evicts once the retirement is committed.
             long epoch = store.advanceCacheEpoch(tenant, updated.ruleSetId(), updated.ruleSet());
             context.transactions().afterCommit(() -> cache.evict(tenant, updated.ruleSet(), epoch));
+            context.transactions().afterCommit(() -> meters.retired(EngineMeters.RetireReason.MANUAL, 1));
             String mode = context.settings().retireApproval();
             store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.RETIRED,
                     current.status(), updated.status(), actor, reason, updated.lockVersion(), now, null, mode, last));

@@ -271,6 +271,42 @@ No failure of one iteration ends the listener or the epoch check: any error, inc
 
 The meters are registered only when the host has Micrometer on its classpath, for example through Spring Boot Actuator. No meter carries a tenant or a rule set.
 
+The engine is tested behind PgBouncer in transaction mode on every build (CI job `pooler`): the whole rule set lifecycle, idempotent replays, the retirement sweep and partition maintenance from two replicas at once, with every statement checked for session state. The engine sends no session `SET`, no `LISTEN` (with `cache.listen-notify: false`), no session advisory lock and no named `PREPARE`. Run the Flyway migrations on a direct connection, or set `migrate-on-start: false` and migrate from a job that has one: Flyway's own lock is held for the session.
+
+## Evaluation metrics
+
+| Meter | Prometheus | Tags | Meaning |
+|---|---|---|---|
+| `horus.rle.evaluations` | `horus_rle_evaluations_seconds_count`, `_sum`, `_max` | `outcome`: `matched`, `no_match`, `failed`, `refused` | Every evaluation call and its duration, including the decision log write |
+| `horus.rle.evaluation.errors` | `horus_rle_evaluation_errors_total` | `code`: the error code, for example `RULE_SET_NOT_FOUND`, `PERMISSION_DENIED`, `EVALUATION_ERROR`, `UNIQUE_HIT_VIOLATION` | Calls that failed or were refused |
+| `horus.rle.lifecycle.retired` | `horus_rle_lifecycle_retired_total` | `reason`: `SUPERSEDED`, `MANUAL` | Versions retired, counted once the retirement commits |
+
+`failed` is a decision that was logged with an error outcome; `refused` is a call refused before anything was logged, such as an unknown rule set, a missing permission or an invalid input. A `code` tag holds only engine error codes; any other value is reported as `OTHER`, so no tag ever carries a tenant, a rule set, a caller or an input. Percentiles are off by default; turn them on for the evaluation timer with `management.metrics.distribution.percentiles-histogram.horus.rle.evaluations: true`.
+
+A host that wants other meters declares its own bean named `ruleEngineEvaluationMetrics`, which replaces the engine's.
+
+## Evaluation speed
+
+Every build runs the JMH benchmarks in `examples/rule-engine-benchmarks` on JDK 21 (CI job `benchmark`) and publishes the report in the job summary, with the JSON result kept for 90 days.
+
+| Requirement | Benchmark | Budget | Gate |
+|---|---|---|---|
+| `TR-PERF-01` | One evaluation of a cached 200-row `first` table, input reaching the default row, no log write | p99 under 100 us | Fails the build |
+| `TR-PERF-02` | Reading and compiling a 1,000-row table from YAML | p99 under 500 ms | Reported |
+
+To run them locally:
+
+```bash
+mvn -pl examples/rule-engine-benchmarks -am install -Dcockpit.bundle.skip=true
+cd examples/rule-engine-benchmarks
+mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.11.0:build-classpath \
+  -Dmdep.includeScope=runtime -Dmdep.outputFile=target/classpath.txt
+java -cp "target/classes:$(cat target/classpath.txt)" org.openjdk.jmh.Main -rf json -rff target/jmh-result.json
+python3 ../../tools/benchmark-report.py target/jmh-result.json
+```
+
+The numbers hold for a cached version after warm-up. First-call latency, database and host transaction time, host GC pauses and other hardware are not part of the budget.
+
 ## Host beans the starter picks up
 
 | Bean | Default | Override when |

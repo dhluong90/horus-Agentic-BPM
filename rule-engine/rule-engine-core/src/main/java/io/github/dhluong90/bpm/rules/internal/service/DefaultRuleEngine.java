@@ -78,6 +78,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     private final DecisionLog log;
     private final Map<String, CompiledRuleSet> compiled = new ConcurrentHashMap<>();
     private final CompiledCache cache;
+    private final EngineMeters meters;
     private final AtomicBoolean grantOpened = new AtomicBoolean();
 
     /**
@@ -88,14 +89,17 @@ public final class DefaultRuleEngine implements RuleEngine {
      * @param log decision log
      */
     public DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log) {
-        this(context, store, log, new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions()));
+        this(context, store, log, new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions()),
+                new EngineMeters());
     }
 
-    DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache) {
+    DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache,
+            EngineMeters meters) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.log = Objects.requireNonNull(log, "log must not be null");
         this.cache = Objects.requireNonNull(cache, "cache must not be null");
+        this.meters = Objects.requireNonNull(meters, "meters must not be null");
     }
 
     /** @return true the first time only: at most one grant of the tenant-scoped entry point per engine (#336) */
@@ -111,14 +115,33 @@ public final class DefaultRuleEngine implements RuleEngine {
     @Override
     public DecisionResult evaluate(DecisionRequest request) {
         Objects.requireNonNull(request, "request must not be null");
-        String tenant = context.tenant();
-        // A pinned evaluation is its own permission (DESIGN 4.2): rules:pin, never rules:evaluate alone.
-        String caller = context.callerWith(request.version() == null ? PERMISSION_EVALUATE : PERMISSION_PIN);
-        if (request.clock() != null && !context.holds(PERMISSION_SIMULATE)) {
-            // A chosen instant reaches versions and dates the caller would not get at the host clock (DESIGN 4.2).
-            throw new ClockNotAllowedException();
+        return measured(() -> {
+            String tenant = context.tenant();
+            // A pinned evaluation is its own permission (DESIGN 4.2): rules:pin, never rules:evaluate alone.
+            String caller = context.callerWith(request.version() == null ? PERMISSION_EVALUATE : PERMISSION_PIN);
+            if (request.clock() != null && !context.holds(PERMISSION_SIMULATE)) {
+                // A chosen instant reaches versions and dates the caller would not get at the host clock (DESIGN 4.2).
+                throw new ClockNotAllowedException();
+            }
+            return evaluateUnmeasured(tenant, caller, request);
+        });
+    }
+
+    /**
+     * Times one evaluation call and records how it ended (DESIGN 4.8): a refusal is recorded with its error code,
+     * then thrown on unchanged.
+     */
+    private DecisionResult measured(java.util.function.Supplier<DecisionResult> call) {
+        long started = System.nanoTime();
+        DecisionResult result;
+        try {
+            result = call.get();
+        } catch (RuntimeException failure) {
+            meters.refused(failure, System.nanoTime() - started);
+            throw failure;
         }
-        return evaluateAs(tenant, caller, request);
+        meters.evaluated(result, System.nanoTime() - started);
+        return result;
     }
 
     /**
@@ -127,6 +150,10 @@ public final class DefaultRuleEngine implements RuleEngine {
      * refuses both.
      */
     DecisionResult evaluateAs(String tenant, String caller, DecisionRequest request) {
+        return measured(() -> evaluateUnmeasured(tenant, caller, request));
+    }
+
+    private DecisionResult evaluateUnmeasured(String tenant, String caller, DecisionRequest request) {
         if (request.correlationId() != null && !CorrelationIds.isValid(request.correlationId())) {
             throw new InputInvalidException("correlationId must be 1 to " + EngineDefaults.CORRELATION_ID_MAX_LENGTH
                     + " characters of A-Z, a-z, 0-9, '.', '_', ':' or '-'");

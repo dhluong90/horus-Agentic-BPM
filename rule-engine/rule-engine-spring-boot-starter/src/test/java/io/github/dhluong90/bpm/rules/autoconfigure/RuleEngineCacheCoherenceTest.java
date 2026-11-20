@@ -113,6 +113,24 @@ class RuleEngineCacheCoherenceTest {
                 .isZero();
     }
 
+    @Test
+    void TR_OBS_02_evaluation_timers_by_outcome_and_retirement_counters_by_reason_are_bound_at_zero() {
+        RuleEngines engines = engines(50);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+
+        new RuleEngineEvaluationMetrics(engines.meters()).bindTo(registry);
+
+        for (String outcome : new String[] {"matched", "no_match", "failed", "refused"}) {
+            assertThat(registry.get("horus.rle.evaluations").tag("outcome", outcome).timer().count()).isZero();
+        }
+        for (String reason : new String[] {"SUPERSEDED", "MANUAL"}) {
+            assertThat(registry.get("horus.rle.lifecycle.retired").tag("reason", reason).counter().count()).isZero();
+        }
+        assertThat(registry.find("horus.rle.evaluation.errors").counters()).isEmpty();
+        assertThat(registry.getMeters()).allSatisfy(meter -> assertThat(meter.getId().getTags())
+                .allSatisfy(tag -> assertThat(tag.getKey()).isIn("outcome", "reason")));
+    }
+
     private static RuleEngines engines(int maxEntries) {
         TenantResolver tenants = () -> "bank-a";
         CallerResolver callers = new CallerResolver() {
