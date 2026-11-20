@@ -88,6 +88,8 @@ Retention is the host's decision; no product default deletes audit data. The tab
 | `rules.version.retired` | A version was retired |
 | `rules.decision.evaluated` | Every decision; off by default because of volume |
 
+These are the events an audit consumer usually needs; the full list, the envelope (`eventId`, `correlationId`, `causationId`, `producer`, `schemaVersion`) and the schema files are in [[Rule Engine Decision API]].
+
 Events are delivered through the `RuleEventPublisher` SPI, which the host implements to forward them to its own audit or messaging system. The engine itself never calls the network (TR-EMB-05).
 
 ## Troubleshooting

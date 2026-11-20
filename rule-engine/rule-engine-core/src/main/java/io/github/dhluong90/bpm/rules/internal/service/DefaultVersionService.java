@@ -23,7 +23,6 @@ import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
-import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
 import io.github.dhluong90.bpm.rules.internal.json.Hashes;
 import io.github.dhluong90.bpm.rules.internal.json.Ulid;
@@ -100,16 +99,18 @@ public final class DefaultVersionService implements VersionService {
         }
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_AUTHOR);
+        String correlationId = EventEnvelope.requireValidCorrelationId(request.correlationId());
         byte[] source = request.source();
         String operation = targetRuleSet == null ? "import-rule-set" : "import-version";
         String requestHash = Hashes.sha256Parts(operation, actor, targetRuleSet, request.format().name(), Hashes.sha256(source));
         return context.idempotent(tenant, operation, request.idempotencyKey(), requestHash, 201,
-                () -> doImport(tenant, actor, targetRuleSet, request.format(), source),
+                () -> doImport(tenant, actor, targetRuleSet, request.format(), source, correlationId),
                 version -> EngineValues.write(EngineValues.version(version)),
                 EngineValues::versionFromJson);
     }
 
-    private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source) {
+    private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source,
+            String correlationId) {
         if (format != SourceFormat.YAML && format != SourceFormat.DMN_XML) {
             throw new InputInvalidException("Only YAML and DMN XML import are available in this release");
         }
@@ -145,13 +146,14 @@ public final class DefaultVersionService implements VersionService {
                 null, null, null, null, null, actor, now);
         store.insertVersion(version);
         history(version, LifecycleAction.CREATED, null, actor, null, now);
-        event(tenant, EVENT_CREATED, version, actor, now);
+        event(tenant, EVENT_CREATED, version, actor, now, correlationId, payload -> { });
         return version.toView(false);
     }
 
     @Override
     public RuleSetVersion requestPublish(String ruleSet, int version, WriteOptions options) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
+        EventEnvelope.requireValidCorrelationId(opts.correlationId());
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_AUTHOR);
         String requestHash = Hashes.sha256Parts("request-publish", actor, ruleSet, Integer.toString(version),
@@ -167,7 +169,7 @@ public final class DefaultVersionService implements VersionService {
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.REQUESTED, current.status(), actor, null, now);
             // DESIGN 3.3: the request names the behaviour hash and the date it asks for (null means at approval).
-            event(tenant, EVENT_PUBLISH_REQUESTED, updated, actor, now, payload -> {
+            event(tenant, EVENT_PUBLISH_REQUESTED, updated, actor, now, opts.correlationId(), payload -> {
                 payload.put("canonicalHash", updated.canonicalHash());
                 payload.put("requestedBy", actor);
                 payload.set("effectiveFrom", EngineValues.value(updated.effectiveFrom()));
@@ -179,6 +181,7 @@ public final class DefaultVersionService implements VersionService {
     @Override
     public RuleSetVersion approve(String ruleSet, int version, WriteOptions options) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
+        EventEnvelope.requireValidCorrelationId(opts.correlationId());
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_APPROVE);
         requireCommentLength(opts.comment());
@@ -199,7 +202,7 @@ public final class DefaultVersionService implements VersionService {
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.APPROVED, current.status(), actor, opts.comment(), now);
             // DESIGN 3.3: the publication names what was approved, from when, and both people of the four eyes.
-            event(tenant, EVENT_PUBLISHED, updated, actor, now, payload -> {
+            event(tenant, EVENT_PUBLISHED, updated, actor, now, opts.correlationId(), payload -> {
                 payload.put("canonicalHash", updated.canonicalHash());
                 payload.set("effectiveFrom", EngineValues.value(updated.effectiveFrom()));
                 payload.put("requestedBy", updated.requestedBy());
@@ -212,6 +215,7 @@ public final class DefaultVersionService implements VersionService {
     @Override
     public RuleSetVersion reject(String ruleSet, int version, WriteOptions options) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
+        EventEnvelope.requireValidCorrelationId(opts.correlationId());
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_APPROVE);
         String reason = requireReason(opts.comment());
@@ -232,7 +236,7 @@ public final class DefaultVersionService implements VersionService {
             StoredVersion updated = current.rejected();
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.REJECTED, current.status(), actor, reason, now);
-            event(tenant, EVENT_REJECTED, updated, actor, now, payload -> payload
+            event(tenant, EVENT_REJECTED, updated, actor, now, opts.correlationId(), payload -> payload
                     .put("rejectedBy", actor)
                     .put("reason", reason));
             return updated.toView(false);
@@ -391,21 +395,19 @@ public final class DefaultVersionService implements VersionService {
         }
     }
 
-    private void event(String tenant, String type, StoredVersion version, String actor, Instant at) {
-        event(tenant, type, version, actor, at, payload -> { });
-    }
-
+    /**
+     * Writes one lifecycle event with the full envelope (DESIGN section 3.3). The event id is the outbox row id. A
+     * lifecycle command has no command id of its own, so {@code causationId} is null.
+     */
     private void event(String tenant, String type, StoredVersion version, String actor, Instant at,
-            java.util.function.Consumer<ObjectNode> extra) {
-        ObjectNode payload = EngineJson.NODES.objectNode()
-                .put("eventType", type)
+            String correlationId, java.util.function.Consumer<ObjectNode> extra) {
+        String eventId = Ulid.next(at);
+        ObjectNode payload = EventEnvelope.start(eventId, type, tenant, at, correlationId, null)
                 .put("ruleSet", version.ruleSet())
                 .put("version", version.version())
-                .put("tenantId", tenant)
-                .put("actor", actor)
-                .put("occurredAt", at.toString());
+                .put("actor", actor);
         extra.accept(payload);
-        outbox.append(tenant, Ulid.next(at), EngineValues.write(payload), at);
+        outbox.append(tenant, eventId, EngineValues.write(payload), at);
     }
 
     private static String utf8(byte[] source) {

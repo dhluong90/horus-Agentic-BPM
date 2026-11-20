@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:event:rules.version.withdrawn.v1",
+  "title": "rules.version.withdrawn.v1",
+  "description": "Written to the Rule Engine outbox in the transaction where the requester takes back a PENDING_APPROVAL version (POST .../versions/{v}:withdraw, DESIGN section 3.3). The version is back to DRAFT, the effective version is unchanged and nothing is published. The outbox row id is the event id. Additive changes only within v1.",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "occurredAt",
+    "tenantId",
+    "correlationId",
+    "causationId",
+    "producer",
+    "schemaVersion",
+    "ruleSet",
+    "version",
+    "actor",
+    "withdrawnBy",
+    "reason"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "eventId": {
+      "description": "The event id, a ULID; equal to the outbox row id. Consumers de-duplicate by it.",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "eventType": {
+      "const": "rules.version.withdrawn.v1"
+    },
+    "occurredAt": {
+      "description": "When the state change committed, ISO 8601 UTC.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenantId": {
+      "description": "The tenant, from the authenticated context; never from a request body.",
+      "type": "string"
+    },
+    "correlationId": {
+      "description": "The caller's correlation id (X-Correlation-Id, or the one passed to the Java API). When the caller gave none, the event id: the event starts its own chain.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "causationId": {
+      "description": "The id of the command or event that caused this one, or null when a caller's command caused it directly.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "producer": {
+      "description": "rule-engine, a slash and the engine version that wrote the event.",
+      "type": "string",
+      "pattern": "^rule-engine/[0-9A-Za-z.+-]+$"
+    },
+    "schemaVersion": {
+      "description": "Version of the envelope layout; 1 for every .v1 type.",
+      "const": 1,
+      "type": "integer"
+    },
+    "ruleSet": {
+      "description": "Rule set name, kebab-case.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "version": {
+      "description": "Version number of the rule set, not the lock version.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "actor": {
+      "description": "Who sent the command.",
+      "type": "string"
+    },
+    "withdrawnBy": {
+      "description": "Who withdrew it; always the requester and equal to actor.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "Why, if the requester gave a reason (at most 2,000 characters); null when none was given.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2000
+    }
+  },
+  "examples": [
+    {
+      "eventId": "01KBX9Q3M4R7T2V8W6Y0Z1A2B3",
+      "eventType": "rules.version.withdrawn.v1",
+      "occurredAt": "2026-12-12T08:30:00Z",
+      "tenantId": "bank-a",
+      "correlationId": "req-7f3a",
+      "causationId": null,
+      "producer": "rule-engine/0.2.0",
+      "schemaVersion": 1,
+      "ruleSet": "card-fee",
+      "version": 2,
+      "actor": "lan",
+      "withdrawnBy": "lan",
+      "reason": "Wrong effective date"
+    }
+  ]
+}

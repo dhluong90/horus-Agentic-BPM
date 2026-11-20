@@ -196,16 +196,19 @@ Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ER
 
 | `eventType` | When | Payload |
 |---|---|---|
+| `rules.version.created.v1` | import (`POST /rule-sets`, `POST .../versions`) | `ruleSet`, `version`, `actor` (the author) |
+| `rules.version.draft-updated.v1` | `PUT .../versions/{v}` on a draft | `ruleSet`, `version`, `canonicalHash`, `lockVersion`, `updatedBy` |
 | `rules.version.publish-requested.v1` | `:request-publish` | `ruleSet`, `version`, `canonicalHash`, `requestedBy`, `effectiveFrom` (the requested date, or null for at approval) |
 | `rules.version.published.v1` | `:approve` | `ruleSet`, `version`, `canonicalHash`, `effectiveFrom`, `requestedBy`, `approvedBy` |
 | `rules.version.rejected.v1` | `:reject` | `ruleSet`, `version`, `rejectedBy`, `reason` |
+| `rules.version.withdrawn.v1` | `:withdraw` by the requester | `ruleSet`, `version`, `withdrawnBy`, `reason` (or null) |
 | `rules.version.retire-requested.v1` | `:retire` in `four-eyes` mode (M3) | `ruleSet`, `version`, `requestedBy`, `reason` |
-| `rules.version.retired.v1` | `:retire` in `single` mode, `:confirm-retire`, or superseded | `ruleSet`, `version`, `retiredBy` (`system` when superseded; the confirmer in `four-eyes` mode), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the requester in `four-eyes` mode, else null), `retiredAt` |
+| `rules.version.retired.v1` | `:retire` in `single` mode, `:confirm-retire`, or superseded | `ruleSet`, `version`, `retiredBy` (`system` when superseded; the confirmer in `four-eyes` mode), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the requester in `four-eyes` mode, else null), `retiredAt`, `noVersionInEffect` |
 | `rules.decision.evaluated.v1` | every decision, off by default (`events.decision-evaluated`) | `decisionId`, `ruleSet`, `version`, `outcome` |
 
 A host that wants tamper evidence for approvals relays these events to a store outside the database administrator's control (an append-only log or a separate audit system) and reconciles the stored versions against it, because rows in the host database, outbox included, can be changed by whoever administers it.
 
-Envelope: `eventId` (ULID), `eventType`, `occurredAt`, `tenantId`, `correlationId`, `causationId`, `producer`, `schemaVersion`, `payload`. Changes are additive within a `.v1` type. Events go through the host's `RuleEventPublisher` inside the same transaction as the state change.
+Envelope, as members next to the payload fields above: `eventId` (the outbox row id, a ULID), `eventType`, `occurredAt`, `tenantId`, `correlationId` (the command's `X-Correlation-Id`), `causationId` (the causing command or event, or null), `producer` (`rule-engine/<version>`) and `schemaVersion` (`1`). Each type has a JSON schema in `rule-engine/api/schema/<eventType>.schema.json`. Changes are additive within a `.v1` type. Events go through the host's `RuleEventPublisher` inside the same transaction as the state change.
 
 ## Performance targets (0.1)
 

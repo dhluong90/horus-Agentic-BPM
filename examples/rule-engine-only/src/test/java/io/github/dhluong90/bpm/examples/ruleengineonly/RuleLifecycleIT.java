@@ -129,6 +129,31 @@ class RuleLifecycleIT {
                 .query(Long.class).single()).isEqualTo(3L);
     }
 
+    /** #241: a lifecycle command's X-Correlation-Id is the correlationId of the event it writes. */
+    @Test
+    void TR_OBS_06_x_correlation_id_of_a_command_is_carried_by_its_event() throws Exception {
+        for (String[] step : new String[][] {
+                {"alice", "/rule-sets", "req-import-41"},
+                {"alice", "/rule-sets/card-fee-corr/versions/1:request-publish", "req-request-41"},
+                {"bob", "/rule-sets/card-fee-corr/versions/1:approve", "req-approve-41"}}) {
+            HttpRequest.Builder request = HttpRequest.newBuilder(uri(step[1]))
+                    .header("Authorization", TestTokens.bearer(step[0])).header("X-Correlation-Id", step[2]);
+            request = step[1].equals("/rule-sets")
+                    ? request.header("Content-Type", "application/yaml")
+                            .POST(HttpRequest.BodyPublishers.ofByteArray(renamed("card-fee-corr")))
+                    : request.POST(HttpRequest.BodyPublishers.noBody());
+            assertThat(HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString()).statusCode()).isBetween(200, 201);
+        }
+        assertThat(jdbc.sql("""
+                SELECT (payload->>'eventType') || ' ' || (payload->>'correlationId') || ' '
+                  || (payload->>'eventId' = id)::text || ' ' || (payload->>'schemaVersion')
+                FROM rle_decision_outbox WHERE tenant_id = 'bank-a' AND payload->>'ruleSet' = 'card-fee-corr' ORDER BY id
+                """).query(String.class).list()).containsExactly(
+                "rules.version.created.v1 req-import-41 true 1",
+                "rules.version.publish-requested.v1 req-request-41 true 1",
+                "rules.version.published.v1 req-approve-41 true 1");
+    }
+
     @Test
     void RLE_001_first_hit_policy_returns_top_matching_rule() throws Exception {
         // Given
