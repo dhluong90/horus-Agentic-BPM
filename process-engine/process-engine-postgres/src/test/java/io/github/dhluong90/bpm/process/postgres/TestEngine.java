@@ -137,15 +137,18 @@ final class TestEngine {
         }
         Optional<io.github.dhluong90.bpm.rules.api.RuleEngine> ruleEngine = b.ruleEngine != null ? Optional.of(b.ruleEngine)
                 : Optional.ofNullable(rules).map(io.github.dhluong90.bpm.rules.internal.service.RuleEngines::ruleEngine);
-        // As the starter wires it: the tenant-scoped entry point comes from RuleEngines, bound to the engine identity,
-        // and only with the real Rule Engine; a host stand-in has none.
-        Optional<io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine> engineWork = b.ruleEngine != null
+        // As the starters wire it: the Rule Engine's wiring opens a grant, when the decision port comes from a sealed
+        // jar of the Rule Engine's version, and the decision port claims the tenant-scoped entry point from it; only
+        // with the real Rule Engine, as a host stand-in has none.
+        Optional<io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant> grant = b.ruleEngine != null
+                || io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants
+                        .registeredClaimantRefusal("system:process-engine").isPresent()
                 ? Optional.empty()
-                : Optional.ofNullable(rules).map(r -> r.forEmbeddedEngine(DecisionCaller.ENGINE_IDENTITY));
+                : Optional.ofNullable(rules).map(io.github.dhluong90.bpm.rules.internal.service.RuleEngines::openEmbeddedEngineGrant);
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, new JdbcProcessStore(ds),
                 Map.of(SourceFormat.BPMN_XML, reader::read), Map.of(),
                 new LocalServiceInvoker(b.handlers.stream().collect(Collectors.toMap(ServiceTaskHandler::name, h -> h)),
-                        ruleEngine, engineWork, Duration.ofSeconds(5)),
+                        ruleEngine, grant, Duration.ofSeconds(5)),
                 publisher, settings, BehaviorCatalog.registry(), new V1ExpressionEvaluator(100), jobStore, jobSettings,
                 b.asyncSettings, b.adapters.stream().map(io.github.dhluong90.bpm.process.spi.ServiceAdapter::name)
                         .collect(Collectors.toSet()));

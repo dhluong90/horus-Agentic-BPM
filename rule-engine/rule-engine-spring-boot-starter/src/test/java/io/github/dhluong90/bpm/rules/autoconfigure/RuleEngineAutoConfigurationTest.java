@@ -106,6 +106,53 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    void TR_TEN_01_no_bean_a_host_can_inject_leads_to_the_tenant_scoped_entry_point() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
+            assertThat(context).hasNotFailed();
+            // RuleEngines is not a bean; the internals sit in a bean of a type host code cannot name
+            assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.internal.service.RuleEngines.class);
+            assertThat(java.lang.reflect.Modifier.isPublic(RuleEngineInternals.class.getModifiers())).isFalse();
+            for (String name : context.getBeanFactory().getSingletonNames()) {
+                Object bean = context.getBeanFactory().getSingleton(name);
+                if (bean == null) {
+                    continue;
+                }
+                assertThat(bean).as(name)
+                        .isNotInstanceOf(io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine.class)
+                        .isNotInstanceOf(io.github.dhluong90.bpm.rules.internal.service.RuleEngines.class);
+            }
+        });
+    }
+
+    @Test
+    void TR_TEN_01_a_same_named_decision_port_in_an_unsealed_package_gets_no_grant_and_the_host_keeps_running() {
+        // Given a class named like the Process Engine's decision port, from this module's test class directory: its
+        // package is not sealed and it carries no Implementation-Version, as in a host with only the Rule Engine
+        // starter that defines the class itself
+        assertThat(io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort.class.getPackage().isSealed())
+                .isFalse();
+
+        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
+            // Then start-up succeeds, without the grant: there is nothing for that class to claim
+            assertThat(context).hasNotFailed();
+            assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class);
+            assertThat(context).hasSingleBean(io.github.dhluong90.bpm.rules.api.RuleEngine.class);
+        });
+    }
+
+    @Test
+    void TR_TEN_01_without_the_process_engine_there_is_no_grant() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withClassLoader(new org.springframework.boot.test.context.FilteredClassLoader(
+                        io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort.class))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class);
+                    assertThat(context).hasSingleBean(io.github.dhluong90.bpm.rules.api.RuleEngine.class);
+                });
+    }
+
+    @Test
     void TR_EXT_03_an_out_of_range_setting_stops_start_up() {
         runner.withUserConfiguration(HostWithEngineStandIns.class)
                 .withPropertyValues("horus.bpm.rules.cache.max-entries=0")

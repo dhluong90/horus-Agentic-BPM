@@ -740,4 +740,87 @@ class DefinitionLifecycleTest {
                 .isInstanceOf(PermissionDeniedException.class);
         assertThat(stored(1).status()).isEqualTo("ACTIVE");
     }
+
+    // ---- a superseded version is not retired by hand (PD-102, #297) ------------------------------------------
+
+    /** v1 active, v2 approved for 1 May; at 1 May 00:00:30 v2 is in effect and its job has not run, so v1 is ACTIVE. */
+    private DefinitionVersion v2InEffectWithJobPending() {
+        clock.set(Instant.parse("2027-04-20T09:00:00Z"));
+        activate(1);
+        DefinitionVersion v2 = approveByBob(request(importAs(2), Instant.parse("2027-05-01T00:00:00Z")));
+        clock.set(Instant.parse("2027-05-01T00:00:30Z"));
+        return v2;
+    }
+
+    @Test
+    void PRE_053_a_version_a_newer_version_in_effect_supersedes_cannot_be_retired_by_hand() {
+        // Given v2 in effect and its effective-date job not yet run, so v1 is still ACTIVE
+        v2InEffectWithJobPending();
+        DefinitionVersion v1 = stored(1);
+        assertThat(v1.status()).isEqualTo("ACTIVE");
+        int history = count("SELECT count(*) FROM pre_definition_history");
+        int idempotency = count("SELECT count(*) FROM pre_idempotency");
+        engine.events.clear();
+
+        // When bob retires v1 by hand, with and without the confirmation
+        engine.identity.as("bank-a", "bob", APPROVER);
+        for (boolean confirm : new boolean[] {false, true}) {
+            assertThatThrownBy(() -> engine.services.retire(v1.ref(), v1.lockVersion(), "flawed credit routing",
+                    confirm, "retire-v1-" + confirm))
+                    // Then 409 INVALID_STATE, naming v2
+                    .isInstanceOf(io.github.dhluong90.bpm.process.api.InvalidStateException.class)
+                    .satisfies(e -> {
+                        assertThat(((ProcessException) e).code()).isEqualTo("INVALID_STATE");
+                        assertThat(e.getMessage()).contains(KEY + " v1").contains("v2 is in effect and supersedes it");
+                    });
+        }
+
+        // And nothing is written: no history row, no event, no stored answer, no change to either version
+        assertThat(count("SELECT count(*) FROM pre_definition_history")).isEqualTo(history);
+        assertThat(count("SELECT count(*) FROM pre_idempotency")).isEqualTo(idempotency);
+        assertThat(engine.events).isEmpty();
+        DefinitionVersion after = stored(1);
+        assertThat(after.status()).isEqualTo("ACTIVE");
+        assertThat(after.lockVersion()).isEqualTo(v1.lockVersion());
+        assertThat(after.retiredBy()).isNull();
+        assertThat(stored(2).status()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void PRE_053_a_superseded_version_is_still_retired_by_the_effective_date_job() {
+        // Given v2 in effect, its job pending, and a refused manual retirement of v1
+        v2InEffectWithJobPending();
+        DefinitionVersion v1 = stored(1);
+        engine.identity.as("bank-a", "bob", APPROVER);
+        assertThatThrownBy(() -> engine.services.retire(v1.ref(), v1.lockVersion(), "flawed credit routing", true,
+                null)).isInstanceOf(io.github.dhluong90.bpm.process.api.InvalidStateException.class);
+
+        // When the effective-date job runs
+        assertThat(engine.jobs.pollOnce()).isEqualTo(1);
+
+        // Then v1 is RETIRED by the system as superseded by v2, with one RETIRED history row and no reason
+        DefinitionVersion retired = stored(1);
+        assertThat(retired.status()).isEqualTo("RETIRED");
+        assertThat(retired.retiredBy()).isEqualTo("system:effective-date");
+        assertThat(retired.supersededBy()).isEqualTo(2);
+        assertThat(TestEngine.jdbc().sql("SELECT actor_id || ' ' || coalesce(comment, '-') FROM pre_definition_history "
+                + "WHERE action = 'RETIRED' AND definition_id = ?").param(v1.id()).query(String.class).single())
+                .isEqualTo("system:effective-date -");
+        assertThat(stored(2).status()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void PRE_053_the_version_in_effect_is_still_retired_as_before_and_its_superseded_versions_with_it() {
+        // Given v2 in effect, its job pending, v1 still ACTIVE
+        DefinitionVersion v2 = v2InEffectWithJobPending();
+
+        // When bob retires v2, the version in effect, with the confirmation (PD-101)
+        engine.identity.as("bank-a", "bob", APPROVER);
+        DefinitionVersion retired = engine.services.retire(v2.ref(), v2.lockVersion(), "wrong rule set", true, null);
+
+        // Then the retirement goes through as before: v2 by bob, v1 by the system as superseded
+        assertThat(retired.retiredBy()).isEqualTo("bob");
+        assertThat(stored(1).retiredBy()).isEqualTo("system:effective-date");
+        assertThat(stored(1).supersededBy()).isEqualTo(2);
+    }
 }

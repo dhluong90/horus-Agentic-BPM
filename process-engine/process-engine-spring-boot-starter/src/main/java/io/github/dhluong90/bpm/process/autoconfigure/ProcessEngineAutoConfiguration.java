@@ -6,8 +6,7 @@ import io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
-import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
-import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
+import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
@@ -58,6 +57,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
@@ -235,13 +235,18 @@ public class ProcessEngineAutoConfiguration {
         return publisher::publishEvent;
     }
 
+    /**
+     * The engine's services. Never lazy: the decision port inside claims the Rule Engine's tenant-scoped entry point
+     * while beans are created, before the Rule Engine starter closes unclaimed identities (#336).
+     */
     @Bean
+    @Lazy(false)
     @ConditionalOnMissingBean
     ProcessServices processEngineServices(ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
             JdbcJobStore jobs, JobSettings jobSettings, AsyncSettings async, ObjectProvider<ServiceAdapter> adapters,
             ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
-            ObjectProvider<RuleEngines> ruleEngines, ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
+            ObjectProvider<EmbeddedEngineGrant> ruleEngineGrant, ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -256,11 +261,14 @@ public class ProcessEngineAutoConfiguration {
         SubsetBpmnReader reader = new SubsetBpmnReader(new Limits(properties.definitions().maxBytes(),
                 Limits.DEFAULTS.maxDepth(), Limits.DEFAULTS.maxElements(), Limits.DEFAULTS.maxForeignFragmentBytes(),
                 Limits.DEFAULTS.maxTextChars(), Limits.DEFAULTS.maxAttributeChars()));
+        EmbeddedEngineGrant grant = ruleEngineGrant.getIfUnique();
+        LocalServiceInvoker invoker = new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
+                Optional.ofNullable(grant), properties.handlers().slowCallWarning());
+        requireEngineWorkClaimed(grant);
         return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
                 Map.of(SourceFormat.BPMN_XML, new SubsetBpmnWriter()::write),
-                new LocalServiceInvoker(byName, Optional.ofNullable(ruleEngine.getIfUnique()),
-                        engineWork(ruleEngines), properties.handlers().slowCallWarning()), publisher,
+                invoker, publisher,
                 properties.toSettings(EngineSettings.ApproverRule.valueOf(ApproverMustDifferFrom.from(environment).name()),
                         EngineSettings.RetireLastVersionRule.valueOf(RetireLastVersion.from(environment).name())),
                 BehaviorCatalog.registry(),
@@ -306,13 +314,17 @@ public class ProcessEngineAutoConfiguration {
     }
 
     /**
-     * The Rule Engine's tenant-scoped entry point for this engine's own work, bound to {@code system:process-engine}
-     * (ADR-0027). Built here and handed only to the decision port; never registered as a bean, so no host code can
-     * inject it.
+     * With the Rule Engine's grant present, the decision port must have claimed the tenant-scoped entry point. If it
+     * did not, because no {@code RuleEngine} bean exists or another party claimed first, start-up fails (#336).
+     *
+     * @param grant the Rule Engine's grant, or null without one
      */
-    private static Optional<TenantScopedRuleEngine> engineWork(ObjectProvider<RuleEngines> ruleEngines) {
-        return Optional.ofNullable(ruleEngines.getIfUnique())
-                .map(engines -> engines.forEmbeddedEngine(DecisionCaller.ENGINE_IDENTITY));
+    static void requireEngineWorkClaimed(EmbeddedEngineGrant grant) {
+        if (grant != null && !grant.isClaimed(DecisionCaller.ENGINE_IDENTITY)) {
+            throw new IllegalStateException("The Rule Engine offers the tenant-scoped entry point, but the Process "
+                    + "Engine did not claim it; decisions after a timer could not run (#336). Is a RuleEngine bean "
+                    + "defined?");
+        }
     }
 
     /**

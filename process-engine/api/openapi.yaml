@@ -269,7 +269,9 @@ paths:
       summary: Retire an active version or withdraw a draft
       description: |
         `ACTIVE` (permission `processes:approve`, `reason` required) or `DRAFT` (permission `processes:author`) to
-        `RETIRED`. A pending or retired version is `409 INVALID_STATE`. Retiring stops new starts only; running
+        `RETIRED`. A pending or retired version is `409 INVALID_STATE`, and so is an active version that a newer
+        version in effect already supersedes: its effective-date job retires it, and the detail names the newer
+        version. Retiring stops new starts only; running
         instances keep their version. The mode is `horus.bpm.lifecycle.retire-approval: single` and is recorded on the
         history row and the event. Retiring the last version in effect of the key needs `confirmNoVersionInEffect:
         true` under `horus.bpm.lifecycle.retire-last-version: confirm` (the default), and is always refused under

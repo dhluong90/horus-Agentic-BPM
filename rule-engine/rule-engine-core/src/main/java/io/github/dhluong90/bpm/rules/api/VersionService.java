@@ -115,6 +115,7 @@ public interface VersionService {
      * @return the published version
      * @throws SelfApprovalForbiddenException when the caller requested the publication
      * @throws InvalidStateException when the version is not pending approval
+     * @throws AuthorUnknownException when the version has no recorded author (PD-105)
      */
     RuleSetVersion approve(String ruleSet, int version, WriteOptions options);
 

@@ -80,6 +80,23 @@ function lifecycle(v: StoredVersion, request: FakeRequest) {
 /** lifecycle.acknowledge-warnings at its default (PD-104). */
 const ACKNOWLEDGE_WARNINGS: readonly string[] = ['UNMASKED_PERSONAL_DATA'];
 
+/**
+ * The fake engine's acknowledgement settings (PD-104, RLE-053): the codes the host lists, the tenant's
+ * decision-log.mask-default, or, for a test, the engine's answer per warning given directly.
+ */
+export interface AcknowledgementSettings {
+  acknowledgeWarnings?: readonly string[];
+  maskDefault?: boolean;
+  requiresAcknowledgement?: (warning: { code: string; input: string }) => boolean;
+}
+
+/** Whether an approval must accept a warning: one rule for the version view and the approve check, as the engine. */
+type Marker = (warning: { code: string; input: string }) => boolean;
+
+function markerOf({ acknowledgeWarnings = ACKNOWLEDGE_WARNINGS, maskDefault = false, requiresAcknowledgement }: AcknowledgementSettings): Marker {
+  return requiresAcknowledgement ?? ((warning) => acknowledgeWarnings.includes(warning.code) && !maskDefault);
+}
+
 /** A part of the engine's built-in personal-data names (RLE-049), as words. */
 const PERSONAL_DATA_NAMES = ['national id', 'passport', 'phone', 'phone number', 'email', 'address', 'date of birth', 'account number', 'cccd', 'cmnd'];
 
@@ -95,14 +112,16 @@ function personalDataName(input: string): string | undefined {
   return PERSONAL_DATA_NAMES.find((name) => ` ${have} `.includes(` ${name} `) || glued === name.replaceAll(' ', ''));
 }
 
-/** UNMASKED_PERSONAL_DATA for every input that declares no mask and looks like personal data. */
-function warningsOf(definition: Definition) {
+/** UNMASKED_PERSONAL_DATA for every input that declares no mask and looks like personal data, marked by the engine. */
+function warningsOf(definition: Definition, marks: Marker) {
   return definition.inputs.flatMap((input) => {
     const matched = input.mask === undefined ? personalDataName(input.name) : undefined;
-    return matched === undefined ? [] : [{
+    if (matched === undefined) return [];
+    const warning = {
       code: 'UNMASKED_PERSONAL_DATA', input: input.name, matchedName: matched,
       message: `Input ${input.name} looks like personal data (it matches "${matched}") but declares no mask.`,
-    }];
+    };
+    return [{ ...warning, requiresAcknowledgement: marks(warning) }];
   });
 }
 
@@ -125,8 +144,8 @@ function maskingDiff(next: Definition, base: Definition) {
   });
 }
 
-function view(v: StoredVersion, request: FakeRequest, withSource = false): FakeResponse {
-  const body = { ...lifecycle(v, request), sourceFormat: 'YAML', sourceHash: hash(v.source), ...(withSource ? { sourceDocument: v.source } : {}), definition: v.definition, warnings: warningsOf(v.definition) };
+function view(v: StoredVersion, request: FakeRequest, marks: Marker, withSource = false): FakeResponse {
+  const body = { ...lifecycle(v, request), sourceFormat: 'YAML', sourceHash: hash(v.source), ...(withSource ? { sourceDocument: v.source } : {}), definition: v.definition, warnings: warningsOf(v.definition, marks) };
   return json(body, { ETag: `"${String(v.lockVersion)}"` });
 }
 
@@ -374,10 +393,12 @@ function exportOf(v: StoredVersion, format: string | null): FakeResponse {
   return problem(400, 'INPUT_INVALID', 'format must be one of json, dmn');
 }
 
-export function createFakeEngine(seed: StoredVersion[]) {
+export function createFakeEngine(seed: StoredVersion[], acknowledgement: AcknowledgementSettings = {}) {
   /** First answers by Idempotency-Key and request, replayed when the same request comes again. */
   const replays = new Map<string, FakeResponse>();
   const store: StoredVersion[] = seed.map((v) => structuredClone(v));
+  const marks = markerOf(acknowledgement);
+  const listed = acknowledgement.acknowledgeWarnings ?? ACKNOWLEDGE_WARNINGS;
   const now = () => new Date('2026-11-19T03:00:00Z').toISOString();
   const find = (name: string, version: number) => store.find((v) => v.ruleSet === name && v.version === version);
   const versionsOf = (name: string) => store.filter((v) => v.ruleSet === name);
@@ -405,7 +426,7 @@ export function createFakeEngine(seed: StoredVersion[]) {
       history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: request.user, reason: null, lockVersion: 0, occurredAt: now() }],
     };
     store.push(stored);
-    const answer = view(stored, request);
+    const answer = view(stored, request, marks);
     return { ...answer, status: 201, headers: { ...answer.headers, Location: `/api/bpm/rules/v1/rule-sets/${stored.ruleSet}/versions/${String(stored.version)}` } };
   }
 
@@ -424,7 +445,7 @@ export function createFakeEngine(seed: StoredVersion[]) {
       if (v.status !== 'DRAFT') return problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`);
       Object.assign(v, { status: 'PENDING_APPROVAL', requestedBy: request.user, requestedAt: now(), lockVersion: v.lockVersion + 1 });
       record(v, 'REQUESTED', from, request.user, null);
-      return view(v, request);
+      return view(v, request, marks);
     }
     if (v.status !== 'PENDING_APPROVAL') return problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`);
     const body = request.body === '' ? {} : (JSON.parse(request.body) as { comment?: string; reason?: string });
@@ -435,23 +456,23 @@ export function createFakeEngine(seed: StoredVersion[]) {
       if (reason.length > 2000) return problem(400, 'INPUT_INVALID', 'reason is longer than 2000 characters');
       Object.assign(v, { status: 'DRAFT', requestedBy: null, requestedAt: null, lockVersion: v.lockVersion + 1 });
       record(v, 'REJECTED', from, request.user, reason);
-      return view(v, request);
+      return view(v, request, marks);
     }
     if (v.requestedBy === request.user || v.createdBy === request.user) return problem(403, 'SELF_APPROVAL_FORBIDDEN', `The requester or author of ${v.ruleSet} v${String(v.version)} cannot approve it`);
     // PD-104, RLE-053: the sent { code, input } pairs must equal, as a set, the pairs that need an acknowledgement.
-    const needed = warningsOf(v.definition).filter((warning) => ACKNOWLEDGE_WARNINGS.includes(warning.code));
+    const needed = warningsOf(v.definition, marks).filter((warning) => warning.requiresAcknowledgement);
     const pairKey = (pair: { code?: unknown; input?: unknown }) => `${String(pair.code)}\u0000${String(pair.input)}`;
     const sent = new Set(((body as { acknowledgedWarnings?: { code?: unknown; input?: unknown }[] }).acknowledgedWarnings ?? []).map(pairKey));
     const wanted = new Set(needed.map(pairKey));
     if (sent.size !== wanted.size || [...wanted].some((key) => !sent.has(key))) {
       const refusal = problem(409, 'WARNINGS_NOT_ACKNOWLEDGED', `Approval needs an acknowledgement of ${needed.map((w) => `${w.code} on ${w.input}`).join(', ') || 'nothing'}`);
-      const extra = { warnings: needed.map(({ code, input, matchedName }) => ({ code, input, matchedName })), setting: ACKNOWLEDGE_WARNINGS };
+      const extra = { warnings: needed.map(({ code, input, matchedName }) => ({ code, input, matchedName })), setting: listed };
       return { ...refusal, body: JSON.stringify({ ...(JSON.parse(refusal.body) as object), ...extra }) };
     }
     for (const other of versionsOf(v.ruleSet)) if (other.status === 'PUBLISHED') other.status = 'RETIRED';
     Object.assign(v, { status: 'PUBLISHED', approvedBy: request.user, approvedAt: now(), effectiveFrom: now(), lockVersion: v.lockVersion + 1 });
     record(v, 'APPROVED', from, request.user, body.comment ?? null);
-    return view(v, request);
+    return view(v, request, marks);
   }
 
   function summary(name: string) {
@@ -534,7 +555,7 @@ export function createFakeEngine(seed: StoredVersion[]) {
         if (!base) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(baseNumber)} of rule set ${name} not found`);
         return json(diffDefinitions(v, base));
       }
-      if (request.method === 'GET' && tail === undefined) return view(v, request, url.searchParams.get('include') === 'source');
+      if (request.method === 'GET' && tail === undefined) return view(v, request, marks, url.searchParams.get('include') === 'source');
       if (request.method === 'GET' && tail === '/history') return json({ data: v.history ?? [] });
       if (request.method === 'GET' && tail === '/export') return exportOf(v, url.searchParams.get('format'));
       if (request.method === 'POST' && tail?.startsWith(':')) return transition(v, request, tail.slice(1) as 'request-publish' | 'approve' | 'reject');

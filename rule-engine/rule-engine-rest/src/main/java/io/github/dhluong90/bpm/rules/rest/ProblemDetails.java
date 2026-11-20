@@ -56,6 +56,7 @@ public class ProblemDetails {
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
             Map.entry("WARNINGS_NOT_ACKNOWLEDGED", HttpStatus.CONFLICT),
             Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
+            Map.entry("AUTHOR_UNKNOWN", HttpStatus.CONFLICT),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
             Map.entry("PRECONDITION_REQUIRED", HttpStatus.PRECONDITION_REQUIRED),
             Map.entry("DRAFT_AUTHORING_DISABLED", HttpStatus.FORBIDDEN),

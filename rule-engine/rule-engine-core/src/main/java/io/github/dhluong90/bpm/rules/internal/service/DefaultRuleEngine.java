@@ -17,6 +17,7 @@ import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
 import io.github.dhluong90.bpm.rules.internal.model.InputClause;
 import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
+import io.github.dhluong90.bpm.rules.internal.expr.RequestReads;
 import io.github.dhluong90.bpm.rules.internal.json.CanonicalJson;
 import io.github.dhluong90.bpm.rules.internal.json.CorrelationIds;
 import io.github.dhluong90.bpm.rules.internal.json.ExactForm;
@@ -39,6 +40,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 
@@ -76,6 +78,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     private final DecisionLog log;
     private final Map<String, CompiledRuleSet> compiled = new ConcurrentHashMap<>();
     private final CompiledCache cache;
+    private final AtomicBoolean grantOpened = new AtomicBoolean();
 
     /**
      * Creates the engine with a selection cache of its own.
@@ -93,6 +96,11 @@ public final class DefaultRuleEngine implements RuleEngine {
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.log = Objects.requireNonNull(log, "log must not be null");
         this.cache = Objects.requireNonNull(cache, "cache must not be null");
+    }
+
+    /** @return true the first time only: at most one grant of the tenant-scoped entry point per engine (#336) */
+    boolean markGrantOpened() {
+        return grantOpened.compareAndSet(false, true);
     }
 
     @Override
@@ -163,6 +171,7 @@ public final class DefaultRuleEngine implements RuleEngine {
             throw new VersionNotFoundException("(invalid name)", number);
         }
         // Any tenant but the caller's has no such version: the same answer whether or not the rule set exists.
+        int stoppedAt = -1;
         StoredVersion simulated = store.findVersion(tenant, ruleSet, number, false)
                 .orElseThrow(() -> new VersionNotFoundException(ruleSet, number));
         CompiledRuleSet draftRules = validated(simulated);
@@ -173,18 +182,40 @@ public final class DefaultRuleEngine implements RuleEngine {
             baselineRules.inputs().forEach(clause -> baselineInputs.add(clause.name()));
         }
         List<SimulationResult.Sample> results = new ArrayList<>(samples.size());
+        // One regex read budget for every decision of this request (evaluation.regex-max-reads-per-request, RLE-007):
+        // once it stops a match, no later item is evaluated, and the same samples stop at the same item on replay.
+        RequestReads request = context.settings().regexLimits().newRequest();
         for (int i = 0; i < samples.size(); i++) {
             DecisionInput sample = samples.get(i);
             if (context.settings().rejectUndeclaredInputs()) {
                 atSample(i, () -> draftRules.requireOnlyDeclared(sample));
             }
-            DecisionResult.Outcome draft = draftRules.evaluate(sample);
+            DecisionResult.Outcome draft = request.spent() ? notRun(request)
+                    : draftRules.evaluateWithReason(sample, null, request).outcome();
             DecisionResult.Outcome baseline = baselineRules == null ? null
-                    : baselineRules.evaluate(only(sample, baselineInputs));
+                    : request.spent() ? notRun(request)
+                    : baselineRules.evaluateWithReason(only(sample, baselineInputs), null, request).outcome();
+            if (request.spent() && stoppedAt < 0) {
+                stoppedAt = i;
+                System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.WARNING,
+                        "Simulation of " + ruleSet + " v" + number + " for tenant " + tenant + " stopped at sample "
+                                + i + " of " + samples.size() + ": evaluation.regex-max-reads-per-request ("
+                                + request.budget() + ") spent");
+            }
             results.add(new SimulationResult.Sample(i, draft, baseline, baseline == null || changed(draft, baseline)));
         }
         return new SimulationResult(simulated.ruleSet(), simulated.version(), simulated.status(),
                 effective == null ? null : effective.version(), now, results);
+    }
+
+    /**
+     * The outcome of an item a request did not evaluate because an earlier item spent the request's regex read budget
+     * (RLE-007): the same code as a decision stopped by a regex budget, naming the setting.
+     */
+    private static DecisionResult.Failed notRun(RequestReads request) {
+        return new DecisionResult.Failed("EVALUATION_ERROR", "REGEX_TIMEOUT: not evaluated, an earlier item spent the"
+                + " request's regular expression budget of " + request.budget()
+                + " characters (evaluation.regex-max-reads-per-request)");
     }
 
     /** Validation runs first: the stored version must still match its hash and compile, else VALIDATION_FAILED. */

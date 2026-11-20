@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
+import io.github.dhluong90.bpm.rules.api.AuthorUnknownException;
 import io.github.dhluong90.bpm.rules.api.DraftAuthoringDisabledException;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
@@ -312,6 +313,10 @@ public final class DefaultVersionService implements VersionService {
             // Four eyes: neither the person who requested publication nor the author of the content may approve it.
             if (actor.equals(current.requestedBy()) || actor.equals(current.createdBy())) {
                 throw new SelfApprovalForbiddenException(ruleSet, version);
+            }
+            // PD-105: a version written before the author was recorded cannot pass four eyes; no author is invented.
+            if (current.createdBy() == null) {
+                throw new AuthorUnknownException(ruleSet, version);
             }
             // DESIGN 3.3.5 order: permission, If-Match present, status, four eyes, lock, strict mode, acknowledgement.
             checkLock(current, opts);
@@ -667,10 +672,11 @@ public final class DefaultVersionService implements VersionService {
     /**
      * The caller's view of a version, with the warnings its author and approver should see (RLE-049): every undeclared
      * input whose name looks like personal data under the tenant's list. Computed from the stored definition and the
-     * tenant's settings on each read, so the approver sees what the author saw at import.
+     * tenant's settings on each read, so the approver sees what the author saw at import. Each warning says whether an
+     * approval must acknowledge it, by the same rule as the approve check (RLE-053).
      */
     private RuleSetVersion view(StoredVersion version, boolean includeSource) {
-        return version.toView(includeSource).withWarnings(warnings(version));
+        return version.toView(includeSource).withWarnings(acknowledgements(version).warnings());
     }
 
     /**
@@ -689,6 +695,32 @@ public final class DefaultVersionService implements VersionService {
      * or an extra pair is refused with the full current set. Exactly that set is recorded.
      */
     private Acknowledgement requireAcknowledgement(StoredVersion version, java.util.Set<AcknowledgedWarning> sent) {
+        Acknowledgements now = acknowledgements(version);
+        List<VersionWarning> needing = now.warnings().stream().filter(VersionWarning::requiresAcknowledgement).toList();
+        List<AcknowledgedWarning> needed = needing.stream()
+                .map(w -> new AcknowledgedWarning(w.code(), w.input())).distinct().toList();
+        if (!java.util.Set.copyOf(needed).equals(sent)) {
+            throw new WarningsNotAcknowledgedException(version.ruleSet(), version.version(), needing.stream()
+                    .map(w -> new WarningsNotAcknowledgedException.Unacknowledged(w.code(), w.input(), w.matchedName()))
+                    .toList(), context.settings().acknowledgeWarnings());
+        }
+        return new Acknowledgement(needed, now.maskedByDefault());
+    }
+
+    /**
+     * A version's warnings, each marked with whether an approval must acknowledge it, and the inputs masked only by
+     * the tenant's default.
+     */
+    private record Acknowledgements(List<VersionWarning> warnings, List<String> maskedByDefault) {
+    }
+
+    /**
+     * The one rule of which warnings need an acknowledgement (RLE-053, PD-104), used by the version view and the
+     * approve check alike: the code is listed in {@code lifecycle.acknowledge-warnings} and the input is not masked
+     * only by the tenant's {@code decision-log.mask-default}, whose values never reach the log in plain text.
+     * Computed from the stored definition and the tenant's personal-data names and masking default in force now.
+     */
+    private Acknowledgements acknowledgements(StoredVersion version) {
         String tenant = version.tenantId();
         boolean maskByDefault = context.masking().maskByDefault(tenant);
         List<String> maskedByDefault = MaskDeclarations.statuses(version.canonicalJson(), maskByDefault).stream()
@@ -697,18 +729,12 @@ public final class DefaultVersionService implements VersionService {
                 .sorted()
                 .toList();
         List<String> listed = context.settings().acknowledgeWarnings();
-        List<VersionWarning> needing = warnings(version).stream()
-                .filter(w -> listed.contains(w.code()))
-                .filter(w -> !maskedByDefault.contains(w.input()))
+        List<VersionWarning> warnings = MaskDeclarations.warnings(version.canonicalJson(),
+                        context.masking().personalDataNames(tenant), maskByDefault).stream()
+                .map(w -> w.withRequiresAcknowledgement(listed.contains(w.code())
+                        && !maskedByDefault.contains(w.input())))
                 .toList();
-        List<AcknowledgedWarning> needed = needing.stream()
-                .map(w -> new AcknowledgedWarning(w.code(), w.input())).distinct().toList();
-        if (!java.util.Set.copyOf(needed).equals(sent)) {
-            throw new WarningsNotAcknowledgedException(version.ruleSet(), version.version(), needing.stream()
-                    .map(w -> new WarningsNotAcknowledgedException.Unacknowledged(w.code(), w.input(), w.matchedName()))
-                    .toList(), listed);
-        }
-        return new Acknowledgement(needed, maskedByDefault);
+        return new Acknowledgements(warnings, maskedByDefault);
     }
 
     /** Most pairs an approval may acknowledge. */
@@ -743,12 +769,6 @@ public final class DefaultVersionService implements VersionService {
     private static String sortedPairs(java.util.Set<AcknowledgedWarning> pairs) {
         return pairs.stream().map(p -> p.code() + ":" + p.input().length() + ":" + p.input()).sorted()
                 .collect(java.util.stream.Collectors.joining(","));
-    }
-
-    private List<VersionWarning> warnings(StoredVersion version) {
-        String tenant = version.tenantId();
-        return MaskDeclarations.warnings(version.canonicalJson(), context.masking().personalDataNames(tenant),
-                context.masking().maskByDefault(tenant));
     }
 
     /** Strict mode (RLE-050): every input declares {@code mask}, or the command is refused before anything is stored. */
