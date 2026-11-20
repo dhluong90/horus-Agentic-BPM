@@ -295,12 +295,10 @@ describe('four eyes', () => {
   });
 
   it('PD_094_without_the_setting_draft_editing_is_off_and_import_stays', async () => {
-    const user = userEvent.setup();
     open('#/rules/card-fee/1', 'rules-author-drafts-default');
     expect(await screen.findByText('Changes to this environment arrive through your release pipeline.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'More' }));
-    expect(screen.getByRole('menuitem', { name: 'Import new version' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Import new version' })).toBeEnabled();
     window.location.hash = '#/rules';
     expect(await screen.findByRole('button', { name: 'Import rule set' })).toBeInTheDocument();
   });
@@ -388,10 +386,8 @@ describe('import of the next version (CKP-030)', () => {
   });
 
   it('PD_075_import_stays_available_when_cockpit_drafts_are_off', async () => {
-    const user = userEvent.setup();
     open('#/rules/card-fee/1', 'rules-author-drafts-off');
-    await user.click(await screen.findByRole('button', { name: 'More' }));
-    expect(screen.getByRole('menuitem', { name: 'Import new version' })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: 'Import new version' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
   });
 });

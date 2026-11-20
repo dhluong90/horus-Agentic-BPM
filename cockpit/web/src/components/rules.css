@@ -476,3 +476,4 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .pii-warning__accept input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--accent-fill); }
 /* The amber marker on a condition header whose masking changed to not masked; the sentence is above the table. */
 .masking-flag { color: var(--warn-fill); font-size: 11px; cursor: help; }
+.rs-head__files { display: flex; align-items: center; gap: 4px; }

@@ -4,7 +4,8 @@ import { toHostError } from '../../api/hostError';
 import type { Rule, RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useRulesSession } from './api/rulesContext';
-import { useApprove, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
+import { useApprove, useExportVersion, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
+import { saveFile } from '../../app/saveFile';
 import { DecisionCard, DetailsPanel, DraftsOffNote, EditDock, HeaderActions, type Action, type Review } from './components/ActionDock';
 import { ChangesView } from './components/ChangesView';
 import { DecisionTable } from './components/DecisionTable';
@@ -129,7 +130,12 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
   const approve = useApprove((updated) => { say(t('dock.approved', { version: String(updated.version) })); });
 
   const reject = useReject((updated) => { say(t('dock.rejected', { version: String(updated.version) })); });
-  const picker = useFilePicker((document) => { importVersion.start(document); });
+  // Export hands the engine's bytes to the browser unchanged, so the file imports back with the same hash (RLE-032).
+  const exportFile = useExportVersion((exported) => {
+    saveFile(exported.file, exported.fileName);
+    say(t('export.done', { file: exported.fileName }));
+  });
+  const picker = useFilePicker((document) => { exportFile.reset(); importVersion.start(document); });
   const errors = placeErrors(save.error ? toHostError(save.error) : undefined);
   const onlyLocated = errors.length > 0 && errors.every((e) => e.kind !== 'table');
   const document = editing ? toDocument(version.definition, draft.rows) : undefined;
@@ -209,6 +215,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
         <DraftsOffNote />
         {picker.input}
         {importVersion.error !== undefined && importVersion.error !== null ? <ProblemNotice error={importVersion.error} located /> : null}
+        {exportFile.error ? <ProblemNotice error={exportFile.error} located /> : null}
         {requestPublish.error ? <ProblemNotice error={requestPublish.error} onReload={() => { window.location.reload(); }} /> : null}
         {!editing ? (
           <div className="rs-head__tabs">
@@ -216,11 +223,20 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, open
               items={[{ id: 'table', label: t('lens.table') }, { id: 'changes', label: t('lens.changes') }, { id: 'history', label: t('lens.history') }]}>
               {null}
             </Tabs>
-            <MenuButton label={t('more.label')} className="btn btn--ghost" trigger={<>{t('more.label')} <span aria-hidden="true">⌄</span></>}
-              items={[
-                { label: t('more.source'), onSelect: () => { go({ lens: 'source' }); } },
-                ...(can('rules:author') ? [{ label: t('ruleSet.import'), onSelect: picker.open, disabled: importVersion.isPending }] : []),
-              ]} />
+            <div className="rs-head__files">
+              {can('rules:author') ? (
+                <button type="button" className="btn btn--ghost" disabled={importVersion.isPending} aria-busy={importVersion.isPending} onClick={picker.open}>
+                  {importVersion.isPending ? t('rulesArea.importing') : t('ruleSet.import')}
+                </button>
+              ) : null}
+              <MenuButton label={t('export.label')} className="btn btn--ghost" trigger={<>{exportFile.isPending ? t('export.busy') : t('export.label')} <span aria-hidden="true">⌄</span></>}
+                items={[
+                  { label: t('export.json'), onSelect: () => { exportFile.start({ name: version.ruleSet, version: version.version, format: 'json' }); }, disabled: exportFile.isPending },
+                  { label: t('export.dmn'), onSelect: () => { exportFile.start({ name: version.ruleSet, version: version.version, format: 'dmn' }); }, disabled: exportFile.isPending },
+                ]} />
+              <MenuButton label={t('more.label')} className="btn btn--ghost" trigger={<>{t('more.label')} <span aria-hidden="true">⌄</span></>}
+                items={[{ label: t('more.source'), onSelect: () => { go({ lens: 'source' }); } }]} />
+            </div>
           </div>
         ) : null}
       </div>

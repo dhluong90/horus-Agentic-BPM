@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { callHost, type HostRequest } from '../hostCall';
+import { callHost, downloadFromHost, type HostRequest } from '../hostCall';
 import {
   decisionResult,
   page,
@@ -22,10 +22,19 @@ type Fetch = typeof fetch;
 
 export const RULES_BASE = '/api/bpm/rules/v1';
 
-/** A document to import: the text and its media type (application/yaml or application/json). */
+/** A document to import: the text and its media type (YAML, JSON, or a DMN decision table as XML). */
 export interface RuleDocument {
-  contentType: 'application/yaml' | 'application/json';
+  contentType: 'application/yaml' | 'application/json' | 'application/xml';
   text: string;
+}
+
+/** The export formats the engine offers (exportVersion): the RFC 8785 canonical JSON document, or DMN 1.5. */
+export type ExportFormat = 'json' | 'dmn';
+
+/** An exported version: the bytes as the engine sent them and the file name to save them under. */
+export interface ExportedFile {
+  file: Blob;
+  fileName: string;
 }
 
 /**
@@ -54,6 +63,8 @@ export interface RulesClient {
   getVersion(name: string, version: number, options?: { source?: boolean; signal?: AbortSignal }): Promise<RuleSetVersion>;
   /** diffVersions: the engine's row-level diff of `version` against `base`; writes nothing (RLE-028) */
   diffVersions(name: string, version: number, base: number, signal?: AbortSignal): Promise<VersionDiff>;
+  /** exportVersion: a file that imports back with the same canonical hash (RLE-032); writes nothing */
+  exportVersion(name: string, version: number, format: ExportFormat, signal?: AbortSignal): Promise<ExportedFile>;
   /** importRuleSet: version 1 of a new rule set */
   importRuleSet(document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** importVersion: the next draft version of an existing rule set */
@@ -129,6 +140,15 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
     async diffVersions(name, version, base, signal) {
       const answer = await call({ method: 'GET', path: `${versionPath(name, version)}/diff?base=${String(base)}`, ...(signal ? { signal } : {}) }, versionDiff);
       return answer.data;
+    },
+    async exportVersion(name, version, format, signal) {
+      const answer = await downloadFromHost(
+        fetchImpl,
+        baseUrl,
+        { method: 'GET', path: `${versionPath(name, version)}/export?format=${format}`, ...(signal ? { signal } : {}) },
+        format === 'json' ? 'application/json' : 'application/xml',
+      );
+      return { file: answer.file, fileName: answer.fileName ?? `${name}-v${String(version)}.${format}` };
     },
     async importRuleSet(document, idempotencyKey) {
       const answer = await call(

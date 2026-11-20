@@ -4,6 +4,8 @@
  * cockpit uses: paged lists of rule sets and versions with a cursor, allowedActions computed for the caller,
  * history, the row-level diff of two versions, reject with a reason, and the problems the screens must show: 422 VALIDATION_FAILED with
  * violations, 403 SELF_APPROVAL_FORBIDDEN, 409 VERSION_CONFLICT, 400 QUERY_INVALID, 413 PAYLOAD_TOO_LARGE.
+ * Export answers the canonical JSON document (keys sorted, no white space) or a small DMN 1.5 table, with
+ * Content-Disposition; a POST repeated with the same Idempotency-Key replays the first answer.
  * It accepts JSON text only (JSON is YAML), which is what the cockpit's editor sends.
  */
 
@@ -329,7 +331,52 @@ export function diffDefinitions(next: StoredVersion, base: StoredVersion) {
   };
 }
 
+/** RFC 8785 in short, for the values a definition holds: object keys sorted, no white space. */
+export function canonicalJson(value: Json): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key] as Json)}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
+const xml = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+
+/** A DMN 1.5 document with one decision table, as the engine's DMN export shapes it. */
+function toDmn(d: Definition): string {
+  const inputs = d.inputs.map((i) => `      <input label="${xml(i.name)}"><inputExpression typeRef="${xml(i.type)}"><text>${xml(i.name)}</text></inputExpression></input>`);
+  const outputs = d.outputs.map((o) => `      <output name="${xml(o.name)}" typeRef="${xml(o.type)}"/>`);
+  const rules = d.rules.map((r) => [
+    `      <rule id="${xml(r.id)}">`,
+    ...d.inputs.map((i) => `        <inputEntry><text>${xml(r.when[i.name] ?? '-')}</text></inputEntry>`),
+    ...d.outputs.map((o) => `        <outputEntry><text>${xml(JSON.stringify(r.then[o.name] ?? null))}</text></outputEntry>`),
+    '      </rule>',
+  ].join('\n'));
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<definitions xmlns="https://www.omg.org/spec/DMN/20230324/MODEL/" name="${xml(d.ruleSet)}" namespace="urn:horus:rules">`,
+    `  <decision id="${xml(d.ruleSet)}" name="${xml(d.ruleSet)}">`,
+    `    <decisionTable hitPolicy="${xml(d.hitPolicy.toUpperCase())}">`,
+    ...inputs, ...outputs, ...rules,
+    '    </decisionTable>',
+    '  </decision>',
+    '</definitions>',
+    '',
+  ].join('\n');
+}
+
+function exportOf(v: StoredVersion, format: string | null): FakeResponse {
+  const fileName = `${v.ruleSet}-v${String(v.version)}`;
+  if (format === 'json') {
+    return { status: 200, headers: { 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="${fileName}.json"` }, body: canonicalJson(v.definition as unknown as Json) };
+  }
+  if (format === 'dmn') {
+    return { status: 200, headers: { 'Content-Type': 'application/xml', 'Content-Disposition': `attachment; filename="${fileName}.dmn"` }, body: toDmn(v.definition) };
+  }
+  return problem(400, 'INPUT_INVALID', 'format must be one of json, dmn');
+}
+
 export function createFakeEngine(seed: StoredVersion[]) {
+  /** First answers by Idempotency-Key and request, replayed when the same request comes again. */
+  const replays = new Map<string, FakeResponse>();
   const store: StoredVersion[] = seed.map((v) => structuredClone(v));
   const now = () => new Date('2026-11-19T03:00:00Z').toISOString();
   const find = (name: string, version: number) => store.find((v) => v.ruleSet === name && v.version === version);
@@ -453,6 +500,17 @@ export function createFakeEngine(seed: StoredVersion[]) {
   }
 
   function handle(request: FakeRequest): FakeResponse {
+    const key = request.headers['idempotency-key'];
+    if (request.method !== 'POST' || key === undefined) return route(request);
+    const replayKey = `${request.user}\u0000${key}\u0000${request.path}`;
+    const replayed = replays.get(replayKey);
+    if (replayed) return replayed;
+    const answer = route(request);
+    if (answer.status < 500) replays.set(replayKey, answer);
+    return answer;
+  }
+
+  function route(request: FakeRequest): FakeResponse {
     const url = new URL(request.path, 'http://host');
     const path = decodeURIComponent(url.pathname).replace(/^.*\/api\/bpm\/rules\/v1/, '');
     let m: RegExpExecArray | null;
@@ -462,7 +520,7 @@ export function createFakeEngine(seed: StoredVersion[]) {
       return versionsOf(name).length === 0 ? problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`) : json(summary(name));
     }
     if ((m = /^\/rule-sets\/([^/]+)\/versions$/.exec(path))) return request.method === 'GET' ? listVersions(m[1] ?? '', url, request) : importVersion(m[1], request);
-    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|:request-publish|:approve|:reject)?$/.exec(path))) {
+    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject)?$/.exec(path))) {
       const name = m[1] ?? '';
       if (m[3] === '/diff' && versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
       const v = find(name, Number(m[2]));
@@ -478,6 +536,7 @@ export function createFakeEngine(seed: StoredVersion[]) {
       }
       if (request.method === 'GET' && tail === undefined) return view(v, request, url.searchParams.get('include') === 'source');
       if (request.method === 'GET' && tail === '/history') return json({ data: v.history ?? [] });
+      if (request.method === 'GET' && tail === '/export') return exportOf(v, url.searchParams.get('format'));
       if (request.method === 'POST' && tail?.startsWith(':')) return transition(v, request, tail.slice(1) as 'request-publish' | 'approve' | 'reject');
     }
     if (request.method === 'POST' && (m = /^\/decisions\/([^/:]+):evaluate$/.exec(path))) return evaluate(m[1] ?? '', request);
