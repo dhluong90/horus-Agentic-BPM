@@ -135,6 +135,138 @@ class RegexBoundsTest {
                 + " (evaluation.regex-max-reads); simplify the pattern");
     }
 
+    /**
+     * A payment screening table: 200 rows, each looking for a different marker after the digits of a remittance
+     * reference, and a catch-all. No marker is present, so every row runs its {@code matches} over the reference.
+     */
+    static String screening(int rows) {
+        StringBuilder yaml = new StringBuilder("""
+                schemaVersion: 1
+                ruleSet: remittance-screening
+                hitPolicy: first
+                inputs:
+                  - { name: reference, type: string }
+                outputs:
+                  - { name: route, type: string }
+                rules:
+                """);
+        for (int i = 1; i <= rows; i++) {
+            yaml.append("  - { id: R").append(i).append(", when: { reference: \"matches('[0-9]*K").append(i)
+                    .append("')\" }, then: { route: \"'HOLD'\" } }\n");
+        }
+        yaml.append("  - { id: CLEAR, when: {}, then: { route: \"'CLEAR'\" } }\n");
+        return yaml.toString();
+    }
+
+    /** A remittance reference of 500 digits; each screening row reads it about 125,000 times, under one match's cap. */
+    static final String LONG_REFERENCE = "1".repeat(500);
+
+    /** Characters the JDK matcher reads to search {@code text} for {@code pattern}, counted as the engine counts. */
+    static long readsOf(String pattern, String text) {
+        long[] reads = {0};
+        record Counting(String text, long[] reads, int start, int end) implements CharSequence {
+            @Override
+            public char charAt(int index) {
+                reads[0]++;
+                return text.charAt(start + index);
+            }
+
+            @Override
+            public int length() {
+                return end - start;
+            }
+
+            @Override
+            public CharSequence subSequence(int from, int to) {
+                return new Counting(text, reads, start + from, start + to);
+            }
+
+            @Override
+            public String toString() {
+                return text.substring(start, end);
+            }
+        }
+        java.util.regex.Pattern.compile(pattern).matcher(new Counting(text, reads, 0, text.length())).find();
+        return reads[0];
+    }
+
+    @Test
+    void RLE_007_a_decision_of_200_matches_rows_stops_at_the_decision_budget_the_same_way_on_every_run() {
+        // Defaults: 1,000,000 reads per match, 5,000,000 per decision. A generous clock leaves only the read counts.
+        RegexLimits limits = new RegexLimits(1000, 4096, RegexLimits.MAX_READS, RegexLimits.MAX_READS_PER_DECISION);
+        long perRow = readsOf("[0-9]*K1", LONG_REFERENCE);
+        assertThat(perRow).isLessThan(RegexLimits.MAX_READS).isGreaterThan(RegexLimits.MAX_READS_PER_DECISION / 200);
+        CompiledRuleSet rules = compiled(screening(200), limits);
+
+        List<String> details = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            CompiledRuleSet.Evaluation evaluation = rules.evaluateWithReason(
+                    DecisionInput.of(Map.of("reference", LONG_REFERENCE)));
+            assertThat(evaluation.reason()).isEqualTo("REGEX_TIMEOUT");
+            assertThat(evaluation.outcome()).isInstanceOfSatisfying(DecisionResult.Failed.class, failed -> {
+                assertThat(failed.code()).isEqualTo("EVALUATION_ERROR");
+                assertThat(failed.matchedRuleIds()).isEmpty();
+            });
+            details.add(((DecisionResult.Failed) evaluation.outcome()).detail());
+        }
+
+        assertThat(details).containsOnly("REGEX_TIMEOUT: matches() stopped: the decision's regular expressions read"
+                + " 5000000 characters in all (evaluation.regex-max-reads-per-decision); simplify the patterns or use"
+                + " fewer matches() rows");
+        // A short reference reads little, so the same 200 rows run to the catch-all within the budget.
+        assertThat(rules.evaluate(DecisionInput.of(Map.of("reference", "FT20270115"))))
+                .isInstanceOfSatisfying(DecisionResult.Matched.class,
+                        matched -> assertThat(matched.ruleIds()).containsExactly("CLEAR"));
+    }
+
+    @Test
+    void RLE_007_reads_are_counted_across_every_matches_call_of_one_decision() {
+        long perRow = readsOf("[0-9]*K1", LONG_REFERENCE);
+        DecisionInput input = DecisionInput.of(Map.of("reference", LONG_REFERENCE));
+        // Each row alone is well inside one match's cap; the decision budget holds one row and not quite two.
+        CompiledRuleSet twoRows = compiled(screening(2),
+                new RegexLimits(1000, 4096, RegexLimits.MAX_READS, (int) (2 * perRow - 1)));
+        CompiledRuleSet oneRow = compiled(screening(1),
+                new RegexLimits(1000, 4096, RegexLimits.MAX_READS, (int) (2 * perRow - 1)));
+        CompiledRuleSet twoRowsExact = compiled(screening(2),
+                new RegexLimits(1000, 4096, RegexLimits.MAX_READS, (int) (2 * perRow)));
+
+        CompiledRuleSet.Evaluation over = twoRows.evaluateWithReason(input);
+
+        assertThat(over.reason()).isEqualTo("REGEX_TIMEOUT");
+        assertThat(((DecisionResult.Failed) over.outcome()).detail())
+                .contains("evaluation.regex-max-reads-per-decision");
+        assertThat(twoRowsExact.evaluate(input)).isInstanceOfSatisfying(DecisionResult.Matched.class,
+                matched -> assertThat(matched.ruleIds()).containsExactly("CLEAR"));
+        // Each decision starts with the whole budget: the one-row table passes every time on the same compiled set.
+        for (int i = 0; i < 3; i++) {
+            assertThat(oneRow.evaluate(input)).isInstanceOfSatisfying(DecisionResult.Matched.class,
+                    matched -> assertThat(matched.ruleIds()).containsExactly("CLEAR"));
+        }
+    }
+
+    @Test
+    void RLE_007_a_decision_past_its_read_budget_is_logged_with_regex_timeout_and_no_outputs() {
+        RuleEngines engines = engines(EngineSettings.defaults().withRegexLimits(
+                new RegexLimits(1000, 4096, RegexLimits.MAX_READS, RegexLimits.MAX_READS_PER_DECISION)));
+        publish(engines, screening(200), "remittance-screening");
+
+        DecisionResult result = engines.ruleEngine().evaluate("remittance-screening",
+                DecisionInput.of(Map.of("reference", LONG_REFERENCE)));
+
+        assertThat(result.outcome()).isInstanceOfSatisfying(DecisionResult.Failed.class, failed -> {
+            assertThat(failed.code()).isEqualTo("EVALUATION_ERROR");
+            assertThat(failed.detail()).startsWith("REGEX_TIMEOUT").contains("evaluation.regex-max-reads-per-decision")
+                    .doesNotContain(LONG_REFERENCE);
+        });
+        assertThat(result.outputs()).isEmpty();
+        assertThat(stores.decisions).singleElement().satisfies(row -> {
+            assertThat(row.outcome()).isEqualTo("EVALUATION_ERROR");
+            assertThat(row.errorCode()).isEqualTo("REGEX_TIMEOUT");
+            assertThat(row.outputsJson()).isNull();
+        });
+    }
+
     @Test
     void TR_SEC_02_text_longer_than_the_limit_fails_without_running_the_match() {
         // A budget of one read: had the match run, it would have stopped with REGEX_TIMEOUT instead.
@@ -281,6 +413,10 @@ class RegexBoundsTest {
         assertThatThrownBy(() -> new RegexLimits(0, 10)).hasMessageContaining("regex-timeout-ms");
         assertThatThrownBy(() -> new RegexLimits(1001, 10)).hasMessageContaining("regex-timeout-ms");
         assertThatThrownBy(() -> new RegexLimits(50, 0)).hasMessageContaining("regex-max-input-length");
+        assertThatThrownBy(() -> new RegexLimits(50, 10, 1000, 0)).hasMessageContaining("regex-max-reads-per-decision");
+        assertThatThrownBy(() -> new RegexLimits(50, 10, 1000, 5_000_001))
+                .hasMessageContaining("regex-max-reads-per-decision").hasMessageContaining("never raised");
+        assertThat(RegexLimits.defaults().maxReadsPerDecision()).isEqualTo(5_000_000);
         assertThatThrownBy(() -> EngineSettings.defaults().withSizeLimits(EngineDefaults.OUTPUT_MAX_BYTES, 100,
                 EngineDefaults.RULES_MAX).withRegexLimits(50, 101))
                 .hasMessageContaining("regex-max-input-length").hasMessageContaining("max-string-length");

@@ -54,7 +54,8 @@ public final class CompiledRuleSet {
     private final List<InputClause> inputs;
     private final List<OutputClause> outputs;
     private final List<CompiledRule> rules;
-    private final Evaluator evaluator;
+    /** Shared and immutable; each evaluation runs on a copy scoped to its own regex read budget. */
+    private final Evaluator shared;
     private final int maxOutputBytes;
 
     private CompiledRuleSet(Definitions model, List<CompiledRule> rules, int maxOutputBytes, int maxStringLength,
@@ -65,7 +66,7 @@ public final class CompiledRuleSet {
         this.inputs = table.inputs();
         this.outputs = table.outputs();
         this.rules = List.copyOf(rules);
-        this.evaluator = new Evaluator(table.moneyRounding(), maxStringLength, regexLimits);
+        this.shared = new Evaluator(table.moneyRounding(), maxStringLength, regexLimits);
         this.maxOutputBytes = maxOutputBytes;
     }
 
@@ -194,11 +195,13 @@ public final class CompiledRuleSet {
      */
     public Evaluation evaluateWithReason(DecisionInput input) {
         Object[] slots = bind(input);
+        // One read budget for every matches() of this decision (evaluation.regex-max-reads-per-decision, RLE-007).
+        Evaluator decision = shared.forDecision();
         try {
             return new Evaluation(switch (hitPolicy) {
-                case FIRST -> first(slots);
-                case UNIQUE -> unique(slots);
-                case COLLECT -> collect(slots);
+                case FIRST -> first(decision, slots);
+                case UNIQUE -> unique(decision, slots);
+                case COLLECT -> collect(decision, slots);
             }, null);
         } catch (EvaluationException e) {
             return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", e.getMessage()), e.reason());
@@ -232,10 +235,10 @@ public final class CompiledRuleSet {
         }
     }
 
-    private DecisionResult.Outcome first(Object[] slots) {
+    private DecisionResult.Outcome first(Evaluator evaluator, Object[] slots) {
         for (CompiledRule rule : rules) {
             if (evaluator.matches(rule.condition(), slots)) {
-                return new DecisionResult.Matched(List.of(rule.id()), rowOutputs(rule, slots));
+                return new DecisionResult.Matched(List.of(rule.id()), rowOutputs(evaluator, rule, slots));
             }
         }
         return noMatch();
@@ -245,8 +248,8 @@ public final class CompiledRuleSet {
      * Exactly one rule must match (RLE-002, DMN 1.5 as decided in PD-088): no match is {@code NoMatch}, as under
      * {@code first}; several matches are {@code UNIQUE_HIT_VIOLATION} with every matched rule id and no outputs.
      */
-    private DecisionResult.Outcome unique(Object[] slots) {
-        List<CompiledRule> matched = matching(slots);
+    private DecisionResult.Outcome unique(Evaluator evaluator, Object[] slots) {
+        List<CompiledRule> matched = matching(evaluator, slots);
         if (matched.isEmpty()) {
             return noMatch();
         }
@@ -256,7 +259,7 @@ public final class CompiledRuleSet {
                     matched.stream().map(CompiledRule::id).toList());
         }
         CompiledRule rule = matched.getFirst();
-        return new DecisionResult.Matched(List.of(rule.id()), rowOutputs(rule, slots));
+        return new DecisionResult.Matched(List.of(rule.id()), rowOutputs(evaluator, rule, slots));
     }
 
     /**
@@ -266,8 +269,8 @@ public final class CompiledRuleSet {
      * is {@code EVALUATION_ERROR} (errorMode strict, PD-066). Aggregates are over all values, not distinct ones.
      * With no match every output is null.
      */
-    private DecisionResult.Outcome collect(Object[] slots) {
-        List<CompiledRule> matched = matching(slots);
+    private DecisionResult.Outcome collect(Evaluator evaluator, Object[] slots) {
+        List<CompiledRule> matched = matching(evaluator, slots);
         if (matched.isEmpty()) {
             return noMatch();
         }
@@ -316,7 +319,7 @@ public final class CompiledRuleSet {
         return new DecisionResult.NoMatch(values);
     }
 
-    private List<CompiledRule> matching(Object[] slots) {
+    private List<CompiledRule> matching(Evaluator evaluator, Object[] slots) {
         List<CompiledRule> matched = new ArrayList<>();
         for (CompiledRule rule : rules) {
             if (evaluator.matches(rule.condition(), slots)) {
@@ -350,7 +353,7 @@ public final class CompiledRuleSet {
         };
     }
 
-    private Map<String, Object> rowOutputs(CompiledRule rule, Object[] slots) {
+    private Map<String, Object> rowOutputs(Evaluator evaluator, CompiledRule rule, Object[] slots) {
         Map<String, Object> values = new LinkedHashMap<>();
         long[] bytes = {0};
         for (int i = 0; i < outputs.size(); i++) {

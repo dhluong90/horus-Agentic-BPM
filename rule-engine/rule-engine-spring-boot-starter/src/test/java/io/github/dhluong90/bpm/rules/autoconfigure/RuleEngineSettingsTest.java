@@ -108,11 +108,31 @@ class RuleEngineSettingsTest {
         "horus.bpm.rules.evaluation.regex-max-input-length=0, horus.bpm.rules.evaluation.regex-max-input-length",
         "horus.bpm.rules.evaluation.regex-max-input-length=65537, horus.bpm.rules.evaluation.regex-max-input-length",
         "horus.bpm.rules.evaluation.regex-max-reads=0, horus.bpm.rules.evaluation.regex-max-reads",
-        "horus.bpm.rules.evaluation.regex-max-reads=1000001, horus.bpm.rules.evaluation.regex-max-reads"
+        "horus.bpm.rules.evaluation.regex-max-reads=1000001, horus.bpm.rules.evaluation.regex-max-reads",
+        "horus.bpm.rules.evaluation.regex-max-reads-per-decision=0, horus.bpm.rules.evaluation.regex-max-reads-per-decision",
+        "horus.bpm.rules.evaluation.regex-max-reads-per-decision=5000001, horus.bpm.rules.evaluation.regex-max-reads-per-decision"
     })
     void TR_EXT_03_an_invalid_value_fails_start_up_naming_the_property(String property, String name) {
         runner.withPropertyValues(property).run(context -> assertThat(context).hasFailed()
                 .getFailure().rootCause().hasMessageContaining(name));
+    }
+
+    @Test
+    void RLE_007_the_decision_read_budget_defaults_to_five_million_and_may_only_be_lowered() {
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits().maxReadsPerDecision())
+                .isEqualTo(5_000_000));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-max-reads-per-decision=250000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits())
+                        .isEqualTo(new RegexLimits(50, 4096, 1_000_000, 250_000)));
+        // Lowering max-string-length keeps the decision budget the host chose.
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-max-reads-per-decision=250000",
+                        "horus.bpm.rules.evaluation.max-string-length=1000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits().maxReadsPerDecision())
+                        .isEqualTo(250_000));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-max-reads-per-decision=5000001")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.evaluation.regex-max-reads-per-decision")
+                        .hasMessageContaining("never raised"));
     }
 
     @Test

@@ -7,10 +7,11 @@ flowchart TD
   F -- yes --> G["null, the condition does not match"]
   F -- no --> H{"Longer than evaluation.regex-max-input-length?"}
   H -- yes --> I["EVALUATION_ERROR, error_code REGEX_INPUT_TOO_LONG; the match never runs"]
-  H -- no --> J["Matcher reads the text through a counting CharSequence"]
-  J --> K{"Finished within evaluation.regex-max-reads, deterministic, and evaluation.regex-timeout-ms, the backstop?"}
-  K -- yes --> L["true or false; evaluation continues"]
-  K -- no --> M["EVALUATION_ERROR, error_code REGEX_TIMEOUT; the thread returns at once"]
+  H -- no --> J["Matcher reads the text through a counting CharSequence; budget = the lower of evaluation.regex-max-reads and the reads left to the decision"]
+  J --> K{"Finished within that budget, deterministic, and evaluation.regex-timeout-ms, the backstop?"}
+  K -- yes --> P["Reads charged to the decision's evaluation.regex-max-reads-per-decision"]
+  P --> L["true or false; evaluation continues with the next cell or row"]
+  K -- no --> M["EVALUATION_ERROR, error_code REGEX_TIMEOUT, no outputs; the thread returns at once"]
   J -- stack overflow --> O["EVALUATION_ERROR, error_code REGEX_TOO_DEEP"]
   O --> N
   I --> N["One decision row in the host transaction, 422 over REST"]
