@@ -39,6 +39,16 @@ Numbers that follow from the rule: 100 concurrent agent calls of 10 s each hold 
 
 Since 0.2.0 a `serviceTask` with `horus:mode="remote"` (and an optional `horus:timeout`, default `adapters.default-timeout`) runs this way through a `ServiceAdapter` bean named by `horus:handler`. A job is claimed only when one of the replica's `adapters.executor-threads` slots is free; its lease is the timeout plus `jobs.lease-margin`. A crashed replica's attempt is claimed again when its lease ends, as attempt 2 with a new attempt id. A failed attempt is retried after `jobs.retry-backoff` times the attempt, up to `jobs.max-attempts`. An adapter that answers `Accepted` frees its thread at once; the remote side later reports the result through `POST /api/bpm/processes/v1/async-steps/{jobId}:complete` ([[Process Engine API]]) before the lease ends, with the attempt's completion token. The caller needs `processes:step:complete` and a role listed for that adapter in `horus.bpm.processes.adapters.completer-roles`.
 
+Each async job kind has its own runner: remote service steps (`ASYNC_SERVICE`) and agent steps (`ASYNC_AGENT`) each get their own slots, default timeout, attempts and back-off under `horus.bpm.processes.runners.async-service.*` and `runners.async-agent.*`. Each kind is claimed separately, up to its own free slots, so five slow agent calls on two agent slots never hold up a credit bureau call. Every value you do not set falls back to `adapters.executor-threads`, `adapters.default-timeout`, `jobs.max-attempts` and `jobs.retry-backoff`; with nothing set, the engine behaves as before. Timers keep `jobs.*`.
+
+The engine checks a result where it records it, so a result sent through the completion API is checked like one from the engine's own executor. Remote service results have no check. An agent step's answer is validated against its output schema and then judged by its guardrail rule set (output `allow`, optional `reasons`), in the result transaction and in-process, within `runners.async-agent.guard-budget` (default `500ms`). The completion API answers `REFUSED` when:
+
+- the answer breaks its schema: the attempt failed and is retried (`AGENT_SCHEMA_INVALID`);
+- the guardrail says `allow: false` (`GUARDRAIL_VIOLATION`);
+- the guardrail cannot decide, because the rule set is missing, nothing matched, it failed, it overran the budget or there is no Rule Engine (`GUARDRAIL_EVALUATION_ERROR`).
+
+In the last two cases nothing of the answer is accepted. The step moves to a review task for the step's reviewer, a four-eyes task the instance's starter cannot take, and the reviewer's answer completes the step. With `onViolation: fail`, or without a reviewer, the job fails instead.
+
 ```java
 public interface ServiceAdapter {
   String name();                                         // the horus:handler name

@@ -35,6 +35,12 @@ The first implementation, for the remote `serviceTask`, differs from the decisio
 4. **Completion credential and scope.** The attempt id can be derived from public ids, so it is not a credential. Each claim issues a completion token of 256 random bits; only its SHA-256 is stored, and the completion API compares it in constant time. The caller also needs `processes:step:complete` and a role listed for the step's adapter in `adapters.completer-roles`.
 5. **Idempotency key.** The remote side deduplicates by the job id (`AdapterCall.idempotencyKey()`), which every retry keeps, not by the attempt id, which changes on each attempt. Compensation handlers will follow the same rule.
 
+## Amendment, 2026-11-20 (#363)
+Two points are added; nothing above changes.
+
+1. **Runner per job kind.** Each async job kind has its own runner, slots, timeout, attempts and back-off, and its own claim statement, so a backlog of one kind never takes another kind's slots or claims. Unset values fall back to the engine-wide keys.
+2. **The result check belongs to TX2.** "validates output and guardrails" in the decision is done in `recordAttempt`, the one place that accepts a result, so a result reported through the completion API is checked like one from the executor. The check is in-process (the output schema validator and the Rule Engine), bounded by a time budget, and fails closed: a result it cannot clear is refused and routed to a reviewer or fails its job.
+
 ## Consequences
 Adapters must be idempotent by the job id (`TR-IDEM-04`; the attempt id before the 2026-11-20 amendment): with option B a takeover only happens after a crash or a stall longer than the margin, but then a late result is discarded while its side effect may have happened. Changing a step's `timeout` changes its lease and its crash recovery time together. The engine part of an async step costs about 10 ms of database time. Hosts size adapter thread pools, not the connection pool, for agent concurrency. Verified by `TR-ASY-01`, `TR-ASY-02`, `PRE-009` and `PRE-017`; documented in `wiki/Architecture.md` section 4.
 
@@ -42,3 +48,4 @@ Adapters must be idempotent by the job id (`TR-IDEM-04`; the attempt id before t
 - 2026-11-18: proposed by the maintainers.
 - 2026-11-19: accepted by the product owner without change (PD-029).
 - 2026-11-20: amended to match the implementation: engine clock, matching by attempt, the `Accepted` hand-off, the completion token and adapter scope, and the job id as idempotency key (#51).
+- 2026-11-20: amended with a runner per job kind and the result check in TX2 (#363).

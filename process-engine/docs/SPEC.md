@@ -620,3 +620,47 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - Separately, `card-reminder-fee` in `bank-f` prices Gold cards only and a Classic card's timer fires: the Rule Engine writes the decision row, the step fails with `DECISION_NO_MATCH`, and that row rolls back with the firing (no `rle_decision` row for the instance, job `DUE` with attempt 1).
 - **Example:** `rule set only in bank-d, bank-c timer fires -> RULE_SET_NOT_FOUND, nothing written, job DUE attempt 1`.
 - **Test ID:** `PRE_056_decision_after_a_timer_never_reads_another_tenants_rule_set`, `PRE_056_a_rule_engine_without_an_explicit_tenant_cannot_run_a_decision_after_a_timer`, `PRE_056_a_decision_row_written_before_the_step_fails_rolls_back_with_the_firing`
+
+### PRE-057 Each async job kind runs on its own runner, so a backlog of one kind never delays another
+- **Traces to:** `TR-ASY-01`, `TR-ASY-02`, `TR-PERF-05`, #363
+- **Milestone:** M2
+- **Given:** A replica with `runners.async-agent.slots: 2` and nothing else set. The document assessor (an `ASYNC_AGENT` job of `loan-document-assessment`) holds every call; five loans wait for it, and one loan of `loan-bureau-check` waits for the credit bureau (`ASYNC_SERVICE`). Separately, `runners.async-service.max-attempts: 5` and `runners.async-agent.retry-backoff: PT4S`.
+- **When:** The replica polls twice while the assessor holds its calls, the assessor is released, and the replica polls again. Separately, an assessor attempt fails with a retryable error.
+- **Then:**
+  - The first poll starts 3 calls: 2 assessments and the bureau call. The second poll starts none: the assessor's 2 slots are taken, and the bureau's slots are its own. 3 assessment jobs stay `DUE`, and the bureau loan reaches `underwrite`.
+  - Each kind is claimed in its own statement, up to that kind's free slots, on the index `idx_pre_timer_poll_kind` (V9). Timers keep `jobs.*` on the timer poller.
+  - A remote service job is parked with its kind's `max-attempts` (5); a failed assessor attempt is due again after its kind's back-off (`T0 + 4 s`).
+  - With nothing set under `runners.*`, every kind has `adapters.executor-threads` slots, `adapters.default-timeout`, `jobs.max-attempts`, `jobs.retry-backoff` and a 500 ms guard budget, which is the behaviour before this statement; a remote service result is accepted without a result check.
+- **Example:** `2 assessor slots, 5 assessments and 1 bureau call due -> 3 started, bureau loan on underwrite, 3 assessments DUE`.
+- **Test ID:** `PRE_057_a_backlog_of_one_kind_never_takes_the_slots_or_claims_of_another`, `PRE_057_each_kind_parks_and_retries_with_its_own_settings`, `PRE_057_remote_service_results_are_not_guarded`, `PRE_057_a_host_that_sets_nothing_runs_every_kind_with_the_engine_wide_values`, `PRE_057_runners_default_to_the_engine_wide_keys_and_take_per_kind_values`
+
+### PRE-058 An agent result that breaks its output schema is refused in the result transaction, by any path
+- **Traces to:** `TR-AGT-01`, `TR-ASY-02`, #363
+- **Milestone:** M2
+- **Given:** The `assess-documents` step's guard spec requires `{ riskScore: integer 0..100, recommendation: APPROVE | REFER | DECLINE }` with no other field. In the first case the assessor answers `riskScore: "high"`. In the second it hands the call off, and its callback, on another replica, reports `{ riskScore: 140, recommendation: APPROVE, comment: "ok" }` through `POST /async-steps/{jobId}:complete`.
+- **When:** The executor records the first answer; the completion API records the second.
+- **Then:** Both are `REFUSED`. Neither writes `ASYNC_RESULT_ACCEPTED` or a result variable, and neither evaluates the guardrail rule set. Each records `ASYNC_ATTEMPT_FAILED` with `AGENT_SCHEMA_INVALID` and `retryable: true`, the job is `DUE` again after the back-off, and the token still waits on the step. The violations name paths and rules, never values. The check runs in `ProcessServices.recordAttempt` only: a runner may pre-check, but the result transaction is the authoritative check, and it calls nothing outside the JVM (an ArchUnit rule).
+- **Example:** `riskScore "high" by the executor, riskScore 140 by the callback -> REFUSED, AGENT_SCHEMA_INVALID, job DUE, nothing accepted`.
+- **Test ID:** `PRE_058_an_answer_breaking_its_output_schema_is_refused_by_the_executor`, `PRE_058_an_answer_breaking_its_output_schema_is_refused_through_the_completion_api`, `PRE_058_result_guards_evaluate_in_process_only`
+
+### PRE-059 An agent result its guardrail refuses goes to a reviewer, by any path, and the reviewer completes the step
+- **Traces to:** `TR-AGT-01`, `TR-AGT-03`, `TR-SEC-04`, #363
+- **Milestone:** M2
+- **Given:** The guardrail rule set `agent-output-guardrails` (`hitPolicy: first`; `R1`: `recommendation == 'DECLINE' -> allow: true`; `R2`: `riskScore >= 70 -> allow: false, reasons: 'HIGH_RISK_SCORE'`; `R3`: default `allow: true`) is published in the tenant. The step's guard spec names it, with `onViolation: route-to-human` and `reviewer: role:COMPLIANCE_REVIEWER`.
+- **When:** The assessor answers `{ riskScore: 85, recommendation: APPROVE }`, once through the executor and once through the completion API (repeated). A compliance reviewer then completes the review task with `{ riskScore: 85, recommendation: REFER }`. Separately, the same answer arrives for a step with `onViolation: fail`, and `{ riskScore: 20, recommendation: APPROVE }` arrives for a normal step.
+- **Then:**
+  - The 85 answer is `REFUSED` by both paths, and the repeat of the callback is `DUPLICATE` and writes nothing. `ASYNC_RESULT_REFUSED` records code `GUARDRAIL_VIOLATION`, reasons `["HIGH_RISK_SCORE"]`, rule ids `["R2"]`, the `rle_decision` id as `guardrailDecisionId`, route `review` and the refused output. No `ASYNC_RESULT_ACCEPTED` and no result variable are written.
+  - The token moves to `WAITING_USER` on the same step with one four-eyes task for `role:COMPLIANCE_REVIEWER` (`STEP_ROUTED_TO_REVIEW`); the job is `DONE`. The instance's starter cannot claim the task (`403 SELF_APPROVAL_FORBIDDEN`). The reviewer's completion stores the reviewer's answer as the step result, and the loan moves on to `underwrite`.
+  - With `onViolation: fail`, the job is `FAILED`, route `incident` is recorded, no task opens, and the token stays on the step until incidents exist (#68).
+  - The 20 answer is `ACCEPTED` and moves on; `ASYNC_RESULT_ACCEPTED` carries `guardrailDecisionId` and rule ids `["R3"]`.
+- **Example:** `riskScore=85 APPROVE -> R2 HIGH_RISK_SCORE -> REFUSED, review task for COMPLIANCE_REVIEWER -> reviewer REFER -> underwrite`.
+- **Test ID:** `PRE_059_a_guardrail_violation_routes_to_a_reviewer_whose_answer_completes_the_step`, `PRE_059_a_guardrail_violation_is_refused_the_same_way_through_the_completion_api`, `PRE_059_with_on_violation_fail_the_job_fails_and_nothing_is_accepted`, `PRE_059_an_answer_the_guardrail_allows_advances_with_its_decision_recorded`, `PRE_059_allow_false_refuses_and_routes_to_the_reviewer_with_reasons_and_rules`, `PRE_059_the_guardrail_is_evaluated_in_the_instance_tenant_as_the_engine_on_the_output`
+
+### PRE-060 A guardrail that cannot decide fails closed
+- **Traces to:** `TR-AGT-01`, `TR-SEC-01`, #363
+- **Milestone:** M2
+- **Given:** Agent answers that the guardrail would allow (`{ riskScore: 20, recommendation: APPROVE }`), in each of these hosts or steps: the guardrail rule set was never published in the tenant; the host has no Rule Engine; the output schema check throws; the check takes 600 ms against `runners.async-agent.guard-budget` of 500 ms (measured on the engine clock); the job has no guard spec. In unit tests, the decision answers `allow: "yes"`, no `allow`, no match, a failure, or throws; and a schema uses an unsupported keyword (`pattern`, `$ref`).
+- **When:** Each result is recorded.
+- **Then:** Every one is `REFUSED` and nothing of it is accepted. The code is `GUARDRAIL_EVALUATION_ERROR` with the cause as reason (`RULE_ENGINE_MISSING`, `IllegalStateException`, `GUARD_BUDGET_EXCEEDED`, `GUARDRAIL_CONTRACT_INVALID`, `DECISION_NO_MATCH`, the decision's code), and the step goes to its reviewer. A missing or malformed guard spec is `GUARD_SPEC_INVALID` and fails the job, because no reviewer can be trusted from it. An unsupported schema keyword is a violation, never skipped.
+- **Example:** `rule set missing -> REFUSED, GUARDRAIL_EVALUATION_ERROR, review task; no guard spec -> REFUSED, GUARD_SPEC_INVALID, job FAILED`.
+- **Test ID:** `PRE_060_a_missing_guardrail_rule_set_fails_closed_to_review`, `PRE_060_a_host_without_a_rule_engine_refuses_every_agent_answer`, `PRE_060_a_check_that_breaks_or_overruns_its_budget_fails_closed`, `PRE_060_an_agent_job_without_a_guard_spec_fails_and_is_never_accepted`, `PRE_060_a_guardrail_that_cannot_decide_fails_closed`, `PRE_060_without_a_rule_engine_the_result_is_refused`, `PRE_060_a_check_slower_than_the_budget_refuses_even_an_allowed_result`, `PRE_060_a_missing_or_malformed_guard_spec_fails_the_job`, `PRE_060_an_unsupported_keyword_fails_closed`
