@@ -99,7 +99,7 @@ curl -s -i localhost:8080/api/bpm/meta
 # {"type":"https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#unauthenticated","title":"Authentication required","status":401,"code":"UNAUTHENTICATED","detail":"Sign in, or send a token issued for this host.","instance":"/api/bpm/meta","correlationId":"01M7RR0S1MJ2AFNEK9G00A9E1N"}
 ```
 
-Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve"]`. Calls that change state with the session need the CSRF token: the host sets it in the `XSRF-TOKEN` cookie and expects it back as `X-XSRF-TOKEN`.
+Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve","rules:simulate"]`. Calls that change state with the session need the CSRF token: the host sets it in the `XSRF-TOKEN` cookie and expects it back as `X-XSRF-TOKEN`.
 
 The demo users exist only on the `dev` profile, and the host refuses to start on `dev` beside another profile (other than `test`) or with a token issuer that is not on this machine. Without `dev` the user store is empty. The host accepts bearer tokens when an issuer, JWK set or public key is configured, and then requires its own audience; token claim `roles` becomes `ROLE_*` authorities and claim `tenant_id` the tenant.
 
@@ -111,8 +111,8 @@ This walkthrough uses the demo users of the `dev` profile, in tenant `bank-a` (t
 
 | User | Roles | Engine permissions |
 |---|---|---|
-| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve` |
-| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve` |
+| `hoa` | `PRICING_AUTHOR`, `PRICING_APPROVER` | `rules:read`, `rules:author`, `rules:approve`, `rules:simulate` |
+| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve`, `rules:simulate` |
 | `tuan` | `TELLER` | `rules:evaluate` |
 
 One more role is mapped and given to no demo user: `PRIVACY_OPS`, with `rules:log:read` and `rules:masked:search`. It is the only role that may look decisions up by a masked value such as a national id (`POST /decisions:find-by-masked-input`), at most 30 times a minute per person (`masking.search.max-per-minute`).
@@ -254,6 +254,29 @@ H=localhost:8080/api/bpm/rules/v1
     # HTTP 422
     ```
 
+### Simulate a changed fee table before approving it
+
+Version 2 of the card fee, [`rules/card-fee-v2.yaml`](src/main/resources/rules/card-fee-v2.yaml), lowers the default fee from 50,000 VND to 30,000 VND. Before Minh approves it, he runs the five sample customers of [`rules/card-fee-samples.json`](src/main/resources/rules/card-fee-samples.json) through v2 and through v1, which is in force. Nothing is logged. After steps 1 to 6 (if a version 2 exists already, the import gets the next number; simulate that one):
+
+```bash
+curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' \
+  --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee-v2.yaml
+# 201 {"ruleSet":"card-fee","version":2,"status":"DRAFT",...}
+curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:simulate -H 'Content-Type: application/json' \
+  --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee-samples.json
+# 200 {"ruleSet":"card-fee","version":2,"status":"DRAFT","baselineVersion":1,"evaluatedAt":"...",
+#      "sampleCount":5,"changedCount":2,"results":[
+#      {"index":0,"changed":false,"simulated":{"outcome":"MATCHED","matchedRuleIds":["R1"],"outputs":{"fee":{"currency":"VND","amount":0}}},...},
+#      ...
+#      {"index":3,"changed":true,"simulated":{...,"outputs":{"fee":{"currency":"VND","amount":30000}}},
+#                                "baseline":{...,"outputs":{"fee":{"currency":"VND","amount":50000}}}},
+#      {"index":4,"changed":true,...}]}
+docker exec horus-pg psql -U horus -d horus -tc 'SELECT count(*) FROM rle_decision'
+# 1   (the decision of step 5 only)
+```
+
+The approver role has `rules:simulate` in [`application.yml`](src/main/resources/application.yml); Tuan, a teller, gets `403 PERMISSION_DENIED`. `SimulationIT` runs the same steps with bearer tokens and prints each sample with its two fees. Once Minh approves v2 (with `If-Match: "1"`), it is in force and v1 is retired as superseded: a new simulation compares with v2, and a pinned evaluate of v1 is `409 INVALID_STATE` while `evaluation.pin-retired` is off.
+
 ### Hit policies: exactly one row, or every matching row
 
 Two more rule sets ship with the example. [`loan-pricing.yaml`](src/main/resources/rules/loan-pricing.yaml) uses `hitPolicy: unique`, and its rows `R1` (score 700 or more) and `R2` (income 20,000,000 VND or more) overlap on purpose. [`risk-flags.yaml`](src/main/resources/rules/risk-flags.yaml) uses `hitPolicy: collect`: every matching row adds a flag and a penalty. Import, request and approve each one as in steps 1 to 4, then:
@@ -297,6 +320,30 @@ public Money cardFee(String tier, int txCount) {
     return (Money) result.outputs().get("fee");   // rolls back with the host's work; one rle_decision row on commit
 }
 ```
+
+### Missing values and mixed currencies
+
+[`null-check.yaml`](src/main/resources/rules/null-check.yaml) is the table of `RLE-006`: missing values follow FEEL, and a row matches only when its condition is `true`, never when it is `null`. Import, request and approve it as in steps 1 to 4, then evaluate with both inputs missing:
+
+```bash
+curl -s -u tuan:demo-only -X POST $H/decisions/null-check:evaluate \
+  -H 'Content-Type: application/json' -d '{"inputs":{"income":null,"tier":null}}'
+# 200 {"outcome":"MATCHED","matchedRuleIds":["R2","R3","R5","R7"],
+#      "outputs":{"hit":["R2","R3","R5","R7"]},...}
+```
+
+`R3` (`tier != 'GOLD'`) and `R5` (`tier not in [...]`) match a missing tier, as in FEEL; `R1` (`income < 5000000 VND`) and `R4` (`not (income < 5000000 VND)`) are both `null` and match nothing.
+
+Money never mixes currencies. A cell that adds 5 USD to a balance and compares it with a VND amount is refused at import, and a USD balance compared with a VND limit fails the decision:
+
+```bash
+curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+  --data-binary @examples/rule-engine-only/src/test/resources/rules/mixed-currency.yaml
+# 422 {"code":"VALIDATION_FAILED","violations":[
+#   {"ruleId":"R1","column":"balance","message":"mixes the currencies USD and VND"}]}
+```
+
+`RuleLifecycleFailurePathsIT` runs both, and `RLE_005_money_currency_mismatch_is_rejected` the run-time case (`422 EVALUATION_ERROR`, no outputs, logged).
 
 ## Demo: a fee change on a date, replay and the bank's time zone
 

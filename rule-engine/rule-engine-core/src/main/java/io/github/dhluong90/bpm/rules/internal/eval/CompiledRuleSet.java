@@ -647,6 +647,7 @@ public final class CompiledRuleSet {
             }
             case Expr.IsNull isNull -> collectInputs(isNull.target(), names);
             case Expr.Matches matches -> collectInputs(matches.target(), names);
+            case Expr.Call call -> call.args().forEach(arg -> collectInputs(arg, names));
             case Expr.Clock ignored -> { }   // the clock is not an input
         }
     }

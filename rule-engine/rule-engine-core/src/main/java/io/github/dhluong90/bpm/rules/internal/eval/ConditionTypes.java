@@ -33,13 +33,18 @@ final class ConditionTypes {
      * @return the problem, or null
      */
     static String conditionProblem(Expr expr, List<InputClause> inputs) {
+        String problem = firstOf(argumentProblem(expr, inputs), currencyProblem(expr));
+        return problem != null ? problem : booleanProblem(expr, inputs);
+    }
+
+    private static String booleanProblem(Expr expr, List<InputClause> inputs) {
         return switch (expr) {
             case Expr.Literal literal -> literal.value() instanceof Boolean ? null : NOT_BOOLEAN;
             case Expr.Var var -> kindOf(var, inputs) == Kind.BOOLEAN ? null : NOT_BOOLEAN;
             case Expr.Clock ignored -> NOT_BOOLEAN;
-            case Expr.Unary unary -> unary.op() == Expr.UnaryOp.NOT ? conditionProblem(unary.operand(), inputs) : NOT_BOOLEAN;
+            case Expr.Unary unary -> unary.op() == Expr.UnaryOp.NOT ? booleanProblem(unary.operand(), inputs) : NOT_BOOLEAN;
             case Expr.Binary binary -> switch (binary.op()) {
-                case AND, OR -> firstOf(conditionProblem(binary.left(), inputs), conditionProblem(binary.right(), inputs));
+                case AND, OR -> firstOf(booleanProblem(binary.left(), inputs), booleanProblem(binary.right(), inputs));
                 case EQ, NE, LT, LE, GT, GE -> comparableProblem(binary.left(), binary.right(), inputs);
                 case ADD, SUB, MUL, DIV -> NOT_BOOLEAN;
             };
@@ -53,11 +58,124 @@ final class ConditionTypes {
             case Expr.Between between -> firstOf(comparableProblem(between.target(), between.low(), inputs),
                     comparableProblem(between.target(), between.high(), inputs));
             case Expr.IsNull ignored -> null;
+            case Expr.Call ignored -> NOT_BOOLEAN;
             case Expr.Matches matches -> {
                 Kind text = kindOf(matches.target(), inputs);
                 yield text == Kind.STRING || text == Kind.UNKNOWN || text == Kind.NULL ? null
                         : "matches() tests text, but it is given a " + name(text);
             }
+        };
+    }
+
+    /**
+     * Checks the argument types of every function call in the tree: {@code round} takes numbers and
+     * {@code daysBetween} dates. An argument whose type is not known statically passes.
+     */
+    private static String argumentProblem(Expr expr, List<InputClause> inputs) {
+        String own = switch (expr) {
+            case Expr.Call call -> {
+                Kind expected = call.function() == Expr.Function.ROUND ? Kind.NUMBER : Kind.DATE;
+                String problem = null;
+                for (Expr arg : call.args()) {
+                    problem = firstOf(problem, argumentKindProblem(call.function().text(), arg, expected, inputs));
+                }
+                yield problem;
+            }
+            default -> null;
+        };
+        if (own != null) {
+            return own;
+        }
+        for (Expr child : children(expr)) {
+            String problem = argumentProblem(child, inputs);
+            if (problem != null) {
+                return problem;
+            }
+        }
+        return null;
+    }
+
+    private static String argumentKindProblem(String function, Expr arg, Kind expected, List<InputClause> inputs) {
+        Kind actual = kindOf(arg, inputs);
+        if (actual == expected || actual == Kind.UNKNOWN || actual == Kind.NULL) {
+            return null;
+        }
+        return function + " takes a " + name(expected) + ", not a " + name(actual);
+    }
+
+    /**
+     * RLE-005: two money operands of a comparison, {@code +} or {@code -} whose currencies are both known statically
+     * (from literals) must have the same currency; at run time a mismatch is {@code EVALUATION_ERROR} anyway.
+     */
+    private static String currencyProblem(Expr expr) {
+        String own = switch (expr) {
+            case Expr.Binary binary -> switch (binary.op()) {
+                case EQ, NE, LT, LE, GT, GE, ADD, SUB -> mismatch(currencyOf(binary.left()), currencyOf(binary.right()));
+                default -> null;
+            };
+            case Expr.InList inList -> {
+                String known = currencyOf(inList.target());
+                String problem = null;
+                for (Expr element : inList.elements()) {
+                    String currency = currencyOf(element);
+                    problem = firstOf(problem, mismatch(known, currency));
+                    known = known != null ? known : currency;
+                }
+                yield problem;
+            }
+            case Expr.Between between -> firstOf(mismatch(currencyOf(between.target()), currencyOf(between.low())),
+                    firstOf(mismatch(currencyOf(between.target()), currencyOf(between.high())),
+                            mismatch(currencyOf(between.low()), currencyOf(between.high()))));
+            default -> null;
+        };
+        if (own != null) {
+            return own;
+        }
+        for (Expr child : children(expr)) {
+            String problem = currencyProblem(child);
+            if (problem != null) {
+                return problem;
+            }
+        }
+        return null;
+    }
+
+    private static String mismatch(String a, String b) {
+        return a != null && b != null && !a.equals(b) ? "mixes the currencies " + a + " and " + b : null;
+    }
+
+    /** The currency of a money expression when a literal fixes it, else null. */
+    private static String currencyOf(Expr expr) {
+        return switch (expr) {
+            case Expr.Literal literal -> literal.value() instanceof Money money ? money.currency() : null;
+            case Expr.Unary unary -> unary.op() == Expr.UnaryOp.NEGATE ? currencyOf(unary.operand()) : null;
+            case Expr.Binary binary -> switch (binary.op()) {
+                case ADD, SUB, MUL, DIV -> {
+                    String left = currencyOf(binary.left());
+                    yield left != null ? left : currencyOf(binary.right());
+                }
+                default -> null;
+            };
+            default -> null;
+        };
+    }
+
+    private static List<Expr> children(Expr expr) {
+        return switch (expr) {
+            case Expr.Literal ignored -> List.of();
+            case Expr.Var ignored -> List.of();
+            case Expr.Unary unary -> List.of(unary.operand());
+            case Expr.Binary binary -> List.of(binary.left(), binary.right());
+            case Expr.InList inList -> {
+                List<Expr> all = new java.util.ArrayList<>(inList.elements());
+                all.addFirst(inList.target());
+                yield all;
+            }
+            case Expr.Between between -> List.of(between.target(), between.low(), between.high());
+            case Expr.IsNull isNull -> List.of(isNull.target());
+            case Expr.Call call -> call.args();
+            case Expr.Clock ignored -> List.of();
+            case Expr.Matches matches -> List.of(matches.target());
         };
     }
 
@@ -69,6 +187,10 @@ final class ConditionTypes {
      * @return the problem, or null
      */
     static String outputProblem(Expr expr, OutputClause output, List<InputClause> inputs) {
+        String problem = firstOf(argumentProblem(expr, inputs), currencyProblem(expr));
+        if (problem != null) {
+            return "output " + output.name() + " " + problem;
+        }
         ValueType type = output.type();
         if (type.list()) {
             return null;
@@ -144,6 +266,7 @@ final class ConditionTypes {
             case Expr.InList ignored -> Kind.BOOLEAN;
             case Expr.Between ignored -> Kind.BOOLEAN;
             case Expr.IsNull ignored -> Kind.BOOLEAN;
+            case Expr.Call ignored -> Kind.NUMBER;
             case Expr.Matches ignored -> Kind.BOOLEAN;
         };
     }

@@ -63,7 +63,7 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
    - Pass explicit `Clock` / `Instant evaluationTime` so `today()` and `now()` are deterministic (`TR-DET-01`, `TR-DET-05`). `today()` is the date of the evaluation instant in the rule set's `timeZone` (default `UTC`); the zone is part of the versioned definition, so the decision row's version identifies it (M1, DN-06, `RLE-022`).
 3. **Semantics aligned with FEEL (M1, DN-07, ADR-0019).** These rules were unspecified and are fixed now so that every expression has a FEEL equivalent with the same result ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) sections 4.3 and 4.4, `RLE-021`):
    - Numbers: `integer` and `decimal` are declared constraints on one number type, evaluated as `BigDecimal` with `MathContext.DECIMAL128` (34 significant digits, `HALF_EVEN`); `7 / 2` is `3.5`; division by zero is `EVALUATION_ERROR`.
-   - `round(x, scale)` rounds half-even. Money arithmetic keeps its own rounding (`moneyRounding`, section 3.4).
+   - `round(x, scale)` rounds half-even, as FEEL `decimal(x, scale)` (DMN 1.5 `round half even`); the scale is a whole number from -34 to 34, refused at import otherwise when it is a literal and `null` when it is not. Money arithmetic keeps its own rounding (`moneyRounding`, section 3.4). `daysBetween(d1, d2)` is FEEL `(d2 - d1).days`, negative when `d2` is earlier.
    - `matches(s, p)` is an unanchored search with the XPath `fn:matches` regex dialect: no back-references, no look-around; bounded as `TR-SEC-02`.
    - Strings compare by Unicode code point. `datetime` is a FEEL `date and time` with offset `Z` (Java `Instant`).
    - Null (PD-058, from M1, `RLE-006`): FEEL three-valued logic. `<`, `<=`, `>`, `>=`, arithmetic and functions with a `null` operand give `null`, except `coalesce`, which exists to handle `null`. `x between a and b` is `x >= a and x <= b` (DMN 1.5), evaluated as `and` is: a null target gives `null`, and a null bound gives `false` when the other comparison is already `false`. `==` and `!=` are two-valued: `null == null` is `true`, `null == 'GOLD'` is `false`, `null != 'GOLD'` is `true`. `x in [...]` is `true` only when an element equals `x` (FEEL `list contains`), so it is `false` for a null `x` unless the list holds `null`, and `x not in [...]` (FEEL `not(x in [...])`) is its negation. `is null` and `is not null` are always `true` or `false`. `and`, `or` and `not` follow the FEEL truth tables: `false and null` is `false`, `true and null` is `null`, `true or null` is `true`, `false or null` is `null`, `not(null)` is `null`. A `when` cell or a gateway condition matches only when it evaluates to `true`; `null` never matches. The type checker reports a warning, not an error, when an input that may be null is used with `!=` or `not in`, because those now match a missing value.
@@ -72,6 +72,8 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
      ![Bounded regular expressions](images/regex-bounds.svg)
 
      Source: [`diagrams/regex-bounds.mmd`](diagrams/regex-bounds.mmd).
+   - Money is a HORUS extension with no FEEL type: two money operands whose currencies are fixed by literals and differ are refused at import (`422 VALIDATION_FAILED`, rule and column); otherwise a mismatch is `EVALUATION_ERROR` at run time (`RLE-005`).
+   - The differential test of `RLE-021` (`FeelDifferentialTest`) evaluates generated trees here and their FEEL translation in a reference FEEL implementation, in test scope only. Money and the clock readings are not generated; `matches` is, with patterns that the XPath dialect and Java read the same way. It accepts two documented differences: strict error mode (PD-066) fails where FEEL gives `null` for a division by zero; the reference orders strings by UTF-16 unit, so the generators leave out U+E000 to U+FFFF.
 
 ### 3.3 Version lifecycle
 
@@ -247,6 +249,7 @@ public interface RuleEngine {
   DecisionResult evaluate(DecisionRequest request); // clock, version (pin), idempotencyKey, correlationId
   DecisionResult replay(String decisionId);         // the logged version, inputs and clock; writes nothing (#22)
   <T> T evaluateAs(String ruleSet, DecisionInput input, Class<T> outputType); // throws instead of returning Failed
+  SimulationResult simulate(String ruleSet, int version, List<DecisionInput> samples); // rules:simulate; logs nothing (RLE-016)
 }
 
 // package io.github.dhluong90.bpm.rules.embedded: engine to engine, not for hosts
@@ -277,7 +280,7 @@ Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `ru
 | `POST /decisions/{ruleSet}/versions/{v}:evaluate` | `rules:pin`, plus `rules:simulate` when the body sets `clock` | Optional `Idempotency-Key`. Only approved versions: a `DRAFT` is `409 INVALID_STATE` and is tried with `:simulate`; a `RETIRED` version is `409 INVALID_STATE` unless `evaluation.pin-retired` is `true`. A decision evaluated with a chosen clock carries `clockChosen: true` in the response and keeps `eval_clock` apart from `created_at` in the log, so a back-dated decision is visible | `403 PERMISSION_DENIED`, `403 CLOCK_NOT_ALLOWED`, `404 VERSION_NOT_FOUND`, `409 INVALID_STATE`, `422 UNIQUE_HIT_VIOLATION`, `422 EVALUATION_ERROR` |
 | `POST /decisions/{decisionId}:replay` | `rules:log:read` | No body; writes nothing; the logged version, inputs and clock (`TR-DET-05`, section 4.1) | `404 DECISION_NOT_FOUND`, `422 REPLAY_NOT_POSSIBLE` (a masked input had a value), `422 UNIQUE_HIT_VIOLATION` and `422 EVALUATION_ERROR` when the logged decision failed |
 | `POST /decisions/{ruleSet}:evaluate-batch` | `rules:evaluate` | At most 1,000 items; `Idempotency-Key`; per-item outcome in a `207`-style body with `200` status | `400 INPUT_INVALID`, `404 NO_EFFECTIVE_VERSION`; item errors `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR` |
-| `POST /rule-sets/{name}/versions/{v}:simulate` | `rules:simulate` | Sample inputs, at most 1,000 sets; writes no decision row (`RLE-016`) | `400 INPUT_INVALID`, `404 VERSION_NOT_FOUND`, `422 VALIDATION_FAILED` |
+| `POST /rule-sets/{name}/versions/{v}:simulate` | `rules:simulate`, checked before the body is read | Body `{ "samples": [{ "inputs": {...} }] }`, 1 to `simulation.max-inputs` sets (default and ceiling 1,000), at most 1,048,576 bytes. Runs the version in any status and the version effective at the host clock in memory; writes nothing (no decision row, idempotency record or event), so no `Idempotency-Key`; no generated id in the response, so the same version, samples and clock give the same body (`RLE-016`, `TR-DET-01`). See section 4.2.1 | `400 INPUT_INVALID` (no samples, too many, or a sample invalid, named `samples[i]`), `404 VERSION_NOT_FOUND` (also for another tenant's version and an unknown rule set), `413 PAYLOAD_TOO_LARGE`, `422 VALIDATION_FAILED` |
 | `GET /rule-sets`, `GET /rule-sets/{name}` | `rules:read` | Signed keyset cursor by name (byte order), `limit` 1 to `query.max-page-size` (default 50, at most 200); each item: `ruleSet`, `latestVersion`, `latestStatus`, `publishedVersion` (the version selected at the host clock, section 3.3.1, or null), `lastChangedAt` (latest version timestamp or history row) (`RLE-039`) | `400 QUERY_INVALID` (limit or cursor), `404 RULE_SET_NOT_FOUND` |
 | `GET /rule-sets/{name}/versions` | `rules:read` | Keyset cursor by version number, newest first, same `limit`; items carry the lifecycle fields and `allowedActions`, never the definition (`RLE-040`) | `400 QUERY_INVALID`, `404 RULE_SET_NOT_FOUND` |
 | `GET /rule-sets/{name}/versions/{v}` | `rules:read` | `ETag`; `?include=source` adds `sourceFormat`, `sourceDocument` and `sourceHash` (M1, DN-01). Every version response carries `allowedActions` for the caller (`RLE-043`) | `404 VERSION_NOT_FOUND` |
@@ -304,6 +307,36 @@ Violations are ordered rule by rule; within a rule the conditions, then the outp
 `allowedActions` is a hint computed at response time from the version's status, `createdBy`, `requestedBy`, the caller and the caller's permissions (`VersionActions`): `request-publish` on a draft for `rules:author`; `approve` on a pending version for `rules:approve` when the caller is neither requester nor author; `reject` on a pending version for `rules:approve` when the caller is not the requester; `withdraw` on a pending version for `rules:author` when the caller is the requester (PD-089), so the requester sees `withdraw` and never `approve` or `reject`. It is never stored with an idempotency record, so a replay shows the caller's current actions. Commands check again and are the authority.
 
 A caller without the endpoint's permission gets `403 PERMISSION_DENIED`; an unauthenticated call, or one whose tenant cannot be resolved, gets `401 UNAUTHENTICATED`. The REST module checks the permission against the caller's `rules:*` authorities itself, so it does not depend on the host enabling method security. All errors are RFC 9457 `application/problem+json` with `code`, `detail` and `correlationId`; `type` is `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#<code in lower case>` (ADR-0010). `409` is used only for state conflicts a client resolves by reloading; `UNIQUE_HIT_VIOLATION` is `422` because it is an authoring defect in the published rule set (ADR-0010, PD-008). Every endpoint that writes accepts `Idempotency-Key`, and also returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` for a key reused with a different request hash and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` while the first request runs (ADR-0006, `RLE-014`). The first request holds a transaction-scoped advisory lock on tenant, operation and key; a duplicate does not wait for it, and once the first commits, the same request replays its stored status and body. Every endpoint returns `403 TENANT_NOT_ALLOWED` when `X-Tenant-Id` names a tenant outside the token's allowed list (ADR-0014, `RLE-018`).
+
+#### 4.2.1 Simulation over sample inputs (`RLE-016`)
+
+An approver asked to publish a changed fee table needs to see which customers get a different fee, which a row diff does not show. `:simulate` answers per sample with the simulated version's `matchedRuleIds` and `outputs`, the same for the baseline, and a `changed` flag.
+
+- **Validation first.** The stored version is integrity-checked against its `canonical_hash` and compiled before any sample is evaluated; a failure is `422 VALIDATION_FAILED` and nothing is evaluated. The baseline is the version selected at the host clock (section 3.3.1), checked the same way.
+- **What counts as changed.** The outcome kind (`MATCHED`, `NO_MATCH`, `FAILED`), any output value compared by exact value (`30000` equals `30000.00`; money by currency and minor units), or the failure code. A different matched rule giving the same outputs is not a change, because the approver's question is who pays a different fee; both rule lists are shown. With no effective version, `baselineVersion` and every `baseline` are null and every sample is `changed`.
+- **Inputs.** Each sample passes the evaluation input bounds and, with `evaluation.reject-undeclared-inputs`, may name only inputs the simulated version declares. Inputs the baseline does not declare (a new input of the draft) are left out of the baseline's side.
+- **No side effects.** Both sides run in memory in one read-only use of the connection; the decision log, the idempotency table, the outbox and the history are untouched. The compiled cache is keyed by version id and canonical hash, so a cached entry is never served for other content.
+- **Beside the lifecycle.** Simulation reads a version in any status. Approving v2 with an `effectiveFrom` at or before now retires v1 as superseded in the same transaction (`RLE-027`), so from then on the baseline is v2 and v1 can still be simulated. The pinned evaluate (DESIGN 4.2) is logged, so it refuses a draft, a version pending approval and, unless `evaluation.pin-retired` is on, a `RETIRED` version; simulation is how those are run.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Approver (rules:simulate)
+    participant R as SimulationController
+    participant E as RuleEngine.simulate
+    participant S as rle_version (read only)
+    C->>R: POST .../card-fee/versions/2:simulate {samples}
+    R->>R: permission, bounded body, 1 to 1,000 samples
+    R->>E: simulate("card-fee", 2, samples)
+    E->>S: find v2 in the caller's tenant
+    alt not in this tenant
+        E-->>C: 404 VERSION_NOT_FOUND
+    end
+    E->>E: integrity check and compile v2 (else 422 VALIDATION_FAILED)
+    E->>S: find the version effective at the host clock (v1)
+    E->>E: evaluate v2 and v1 per sample, compare outputs
+    E-->>C: 200 results with changed flags, nothing written
+```
 
 ### 4.3 Host metadata
 
@@ -335,7 +368,7 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `evaluation.max-output-bytes` | `1048576` | Estimated JSON size of one decision's outputs, checked as `collect` values accumulate; a breach is a logged `EVALUATION_ERROR`; lower only |
 | `evaluation.max-string-length` | `65536` | String inputs (`INPUT_INVALID`) and strings built by `+` (`EVALUATION_ERROR`); lower only. The three limits bound the heap one decision can use, which every tenant of the host shares |
 | `idempotency.retention` | `PT24H` | Lifetime of idempotency records, `PT1M` to `P30D` |
-| `evaluation.max-batch`, `simulation.max-inputs` | `1000`, `1000` | Items per `:evaluate-batch` and per `:simulate`; may be lowered, never raised |
+| `evaluation.max-batch`, `simulation.max-inputs` | `1000`, `1000` | Items per `:evaluate-batch` and per `:simulate`; may be lowered, never raised. `simulation.max-inputs` is built (RLE-016) |
 | `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | Bounds of `GET /decisions` and list reads (ADR-0015); range and page size may be lowered only |
 | `idempotency.retention` | `PT24H` | How long an idempotency record answers replays |
 | `tenancy.claim` | `tenant_id` | Attribute of the session principal, or claim of a validated token, that the default `TenantResolver` reads (PD-079, ADR-0014 decision 6). No header-based resolver is shipped; a host replaces the resolver with its own bean |

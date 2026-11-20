@@ -43,6 +43,12 @@
       <artifactId>archunit-junit5</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- RLE-021: the reference FEEL implementation, test scope only; it never ships (ArchUnit, enforcer). -->
+    <dependency>
+      <groupId>org.camunda.feel</groupId>
+      <artifactId>feel-engine</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -101,10 +107,21 @@
                     <exclude>com.microsoft.sqlserver:*</exclude>
                     <exclude>com.h2database:*</exclude>
                     <exclude>org.hsqldb:*</exclude>
-                    <!-- TR-EMB-07, ADR-0021: one JSON major in the core, Jackson 3; never Jackson 2 or another JSON library. -->
-                    <exclude>com.fasterxml.jackson.core:jackson-databind</exclude>
-                    <exclude>com.fasterxml.jackson.core:jackson-core</exclude>
+                    <!--
+                      TR-EMB-07, ADR-0021: one JSON major in the core, Jackson 3; never Jackson 2 or another JSON library.
+                      Jackson 2 is banned in every scope that ships or that a host supplies. Test scope only, it comes
+                      with the reference FEEL implementation of RLE-021, whose built-in functions load it.
+                    -->
+                    <exclude>com.fasterxml.jackson.core:jackson-databind:*:*:compile</exclude>
+                    <exclude>com.fasterxml.jackson.core:jackson-databind:*:*:runtime</exclude>
+                    <exclude>com.fasterxml.jackson.core:jackson-databind:*:*:provided</exclude>
+                    <exclude>com.fasterxml.jackson.core:jackson-core:*:*:compile</exclude>
+                    <exclude>com.fasterxml.jackson.core:jackson-core:*:*:runtime</exclude>
+                    <exclude>com.fasterxml.jackson.core:jackson-core:*:*:provided</exclude>
                     <exclude>com.fasterxml.jackson.dataformat:*</exclude>
+                    <exclude>com.fasterxml.jackson.module:*:*:*:compile</exclude>
+                    <exclude>com.fasterxml.jackson.module:*:*:*:runtime</exclude>
+                    <exclude>com.fasterxml.jackson.module:*:*:*:provided</exclude>
                     <exclude>com.google.code.gson:*</exclude>
                     <exclude>org.json:*</exclude>
                     <exclude>jakarta.json*:*</exclude>
