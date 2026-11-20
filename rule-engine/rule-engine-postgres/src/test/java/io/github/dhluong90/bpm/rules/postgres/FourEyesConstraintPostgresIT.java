@@ -39,8 +39,8 @@ class FourEyesConstraintPostgresIT {
 
     @Test
     void RLE_009_the_database_refuses_the_former_exempt_id_approving_its_own_request() {
-        // Given: a card fee version requested by the former exempt id, written at V5 and at V12
-        DataSource before = databaseAt("5");
+        // Given: a card fee version requested by the former exempt id, written at V11 and at V12
+        DataSource before = databaseAt("11");
         DataSource after = migratedDatabase();
         for (DataSource db : new DataSource[] {before, after}) {
             insertVersion(db, "V1", "PENDING_APPROVAL", "alice", FORMER_EXEMPT_ID, null);
@@ -72,9 +72,9 @@ class FourEyesConstraintPostgresIT {
 
     @Test
     void RLE_009_existing_rows_validate_when_upgrading_to_the_constraint_without_exemption() {
-        // Given: a database at V5 with a draft, a pending request, a colleague's approval and an approval recorded
+        // Given: a database at V11 with a draft, a pending request, a colleague's approval and an approval recorded
         // under the former exempt id for someone else's request, all valid without the exemption
-        DataSource db = databaseAt("5");
+        DataSource db = databaseAt("11");
         insertVersion(db, "V1", "DRAFT", "alice", null, null);
         insertVersion(db, "V2", "PENDING_APPROVAL", "alice", "alice", null);
         insertVersion(db, "V3", "PUBLISHED", "alice", "alice", "bob");
@@ -84,7 +84,7 @@ class FourEyesConstraintPostgresIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         // Then: the constraint is in place and validated, and every row is kept
-        assertThat(result.initialVersion()).isEqualTo("5");
+        assertThat(result.initialVersion()).isEqualTo("11");
         assertThat(result.currentVersion()).isEqualTo("12");
         assertThat(JdbcClient.create(db).sql("""
                 SELECT convalidated FROM pg_constraint
@@ -98,13 +98,13 @@ class FourEyesConstraintPostgresIT {
     @Test
     void RLE_009_an_existing_self_approval_under_the_former_exempt_id_stops_the_upgrade_naming_the_constraint() {
         // Given: the one row shape V2 allowed and V12 does not; no engine code writes it
-        DataSource db = databaseAt("5");
+        DataSource db = databaseAt("11");
         insertVersion(db, "V1", "PUBLISHED", "alice", FORMER_EXEMPT_ID, FORMER_EXEMPT_ID);
 
-        // When / Then: VALIDATE refuses, the migration rolls back, and the schema stays at V5
+        // When / Then: VALIDATE refuses, the migration rolls back, and the schema stays at V11
         assertThatThrownBy(() -> new RuleEngineSchemaMigrator(db).migrate())
                 .hasStackTraceContaining("rle_version_four_eyes");
-        assertThat(new RuleEngineSchemaMigrator(db).currentVersion()).contains("5");
+        assertThat(new RuleEngineSchemaMigrator(db).currentVersion()).contains("11");
         assertThat(constraintDefinition(db)).contains(FORMER_EXEMPT_ID);
     }
 
@@ -151,10 +151,10 @@ class FourEyesConstraintPostgresIT {
         jdbc.sql("""
                 INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy, canonical_json,
                   canonical_hash, source_format, source_document, source_hash, created_by, requested_by, approved_by,
-                  created_at)
+                  created_at, retired_at)
                 VALUES ('bank-a', :id, 'RS1', (SELECT coalesce(max(version_num), 0) + 1 FROM rle_version),
                   :status, 'FIRST', '{}'::jsonb, :hash, 'YAML', 'ruleSet: card-fee', :hash, :author, :requester,
-                  :approver, now())
+                  :approver, now(), CASE WHEN :status = 'RETIRED' THEN now() END)
                 """).param("id", id).param("status", status).param("hash", "a".repeat(64)).param("author", author)
                 .param("requester", requester).param("approver", approver).update();
     }
