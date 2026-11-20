@@ -593,3 +593,28 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
     - None of them changes anything.
 - **Example:** `lan (processes:start) cancels I7 -> 403; minh (processes:cancel) cancels with reason -> CANCELLED, task CANCELLED, cancelled event with reason`.
 - **Test ID:** `PRE_054_cancel_needs_processes_cancel_and_a_reason`
+
+### PRE-055 A decision step after a timer runs in the instance's tenant, as the engine, with no caller
+- **Traces to:** `TR-TEN-01`, `TR-SEC-03`, ADR-0027
+- **Milestone:** M2
+- **Given:** Tenants `bank-a` and `bank-b` each publish a rule set `card-reminder-fee`: a `CLASSIC` card pays 20,000 VND at `bank-a` and 35,000 VND at `bank-b`. Each tenant runs an instance of `card-fee-reminder` (start, a `P3D` timer, `businessRuleTask` `price-reminder`, user task `collect-fee`) for a `CLASSIC` card. The job poller thread has no caller, and its tenant resolver falls back to a third tenant `bank-fallback`.
+- **When:** Both timers are due at the same instant and one poll fires them.
+- **Then:**
+  - Each decision is evaluated in the tenant of its stored instance row through the tenant-scoped Rule Engine entry point: `bank-a`'s instance gets 20,000 VND, `bank-b`'s gets 35,000 VND.
+  - Each `rle_decision` row is in the instance's tenant, with caller `system:process-engine` and the instance id as correlation id; no row is written in `bank-fallback`.
+  - Each instance records `DECISION_EVALUATED`, keeps the decision id in its result variable, moves on to an open `collect-fee` task, and its timer is `DONE`.
+  - The engine-owned context is a parameter of the fire transaction, never a thread-local, and is built only by the job handler; the caller-tenant guard for requests is unchanged.
+- **Example:** `two timers due together, poller context bank-fallback -> bank-a 20000 VND, bank-b 35000 VND, caller system:process-engine`.
+- **Test ID:** `PRE_055_decision_after_a_timer_runs_in_the_instance_tenant_as_the_engine`
+
+### PRE-056 A decision step after a timer never reads another tenant's rule set, and fails closed
+- **Traces to:** `TR-TEN-01`, ADR-0027
+- **Milestone:** M2
+- **Given:** `card-reminder-fee` exists only in `bank-d`. An instance of `card-fee-reminder` runs in `bank-c`, and the poller thread's context even resolves to `bank-d`. Separately, a host whose Rule Engine can only resolve the tenant from the thread (no tenant-scoped entry point) runs an instance in `bank-e`.
+- **When:** Each timer becomes due and the poller fires it.
+- **Then:**
+  - `bank-c`: the decision fails with `RULE_SET_NOT_FOUND` in `bank-c` and the firing rolls back: no `rle_decision` row in `bank-c` or `bank-d`, no task, no `TIMER_FIRED` or `DECISION_EVALUATED`, no result variable; the token still waits at the timer and the job is `DUE` again with attempt 1 after `jobs.retry-backoff`, and `FAILED` after `jobs.max-attempts`.
+  - `bank-e`: the step fails closed with `TENANT_NOT_ALLOWED` without calling the Rule Engine, and the firing rolls back the same way.
+  - Separately, `card-reminder-fee` in `bank-f` prices Gold cards only and a Classic card's timer fires: the Rule Engine writes the decision row, the step fails with `DECISION_NO_MATCH`, and that row rolls back with the firing (no `rle_decision` row for the instance, job `DUE` with attempt 1).
+- **Example:** `rule set only in bank-d, bank-c timer fires -> RULE_SET_NOT_FOUND, nothing written, job DUE attempt 1`.
+- **Test ID:** `PRE_056_decision_after_a_timer_never_reads_another_tenants_rule_set`, `PRE_056_a_rule_engine_without_an_explicit_tenant_cannot_run_a_decision_after_a_timer`, `PRE_056_a_decision_row_written_before_the_step_fails_rolls_back_with_the_firing`

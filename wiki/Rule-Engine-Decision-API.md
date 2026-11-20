@@ -36,7 +36,14 @@ public interface RuleEngine {
   DecisionResult evaluate(DecisionRequest request);                            // tenant, clock, correlation id, caller, idempotency key
   <T> T evaluateAs(String ruleSet, DecisionInput input, Class<T> outputType);  // map outputs onto a record
 }
+
+// package io.github.dhluong90.bpm.rules.embedded: engine to engine, not for hosts, never a bean
+public interface TenantScopedRuleEngine {
+  String engineId();                                                 // system:process-engine, fixed when built
+  DecisionResult evaluate(String tenantId, DecisionRequest request);
+}
 ```
+`TenantScopedRuleEngine` is for an embedded engine acting on its own stored work with no caller signed in, for example the Process Engine pricing a step after a timer. Host code cannot reach it: the `RuleEngine` bean does not implement it and it is not a bean. The Process Engine's starter builds it with `RuleEngines.forEmbeddedEngine("system:process-engine")`, which accepts only a registered engine identity, so the caller written to the decision log is fixed and cannot be chosen per call. The tenant is the one the engine read from its own stored row; a blank tenant is refused. There is no REST endpoint for it.
 ```java
 DecisionResult r = rules.evaluate("card-fee", DecisionInput.of("tier", "GOLD", "balance", Money.ofMinor("VND", 60_000_000), "txCount", 3));
 r.ruleSet();            // "card-fee"
