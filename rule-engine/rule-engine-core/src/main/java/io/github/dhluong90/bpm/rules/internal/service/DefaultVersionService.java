@@ -145,7 +145,7 @@ public final class DefaultVersionService implements VersionService {
             throw new ValidationFailedException("The rule set has " + rows + " rules; evaluation.max-rows allows "
                     + context.settings().maxRows());
         }
-        CompiledRuleSet.compile(parsed.model(), context.settings().maxOutputBytes(), context.settings().maxStringLength());
+        compileForPublication(parsed.model());
         return parsed;
     }
 
@@ -623,9 +623,18 @@ public final class DefaultVersionService implements VersionService {
                 && (stored.sourceFormat() == SourceFormat.YAML || stored.sourceFormat() == SourceFormat.DMN_XML)) {
             checkedDocument(stored.sourceFormat(), stored.sourceDocument().getBytes(StandardCharsets.UTF_8));
         } else {
-            CompiledRuleSet.compile(RuleSetReader.readCanonical(stored.canonicalJson()),
-                    context.settings().maxOutputBytes(), context.settings().maxStringLength());
+            compileForPublication(RuleSetReader.readCanonical(stored.canonicalJson()));
         }
+    }
+
+    /**
+     * Compiles a model with the host's configured limits, the ones evaluation will apply, and refuses a table whose
+     * worst-case step count is over the step budget (TR-SEC-01), so it fails here and not on every evaluation.
+     */
+    private void compileForPublication(io.github.dhluong90.bpm.rules.internal.model.Definitions model) {
+        EngineSettings settings = context.settings();
+        CompiledRuleSet.compile(model, settings.maxOutputBytes(), settings.maxStringLength(), settings.regexLimits(),
+                settings.evaluationLimits()).requireWithinStepBudget();
     }
 
     @Override

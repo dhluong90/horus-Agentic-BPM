@@ -238,14 +238,28 @@ class ExpressionValidationTest {
         for (int run = 0; run < 3; run++) {
             CompiledRuleSet.Evaluation evaluation = tight.evaluateWithReason(input);
             assertThat(evaluation.reason()).isEqualTo(EvaluationLimits.EVALUATION_BUDGET_EXCEEDED);
-            assertThat(evaluation.outcome()).isInstanceOfSatisfying(DecisionResult.Failed.class, failed ->
-                    assertThat(failed.detail()).isEqualTo("EVALUATION_BUDGET_EXCEEDED: the decision took more than 5"
-                            + " evaluation steps"));
+            assertThat(evaluation.outcome()).isInstanceOfSatisfying(DecisionResult.Failed.class, failed -> {
+                assertThat(failed.detail()).isEqualTo("EVALUATION_BUDGET_EXCEEDED: the decision took more than 5"
+                        + " evaluation steps");
+                assertThat(failed.limit()).as("which limit, as a field").isEqualTo("STEPS");
+            });
         }
 
         CompiledRuleSet roomy = CompiledRuleSet.compile(model, EngineDefaults.OUTPUT_MAX_BYTES,
                 EngineDefaults.STRING_MAX_LENGTH, RegexLimits.defaults(), EvaluationLimits.defaults());
         assertThat(roomy.evaluateWithReason(input).reason()).isNull();
+    }
+
+    @Test
+    void TR_SEC_01_the_limit_survives_the_stored_result_an_idempotent_replay_answers_with() {
+        DecisionResult failed = new DecisionResult("01KDG7Z0RQ6V2Y8M1C4N5P7T9W", "card-tariff", 1,
+                Instant.parse("2026-12-01T00:00:00Z"), new DecisionResult.Failed("EVALUATION_ERROR",
+                        "EVALUATION_BUDGET_EXCEEDED: the decision ran longer than 10000 ms", List.of(), "TIME"));
+
+        DecisionResult read = io.github.dhluong90.bpm.rules.internal.json.EngineValues.decisionFromJson(
+                io.github.dhluong90.bpm.rules.internal.json.EngineValues.decision(failed).toString());
+
+        assertThat(read.outcome()).isEqualTo(failed.outcome());
     }
 
     @Test
@@ -256,6 +270,163 @@ class ExpressionValidationTest {
         assertThatThrownBy(() -> new EvaluationLimits(100, 0)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new EvaluationLimits(100, EvaluationLimits.TIMEOUT_MILLIS_MAX + 1))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // ---------------------------------------------------------------- worst-case steps at authoring time
+
+    /** Eight tariff dimensions of a bank-a card pricing table, each an integer band. */
+    static final List<String> DIMENSIONS = List.of("amount", "tenor", "age", "score", "region", "segment", "channel",
+            "product");
+
+    /**
+     * A pricing table of {@code rows} rules over the eight dimensions. Each cell is {@code ">= n"}, three nodes
+     * ({@code dimension >= n}); the eight cells of a row are joined by seven {@code and}, so a condition is 31 nodes,
+     * and each rule's {@code feeBps} output is one.
+     */
+    static byte[] tariff(String hitPolicy, int rows) {
+        StringBuilder yaml = new StringBuilder("schemaVersion: 1\nruleSet: card-tariff\nhitPolicy: " + hitPolicy
+                + "\ninputs:\n");
+        DIMENSIONS.forEach(d -> yaml.append("  - { name: ").append(d).append(", type: integer }\n"));
+        yaml.append("outputs:\n  - { name: feeBps, type: integer")
+                .append(hitPolicy.equals("collect") ? ", collect: sum" : "").append(" }\nrules:\n");
+        for (int r = 1; r <= rows; r++) {
+            yaml.append("  - { id: T").append(r).append(", when: { ");
+            for (int d = 0; d < DIMENSIONS.size(); d++) {
+                yaml.append(d == 0 ? "" : ", ").append(DIMENSIONS.get(d)).append(": \">= ").append(r % 7).append('"');
+            }
+            yaml.append(" }, then: { feeBps: 25 } }\n");
+        }
+        return yaml.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    RuleEngines enginesWith(EngineSettings settings) {
+        RuleEngines other = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores, settings),
+                stores, stores, stores);
+        other.cursorKeys().load();
+        return other;
+    }
+
+    @Test
+    void RLE_004_TR_SEC_01_a_5000_row_8_column_unique_tariff_is_refused_at_import_not_at_evaluation() {
+        // Given a 5,000-row, 8-column unique tariff (31 nodes a condition): 155,001 steps in the worst case
+        byte[] source = tariff("unique", 5_000);
+
+        // When it is imported under the default budget of 100,000 steps
+        ValidationFailedException e = catchThrowableOfType(ValidationFailedException.class,
+                () -> versions.importRuleSet(ImportRequest.yaml(source)));
+
+        // Then import refuses it, on the first rule from which the worst case is over the budget, and stores nothing
+        assertThat(e).isNotNull();
+        assertThat(e.violations()).singleElement().satisfies(v -> {
+            assertThat(v.code()).isEqualTo("EVALUATION_BUDGET_EXCEEDED");
+            assertThat(v.ruleId()).as("31 x 3,226 + 1 > 100,000").isEqualTo("T3226");
+            assertThat(v.column()).isNull();
+            assertThat(v.position()).isNull();
+            assertThat(v.message()).contains("155,001 evaluation steps", "hit policy unique", "step budget of 100,000");
+        });
+        assertThat(stores.versions).isEmpty();
+    }
+
+    @Test
+    void RLE_004_TR_SEC_01_a_5000_row_8_column_collect_tariff_is_refused_at_import_not_at_evaluation() {
+        ValidationFailedException e = catchThrowableOfType(ValidationFailedException.class,
+                () -> versions.importRuleSet(ImportRequest.yaml(tariff("collect", 5_000))));
+
+        // collect evaluates every row's output too: 32 x 5,000
+        assertThat(e).isNotNull();
+        assertThat(e.violations()).singleElement().satisfies(v -> {
+            assertThat(v.code()).isEqualTo("EVALUATION_BUDGET_EXCEEDED");
+            assertThat(v.ruleId()).as("32 x 3,126 > 100,000").isEqualTo("T3126");
+            assertThat(v.message()).contains("160,000 evaluation steps", "hit policy collect");
+        });
+        assertThat(stores.versions).isEmpty();
+    }
+
+    @Test
+    void TR_SEC_01_a_tariff_within_the_budget_imports_and_its_worst_case_is_its_node_count() {
+        // Given 3,000 rows of the same tariff under first: 93,001 steps at most
+        byte[] source = tariff("first", 3_000);
+        CompiledRuleSet compiled = CompiledRuleSet.compile(RuleSetReader.read(SourceFormat.YAML, source).model());
+
+        // When imported, and evaluated on an input that matches no rule (every condition is read)
+        versions.importRuleSet(ImportRequest.yaml(source));
+        java.util.Map<String, Object> none = new java.util.HashMap<>();
+        DIMENSIONS.forEach(d -> none.put(d, -1));
+        CompiledRuleSet.Evaluation evaluation = compiled.evaluateWithReason(DecisionInput.of(none));
+
+        // Then the static bound is exact for this table, and evaluation stays inside it
+        assertThat(compiled.worstCaseSteps()).isEqualTo(31L * 3_000 + 1);
+        assertThat(stores.versions).hasSize(1);
+        assertThat(evaluation.reason()).isNull();
+        assertThat(evaluation.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
+    }
+
+    @Test
+    void RLE_004_TR_SEC_01_request_publish_checks_the_worst_case_against_the_host_budget() {
+        // Given a 200-row tariff (6,201 steps) stored as a draft under the default budget
+        versions.importRuleSet(ImportRequest.yaml(tariff("first", 200)));
+
+        // When the host runs with a step budget of 5,000 and the author asks for publication
+        VersionService lowered = enginesWith(EngineSettings.defaults()
+                .withEvaluationLimits(new EvaluationLimits(5_000, EvaluationLimits.TIMEOUT_MILLIS))).versionService();
+        ValidationFailedException e = catchThrowableOfType(ValidationFailedException.class,
+                () -> lowered.requestPublish("card-tariff", 1, WriteOptions.none()));
+
+        // Then the host's budget applies, not the default, and the version stays a draft
+        assertThat(e).isNotNull();
+        assertThat(e.violations()).singleElement().satisfies(v -> {
+            assertThat(v.code()).isEqualTo("EVALUATION_BUDGET_EXCEEDED");
+            assertThat(v.ruleId()).as("31 x 162 + 1 > 5,000").isEqualTo("T162");
+            assertThat(v.message()).contains("6,201 evaluation steps", "step budget of 5,000");
+        });
+        assertThat(stores.versions).singleElement().extracting(StoredVersion::status).isEqualTo(VersionStatus.DRAFT);
+    }
+
+    @Test
+    void TR_SEC_01_a_host_with_a_higher_budget_imports_the_large_tariff() {
+        VersionService roomy = enginesWith(EngineSettings.defaults()
+                .withEvaluationLimits(new EvaluationLimits(200_000, EvaluationLimits.TIMEOUT_MILLIS))).versionService();
+
+        roomy.importRuleSet(ImportRequest.yaml(tariff("unique", 5_000)));
+
+        assertThat(stores.versions).hasSize(1);
+    }
+
+    // ---------------------------------------------------------------- depth of left-associative chains
+
+    @Test
+    void TR_SEC_01_a_left_associative_chain_deeper_than_the_depth_limit_is_refused() {
+        // Given a cell of 65 terms joined by +: a tree 65 levels deep, with no parenthesis at all
+        String chain = "balance" + " + 1 VND".repeat(64) + " > 0 VND";
+
+        // When it is imported
+        Violation v = refusedAtImport(row("R1", "balance: \"" + chain + "\"", "0 VND"));
+
+        // Then it is too deep, at the operator that crosses the limit
+        assertThat(v.code()).isEqualTo("EXPRESSION_TOO_DEEP");
+        assertThat(v.ruleId()).isEqualTo("R1");
+        assertThat(v.position()).isEqualTo(chain.indexOf("+") + 8 * 63);
+    }
+
+    @Test
+    void TR_SEC_01_a_chain_at_the_depth_limit_is_accepted() {
+        // 62 additions and the comparison: 64 levels
+        String chain = "balance" + " + 1 VND".repeat(62) + " > 0 VND";
+
+        versions.importRuleSet(ImportRequest.yaml(table(row("R1", "balance: \"" + chain + "\"", "0 VND"))));
+
+        assertThat(stores.versions).hasSize(1);
+    }
+
+    @Test
+    void TR_SEC_01_a_2000_term_chain_is_refused_without_building_the_tree() {
+        // The 4,096-character cell of the security review: about 2,000 levels before this limit
+        String chain = "creditScore" + "+creditScore".repeat(300) + " > 0";
+        assertThat(chain.length()).isLessThanOrEqualTo(io.github.dhluong90.bpm.rules.internal.expr.Parser.MAX_LENGTH);
+
+        Violation v = refusedAtImport(row("R1", "creditScore: \"" + chain + "\"", "0 VND"));
+
+        assertThat(v.code()).isEqualTo("EXPRESSION_TOO_DEEP");
     }
 
     /** Replaces the stored source of version 1, as a draft written by an earlier release with fewer checks. */

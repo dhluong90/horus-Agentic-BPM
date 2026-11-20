@@ -129,7 +129,8 @@ Codes of expression problems, in `when` and `then` cells. Each is refused at imp
 | `SYNTAX_ERROR` | Not an expression: an unterminated string, a missing parenthesis, `=` for `==`, `&&` for `and` | `tier == 'GOLD`: `Unterminated string at position 8` |
 | `INVALID_LITERAL` | A malformed date, datetime, money amount or `round` scale | `10.5 VND` (VND has no minor unit) |
 | `INVALID_PATTERN` | A `matches()` pattern outside the dialect or not a regular expression | `matches(ref, '(?i)ft')` |
-| `EXPRESSION_TOO_LONG`, `EXPRESSION_TOO_DEEP` | More than 4,096 characters, or nested deeper than 64 | |
+| `EXPRESSION_TOO_LONG`, `EXPRESSION_TOO_DEEP` | More than 4,096 characters, or a tree deeper than 64 levels, chains of `+`, `*`, `and` or `or` included | `balance + 1 VND + ... > 0 VND` with 64 additions |
+| `EVALUATION_BUDGET_EXCEEDED` | The table's worst case is over the step budget, so some decisions on it could fail every time. On the first rule from which it is over; `column` is null | A 5,000-rule `unique` tariff over 8 inputs: `the table can take up to 155,001 evaluation steps under hit policy unique, more than the step budget of 100,000 ...` on `T3226` |
 | `UNKNOWN_OUTPUT`, `MASKED_INPUT_IN_OUTPUT` | A `then` key that is not a declared output; an output cell that reads a masked input | |
 
 New codes may be added; a client should show `message` for a code it does not know.
@@ -179,7 +180,7 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 
 - `REGEX_TIMEOUT`: a `matches()` read more than `evaluation.regex-max-reads` characters (default 1,000,000), the `matches()` calls of one decision together read more than `evaluation.regex-max-reads-per-decision` (default 5,000,000; `detail` names that setting), or a `matches()` ran longer than `evaluation.regex-timeout-ms` (default 50 ms), and was stopped. `detail` starts with `REGEX_TIMEOUT:` and the decision row has `error_code = REGEX_TIMEOUT`. Retrying the same input fails the same way; simplify the pattern (avoid nested quantifiers such as `(a+?)+?`).
 - `REGEX_INPUT_TOO_LONG`: the text given to `matches()` is longer than `evaluation.regex-max-input-length` (default 4,096); the match was not run. `detail` starts with `REGEX_INPUT_TOO_LONG:` and so does the row's `error_code`.
-- `EVALUATION_BUDGET_EXCEEDED`: the decision visited more than 100,000 nodes of its expressions (the step budget), or ran longer than the 10-second backstop. Steps are counted, not timed, so the same input fails the same way on every machine. `detail` starts with `EVALUATION_BUDGET_EXCEEDED:` and so does the row's `error_code`. Split a very large `collect` table or simplify its cells.
+- `EVALUATION_BUDGET_EXCEEDED`: the decision visited more than 100,000 nodes of its expressions (the step budget), or ran longer than the 10-second backstop. The problem's `limit` says which: `STEPS` is counted, not timed, so the same input fails the same way on every machine and the rule set must change; `TIME` means the machine was slow. `detail` starts with `EVALUATION_BUDGET_EXCEEDED:` and so does the row's `error_code`. Import and `:request-publish` already refuse a table whose worst case is over the budget, so `STEPS` at evaluation means the budget was lowered after the version was approved. A step is one node visited; the exact count of an expression may change between minor releases. One budget covers one top-level evaluation and every decision it requires.
 - `REGEX_TOO_DEEP`: the pattern's backtracking ran out of thread stack, typically an alternation under `*` or `+` such as `(a|b)*c` on a long text. Simplify the pattern or lower `evaluation.regex-max-input-length`.
 
 ### BATCH_TOO_LARGE

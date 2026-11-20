@@ -67,6 +67,11 @@ public final class CompiledRuleSet {
     private final int maxOutputBytes;
     private final java.time.ZoneId timeZone;
     private final Set<String> inputsInOutputs;
+    private final EvaluationLimits evaluationLimits;
+    /** The most steps one decision on this table can take (no loops: a sum of node counts). */
+    private final long worstCaseSteps;
+    /** The first rule from which the worst case is over the step budget, or null when it never is. */
+    private final String overBudgetFrom;
 
     private CompiledRuleSet(Definitions model, List<CompiledRule> rules, int maxOutputBytes, int maxStringLength,
             RegexLimits regexLimits, EvaluationLimits evaluationLimits) {
@@ -82,6 +87,36 @@ public final class CompiledRuleSet {
         this.inputsInOutputs = java.util.Collections.unmodifiableSet(referenced);
         this.shared = new Evaluator(table.moneyRounding(), maxStringLength, regexLimits, evaluationLimits);
         this.maxOutputBytes = maxOutputBytes;
+        this.evaluationLimits = evaluationLimits;
+        // Worst case over the rules seen so far, by hit policy: first stops at the first match (or reads every
+        // condition and matches none); unique reads every condition and the outputs of one rule; collect reads every
+        // condition and the outputs of every rule.
+        long conditions = 0;
+        long collected = 0;
+        long widestRow = 0;
+        long firstMatch = 0;
+        long worst = 0;
+        String over = null;
+        for (CompiledRule rule : this.rules) {
+            long row = 0;
+            for (Expr then : rule.thens()) {
+                row += EvaluationLimits.worstCase(then);
+            }
+            conditions += EvaluationLimits.worstCase(rule.condition());
+            collected += row;
+            widestRow = Math.max(widestRow, row);
+            firstMatch = Math.max(firstMatch, conditions + row);
+            worst = switch (hitPolicy) {
+                case FIRST -> Math.max(conditions, firstMatch);
+                case UNIQUE -> conditions + widestRow;
+                case COLLECT -> conditions + collected;
+            };
+            if (over == null && worst > evaluationLimits.stepBudget()) {
+                over = rule.id();
+            }
+        }
+        this.worstCaseSteps = worst;
+        this.overBudgetFrom = over;
     }
 
     /**
@@ -179,6 +214,38 @@ public final class CompiledRuleSet {
             throw new ValidationFailedException(problems.kept, problems.truncated);
         }
         return new CompiledRuleSet(model, rules, maxOutputBytes, maxStringLength, regexLimits, evaluationLimits);
+    }
+
+    /**
+     * Returns the most evaluation steps one decision on this table can take. The language has no loops, so this is
+     * a sum of node counts: every condition, plus the outputs of the rules a hit policy can evaluate. The count of a
+     * given table may change in a minor release; the guarantee is the step budget and the reason code.
+     *
+     * @return the worst-case steps
+     */
+    public long worstCaseSteps() {
+        return worstCaseSteps;
+    }
+
+    /**
+     * Refuses a table that could fail every evaluation with {@code EVALUATION_BUDGET_EXCEEDED}: one whose worst case
+     * is over the step budget. Import and request-publish call it, so the failure shows at authoring time and not
+     * in production. Evaluation does not: a version already in effect keeps the runtime bound.
+     *
+     * @throws ValidationFailedException with one violation, code {@code EVALUATION_BUDGET_EXCEEDED}, on the first rule
+     *     from which the worst case is over the budget
+     */
+    public void requireWithinStepBudget() {
+        if (overBudgetFrom == null) {
+            return;
+        }
+        String policy = hitPolicy.name().toLowerCase(java.util.Locale.ROOT);
+        throw new ValidationFailedException(List.of(new Violation(overBudgetFrom, null, String.format(
+                java.util.Locale.ROOT, "the table can take up to %,d evaluation steps under hit policy %s, more than"
+                        + " the step budget of %,d; from this rule on, a decision could fail with"
+                        + " EVALUATION_BUDGET_EXCEEDED. Split the table or simplify its cells",
+                worstCaseSteps, policy, evaluationLimits.stepBudget()), EvaluationLimits.EVALUATION_BUDGET_EXCEEDED)),
+                false);
     }
 
     /**
@@ -285,7 +352,8 @@ public final class CompiledRuleSet {
                 case COLLECT -> collect(decision, slots);
             }, null);
         } catch (EvaluationException e) {
-            return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", e.getMessage()), e.reason());
+            return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", e.getMessage(), List.of(), e.limit()),
+                    e.reason());
         } catch (ArithmeticException e) {
             // Exponent overflow or underflow in DECIMAL128 arithmetic: a deterministic failure, never a 500.
             return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", "Arithmetic out of range"), null);

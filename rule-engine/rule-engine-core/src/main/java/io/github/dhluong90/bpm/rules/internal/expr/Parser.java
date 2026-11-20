@@ -43,7 +43,10 @@ public final class Parser {
     /** Longest expression accepted, in characters. */
     public static final int MAX_LENGTH = 4096;
 
-    /** Deepest nesting accepted. */
+    /**
+     * Deepest expression accepted: both the nesting of parentheses and prefix operators while parsing, and the height
+     * of the tree built, so a left-associative chain such as {@code a + a + a ...} is bounded too.
+     */
     public static final int MAX_DEPTH = 64;
 
     /**
@@ -62,6 +65,8 @@ public final class Parser {
     private final List<Token> tokens;
     /** Where each node starts; identity keys, because equal subtrees at two places are two nodes. */
     private final Map<Expr, Integer> positions = new IdentityHashMap<>();
+    /** The height of each node built, so the tree is never deeper than {@link #MAX_DEPTH}. */
+    private final Map<Expr, Integer> heights = new IdentityHashMap<>();
     private int index;
     private int depth;
 
@@ -147,8 +152,39 @@ public final class Parser {
     }
 
     private <T extends Expr> T at(T node, int position) {
+        int height = 1 + switch (node) {
+            case Expr.Literal ignored -> 0;
+            case Expr.Var ignored -> 0;
+            case Expr.Clock ignored -> 0;
+            case Expr.Unary unary -> height(unary.operand());
+            case Expr.Binary binary -> Math.max(height(binary.left()), height(binary.right()));
+            case Expr.InList inList -> Math.max(height(inList.target()), maxHeight(inList.elements()));
+            case Expr.Between between -> Math.max(height(between.target()),
+                    Math.max(height(between.low()), height(between.high())));
+            case Expr.IsNull isNull -> height(isNull.target());
+            case Expr.Matches matches -> height(matches.target());
+            case Expr.Call call -> maxHeight(call.args());
+        };
+        if (height > MAX_DEPTH) {
+            // Chains of + - * / and or are built in one loop, so the nesting count alone does not bound them.
+            throw new ExpressionException(ExpressionError.EXPRESSION_TOO_DEEP, "Expression nested deeper than "
+                    + MAX_DEPTH, position);
+        }
+        heights.put(node, height);
         positions.putIfAbsent(node, position);
         return node;
+    }
+
+    private int height(Expr node) {
+        return heights.getOrDefault(node, 1);
+    }
+
+    private int maxHeight(List<Expr> nodes) {
+        int max = 0;
+        for (Expr node : nodes) {
+            max = Math.max(max, height(node));
+        }
+        return max;
     }
 
     private Expr or() {
