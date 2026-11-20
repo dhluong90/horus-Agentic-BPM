@@ -551,7 +551,11 @@ Micrometer names, exported to Prometheus with the usual suffixes; no tenant, rul
 | `horus.rle.cache.size` | Gauge | `horus_rle_cache_size` | none |
 | `horus.rle.cache.evictions` | Counter | `horus_rle_cache_evictions_total` | `cause` (`size`, `epoch`, `notify`) |
 | `horus.rle.partition.default.rows` | Gauge | `horus_rle_partition_default_rows` | none |
-| `horus.rle.lifecycle.retired` | Counter | `horus_rle_lifecycle_retired_total` | `reason` (`SUPERSEDED`, `MANUAL`) |
+| `horus.rle.lifecycle.retired` | Counter | `horus_rle_lifecycle_retired_total` | `reason` (`SUPERSEDED`, `MANUAL`), counted after commit |
+| `horus.rle.evaluations` | Timer | `horus_rle_evaluations_seconds_count`, `_sum`, `_max` | `outcome` (`matched`, `no_match`, `failed`, `refused`) |
+| `horus.rle.evaluation.errors` | Counter | `horus_rle_evaluation_errors_total` | `code` (an engine error code; anything else is `OTHER`) |
+
+The core records evaluations and retirements without a metrics library: `EngineMeters` hands each record (an outcome, an error code, a reason, a duration) to the recorders bound to it, and the starter binds one per meter registry when Micrometer is present. Every evaluation call is timed once, from the permission check to the decision log write, including a refusal (`refused`) and an idempotent replay. Percentile histograms are the host's choice (`management.metrics.distribution.percentiles-histogram.horus.rle.evaluations`).
 
 ## 5. Storage model (`rule-engine-postgres`)
 

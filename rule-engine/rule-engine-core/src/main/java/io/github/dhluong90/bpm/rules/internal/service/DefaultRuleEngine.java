@@ -84,6 +84,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     private final Map<String, CompiledRuleSet> compiled = new ConcurrentHashMap<>();
     private final CompiledCache cache;
     private final DecisionQuerySettings querySettings;
+    private final EngineMeters meters;
     private final AtomicBoolean grantOpened = new AtomicBoolean();
 
     /**
@@ -98,16 +99,27 @@ public final class DefaultRuleEngine implements RuleEngine {
     }
 
     DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache) {
-        this(context, store, log, cache, DecisionQuerySettings.defaults());
+        this(context, store, log, cache, DecisionQuerySettings.defaults(), new EngineMeters());
     }
 
     DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache,
             DecisionQuerySettings querySettings) {
+        this(context, store, log, cache, querySettings, new EngineMeters());
+    }
+
+    DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache,
+            EngineMeters meters) {
+        this(context, store, log, cache, DecisionQuerySettings.defaults(), meters);
+    }
+
+    DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache,
+            DecisionQuerySettings querySettings, EngineMeters meters) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.log = Objects.requireNonNull(log, "log must not be null");
         this.cache = Objects.requireNonNull(cache, "cache must not be null");
         this.querySettings = Objects.requireNonNull(querySettings, "querySettings must not be null");
+        this.meters = Objects.requireNonNull(meters, "meters must not be null");
     }
 
     /** @return true the first time only: at most one grant of the tenant-scoped entry point per engine (#336) */
@@ -123,14 +135,33 @@ public final class DefaultRuleEngine implements RuleEngine {
     @Override
     public DecisionResult evaluate(DecisionRequest request) {
         Objects.requireNonNull(request, "request must not be null");
-        String tenant = context.tenant();
-        // A pinned evaluation is its own permission (DESIGN 4.2): rules:pin, never rules:evaluate alone.
-        String caller = context.callerWith(request.version() == null ? PERMISSION_EVALUATE : PERMISSION_PIN);
-        if (request.clock() != null && !context.holds(PERMISSION_SIMULATE)) {
-            // A chosen instant reaches versions and dates the caller would not get at the host clock (DESIGN 4.2).
-            throw new ClockNotAllowedException();
+        return measured(() -> {
+            String tenant = context.tenant();
+            // A pinned evaluation is its own permission (DESIGN 4.2): rules:pin, never rules:evaluate alone.
+            String caller = context.callerWith(request.version() == null ? PERMISSION_EVALUATE : PERMISSION_PIN);
+            if (request.clock() != null && !context.holds(PERMISSION_SIMULATE)) {
+                // A chosen instant reaches versions and dates the caller would not get at the host clock (DESIGN 4.2).
+                throw new ClockNotAllowedException();
+            }
+            return evaluateUnmeasured(tenant, caller, null, null, request);
+        });
+    }
+
+    /**
+     * Times one evaluation call and records how it ended (DESIGN 4.8): a refusal is recorded with its error code,
+     * then thrown on unchanged.
+     */
+    private DecisionResult measured(java.util.function.Supplier<DecisionResult> call) {
+        long started = System.nanoTime();
+        DecisionResult result;
+        try {
+            result = call.get();
+        } catch (RuntimeException failure) {
+            meters.refused(failure, System.nanoTime() - started);
+            throw failure;
         }
-        return evaluateAs(tenant, caller, request);
+        meters.evaluated(result, System.nanoTime() - started);
+        return result;
     }
 
     /**
@@ -145,7 +176,8 @@ public final class DefaultRuleEngine implements RuleEngine {
     /**
      * Evaluates for an embedded engine (ADR-0027): as {@code caller}, on behalf of {@code onBehalfOf}, at the calling
      * engine's clock {@code engineTime}. Neither the time nor {@code onBehalfOf} is part of the request hash: a retried
-     * step comes later on the clock and must replay the logged decision, with its original evaluation time.
+     * step comes later on the clock and must replay the logged decision, with its original evaluation time. Timed and
+     * recorded as one evaluation call (DESIGN 4.8).
      *
      * @param tenant the tenant
      * @param caller the caller identity written to the log
@@ -155,6 +187,11 @@ public final class DefaultRuleEngine implements RuleEngine {
      * @return the logged result
      */
     DecisionResult evaluateAs(String tenant, String caller, String onBehalfOf, Instant engineTime,
+            DecisionRequest request) {
+        return measured(() -> evaluateUnmeasured(tenant, caller, onBehalfOf, engineTime, request));
+    }
+
+    private DecisionResult evaluateUnmeasured(String tenant, String caller, String onBehalfOf, Instant engineTime,
             DecisionRequest request) {
         if (request.correlationId() != null && !CorrelationIds.isValid(request.correlationId())) {
             throw new InputInvalidException("correlationId must be 1 to " + EngineDefaults.CORRELATION_ID_MAX_LENGTH
