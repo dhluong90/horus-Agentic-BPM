@@ -127,18 +127,18 @@ class EditorApiTest {
         int history = stores.history.size();
 
         // Then an empty reason is 400 INPUT_INVALID naming reason
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, 1L, "")))
                 .isInstanceOf(InputInvalidException.class).hasMessageContaining("reason");
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "   ")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, 1L, "   ")))
                 .isInstanceOf(InputInvalidException.class).hasMessageContaining("reason");
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "x".repeat(2001))))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, 1L, "x".repeat(2001))))
                 .isInstanceOf(InputInvalidException.class).hasMessageContaining("2000");
         // a stale If-Match is 409 VERSION_CONFLICT
         assertThatThrownBy(() -> versions.reject("card-fee", 2,
                 new WriteOptions(null, pending.lockVersion() - 1, "R2 waiver needs pricing committee minutes")))
                 .isInstanceOf(VersionConflictException.class);
         // a published version is 409 INVALID_STATE
-        assertThatThrownBy(() -> versions.reject("card-fee", 1, new WriteOptions(null, null, "too late")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 1, new WriteOptions(null, 1L, "too late")))
                 .isInstanceOf(InvalidStateException.class).extracting(e -> ((InvalidStateException) e).code())
                 .isEqualTo("INVALID_STATE");
 
@@ -158,7 +158,7 @@ class EditorApiTest {
         int history = stores.history.size();
 
         // When minh rejects it, then PD-089: 403 SELF_APPROVAL_FORBIDDEN pointing to :withdraw, nothing changes
-        assertThatThrownBy(() -> versions.reject("fx-margin", 1, new WriteOptions(null, null, "Wrong margin table attached")))
+        assertThatThrownBy(() -> versions.reject("fx-margin", 1, new WriteOptions(null, 1L, "Wrong margin table attached")))
                 .isInstanceOfSatisfying(SelfApprovalForbiddenException.class, e -> {
                     assertThat(e.code()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
                     assertThat(e.getMessage()).contains(":withdraw");
@@ -169,7 +169,7 @@ class EditorApiTest {
 
         // and an approver who did not request it still can
         caller.become("bank-a", "lan", APPROVER);
-        assertThat(versions.reject("fx-margin", 1, new WriteOptions(null, null, "Wrong margin table attached")).status())
+        assertThat(versions.reject("fx-margin", 1, new WriteOptions(null, 1L, "Wrong margin table attached")).status())
                 .isEqualTo(VersionStatus.DRAFT);
     }
 
@@ -180,10 +180,10 @@ class EditorApiTest {
         versions.importVersion("card-fee", ImportRequest.yaml(cardFee("10000 VND", "card-fee")));
         versions.requestPublish("card-fee", 2, WriteOptions.none());
         caller.become("bank-a", "minh", APPROVER);
-        versions.reject("card-fee", 2, new WriteOptions("k-202", null, "first reason"));
+        versions.reject("card-fee", 2, new WriteOptions("k-202", 1L, "first reason"));
         int events = stores.outbox.size();
 
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions("k-202", null, "another reason")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions("k-202", 1L, "another reason")))
                 .isInstanceOf(IdempotencyKeyReuseException.class)
                 .extracting(e -> ((IdempotencyKeyReuseException) e).code()).isEqualTo("IDEMPOTENCY_KEY_REUSE_MISMATCH");
         assertThat(stores.outbox).hasSize(events);
@@ -197,14 +197,228 @@ class EditorApiTest {
         versions.requestPublish("card-fee", 2, WriteOptions.none());
 
         caller.become("bank-a", "dan", READER);
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "no")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, 1L, "no")))
                 .isInstanceOf(PermissionDeniedException.class);
         caller.become("bank-b", "minh", APPROVER);
-        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "no")))
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, 1L, "no")))
                 .isInstanceOf(RuleSetNotFoundException.class);
 
         caller.become("bank-a", "dan", READER);
         assertThat(versions.find("card-fee", 2, false).orElseThrow().status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
+    }
+
+    // ---------------------------------------------------------------- RLE-046 withdraw
+
+    static final Set<String> AUTHOR = Set.of("rules:read", "rules:author");
+    static final Set<String> EVALUATOR = Set.of("rules:evaluate");
+
+    /** card-fee v1 published by bob, v2 pending approval with lockVersion 1, requested by alice (rules:author only). */
+    RuleSetVersion alicesPendingCardFeeV2() {
+        caller.become("bank-a", "lan", AUTHOR);
+        versions.importRuleSet(ImportRequest.yaml(CardFee.yaml()));
+        versions.requestPublish("card-fee", 1, WriteOptions.none());
+        caller.become("bank-a", "bob", APPROVER);
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
+        caller.become("bank-a", "alice", AUTHOR);
+        versions.importVersion("card-fee", ImportRequest.yaml(cardFee("0 VND", "card-fee")));
+        return versions.requestPublish("card-fee", 2, WriteOptions.none());
+    }
+
+    @Test
+    void RLE_046_requester_withdraws_own_pending_request_to_draft() {
+        // Given card-fee v1 published and in effect, v2 pending approval requested by alice
+        RuleSetVersion pending = alicesPendingCardFeeV2();
+        int events = stores.outbox.size();
+
+        // When alice withdraws it with k-301, If-Match and a reason
+        WriteOptions withdraw = new WriteOptions("k-301", pending.lockVersion(), "Wrong fee for GOLD");
+        RuleSetVersion draft = versions.withdraw("card-fee", 2, withdraw);
+
+        // Then v2 is a draft again, the request cleared and the lock moved on
+        assertThat(draft.status()).isEqualTo(VersionStatus.DRAFT);
+        assertThat(draft.lockVersion()).isEqualTo(pending.lockVersion() + 1);
+        assertThat(draft.requestedBy()).isNull();
+        assertThat(draft.requestedAt()).isNull();
+        // and one WITHDRAWN history row with actor, reason and statuses
+        VersionHistoryEntry entry = versions.history("card-fee", 2).getLast();
+        assertThat(versions.history("card-fee", 2)).extracting(VersionHistoryEntry::action)
+                .containsExactly(LifecycleAction.CREATED, LifecycleAction.REQUESTED, LifecycleAction.WITHDRAWN);
+        assertThat(entry.actor()).isEqualTo("alice");
+        assertThat(entry.reason()).isEqualTo("Wrong fee for GOLD");
+        assertThat(entry.fromStatus()).isEqualTo(VersionStatus.PENDING_APPROVAL);
+        assertThat(entry.toStatus()).isEqualTo(VersionStatus.DRAFT);
+        assertThat(entry.lockVersion()).isEqualTo(draft.lockVersion());
+        // and exactly one withdrawn event, no rejected event
+        assertThat(stores.outbox).hasSize(events + 1);
+        assertThat(stores.outbox.getLast().payload())
+                .contains("\"eventType\":\"rules.version.withdrawn.v1\"", "\"withdrawnBy\":\"alice\"",
+                        "\"reason\":\"Wrong fee for GOLD\"", "\"tenantId\":\"bank-a\"", "\"ruleSet\":\"card-fee\"",
+                        "\"version\":2", "\"occurredAt\":\"2026-12-01T00:00:00Z\"")
+                .doesNotContain("rules.version.rejected.v1");
+        // and evaluation still selects v1: nothing was published
+        caller.become("bank-a", "teller", EVALUATOR);
+        DecisionResult result = engines.ruleEngine().evaluate("card-fee",
+                DecisionInput.of(Map.of("tier", "SILVER", "txCount", 5)));
+        assertThat(result.version()).isEqualTo(1);
+        assertThat(result.outcome()).isEqualTo(new DecisionResult.Matched(List.of("R2"),
+                Map.of("fee", Money.ofMinor("VND", 10000))));
+
+        // When the withdrawal is replayed with k-301 and the same body
+        caller.become("bank-a", "alice", AUTHOR);
+        assertThat(versions.withdraw("card-fee", 2, withdraw)).isEqualTo(draft);
+        // Then the same result and no second event or history row
+        assertThat(stores.outbox).hasSize(events + 1);
+        assertThat(versions.history("card-fee", 2)).hasSize(3);
+
+        // When alice requests publication again, a new approval starts and bob may approve it
+        RuleSetVersion again = versions.requestPublish("card-fee", 2, WriteOptions.none());
+        assertThat(again.status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
+        caller.become("bank-a", "bob", APPROVER);
+        assertThat(versions.approve("card-fee", 2, new WriteOptions(null, again.lockVersion(), null)).status())
+                .isEqualTo(VersionStatus.PUBLISHED);
+        assertThat(versions.history("card-fee", 2)).extracting(VersionHistoryEntry::action)
+                .containsExactly(LifecycleAction.CREATED, LifecycleAction.REQUESTED, LifecycleAction.WITHDRAWN,
+                        LifecycleAction.REQUESTED, LifecycleAction.APPROVED);
+    }
+
+    /**
+     * Security review of #234, which withdraw inherits (#275): request, withdraw, replace in place, request again, then
+     * an approval with the lock version the approver reviewed is refused. Withdraw is what lets the requester start
+     * this sequence without an approver, so it is tested here with the exact steps.
+     */
+    @Test
+    void RLE_046_an_approval_of_content_withdrawn_and_replaced_since_is_refused() {
+        // Given v2 pending, requested by alice; bob, the approver, reviews it at its current lock version
+        RuleSetVersion pending = alicesPendingCardFeeV2();
+        caller.become("bank-a", "bob", APPROVER);
+        RuleSetVersion reviewed = versions.find("card-fee", 2, false).orElseThrow();
+        assertThat(reviewed.lockVersion()).isEqualTo(pending.lockVersion());
+
+        // When alice withdraws it, replaces R2 in place and requests publication again (draft editing on)
+        VersionService editing = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
+                EngineSettings.defaults().withDraftAuthoring(true)), stores, stores, stores).versionService();
+        caller.become("bank-a", "alice", AUTHOR);
+        RuleSetVersion withdrawn = editing.withdraw("card-fee", 2, new WriteOptions("k-w", reviewed.lockVersion(), null));
+        RuleSetVersion replaced = editing.replaceDraft("card-fee", 2, ImportRequest.yaml(cardFee("50000 VND", "card-fee")),
+                new WriteOptions("k-p", withdrawn.lockVersion(), null));
+        RuleSetVersion again = editing.requestPublish("card-fee", 2, new WriteOptions(null, replaced.lockVersion(), null));
+        assertThat(again.canonicalHash()).isNotEqualTo(reviewed.canonicalHash());
+        int events = stores.outbox.size();
+        int history = stores.history.size();
+
+        // Then bob's approval with the lock version he reviewed is refused, and one without a lock version too
+        caller.become("bank-a", "bob", APPROVER);
+        assertThatThrownBy(() -> versions.approve("card-fee", 2, new WriteOptions(null, reviewed.lockVersion(), null)))
+                .isInstanceOf(VersionConflictException.class);
+        assertThatThrownBy(() -> versions.approve("card-fee", 2, WriteOptions.none()))
+                .isInstanceOfSatisfying(io.github.dhluong90.bpm.rules.api.PreconditionRequiredException.class,
+                        e -> assertThat(e.code()).isEqualTo("PRECONDITION_REQUIRED"));
+        // and nothing was published or recorded; v1 is still in effect
+        assertThat(versions.find("card-fee", 2, false).orElseThrow().status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
+        assertThat(stores.outbox).hasSize(events);
+        assertThat(stores.history).hasSize(history);
+
+        // When bob reviews the new content and approves with its lock version, it publishes
+        assertThat(versions.approve("card-fee", 2, new WriteOptions(null, again.lockVersion(), null)).status())
+                .isEqualTo(VersionStatus.PUBLISHED);
+    }
+
+    @Test
+    void RLE_046_withdraw_without_a_reason_records_a_null_reason() {
+        RuleSetVersion pending = alicesPendingCardFeeV2();
+
+        versions.withdraw("card-fee", 2, new WriteOptions("k-302", pending.lockVersion(), null));
+
+        assertThat(versions.history("card-fee", 2).getLast().reason()).isNull();
+        assertThat(stores.outbox.getLast().payload()).contains("\"reason\":null", "\"withdrawnBy\":\"alice\"");
+    }
+
+    @Test
+    void RLE_046_only_the_requester_withdraws_and_every_refusal_changes_nothing() {
+        // Given v2 pending, requested by alice; bob approves, carol authors
+        RuleSetVersion pending = alicesPendingCardFeeV2();
+        int events = stores.outbox.size();
+        int history = stores.history.size();
+        int keys = stores.idempotency.size();
+
+        // bob holds rules:approve only: 403 PERMISSION_DENIED (an approver uses :reject)
+        caller.become("bank-a", "bob", APPROVER);
+        assertThatThrownBy(() -> versions.withdraw("card-fee", 2, new WriteOptions("k-b", 1L, null)))
+                .isInstanceOf(PermissionDeniedException.class);
+        // bob holding rules:author too is still not the requester
+        caller.become("bank-a", "bob", AUTHOR_APPROVER);
+        assertThatThrownBy(() -> versions.withdraw("card-fee", 2, new WriteOptions("k-b2", 1L, null)))
+                .isInstanceOfSatisfying(PermissionDeniedException.class, e -> {
+                    assertThat(e.code()).isEqualTo("PERMISSION_DENIED");
+                    assertThat(e.getMessage()).contains(":reject");
+                });
+        // carol is another author
+        caller.become("bank-a", "carol", AUTHOR);
+        assertThatThrownBy(() -> versions.withdraw("card-fee", 2, new WriteOptions("k-c", 1L, null)))
+                .isInstanceOf(PermissionDeniedException.class);
+        // a reader
+        caller.become("bank-a", "dan", READER);
+        assertThatThrownBy(() -> versions.withdraw("card-fee", 2, new WriteOptions("k-d", 1L, null)))
+                .isInstanceOf(PermissionDeniedException.class);
+        // alice with a stale If-Match: 409 VERSION_CONFLICT
+        caller.become("bank-a", "alice", AUTHOR);
+        assertThatThrownBy(() -> versions.withdraw("card-fee", 2,
+                new WriteOptions("k-a1", pending.lockVersion() - 1, "Wrong fee for GOLD")))
+                .isInstanceOf(VersionConflictException.class);
+        // alice withdraws the published v1: 409 INVALID_STATE
+        assertThatThrownBy(() -> versions.withdraw("card-fee", 1, new WriteOptions("k-a2", null, null)))
+                .isInstanceOfSatisfying(InvalidStateException.class, e -> assertThat(e.code()).isEqualTo("INVALID_STATE"));
+        // alice with a 2,001-character reason: 400 INPUT_INVALID naming reason
+        assertThatThrownBy(() -> versions.withdraw("card-fee", 2,
+                new WriteOptions("k-a3", pending.lockVersion(), "x".repeat(2001))))
+                .isInstanceOf(InputInvalidException.class).hasMessageContaining("reason");
+        // alice of another tenant does not see the rule set
+        caller.become("bank-b", "alice", AUTHOR);
+        assertThatThrownBy(() -> versions.withdraw("card-fee", 2, new WriteOptions("k-a4", pending.lockVersion(), null)))
+                .isInstanceOf(RuleSetNotFoundException.class);
+
+        // and in every case nothing changed
+        caller.become("bank-a", "alice", AUTHOR);
+        assertThat(versions.find("card-fee", 2, false).orElseThrow()).isEqualTo(pending);
+        assertThat(stores.outbox).hasSize(events);
+        assertThat(stores.history).hasSize(history);
+        assertThat(stores.idempotency).hasSize(keys);
+    }
+
+    @Test
+    void RLE_046_withdraw_with_the_same_key_and_another_reason_is_a_key_reuse_mismatch() {
+        RuleSetVersion pending = alicesPendingCardFeeV2();
+        versions.withdraw("card-fee", 2, new WriteOptions("k-303", pending.lockVersion(), "first reason"));
+        int events = stores.outbox.size();
+
+        assertThatThrownBy(() -> versions.withdraw("card-fee", 2,
+                new WriteOptions("k-303", pending.lockVersion(), "another reason")))
+                .isInstanceOf(IdempotencyKeyReuseException.class);
+        assertThat(stores.outbox).hasSize(events);
+    }
+
+    @Test
+    void RLE_046_allowed_actions_offer_withdraw_to_the_requester_only() {
+        RuleSetVersion pending = alicesPendingCardFeeV2();
+
+        // alice, the requester with rules:author: withdraw, never approve or reject
+        assertThat(VersionActions.allowed(pending.status(), pending.createdBy(), pending.requestedBy(), "alice", AUTHOR))
+                .containsExactly("withdraw");
+        // a requester who also holds rules:approve still gets withdraw only
+        assertThat(VersionActions.allowed(pending.status(), pending.createdBy(), pending.requestedBy(), "alice",
+                AUTHOR_APPROVER)).containsExactly("withdraw");
+        // bob approves or rejects; carol, another author, gets nothing
+        assertThat(VersionActions.allowed(pending.status(), pending.createdBy(), pending.requestedBy(), "bob", APPROVER))
+                .containsExactly("approve", "reject");
+        assertThat(VersionActions.allowed(pending.status(), pending.createdBy(), pending.requestedBy(), "carol", AUTHOR))
+                .isEmpty();
+        // a requester without rules:author (approve only) cannot withdraw: PD-089 accepted edge case
+        assertThat(VersionActions.allowed(pending.status(), pending.createdBy(), pending.requestedBy(), "alice", APPROVER))
+                .isEmpty();
+        // and once withdrawn, the draft offers request-publish again
+        RuleSetVersion draft = versions.withdraw("card-fee", 2, new WriteOptions(null, pending.lockVersion(), null));
+        assertThat(VersionActions.allowed(draft.status(), draft.createdBy(), draft.requestedBy(), "alice", AUTHOR))
+                .containsExactly("request-publish");
     }
 
     // ---------------------------------------------------------------- RLE-039 rule set list
@@ -252,7 +466,7 @@ class EditorApiTest {
         versions.requestPublish("card-fee", 2, WriteOptions.none());
         clock.set(DEC_10);
         caller.become("bank-a", "minh", APPROVER);
-        versions.reject("card-fee", 2, new WriteOptions(null, null, "R2 waiver needs pricing committee minutes"));
+        versions.reject("card-fee", 2, new WriteOptions(null, 1L, "R2 waiver needs pricing committee minutes"));
 
         RuleSetSummary summary = versions.findRuleSet("card-fee").orElseThrow();
 
@@ -452,7 +666,7 @@ class EditorApiTest {
         versions.importRuleSet(ImportRequest.yaml(good));
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "minh", Set.of("rules:approve", "rules:evaluate"));
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
         RuleEngine engine = engines.ruleEngine();
         DecisionResult result = engine.evaluate("card-fee", DecisionInput.of(Map.of("tier", "SILVER", "txCount", 5)));
         assertThat(result.outcome()).isEqualTo(new DecisionResult.Matched(List.of("R2"),
@@ -570,12 +784,12 @@ class EditorApiTest {
         caller.become("bank-a", "minh", APPROVER);
         int history = stores.history.size();
 
-        assertThatThrownBy(() -> versions.approve("card-fee", 1, new WriteOptions(null, null, "x".repeat(2001))))
+        assertThatThrownBy(() -> versions.approve("card-fee", 1, new WriteOptions(null, 1L, "x".repeat(2001))))
                 .isInstanceOf(InputInvalidException.class).hasMessageContaining("comment").hasMessageContaining("2000");
         assertThat(stores.history).hasSize(history);
         assertThat(versions.find("card-fee", 1, false).orElseThrow().status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
 
-        assertThat(versions.approve("card-fee", 1, new WriteOptions(null, null, "y".repeat(2000))).status())
+        assertThat(versions.approve("card-fee", 1, new WriteOptions(null, 1L, "y".repeat(2000))).status())
                 .isEqualTo(VersionStatus.PUBLISHED);
         assertThat(versions.history("card-fee", 1).getLast().reason()).hasSize(2000);
     }
@@ -602,7 +816,7 @@ class EditorApiTest {
     void RLE_043_allowed_actions_follow_permissions_and_four_eyes() {
         // v2 pending, created and requested by lan
         assertThat(VersionActions.allowed(VersionStatus.PENDING_APPROVAL, "lan", "lan", "lan", AUTHOR_APPROVER))
-                .isEmpty();
+                .containsExactly("withdraw");
         assertThat(VersionActions.allowed(VersionStatus.PENDING_APPROVAL, "lan", "lan", "minh", APPROVER))
                 .containsExactly("approve", "reject");
         assertThat(VersionActions.allowed(VersionStatus.PENDING_APPROVAL, "lan", "lan", "dan", READER)).isEmpty();
@@ -613,9 +827,13 @@ class EditorApiTest {
         assertThat(VersionActions.allowed(VersionStatus.DRAFT, "lan", null, "lan", AUTHOR_APPROVER))
                 .containsExactly("request-publish");
         assertThat(VersionActions.allowed(VersionStatus.DRAFT, "lan", null, "minh", APPROVER)).isEmpty();
-        // v1 published, and retired versions
+        // v1 published: an approver may retire it (#28), anyone else nothing; a retired version allows nothing
+        assertThat(VersionActions.allowed(VersionStatus.PUBLISHED, "lan", "lan", "lan", AUTHOR_APPROVER))
+                .containsExactly("retire");
+        assertThat(VersionActions.allowed(VersionStatus.PUBLISHED, "lan", "lan", "minh", APPROVER))
+                .containsExactly("retire");
+        assertThat(VersionActions.allowed(VersionStatus.PUBLISHED, "lan", "lan", "dan", READER)).isEmpty();
         for (String user : new String[] {"lan", "minh", "dan"}) {
-            assertThat(VersionActions.allowed(VersionStatus.PUBLISHED, "lan", "lan", user, AUTHOR_APPROVER)).isEmpty();
             assertThat(VersionActions.allowed(VersionStatus.RETIRED, "lan", "lan", user, AUTHOR_APPROVER)).isEmpty();
         }
     }
@@ -628,7 +846,7 @@ class EditorApiTest {
         assertThat(VersionActions.allowed(pending.status(), pending.createdBy(), pending.requestedBy(), "lan",
                 AUTHOR_APPROVER)).doesNotContain("approve");
 
-        assertThatThrownBy(() -> versions.approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> versions.approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
     }
 
@@ -640,7 +858,7 @@ class EditorApiTest {
         versions.importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "minh", APPROVER);
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
     }
 
     /** card-fee.yaml with R2's fee replaced and the rule set renamed. */

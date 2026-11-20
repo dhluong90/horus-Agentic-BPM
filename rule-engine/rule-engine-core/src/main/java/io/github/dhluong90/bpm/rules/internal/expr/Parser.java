@@ -12,8 +12,11 @@ import java.util.function.ToIntFunction;
 /**
  * Hand-written lexer and recursive-descent parser of {@code urn:horus-bpm:expr:v1} (ADR-0003). No
  * reflection, no scripting; the only calls are the constant literals {@code date('...')} and
- * {@code datetime('...')}. Identifiers are bound to input slots at parse time; an unknown identifier is a
- * parse error.
+ * {@code datetime('...')}, the clock readings {@code today()} and {@code now()}, which take no argument and are
+ * bound to the slots the resolver names {@code today()} and {@code now()} (-1 when it has none), and the bounded
+ * regular expression search {@code matches(text, 'pattern')}, whose pattern is a string literal compiled here,
+ * once (TR-SEC-02). In a condition cell, {@code matches('pattern')} tests the cell's own input. Identifiers are
+ * bound to input slots at parse time; an unknown identifier is a parse error.
  *
  * <pre>
  * or         = and { "or" and }
@@ -25,7 +28,8 @@ import java.util.function.ToIntFunction;
  * multiplicative = unary { ("*"|"/") unary }
  * unary      = "-" unary | primary
  * primary    = number [CURRENCY] | string | "true" | "false" | "null" | identifier | "(" or ")" | list
- *            | "date" "(" string ")" | "datetime" "(" string ")"
+ *            | "date" "(" string ")" | "datetime" "(" string ")" | "today" "(" ")" | "now" "(" ")"
+ *            | "matches" "(" [ or "," ] string ")"
  * list       = "[" [ or { "," or } ] "]"
  * </pre>
  */
@@ -39,13 +43,15 @@ public final class Parser {
 
     private final String source;
     private final ToIntFunction<String> slots;
+    private final String column;
     private final List<Token> tokens;
     private int index;
     private int depth;
 
-    private Parser(String source, ToIntFunction<String> slots) {
+    private Parser(String source, ToIntFunction<String> slots, String column) {
         this.source = source;
         this.slots = slots;
+        this.column = column;
         this.tokens = lex(source);
     }
 
@@ -58,10 +64,24 @@ public final class Parser {
      * @throws ExpressionException when the text is not a valid expression
      */
     public static Expr parse(String source, ToIntFunction<String> slots) {
+        return parse(source, slots, null);
+    }
+
+    /**
+     * Parses the expression of a condition cell, where {@code matches('pattern')} with one argument tests the
+     * cell's own input.
+     *
+     * @param source the expression text
+     * @param slots maps an input name to its slot index, or -1 when there is no such input
+     * @param column the input the cell is keyed by, or null outside a condition cell
+     * @return the tree
+     * @throws ExpressionException when the text is not a valid expression
+     */
+    public static Expr parse(String source, ToIntFunction<String> slots, String column) {
         if (source.length() > MAX_LENGTH) {
             throw new ExpressionException("Expression longer than " + MAX_LENGTH + " characters", MAX_LENGTH);
         }
-        Parser parser = new Parser(source, slots);
+        Parser parser = new Parser(source, slots, column);
         Expr expr = parser.or();
         Token rest = parser.peek();
         if (rest.kind() != Kind.EOF) {
@@ -214,6 +234,12 @@ public final class Parser {
                         if (peek().kind() == Kind.LPAREN && (token.text().equals("date") || token.text().equals("datetime"))) {
                             return temporal(token);
                         }
+                        if (peek().kind() == Kind.LPAREN && (token.text().equals("today") || token.text().equals("now"))) {
+                            return clock(token);
+                        }
+                        if (peek().kind() == Kind.LPAREN && token.text().equals("matches")) {
+                            return matches(token);
+                        }
                         if (peek().kind() == Kind.LPAREN) {
                             throw new ExpressionException("Unknown function '" + token.text() + "'", token.position());
                         }
@@ -257,6 +283,56 @@ public final class Parser {
             throw new ExpressionException("Invalid " + function.text() + " literal '" + argument.text() + "'",
                     argument.position());
         }
+    }
+
+    /** {@code today()} or {@code now()}: no argument, bound to the clock slot the resolver gives. */
+    private Expr clock(Token function) {
+        expect(Kind.LPAREN, "(");
+        Token close = peek();
+        if (close.kind() != Kind.RPAREN) {
+            throw new ExpressionException(function.text() + "() takes no argument", close.position());
+        }
+        next();
+        Expr.ClockFunction which = function.text().equals("today") ? Expr.ClockFunction.TODAY : Expr.ClockFunction.NOW;
+        return new Expr.Clock(which, slots.applyAsInt(which.slotName()));
+    }
+
+    /**
+     * {@code matches(text, 'pattern')}, or {@code matches('pattern')} in a condition cell, testing the cell's input.
+     * The pattern must be a string literal, so it is checked and compiled here and never at evaluation.
+     */
+    private Expr matches(Token function) {
+        expect(Kind.LPAREN, "(");
+        enter();
+        Expr first = or();
+        Expr text;
+        Token pattern;
+        if (accept(Kind.COMMA)) {
+            text = first;
+            pattern = next();
+            if (pattern.kind() != Kind.STRING) {
+                throw new ExpressionException("matches(text, pattern) takes the pattern as a string literal",
+                        pattern.position());
+            }
+        } else {
+            if (!(first instanceof Expr.Literal literal && literal.value() instanceof String)) {
+                throw new ExpressionException("matches(text, pattern) takes the pattern as a string literal",
+                        function.position());
+            }
+            if (column == null) {
+                throw new ExpressionException("matches('pattern') needs the text to test: write matches(input, "
+                        + "'pattern')", function.position());
+            }
+            int slot = slots.applyAsInt(column);
+            if (slot < 0) {
+                throw new ExpressionException("Unknown input '" + column + "'", function.position());
+            }
+            text = new Expr.Var(slot, column);
+            pattern = new Token(Kind.STRING, (String) ((Expr.Literal) first).value(), function.position());
+        }
+        expect(Kind.RPAREN, ")");
+        leave();
+        return new Expr.Matches(text, pattern.text(), BoundedRegex.compile(pattern.text(), pattern.position()));
     }
 
     private List<Expr> list() {

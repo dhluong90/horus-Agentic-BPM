@@ -13,7 +13,8 @@ import java.util.Optional;
  * {@code TenantResolver} and {@code CallerResolver}, never from an argument.
  *
  * <p>Permissions (ADR-0010) are checked here, not only over REST: import and {@code requestPublish} need
- * {@code rules:author}, {@code approve} and {@code reject} need {@code rules:approve}, every read and
+ * {@code rules:author}, {@code approve} and {@code reject} need {@code rules:approve}, {@code withdraw} needs {@code rules:author} and
+ * the caller must be the requester, {@code replaceDraft} needs {@code rules:author} and the draft's authorship, every read and
  * {@code export} need {@code rules:read}. A
  * caller without them gets {@link PermissionDeniedException}; an unresolved caller or tenant gets
  * {@link UnauthenticatedException}. The approver must be neither the requester nor the author of the version.
@@ -40,6 +41,42 @@ public interface VersionService {
      * @throws RuleSetNotFoundException when the tenant has no such rule set
      */
     RuleSetVersion importVersion(String ruleSet, ImportRequest request);
+
+    /**
+     * Replaces the document of a draft in place (RLE-047): the same reading, validation and violations as
+     * {@link #importVersion}, the canonical and source hashes recomputed, the version number, author and creation time
+     * kept, and the lock version incremented. Writes one {@code DRAFT_UPDATED} history row with the old and new
+     * canonical hash and one {@code rules.version.draft-updated.v1} event. Needs {@code rules:author}, the
+     * caller must be the draft's author, and the host must allow draft authoring
+     * ({@code horus.bpm.rules.authoring.cockpit-drafts}).
+     *
+     * @param ruleSet the rule set name; must equal the name in the document
+     * @param version the version number
+     * @param request the new source document
+     * @param options idempotency key and optimistic lock; the key of {@code options} wins over the request's
+     * @return the version with its new document
+     * @throws DraftAuthoringDisabledException when the host turned draft authoring off
+     * @throws PermissionDeniedException when the caller lacks {@code rules:author} or is not the draft's author
+     * @throws InvalidStateException when the version is not a draft
+     * @throws VersionConflictException when the lock version is stale
+     * @throws ValidationFailedException when the document cannot be read or compiled; nothing is stored
+     * @throws InputInvalidException when the document names another rule set
+     */
+    RuleSetVersion replaceDraft(String ruleSet, int version, ImportRequest request, WriteOptions options);
+
+    /**
+     * Compares two versions of a rule set row by row, from their canonical models (RLE-028, RLE-048). Writes nothing.
+     * Needs {@code rules:read}.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version compared
+     * @param base the version it is compared against; must differ from {@code version}
+     * @return the diff
+     * @throws InputInvalidException when {@code base} equals {@code version}
+     * @throws RuleSetNotFoundException when the tenant has no such rule set
+     * @throws VersionNotFoundException when either version does not exist
+     */
+    VersionDiff diff(String ruleSet, int version, int base);
 
     /**
      * Moves a draft to {@code PENDING_APPROVAL} and records the caller as requester.
@@ -77,6 +114,56 @@ public interface VersionService {
      * @throws SelfApprovalForbiddenException when the caller requested the publication
      */
     RuleSetVersion reject(String ruleSet, int version, WriteOptions options);
+
+    /**
+     * Takes a published version out of service by hand (ADR-0025, PD-080, RLE-026). In the default
+     * {@code lifecycle.retire-approval: single} mode one holder of {@code rules:approve} with a reason is enough. The
+     * version becomes {@code RETIRED} from the transaction's clock on: evaluation stops selecting it on every replica,
+     * while a clock before it still does and logged decisions still replay. Older published versions it had
+     * superseded are retired with it, so a retire never brings an older version back. Writes one {@code RETIRED}
+     * history row with the approval mode and one {@code rules.version.retired.v1} event.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key, optimistic lock and the required reason in {@link WriteOptions#comment()}
+     * @return the version, now retired
+     * @throws InputInvalidException when the reason is blank or longer than {@code lifecycle.reason-max-length}
+     * @throws InvalidStateException when the version is not published, or a newer version in effect supersedes it
+     * @throws VersionConflictException when the lock version is stale
+     */
+    RuleSetVersion retire(String ruleSet, int version, WriteOptions options);
+
+    /**
+     * Retires a published version as {@link #retire(String, int, WriteOptions)} does, and lets it be the last version
+     * in effect of its rule set when {@code confirmNoVersionInEffect} is true (PD-101). Without the confirmation, a
+     * retirement that would leave no version in effect is refused with {@link LastVersionInEffectException}; with it,
+     * the history row and the event record that no version remains in effect. A host with
+     * {@code horus.bpm.lifecycle.retire-last-version: refuse} refuses it either way.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key, optimistic lock and the required reason
+     * @param confirmNoVersionInEffect true to accept that no version will be in effect afterwards
+     * @return the version, now retired
+     * @throws LastVersionInEffectException when it is the last version in effect and that is not confirmed or allowed
+     */
+    RuleSetVersion retire(String ruleSet, int version, WriteOptions options, boolean confirmNoVersionInEffect);
+
+    /**
+     * Takes the caller's own publication request back (PD-089, RLE-046): a pending version returns to {@code DRAFT},
+     * nothing is published and the version in effect does not change. Writes one {@code WITHDRAWN} history row and
+     * one {@code rules.version.withdrawn.v1} event. Needs {@code rules:author}, and the caller must be the requester.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key, optimistic lock and the optional reason in {@link WriteOptions#comment()}
+     * @return the version, now a draft
+     * @throws InputInvalidException when the reason is longer than {@code lifecycle.reason-max-length}
+     * @throws InvalidStateException when the version is not pending approval
+     * @throws PermissionDeniedException when the caller lacks {@code rules:author} or is not the requester
+     * @throws VersionConflictException when the lock version is stale
+     */
+    RuleSetVersion withdraw(String ruleSet, int version, WriteOptions options);
 
     /**
      * Lists the rule sets of the caller's tenant by name, a page at a time.

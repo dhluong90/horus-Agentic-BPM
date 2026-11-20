@@ -1,6 +1,14 @@
 package io.github.dhluong90.bpm.process.rest;
 
+import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
+import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
+import io.github.dhluong90.bpm.process.api.DefinitionSummary;
+import io.github.dhluong90.bpm.process.api.InstanceQuery;
+import io.github.dhluong90.bpm.process.api.Page;
+import io.github.dhluong90.bpm.process.api.PageRequest;
+import io.github.dhluong90.bpm.process.api.ProcessQueryService;
+import io.github.dhluong90.bpm.process.api.QueryInvalidException;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.InputInvalidException;
@@ -11,6 +19,7 @@ import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
 import io.github.dhluong90.bpm.process.api.TaskService;
+import io.github.dhluong90.bpm.process.api.TaskView;
 import io.github.dhluong90.bpm.process.internal.json.EngineJson;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
@@ -18,6 +27,13 @@ import io.github.dhluong90.bpm.process.internal.service.Views;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -28,6 +44,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -47,20 +64,23 @@ public class ProcessController {
     private final DefinitionService definitions;
     private final ProcessEngine engine;
     private final TaskService tasks;
+    private final ProcessQueryService queries;
     private final int maxDefinitionBytes;
 
     /**
      * @param definitions definition service
      * @param engine process engine
      * @param tasks task service
+     * @param queries list queries
      * @param maxDefinitionBytes largest BPMN document accepted ({@code definitions.max-bytes})
      */
     public ProcessController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
-            int maxDefinitionBytes) {
+            ProcessQueryService queries, int maxDefinitionBytes) {
         this.maxDefinitionBytes = maxDefinitionBytes;
         this.definitions = definitions;
         this.engine = engine;
         this.tasks = tasks;
+        this.queries = queries;
     }
 
     /** Imports a BPMN 2.0 XML document ({@code processes:deploy}). */
@@ -72,6 +92,149 @@ public class ProcessController {
                 new ImportRequest(SourceFormat.BPMN_XML, body, idempotencyKey));
         return json(HttpStatus.CREATED, Views.definition(version), null,
                 BASE + "/definitions/" + version.key() + "/versions/" + version.version());
+    }
+
+    /** Lifecycle history of a version, oldest first ({@code processes:read}). */
+    @GetMapping("/definitions/{key}/versions/{version}/history")
+    public ResponseEntity<byte[]> definitionHistory(@PathVariable("key") String key,
+            @PathVariable("version") int version) {
+        List<DefinitionHistoryEntry> history = definitions.history(DefinitionRef.of(key, version));
+        tools.jackson.databind.node.ObjectNode body = EngineJson.NODES.objectNode();
+        body.set("items", Views.definitionHistory(history));
+        return json(HttpStatus.OK, body, null, null);
+    }
+
+    /**
+     * Requests approval of a draft ({@code processes:author} or {@code processes:deploy}). Body, optional:
+     * {@code effectiveFrom} (RFC 3339, not in the past). {@code If-Match} is required.
+     */
+    @PostMapping("/definitions/{key}/versions/{version}:request-approval")
+    public ResponseEntity<byte[]> requestApproval(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        JsonNode body = optionalBody(http);
+        Instant effectiveFrom = null;
+        String from = text(body, "effectiveFrom");
+        if (from != null) {
+            try {
+                effectiveFrom = OffsetDateTime.parse(from).toInstant();
+            } catch (DateTimeException e) {
+                throw new InputInvalidException("effectiveFrom must be an RFC 3339 date-time with an offset");
+            }
+        }
+        return version(definitions.requestApproval(DefinitionRef.of(key, version), lock, effectiveFrom, idempotencyKey));
+    }
+
+    /** Approves a pending version as a second person ({@code processes:approve}). Body, optional: {@code comment}. */
+    @PostMapping("/definitions/{key}/versions/{version}:approve")
+    public ResponseEntity<byte[]> approve(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        return version(definitions.approve(DefinitionRef.of(key, version), lock, text(optionalBody(http), "comment"),
+                idempotencyKey));
+    }
+
+    /** Sends a pending version back to draft ({@code processes:approve}). Body: {@code reason}, required. */
+    @PostMapping("/definitions/{key}/versions/{version}:reject")
+    public ResponseEntity<byte[]> reject(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        return version(definitions.reject(DefinitionRef.of(key, version), lock, text(optionalBody(http), "reason"),
+                idempotencyKey));
+    }
+
+    /**
+     * Retires an active version ({@code processes:approve}) or withdraws a draft ({@code processes:author}). Body:
+     * {@code reason} (required for an active version) and {@code confirmNoVersionInEffect} (PD-101).
+     */
+    @PostMapping("/definitions/{key}/versions/{version}:retire")
+    public ResponseEntity<byte[]> retire(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        JsonNode body = optionalBody(http);
+        JsonNode confirm = body.get("confirmNoVersionInEffect");
+        if (confirm != null && !confirm.isNull() && !confirm.isBoolean()) {
+            throw new InputInvalidException("confirmNoVersionInEffect must be true or false");
+        }
+        return version(definitions.retire(DefinitionRef.of(key, version), lock, text(body, "reason"),
+                confirm != null && confirm.isBoolean() && confirm.booleanValue(), idempotencyKey));
+    }
+
+    private ResponseEntity<byte[]> version(DefinitionVersion v) {
+        return json(HttpStatus.OK, Views.definition(v), v.lockVersion(), null);
+    }
+
+    private static long requiredLockVersion(String ifMatch) {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new PreconditionRequiredException("Send If-Match with the version's lockVersion, for example \"0\"");
+        }
+        return lockVersion(ifMatch);
+    }
+
+    private static JsonNode optionalBody(HttpServletRequest http) throws IOException {
+        byte[] body = boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
+        return body.length == 0 ? EngineJson.NODES.objectNode() : parse(body);
+    }
+
+    private static String text(JsonNode body, String field) {
+        JsonNode value = body.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isString()) {
+            throw new InputInvalidException(field + " must be a string");
+        }
+        return value.stringValue();
+    }
+
+    /** Lists the definition keys of the tenant ({@code processes:read}). */
+    @GetMapping("/definitions")
+    public ResponseEntity<byte[]> definitions(@RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor) {
+        Page<DefinitionSummary> page = queries.definitions(new PageRequest(limitOf(limit), cursor));
+        return json(HttpStatus.OK, Views.page(page, Views::definitionSummary), null, null);
+    }
+
+    /** Reads one version of a definition ({@code processes:read}); the {@code ETag} is its definition hash. */
+    @GetMapping("/definitions/{key}/versions/{version}")
+    public ResponseEntity<byte[]> definitionVersion(@PathVariable("key") String key,
+            @PathVariable("version") String version) {
+        int number;
+        try {
+            number = Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException("version must be a version number, for example 1");
+        }
+        DefinitionVersion found = definitions.version(key, number);
+        return ResponseEntity.status(HttpStatus.OK).contentType(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.ETAG, "\"" + found.definitionHash() + "\"")
+                .body(bytes(Views.definition(found)));
+    }
+
+    /**
+     * Lists instances, newest first ({@code processes:read}). {@code status} is one or more statuses, comma
+     * separated, {@code RUNNING} when absent.
+     */
+    @GetMapping("/instances")
+    public ResponseEntity<byte[]> instances(@RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "definitionKey", required = false) String definitionKey,
+            @RequestParam(value = "startedFrom", required = false) String startedFrom,
+            @RequestParam(value = "startedTo", required = false) String startedTo,
+            @RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor) {
+        Set<String> statuses = new LinkedHashSet<>();
+        if (status != null) {
+            for (String part : status.split(",", -1)) {
+                statuses.add(part.strip());
+            }
+        }
+        InstanceQuery query = new InstanceQuery(statuses, definitionKey, instantOf("startedFrom", startedFrom),
+                instantOf("startedTo", startedTo), new PageRequest(limitOf(limit), cursor));
+        return json(HttpStatus.OK, Views.page(queries.instances(query), Views::instanceSummary), null, null);
     }
 
     /**
@@ -115,6 +278,76 @@ public class ProcessController {
     public ResponseEntity<byte[]> instance(@PathVariable("id") String id) {
         ProcessInstance instance = engine.instance(id);
         return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
+    }
+
+    /**
+     * Cancels a running instance ({@code processes:cancel}, PD-103). Body: the required {@code reason}. {@code If-Match} carries
+     * the instance {@code lockVersion} (its {@code ETag}) and {@code Idempotency-Key} makes a retry safe; both are
+     * required ({@code 428 PRECONDITION_REQUIRED}).
+     */
+    @PostMapping(value = "/instances/{id}:cancel")
+    public ResponseEntity<byte[]> cancel(@PathVariable("id") String id, HttpServletRequest http,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new PreconditionRequiredException("Send If-Match with the instance's lockVersion (its ETag), for "
+                    + "example \"2\"");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot cancel twice");
+        }
+        byte[] body = boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
+        JsonNode request = body.length == 0 ? EngineJson.NODES.objectNode() : parse(body);
+        JsonNode reason = request.get("reason");
+        if (reason != null && !reason.isNull() && !reason.isString()) {
+            throw new InputInvalidException("reason must be a string");
+        }
+        ProcessInstance instance = engine.cancel(id, lockVersion(ifMatch),
+                reason == null || reason.isNull() ? null : reason.stringValue(), idempotencyKey);
+        return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
+    }
+
+    /**
+     * Reads a task with the caller's {@code allowedActions} ({@code processes:task:work}); the {@code ETag} is its
+     * lock version.
+     */
+    @GetMapping("/tasks/{id}")
+    public ResponseEntity<byte[]> task(@PathVariable("id") String id) {
+        TaskView task = tasks.task(id);
+        return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
+    }
+
+    /**
+     * Claims an open task for the caller ({@code processes:task:work}). {@code If-Match} carries the task's
+     * {@code lockVersion} and {@code Idempotency-Key} makes a retry safe; both are required.
+     */
+    @PostMapping("/tasks/{id}:claim")
+    public ResponseEntity<byte[]> claim(@PathVariable("id") String id,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        requireTaskPreconditions(ifMatch, idempotencyKey, "claim");
+        TaskView task = tasks.claim(id, lockVersion(ifMatch), idempotencyKey);
+        return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
+    }
+
+    /** Hands a claimed task back ({@code processes:task:work}); only the claimant may. Same headers as a claim. */
+    @PostMapping("/tasks/{id}:unclaim")
+    public ResponseEntity<byte[]> unclaim(@PathVariable("id") String id,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        requireTaskPreconditions(ifMatch, idempotencyKey, "unclaim");
+        TaskView task = tasks.unclaim(id, lockVersion(ifMatch), idempotencyKey);
+        return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
+    }
+
+    private static void requireTaskPreconditions(String ifMatch, String idempotencyKey, String action) {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new PreconditionRequiredException("Send If-Match with the task's lockVersion (its ETag), for example "
+                    + "\"0\"");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot " + action + " twice");
+        }
     }
 
     /**
@@ -167,6 +400,29 @@ public class ProcessController {
         }
     }
 
+    private static Integer limitOf(String limit) {
+        if (limit == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(limit.strip());
+        } catch (NumberFormatException e) {
+            throw new QueryInvalidException("limit must be a whole number, for example 50");
+        }
+    }
+
+    private static Instant instantOf(String name, String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value.strip()).toInstant();
+        } catch (DateTimeParseException e) {
+            throw new QueryInvalidException(name + " must be an ISO 8601 time with an offset, for example "
+                    + "2027-02-01T00:00:00Z");
+        }
+    }
+
     private static long lockVersion(String ifMatch) {
         String value = ifMatch.strip();
         if (value.startsWith("W/")) {
@@ -187,6 +443,10 @@ public class ProcessController {
         if (location != null) {
             builder.header(HttpHeaders.LOCATION, location);
         }
-        return builder.body(EngineJson.JSON.writeValueAsString(body).getBytes(StandardCharsets.UTF_8));
+        return builder.body(bytes(body));
+    }
+
+    private static byte[] bytes(JsonNode body) {
+        return EngineJson.JSON.writeValueAsString(body).getBytes(StandardCharsets.UTF_8);
     }
 }

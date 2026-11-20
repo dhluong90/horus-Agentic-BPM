@@ -95,8 +95,8 @@ Given the same version, inputs and clock, outputs and matched rule ids are ident
 | `403 PERMISSION_DENIED` on `:simulate` | Caller lacks `rules:simulate`; nothing was evaluated | Grant the permission to the author and approver roles |
 | `404 VERSION_NOT_FOUND` on `:simulate` | The version does not exist in your tenant (another tenant's version gives the same answer) | Check the rule set name, the version number and the signed-in tenant |
 | `400 INPUT_INVALID` naming `samples[3]` | That sample has an input the version does not declare, a value of the wrong type, or a number out of bounds; or there are no samples or more than `simulation.max-inputs` | Fix that sample, or split the samples |
-| `403` on `versions/{v}:evaluate` for a draft | Caller lacks `rules:simulate` | Grant the permission to the simulation role |
-| `403` when sending `clock` | `clock` requires `rules:simulate` even on a published version | Same |
-| Simulation rows appear in the Decisions screen | The call went to `/decisions/{ruleSet}:evaluate` instead of the versioned path | Use `/versions/{v}:evaluate` for drafts |
+| `409 INVALID_STATE` on `/decisions/{ruleSet}/versions/{v}:evaluate` for a draft | A pinned evaluation is logged, so it accepts only approved versions (`PUBLISHED` or `RETIRED`); a draft never enters the decision log | Simulate the draft with `POST /rule-sets/{name}/versions/{v}:simulate`, which writes no decision row |
+| `403 CLOCK_NOT_ALLOWED` when sending `clock` | `clock` requires `rules:simulate`, on `:evaluate` and on `/versions/{v}:evaluate` alike | Grant the permission to the simulation role, or leave `clock` out to use the host clock |
+| Simulation rows appear in the Decisions screen | The call went to an `:evaluate` endpoint, which logs every decision | Use `:simulate` for drafts and what-if runs; it writes no decision row |
 | `rules:coverage` reports a row you believe is tested | The test matches a different row first under `first` | Check `matchedRuleIds` in the test; reorder rows or adjust inputs |
 | Replay shows 0 changed outcomes for a changed row | The history window contains no decisions that reach that row | Increase N or add sample inputs that hit the row |

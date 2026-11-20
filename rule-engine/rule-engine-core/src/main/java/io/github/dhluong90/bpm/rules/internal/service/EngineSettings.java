@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
+import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import java.time.Duration;
 
 /**
@@ -18,14 +19,34 @@ import java.time.Duration;
  * @param maxOutputBytes {@code horus.bpm.rules.evaluation.max-output-bytes}, 1 to {@value EngineDefaults#OUTPUT_MAX_BYTES}
  * @param maxStringLength {@code horus.bpm.rules.evaluation.max-string-length}, 1 to {@value EngineDefaults#STRING_MAX_LENGTH}
  * @param maxRows {@code horus.bpm.rules.evaluation.max-rows}, 1 to {@value EngineDefaults#RULES_MAX}
+ * @param regexLimits {@code horus.bpm.rules.evaluation.regex-timeout-ms}, {@code regex-max-input-length},
+ *     {@code regex-max-reads} and {@code regex-max-reads-per-decision} (TR-SEC-02); the length is at most
+ *     {@code max-string-length}
+ * @param draftAuthoring {@code horus.bpm.rules.authoring.cockpit-drafts}: whether drafts may be replaced in place
+ *     through {@code VersionService.replaceDraft}; false (the 0.1.0 default, PD-094) refuses it with
+ *     {@code DRAFT_AUTHORING_DISABLED}
+ * @param pinRetired {@code horus.bpm.rules.evaluation.pin-retired}: whether a pinned evaluation may name a
+ *     {@code RETIRED} version; default false, so a retired rule never produces a new logged decision
+ * @param systemActor {@code horus.bpm.rules.lifecycle.system-actor}: the actor recorded when a version is superseded, in the reserved
+ *     {@code system:} namespace (default {@code system:supersession}),
+ *     1 to {@value EngineDefaults#SYSTEM_ACTOR_MAX_LENGTH} characters, not blank
+ * @param retireApproval {@code horus.bpm.lifecycle.retire-approval} (PD-080): {@code single}, recorded on every
+ *     retirement; {@code four-eyes} is refused until it ships in M3 (RLE-038)
+ * @param retireLastVersion {@code horus.bpm.lifecycle.retire-last-version} (PD-101, shared with the Process Engine):
+ *     {@code confirm} (default) lets a retirement leave no version in effect only when the request confirms it with
+ *     {@code confirmNoVersionInEffect}; {@code refuse} never lets it; {@code four-eyes} is refused until it ships
  * @param simulationMaxInputs {@code horus.bpm.rules.simulation.max-inputs}, 1 to
  *     {@value EngineDefaults#SIMULATION_MAX_SAMPLES}: the most sample input sets one {@code :simulate} accepts
  */
 public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
         boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
-        int maxStringLength, int maxRows, int simulationMaxInputs) {
+        int maxStringLength, int maxRows, RegexLimits regexLimits, boolean draftAuthoring, boolean pinRetired,
+        String systemActor, String retireApproval, String retireLastVersion, int simulationMaxInputs) {
 
     public EngineSettings {
+        if (regexLimits == null) {
+            throw new IllegalArgumentException("regexLimits must not be null");
+        }
         if (cacheMaxEntries < 1 || cacheMaxEntries > EngineDefaults.CACHE_MAX_ENTRIES_LIMIT) {
             throw new IllegalArgumentException("horus.bpm.rules.cache.max-entries must be 1 to "
                     + EngineDefaults.CACHE_MAX_ENTRIES_LIMIT + ", was " + cacheMaxEntries);
@@ -47,10 +68,67 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         requireLowerOnly("horus.bpm.rules.evaluation.max-rows", maxRows, EngineDefaults.RULES_MAX);
         requireLowerOnly("horus.bpm.rules.simulation.max-inputs", simulationMaxInputs,
                 EngineDefaults.SIMULATION_MAX_SAMPLES);
+        if (systemActor == null || !systemActor.startsWith(EngineDefaults.RESERVED_ACTOR_PREFIX)
+                || systemActor.length() == EngineDefaults.RESERVED_ACTOR_PREFIX.length()
+                || systemActor.length() > EngineDefaults.SYSTEM_ACTOR_MAX_LENGTH) {
+            throw new IllegalArgumentException("horus.bpm.rules.lifecycle.system-actor must start with "
+                    + EngineDefaults.RESERVED_ACTOR_PREFIX + ", have a name after it and be at most "
+                    + EngineDefaults.SYSTEM_ACTOR_MAX_LENGTH + " characters, was '" + systemActor + "'");
+        }
+        if ("four-eyes".equals(retireApproval)) {
+            throw new IllegalArgumentException("horus.bpm.lifecycle.retire-approval: four-eyes arrives in M3"
+                    + " (RLE-038); this release supports single");
+        }
+        if ("four-eyes".equals(retireLastVersion)) {
+            throw new IllegalArgumentException("horus.bpm.lifecycle.retire-last-version: four-eyes is not built in this"
+                    + " release; use confirm or refuse (PD-101)");
+        }
+        if (!EngineDefaults.RETIRE_LAST_CONFIRM.equals(retireLastVersion)
+                && !EngineDefaults.RETIRE_LAST_REFUSE.equals(retireLastVersion)) {
+            throw new IllegalArgumentException("horus.bpm.lifecycle.retire-last-version must be confirm or refuse, was '"
+                    + retireLastVersion + "'");
+        }
+        if (!EngineDefaults.RETIRE_APPROVAL.equals(retireApproval)) {
+            throw new IllegalArgumentException("horus.bpm.lifecycle.retire-approval must be single (four-eyes"
+                    + " arrives in M3), was '" + retireApproval + "'");
+        }
+        if (regexLimits.maxInputLength() > maxStringLength) {
+            throw new IllegalArgumentException("horus.bpm.rules.evaluation.regex-max-input-length must be at most "
+                    + "horus.bpm.rules.evaluation.max-string-length (" + maxStringLength + "), was "
+                    + regexLimits.maxInputLength());
+        }
     }
 
     /**
      * Creates settings with the default simulation limit.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     * @param queryMaxPageSize see the record
+     * @param reasonMaxLength see the record
+     * @param maxOutputBytes see the record
+     * @param maxStringLength see the record
+     * @param maxRows see the record
+     * @param regexLimits see the record
+     * @param draftAuthoring see the record
+     * @param pinRetired see the record
+     * @param systemActor see the record
+     * @param retireApproval see the record
+     * @param retireLastVersion see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
+            int maxStringLength, int maxRows, RegexLimits regexLimits, boolean draftAuthoring, boolean pinRetired,
+            String systemActor, String retireApproval, String retireLastVersion) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring, pinRetired,
+                systemActor, retireApproval, retireLastVersion, EngineDefaults.SIMULATION_MAX_SAMPLES);
+    }
+
+    /**
+     * Creates settings with the default regular expression bounds.
      *
      * @param cacheMaxEntries see the record
      * @param idempotencyRetention see the record
@@ -66,7 +144,77 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
             boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
             int maxStringLength, int maxRows) {
         this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
-                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, EngineDefaults.SIMULATION_MAX_SAMPLES);
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows,
+                new RegexLimits(RegexLimits.TIMEOUT_MILLIS, Math.min(RegexLimits.MAX_INPUT_LENGTH, maxStringLength)),
+                false);
+    }
+
+    /**
+     * Creates settings with draft authoring off.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     * @param queryMaxPageSize see the record
+     * @param reasonMaxLength see the record
+     * @param maxOutputBytes see the record
+     * @param maxStringLength see the record
+     * @param maxRows see the record
+     * @param regexLimits see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
+            int maxStringLength, int maxRows, RegexLimits regexLimits) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, false);
+    }
+
+    /**
+     * Creates settings that refuse pinning a retired version.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     * @param queryMaxPageSize see the record
+     * @param reasonMaxLength see the record
+     * @param maxOutputBytes see the record
+     * @param maxStringLength see the record
+     * @param maxRows see the record
+     * @param regexLimits see the record
+     * @param draftAuthoring see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
+            int maxStringLength, int maxRows, RegexLimits regexLimits, boolean draftAuthoring) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
+                EngineDefaults.PIN_RETIRED);
+    }
+
+    /**
+     * Creates settings with the default lifecycle actor, retirement approval and last-version rule.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     * @param queryMaxPageSize see the record
+     * @param reasonMaxLength see the record
+     * @param maxOutputBytes see the record
+     * @param maxStringLength see the record
+     * @param maxRows see the record
+     * @param regexLimits see the record
+     * @param draftAuthoring see the record
+     * @param pinRetired see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
+            int maxStringLength, int maxRows, RegexLimits regexLimits, boolean draftAuthoring, boolean pinRetired) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring, pinRetired,
+                EngineDefaults.SYSTEM_ACTOR, EngineDefaults.RETIRE_APPROVAL, EngineDefaults.RETIRE_LAST_CONFIRM);
     }
 
     private static void requireLowerOnly(String property, int value, int ceiling) {
@@ -126,7 +274,8 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withRejectUndeclaredInputs(boolean reject) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, reject, queryMaxPageSize,
-                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, simulationMaxInputs);
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring, pinRetired,
+                systemActor, retireApproval, retireLastVersion, simulationMaxInputs);
     }
 
     /**
@@ -139,7 +288,84 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withSizeLimits(int outputBytes, int stringLength, int rows) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows, simulationMaxInputs);
+                queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows,
+                regexLimits.maxInputLength() <= stringLength ? regexLimits
+                        : new RegexLimits(regexLimits.timeoutMillis(), stringLength, regexLimits.maxReads(),
+                                regexLimits.maxReadsPerDecision()),
+                draftAuthoring, pinRetired, systemActor, retireApproval, retireLastVersion, simulationMaxInputs);
+    }
+
+    /**
+     * Returns a copy with the regular expression bounds set.
+     *
+     * @param timeoutMillis {@code evaluation.regex-timeout-ms}
+     * @param maxInputLength {@code evaluation.regex-max-input-length}
+     * @return the settings
+     */
+    public EngineSettings withRegexLimits(int timeoutMillis, int maxInputLength) {
+        return withRegexLimits(new RegexLimits(timeoutMillis, maxInputLength, regexLimits.maxReads(),
+                regexLimits.maxReadsPerDecision()));
+    }
+
+    /**
+     * Returns a copy with the regular expression bounds set.
+     *
+     * @param limits the bounds
+     * @return the settings
+     */
+    public EngineSettings withRegexLimits(RegexLimits limits) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, limits, draftAuthoring,
+                pinRetired, systemActor, retireApproval, retireLastVersion, simulationMaxInputs);
+    }
+
+    /**
+     * Returns a copy with {@code authoring.cockpit-drafts} set.
+     *
+     * @param enabled whether drafts may be replaced in place
+     * @return the settings
+     */
+    public EngineSettings withDraftAuthoring(boolean enabled) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, enabled,
+                pinRetired, systemActor, retireApproval, retireLastVersion, simulationMaxInputs);
+    }
+
+    /**
+     * Returns a copy with {@code evaluation.pin-retired} set.
+     *
+     * @param allowed whether a pinned evaluation may name a retired version
+     * @return the settings
+     */
+    public EngineSettings withPinRetired(boolean allowed) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits,
+                draftAuthoring, allowed, systemActor, retireApproval, retireLastVersion, simulationMaxInputs);
+    }
+
+    /**
+     * Returns a copy with the lifecycle settings set.
+     *
+     * @param actor {@code lifecycle.system-actor}
+     * @param approval {@code lifecycle.retire-approval}
+     * @return the settings
+     */
+    public EngineSettings withLifecycle(String actor, String approval) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
+                pinRetired, actor, approval, retireLastVersion, simulationMaxInputs);
+    }
+
+    /**
+     * Returns a copy with {@code horus.bpm.lifecycle.retire-last-version} set.
+     *
+     * @param mode {@code confirm} or {@code refuse}
+     * @return the settings
+     */
+    public EngineSettings withRetireLastVersion(String mode) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
+                pinRetired, systemActor, retireApproval, mode, simulationMaxInputs);
     }
 
     /**
@@ -150,6 +376,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withSimulationMaxInputs(int maxInputs) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, maxInputs);
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
+                pinRetired, systemActor, retireApproval, retireLastVersion, maxInputs);
     }
 }

@@ -1,0 +1,160 @@
+# Process Engine: import a BPMN file
+
+This guide shows how to import a BPMN 2.0 file into the Process Engine, which elements 0.1.0 accepts, and how the engine refuses the rest. The Process Engine is a preview in 0.1.0 ([[Release Notes]]): outside the `dev` profile an imported process stays a draft and cannot start.
+
+## Before you start
+
+| You need | Check |
+|---|---|
+| The example host with both engines, running on the `dev` profile | Follow [Run locally](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/README.md#run-locally). The log shows `Process definition card-fee-review v1 ACTIVE for tenant bank-a` |
+| A user with `processes:deploy` | On the example host, `lan` with the password in `HORUS_DEMO_PASSWORD` |
+| A `.bpmn` file, UTF-8, at most 1 MB | `file my-process.bpmn` says `UTF-8` or `ASCII`; `wc -c < my-process.bpmn` prints at most `1048576` |
+
+The commands below run from the repository root and use the demo password `demo-pass`.
+
+## What happens to the file
+
+![BPMN import: size, safety, subset and attribute checks, then a draft that becomes active only on dev](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/bpmn-import-outcomes.svg)
+
+1. You post the file as XML.
+2. A file over 1 MB is refused before it is read.
+3. A `DOCTYPE`, an entity declaration, nesting deeper than 32 or more than 5,000 elements is refused, and nothing in the file is resolved.
+4. Every element outside the subset is listed in one answer.
+5. Each element must carry the `horus` attributes it needs.
+6. A file identical to the latest version returns that version.
+7. Otherwise the file becomes the next version, as a `DRAFT`.
+8. On the `dev` profile with auto-approve on, the draft becomes `ACTIVE` at once. Anywhere else it stays a `DRAFT`.
+
+## 1. Import the file
+
+```bash
+P=demo-pass
+curl -s -u lan:$P -H 'Content-Type: application/xml' \
+  --data-binary @examples/rule-and-process/src/main/resources/processes/card-fee-review.bpmn \
+  localhost:8080/api/bpm/processes/v1/definitions
+```
+
+Expected answer, `201`:
+
+```json
+{"key":"card-fee-review","version":1,"status":"ACTIVE","definitionHash":"3fa54143...","sourceFormat":"BPMN_XML",...}
+```
+
+This file is the one the host imported at start-up, so the engine returns version 1 and creates no new version. A changed file becomes version 2.
+
+| Field | Meaning |
+|---|---|
+| `key` | The `id` of the `process` element. It must be kebab-case, for example `card-fee-review` |
+| `version` | The version number of this definition |
+| `status` | `ACTIVE` on `dev` with `horus.bpm.processes.definitions.auto-approve: true`; `DRAFT` everywhere else |
+| `sourceFormat` | `BPMN_XML`. The engine keeps the file as received and runs each version from it |
+
+The body may also be sent as `text/xml` or `application/bpmn+xml`.
+
+## 2. Write a file the engine accepts
+
+The engine reads standard BPMN 2.0 XML. Engine settings are attributes and elements in the namespace `urn:horus-bpm:bpmn:extensions:v1`, with the prefix `horus`. Conditions are written in the expression language `urn:horus-bpm:expr:v1`. A BPMN modeller can open and save the file; add the `horus` attributes in its XML or properties view.
+
+The root element must declare the namespaces, and the process must be executable:
+
+```xml
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_card-fee-review"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="card-fee-review" name="Card application fee review" isExecutable="true">
+```
+
+### Supported in 0.1.0
+
+| BPMN element | Required | Optional | Example |
+|---|---|---|---|
+| `startEvent` with no event definition | | `name` | `<bpmn:startEvent id="start"/>` |
+| `endEvent` with no event definition | | `name` | `<bpmn:endEvent id="end-approved"/>` |
+| `serviceTask` | `horus:handler`, the name of a `ServiceTaskHandler` bean in your host | `horus:resultVariable`, `horus:input` elements | `horus:handler="cardProfiles.load"` |
+| `businessRuleTask` | `horus:ruleSet`, the name of a published rule set | `horus:resultVariable`, `horus:input` elements | `horus:ruleSet="card-fee"` |
+| `userTask` | `horus:assignee` as `user:<id>`, `role:<role>` or `group:<group>`; `horus:resultVariable` | `horus:fourEyes="true"`: the starter and earlier completers may not complete it | `horus:assignee="role:CARD_OFFICER"` |
+| `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
+| `sequenceFlow` | `sourceRef`, `targetRef` | `conditionExpression` in `urn:horus-bpm:expr:v1` | `pricing.fee == 0 VND` |
+
+Inputs to a service or rule step are `horus:input` elements inside `extensionElements`:
+
+```xml
+<bpmn:businessRuleTask id="price-card" name="Price the card" horus:ruleSet="card-fee" horus:resultVariable="pricing">
+  <bpmn:extensionElements>
+    <horus:input name="tier" value="${instance.profile.tier}"/>
+    <horus:input name="txCount" value="${instance.profile.txCount}"/>
+  </bpmn:extensionElements>
+</bpmn:businessRuleTask>
+```
+
+The engine skips diagram interchange (`bpmndi`), `documentation`, and extensions of other vendors. They are kept in the stored file but never executed.
+
+A gateway takes a flow only when its condition is true. A condition that is null or false is not taken; then the `default` flow is taken, and without a `default` the step fails. Money compares only within one currency. The full rules are on [[Rule Engine Expression Language|Rule-Engine-Expression-Language]].
+
+A complete working file is [`card-fee-review.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/card-fee-review.bpmn).
+
+## 3. Read a refusal
+
+Every refusal is an RFC 9457 problem with a `code`. Nothing is stored.
+
+### An element outside the subset
+
+```bash
+curl -s -u lan:$P -H 'Content-Type: application/xml' \
+  --data-binary @process-engine/process-engine-bpmn/src/test/resources/bpmn/unsupported.bpmn \
+  localhost:8080/api/bpm/processes/v1/definitions
+```
+
+Expected answer, `422`:
+
+```json
+{"status":422,"code":"BPMN_UNSUPPORTED_ELEMENT","problems":[
+  {"element":"boundaryEvent","elementId":"be-timeout","line":6,...},
+  {"element":"inclusiveGateway","elementId":"ig-1","line":7,...},
+  {"element":"endEvent with terminateEventDefinition","elementId":"end","line":8,...}],...}
+```
+
+The answer lists every unsupported element in the file, each with its id, its line and the later stage that adds it. Remove or replace each one and import again. These are refused in 0.1.0:
+
+| Kind | Elements |
+|---|---|
+| Gateways | `parallelGateway`, `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
+| Events | `boundaryEvent`, `intermediateCatchEvent`, `intermediateThrowEvent`, and any start or end event with an event definition (timer, message, signal, error, terminate) |
+| Activities | `subProcess`, `transaction`, `callActivity`, `adHocSubProcess`, `task`, `scriptTask`, `manualTask`, `sendTask`, `receiveTask` |
+| Service task variants | `horus:type="agentTask"`, and `horus:mode` other than `local` |
+| Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
+| Conditions | a `conditionExpression` in any language other than `urn:horus-bpm:expr:v1` (`BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`) |
+
+### A missing attribute or a broken document
+
+`422 VALIDATION_FAILED` carries a `problems` list. Each problem names its code, element, id and line:
+
+| Problem code | Fix |
+|---|---|
+| `KEY_INVALID` | Make the `process` id kebab-case, for example `card-fee-review` |
+| `NOT_EXECUTABLE` | Set `isExecutable="true"` on the process |
+| `HANDLER_MISSING` | Add `horus:handler` to the `serviceTask` |
+| `RULE_SET_MISSING` | Add `horus:ruleSet` to the `businessRuleTask` |
+| `ASSIGNEE_INVALID` | Set `horus:assignee` to `user:<id>`, `role:<role>` or `group:<group>` |
+| `RESULT_VARIABLE_REQUIRED` | Add `horus:resultVariable` to the `userTask`, so a completion never overwrites other variables |
+| `INPUT_INVALID`, `INPUT_DUPLICATE` | Give each `horus:input` a unique `name` (letters, digits, `_`) and a `value` |
+| `FLOW_REF_INVALID` | Give the `sequenceFlow` both `sourceRef` and `targetRef` |
+| `NOT_BPMN` | The root element must be `definitions` in `http://www.omg.org/spec/BPMN/20100524/MODEL` |
+| `NO_PROCESS` | Add a `process` element |
+| `XML_MALFORMED` | Fix the XML at the line given |
+
+### An unsafe or oversized file
+
+| Answer | Cause | Fix |
+|---|---|---|
+| `422 BPMN_UNSAFE_XML` | A `DOCTYPE` or entity declaration, nesting deeper than 32, or more than 5,000 elements | Export the file again without a document type declaration |
+| `413 PAYLOAD_TOO_LARGE` | The body is over 1 MB (`horus.bpm.processes.definitions.max-bytes`) | Split the process or remove unused diagram data |
+
+All codes are on [[Common Error Codes]].
+
+## Outside the `dev` profile
+
+The same import works, and the answer has `"status":"DRAFT"`. In 0.1.0 nothing can approve a process draft, so it cannot start. Use the preview on `dev` for evaluation. The approval flow for process definitions comes in a later release ([[Roadmap]]).

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test of the docker compose deployment (docs/DEPLOYING.md). Run from the repository root after
-# "docker compose up --build --wait". Needs bash and curl. Reads HORUS_DEMO_PASSWORD, HORUS_HTTP_PORT and
-# HORUS_EXAMPLE from the environment or, when unset, from ./.env.
+# "docker compose up --build --wait". Needs bash and curl. Reads HORUS_HTTP_PORT and HORUS_EXAMPLE from the
+# environment or, when unset, from ./.env, and HORUS_DEMO_PASSWORD from the environment or, when unset, from
+# the secret file ./secrets/demo_password (deploy/create-secrets.sh).
 #
 #   1. GET /actuator/health answers {"status":"UP"} (waits up to SMOKE_TIMEOUT seconds, default 180).
 #   2. GET /api/bpm/meta without a caller answers 401.
@@ -25,7 +26,8 @@ env_value() { # env_value NAME: the variable from the environment, else from ./.
 
 PORT="$(env_value HORUS_HTTP_PORT)"; PORT="${PORT:-8080}"
 EXAMPLE="$(env_value HORUS_EXAMPLE)"; EXAMPLE="${EXAMPLE:-rule-engine-only}"
-DEMO_PASSWORD="$(env_value HORUS_DEMO_PASSWORD)"
+DEMO_PASSWORD="${HORUS_DEMO_PASSWORD:-}"
+if [[ -z "$DEMO_PASSWORD" && -f secrets/demo_password ]]; then DEMO_PASSWORD="$(cat secrets/demo_password)"; fi
 BASE="${SMOKE_BASE_URL:-http://127.0.0.1:${PORT}}"
 TIMEOUT="${SMOKE_TIMEOUT:-180}"
 RULES="$BASE/api/bpm/rules/v1"
@@ -67,7 +69,7 @@ status="$(call GET "$BASE/api/bpm/meta")"
 pass "anonymous GET /api/bpm/meta: 401 $(grep -o '"code":"[A-Z_]*"' "$WORK/body" || true)"
 
 # 3. Form sign-in as lan, then metadata with the session
-[[ -n "$DEMO_PASSWORD" ]] || fail "HORUS_DEMO_PASSWORD is empty; set it in .env and start with SPRING_PROFILES_ACTIVE=dev"
+[[ -n "$DEMO_PASSWORD" ]] || fail "no demo password: run deploy/create-secrets.sh and start with SPRING_PROFILES_ACTIVE=dev"
 jar="$WORK/cookies"
 csrf="$(curl -s -c "$jar" -b "$jar" "$BASE/login" | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')"
 [[ -n "$csrf" ]] || fail "no sign-in form at $BASE/login; is the host on the dev profile?"
@@ -97,12 +99,13 @@ else
     [[ "$status" == 200 ]] || fail "request publication as hoa: expected 200, got $status: $(cat "$WORK/body")"
     pass "request publication as hoa: 200 $(grep -o '"status":"[A-Z_]*"' "$WORK/body" | head -n 1)"
 
-    status="$(call POST "$RULES/rule-sets/card-fee/versions/1:approve" -K "$WORK/hoa.curlrc")"
+    # An approval names the lock version it was decided on; v1 was just requested, so it is at lock version 1.
+    status="$(call POST "$RULES/rule-sets/card-fee/versions/1:approve" -K "$WORK/hoa.curlrc" -H 'If-Match: "1"')"
     [[ "$status" == 403 && "$(cat "$WORK/body")" == *SELF_APPROVAL_FORBIDDEN* ]] \
       || fail "self-approval as hoa: expected 403 SELF_APPROVAL_FORBIDDEN, got $status: $(cat "$WORK/body")"
     pass "self-approval as hoa refused: 403 $(grep -o '"code":"[A-Z_]*"' "$WORK/body" | head -n 1)"
 
-    status="$(call POST "$RULES/rule-sets/card-fee/versions/1:approve" -K "$WORK/minh.curlrc" \
+    status="$(call POST "$RULES/rule-sets/card-fee/versions/1:approve" -K "$WORK/minh.curlrc" -H 'If-Match: "1"' \
       -H 'Content-Type: application/json' -d '{"comment":"Smoke test"}')"
     [[ "$status" == 200 ]] || fail "approve as minh: expected 200, got $status: $(cat "$WORK/body")"
     pass "approve as minh: 200 $(grep -o '"status":"[A-Z_]*"' "$WORK/body" | head -n 1)"

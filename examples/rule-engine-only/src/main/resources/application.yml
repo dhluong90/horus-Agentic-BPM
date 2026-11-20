@@ -33,6 +33,9 @@ horus:
           ROLE_PRICING_AUTHOR: [rules:read, rules:author]
           ROLE_PRICING_APPROVER: [rules:read, rules:approve, rules:simulate]
           ROLE_TELLER: [rules:evaluate]
+          # The only role that may look decisions up by a masked value such as a national id; no other role holds
+          # rules:masked:search, and rules:log:read does not imply it.
+          ROLE_PRIVACY_OPS: [rules:log:read, rules:masked:search]
     cockpit:
       # How the cockpit header names this service.
       host-label: Loan origination

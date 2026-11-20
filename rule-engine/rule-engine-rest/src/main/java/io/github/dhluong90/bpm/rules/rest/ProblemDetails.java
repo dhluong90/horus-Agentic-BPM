@@ -24,7 +24,8 @@ import tools.jackson.databind.node.ObjectNode;
  * Maps engine exceptions to RFC 9457 {@code application/problem+json} with {@code code},
  * {@code detail} and {@code correlationId} (ADR-0010). Applies to the engine controllers only.
  */
-@RestControllerAdvice(assignableTypes = {RuleSetController.class, DecisionController.class, SimulationController.class})
+@RestControllerAdvice(assignableTypes = {RuleSetController.class, DecisionController.class,
+    DecisionLogController.class, SimulationController.class})
 public class ProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProblemDetails.class.getName());
@@ -44,6 +45,8 @@ public class ProblemDetails {
             Map.entry("UNAUTHENTICATED", HttpStatus.UNAUTHORIZED),
             Map.entry("PERMISSION_DENIED", HttpStatus.FORBIDDEN),
             Map.entry("SELF_APPROVAL_FORBIDDEN", HttpStatus.FORBIDDEN),
+            Map.entry("CLOCK_NOT_ALLOWED", HttpStatus.FORBIDDEN),
+            Map.entry("DECISION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("RULE_SET_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("VERSION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("NO_EFFECTIVE_VERSION", HttpStatus.NOT_FOUND),
@@ -51,16 +54,22 @@ public class ProblemDetails {
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
+            Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
+            Map.entry("PRECONDITION_REQUIRED", HttpStatus.PRECONDITION_REQUIRED),
+            Map.entry("DRAFT_AUTHORING_DISABLED", HttpStatus.FORBIDDEN),
+            Map.entry("RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
             Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE),
+            Map.entry("REPLAY_NOT_POSSIBLE", UNPROCESSABLE),
             Map.entry("INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR),
             Map.entry("SCHEMA_NOT_READY", HttpStatus.SERVICE_UNAVAILABLE));
 
     /**
-     * Answers an engine exception.
+     * Answers an engine exception. A code outside the matrix (for example one a host extension made up) is answered
+     * as an unexpected failure, so its message never reaches the body of a {@code 500} (TR-SEC-08).
      *
      * @param e the exception
      * @param request the request, for its correlation id
@@ -68,7 +77,10 @@ public class ProblemDetails {
      */
     @ExceptionHandler(HorusBpmException.class)
     public ResponseEntity<byte[]> handle(HorusBpmException e, WebRequest request) {
-        HttpStatus status = STATUS.getOrDefault(e.code(), HttpStatus.INTERNAL_SERVER_ERROR);
+        HttpStatus status = STATUS.get(e.code());
+        if (status == null) {
+            return unexpected(e, request.getHeader(CORRELATION_HEADER));
+        }
         ObjectNode body = body(e.code(), status, e.getMessage(), request.getHeader(CORRELATION_HEADER));
         if (e instanceof ValidationFailedException failed) {
             ArrayNode violations = body.putArray("violations");
@@ -80,7 +92,18 @@ public class ProblemDetails {
             }
             body.put("violationsTruncated", failed.truncated());
         }
+        if (e instanceof io.github.dhluong90.bpm.rules.api.LastVersionInEffectException last) {
+            // PD-101: what a client needs to word the warning and to retry with the confirmation
+            body.put("ruleSet", last.ruleSet());
+            body.put("version", last.version());
+            body.put("setting", last.setting());
+            body.set("nextEffectiveFrom", EngineValues.value(last.nextEffectiveFrom()));
+        }
         ResponseEntity<byte[]> response = response(status, body);
+        if (e instanceof io.github.dhluong90.bpm.rules.api.RateLimitedException limited) {
+            return ResponseEntity.status(status).header("Retry-After", Long.toString(limited.retryAfterSeconds()))
+                    .contentType(PROBLEM).body(response.getBody());
+        }
         if (status == HttpStatus.CONFLICT && "IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {
             return ResponseEntity.status(status).header("Retry-After", "1").contentType(PROBLEM).body(response.getBody());
         }

@@ -46,32 +46,76 @@ public interface AgentAdapter {
 }
 ```
 
+## `exclusiveGateway` routing: exactly one branch
+
+![Exclusive gateway routing](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/exclusive-gateway-routing.svg)
+
+An exclusive gateway takes exactly one outgoing flow, and the same one every time for the same variables (`PRE-004`, `TR-DET-01`).
+
+| Rule | Behaviour |
+|---|---|
+| Order | Conditions are tested in document order; the first `true` wins and later ones are not evaluated |
+| Default | Taken only when no condition is `true`; a default flow carries no condition (`DEFAULT_FLOW_HAS_CONDITION` at import) |
+| Missing condition | Every non-default outgoing flow of a diverging gateway needs a condition with text (`CONDITION_MISSING` at import) |
+| Null | A comparison with a missing variable is null, which does not hold, so routing moves on to the next flow or the default |
+| Type error | Text against a number, or money of two currencies, is `CONDITION_ERROR`, never a silent `false` |
+| No path | No `true` condition and no default fails the step with `422 STEP_FAILED`, reason `NO_PATH`. No instance, token, task, history or idempotency row is kept, so the caller can correct the data and retry with the same key |
+| Audit | `pre_history` records `NODE_COMPLETED` on the gateway with the flow taken |
+
+Example: with `amount >= 100000000 VND` to `senior-approval` and the default to `auto-approve`, 150,000,000 VND activates only `senior-approval` and 99,999,999 VND only `auto-approve`. The cases run with:
+
+```
+mvn -B -pl process-engine/process-engine-test,process-engine/process-engine-postgres -am verify \
+  -Dtest='ExclusiveGatewayTest' -Dit.test='ExclusiveGatewayPostgresIT' -Dsurefire.failIfNoSpecifiedTests=false
+```
+
 ## Timers and jobs with leases
 
-`pre_timer` holds timers, SLA escalations and async job claims. One scheduler thread per replica polls every 500 ms:
+`pre_timer` holds timers now, and SLA escalations, async step attempts and effective-date jobs later. Each replica runs one poller thread (`horus.bpm.processes.jobs.*`). The claim is one short transaction:
 
 ```sql
-WITH claimed AS (
-  SELECT id FROM pre_timer
-  WHERE status IN ('DUE', 'CLAIMED') AND next_fire_at <= now()
-    AND (locked_until IS NULL OR locked_until < now())
-  ORDER BY next_fire_at LIMIT 50 FOR UPDATE SKIP LOCKED)
-UPDATE pre_timer t SET status = 'CLAIMED', locked_by = :replica, locked_until = now() + interval '60 seconds', attempt = attempt + 1
-FROM claimed WHERE t.id = claimed.id RETURNING t.*;
+WITH due AS (
+  SELECT tenant_id, id FROM pre_timer
+  WHERE status IN ('DUE', 'CLAIMED') AND next_fire_at <= :now
+    AND (status = 'DUE' OR locked_until <= :now)
+  ORDER BY next_fire_at, id LIMIT :batchSize FOR UPDATE SKIP LOCKED)
+UPDATE pre_timer t SET status = 'CLAIMED', locked_by = :replicaId,
+       locked_until = :now + t.lease_duration, attempt = t.attempt + 1
+FROM due WHERE t.tenant_id = due.tenant_id AND t.id = due.id RETURNING t.*;
 ```
+
+Each claimed job then fires in its own transaction: the instance row is locked, then the job row, and the timer fires only if the job is still `CLAIMED` by this replica with the same attempt number. The job becomes `DONE` in the same transaction as the steps it ran.
 
 | Property | Value |
 |---|---|
-| Lease length | 60 s; a crashed replica's jobs are reclaimed after that by any other replica (`PRE-006`) |
-| Firing lag | p50 300 ms, p99 1 s at the default poll interval (target) |
-| Duplicate protection | `SKIP LOCKED` on claim; `locked_by` and `locked_until` checked again in TX2 |
-| Throughput | 100 jobs/s per replica at batch 50; scale by replicas before adding threads |
+| Lease length | `jobs.timer-lease`, 60 s; a crashed replica's timers are claimed by another replica after that (`PRE-006`) |
+| Duplicate protection | `SKIP LOCKED` on the claim; the fire and `DONE` commit together; the attempt number fences an old claim, so a replica that comes back after its lease was taken over fires nothing |
+| Failed firing | Rolled back; due again after `jobs.retry-backoff` times the attempt; `FAILED` after `jobs.max-attempts` (3) |
+| Poll cadence | `jobs.poll-interval`, 1 s when idle; at once again while polls find due jobs; `jobs.batch-size` 32 |
+| Decision after a timer | No one is signed in when a timer fires. A `decision` step that follows runs in the tenant of the stored instance row, as `system:process-engine`, never in the tenant the poller thread's security context resolves; a rule set that exists only in another tenant fails the step closed and the firing rolls back, with any decision row already written (`PRE-055`, `PRE-056`). The Rule Engine's entry point for this is handed only to the Process Engine; host code cannot reach it |
+| Timer events in this release | Intermediate timer catch event with `timeDuration` (for example `P3D`) or `timeDate` (for example `2027-04-01T00:00:00+07:00`); cycles and boundary timers follow |
 
 ## `parallelGateway` join without lost wakeups
 
 ![Parallel join](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/parallel-join.svg)
 
 When two branches finish on two replicas at the same instant, each transaction locks the parent `pre_instance` row `FOR UPDATE` before it marks its token `JOINED` and counts the remaining tokens under the same scope token (the instance, or the enclosing `saga` block). The lock serialises the two counts, so exactly one transaction sees zero remaining and creates the single outgoing token (`PRE-005`, `TR-ASY-03`). The lock is per instance and held for about 2 ms, so it never contends across instances.
+
+| Rule | Behaviour |
+|---|---|
+| Fork | A parallel gateway with one incoming flow sends a token down every outgoing flow, one `FLOW` token per flow, all under the scope token of the arriving token |
+| Join | With several incoming flows, each arriving token becomes `JOINED`. The arrival that brings the `JOINED` tokens on the gateway, under the same scope token, to the number of incoming flows marks them `COMPLETED` and creates one new token that leaves the gateway (and forks again if the gateway has several outgoing flows) |
+| Scope | Tokens of another scope token are never counted (`PRE-044`), so two instances, or a `saga` block and its parent, never complete each other's join |
+| Conditions | A condition on an outgoing flow of a parallel gateway is refused at import (`CONDITION_ON_PARALLEL_FLOW`); use an exclusive gateway to choose |
+| Audit | `pre_history` records `TOKEN_JOINED` per arrival with the count, and `NODE_COMPLETED` once, by the identity whose completion fired the join |
+| Modelling | The join counts arrivals, as BPMN engines usually do. If a forked branch ends at an end event instead of reaching the join, the join never fires and the instance ends with that end event; model every forked branch back into the join |
+
+The race is proven with two engine instances on two connection pools against one PostgreSQL: the two checks of a loan application are completed at the same moment, one on each, 1,000 times, and every run ends with exactly one token at `underwrite`. Removing the row lock makes the first run fail. The test runs with:
+
+```
+mvn -B -pl process-engine/process-engine-test,process-engine/process-engine-postgres -am verify \
+  -Dtest='ParallelGatewayTest' -Dit.test='ParallelJoinPostgresIT' -Dsurefire.failIfNoSpecifiedTests=false
+```
 
 ## Idempotency and business keys
 

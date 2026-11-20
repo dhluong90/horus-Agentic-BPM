@@ -10,7 +10,9 @@ import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.IdempotencyKeyReuseException;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
+import io.github.dhluong90.bpm.rules.api.MaskingKey;
 import io.github.dhluong90.bpm.rules.api.Money;
+import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.rules.api.SelfApprovalForbiddenException;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
@@ -36,9 +38,10 @@ class SecurityReviewRegressionTest {
 
     final InMemoryStores stores = new InMemoryStores();
     final TestCaller caller = new TestCaller("bank-a", "alice");
+    /** PRICING masks nationalId, so the engine needs a key; without one it fails closed (RLE-012). */
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, EngineSettings.defaults()),
+                    stores, stores, EngineSettings.defaults(), MaskingPolicy.withKey(MaskingKey.of(new byte[32]))),
             stores, stores, stores);
 
     /** A table that multiplies a money input by a decimal input, the shape the review probed. */
@@ -61,7 +64,7 @@ class SecurityReviewRegressionTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml.getBytes(StandardCharsets.UTF_8)));
         engines.versionService().requestPublish(name, 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve(name, 1, WriteOptions.none());
+        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
     }
 
     // Finding 1 (blocking): permissions are checked in the services, not only over REST.
@@ -72,7 +75,7 @@ class SecurityReviewRegressionTest {
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "teller", EVALUATE_ONLY);
 
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(PermissionDeniedException.class)
                 .extracting(e -> ((PermissionDeniedException) e).code()).isEqualTo("PERMISSION_DENIED");
         caller.become("bank-a", "bob");
@@ -147,16 +150,19 @@ class SecurityReviewRegressionTest {
 
     @Test
     void TR_SEC_05_undeclared_inputs_never_reach_the_decision_log_when_they_are_allowed() {
+        MaskingKey key = MaskingKey.of(new byte[32]);
         RuleEngines lenient = RuleEngines.create(new EngineContext(caller, caller,
                 Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC), stores, stores,
-                EngineSettings.defaults().withRejectUndeclaredInputs(false)), stores, stores, stores);
+                EngineSettings.defaults().withRejectUndeclaredInputs(false), MaskingPolicy.withKey(key)),
+                stores, stores, stores);
         publish(PRICING, "pricing");
         caller.become("bank-a", "teller", EVALUATE_ONLY);
 
         lenient.ruleEngine().evaluate("pricing", DecisionInput.of(customer()));
 
         String logged = stores.decisions.getFirst().maskedInputsJson();
-        assertThat(logged).isEqualTo("{\"fee\":{\"currency\":\"VND\",\"amount\":1000},\"rate\":1,\"nationalId\":\"masked\"}");
+        assertThat(logged).isEqualTo("{\"fee\":{\"currency\":\"VND\",\"amount\":1000},\"rate\":1,\"nationalId\":\""
+                + key.forTenant("bank-a").fingerprint("079090001234") + "\"}");
         assertThat(logged).doesNotContain("079090001234", "0903123456", "1903 4567 8901", "phone", "accountNumber");
     }
 
@@ -191,11 +197,11 @@ class SecurityReviewRegressionTest {
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "alice");
 
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, WriteOptions.none()))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
         assertThat(engines.versionService().find("card-fee", 1, false).orElseThrow().createdBy()).isEqualTo("alice");
         caller.become("bank-a", "carol");
-        assertThat(engines.versionService().approve("card-fee", 1, WriteOptions.none()).status())
+        assertThat(engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)).status())
                 .isEqualTo(VersionStatus.PUBLISHED);
     }
 
@@ -206,10 +212,10 @@ class SecurityReviewRegressionTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.idempotencyKey("k-approve"));
+        engines.versionService().approve("card-fee", 1, new WriteOptions("k-approve", 1L, null));
 
         caller.become("bank-a", "alice");
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, WriteOptions.idempotencyKey("k-approve")))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions("k-approve", 1L, null)))
                 .isInstanceOf(IdempotencyKeyReuseException.class);
 
         caller.become("bank-a", "teller-1", EVALUATE_ONLY);

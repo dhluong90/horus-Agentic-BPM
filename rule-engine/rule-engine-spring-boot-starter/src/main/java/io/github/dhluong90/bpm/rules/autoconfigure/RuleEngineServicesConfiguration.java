@@ -1,16 +1,19 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
+import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.rules.postgres.PostgresRuleEngines;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
 import io.github.dhluong90.bpm.rules.rest.DecisionController;
+import io.github.dhluong90.bpm.rules.rest.DecisionLogController;
 import io.github.dhluong90.bpm.rules.rest.ProblemDetails;
 import io.github.dhluong90.bpm.rules.rest.RuleSetController;
 import io.github.dhluong90.bpm.rules.rest.SimulationController;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
+import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
 import java.time.Clock;
 import java.util.Set;
@@ -24,6 +27,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClas
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 
 /**
  * The engine's entry points ({@link RuleEngine}, {@link VersionService}), the security SPIs and the
@@ -45,18 +49,50 @@ class RuleEngineServicesConfiguration {
         return EngineAccessResolvers.tenants(access::getIfAvailable);
     }
 
+    /**
+     * Masking from {@code horus.bpm.rules.masking.*} and {@code decision-log.mask-default}; a host bean, for example
+     * one reading a key per tenant from a vault, replaces it.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    MaskingPolicy ruleEngineMaskingPolicy(RuleEngineProperties properties, Environment environment) {
+        return PropertyMaskingPolicy.from(properties,
+                environment.getProperty(PropertyMaskingPolicy.SHARED_KEY_PROPERTY),
+                environment.getProperty(PropertyMaskingPolicy.SHARED_KEY_ID_PROPERTY));
+    }
+
     @Bean
     @ConditionalOnMissingBean
     RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
-            CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties) {
+            CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
+            MaskingPolicy masking, Environment environment) {
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings());
+                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(environment), masking);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngines engines, MaskingPolicy masking) {
+        return RuleEngineMaskingCheck.of(engines.maskingCheck(), masking);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    DecisionLogService ruleEngineDecisionLogService(RuleEngines engines) {
+        return engines.decisionLog();
     }
 
     @Bean
     @ConditionalOnMissingBean
     RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngines engines) {
         return new RuleEngineCursorKeyInitializer(engines.cursorKeys());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    RuleEngineLifecycleSweeper ruleEngineLifecycleSweeper(RuleEngines engines, RuleEngineProperties properties) {
+        return new RuleEngineLifecycleSweeper(engines.lifecycleSweep()::run,
+                properties.lifecycle().sweepIntervalOrDefault());
     }
 
     @Bean
@@ -120,6 +156,12 @@ class RuleEngineServicesConfiguration {
         @ConditionalOnMissingBean
         DecisionController ruleEngineDecisionController(RuleEngine engine, CallerResolver callers) {
             return new DecisionController(engine, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions, CallerResolver callers) {
+            return new DecisionLogController(decisions, callers);
         }
 
         @Bean
