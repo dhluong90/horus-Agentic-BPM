@@ -6,6 +6,7 @@ import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 
 /**
  * Evaluates an {@link Expr} over input slots with FEEL semantics (rule-engine/docs/DESIGN.md section
@@ -13,7 +14,8 @@ import java.time.LocalDate;
  * and arithmetic with a null operand give null; {@code between} is {@code x >= a and x <= b}, as
  * DMN 1.5; {@code ==} and {@code !=} are two-valued; {@code in} is true when an element equals the
  * target, so a null target is in a list only when the list holds null; {@code and}, {@code or} and
- * {@code not} follow the FEEL truth tables. Mixed currencies and division by zero raise {@link EvaluationException}, as does
+ * {@code not} follow the FEEL truth tables; a function with a null argument gives null; {@code round}
+ * is half-even. Mixed currencies and division by zero raise {@link EvaluationException}, as does
  * a {@code matches} past one of its bounds ({@link BoundedRegex}).
  * An evaluator made by a constructor is stateless and thread-safe, and gives each {@code matches} a decision budget
  * of its own. An evaluator made by {@link #forDecision()} charges every {@code matches} it runs to one budget of
@@ -106,6 +108,7 @@ public final class Evaluator {
                 yield and(low, compare(Expr.BinaryOp.LE, value, evaluate(between.high(), slots)));
             }
             case Expr.IsNull isNull -> (evaluate(isNull.target(), slots) == null) != isNull.negated();
+            case Expr.Call call -> call(call, slots);
             case Expr.Matches matches -> {
                 // FEEL: a null or non-string text gives null, which never matches.
                 Object text = evaluate(matches.target(), slots);
@@ -145,6 +148,17 @@ public final class Evaluator {
             }
         }
         return false;
+    }
+
+    private Object call(Expr.Call call, Object[] slots) {
+        Object first = evaluate(call.args().get(0), slots);
+        Object second = evaluate(call.args().get(1), slots);
+        return switch (call.function()) {
+            case ROUND -> first instanceof BigDecimal number && second instanceof BigDecimal scale && Parser.isScale(scale)
+                    ? number.setScale(scale.intValueExact(), RoundingMode.HALF_EVEN) : null;
+            case DAYS_BETWEEN -> first instanceof LocalDate from && second instanceof LocalDate to
+                    ? BigDecimal.valueOf(ChronoUnit.DAYS.between(from, to)) : null;
+        };
     }
 
     private Object binary(Expr.Binary binary, Object[] slots) {
