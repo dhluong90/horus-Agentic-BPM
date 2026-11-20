@@ -66,7 +66,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
   "schemaVersion": 1,
   "hostId": "rule-engine-only",
   "modules": [
-    { "module": "rules", "engineVersion": "0.1.0-SNAPSHOT", "apiVersion": "v1", "features": [] }
+    { "module": "rules", "engineVersion": "0.1.0", "apiVersion": "v1", "features": [] }
   ],
   "tenancy": { "switching": false },
   "limits": { "maxPageSize": 200 }

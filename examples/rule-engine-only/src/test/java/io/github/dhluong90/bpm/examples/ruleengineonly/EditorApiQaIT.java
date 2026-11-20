@@ -87,10 +87,11 @@ class EditorApiQaIT {
         assertThat(exact.status()).as(exact.body()).isEqualTo(200);
 
         send(t, "lan", "POST", "/rule-sets/card-fee/versions/2:request-publish", null, null, null);
+        // created 0, requested 1, rejected 2, requested again 3: the approval names lock version 3
         Reply approveOver = send(t, "minh", "POST", "/rule-sets/card-fee/versions/2:approve",
-                padded("{\"comment\":\"too big\"}", COMMAND + 1), "application/json", null);
+                padded("{\"comment\":\"too big\"}", COMMAND + 1), "application/json", "\"3\"");
         Reply approveExact = send(t, "minh", "POST", "/rule-sets/card-fee/versions/2:approve",
-                padded("{\"comment\":\"exactly at the limit\"}", COMMAND), "application/json", null);
+                padded("{\"comment\":\"exactly at the limit\"}", COMMAND), "application/json", "\"3\"");
         assertThat(approveOver.status()).as(approveOver.body()).isEqualTo(413);
         assertThat(approveExact.status()).as(approveExact.body()).isEqualTo(200);
     }
@@ -200,8 +201,11 @@ class EditorApiQaIT {
         if (contentType != null) {
             request.header("Content-Type", contentType);
         }
-        if (ifMatch != null) {
-            request.header("If-Match", ifMatch);
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        String lock = ifMatch == null && path.matches(".*:(approve|reject)$") ? "\"1\"" : ifMatch;
+        if (lock != null) {
+            request.header("If-Match", lock);
         }
         if (key != null) {
             request.header("Idempotency-Key", key);

@@ -338,7 +338,7 @@ class RuleLifecycleIT {
                 + environment.getProperty("local.server.port") + "/api/bpm/me")).header("Authorization", minh).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
         HttpResponse<String> approve = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets/card-fee-roles/versions/1:approve"))
-                .header("Authorization", minh).POST(HttpRequest.BodyPublishers.noBody()).build(),
+                .header("Authorization", minh).header("If-Match", "\"1\"").POST(HttpRequest.BodyPublishers.noBody()).build(),
                 HttpResponse.BodyHandlers.ofString());
         HttpResponse<String> importAttempt = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets"))
                 .header("Authorization", minh).header("Content-Type", "application/yaml")
@@ -394,6 +394,11 @@ class RuleLifecycleIT {
         }
         if (idempotencyKey != null) {
             request.header("Idempotency-Key", idempotencyKey);
+        }
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        if (path.matches(".*:(approve|reject)$")) {
+            request.header("If-Match", "\"1\"");
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""), response.body());

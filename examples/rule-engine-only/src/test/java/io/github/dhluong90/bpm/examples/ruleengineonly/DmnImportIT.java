@@ -120,6 +120,11 @@ class DmnImportIT {
         if (contentType != null) {
             request.header("Content-Type", contentType);
         }
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        if (path.matches(".*:(approve|reject)$")) {
+            request.header("If-Match", "\"1\"");
+        }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""), response.body());
     }

@@ -35,7 +35,7 @@ class HitPolicyEdgeCasesQaTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml.getBytes(StandardCharsets.UTF_8)));
         engines.versionService().requestPublish(name, 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve(name, 1, WriteOptions.none());
+        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
         caller.become("bank-a", "teller");
     }
 

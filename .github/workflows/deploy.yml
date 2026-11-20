@@ -48,14 +48,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Throwaway secrets in .env, masked in the log
+      - name: Settings in .env, throwaway secret files, masked in the log
         run: |
-          admin="$(openssl rand -hex 16)"; db="$(openssl rand -hex 16)"; demo="$(openssl rand -hex 12)"
-          echo "::add-mask::$admin"; echo "::add-mask::$db"; echo "::add-mask::$demo"
-          sed -e "s/^HORUS_DB_ADMIN_PASSWORD=.*/HORUS_DB_ADMIN_PASSWORD=$admin/" \
-              -e "s/^HORUS_DB_PASSWORD=.*/HORUS_DB_PASSWORD=$db/" \
-              -e "s/^HORUS_DEMO_PASSWORD=.*/HORUS_DEMO_PASSWORD=$demo/" .env.example > .env
+          cp .env.example .env
+          deploy/create-secrets.sh
+          for f in secrets/*; do echo "::add-mask::$(cat "$f")"; done
           git check-ignore -q .env
+          git check-ignore -q secrets/db_password
 
       - name: Build the image
         run: docker compose build
@@ -65,6 +64,28 @@ jobs:
 
       - name: Smoke test (health, sign-in, metadata, rule lifecycle, cockpit)
         run: deploy/smoke-test.sh
+
+      - name: No password in the environment of either container
+        run: |
+          set -euo pipefail
+          # Each /proc/1/environ is read as the user that owns process 1 (capabilities are dropped).
+          for pair in postgres:postgres host:10001; do
+            service="${pair%%:*}"; user="${pair#*:}"
+            env_json="$(docker inspect "$(docker compose ps -q "$service")" --format '{{json .Config.Env}}')"
+            for f in secrets/*; do
+              if grep -q -F -- "$(cat "$f")" <<< "$env_json"; then
+                echo "FAIL  the value of $(basename "$f") is in Config.Env of $service" >&2; exit 1
+              fi
+            done
+            environ="$(docker compose exec -T -u "$user" "$service" cat /proc/1/environ | tr '\0' '\n')"
+            test -n "$environ"
+            for f in secrets/*; do
+              if grep -q -F -- "$(cat "$f")" <<< "$environ"; then
+                echo "FAIL  the value of $(basename "$f") is in /proc/1/environ of $service" >&2; exit 1
+              fi
+            done
+            echo "PASS  no password in Config.Env or /proc/1/environ of $service"
+          done
 
       - name: Local-evaluation warning in the start-up log, application role without superuser rights
         run: |
@@ -92,6 +113,20 @@ jobs:
 
       - name: Image gates, no secrets in layers and no high or critical vulnerability
         run: deploy/scan-image.sh "$IMAGE"
+
+      - name: A missing secret file stops compose before any container starts
+        run: |
+          set -euo pipefail
+          docker compose down -v
+          mv secrets/demo_password "$RUNNER_TEMP/demo_password"
+          if docker compose up --no-build --wait --wait-timeout 60 > "$RUNNER_TEMP/up.log" 2>&1; then
+            cat "$RUNNER_TEMP/up.log"; echo "FAIL  compose started without secrets/demo_password" >&2; exit 1
+          fi
+          cat "$RUNNER_TEMP/up.log"
+          grep -F 'secrets/demo_password' "$RUNNER_TEMP/up.log"
+          test -z "$(docker compose ps -q --status running)"
+          echo "PASS  compose stopped, naming secrets/demo_password, and no container is running"
+          mv "$RUNNER_TEMP/demo_password" secrets/demo_password
 
       - name: Container logs
         if: failure()

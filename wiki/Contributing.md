@@ -46,6 +46,19 @@ The CI job "Spec-to-test coverage" runs `python3 tools/spec-coverage.py` (Python
 
 To deliver a statement: add the test named by its id and delete the id's line from `spec-pending.txt`. To add a statement: add it to `SPEC.md` and the TEST-PLAN table with its milestone, and either its test or an allow-list line.
 
+## Database migrations
+
+The engines run Flyway with out-of-order migrations off, so a migration numbered below one a host has already applied stops that host from starting. The CI job "Migration order" runs `python3 tools/check-migration-order.py` on every pull request and every push to `main`; its own tests run with `python3 tools/test_check_migration_order.py`.
+
+| Rule | Detail |
+|---|---|
+| Which files | `V<n>__<description>.sql` under a `migration/` folder of `rule-engine/` or `process-engine/`, numbered per engine. Example host migrations under `examples/` belong to the host and are not checked |
+| Choosing a number | The next number above the highest of that engine on `main` at the moment the pull request merges, skipping retired numbers. Never reserve a number ahead |
+| Retired numbers | `tools/migration-retired-versions.txt` lists numbers nothing may use, with the reason: Rule Engine V7, V8 and V9, Process Engine V5 |
+| Released migrations | A migration on `main` is never edited, deleted or renamed; moving it to another folder keeps its file name and bytes. Change the schema with a new migration |
+| Fails on | An added migration at or below the highest of its engine on `main`; two migrations of one engine with the same number, on the branch or against `main`; a retired number; a changed migration that is on `main`. The message names the file, the highest number on `main` and the next free number |
+| Before merging | The pull request run compares with `main` as it was when the run started. If another migration merged since, merge `main` into the branch, renumber if the check asks, and run the check again. The run on the push to `main` catches any that slip through |
+
 ## Documentation standard
 
 This wiki is the `wiki/` folder of the repository; a workflow publishes it on merge to `main`. Pages follow four kinds (tutorial, how-to, reference, explanation) and one canonical owner per fact; see [[Home]] for the map.

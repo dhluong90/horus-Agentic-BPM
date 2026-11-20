@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.postgres;
 
+import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import io.github.dhluong90.bpm.process.internal.exec.HistoryEntry;
 import io.github.dhluong90.bpm.process.internal.exec.Token;
 import io.github.dhluong90.bpm.process.internal.exec.TokenKind;
@@ -13,6 +14,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -56,6 +58,38 @@ public final class JdbcProcessStore implements ProcessStore {
     public Optional<StoredDefinition> definition(String tenant, String id) {
         return jdbc.sql("SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE tenant_id = ? AND id = ?")
                 .params(tenant, id).query(JdbcProcessStore::definition).optional();
+    }
+
+    @Override
+    public Optional<StoredDefinition> definitionVersion(String tenant, String key, int version) {
+        return jdbc.sql("SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE tenant_id = ? AND key_name = ? "
+                        + "AND version_num = ?")
+                .params(tenant, key, version).query(JdbcProcessStore::definition).optional();
+    }
+
+    @Override
+    public List<DefinitionSummary> definitionKeys(String tenant, String afterKey, int limit, Instant now) {
+        // The latest version of each key by the (tenant_id, key_name, version_num) unique index, with the effective
+        // version and the last change per key; keyset on the key, never OFFSET.
+        String sql = "SELECT d.key_name, d.name, d.version_num, d.status, "
+                + "(SELECT max(e.version_num) FROM pre_definition e WHERE e.tenant_id = d.tenant_id "
+                + "AND e.key_name = d.key_name AND e.status = 'ACTIVE' AND e.effective_from <= ?) AS effective_version, "
+                + "(SELECT max(GREATEST(c.created_at, COALESCE(c.approved_at, c.created_at))) FROM pre_definition c "
+                + "WHERE c.tenant_id = d.tenant_id AND c.key_name = d.key_name) AS last_changed_at "
+                + "FROM pre_definition d WHERE d.tenant_id = ? "
+                + (afterKey == null ? "" : "AND d.key_name > ? ")
+                + "AND d.version_num = (SELECT max(m.version_num) FROM pre_definition m WHERE m.tenant_id = d.tenant_id "
+                + "AND m.key_name = d.key_name) ORDER BY d.key_name LIMIT ?";
+        List<Object> params = new ArrayList<>(List.of(ts(now), tenant));
+        if (afterKey != null) {
+            params.add(afterKey);
+        }
+        params.add(limit);
+        return jdbc.sql(sql).params(params).query((rs, row) -> {
+            int effective = rs.getInt("effective_version");
+            return new DefinitionSummary(rs.getString("key_name"), rs.getString("name"), rs.getInt("version_num"),
+                    rs.getString("status"), rs.wasNull() ? null : effective, instant(rs, "last_changed_at"));
+        }).list();
     }
 
     @Override
@@ -114,6 +148,41 @@ public final class JdbcProcessStore implements ProcessStore {
         return jdbc.sql("SELECT " + INSTANCE_COLUMNS + " FROM pre_instance WHERE tenant_id = ? AND definition_key = ? "
                         + "AND business_key = ?")
                 .params(tenant, key, businessKey).query(JdbcProcessStore::instance).optional();
+    }
+
+    @Override
+    public List<InstanceRow> instances(String tenant, List<String> statuses, String definitionKey, Instant from,
+            Instant to, Instant afterStartedAt, String afterId, int limit) {
+        // Served by idx_pre_instance_status (tenant_id, status, started_at DESC); keyset on (started_at, id).
+        StringBuilder sql = new StringBuilder("SELECT " + INSTANCE_COLUMNS + " FROM pre_instance WHERE tenant_id = ? "
+                + "AND status IN (");
+        List<Object> params = new ArrayList<>();
+        params.add(tenant);
+        for (int i = 0; i < statuses.size(); i++) {
+            sql.append(i == 0 ? "?" : ", ?");
+            params.add(statuses.get(i));
+        }
+        sql.append(")");
+        if (definitionKey != null) {
+            sql.append(" AND definition_key = ?");
+            params.add(definitionKey);
+        }
+        if (from != null) {
+            sql.append(" AND started_at >= ?");
+            params.add(ts(from));
+        }
+        if (to != null) {
+            sql.append(" AND started_at < ?");
+            params.add(ts(to));
+        }
+        if (afterStartedAt != null) {
+            sql.append(" AND (started_at, id) < (?, ?)");
+            params.add(ts(afterStartedAt));
+            params.add(afterId);
+        }
+        sql.append(" ORDER BY started_at DESC, id DESC LIMIT ?");
+        params.add(limit);
+        return jdbc.sql(sql.toString()).params(params).query(JdbcProcessStore::instance).list();
     }
 
     @Override
@@ -272,6 +341,14 @@ public final class JdbcProcessStore implements ProcessStore {
         if (updated != 1) {
             throw new IllegalStateException("Idempotency claim lost for " + operation);
         }
+    }
+
+    @Override
+    public byte[] engineKey(String name, byte[] candidate, Instant now) {
+        // ON CONFLICT so concurrent first uses on two replicas neither fail nor doom the caller's transaction.
+        jdbc.sql("INSERT INTO pre_engine_key (name, key_bytes, created_at) VALUES (?, ?, ?) ON CONFLICT (name) DO NOTHING")
+                .params(name, candidate, ts(now)).update();
+        return jdbc.sql("SELECT key_bytes FROM pre_engine_key WHERE name = ?").params(name).query(byte[].class).single();
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------
