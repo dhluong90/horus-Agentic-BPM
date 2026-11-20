@@ -190,6 +190,94 @@ class MaskedInputsHostIT {
     }
 
     @Test
+    void RLE_012_rotation_keeps_earlier_decisions_findable_and_writes_under_the_current_key(CapturedOutput output)
+            throws Exception {
+        String db = freshDatabase();
+        byte[] k2 = filled(32, '2');
+        String k2Base64 = Base64.getEncoder().encodeToString(k2);
+        String auditor = TestTokens.bearerFor("audrey", "bank-a", List.of("rules:log:read", "rules:masked:search"));
+        Instant now = Instant.now();
+        String search = "{\"ruleSet\": \"minor-review\", \"input\": \"nationalId\", \"value\": \"" + NATIONAL_ID
+                + "\", \"from\": \"" + now.minus(1, ChronoUnit.DAYS) + "\", \"to\": \"" + now.plus(1, ChronoUnit.DAYS)
+                + "\"}";
+        String before;
+        String after;
+
+        // Key k1 in use: one decision about 079090001234.
+        try (ConfigurableApplicationContext host = start(db, KEY_SETTING + "=" + K32_BASE64)) {
+            int port = port(host);
+            send(port, TestTokens.bearer("alice"), "POST", "/rule-sets", MINOR_REVIEW, "application/yaml");
+            send(port, TestTokens.bearer("alice"), "POST", "/rule-sets/minor-review/versions/1:request-publish", null,
+                    null);
+            send(port, TestTokens.bearer("bob"), "POST", "/rule-sets/minor-review/versions/1:approve", null, null);
+            before = send(port, TestTokens.bearer("teller"), "POST", "/decisions/minor-review:evaluate",
+                    "{\"inputs\": {\"nationalId\": \"" + NATIONAL_ID + "\", \"age\": 16}}", "application/json")
+                    .json().path("decisionId").asString();
+        }
+
+        // Rotated: current k2, previous k1. New decisions carry k2; the search finds the decisions under both keys.
+        String[] rotated = {KEY_SETTING + "=" + k2Base64, KEY_SETTING + "-id=k2",
+            "horus.bpm.rules.masking.previous-keys[0].hmac-key=" + K32_BASE64,
+            "horus.bpm.rules.masking.previous-keys[0].hmac-key-id=k1"};
+        try (ConfigurableApplicationContext host = start(db, rotated)) {
+            int port = port(host);
+            after = send(port, TestTokens.bearer("teller"), "POST", "/decisions/minor-review:evaluate",
+                    "{\"inputs\": {\"nationalId\": \"" + NATIONAL_ID + "\", \"age\": 30}}", "application/json")
+                    .json().path("decisionId").asString();
+            JdbcClient jdbc = host.getBean(JdbcClient.class);
+            assertThat(jdbc.sql("SELECT masked_inputs ->> 'nationalId' FROM rle_decision WHERE id = :id")
+                    .param("id", before).query(String.class).single())
+                    .isEqualTo("hmac:k1:" + hmacHex(tenantSubkey(K32, "bank-a"), NATIONAL_ID));
+            assertThat(jdbc.sql("SELECT masked_inputs ->> 'nationalId' FROM rle_decision WHERE id = :id")
+                    .param("id", after).query(String.class).single())
+                    .isEqualTo("hmac:k2:" + hmacHex(tenantSubkey(k2, "bank-a"), NATIONAL_ID));
+            Reply found = send(port, auditor, "POST", "/decisions:find-by-masked-input", search, "application/json");
+            assertThat(found.status()).isEqualTo(200);
+            List<String> ids = new ArrayList<>();
+            found.json().path("data").forEach(item -> ids.add(item.path("decisionId").asString()));
+            assertThat(ids).containsExactlyInAnyOrder(before, after);
+            // Host keys are recorded once, under '*', each with its check value, never the key.
+            assertThat(jdbc.sql("SELECT tenant_id || ' ' || key_id || ' ' || check_value FROM rle_masking_key_check"
+                    + " ORDER BY key_id").query(String.class).list()).containsExactly(
+                    "* k1 " + checkValue(K32), "* k2 " + checkValue(k2));
+        }
+
+        // Retired: k1 no longer listed, so it is no longer searched.
+        try (ConfigurableApplicationContext host = start(db, KEY_SETTING + "=" + k2Base64, KEY_SETTING + "-id=k2")) {
+            Reply found = send(port(host), auditor, "POST", "/decisions:find-by-masked-input", search,
+                    "application/json");
+            assertThat(found.json().path("data")).singleElement()
+                    .satisfies(item -> assertThat(item.path("decisionId").asString()).isEqualTo(after));
+        }
+
+        // bank-a moves off the host key to a key of its own, a1: it writes under a1 and still finds its k2 rows.
+        byte[] a1 = filled(32, 'a');
+        String a1Base64 = Base64.getEncoder().encodeToString(a1);
+        try (ConfigurableApplicationContext host = start(db, KEY_SETTING + "=" + k2Base64, KEY_SETTING + "-id=k2",
+                "horus.bpm.rules.masking.tenants.bank-a.hmac-key=" + a1Base64,
+                "horus.bpm.rules.masking.tenants.bank-a.hmac-key-id=a1")) {
+            int port = port(host);
+            String own = send(port, TestTokens.bearer("teller"), "POST", "/decisions/minor-review:evaluate",
+                    "{\"inputs\": {\"nationalId\": \"" + NATIONAL_ID + "\", \"age\": 40}}", "application/json")
+                    .json().path("decisionId").asString();
+            assertThat(host.getBean(JdbcClient.class)
+                    .sql("SELECT masked_inputs ->> 'nationalId' FROM rle_decision WHERE id = :id")
+                    .param("id", own).query(String.class).single()).isEqualTo("hmac:a1:" + hmacHex(a1, NATIONAL_ID));
+            Reply found = send(port, auditor, "POST", "/decisions:find-by-masked-input", search, "application/json");
+            List<String> ids = new ArrayList<>();
+            found.json().path("data").forEach(item -> ids.add(item.path("decisionId").asString()));
+            assertThat(ids).containsExactlyInAnyOrder(after, own);
+        }
+
+        // TR-SEC-10: id k1 back with different key bytes stops start-up, naming the id, never the key.
+        String other = Base64.getEncoder().encodeToString(filled(32, 'o'));
+        assertThatThrownBy(() -> start(db, KEY_SETTING + "=" + other).close())
+                .satisfies(e -> assertThat(rootMessage(e)).contains("host masking key id k1", "check value")
+                        .doesNotContain(other, K32_BASE64));
+        assertThat(output.getAll()).doesNotContain(K32_BASE64, K32_HEX, k2Base64, a1Base64, other, NATIONAL_ID);
+    }
+
+    @Test
     void RLE_035_a_host_without_masked_rule_sets_starts_without_a_key() {
         try (ConfigurableApplicationContext host = start(freshDatabase())) {
             assertThat(host.isActive()).isTrue();

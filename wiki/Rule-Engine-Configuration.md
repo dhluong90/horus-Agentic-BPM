@@ -38,7 +38,8 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `masking.hmac-key` | unset | Built | Base64 key, 32 bytes or more after decoding, for HMAC-SHA256 of masked inputs, used by every tenant without its own key. Supply it from an environment variable (`HORUS_BPM_RULES_MASKING_HMAC_KEY`) or a secret store. When unset, the shared `horus.bpm.masking.hmac-key` is used. See [Masking keys](#masking-keys) |
 | `masking.hmac-key-id`, `masking.tenants.<tenant>.hmac-key-id` | `k1` | Built | Label of the key, 1 to 32 letters, digits, `_` or `-`, stored in every fingerprint as `hmac:<keyId>:<hex>`, so each row says which key made it. Not secret; change it whenever you change the key. When unset, the shared `horus.bpm.masking.hmac-key-id` is used |
 | `masking.search.max-per-minute`, `masking.tenants.<tenant>.search.max-per-minute` | `30` | Built | Masked-input searches one caller may run per minute on one replica, at least `1`; it cannot be switched off. Past it: `429 RATE_LIMITED` with `Retry-After`, and an audit entry with `outcome = RATE_LIMITED`. A value below 1 stops start-up |
-| `masking.tenants.<tenant>.hmac-key` | unset | Built | The tenant's own key, same format. A tenant with this setting never uses the host key, even when its own value is invalid |
+| `masking.tenants.<tenant>.hmac-key` | unset | Built | The tenant's own key, same format. A tenant with this setting never writes with the host key, even when its own value is invalid. Its search still tries its subkeys of the host keys, so rows from before the move stay findable. The tenant id `*` is reserved and stops start-up |
+| `masking.previous-keys[n].hmac-key`, `masking.previous-keys[n].hmac-key-id`, `masking.tenants.<tenant>.previous-keys[n].*` | empty | 0.2.0 | Earlier keys kept after a rotation, each with the id its tokens carry (required). Used by the masked-input search only, never for writing. A previous host key is also searched for tenants that now have a key of their own. See [Rotating a key](#rotating-a-masking-key) |
 | `masking.tenants.<tenant>.mask-default` | `decision-log.mask-default` | Built | The masking default of one tenant |
 | `masking.tenants.<tenant>.require-explicit-mask` | `decision-log.require-explicit-mask` | 0.2 | Strict mode for one tenant |
 | `masking.tenants.<tenant>.personal-data-names` | the host's list | 0.2 | The tenant's own list, replacing the host's for that tenant only |
@@ -90,6 +91,11 @@ A rule set marks personal data with `mask: true`; the decision log then stores `
 | A key setting holds a value that is not Base64 or decodes to fewer than 32 bytes | Start-up fails naming the setting; the value is never printed |
 | A tenant key equals the host key or another tenant's key | Start-up fails naming the setting; keys are compared in constant time and never printed |
 | A tenant key's id equals the host key id (`k1` when neither is set) | Start-up fails naming `masking.tenants.<tenant>.hmac-key-id`; give each tenant key an id of its own |
+| Two keys share one id among the host keys or one tenant's keys, current or previous, or a previous key equals a configured key | Start-up fails naming the setting; the key is never printed |
+| A key id already used in this database comes back with different key bytes | Start-up fails naming the key id and both check values, never the key (see [Rotating a key](#rotating-a-masking-key)) |
+| A key id once used for a host key is given to a tenant key, or the reverse, even after the first key was retired | Start-up fails naming the key id and the tenant; give the new key an id of its own |
+| A tenant is configured as `masking.tenants.[*]` | Start-up fails naming the setting: `*` is the scope of the host keys |
+| A `MaskingPolicy` bean of your own hands out a key, for a tenant with live rule sets, that it does not return from `configuredKeys()` | Start-up fails naming the policy class, the tenant and the key id. A bean that declares no keys at all is named in a start-up warning |
 | No rule set masks anything and no key is set | The host starts |
 | An output cell or default reads an input declared `mask: true` | Import is refused with `422 VALIDATION_FAILED` naming the output and the input |
 | An output reads an input that only the tenant's masking default masks | Its decisions fail closed: `422 EVALUATION_ERROR`, `error_code = MASKED_INPUT_IN_OUTPUT`, no inputs or outputs logged |
@@ -139,7 +145,25 @@ The start-up record lives in `rle_setting_seen` (one row per tenant, plus one fo
 
 The subkey of `bank-a` in that vector is `c8e45e83d5ee7574102467fccc635e7113045b1b05714cca14a9aab5f01c2ecb`. The token is the input's value fingerprinted with the tenant's key only, without the rule set or the input name, so one person has one token across a tenant's rule sets.
 
-To keep one key per tenant, either set `masking.tenants.<tenant>.hmac-key` for each tenant, or declare a `MaskingPolicy` bean that reads the tenant's key from your vault; the bean replaces every `masking.*` setting, and with it the personal-data settings: its `requireExplicitMask(tenant)` and `personalDataNames(tenant)` default to off and to the built-in list. A bean that shares one root key between tenants derives each tenant's key with `MaskingKey.forTenant(tenantId)`. The key never appears in a log line, a response, an event or a metric. Rotation is not offered by these settings yet: decisions keep the fingerprint, and the key id, of the key in force when they were made. A `MaskingPolicy` bean can already hold earlier keys in `searchKeys`, and the search fingerprints the value with each of them.
+To keep one key per tenant, either set `masking.tenants.<tenant>.hmac-key` for each tenant, or declare a `MaskingPolicy` bean that reads the tenant's key from your vault; the bean replaces every `masking.*` setting, and with it the personal-data settings: its `requireExplicitMask(tenant)` and `personalDataNames(tenant)` default to off and to the built-in list. A bean that shares one root key between tenants derives each tenant's key with `MaskingKey.forTenant(tenantId)`. The key never appears in a log line, a response, an event or a metric. Decisions keep the fingerprint, and the key id, of the key in force when they were made; stored rows are never re-fingerprinted.
+
+#### Rotating a masking key
+
+1. Generate the new key and give it a new id. Keep the old key and its id under `previous-keys`:
+   ```bash
+   export HORUS_BPM_RULES_MASKING_HMAC_KEY="$(openssl rand -base64 32)"
+   export HORUS_BPM_RULES_MASKING_HMACKEYID=k2
+   export HORUS_BPM_RULES_MASKING_PREVIOUSKEYS_0_HMACKEY="$OLD_KEY"   # from your secret store
+   export HORUS_BPM_RULES_MASKING_PREVIOUSKEYS_0_HMACKEYID=k1
+   ```
+2. Restart every replica. New decisions are stored as `hmac:k2:<hex>`. A search by a national id such as `079090001234` fingerprints it with `k2` and then with `k1`, so it finds decisions made under both keys. A tenant on the host key searches with its own subkey of each key; a tenant's own earlier keys go under `masking.tenants.<tenant>.previous-keys` and are used as they are.
+3. To retire `k1`, remove it from `previous-keys`. Decisions made under `k1` stay in the log, but the search no longer finds them.
+
+**Rolling deploys.** While replicas restart one by one, the ones still on the old settings do not know `k2`: their searches miss decisions that the new replicas wrote under `k2`, until they restart too. To close that gap, roll out in two steps: first add the new key under `previous-keys` with id `k2` and keep `k1` current, so every replica can search under `k2`; then make `k2` current and move `k1` to `previous-keys`.
+
+**Moving a tenant off the host key.** When a tenant that shared the host key gets `masking.tenants.<tenant>.hmac-key`, it writes under its own key from then on. Its search still tries its subkey of the current host key and of every key under `previous-keys`, so the decisions it made before the move stay findable until that host key is retired. Give the tenant key an id the host never used: a host key id never comes back as a tenant key id, and the reverse.
+
+**Key check values.** A key id names one key for good. At start-up the engine records a check value for every configured key, per tenant (or `*` for host keys) and key id, in `rle_masking_key_check`, and it refuses to start when a known id comes back with different key bytes, across replicas and over time, and also after the key is retired. It also refuses a key id that moves between the host and a tenant. The check value is computed under a key derived for it alone: `HKDF-SHA256(key, info = "horus-bpm/masking/v1/kcv")`, then the first 8 bytes of the HMAC-SHA256 of an empty message, in hex. It is not secret: it tells keys apart without revealing them, and it is never equal to a token. The key `000102…1f` gives `471be5b6391b902f`. A `MaskingPolicy` bean of your own must return every key it uses, current and previous, from `configuredKeys()`: a tenant's own keys under its id, host keys under `*`. At start-up, a key in use for a tenant with live rule sets that is not declared there stops the host.
 
 ## Host-wide properties
 

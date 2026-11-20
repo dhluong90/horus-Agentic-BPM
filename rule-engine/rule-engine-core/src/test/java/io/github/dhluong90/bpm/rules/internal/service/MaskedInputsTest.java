@@ -684,6 +684,122 @@ class MaskedInputsTest {
         return HexFormat.of().formatHex(check.doFinal(new byte[0])).substring(0, 16);
     }
 
+    @Test
+    void TR_SEC_10_a_known_key_id_that_comes_back_with_other_key_bytes_stops_start_up() {
+        MaskingPolicy first = configured(Map.of(MaskingPolicy.HOST_SCOPE, List.of(MaskingKey.of("k1", KEY_A)),
+                "bank-b", List.of(MaskingKey.of("b1", KEY_B))));
+        engines(first).maskingCheck().verify(List.of());
+        assertThat(stores.maskingKeyChecks).hasSize(2)
+                .containsEntry("*\u0000k1", MaskingKey.of(KEY_A).checkValue());
+        // The same keys again, on another replica or after a restart: accepted.
+        engines(first).maskingCheck().verify(List.of());
+
+        byte[] other = seeded(32, 7L);
+        MaskingPolicy reused = configured(Map.of(MaskingPolicy.HOST_SCOPE, List.of(MaskingKey.of("k1", other))));
+        assertThatThrownBy(() -> engines(reused).maskingCheck().verify(List.of()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("host masking key id k1")
+                .hasMessageContaining(MaskingKey.of(KEY_A).checkValue())
+                .hasMessageContaining(MaskingKey.of(other).checkValue())
+                .hasMessageNotContaining(HexFormat.of().formatHex(other))
+                .hasMessageNotContaining(java.util.Base64.getEncoder().encodeToString(other));
+        MaskingPolicy tenantReused = configured(Map.of("bank-b", List.of(MaskingKey.of("b1", other))));
+        assertThatThrownBy(() -> engines(tenantReused).maskingCheck().verify(List.of()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("masking key id b1 of tenant bank-b");
+    }
+
+    @Test
+    void TR_SEC_10_a_retired_host_key_id_never_comes_back_as_a_tenant_key_id_and_the_reverse() {
+        // bank-a writes under the host key k1; the host then rotates to k2 and drops k1.
+        engines(configured(Map.of(MaskingPolicy.HOST_SCOPE, List.of(MaskingKey.of("k1", KEY_A))))).maskingCheck()
+                .verify(List.of());
+        // bank-a then gets a key of its own and reuses id k1: hmac:k1: would name two keys of bank-a over time.
+        MaskingPolicy reusedByTenant = configured(Map.of(MaskingPolicy.HOST_SCOPE, List.of(MaskingKey.of("k2", KEY_B)),
+                "bank-a", List.of(MaskingKey.of("k1", seeded(32, 11L)))));
+        assertThatThrownBy(() -> engines(reusedByTenant).maskingCheck().verify(List.of()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("masking key id k1 of tenant bank-a")
+                .hasMessageContaining("already recorded as a host key id");
+
+        // The reverse: bank-b drops its own key t1, and a host key later takes id t1.
+        engines(configured(Map.of("bank-b", List.of(MaskingKey.of("t1", KEY_B))))).maskingCheck().verify(List.of());
+        // Two tenants may each have a key t1 of their own: tokens are always searched within one tenant.
+        engines(configured(Map.of("bank-c", List.of(MaskingKey.of("t1", seeded(32, 13L)))))).maskingCheck()
+                .verify(List.of());
+        MaskingPolicy reusedByHost = configured(Map.of(MaskingPolicy.HOST_SCOPE,
+                List.of(MaskingKey.of("t1", seeded(32, 12L)))));
+        assertThatThrownBy(() -> engines(reusedByHost).maskingCheck().verify(List.of()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("host masking key id t1")
+                .hasMessageContaining("already recorded as a key id of tenant bank-b");
+    }
+
+    @Test
+    void TR_SEC_10_a_host_policy_that_keeps_a_key_in_use_out_of_configured_keys_stops_start_up() {
+        RuleEngines setup = engines(MaskingPolicy.withKey(MaskingKey.of(KEY_A)));
+        publish(setup, "bank-a", MINOR_REVIEW, "minor-review");
+        // A vault-backed policy that hands out bank-a's key but declares nothing.
+        MaskingPolicy undeclared = keys(Map.of("bank-a", KEY_B), Set.of());
+        assertThatThrownBy(() -> engines(undeclared).maskingCheck().verify(List.of()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("does not declare in configuredKeys()")
+                .hasMessageContaining("key id k1 of tenant bank-a")
+                .hasMessageContaining(undeclared.getClass().getName())
+                .hasMessageNotContaining(HexFormat.of().formatHex(KEY_B));
+        assertThat(stores.maskingKeyChecks).isEmpty();
+        // Declared under the tenant as it is, or as the host key whose subkey it is: accepted.
+        engines(new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenantId) {
+                return Optional.of(MaskingKey.of("b1", KEY_B));
+            }
+
+            @Override
+            public Map<String, List<MaskingKey>> configuredKeys() {
+                return Map.of("bank-a", List.of(MaskingKey.of("b1", KEY_B)));
+            }
+        }).maskingCheck().verify(List.of());
+        engines(MaskingPolicy.withKey(MaskingKey.of("h1", KEY_A))).maskingCheck().verify(List.of());
+        // A declared id with other bytes is not the key in use.
+        MaskingPolicy wrongBytes = new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenantId) {
+                return Optional.of(MaskingKey.of("b1", KEY_B));
+            }
+
+            @Override
+            public Map<String, List<MaskingKey>> configuredKeys() {
+                return Map.of("bank-a", List.of(MaskingKey.of("b1", KEY_A)));
+            }
+        };
+        assertThatThrownBy(() -> engines(wrongBytes).maskingCheck().verify(List.of()))
+                .hasMessageContaining("key id b1 of tenant bank-a");
+    }
+
+    @Test
+    void TR_SEC_10_keys_are_recorded_in_scope_then_key_id_order_whatever_order_the_policy_gives() {
+        MaskingPolicy unordered = configured(Map.of("bank-b", List.of(MaskingKey.of("b3", seeded(32, 3L)),
+                        MaskingKey.of("b1", seeded(32, 1L)), MaskingKey.of("b2", seeded(32, 2L))),
+                MaskingPolicy.HOST_SCOPE, List.of(MaskingKey.of("k2", KEY_B), MaskingKey.of("k1", KEY_A))));
+        engines(unordered).maskingCheck().verify(List.of());
+        assertThat(stores.maskingKeyCheckOrder).containsExactly("* k1", "* k2", "bank-b b1", "bank-b b2", "bank-b b3");
+    }
+
+    static MaskingPolicy configured(Map<String, List<MaskingKey>> keys) {
+        return new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenantId) {
+                return Optional.empty();
+            }
+
+            @Override
+            public Map<String, List<MaskingKey>> configuredKeys() {
+                return keys;
+            }
+        };
+    }
+
     static String hmacHex(byte[] key, String value) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));

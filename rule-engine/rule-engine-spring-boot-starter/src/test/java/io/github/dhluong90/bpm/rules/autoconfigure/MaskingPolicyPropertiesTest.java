@@ -22,6 +22,8 @@ class MaskingPolicyPropertiesTest {
     static final String HOST_KEY = key('h');
     static final String TENANT_KEY = key('t');
     static final String SHARED_KEY = key('s');
+    static final String OLD_KEY = key('o');
+    static final String OLD_TENANT_KEY = key('p');
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(PolicyOnly.class);
@@ -102,7 +104,9 @@ class MaskingPolicyPropertiesTest {
                     PropertyMaskingPolicy policy = context.getBean(PropertyMaskingPolicy.class);
                     assertThat(policy.hmacKey("bank-a").orElseThrow().keyId()).isEqualTo("k1");
                     assertThat(fingerprint(policy, "bank-b")).startsWith("hmac:bank-b-2027:");
-                    assertThat(policy.searchKeys("bank-b")).extracting(MaskingKey::keyId).containsExactly("bank-b-2027");
+                    // Its own key first; then its subkey of the host key, for rows from before it had its own.
+                    assertThat(policy.searchKeys("bank-b")).extracting(MaskingKey::keyId)
+                            .containsExactly("bank-b-2027", "k1");
                 });
         runner.withPropertyValues("horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
                         "horus.bpm.rules.masking.hmac-key-id=not a label")
@@ -164,6 +168,154 @@ class MaskingPolicyPropertiesTest {
         // Without a host key there is nothing to confuse, and the default id is fine.
         runner.withPropertyValues("horus.bpm.rules.masking.tenants.bank-b.hmac-key=" + TENANT_KEY)
                 .run(context -> assertThat(context.getBean(PropertyMaskingPolicy.class).invalidSettings()).isEmpty());
+    }
+
+    @Test
+    void RLE_012_previous_keys_feed_the_search_and_never_the_writing() {
+        runner.withPropertyValues(
+                        "horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.hmac-key-id=k2",
+                        "horus.bpm.rules.masking.previous-keys[0].hmac-key=" + OLD_KEY,
+                        "horus.bpm.rules.masking.previous-keys[0].hmac-key-id=k1",
+                        "horus.bpm.rules.masking.tenants.bank-b.hmac-key=" + TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-b.hmac-key-id=b2",
+                        "horus.bpm.rules.masking.tenants.bank-b.previous-keys[0].hmac-key=" + OLD_TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-b.previous-keys[0].hmac-key-id=b1")
+                .run(context -> {
+                    PropertyMaskingPolicy policy = context.getBean(PropertyMaskingPolicy.class);
+                    assertThat(policy.invalidSettings()).isEmpty();
+                    // Writing: the current key only.
+                    assertThat(fingerprint(policy, "bank-a")).startsWith("hmac:k2:");
+                    assertThat(fingerprint(policy, "bank-b")).startsWith("hmac:b2:");
+                    // Search: current first, then each earlier key; the host's through the tenant's subkey.
+                    assertThat(policy.searchKeys("bank-a")).extracting(MaskingKey::keyId).containsExactly("k2", "k1");
+                    assertThat(policy.searchKeys("bank-a").get(1).fingerprint("x"))
+                            .isEqualTo(MaskingKey.fromBase64("k1", OLD_KEY).forTenant("bank-a").fingerprint("x"));
+                    // A tenant with its own key searches its own keys, used as they are, then its host subkeys.
+                    assertThat(policy.searchKeys("bank-b")).extracting(MaskingKey::keyId)
+                            .containsExactly("b2", "b1", "k2", "k1");
+                    assertThat(policy.searchKeys("bank-b").get(1).fingerprint("x"))
+                            .isEqualTo(MaskingKey.fromBase64("b1", OLD_TENANT_KEY).fingerprint("x"));
+                    // Check values are recorded per scope: host keys as configured under '*', tenant keys by tenant.
+                    assertThat(policy.configuredKeys()).containsOnlyKeys("*", "bank-b");
+                    assertThat(policy.configuredKeys().get("*")).extracting(MaskingKey::checkValue).containsExactly(
+                            MaskingKey.fromBase64(HOST_KEY).checkValue(), MaskingKey.fromBase64(OLD_KEY).checkValue());
+                    assertThat(policy.toString()).doesNotContain(HOST_KEY, OLD_KEY, TENANT_KEY, OLD_TENANT_KEY);
+                    assertThat(context.getBean(RuleEngineProperties.class).toString())
+                            .doesNotContain(HOST_KEY, OLD_KEY, TENANT_KEY, OLD_TENANT_KEY);
+                });
+        // Retired: a key no longer listed is no longer searched.
+        runner.withPropertyValues("horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.hmac-key-id=k2")
+                .run(context -> assertThat(context.getBean(PropertyMaskingPolicy.class).searchKeys("bank-a"))
+                        .extracting(MaskingKey::keyId).containsExactly("k2"));
+    }
+
+    @Test
+    void RLE_012_a_tenant_that_moves_off_the_host_key_still_finds_the_rows_it_wrote_under_it() {
+        // Before: bank-a writes national id 079090001234 under its subkey of host key k1.
+        String tokenOnHostKey = MaskingKey.fromBase64(HOST_KEY).forTenant("bank-a").fingerprint("079090001234");
+        // After: bank-a has a key of its own, a1; the host key is unchanged.
+        runner.withPropertyValues(
+                        "horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-a.hmac-key=" + TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-a.hmac-key-id=a1")
+                .run(context -> {
+                    PropertyMaskingPolicy policy = context.getBean(PropertyMaskingPolicy.class);
+                    assertThat(policy.invalidSettings()).isEmpty();
+                    assertThat(fingerprint(policy, "bank-a")).startsWith("hmac:a1:");
+                    assertThat(policy.searchKeys("bank-a")).extracting(MaskingKey::keyId).containsExactly("a1", "k1");
+                    assertThat(policy.searchKeys("bank-a")).extracting(key -> key.fingerprint("079090001234"))
+                            .contains(tokenOnHostKey);
+                    // The host key itself is never searched, only bank-a's subkey of it.
+                    assertThat(policy.searchKeys("bank-a")).noneMatch(key -> key.sameKeyAs(
+                            MaskingKey.fromBase64(HOST_KEY)));
+                });
+        // Later the host rotates to k2 and keeps k1 as a previous key: bank-a still finds its k1 rows.
+        runner.withPropertyValues(
+                        "horus.bpm.rules.masking.hmac-key=" + SHARED_KEY,
+                        "horus.bpm.rules.masking.hmac-key-id=k2",
+                        "horus.bpm.rules.masking.previous-keys[0].hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.previous-keys[0].hmac-key-id=k1",
+                        "horus.bpm.rules.masking.tenants.bank-a.hmac-key=" + TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-a.hmac-key-id=a1")
+                .run(context -> assertThat(context.getBean(PropertyMaskingPolicy.class).searchKeys("bank-a"))
+                        .extracting(key -> key.fingerprint("079090001234")).contains(tokenOnHostKey));
+    }
+
+    @Test
+    void TR_SEC_10_a_tenant_named_star_is_refused_because_star_is_the_host_scope() {
+        runner.withPropertyValues(
+                        "horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.tenants.[*].hmac-key=" + TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.[*].hmac-key-id=t1")
+                .run(context -> {
+                    PropertyMaskingPolicy policy = context.getBean(PropertyMaskingPolicy.class);
+                    assertThat(policy.invalidSettings()).singleElement().asString()
+                            .contains("horus.bpm.rules.masking.tenants.[*]", "reserved for the host keys")
+                            .doesNotContain(TENANT_KEY);
+                    assertThat(policy.configuredKeys()).containsOnlyKeys("*");
+                    assertThat(policy.configuredKeys().get("*")).singleElement()
+                            .satisfies(key -> assertThat(key.sameKeyAs(MaskingKey.fromBase64(HOST_KEY))).isTrue());
+                });
+    }
+
+    @Test
+    void TR_SEC_10_two_keys_with_the_same_id_for_one_tenant_stop_start_up_naming_the_setting_never_the_key() {
+        runner.withPropertyValues(
+                        "horus.bpm.rules.masking.tenants.bank-a.hmac-key=" + TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-a.hmac-key-id=a1",
+                        "horus.bpm.rules.masking.tenants.bank-a.previous-keys[0].hmac-key=" + OLD_TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-a.previous-keys[0].hmac-key-id=a1")
+                .run(context -> assertThat(context.getBean(PropertyMaskingPolicy.class).invalidSettings())
+                        .singleElement().asString()
+                        .contains("horus.bpm.rules.masking.tenants.bank-a.previous-keys[0].hmac-key-id", "a1")
+                        .doesNotContain(TENANT_KEY, OLD_TENANT_KEY));
+        runner.withPropertyValues(
+                        "horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.previous-keys[0].hmac-key=" + OLD_KEY,
+                        "horus.bpm.rules.masking.previous-keys[0].hmac-key-id=k1")
+                .run(context -> assertThat(context.getBean(PropertyMaskingPolicy.class).invalidSettings())
+                        .singleElement().asString()
+                        .contains("horus.bpm.rules.masking.previous-keys[0].hmac-key-id", "k1")
+                        .doesNotContain(HOST_KEY, OLD_KEY));
+        // A tenant's earlier key may not reuse a host key id either.
+        runner.withPropertyValues(
+                        "horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-a.previous-keys[0].hmac-key=" + OLD_TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-a.previous-keys[0].hmac-key-id=k1")
+                .run(context -> assertThat(context.getBean(PropertyMaskingPolicy.class).invalidSettings())
+                        .singleElement().asString()
+                        .contains("horus.bpm.rules.masking.tenants.bank-a.previous-keys[0].hmac-key-id",
+                                "host key id k1"));
+    }
+
+    @Test
+    void TR_SEC_10_a_previous_key_equal_to_a_current_key_or_without_an_id_is_refused() {
+        runner.withPropertyValues(
+                        "horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.previous-keys[0].hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.previous-keys[0].hmac-key-id=k0",
+                        "horus.bpm.rules.masking.tenants.bank-b.hmac-key=" + TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-b.hmac-key-id=b2",
+                        "horus.bpm.rules.masking.tenants.bank-b.previous-keys[0].hmac-key=" + TENANT_KEY,
+                        "horus.bpm.rules.masking.tenants.bank-b.previous-keys[0].hmac-key-id=b1")
+                .run(context -> assertThat(context.getBean(PropertyMaskingPolicy.class).invalidSettings())
+                        .anySatisfy(problem -> assertThat(problem)
+                                .contains("horus.bpm.rules.masking.previous-keys[0].hmac-key", "equals the host key"))
+                        .anySatisfy(problem -> assertThat(problem).contains(
+                                "horus.bpm.rules.masking.tenants.bank-b.hmac-key", "previous key of tenant bank-b b1"))
+                        .allSatisfy(problem -> assertThat(problem).doesNotContain(HOST_KEY, TENANT_KEY)));
+        runner.withPropertyValues(
+                        "horus.bpm.rules.masking.hmac-key=" + HOST_KEY,
+                        "horus.bpm.rules.masking.previous-keys[0].hmac-key=" + OLD_KEY)
+                .run(context -> {
+                    PropertyMaskingPolicy policy = context.getBean(PropertyMaskingPolicy.class);
+                    assertThat(policy.invalidSettings()).singleElement().asString()
+                            .contains("horus.bpm.rules.masking.previous-keys[0].hmac-key-id", "id")
+                            .doesNotContain(OLD_KEY);
+                    assertThat(policy.searchKeys("bank-a")).hasSize(1);
+                });
     }
 
     static String fingerprint(PropertyMaskingPolicy policy, String tenant) {

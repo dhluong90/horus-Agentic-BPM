@@ -57,7 +57,8 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
         Supersession supersession = new Supersession(store, outbox, context.settings());
         return new RuleEngines(new DefaultRuleEngine(context, store, log, cache),
                 new DefaultVersionService(context, store, outbox, keys, supersession, cache), keys,
-                new DefaultDecisionLogService(context, log, outbox), new MaskingStartupCheck(store, context.masking()),
+                new DefaultDecisionLogService(context, log, outbox), new MaskingStartupCheck(store, context.masking(),
+                        context.transactions(), context.clock()),
                 new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, keys, querySettings),
                 cache);
     }

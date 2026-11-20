@@ -261,6 +261,28 @@ public interface RuleStore {
     List<VersionInputs> liveVersionInputs();
 
     /**
+     * Returns the check value recorded for a masking key id, recording {@code checkValue} first when the id is not
+     * known yet. Every replica gets the same answer: the first insert wins and later ones read it. Engine-internal,
+     * used once at start-up outside any request; a check value is not secret.
+     *
+     * @param scope {@code *} for a host key, otherwise the tenant id
+     * @param keyId the key id
+     * @param checkValue the check value of the key configured now
+     * @param now the time of first sight
+     * @return the recorded check value
+     */
+    String maskingKeyCheck(String scope, String keyId, String checkValue, Instant now);
+
+    /**
+     * Returns every scope under which a masking key id is recorded, so start-up can refuse an id that a host key and a
+     * tenant key would share over time. Engine-internal, across tenants on purpose, used once at start-up.
+     *
+     * @param keyId the key id
+     * @return the scopes ({@code *} for the host, otherwise tenant ids), possibly empty
+     */
+    java.util.Set<String> maskingKeyScopes(String keyId);
+
+    /**
      * Reads the value of a setting each tenant last started with (RLE-052). Engine-internal, read once at start-up
      * outside any request.
      *
