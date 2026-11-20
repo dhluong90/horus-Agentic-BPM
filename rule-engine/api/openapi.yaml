@@ -6,7 +6,7 @@ info:
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
     export, replace a draft, diff two versions, request publication, approve, reject, withdraw, retire, history,
-    evaluate (at the host clock, at a chosen clock, or pinned to a version), replay of a logged decision,
+    simulate a version over sample inputs, evaluate (at the host clock, at a chosen clock, or pinned to a version), replay of a logged decision,
     and decision-log reads (one decision, and the search by a masked input's plain value).
     The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
@@ -585,6 +585,68 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:simulate:
+    post:
+      tags: [rule-sets]
+      operationId: simulate
+      summary: Run a version over sample inputs beside the version effective now, without logging anything
+      description: |
+        Permission `rules:simulate`, checked before the body is read. Runs the version (normally a
+        `DRAFT`, or a version `PENDING_APPROVAL` an approver is looking at) and the version effective
+        at the host clock over 1 to 1,000 sample input sets, and flags each sample whose outcome
+        changed: the outcome kind, an output value or the failure code differs. A different matched
+        rule giving the same outputs is not a change; with no effective version every sample is
+        `changed`. Validation runs first: a stored version that no longer compiles or matches its hash
+        is `422 VALIDATION_FAILED`, and no sample is evaluated. Inputs the effective version does not
+        declare are left out of its side. Writes nothing (no decision row, no idempotency record, no
+        event), so it takes no `Idempotency-Key`; the same version, samples and clock give the same
+        body. A version of another tenant is `404 VERSION_NOT_FOUND`. Members other than `samples` and
+        their `inputs` are ignored, including `tenantId`. A body over 1,048,576 bytes is
+        `413 PAYLOAD_TOO_LARGE`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationRequest'
+            example:
+              samples:
+                - inputs: { tier: GOLD, txCount: 5 }
+                - inputs: { tier: SILVER, txCount: 2 }
+      responses:
+        '200':
+          description: One result per sample, in the order sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationResult'
+              example:
+                ruleSet: card-fee
+                version: 2
+                status: DRAFT
+                baselineVersion: 1
+                evaluatedAt: '2026-12-15T02:00:00Z'
+                sampleCount: 2
+                changedCount: 1
+                results:
+                  - index: 0
+                    changed: false
+                    simulated: { outcome: MATCHED, matchedRuleIds: [R1], outputs: { fee: { currency: VND, amount: 0 } } }
+                    baseline: { outcome: MATCHED, matchedRuleIds: [R1], outputs: { fee: { currency: VND, amount: 0 } } }
+                  - index: 1
+                    changed: true
+                    simulated: { outcome: MATCHED, matchedRuleIds: [R3], outputs: { fee: { currency: VND, amount: 30000 } } }
+                    baseline: { outcome: MATCHED, matchedRuleIds: [R3], outputs: { fee: { currency: VND, amount: 50000 } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:retire:
     post:
@@ -1453,6 +1515,82 @@ components:
             The instant the decision reasons about, ISO 8601 with `Z` or an offset, for example
             `2026-11-20T10:00:00Z`. Selects the version in force and feeds `today()` and `now()`.
             Needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`); default the host clock.
+    SimulationRequest:
+      type: object
+      required: [samples]
+      properties:
+        samples:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [inputs]
+            properties:
+              inputs:
+                type: object
+                description: Input values by name; money as `Money`
+                additionalProperties: true
+    SimulationResult:
+      type: object
+      required: [ruleSet, version, status, baselineVersion, evaluatedAt, sampleCount, changedCount, results]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        status:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+        baselineVersion:
+          type: [integer, 'null']
+          description: The version effective at `evaluatedAt`, or null when nothing is effective
+        evaluatedAt: { type: string, format: date-time }
+        sampleCount: { type: integer }
+        changedCount:
+          type: integer
+          description: How many results have `changed` set
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatedSample'
+    SimulatedSample:
+      type: object
+      required: [index, changed, simulated, baseline]
+      properties:
+        index:
+          type: integer
+          description: Position of the sample in the request, from 0
+        changed:
+          type: boolean
+          description: The outcome kind, an output value or the failure code differs, or there is no baseline
+        simulated:
+          $ref: '#/components/schemas/SimulatedOutcome'
+        baseline:
+          oneOf:
+            - $ref: '#/components/schemas/SimulatedOutcome'
+            - type: 'null'
+    SimulatedOutcome:
+      type: object
+      required: [outcome, matchedRuleIds, outputs]
+      properties:
+        outcome:
+          type: string
+          enum: [MATCHED, NO_MATCH, FAILED]
+        matchedRuleIds:
+          type: array
+          items: { type: string }
+        outputs:
+          type: object
+          additionalProperties: true
+          description: Output values by name; money as `Money`. Empty on `FAILED`
+        error:
+          type: object
+          description: Present on `FAILED` only
+          required: [code, detail]
+          properties:
+            code:
+              type: string
+              enum: [EVALUATION_ERROR, UNIQUE_HIT_VIOLATION]
+            detail: { type: string }
     DecisionResult:
       type: object
       required: [decisionId, ruleSet, version, evalClock, evaluatedAt, clockChosen, pinned, outcome, matchedRuleIds, outputs]

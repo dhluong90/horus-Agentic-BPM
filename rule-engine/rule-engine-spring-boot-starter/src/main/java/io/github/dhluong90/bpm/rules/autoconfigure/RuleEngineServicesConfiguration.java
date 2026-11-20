@@ -11,6 +11,7 @@ import io.github.dhluong90.bpm.rules.rest.DecisionController;
 import io.github.dhluong90.bpm.rules.rest.DecisionLogController;
 import io.github.dhluong90.bpm.rules.rest.ProblemDetails;
 import io.github.dhluong90.bpm.rules.rest.RuleSetController;
+import io.github.dhluong90.bpm.rules.rest.SimulationController;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
@@ -161,6 +162,12 @@ class RuleEngineServicesConfiguration {
         @ConditionalOnMissingBean
         DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions, CallerResolver callers) {
             return new DecisionLogController(decisions, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        SimulationController ruleEngineSimulationController(RuleEngine engine, CallerResolver callers) {
+            return new SimulationController(engine, callers);
         }
 
         @Bean

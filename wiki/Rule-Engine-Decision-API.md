@@ -96,7 +96,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions` | New draft, empty or copied from a version | `rules:author` | `Idempotency-Key` |
 | `PUT /rule-sets/{name}/versions/{v}` | Replace a draft's content in place; the draft's author only | `rules:author` | `Idempotency-Key`, `If-Match` (both required) |
 | `POST /rule-sets/{name}/versions/{v}:validate` | Parse and type-check without saving | `rules:author` | |
-| `POST /rule-sets/{name}/versions/{v}:simulate` | Evaluate a draft over sample inputs or logged decisions; writes no decision rows | `rules:simulate` | `Idempotency-Key` |
+| `POST /rule-sets/{name}/versions/{v}:simulate` | Run a version (normally a draft) over 1 to 1,000 sample inputs beside the version effective now, flagging changed outcomes; writes nothing (see [[Rule Engine Simulation and Testing]]). Replay over logged decisions is M3 | `rules:simulate` | None: nothing is written, so no `Idempotency-Key` |
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | Freeze the draft, record the requester | `rules:author` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:approve` | Publish; approver must differ from requester | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
 | `POST /rule-sets/{name}/versions/{v}:reject` | Back to draft with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
