@@ -80,7 +80,7 @@ History is never rewritten, so a rollback is a new version with old content.
 
 ## Retire a rule set
 
-How many people a retirement needs depends on `horus.bpm.rules.lifecycle.retire-approval` ([[Rule Engine Configuration]]). `/api/bpm/meta` shows the mode in force.
+How many people a retirement needs depends on `horus.bpm.lifecycle.retire-approval`, shared with the Process Engine ([[Rule Engine Configuration]]). `/api/bpm/meta` shows the mode in force.
 
 ### Default mode: `single`
 
@@ -102,7 +102,20 @@ The emergency single-approver path is not involved in either mode: it governs pu
 
 ### What a retirement does
 
-Older published versions are retired with it, so none comes back. Callers then receive `404 NO_EFFECTIVE_VERSION`. Decisions already logged keep pointing at version 3 and replay; an evaluation with a clock before the retirement still selects version 3 (ADR-0025).
+From the instant of the retirement no replica selects version 3: every evaluation selects in the database. Callers then receive `404 NO_EFFECTIVE_VERSION`, unless an older version is still in force. Decisions already logged keep pointing at version 3 and replay. An evaluation with a clock before the retirement still selects version 3 (ADR-0025), and version 3 stays readable, with `retiredAt` in its response.
+
+- **The last version in effect needs a confirmation.** If no other version would remain in effect, send `{ "reason": "Tet promotion ended", "confirmNoVersionInEffect": true }`; without it the answer is `409 LAST_VERSION_IN_EFFECT`, naming the rule set. The history row and the event record `noVersionInEffect: true`. A host may refuse it outright with `horus.bpm.lifecycle.retire-last-version: refuse` (PD-101).
+- **No older version comes back.** Versions that version 3 had superseded are retired with it, as `SUPERSEDED`, in the same transaction.
+- **A scheduled change can be cancelled.** Retiring a version whose `effectiveFrom` is still ahead leaves the version in force serving.
+- **A superseded version retires on its own.** Retiring a version that a newer version in effect already supersedes is `409 INVALID_STATE`, naming the newer version; nothing is written.
+
+`Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is `428 PRECONDITION_REQUIRED`, and without the key `400 INPUT_INVALID`. A retired version never changes state again; to use its rules again, export it and import the file as a new version.
+
+![Retirement by supersession on two replicas, and by hand](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/retire-and-supersede.svg)
+
+### Automatic retirement of a superseded version
+
+When a newer approved version comes into effect, the older one stops serving at that instant. Its status follows within one `lifecycle.sweep-interval` (1 minute by default), or at once when the newer version is in effect at its approval. The older version becomes `RETIRED` with one history row and one `rules.version.retired.v1` event: actor `system:supersession`, reason `SUPERSEDED`, `supersededBy` the version in force, `approvalMode: system`. Every replica runs the sweep in an ordinary transaction with no advisory lock, and each retirement is still recorded exactly once.
 
 ## Give one tenant different rules
 

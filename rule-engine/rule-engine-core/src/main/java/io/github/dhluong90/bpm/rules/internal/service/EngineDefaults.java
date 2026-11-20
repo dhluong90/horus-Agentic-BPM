@@ -68,8 +68,8 @@ public final class EngineDefaults {
     public static final int QUERY_DEFAULT_PAGE_SIZE = 50;
 
     /**
-     * Default and ceiling of {@code horus.bpm.rules.lifecycle.reason-max-length}: longest reason of a reject (and,
-     * later, a retire), in characters. A host may lower it, never raise it.
+     * Default and ceiling of {@code horus.bpm.rules.lifecycle.reason-max-length}: longest reason of a reject or a
+     * retire, in characters. A host may lower it, never raise it.
      */
     public static final int REASON_MAX_LENGTH = 2000;
 
@@ -93,6 +93,39 @@ public final class EngineDefaults {
      * verify re-reads at once. A bound of the engine, not a setting.
      */
     public static final java.time.Duration CURSOR_KEY_REFRESH = java.time.Duration.ofMinutes(5);
+
+    /** Default of {@code horus.bpm.rules.lifecycle.system-actor}: the actor recorded when a version is superseded. */
+    public static final String SYSTEM_ACTOR = "system:supersession";
+
+    /**
+     * The namespace of the engine's own actors: {@code lifecycle.system-actor} must start with it, and no caller id
+     * may, so a host user can never act or appear in the audit trail under an engine actor's name.
+     */
+    public static final String RESERVED_ACTOR_PREFIX = "system:";
+
+    /** Longest {@code lifecycle.system-actor}, in characters, the bound of every recorded actor. */
+    public static final int SYSTEM_ACTOR_MAX_LENGTH = 200;
+
+    /**
+     * Default of {@code horus.bpm.lifecycle.retire-approval} (PD-080): one {@code rules:approve} holder with a
+     * reason retires a version. The other value, {@code four-eyes}, arrives in M3 (RLE-038).
+     */
+    public static final String RETIRE_APPROVAL = "single";
+
+    /**
+     * Default of {@code horus.bpm.lifecycle.retire-last-version} (PD-101): retiring the version in effect, when no other
+     * would remain, needs {@code confirmNoVersionInEffect} on the request.
+     */
+    public static final String RETIRE_LAST_CONFIRM = "confirm";
+
+    /** {@code horus.bpm.lifecycle.retire-last-version: refuse}: the last version in effect is never retired by hand. */
+    public static final String RETIRE_LAST_REFUSE = "refuse";
+
+    /** Default of {@code horus.bpm.rules.lifecycle.sweep-interval}: how often superseded versions are retired. */
+    public static final java.time.Duration SWEEP_INTERVAL = java.time.Duration.ofMinutes(1);
+
+    /** Reason recorded on a version retired because a newer one is in effect (ADR-0025 decision 2). */
+    public static final String REASON_SUPERSEDED = "SUPERSEDED";
 
     /**
      * Default of {@code horus.bpm.rules.evaluation.pin-retired}: a pinned evaluation of a retired version is refused,

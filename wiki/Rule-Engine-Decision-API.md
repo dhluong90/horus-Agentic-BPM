@@ -222,7 +222,7 @@ Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ER
 | `rules.version.rejected.v1` | `:reject` | `ruleSet`, `version`, `rejectedBy`, `reason` |
 | `rules.version.withdrawn.v1` | `:withdraw` | `ruleSet`, `version`, `withdrawnBy`, `reason` (null when none was given) |
 | `rules.version.retire-requested.v1` | `:retire` in `four-eyes` mode (M3) | `ruleSet`, `version`, `requestedBy`, `reason` |
-| `rules.version.retired.v1` | `:retire` in `single` mode, `:confirm-retire`, or superseded | `ruleSet`, `version`, `retiredBy` (`system` when superseded; the confirmer in `four-eyes` mode), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the requester in `four-eyes` mode, else null), `retiredAt`, `noVersionInEffect` |
+| `rules.version.retired.v1` | `:retire` in `single` mode, `:confirm-retire`, or superseded | `ruleSet`, `version`, `retiredBy` (`system:supersession`, the `lifecycle.system-actor`, when superseded; the confirmer in `four-eyes` mode), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the requester in `four-eyes` mode, else null), `retiredAt`, `noVersionInEffect` |
 | `rules.decision.evaluated.v1` | every decision, off by default (`events.decision-evaluated`) | `decisionId`, `ruleSet`, `version`, `outcome` |
 
 A host that wants tamper evidence for approvals relays these events to a store outside the database administrator's control (an append-only log or a separate audit system) and reconciles the stored versions against it, because rows in the host database, outbox included, can be changed by whoever administers it.

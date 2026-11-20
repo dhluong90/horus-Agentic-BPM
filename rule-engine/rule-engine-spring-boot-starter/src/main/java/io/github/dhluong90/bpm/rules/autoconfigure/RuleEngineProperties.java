@@ -172,16 +172,57 @@ public record RuleEngineProperties(
     }
 
     /**
-     * Version lifecycle commands.
+     * Version lifecycle commands and the automatic retirement of superseded versions (ADR-0025).
      *
-     * @param reasonMaxLength the longest reason of {@code :reject}, in characters, 1 to 2000; default 2000. May be
-     *     lowered, never raised
+     * @param reasonMaxLength the longest reason of {@code :reject} and {@code :retire}, in characters, 1 to 2000;
+     *     default 2000. May be lowered, never raised
+     * @param sweepInterval how often the lifecycle sweep retires versions a newer version in effect has superseded,
+     *     {@code PT1S} to {@code PT1H}; default {@code PT1M}. Status only: selection follows the effective date
+     * @param systemActor the actor recorded on the history row and event of a superseded version; it must start with
+     *     {@code system:}, a namespace no caller id may use; default {@code system:supersession}
      */
-    public record Lifecycle(Integer reasonMaxLength) {
+    public record Lifecycle(Integer reasonMaxLength, Duration sweepInterval, String systemActor) {
+
+        /** Shortest accepted {@code sweep-interval}. */
+        static final Duration SWEEP_MIN = Duration.ofSeconds(1);
+
+        /** Longest accepted {@code sweep-interval}: the status of a superseded version lags at most this long. */
+        static final Duration SWEEP_MAX = Duration.ofHours(1);
+
+        /**
+         * Returns the validated sweep interval.
+         *
+         * @return the interval, the default when unset
+         * @throws IllegalArgumentException when it is outside {@code PT1S} to {@code PT1H}, naming the property
+         */
+        public Duration sweepIntervalOrDefault() {
+            Duration interval = sweepInterval == null ? EngineDefaults.SWEEP_INTERVAL : sweepInterval;
+            if (interval.compareTo(SWEEP_MIN) < 0 || interval.compareTo(SWEEP_MAX) > 0) {
+                throw new IllegalArgumentException("horus.bpm.rules.lifecycle.sweep-interval must be PT1S to PT1H,"
+                        + " was " + interval);
+            }
+            return interval;
+        }
     }
 
     /**
-     * Returns the validated settings; an out-of-range value fails start-up naming the property.
+     * Returns the validated settings, with the retirement settings shared by both engines read from the host
+     * (PD-101, PD-102: {@code horus.bpm.lifecycle.retire-approval} and {@code horus.bpm.lifecycle.retire-last-version},
+     * through bpm-host-metadata); an out-of-range value fails start-up naming the property.
+     *
+     * @param environment the host environment
+     * @return the engine settings
+     */
+    public EngineSettings toSettings(org.springframework.core.env.Environment environment) {
+        EngineSettings settings = toSettings();
+        return settings.withLifecycle(settings.systemActor(),
+                        io.github.dhluong90.bpm.host.autoconfigure.RetireApproval.from(environment).value())
+                .withRetireLastVersion(io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion.from(environment)
+                        .value());
+    }
+
+    /**
+     * Returns the validated settings with the shared retirement settings at their defaults.
      *
      * @return the engine settings
      */
@@ -208,7 +249,10 @@ public record RuleEngineProperties(
                         evaluation.regexMaxReadsPerDecision() == null
                                 ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision()))
                 .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()))
-                .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired());
+                .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired())
+                .withLifecycle(
+                        lifecycle.systemActor() == null ? EngineDefaults.SYSTEM_ACTOR : lifecycle.systemActor(),
+                        EngineDefaults.RETIRE_APPROVAL);
     }
 
     /**
