@@ -356,6 +356,28 @@ class RuleEnginePostgresIT {
                 """).query(String.class).single()).isEqualTo(hash + " " + NOW + " alice bob");
     }
 
+    /** #241: every outbox row carries the full envelope through JSONB; the event id is the row id. */
+    @Test
+    void TR_OBS_06_every_outbox_row_carries_the_full_envelope() {
+        caller.as("bank-a", "alice");
+        engines.versionService().importRuleSet(ImportRequest.yaml(cardFee()).withCorrelationId("req-import-1"));
+        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none().withCorrelationId("req-request-1"));
+        caller.as("bank-a", "bob");
+        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+
+        // The approval passed no correlation id, so its event starts its own chain: correlationId = eventId.
+        assertThat(JdbcClient.create(db).sql("""
+                SELECT (payload->>'eventId' = id)::text || ' ' || (payload->>'eventType') || ' '
+                  || CASE WHEN payload->>'correlationId' = id THEN 'own-chain' ELSE payload->>'correlationId' END || ' '
+                  || jsonb_typeof(payload->'causationId') || ' ' || (payload->>'producer' LIKE 'rule-engine/_%')::text
+                  || ' ' || jsonb_typeof(payload->'schemaVersion') || ':' || (payload->>'schemaVersion')
+                FROM rle_decision_outbox WHERE tenant_id = 'bank-a' ORDER BY id
+                """).query(String.class).list()).containsExactly(
+                "true rules.version.created.v1 req-import-1 null true number:1",
+                "true rules.version.publish-requested.v1 req-request-1 null true number:1",
+                "true rules.version.published.v1 own-chain null true number:1");
+    }
+
     private void publish(String resource, String name) {
         caller.as("bank-a", "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(resource(resource)));

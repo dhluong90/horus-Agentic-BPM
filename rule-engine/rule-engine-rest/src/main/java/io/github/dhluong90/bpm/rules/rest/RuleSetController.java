@@ -108,11 +108,12 @@ public class RuleSetController {
             InputStream body,
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         // Permission first, then a bounded read: a caller without rules:author never makes the host buffer a body.
         RestSupport.require(callers, "rules:author");
         ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength),
-                idempotencyKey);
+                idempotencyKey, ProblemDetails.correlationId(correlationId));
         return RestSupport.version(HttpStatus.CREATED, versions.importRuleSet(request), callers);
     }
 
@@ -123,10 +124,11 @@ public class RuleSetController {
             InputStream body,
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         RestSupport.require(callers, "rules:author");
         ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength),
-                idempotencyKey);
+                idempotencyKey, ProblemDetails.correlationId(correlationId));
         return RestSupport.version(HttpStatus.CREATED, versions.importVersion(name, request), callers);
     }
 
@@ -155,13 +157,15 @@ public class RuleSetController {
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         RestSupport.require(callers, "rules:author");
         String key = RestSupport.requiredIdempotencyKey(idempotencyKey, "PUT of a draft");
         long lock = RestSupport.requiredIfMatch(ifMatch, "PUT of a draft");
         ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength), key);
         return RestSupport.version(HttpStatus.OK,
-                versions.replaceDraft(name, version, request, new WriteOptions(key, lock, null)), callers);
+                versions.replaceDraft(name, version, request,
+                        new WriteOptions(key, lock, null, ProblemDetails.correlationId(correlationId))), callers);
     }
 
     /**
@@ -195,9 +199,11 @@ public class RuleSetController {
             @PathVariable("name") String name,
             @PathVariable("version") int version,
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) {
         RestSupport.require(callers, "rules:author");
-        WriteOptions options = new WriteOptions(idempotencyKey, RestSupport.ifMatch(ifMatch), null);
+        WriteOptions options = new WriteOptions(idempotencyKey, RestSupport.ifMatch(ifMatch), null,
+                ProblemDetails.correlationId(correlationId));
         return RestSupport.version(HttpStatus.OK, versions.requestPublish(name, version, options), callers);
     }
 
@@ -209,7 +215,8 @@ public class RuleSetController {
             InputStream requestBody,
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         RestSupport.require(callers, "rules:approve");
         long lock = RestSupport.requiredIfMatch(ifMatch, ":approve");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
@@ -224,7 +231,8 @@ public class RuleSetController {
                 comment = value.stringValue();
             }
         }
-        WriteOptions options = new WriteOptions(idempotencyKey, lock, comment);
+        WriteOptions options = new WriteOptions(idempotencyKey, lock, comment,
+                ProblemDetails.correlationId(correlationId));
         return RestSupport.version(HttpStatus.OK, versions.approve(name, version, options), callers);
     }
 
@@ -236,7 +244,8 @@ public class RuleSetController {
             InputStream requestBody,
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         RestSupport.require(callers, "rules:approve");
         long lock = RestSupport.requiredIfMatch(ifMatch, ":reject");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
@@ -250,7 +259,8 @@ public class RuleSetController {
                 reason = value.stringValue();
             }
         }
-        WriteOptions options = new WriteOptions(idempotencyKey, lock, reason);
+        WriteOptions options = new WriteOptions(idempotencyKey, lock, reason,
+                ProblemDetails.correlationId(correlationId));
         return RestSupport.version(HttpStatus.OK, versions.reject(name, version, options), callers);
     }
 
@@ -265,7 +275,8 @@ public class RuleSetController {
             InputStream requestBody,
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         // Permission first, then the headers, then a bounded read: no body is buffered for a caller who may not send it.
         RestSupport.require(callers, "rules:author");
         String key = RestSupport.requiredIdempotencyKey(idempotencyKey, ":withdraw");
@@ -281,7 +292,7 @@ public class RuleSetController {
                 reason = value.stringValue();
             }
         }
-        WriteOptions options = new WriteOptions(key, lock, reason);
+        WriteOptions options = new WriteOptions(key, lock, reason, ProblemDetails.correlationId(correlationId));
         return RestSupport.version(HttpStatus.OK, versions.withdraw(name, version, options), callers);
     }
 

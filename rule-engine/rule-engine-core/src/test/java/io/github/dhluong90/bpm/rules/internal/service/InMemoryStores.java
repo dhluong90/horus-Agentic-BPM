@@ -1,10 +1,13 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import io.github.dhluong90.bpm.rules.api.RuleSetExistsException;
 import io.github.dhluong90.bpm.rules.api.RuleSetSummary;
 import io.github.dhluong90.bpm.rules.api.VersionSummary;
 import io.github.dhluong90.bpm.rules.api.VersionConflictException;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionLog;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionRecord;
 import io.github.dhluong90.bpm.rules.internal.store.EventOutbox;
@@ -24,6 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+import tools.jackson.databind.JsonNode;
 
 /** In-memory adapters of the storage ports, for service tests without a database. Not thread-safe across tenants. */
 final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, IdempotencyStore, TransactionRunner {
@@ -155,6 +159,13 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
 
     @Override
     public void append(String tenantId, String id, String payloadJson, Instant createdAt) {
+        // Every event any core test writes is checked against its schema file and its envelope (#241).
+        JsonNode payload = EngineJson.JSON.readTree(payloadJson);
+        EventSchemas.conforms(payload);
+        assertThat(payload.path("eventId").asString()).as("eventId is the row id")
+                .isEqualTo(id);
+        assertThat(payload.path("tenantId").asString()).as("tenantId is the row's")
+                .isEqualTo(tenantId);
         outbox.add(new OutboxRow(tenantId, id, payloadJson, createdAt));
     }
 

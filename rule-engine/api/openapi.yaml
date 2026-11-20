@@ -79,6 +79,7 @@ paths:
         is `413 PAYLOAD_TOO_LARGE`, for every content type.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
       requestBody:
         required: true
         content:
@@ -195,6 +196,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
       requestBody:
         required: true
         content:
@@ -276,6 +278,7 @@ paths:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: true
@@ -477,6 +480,7 @@ paths:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatch'
       responses:
         '200':
@@ -510,6 +514,7 @@ paths:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: false
@@ -557,6 +562,7 @@ paths:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: true
@@ -603,6 +609,7 @@ paths:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: false
@@ -791,6 +798,16 @@ components:
       schema:
         type: integer
         minimum: 1
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: |
+        Carried as `correlationId` by the event the command writes. Not part of the idempotent request: a replay
+        with another correlation id returns the original result. When absent or malformed (more than 128 characters,
+        or characters outside `A-Z a-z 0-9 . _ : -`), the engine uses a generated id.
+      schema:
+        type: string
     IdempotencyKey:
       name: Idempotency-Key
       in: header
