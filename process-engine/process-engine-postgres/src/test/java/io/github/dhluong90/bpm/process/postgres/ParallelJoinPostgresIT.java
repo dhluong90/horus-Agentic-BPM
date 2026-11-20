@@ -162,12 +162,14 @@ class ParallelJoinPostgresIT {
     private static void completeAt(CyclicBarrier barrier, ProcessServices replica, String analyst,
             ProcessInstance.Task task, String key) {
         CALLER.as("bank-a", analyst);
+        // Completing needs a claim (PRE-051); the claim comes before the barrier, so only the completions race.
+        long lockVersion = replica.claim(task.id(), task.lockVersion(), key + "-claim").lockVersion();
         try {
             barrier.await(10, TimeUnit.SECONDS);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
-        replica.complete(task.id(), Map.of("done", true), task.lockVersion(), key);
+        replica.complete(task.id(), Map.of("done", true), lockVersion, key);
     }
 
     private static ProcessInstance startAt(CyclicBarrier barrier, ProcessServices replica, String businessKey)
