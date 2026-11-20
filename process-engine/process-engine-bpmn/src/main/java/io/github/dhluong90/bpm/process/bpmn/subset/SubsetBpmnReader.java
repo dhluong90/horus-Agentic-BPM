@@ -10,6 +10,9 @@ import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.bpmn.xml.XmlHardening;
 import io.github.dhluong90.bpm.process.internal.json.Quote;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.AssociationDirection;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ElementInfo;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
@@ -18,6 +21,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Expression;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExtensionBag;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.GatewayDirection;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.exec.behavior.event.TimerSchedule;
@@ -27,6 +31,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ProcessType;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TextAnnotation;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.foreign.ForeignFragment;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
@@ -37,11 +42,13 @@ import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.io.StringReader;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import javax.xml.namespace.QName;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
@@ -59,6 +66,12 @@ import javax.xml.stream.XMLStreamReader;
  * {@code BPMN_UNSUPPORTED_ELEMENT}. BPMNDI is skipped (layout is not behaviour). Foreign extensions are skipped and
  * never executed.
  *
+ * <p>The artifacts that modellers add to a diagram, {@code textAnnotation}, {@code association} and {@code group}
+ * (with the document-level {@code category} its {@code categoryValueRef} points to), are read into
+ * {@link Process#artifacts()}. Like {@code documentation} they are never executed and are not part of the definition
+ * hash; the stored source keeps them and the BPMN export writes them back. The group's category label is carried on
+ * the group, see {@link #categoryValueLabel(Group)}.
+ *
  * <p>Safety: DTD support and external entities are off; any {@code DOCTYPE} or entity is {@code BPMN_UNSAFE_XML}
  * and nothing is resolved; size, depth and element count are bounded while reading.
  *
@@ -72,6 +85,10 @@ public final class SubsetBpmnReader {
     private static final Pattern KEY = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     private static final Pattern ASSIGNEE = Pattern.compile("^(user|role|group):[A-Za-z0-9_.@-]{1,100}$");
     private static final Set<String> IGNORED_CHILDREN = Set.of("incoming", "outgoing", "documentation");
+    /** Where a group carries the label of the category value it refers to; the process model has no root elements. */
+    static final QName CATEGORY_VALUE_LABEL = new QName(BpmnNamespaces.BPMN, "categoryValue");
+    /** Where a group carries the id of the category that holds its category value. */
+    static final QName CATEGORY_ID = new QName(BpmnNamespaces.BPMN, "category");
     private static final Map<String, String> LATER = Map.ofEntries(
             Map.entry("intermediateCatchEvent", "S1 or S2 (message, signal and conditional catch events)"),
             Map.entry("callActivity", "the next sprint"),
@@ -98,6 +115,22 @@ public final class SubsetBpmnReader {
     /** @param limits size, depth and element limits */
     public SubsetBpmnReader(Limits limits) {
         this.limits = limits;
+    }
+
+    /**
+     * @param group a group read by this reader
+     * @return the label of the category value the group refers to, or {@code null} when the document has none
+     */
+    public static String categoryValueLabel(Group group) {
+        return group.info().otherAttributes().get(CATEGORY_VALUE_LABEL);
+    }
+
+    /**
+     * @param group a group read by this reader
+     * @return the id of the category that holds the group's category value, or {@code null} when the document has none
+     */
+    public static String categoryId(Group group) {
+        return group.info().otherAttributes().get(CATEGORY_ID);
     }
 
     /**
@@ -144,6 +177,8 @@ public final class SubsetBpmnReader {
         private String documentLanguage;
         private final Set<String> sharedDefinitionIds = new HashSet<>();
         private final List<DefinitionProblem> unresolvedRefs = new ArrayList<>();
+        /** Category value id to its label and its category id, from the document-level categories. */
+        private final Map<String, String[]> categoryValues = new HashMap<>();
 
         Pass(XMLStreamReader xml) {
             this.xml = xml;
@@ -167,6 +202,8 @@ public final class SubsetBpmnReader {
                     } else {
                         process = process();
                     }
+                } else if (BPMN.equals(ns) && "category".equals(local)) {
+                    category();
                 } else if (BPMN.equals(ns)) {
                     if (local.endsWith("EventDefinition") && attr("id") != null) {
                         sharedDefinitionIds.add(attr("id"));
@@ -192,7 +229,47 @@ public final class SubsetBpmnReader {
             if (!invalid.isEmpty()) {
                 throw new ValidationFailedException(invalid);
             }
-            return process;
+            return withCategoryLabels(process);
+        }
+
+        /** A document-level category: only its values are kept, as labels of the groups that refer to them. */
+        private void category() throws XMLStreamException {
+            String categoryId = id();
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (BPMN.equals(xml.getNamespaceURI()) && "categoryValue".equals(local)) {
+                    String valueId = id();
+                    categoryValues.put(valueId, new String[] {xml.getAttributeValue(null, "value"), categoryId});
+                    children("categoryValue", valueId, false);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !"documentation".equals(local)
+                        && !"extensionElements".equals(local)) {
+                    unsupported("category child " + local, categoryId, "a later stage");
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+        }
+
+        private Process withCategoryLabels(Process p) {
+            if (categoryValues.isEmpty()) {
+                return p;
+            }
+            List<Artifact> artifacts = p.artifacts().stream().map(a -> {
+                if (a instanceof Group g && g.categoryValueRef() != null && categoryValues.containsKey(g.categoryValueRef())) {
+                    String[] value = categoryValues.get(g.categoryValueRef());
+                    Map<QName, String> labels = new HashMap<>();
+                    if (value[0] != null) {
+                        labels.put(CATEGORY_VALUE_LABEL, value[0]);
+                    }
+                    labels.put(CATEGORY_ID, value[1]);
+                    return (Artifact) new Group(g.id(), g.categoryValueRef(), new ElementInfo(List.of(),
+                            g.info().extensions(), labels));
+                }
+                return a;
+            }).toList();
+            return new Process(p.id(), p.name(), p.processType(), p.isExecutable(), p.isClosed(), p.flowElements(),
+                    artifacts, p.laneSets(), p.info());
         }
 
         private Process process() throws XMLStreamException {
@@ -208,6 +285,7 @@ public final class SubsetBpmnReader {
                         "process", safe(key), line));
             }
             List<FlowElement> elements = new ArrayList<>();
+            List<Artifact> artifacts = new ArrayList<>();
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (!BPMN.equals(xml.getNamespaceURI())) {
@@ -237,6 +315,14 @@ public final class SubsetBpmnReader {
                                 children.info()));
                     }
                     case "sequenceFlow" -> elements.add(sequenceFlow());
+                    case "textAnnotation" -> artifacts.add(textAnnotation());
+                    case "association" -> artifacts.add(association());
+                    case "group" -> {
+                        String id = id();
+                        String ref = attr("categoryValueRef");
+                        children(local, id, false);
+                        artifacts.add(new Group(id, ref, null));
+                    }
                     case "documentation", "extensionElements" -> skip();
                     default -> {
                         unsupported(local, attr("id"), LATER.getOrDefault(local, "a later stage"));
@@ -244,7 +330,47 @@ public final class SubsetBpmnReader {
                     }
                 }
             }
-            return withRefs(new Process(key, name, ProcessType.NONE, true, false, elements, List.of(), List.of(), null));
+            return withRefs(new Process(key, name, ProcessType.NONE, true, false, elements, artifacts, List.of(), null));
+        }
+
+        /** A note on the diagram: its {@code text} is kept exactly, nothing is executed. */
+        private Artifact textAnnotation() throws XMLStreamException {
+            String id = id();
+            String format = attr("textFormat");
+            String text = null;
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (BPMN.equals(xml.getNamespaceURI()) && "text".equals(local)) {
+                    text = text();
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !"documentation".equals(local)
+                        && !"extensionElements".equals(local)) {
+                    unsupported("textAnnotation child " + local, id, "a later stage");
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            return new TextAnnotation(id, text, format, null);
+        }
+
+        /** A line from an element to a note or another artifact; it carries no behaviour. */
+        private Artifact association() throws XMLStreamException {
+            String id = id();
+            int line = line();
+            String direction = attr("associationDirection");
+            AssociationDirection parsed = switch (direction == null ? "None" : direction) {
+                case "None" -> AssociationDirection.NONE;
+                case "One" -> AssociationDirection.ONE;
+                case "Both" -> AssociationDirection.BOTH;
+                default -> {
+                    invalid.add(new DefinitionProblem("ASSOCIATION_DIRECTION_INVALID",
+                            "associationDirection must be None, One or Both", "association", safe(id), line));
+                    yield AssociationDirection.NONE;
+                }
+            };
+            Association association = new Association(id, attr("sourceRef"), attr("targetRef"), parsed, null);
+            children("association", id, false);
+            return association;
         }
 
         private FlowElement event(boolean start) throws XMLStreamException {
