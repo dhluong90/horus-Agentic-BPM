@@ -276,6 +276,12 @@ public final class EngineValues {
         node.set("createdBy", value(version.createdBy()));
         node.put("createdAt", version.createdAt().toString());
         node.set("retiredAt", value(version.retiredAt()));
+        // RLE-038: the pending four-eyes retirement, all null when none is pending.
+        io.github.dhluong90.bpm.rules.api.RetirementRequest retirement = version.retirementRequest();
+        node.set("retireRequestedBy", value(retirement == null ? null : retirement.requestedBy()));
+        node.set("retireRequestedAt", value(retirement == null ? null : retirement.requestedAt()));
+        node.set("retireReason", value(retirement == null ? null : retirement.reason()));
+        node.put("retireConfirmsNoVersionInEffect", retirement != null && retirement.confirmNoVersionInEffect());
         node.set("definition", read(version.canonicalDocument()));
         ArrayNode warnings = node.putArray("warnings");
         for (VersionWarning warning : version.warnings()) {
@@ -316,7 +322,18 @@ public final class EngineValues {
                 text(node.get("createdBy")),
                 Instant.parse(node.get("createdAt").stringValue()),
                 instant(node.get("retiredAt")),
-                warnings(node.get("warnings")));
+                warnings(node.get("warnings")),
+                retirementRequest(node));
+    }
+
+    /** The pending retirement of a stored version result; absent in results recorded before four-eyes retirement. */
+    private static io.github.dhluong90.bpm.rules.api.RetirementRequest retirementRequest(JsonNode node) {
+        String requestedBy = text(node.get("retireRequestedBy"));
+        if (requestedBy == null) {
+            return null;
+        }
+        return new io.github.dhluong90.bpm.rules.api.RetirementRequest(requestedBy, instant(node.get("retireRequestedAt")),
+                text(node.get("retireReason")), node.path("retireConfirmsNoVersionInEffect").asBoolean(false));
     }
 
     /** The warnings of a stored version result; absent in results recorded before warnings existed. */

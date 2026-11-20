@@ -105,7 +105,7 @@ Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` 
 | `rules.version.published.v1` | `ruleSet`, `version`, `canonicalHash`, `effectiveFrom`, `requestedBy`, `approvedBy`, `acknowledgedWarnings` (list of `{ code, input }`, empty when none) and `maskedByDefaultInputs` (inputs masked only by the tenant default at approval, empty when none) (PD-104, additive; both lists on every publication); schema `rule-engine/api/schema/rules.version.published.v1.schema.json` |
 | `rules.version.rejected.v1` | `ruleSet`, `version`, `rejectedBy`, `reason`; schema `rule-engine/api/schema/rules.version.rejected.v1.schema.json` |
 | `rules.version.withdrawn.v1` | `ruleSet`, `version`, `withdrawnBy`, `reason` (null when none was given); schema `rule-engine/api/schema/rules.version.withdrawn.v1.schema.json` |
-| `rules.version.retire-requested.v1` (M3, `four-eyes` mode) | `ruleSet`, `version`, `requestedBy`, `reason`; the request instant is the envelope's `occurredAt` |
+| `rules.version.retire-requested.v1` (`four-eyes` mode, #213) | `ruleSet`, `version`, `requestedBy`, `reason`; the request instant is the envelope's `occurredAt`; schema `rule-engine/api/schema/rules.version.retire-requested.v1.schema.json` |
 | `rules.version.retired.v1` | `ruleSet`, `version`, `retiredBy` (`lifecycle.system-actor`, `system:supersession` by default, when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version or null), `retiredAt`, `noVersionInEffect` (PD-101, section 3.3.4), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the four-eyes requester, else null); schema `rule-engine/api/schema/rules.version.retired.v1.schema.json` |
 | `rules.decision.evaluated.v1` | `decisionId`, `ruleSet`, `version`, `outcome` (`MATCHED`, `NO_MATCH` or `FAILED`); no inputs or outputs, which stay in the decision log; schema `rule-engine/api/schema/rules.decision.evaluated.v1.schema.json` |
 
@@ -552,6 +552,8 @@ CREATE TABLE rle_version (
   retire_requested_by TEXT,                      -- four-eyes retirement request (M3, PD-080); selection never reads it
   retire_requested_at TIMESTAMPTZ,
   retire_reason     TEXT,
+  retire_confirm_no_version BOOLEAN,             -- V18: the request accepted that no version may remain in effect (PD-101)
+                                                 -- V18 checks: the four retire_* columns are set together, only while PUBLISHED
   created_at        TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, rule_set_id, version_num),
@@ -577,6 +579,7 @@ CREATE TABLE rle_version_history (
   approval_mode     TEXT        CHECK (approval_mode IN ('single','four-eyes','system')),  -- RETIRED rows: mode in force (PD-080)
   acknowledged_warnings JSONB,                   -- APPROVED rows: [{code, input}] accepted by the approver, [] when none (PD-104, additive migration)
   masked_by_default_inputs JSONB,                -- APPROVED rows: inputs masked only by the tenant default, [] when none (PD-104)
+  retire_requested_by TEXT,                      -- V18: RETIRED rows in four-eyes mode, the requester; CHECK it differs from actor
   -- V15: CHECK (action = 'APPROVED' OR both columns null); CHECK both are JSON arrays when set
   no_version_in_effect BOOLEAN,                  -- RETIRED rows: true when no version remained in effect (PD-101, additive migration)
   lock_version      BIGINT      NOT NULL,        -- after the transition

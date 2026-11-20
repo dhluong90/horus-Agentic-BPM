@@ -19,10 +19,11 @@ import java.util.Objects;
  * @param requestedAt when publication was requested, or null
  * @param approvedBy who approved it, or null
  * @param approvedAt when it was approved, or null
+ * @param retireRequestedBy who requested the pending four-eyes retirement (RLE-038), or null when none is pending
  */
 public record VersionSummary(String ruleSet, int version, VersionStatus status, String hitPolicy,
         Instant effectiveFrom, long lockVersion, String canonicalHash, String createdBy, Instant createdAt,
-        String requestedBy, Instant requestedAt, String approvedBy, Instant approvedAt) {
+        String requestedBy, Instant requestedAt, String approvedBy, Instant approvedAt, String retireRequestedBy) {
 
     public VersionSummary {
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
@@ -30,5 +31,29 @@ public record VersionSummary(String ruleSet, int version, VersionStatus status, 
         Objects.requireNonNull(hitPolicy, "hitPolicy must not be null");
         Objects.requireNonNull(canonicalHash, "canonicalHash must not be null");
         Objects.requireNonNull(createdAt, "createdAt must not be null");
+    }
+
+    /**
+     * Creates a summary with no pending retirement.
+     *
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param status see the record
+     * @param hitPolicy see the record
+     * @param effectiveFrom see the record
+     * @param lockVersion see the record
+     * @param canonicalHash see the record
+     * @param createdBy see the record
+     * @param createdAt see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param approvedBy see the record
+     * @param approvedAt see the record
+     */
+    public VersionSummary(String ruleSet, int version, VersionStatus status, String hitPolicy, Instant effectiveFrom,
+            long lockVersion, String canonicalHash, String createdBy, Instant createdAt, String requestedBy,
+            Instant requestedAt, String approvedBy, Instant approvedAt) {
+        this(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalHash, createdBy, createdAt,
+                requestedBy, requestedAt, approvedBy, approvedAt, null);
     }
 }

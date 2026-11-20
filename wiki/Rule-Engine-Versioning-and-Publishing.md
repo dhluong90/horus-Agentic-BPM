@@ -86,7 +86,7 @@ How many people a retirement needs depends on `horus.bpm.lifecycle.retire-approv
 
 `POST .../versions/3:retire` with `{ "reason": "Tet promotion ended" }` by an identity with `rules:approve`. One identity is enough, because a retire only stops behaviour and nothing is deleted. The reason, the actor, the time and the mode `single` are recorded in the history row, and `rules.version.retired.v1` is emitted with `approvalMode: "single"`.
 
-### Four-eyes mode (M3, May 2027)
+### Four-eyes mode
 
 With `lifecycle.retire-approval: four-eyes`:
 
@@ -96,7 +96,9 @@ With `lifecycle.retire-approval: four-eyes`:
 | 2a | `POST .../versions/3:confirm-retire` | `rules:approve`, not the requester | Version 3 is retired. History row `RETIRED` with the mode `four-eyes`; event `rules.version.retired.v1` with `approvalMode: "four-eyes"`. The requester's own confirmation gets `403 SELF_APPROVAL_FORBIDDEN` |
 | 2b | `POST .../versions/3:cancel-retire` with `{ "reason": "..." }` | `rules:approve` | The request is withdrawn and version 3 stays published. History row `RETIRE_CANCELLED` |
 
-A second retire request while one is pending gets `409 INVALID_STATE`. `:confirm-retire` in `single` mode, or with no pending request, also gets `409 INVALID_STATE`. Every call takes `Idempotency-Key` and `If-Match`.
+A second retire request while one is pending gets `409 INVALID_STATE`. `:confirm-retire` or `:cancel-retire` with no pending request also gets `409 INVALID_STATE`. Every call takes `Idempotency-Key` and the `If-Match` of the version it was decided on. While a request is pending, the version response carries `retireRequestedBy`, `retireRequestedAt` and `retireReason`, and `allowedActions` offers `confirm-retire` to every approver except the requester.
+
+The last-version rule below applies to the request. It is checked again at the confirmation, because a version scheduled at the time of the request may be in effect by then: if no other version would remain, the request or the confirmation must carry `"confirmNoVersionInEffect": true`. With `lifecycle.retire-last-version: four-eyes`, retiring the last version in effect becomes such a request in `single` mode too.
 
 The emergency single-approver path is not involved in either mode: it governs publication only, and neither setting changes the other.
 
