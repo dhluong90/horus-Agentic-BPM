@@ -63,6 +63,9 @@ public class ProblemDetails {
             Map.entry("RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("BATCH_TOO_LARGE", UNPROCESSABLE),
+            Map.entry("CMMN_UNSUPPORTED", UNPROCESSABLE),
+            Map.entry("DMN_UNSUPPORTED_ELEMENT", UNPROCESSABLE),
+            Map.entry("EXPRESSION_LANGUAGE_UNSUPPORTED", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
             Map.entry("EVALUATION_ERROR", UNPROCESSABLE),
             Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE),
@@ -97,6 +100,24 @@ public class ProblemDetails {
                 item.set("position", EngineValues.value(v.position()));
             }
             body.put("violationsTruncated", failed.truncated());
+        }
+        if (e instanceof io.github.dhluong90.bpm.rules.api.UnsupportedStandardException unsupported) {
+            // RLE-060, RLE-061: what the file uses that the engine does not support, by name, line and stage
+            if (unsupported.namespace() != null) {
+                body.put("namespace", unsupported.namespace()).put("line", unsupported.line());
+            } else {
+                ArrayNode elements = body.putArray("elements");
+                for (var item : unsupported.elements()) {
+                    ObjectNode node = elements.addObject();
+                    node.put("element", item.element());
+                    node.set("id", EngineValues.value(item.id()));
+                    node.put("line", item.line());
+                    node.put("stage", item.stage());
+                }
+                if (unsupported.truncated()) {
+                    body.put("violationsTruncated", true);
+                }
+            }
         }
         if (e instanceof io.github.dhluong90.bpm.rules.api.WarningsNotAcknowledgedException unacknowledged) {
             // RLE-053: the client shows these again and the approver resends with the codes; never retried on its own.

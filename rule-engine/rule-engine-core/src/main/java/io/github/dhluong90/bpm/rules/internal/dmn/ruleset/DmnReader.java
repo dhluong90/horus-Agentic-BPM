@@ -1,5 +1,7 @@
 package io.github.dhluong90.bpm.rules.internal.dmn.ruleset;
 
+import io.github.dhluong90.bpm.rules.api.UnsupportedElement;
+import io.github.dhluong90.bpm.rules.api.UnsupportedStandardException;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import java.math.BigDecimal;
@@ -18,8 +20,9 @@ import tools.jackson.databind.node.ObjectNode;
  * lowest schema version that can express it (TR-STD-03). The result goes through the same reader, checks and
  * hash as a YAML import. Every element, attribute value or FEEL construct the release cannot execute is refused
  * by name with its line and, where known, the stage that adds it (TR-STD-04); nothing is dropped silently. DMN
- * diagram interchange (DMNDI), elements in foreign namespaces and DRD wiring ({@code inputData},
- * {@code informationRequirement}) carry no decision logic and are kept only in the stored source document.
+ * diagram interchange (DMNDI), elements in foreign namespaces and DRD wiring to input data ({@code inputData},
+ * an {@code informationRequirement} that names {@code requiredInput}) carry no decision logic and are kept only in
+ * the stored source document. A CMMN root is refused before anything else is read (RLE-060).
  */
 public final class DmnReader {
 
@@ -27,31 +30,44 @@ public final class DmnReader {
     private static final Pattern IDENTIFIER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
     private static final Pattern RULE_ID = Pattern.compile("^[A-Za-z][A-Za-z0-9_-]{0,63}$");
 
-    /** Elements of {@code definitions} refused with the stage that adds them (standards-compliance.md 6.2). */
-    private static final Map<String, String> LATER = Map.ofEntries(
-            Map.entry("itemDefinition", "S1 (release 1.1)"),
-            Map.entry("knowledgeSource", "S1 (release 1.1)"),
-            Map.entry("textAnnotation", "S1 (release 1.1)"),
-            Map.entry("association", "S1 (release 1.1)"),
-            Map.entry("group", "S1 (release 1.1)"),
-            Map.entry("businessKnowledgeModel", "S2 (release 1.2)"),
-            Map.entry("decisionService", "S2 (release 1.2)"),
-            Map.entry("import", "S3 (release 1.3)"),
-            Map.entry("knowledgeRequirement", "S2 (release 1.2)"),
-            Map.entry("authorityRequirement", "S1 (release 1.1)"),
-            Map.entry("literalExpression", "S1 (release 1.1)"),
-            Map.entry("context", "S2 (release 1.2)"),
-            Map.entry("invocation", "S2 (release 1.2)"),
-            Map.entry("relation", "S2 (release 1.2)"),
-            Map.entry("list", "S2 (release 1.2)"),
-            Map.entry("functionDefinition", "S2 (release 1.2)"),
-            Map.entry("conditional", "S2 (release 1.2)"),
-            Map.entry("for", "S2 (release 1.2)"),
-            Map.entry("every", "S2 (release 1.2)"),
-            Map.entry("some", "S2 (release 1.2)"),
-            Map.entry("filter", "S2 (release 1.2)"),
-            Map.entry("outputValues", "S1 (release 1.1)"),
-            Map.entry("defaultOutputEntry", "S1 (release 1.1)"));
+    private static final String CMMN_NAMESPACE_PREFIX = "http://www.omg.org/spec/CMMN/";
+
+    /**
+     * Elements refused with the stage of the coverage table (standards-compliance.md 6.2) that adds them. An
+     * element not listed is {@code not planned}. A refusal names the stage and never a release or a date.
+     */
+    private static final Map<String, String> STAGES = Map.ofEntries(
+            Map.entry("itemDefinition", "S1"),
+            Map.entry("knowledgeSource", "S1"),
+            Map.entry("textAnnotation", "S1"),
+            Map.entry("association", "S1"),
+            Map.entry("group", "S1"),
+            Map.entry("authorityRequirement", "S1"),
+            Map.entry("literalExpression", "S1"),
+            Map.entry("outputValues", "S1"),
+            Map.entry("defaultOutputEntry", "S1"),
+            Map.entry("businessKnowledgeModel", "S2"),
+            Map.entry("decisionService", "S2"),
+            Map.entry("knowledgeRequirement", "S2"),
+            Map.entry("context", "S2"),
+            Map.entry("invocation", "S2"),
+            Map.entry("relation", "S2"),
+            Map.entry("list", "S2"),
+            Map.entry("functionDefinition", "S2"),
+            Map.entry("conditional", "S2"),
+            Map.entry("for", "S2"),
+            Map.entry("every", "S2"),
+            Map.entry("some", "S2"),
+            Map.entry("filter", "S2"),
+            Map.entry("import", "S3"));
+
+    /** Children of a {@code decision} that carry no logic or are read. */
+    private static final Set<String> DECISION_CHILDREN = Set.of("decisionTable", "description", "variable",
+            "informationRequirement", "question", "allowedAnswers", "extensionElements");
+
+    /** Children of a {@code decisionTable} that are read or are documentation. */
+    private static final Set<String> TABLE_CHILDREN = Set.of("input", "output", "annotation", "rule", "description",
+            "extensionElements");
 
     private DmnReader() {
     }
@@ -64,6 +80,11 @@ public final class DmnReader {
      * @throws ValidationFailedException naming the element, cell or construct that cannot be imported
      */
     public static ObjectNode toRuleSet(byte[] source) {
+        // CMMN is refused at the root, before the rest of the document is read (RLE-060). A DTD or an entity is
+        // not a root: the full parse below refuses it first.
+        XmlTree.peekRoot(source).filter(r -> r.namespace().startsWith(CMMN_NAMESPACE_PREFIX)).ifPresent(r -> {
+            throw UnsupportedStandardException.cmmn(Quote.text(r.namespace()), r.line());
+        });
         XmlTree root = XmlTree.parse(source);
         String ns = root.namespace();
         if (!Dmn.MODEL_NAMESPACES.contains(ns) || !root.name().equals("definitions")) {
@@ -74,6 +95,7 @@ public final class DmnReader {
         String feel = Dmn.feelNamespaceOf(ns);
         requireFeel(root, "expressionLanguage", feel);
         requireFeel(root, "typeLanguage", feel);
+        refuseUnsupportedElements(root, ns);
 
         XmlTree decision = null;
         for (XmlTree child : root.children()) {
@@ -84,7 +106,7 @@ public final class DmnReader {
                 case "decision" -> {
                     if (decision != null) {
                         throw invalid("More than one <decision>: decision requirement graphs arrive in stage"
-                                + " S1 (release 1.1); import one decision table per file", child);
+                                + " S1; import one decision table per file", child);
                     }
                     decision = child;
                 }
@@ -136,13 +158,13 @@ public final class DmnReader {
         String hitPolicy = table.attribute("hitPolicy").orElse("UNIQUE");
         if (table.attribute("aggregation").isPresent()) {
             throw invalid("Hit policy COLLECT with aggregation " + Quote.text(table.attribute("aggregation").get())
-                    + " arrives in stage S1 (release 1.1)", table);
+                    + " arrives in stage S1", table);
         }
         doc.put("hitPolicy", switch (hitPolicy) {
             case "FIRST" -> "first";
             case "UNIQUE" -> "unique";
             case "COLLECT" -> "collect";
-            default -> throw invalid("Hit policy " + Quote.text(hitPolicy) + " arrives in stage S1 (release 1.1);"
+            default -> throw invalid("Hit policy " + Quote.text(hitPolicy) + " arrives in stage S1;"
                     + " this release reads FIRST, UNIQUE and COLLECT", table);
         });
         if ("CrossTable".equals(table.attribute("preferredOrientation").orElse(""))) {
@@ -202,7 +224,7 @@ public final class DmnReader {
         String name = text(expression).strip();
         if (!IDENTIFIER.matcher(name).matches() || name.length() > 64) {
             throw invalid("Input expression " + Quote.of(name) + " must be a plain input name such as txCount;"
-                    + " paths and calculations arrive with full FEEL in stage S2 (release 1.2)", expression);
+                    + " paths and calculations arrive with full FEEL in stage S2", expression);
         }
         ObjectNode node = inputs.addObject();
         node.put("name", name);
@@ -379,7 +401,7 @@ public final class DmnReader {
             case "date" -> "date";
             case "date and time", "datetime" -> "datetime";
             default -> throw invalid("typeRef " + Quote.of(ref) + " of " + where + " is not supported; item definitions"
-                    + " arrive in stage S1 (release 1.1)", element);
+                    + " arrive in stage S1", element);
         };
     }
 
@@ -422,8 +444,9 @@ public final class DmnReader {
     private static void requireFeel(XmlTree element, String attribute, String feel) {
         element.attribute(attribute).ifPresent(language -> {
             if (!language.equals(feel) && !Dmn.FEEL_NAMESPACES.contains(language)) {
-                throw invalid("<" + Quote.text(element.name()) + "> " + attribute + " " + Quote.of(language) + " is not FEEL;"
-                        + " only FEEL is supported", element);
+                throw UnsupportedStandardException.expressionLanguage(Quote.text(language),
+                        new UnsupportedElement(Quote.text(element.name()), element.attribute("id").orElse(null),
+                                element.line(), UnsupportedElement.NOT_PLANNED));
             }
         });
     }
@@ -436,11 +459,64 @@ public final class DmnReader {
         }
     }
 
-    private static ValidationFailedException refused(XmlTree element) {
-        String id = element.attribute("id").map(i -> " id=\"" + Quote.text(i) + "\"").orElse("");
-        String stage = LATER.get(element.name());
-        return invalid("<" + Quote.text(element.name()) + id + "> is not supported in this release"
-                + (stage == null ? "" : "; it arrives in stage " + stage), element);
+    private static UnsupportedStandardException refused(XmlTree element) {
+        return UnsupportedStandardException.dmnElements(List.of(entry(element)));
+    }
+
+    private static UnsupportedElement entry(XmlTree element) {
+        return new UnsupportedElement(Quote.text(element.name()), element.attribute("id").orElse(null), element.line(),
+                STAGES.getOrDefault(element.name(), UnsupportedElement.NOT_PLANNED));
+    }
+
+    /**
+     * Lists every element the release cannot execute, in document order, and refuses the document with all of them
+     * at once (RLE-061): a second {@code decision}'s wiring to another decision, models, services, boxed
+     * expressions and elements the standard does not define. DRD wiring to input data, documentation, vendor
+     * extensions and elements in other namespaces carry no logic and stay in the source document.
+     */
+    private static void refuseUnsupportedElements(XmlTree root, String ns) {
+        List<UnsupportedElement> found = new java.util.ArrayList<>();
+        for (XmlTree child : root.children()) {
+            if (!child.namespace().equals(ns)) {
+                continue;
+            }
+            switch (child.name()) {
+                case "decision" -> scanDecision(child, ns, found);
+                case "inputData", "description", "extensionElements" -> {
+                    // no decision logic
+                }
+                default -> found.add(entry(child));
+            }
+        }
+        if (!found.isEmpty()) {
+            throw UnsupportedStandardException.dmnElements(found);
+        }
+    }
+
+    private static void scanDecision(XmlTree decision, String ns, List<UnsupportedElement> found) {
+        for (XmlTree child : decision.children()) {
+            if (!child.namespace().equals(ns)) {
+                continue;
+            }
+            if (child.name().equals("decisionTable")) {
+                for (XmlTree part : child.children()) {
+                    if (part.namespace().equals(ns) && !TABLE_CHILDREN.contains(part.name())) {
+                        found.add(entry(part));
+                    }
+                }
+            } else if (child.name().equals("informationRequirement")) {
+                // A wire to another decision is a decision requirement graph; a wire to input data is not.
+                child.children().stream().filter(c -> c.namespace().equals(ns) && c.name().equals("requiredDecision"))
+                        .findFirst().ifPresent(c -> found.add(new UnsupportedElement(Quote.text(child.name()),
+                                child.attribute("id").or(() -> decision.attribute("id")).orElse(null), child.line(),
+                                "S1")));
+            } else if (!DECISION_CHILDREN.contains(child.name())) {
+                // A boxed expression has no id of its own; it is named by the decision that holds it.
+                found.add(new UnsupportedElement(Quote.text(child.name()),
+                        child.attribute("id").or(() -> decision.attribute("id")).orElse(null), child.line(),
+                        STAGES.getOrDefault(child.name(), UnsupportedElement.NOT_PLANNED)));
+            }
+        }
     }
 
     private static ValidationFailedException invalid(String detail, XmlTree element) {

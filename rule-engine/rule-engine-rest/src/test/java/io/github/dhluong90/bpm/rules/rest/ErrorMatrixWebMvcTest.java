@@ -223,6 +223,19 @@ class ErrorMatrixWebMvcTest {
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/yaml").content(yaml),
                         s -> s.thrown = new ValidationFailedException(List.of(new Violation("R3", "fee",
                                 "output fee is money and needs a currency")))),
+                new Case("CMMN_UNSUPPORTED", 422,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/xml").content(yaml),
+                        s -> s.thrown = io.github.dhluong90.bpm.rules.api.UnsupportedStandardException.cmmn(
+                                "http://www.omg.org/spec/CMMN/20151109/MODEL", 1)),
+                new Case("DMN_UNSUPPORTED_ELEMENT", 422,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/xml").content(yaml),
+                        s -> s.thrown = io.github.dhluong90.bpm.rules.api.UnsupportedStandardException.dmnElements(List.of(
+                                new io.github.dhluong90.bpm.rules.api.UnsupportedElement("decisionService", "ds-1", 70, "S2")))),
+                new Case("EXPRESSION_LANGUAGE_UNSUPPORTED", 422,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/xml").content(yaml),
+                        s -> s.thrown = io.github.dhluong90.bpm.rules.api.UnsupportedStandardException.expressionLanguage(
+                                "urn:groovy", new io.github.dhluong90.bpm.rules.api.UnsupportedElement("inputExpression",
+                                        null, 12, "not planned"))),
                 new Case("IDEMPOTENCY_KEY_REUSE_MISMATCH", 422,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:request-publish")
                                 .header("Idempotency-Key", "k-101"),

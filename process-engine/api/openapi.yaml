@@ -52,9 +52,11 @@ paths:
         (`horus:mode="remote"`, optional `horus:timeout`, run as an Async Wait-State), `businessRuleTask`,
         `userTask` with `horus:resultVariable`, `exclusiveGateway` with conditions and a default flow, and an
         intermediate timer catch event with `timeDuration` or `timeDate`) from a UTF-8
-        document. DTDs and entities are refused (`BPMN_UNSAFE_XML`), every element outside the subset is named with
-        its id and line (`BPMN_UNSUPPORTED_ELEMENT`), and a condition in another expression language is
-        `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`. The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A
+        document. DTDs and entities are refused (`BPMN_UNSAFE_XML`), a CMMN root element is
+        `422 CMMN_UNSUPPORTED` before any other check (`PRE-107`), every element or behaviour attribute outside
+        the subset is named with its id, line and stage in `BPMN_UNSUPPORTED_ELEMENT` (`PRE-108`), and a condition
+        in another expression language has the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`. Vendor
+        attributes and extensions are kept in the stored source and listed as `warnings`. The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A
         document identical to the latest version of its key returns that version, also with `201`. A draft is never
         the effective version: instances keep starting on the active one until the draft is approved. An `agentTask`
         whose guardrail rule set breaks the guardrail contract (missing in the tenant or without a version in effect,
@@ -846,7 +848,7 @@ components:
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
         `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
-        `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
+        `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `CMMN_UNSUPPORTED`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED` or `FORM_VALIDATION_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
         back), with a correlation id only.
@@ -1126,8 +1128,14 @@ components:
         code: { type: string }
         message: { type: string }
         element: { type: [string, 'null'] }
-        elementId: { type: [string, 'null'], description: At most 80 characters, control characters escaped }
+        elementId: { type: [string, 'null'], description: 'At most 200 characters, control characters removed' }
         line: { type: integer }
+        stage:
+          type: string
+          enum: [S1, S2, S3, not planned, S0]
+          description: >-
+            Present on a refusal of a standard: the stage of the coverage table that adds the element, or
+            `not planned`; `S0` is an element of the current stage that this release has not finished
     Problem:
       type: object
       required: [type, title, status, code, correlationId]
@@ -1141,14 +1149,25 @@ components:
             SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND, ASYNC_STEP_NOT_FOUND,
             TASK_NOT_FOUND, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
-            BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
+            CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
         problems:
           type: array
-          description: Present on `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID` and `BPMN_UNSUPPORTED_ELEMENT`
+          description: Present on `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID` and `BPMN_UNSUPPORTED_ELEMENT`, at most 100 entries
           items: { $ref: '#/components/schemas/DefinitionProblemItem' }
+        violationsTruncated:
+          type: boolean
+          description: Present, and true, on `BPMN_UNSUPPORTED_ELEMENT` when more than 100 problems were found
+        warnings:
+          type: array
+          description: >-
+            Present on `BPMN_UNSUPPORTED_ELEMENT` when the file also has vendor attributes or extensions, listed as
+            `FOREIGN_EXTENSION_IGNORED` with the namespace in `message` and the line; the stored source keeps them
+          items: { $ref: '#/components/schemas/DefinitionProblemItem' }
+        namespace: { type: string, description: 'Present on `CMMN_UNSUPPORTED`, the namespace of the root element' }
+        line: { type: integer, description: 'Present on `CMMN_UNSUPPORTED`, the line of the root element' }
         nodeId: { type: string, description: Present on `STEP_FAILED` }
         violations:
           type: array

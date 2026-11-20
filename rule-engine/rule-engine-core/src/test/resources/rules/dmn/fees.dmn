@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20230324/MODEL/" id="fees" name="fees">
+
+  <decision id="fee-table" name="Fee table">
+    <decisionTable hitPolicy="FIRST">
+      <input id="i1"><inputExpression typeRef="string"><text>tier</text></inputExpression></input>
+      <output id="o1" name="fee" typeRef="number"/>
+      <rule id="R1"><inputEntry><text>"GOLD"</text></inputEntry><outputEntry><text>0</text></outputEntry></rule>
+      <rule id="R2"><inputEntry><text>-</text></inputEntry><outputEntry><text>50000</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <decision id="risk-adj" name="Risk adjustment">
+
+
+
+    <informationRequirement><requiredDecision href="#fee-table"/></informationRequirement>
+
+
+
+  </decision>
+
+
+
+
+
+
+
+
+
+
+  <businessKnowledgeModel id="bkm-1" name="Rounding"/>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <decisionService id="ds-1" name="Pricing"/>
+
+
+
+
+
+
+
+  <decision id="adjust" name="Adjust">
+
+
+    <context><contextEntry/></context>
+
+
+  </decision>
+
+
+
+
+
+</definitions>

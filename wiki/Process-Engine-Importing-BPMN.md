@@ -125,21 +125,40 @@ Expected answer, `422`:
 
 ```json
 {"status":422,"code":"BPMN_UNSUPPORTED_ELEMENT","problems":[
-  {"element":"boundaryEvent","elementId":"be-timeout","line":6,...},
-  {"element":"inclusiveGateway","elementId":"ig-1","line":7,...},
-  {"element":"endEvent with terminateEventDefinition","elementId":"end","line":8,...}],...}
+  {"code":"BPMN_UNSUPPORTED_ELEMENT","element":"boundaryEvent","elementId":"be-timeout","line":6,"stage":"S1",...},
+  {"code":"BPMN_UNSUPPORTED_ELEMENT","element":"inclusiveGateway","elementId":"ig-1","line":7,"stage":"S1",...},
+  {"code":"BPMN_UNSUPPORTED_ELEMENT","element":"endEvent with terminateEventDefinition","elementId":"end","line":8,"stage":"S1",...}],...}
 ```
 
-The answer lists every unsupported element in the file, each with its id, its line and the later stage that adds it. Remove or replace each one and import again. These are refused in 0.1.0:
+The answer lists every unsupported element in the file, each with its id, its line and its stage. Remove or replace each one and import again. At most 100 entries are listed; `violationsTruncated: true` says there were more. Ids are printed without control characters and cut at 200 characters.
+
+**Stages.** `stage` is one value and never names a sprint or a date. It comes from the coverage table in [standards compliance](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md):
+
+| `stage` | Meaning |
+|---|---|
+| `S1`, `S2`, `S3` | The stage after 1.0 that adds the element |
+| `not planned` | A deviation the engine keeps by design, for example an XPath condition |
+| `S0` | An element of the current stage that this release has not finished: `callActivity`, `transaction` and `intermediateThrowEvent` |
+
+Examples: `boundaryEvent`, `inclusiveGateway`, `scriptTask`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+
+These are refused in 0.2.0:
 
 | Kind | Elements |
 |---|---|
-| Gateways | `parallelGateway`, `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
-| Events | `boundaryEvent`, `intermediateCatchEvent`, `intermediateThrowEvent`, and any start or end event with an event definition (timer, message, signal, error, terminate) |
-| Activities | `subProcess`, `transaction`, `callActivity`, `adHocSubProcess`, `task`, `scriptTask`, `manualTask`, `sendTask`, `receiveTask` |
+| Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
+| Events | `boundaryEvent`, `intermediateThrowEvent`, a catch event that is not a timer, and any start or end event with an event definition (timer, message, signal, error, terminate) |
+| Activities | `subProcess`, `transaction`, `callActivity`, `adHocSubProcess`, `task`, `scriptTask`, `manualTask`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
+| Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | `horus:mode` other than `local` (remote steps import since 0.2.0), and any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
-| Conditions | a `conditionExpression` in any language other than `urn:horus-bpm:expr:v1` (`BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`) |
+| Conditions | a `conditionExpression` in any language other than `urn:horus-bpm:expr:v1`, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` (FEEL is `S1`; XPath and the others are `not planned`) |
+
+An attribute or extension element of another vendor, such as `camunda:class`, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.
+
+### A CMMN file
+
+A file whose root element is in a CMMN namespace, such as `http://www.omg.org/spec/CMMN/20151109/MODEL`, is refused as `422 CMMN_UNSUPPORTED` with the detail "CMMN is not supported; model the case as a BPMN process", the `namespace` and the `line`. The reader stops at the root element, so no other part of the file is checked. A root in any other unknown namespace, such as XPDL or BPEL, is `422 VALIDATION_FAILED` with the problem code `NOT_BPMN`.
 
 ### A missing attribute or a broken document
 
