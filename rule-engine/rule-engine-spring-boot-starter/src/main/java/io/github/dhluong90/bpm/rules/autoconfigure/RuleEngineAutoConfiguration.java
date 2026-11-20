@@ -80,6 +80,14 @@ public class RuleEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    RuleEnginePartitionMaintenance ruleEnginePartitionMaintenance(
+            DecisionLogPartitions partitions, RuleEngineProperties properties, ObjectProvider<Clock> clock) {
+        return new RuleEnginePartitionMaintenance(partitions, engineClock(clock),
+                properties.decisionLog().partitionsAheadOrDefault());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     RuleEngineSchemaInitializer ruleEngineSchemaInitializer(
             RuleEngineSchemaMigrator migrator,
             DecisionLogPartitions partitions,
@@ -87,9 +95,23 @@ public class RuleEngineAutoConfiguration {
             ObjectProvider<Clock> clock,
             ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys,
             ObjectProvider<RuleEngineMaskingCheck> maskingCheck,
-            ObjectProvider<RuleEngineLifecycleSweeper> sweeper) {
+            ObjectProvider<RuleEngineLifecycleSweeper> sweeper,
+            ObjectProvider<RuleEnginePartitionMaintenance> maintenance) {
         return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
-                cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable(), sweeper.getIfAvailable());
+                cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable(), sweeper.getIfAvailable(),
+                maintenance.getIfAvailable());
+    }
+
+    /** The decision log gauge, bound by the host's meter registry when Micrometer is present (DESIGN 4.8). */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.core.instrument.binder.MeterBinder")
+    static class RuleEngineMetricsConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(name = "ruleEngineMetrics")
+        RuleEngineMetrics ruleEngineMetrics(DecisionLogPartitions partitions) {
+            return new RuleEngineMetrics(partitions);
+        }
     }
 
     /**
@@ -148,9 +170,10 @@ public class RuleEngineAutoConfiguration {
     /** Bean name on both lines; a host bean of this name replaces the engine's (TR-EXT-02). */
     static final String HEALTH_BEAN = "ruleEngineHealthIndicator";
 
-    static RuleEngineHealthCheck healthCheck(
-            RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, ObjectProvider<Clock> clock) {
-        return new RuleEngineHealthCheck(migrator, partitions, engineClock(clock));
+    static RuleEngineHealthCheck healthCheck(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions,
+            ObjectProvider<Clock> clock, ObjectProvider<RuleEngineBackgroundJob> jobs) {
+        return new RuleEngineHealthCheck(migrator, partitions, engineClock(clock), System::nanoTime,
+                jobs.orderedStream().toList());
     }
 
     /** Spring Boot 4 hosts with the health module. Contributed as {@code ruleEngine}. */
@@ -162,8 +185,9 @@ public class RuleEngineAutoConfiguration {
         @Bean(HEALTH_BEAN)
         @ConditionalOnMissingBean(name = HEALTH_BEAN)
         org.springframework.boot.health.contributor.HealthIndicator ruleEngineHealthIndicator(
-                RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, ObjectProvider<Clock> clock) {
-            return new RuleEngineHealthIndicator(healthCheck(migrator, partitions, clock));
+                RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, ObjectProvider<Clock> clock,
+                ObjectProvider<RuleEngineBackgroundJob> jobs) {
+            return new RuleEngineHealthIndicator(healthCheck(migrator, partitions, clock, jobs));
         }
     }
 
@@ -181,8 +205,9 @@ public class RuleEngineAutoConfiguration {
         @Bean(HEALTH_BEAN)
         @ConditionalOnMissingBean(name = HEALTH_BEAN)
         org.springframework.boot.actuate.health.HealthIndicator ruleEngineHealthIndicator(
-                RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, ObjectProvider<Clock> clock) {
-            return new RuleEngineSpringBoot35HealthIndicator(healthCheck(migrator, partitions, clock));
+                RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, ObjectProvider<Clock> clock,
+                ObjectProvider<RuleEngineBackgroundJob> jobs) {
+            return new RuleEngineSpringBoot35HealthIndicator(healthCheck(migrator, partitions, clock, jobs));
         }
     }
 }

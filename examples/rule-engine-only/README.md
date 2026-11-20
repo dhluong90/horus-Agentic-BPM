@@ -349,6 +349,56 @@ curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml
 
 `RuleLifecycleFailurePathsIT` runs both, and `RLE_005_money_currency_mismatch_is_rejected` the run-time case (`422 EVALUATION_ERROR`, no outputs, logged).
 
+## Demo: the decision log by month
+
+The decision log keeps one table section per calendar month, created ahead of the clock while the host runs. An auditor reads one rule set's decisions for a period of at most 31 days, 200 at a time. The demo users hold no audit permission by default, so start the host as in the walkthrough above with one more argument that gives Minh `rules:log:read`, then run steps 1 to 5 there so `card-fee` has decisions:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  --horus.bpm.rules.security.role-permissions.ROLE_PRICING_APPROVER=rules:read,rules:approve,rules:log:read
+FROM=$(date -u +%Y-%m-01T00:00:00Z)
+TO=$(date -u -v+1m +%Y-%m-01T00:00:00Z 2>/dev/null || date -u -d "$(date -u +%Y-%m-01) +1 month" +%Y-%m-01T00:00:00Z)
+```
+
+1. Minh lists this month's card fee decisions, newest first. A page holds up to 200; pass `nextCursor` back as `cursor` with the same query for the next one:
+
+   ```bash
+   curl -s -u minh:demo-only "$H/decisions?ruleSet=card-fee&from=$FROM&to=$TO"
+   # {"data":[{"decisionId":"...","ruleSet":"card-fee","version":1,"hitPolicy":"FIRST","outcome":"MATCHED",
+   #   "matchedRuleIds":["R1"],"inputs":{"tier":"GOLD","txCount":5},"outputs":{"fee":{"currency":"VND","amount":0}},
+   #   "callerId":"tuan",...}],"nextCursor":null,"hasNext":false}
+   ```
+
+2. A period longer than 31 days, or no rule set, is refused before the database is read; a teller without the permission gets `403`:
+
+   ```bash
+   curl -s -u minh:demo-only "$H/decisions?ruleSet=card-fee&from=2027-01-01T00:00:00Z&to=2027-02-02T00:00:00Z"
+   # 400 {"code":"QUERY_INVALID","detail":"from and to may be at most 31 days apart (query.max-range P31D), were PT768H",...}
+   curl -s -o /dev/null -w '%{http_code}\n' -u tuan:demo-only "$H/decisions?ruleSet=card-fee&from=$FROM&to=$TO"
+   # 403
+   ```
+
+3. The sections that exist: this month and the next one, created at start-up, plus every month up to `decision-log.partitions-ahead` (7 days) ahead. A daily run adds the next month without a restart:
+
+   ```bash
+   docker exec horus-pg psql -U horus -d horus -At -c \
+     "SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid WHERE i.inhparent = 'rle_decision'::regclass ORDER BY 1"
+   # rle_decision_2026_11
+   # rle_decision_2026_12
+   # rle_decision_default
+   ```
+
+4. The clock move, the overflow counter and the 250-decision search run as tests with a fixed clock, recorded for the sprint review. The host clock moves from 26 January to 25 February 2027 without a restart and March appears; a decision of 15 March that landed in the default section moves into March, and the gauge `horus.rle.partition.default.rows` goes from 1 to 0:
+
+   ```bash
+   mvn -B -pl examples/rule-engine-only -am verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false \
+     -Dit.test=DecisionLogSearchIT
+   # [INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- in ...DecisionLogSearchIT
+   ```
+
+   In a host with Actuator's metrics endpoint exposed, `GET /actuator/metrics/horus.rle.partition.default.rows` shows the same gauge; this example exposes only `health`.
+
 ## Demo: a fee change on a date, replay and the bank's time zone
 
 `card-fee` v1 charges a default of 50,000 VND. [`rules/card-fee-december.yaml`](src/main/resources/rules/card-fee-december.yaml) is the same table with a default of 30,000 VND and `effectiveFrom: "2026-12-01T00:00:00Z"`, so it is approved now and takes over on that instant. Choosing the evaluation clock needs `rules:simulate` and replay needs `rules:log:read`, which the demo roles do not hold by default. Start the host with two extra mappings, then run steps 1 to 4 of the demo above for v1:
@@ -664,6 +714,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `SignInPageTest` | The page in English and Vietnamese, the error and signed-out states, the escaped CSRF field, demo users only on `dev` with a password, no inline script or style, and the same message keys in both languages |
 | `CockpitEmbeddedIT.CKP_001_*` | On the `dev` profile: form sign-in, the cockpit page and its one-host registry, then `200` from `/api/bpm/meta` and `/api/bpm/me` with the session, valid against the cockpit schemas; a call that changes data needs `X-XSRF-TOKEN` from the cookie |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
+| `DecisionLogSearchIT.RLE_029_*`, `DecisionLogSearchIT.RLE_017_*` | The decision log demo above over HTTP: 250 card-fee decisions of January 2027 in pages of 200 and 50, a 32-day range and a missing rule set refused, another tenant's own rows only, `403` without `rules:log:read`, masked inputs still hashed; the default-section gauge from 1 to 0 when the job creates March without a restart |
 | `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*`, `RLE_002_*`, `RLE_003_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
 
 Run only this module's tests: `mvn -B -pl examples/rule-engine-only -am verify`.

@@ -67,6 +67,27 @@ public final class EngineDefaults {
     /** Items per page of a list read when the request names no {@code limit}. */
     public static final int QUERY_DEFAULT_PAGE_SIZE = 50;
 
+    /** Longest period of a decision log search, {@code query.max-range} (ADR-0015); may be lowered only. */
+    public static final Duration QUERY_MAX_RANGE = Duration.ofDays(31);
+
+    /** Longest a decision log search may run, {@code query.statement-timeout}. */
+    public static final Duration QUERY_STATEMENT_TIMEOUT = Duration.ofSeconds(2);
+
+    /** Bounds of {@code query.statement-timeout}. */
+    public static final Duration QUERY_STATEMENT_TIMEOUT_MIN = Duration.ofMillis(100);
+
+    /** Bounds of {@code query.statement-timeout}. */
+    public static final Duration QUERY_STATEMENT_TIMEOUT_MAX = Duration.ofSeconds(30);
+
+    /** How far ahead monthly partitions of the decision log are created, {@code decision-log.partitions-ahead}. */
+    public static final Duration PARTITIONS_AHEAD = Duration.ofDays(7);
+
+    /** Largest {@code decision-log.partitions-ahead}: one year of months. */
+    public static final Duration PARTITIONS_AHEAD_MAX = Duration.ofDays(366);
+
+    /** How often partition maintenance runs after start-up: daily. */
+    public static final Duration PARTITION_MAINTENANCE_INTERVAL = Duration.ofDays(1);
+
     /**
      * Default and ceiling of {@code horus.bpm.rules.lifecycle.reason-max-length}: longest reason of a reject or a
      * retire, in characters. A host may lower it, never raise it.
@@ -142,12 +163,6 @@ public final class EngineDefaults {
 
     /** Longest accepted {@code X-Correlation-Id}; a longer or malformed one is replaced by a generated id. */
     public static final int CORRELATION_ID_MAX_LENGTH = 128;
-
-    /**
-     * Longest period of one decision-log search, from inclusive to exclusive (ADR-0015): at most two monthly
-     * partitions are read. A bound of the engine.
-     */
-    public static final java.time.Duration QUERY_MAX_RANGE = java.time.Duration.ofDays(31);
 
     /** The host setting of the masking key, named in every message about a missing or invalid key (RLE-035). */
     public static final String MASKING_KEY_PROPERTY = "horus.bpm.rules.masking.hmac-key";

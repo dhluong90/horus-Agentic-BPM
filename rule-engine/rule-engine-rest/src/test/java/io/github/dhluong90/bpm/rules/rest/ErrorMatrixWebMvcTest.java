@@ -115,7 +115,7 @@ class ErrorMatrixWebMvcTest {
         };
         mvc = MockMvcBuilders.standaloneSetup(
                         new RuleSetController(standIn(VersionService.class), callers),
-                        new DecisionController(standIn(RuleEngine.class), callers),
+                        new DecisionController(standIn(RuleEngine.class), standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers),
                         new DecisionLogController(standIn(DecisionLogService.class), callers))
                 .setControllerAdvice(new ProblemDetails())
                 .build();
