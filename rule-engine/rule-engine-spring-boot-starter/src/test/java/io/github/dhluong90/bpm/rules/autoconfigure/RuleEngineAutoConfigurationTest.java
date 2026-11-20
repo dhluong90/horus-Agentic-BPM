@@ -121,28 +121,22 @@ class RuleEngineAutoConfigurationTest {
                         .isNotInstanceOf(io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine.class)
                         .isNotInstanceOf(io.github.dhluong90.bpm.rules.internal.service.RuleEngines.class);
             }
-            // The grant is a bean while the Process Engine's claimant is on the class path, and a host that injects
-            // it is refused
-            var grant = context.getBean(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class);
-            Object hostController = new Object();
-            org.assertj.core.api.Assertions.assertThatThrownBy(
-                            () -> grant.claim("system:process-engine", hostController))
-                    .isInstanceOf(SecurityException.class);
         });
     }
 
     @Test
-    void TR_TEN_01_a_grant_nobody_claimed_during_start_up_is_closed_when_start_up_finishes() {
-        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
-            assertThat(context).hasNotFailed();
-            var grant = context.getBean(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class);
+    void TR_TEN_01_a_same_named_decision_port_in_an_unsealed_package_gets_no_grant_and_the_host_keeps_running() {
+        // Given a class named like the Process Engine's decision port, from this module's test class directory: its
+        // package is not sealed and it carries no Implementation-Version, as in a host with only the Rule Engine
+        // starter that defines the class itself
+        assertThat(io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort.class.getPackage().isSealed())
+                .isFalse();
 
-            // Then no identity can be claimed for the rest of the run, not even by the registered claimant's class
-            assertThat(grant.isClaimed("system:process-engine")).isFalse();
-            assertThat(grant.isOpen("system:process-engine")).isFalse();
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> grant.claim("system:process-engine",
-                            new io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort()))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
+            // Then start-up succeeds, without the grant: there is nothing for that class to claim
+            assertThat(context).hasNotFailed();
+            assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class);
+            assertThat(context).hasSingleBean(io.github.dhluong90.bpm.rules.api.RuleEngine.class);
         });
     }
 
