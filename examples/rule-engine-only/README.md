@@ -32,7 +32,7 @@ docker run -d --name horus-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
   -e POSTGRES_PASSWORD=change-me -p 5432:5432 postgres:16-alpine
 
 mvn -B -pl examples/rule-engine-only -am package -DskipTests      # from the repository root
-HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 ```
 
 Check it (health is public; everything else needs a caller):
@@ -77,7 +77,7 @@ On the `dev` profile the host has two demo users, Lan (role `PRICING_AUTHOR`) an
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=choose-one HORUS_DB_PASSWORD=change-me \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 
 # sign in as lan with the form, keeping the session cookie in ./jar
 CSRF=$(curl -s -c jar -b jar localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
@@ -87,7 +87,7 @@ curl -s -b jar localhost:8080/api/bpm/me
 # {"schemaVersion":1,"user":{"id":"lan"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:author"],"roles":["ROLE_PRICING_AUTHOR"],"groups":[]}
 
 curl -s -b jar localhost:8080/api/bpm/meta
-# {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0-SNAPSHOT","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
+# {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
 
 curl -s -i localhost:8080/api/bpm/meta
 # HTTP/1.1 401
@@ -116,7 +116,7 @@ Start PostgreSQL as above, then start the host on the `dev` profile:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 H=localhost:8080/api/bpm/rules/v1
 ```
 
@@ -311,7 +311,7 @@ The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`Host
 npm --prefix cockpit/web ci && npm --prefix cockpit/web run build      # from the repository root
 mvn -B -pl examples/rule-engine-only -am package -DskipTests
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 ```
 
 Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
@@ -343,7 +343,7 @@ Draft editing in the cockpit is off by default in 0.1.0 (PD-094); this example t
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate' \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:evaluate'
 ```
