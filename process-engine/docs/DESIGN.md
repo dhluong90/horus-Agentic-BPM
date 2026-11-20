@@ -281,6 +281,38 @@ flowchart TD
     V -- no --> X[REFUSED: job FAILED, incident opened]
 ```
 
+#### Offline replay of agent answers (#98, `PRE-092` to `PRE-095`, PD-128)
+
+A changed guardrail, or a changed output schema, is tested against the answers a step already recorded before it goes live. `AgentReplayService` (REST `POST /agent-replays`) takes the step (`definitionKey`, `nodeId`), a period of whole UTC days (`from` and `to` inclusive, at most `query.max-range`) and a candidate rule set version in any status, usually a draft, plus an optional candidate output schema. PD-128 scopes it to guardrail and schema changes: a prompt or model change is replayed by a host harness, because masked inputs are kept only as keyed hashes and the engine never calls a model for a test.
+
+- **Start.** In one transaction, with the tenant from the resolver and `processes:agent:replay`: the period is checked (`400 QUERY_INVALID`), the recorded answers counted (`422 REPLAY_TOO_LARGE` over `replay.max-cases`), the candidate described through `DecisionPort.signature(tenant, ruleSet, version)` (`404 RULE_SET_NOT_FOUND` when the tenant has no such version) and checked by `GuardrailContract` against the candidate schema or the latest recorded one (`422 GUARDRAIL_CONTRACT_INVALID`, nothing written), and a `QUEUED` run stored in `pre_agent_replay` (V17). An optional `Idempotency-Key` returns the original run on a repeat.
+- **Replay.** The job poller's `AgentReplays.pollOnce()` locks the oldest open run with `FOR UPDATE SKIP LOCKED`, reads one page of `replay.page-size` answers (`ASYNC_RESULT_ACCEPTED` and `ASYNC_RESULT_REFUSED` rows of the step, keyset over `(occurred_at, id)` of `pre_history`, joined to their job's guard spec), and writes one report line per answer to `pre_agent_replay_case` with the cursor and counts, in one transaction; the last page completes the run. A page that fails marks the run `FAILED` with the exception class. The same call deletes runs past `replay.retention`.
+- **Check.** Each answer runs through `AgentResultGuard`, the result check of the result transaction, with the candidate in place of the recorded rule set and the candidate schema in place of the recorded one, on a fixed clock at the answer's recorded time, so `today()` is the day it was checked. The decision port is wrapped so the guardrail goes through `DecisionPort.simulate`, which the starter maps to the Rule Engine's simulation path (`TenantScopedRuleEngine.simulate`, `RLE-015`): no decision row, idempotency record or event. A schema violation is final (schema retries are generations of the model). Top-level fields recorded as `***` were never kept: they are left out of the check and out of `required`, and the line counts them. A job without a guard spec is `NOT_REPLAYED` with `GUARD_SPEC_INVALID`.
+- **Report.** Outcomes `ALLOWED`, `REVIEW` and `REFUSED` (the refusal follows the job's recorded route), changes `UNCHANGED`, `NEWLY_ALLOWED`, `NEWLY_REFUSED`, `NEWLY_ROUTED_TO_REVIEW` and `NOT_REPLAYED`, the matched rule ids on both sides, and `OVERRIDDEN_BY_REVIEWER` when a `HUMAN_OVERRIDE` of that attempt changed a field whose value was kept. Lines hold ids, outcomes and rule ids, never values; `GET /agent-replays/{id}/cases/{attemptId}/answer` opens one recorded answer as history keeps it. Reports are test aids, not audit records.
+- **Isolation.** No adapter, runner, executor or network call is reachable from the replay classes (ArchUnit, `PRE-092`); nothing writes `pre_history`, `pre_timer`, `rle_decision` or an instance.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Replay user
+    participant S as AgentReplayService
+    participant P as Job poller
+    participant H as pre_history and pre_timer
+    participant G as AgentResultGuard
+    participant R as Rule Engine simulation
+    U->>S: POST /agent-replays (step, period, candidate)
+    S->>R: signature of the candidate version
+    S->>S: period, size and contract checks
+    S-->>U: 202 QUEUED run
+    loop one page per poll
+        P->>H: next page of recorded answers (keyset)
+        P->>G: each answer, candidate in place, clock at recorded time
+        G->>R: simulate, writes nothing
+        P->>P: report lines, counts, cursor in one transaction
+    end
+    U->>S: GET /agent-replays/{id} and /cases
+```
+
 ### 4.2 Saga compensation (ADR-0007, `TR-COMP-01` to `TR-COMP-03`)
 
 A completed `serviceTask` or `agentTask` with a `compensate` handler pushes `(step_id, attempt_id, handler, input_snapshot)` onto `pre_compensation_stack` under its scope token: the enclosing `saga`'s scope token, or the root scope token outside any `saga` (ADR-0020). On `onFailure: compensate` or `throwCompensation` the stack of the failing or throwing step's scope token is walked newest first, and entries under other scope tokens are untouched (`PRE-044`); each handler call is an async job with its own retry policy and a new `attemptId`, and receives the forward step's `attemptId` as `forwardAttemptId`. `compensate: manual` opens `COMPENSATION_MANUAL_REQUIRED` instead of skipping.
@@ -478,6 +510,10 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `GET /tasks/{id}`, `GET /tasks/{id}/form` | `processes:task:work` | Task context and resolved form | `ETag` | `404 TASK_NOT_FOUND` | M2 |
 | `POST /tasks/{id}:claim`, `:unclaim`, `:complete` | `processes:task:work` | Section 3.5 | `Idempotency-Key`, `If-Match` | `403 SELF_APPROVAL_FORBIDDEN`, `422 FORM_VALIDATION_FAILED` | M2 |
 | `POST /async-steps/{jobId}:complete` | `processes:step:complete` | Report the result of a remote step attempt whose adapter answered `Accepted`; body `attemptId`, `completionToken`, `status` (`COMPLETED`, `FAILED`, `BUSINESS_ERROR`), `output` or `errorCode` and `retryable`; answers `outcome` `ACCEPTED`, `DUPLICATE` or `DISCARDED` (section 4); the caller also needs a completer role of the step's adapter | A repeat is `DUPLICATE`; the lease fences late results; the remote call is deduplicated by the job id | `403 PERMISSION_DENIED` (no completer role, wrong token), `404 ASYNC_STEP_NOT_FOUND` | M2 (0.2.0) |
+| `POST /agent-replays` | `processes:agent:replay` | Replay one agent step's recorded answers over a period against a candidate guardrail version and optional output schema (section 4.1); `202` with the queued run | Optional `Idempotency-Key` returns the original run | `400 QUERY_INVALID` (period), `404 RULE_SET_NOT_FOUND`, `422 REPLAY_TOO_LARGE`, `422 GUARDRAIL_CONTRACT_INVALID` | M3 (#98) |
+| `GET /agent-replays/{id}` | `processes:agent:replay` | Read a run and its summary | Read only | `404 REPLAY_NOT_FOUND` | M3 (#98) |
+| `GET /agent-replays/{id}/cases` | `processes:agent:replay` | Read report lines in recorded order, keyset-paged, `limit` 1 to 500 | Read only | `404 REPLAY_NOT_FOUND`, `400 QUERY_INVALID` | M3 (#98) |
+| `GET /agent-replays/{id}/cases/{attemptId}/answer` | `processes:agent:replay` | Open one case's recorded answer as history keeps it (masked fields stay masked) | Read only | `404 REPLAY_NOT_FOUND` | M3 (#98) |
 | `POST /tasks/{id}:delegate`, `:reassign` | `processes:task:manage` | Section 3.5 | `Idempotency-Key`, `If-Match` | | M2 |
 | `GET /incidents?status=OPEN&definitionKey=&nodeId=` | `processes:read` | Incident list | Cursor, at most 200, `ETag` | | M2 |
 | `POST /incidents/{id}:retry`, `:resolve` | `processes:incident:manage` | Retry or resolve | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
@@ -489,7 +525,7 @@ Common set on every endpoint: `400 INPUT_INVALID`, `401`, `403 FORBIDDEN` (permi
 
 ### 6.3 Permissions
 
-From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:step:complete` (report the result of a remote step attempt, for the integration that receives a partner's callback; 0.2.0), `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage`.
+From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:step:complete` (report the result of a remote step attempt, for the integration that receives a partner's callback; 0.2.0), `processes:agent:replay` (replay recorded agent answers against a candidate guardrail and read the reports; held by no role by default, PD-128, #98), `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage`.
 
 ### 6.4 Events
 
@@ -551,6 +587,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `idempotency.retention` | `PT24H` | How long an idempotency record answers replays |
 | `lifecycle.reason-max-length` | `2000` | Longest reason a cancellation accepts (PD-103); may be lowered, never raised |
 | `agents.labels.max-count`, `agents.labels.max-key-length`, `agents.labels.max-value-length` | `16`, `64`, `256` | Bounds of agent result labels (section 4.1, PD-014); may be lowered only |
+| `replay.page-size`, `replay.max-cases`, `replay.retention` | `500`, `50000`, `P30D` | Offline agent replay (section 4.1, #98): answers per worker transaction (1 to 1,000), most answers per run (may be lowered, never raised), how long a run and its report are kept (1 hour to 366 days) |
 | `tenancy.claim`, `tenancy.dev-tenant` | `tenant_id`, unset | Shared with the Rule Engine under `horus.bpm.*`; session-principal default resolver (ADR-0014 decision 6, PD-079) |
 
 Extension points (ADR-0024, `TR-EXT-02`), each with an engine default registered `@ConditionalOnMissingBean`: `TenantResolver`, `CallerResolver`, `BusinessCalendar` (default 24x7), `StepRegistry`, `FormRegistry`, `RoleCatalogue` (default none), `AgentAdapter` and `ServiceAdapter` (no default; required only by definitions that use them), `OutputSchemaValidator` (default: the JSON Schema subset of section 4.1, #363), `MessageAdapter` (S2), the process event publisher, and `LifecycleGuard` (default allows everything; a host guard may veto a definition, task or incident transition with its own code and can never make a refused transition succeed, `TR-EXT-06`). Approval rules, assignees, SLA durations, escalation targets, retries, timeouts and guardrails are per definition, not engine settings.
@@ -773,6 +810,33 @@ CREATE TABLE pre_incident (                                                     
 CREATE INDEX idx_pre_incident_open ON pre_incident (tenant_id, created_at DESC, id) WHERE status = 'OPEN';
 CREATE INDEX idx_pre_incident_node ON pre_incident (tenant_id, definition_id, node_id) WHERE status = 'OPEN';
 CREATE INDEX idx_pre_incident_instance ON pre_incident (tenant_id, instance_id, created_at, id) WHERE status = 'OPEN';
+
+CREATE TABLE pre_agent_replay (                                                 -- M3 (#98, V17): offline replay runs
+  tenant_id TEXT NOT NULL, id VARCHAR(26) NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('QUEUED','RUNNING','COMPLETED','FAILED')),
+  definition_key TEXT NOT NULL, node_id TEXT NOT NULL, period_from DATE NOT NULL, period_to DATE NOT NULL,
+  candidate_rule_set TEXT NOT NULL, candidate_version INT NOT NULL, candidate_schema JSONB,
+  idempotency_key TEXT, request_hash CHAR(64), cursor_at TIMESTAMPTZ, cursor_id VARCHAR(26),
+  cases INT, unchanged INT, newly_allowed INT, newly_refused INT, newly_reviewed INT, overridden INT,
+  not_replayed INT, with_masked_fields INT, failure_code TEXT,
+  created_by TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, id)
+);
+CREATE UNIQUE INDEX uq_pre_agent_replay_idempotency ON pre_agent_replay (tenant_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+CREATE INDEX idx_pre_agent_replay_open ON pre_agent_replay (created_at, id)        -- worker claim, crosses tenants
+  WHERE status IN ('QUEUED','RUNNING');
+CREATE INDEX idx_pre_agent_replay_expiry ON pre_agent_replay (expires_at);         -- retention purge
+
+CREATE TABLE pre_agent_replay_case (                                            -- M3 (#98, V17): one line per answer
+  tenant_id TEXT NOT NULL, replay_id VARCHAR(26) NOT NULL, seq INT NOT NULL,
+  attempt_id VARCHAR(26) NOT NULL, instance_id VARCHAR(26) NOT NULL, recorded_at TIMESTAMPTZ NOT NULL,
+  recorded_outcome TEXT NOT NULL, candidate_outcome TEXT NOT NULL, change TEXT NOT NULL,
+  recorded_rule_ids JSONB NOT NULL, candidate_rule_ids JSONB NOT NULL, code TEXT,
+  overridden BOOLEAN NOT NULL, masked_fields INT NOT NULL,                     -- ids, outcomes, rule ids; never values
+  PRIMARY KEY (tenant_id, replay_id, seq),
+  FOREIGN KEY (tenant_id, replay_id) REFERENCES pre_agent_replay (tenant_id, id) ON DELETE CASCADE
+);
 
 CREATE TABLE pre_history (
   tenant_id       TEXT        NOT NULL,

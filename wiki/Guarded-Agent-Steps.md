@@ -127,6 +127,24 @@ Rules the engine enforces:
 
 The engine's share of an agent step is the two short transactions, about 10 ms in total. 100 concurrent agent calls of 10 seconds each hold no database connection while they wait ([[Architecture]] section 8).
 
+### Replay a changed guardrail before it goes live
+
+Test a changed guardrail, or a changed output schema, against the answers a step has already recorded. A user with `processes:agent:replay` names the step, a period of at most 31 days and a candidate rule set version, usually a draft:
+
+```http
+POST /api/bpm/processes/v1/agent-replays
+{ "definitionKey": "kyc-onboarding", "nodeId": "assess-documents", "from": "2026-11-01", "to": "2026-11-30",
+  "candidate": { "ruleSet": "kyc-document-guardrails", "version": 3 } }
+```
+
+The engine answers `202` with a run and replays it in the background, 500 answers at a time. Each recorded answer goes through the same check as when it was recorded (output schema, then guardrail), with the candidate in place, at the time it was recorded, so `today()` is the day of the original check. The report says, per answer, whether the candidate would allow it, send it to a reviewer or refuse it, compared with what happened, and flags `OVERRIDDEN_BY_REVIEWER` when the candidate would let through an answer a reviewer corrected. For example, lowering R5 from `confidence < 0.90` to `< 0.85` over 1,200 November answers reports 96 newly allowed, 7 of them answers a reviewer had corrected: the change would let those through unchecked.
+
+What a replay never does: call a model or any adapter, write history or the decision log, or move an instance. It reads only your tenant. Fields your schema masks were never kept, so they are left out of the check and counted on the line. A changed prompt or model is replayed by your own harness: your adapter re-runs selected cases outside the engine. Reports are kept for `replay.retention` (30 days) and are not audit records. Limits: `replay.max-cases` (50,000 answers per run), `replay.page-size` (500).
+
+### Calling an MCP tool
+
+[`examples/mcp-tool-adapter`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/mcp-tool-adapter) shows an agent step calling one tool of a Model Context Protocol server through `AgentAdapter`, over Streamable HTTP. The process names the tool in a step input and the adapter refuses any tool outside its configured allow-list; the tool call carries the job id as `_meta.idempotencyKey`, so a retry never runs the tool twice; the tool's `structuredContent` is the answer, checked like any other. Server address and token are host configuration. The example is not part of the engine artifacts.
+
 ### A guardrail is an ordinary rule set
 
 The guardrail is a Rule Engine rule set with hit policy `first` or `unique`. It must declare the output `allow` (boolean) and may declare `reasons` (a string); the engine reads no other output. Its inputs are fields of the agent's answer, so each must be declared in the step's `outputSchema` with a compatible type. Deploying a process definition whose guardrail rule set is missing in your tenant, has no version in effect or breaks this contract fails with `422 GUARDRAIL_CONTRACT_INVALID`, naming the step and the failed check, and nothing is written. The same check runs when approval is requested and at approval, so a guardrail changed after import is caught before the process goes live. Publish the guardrail rule set before you deploy the process. At run time the check fails closed: a decision error counts as `allow: false` with reason `GUARDRAIL_EVALUATION_ERROR` and follows `onViolation`.
@@ -135,7 +153,7 @@ Because it is a rule set, it has everything a rule set has:
 
 - versions, effective dates and a decision log entry for every check;
 - a second approver for every change: loosening a guardrail needs the same four-eyes approval as changing a fee;
-- simulation of a draft before publication; replay of past checks is planned for M3.
+- simulation of a draft before publication, and replay of past checks against a draft (see above).
 
 Your compliance team reads the guardrail as a table, not as code or prompt text.
 
@@ -209,7 +227,7 @@ rules:
     then: { allow: true }
 ```
 
-This is version 2, at rung 2. Version 1, at rung 1, was identical except that R6 returned `allow: false` with reason `HUMAN_REVIEW_REQUIRED`, so every case went to a person. Publishing version 2 needed a second approver. From M3 the approver can first replay the checks made under version 1 to see how many cases version 2 would have let through.
+This is version 2, at rung 2. Version 1, at rung 1, was identical except that R6 returned `allow: false` with reason `HUMAN_REVIEW_REQUIRED`, so every case went to a person. Publishing version 2 needed a second approver. The approver can first replay the checks made under version 1 to see how many cases version 2 would have let through.
 
 ### 3. Three runs
 
@@ -242,7 +260,7 @@ If the adapter does not answer within 5 minutes (`timeout: PT5M`), the attempt f
 | Cockpit | Agent task inspector: inputs, schema verdict, output, fired rules; approve or override with a reason (Cockpit 0.2) | |
 | Agent context | Bounded inputs per step | Bounded context passed as agent memory |
 | Planning | One agent call per step | Agent chooses steps inside a bounded block, under the same guardrails |
-| Evaluation | History and human overrides available for your own analysis | Offline runner that replays recorded agent traces and human overrides against a changed prompt or guardrail |
+| Evaluation | History and human overrides available for your own analysis | Offline replay of recorded answers and human overrides against a changed guardrail or output schema; prompt changes through a host harness |
 
 Multi-agent planning is a candidate after 1.0 ([[Roadmap]]). Dates are targets, not commitments; [[Feature status|Feature-Status]] links to the current state of each item.
 

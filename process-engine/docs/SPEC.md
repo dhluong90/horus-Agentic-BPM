@@ -701,6 +701,60 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `summary with a national id -> history "***", review task output.summary "***"`.
 - **Test ID:** `PRE_063_an_accepted_agent_answer_is_recorded_masked_by_the_output_schema`, `PRE_063_the_review_task_carries_why_the_answer_was_refused_and_the_masked_answer`
 
+### PRE-092 A candidate guardrail is replayed over recorded answers and reports what would change, without calling a model
+- **Traces to:** `TR-AGT-03`, `TR-OBS-01`, PD-128, #98
+- **Milestone:** M3
+- **Given:** Step `assess-documents` of `kyc-onboarding` in one tenant has 1,200 answers recorded in November 2026, checked by `kyc-document-guardrails` v2, whose rule R5 refuses `confidence < 0.90`. 96 of them had a confidence of 0.85 to 0.89 and went to a reviewer; reviewers changed the document type in 7 of those 96 (`HUMAN_OVERRIDE`) and confirmed 2 others. Draft v3 changes R5 to `confidence < 0.85`.
+- **When:** A user with `processes:agent:replay` sends `POST /agent-replays` with `{ "definitionKey": "kyc-onboarding", "nodeId": "assess-documents", "from": "2026-11-01", "to": "2026-11-30", "candidate": { "ruleSet": "kyc-document-guardrails", "version": 3 } }` (Java: `AgentReplayService.start`), the job poller replays it, and the user reads `GET /agent-replays/{id}` and `GET /agent-replays/{id}/cases`.
+- **Then:** The start answers `202` with a `QUEUED` run. The poller replays it in pages of `replay.page-size` (500): three pages. The summary shows 1,200 cases, 1,104 unchanged, 96 newly allowed, 7 of them `OVERRIDDEN_BY_REVIEWER`, 0 newly refused, 0 newly routed to review. Each line carries the attempt id, the instance id, the recorded and the candidate outcome, the change and the matched rule ids (`R5` recorded, `R9` candidate), never an output value. A change from a masked value is not an override, so the 2 confirmations are not flagged. The stub agent records no call, and `pre_history`, `rle_decision` and every instance row are unchanged.
+- **Example:** `v3 R5 < 0.85 over 1,200 cases -> 96 newly allowed, 7 of them corrected by a reviewer`.
+- **Test ID:** `PRE_092_candidate_guardrail_replay_reports_newly_allowed_cases_and_reviewer_overrides` (`AgentReplayIT`); `PRE_092_*` in `AgentReplayCheckTest` and `KernelContractArchitectureTest`
+
+### PRE-093 The same replay gives the same report, and today() is the recorded time
+- **Traces to:** `TR-DET-01`, PD-128, #98
+- **Milestone:** M3
+- **Given:** Answers recorded on 2 and 3 November 2026; rule R2 of the candidate refuses `expiryDate < today()`, and the answer of 3 November has an expiry date of 10 November 2026.
+- **When:** The same replay runs twice on 20 January 2027.
+- **Then:** `today()` evaluates to 3 November 2026 for that case, the time its answer was checked, so it is not newly refused. The two runs give identical report lines and summaries; only the run ids and times differ.
+- **Example:** `case of 3 Nov, expiry 10 Nov, replayed 20 Jan -> not expired`.
+- **Test ID:** `PRE_093_replay_is_deterministic_and_today_is_the_recorded_time`
+
+### PRE-094 A replay is bounded, and a candidate that breaks the contract fails before any case runs
+- **Traces to:** `TR-PERF-10`, `TR-AGT-03`, PD-128, #98
+- **Milestone:** M3
+- **Given:** (a) A period of 45 days. (b) A period that holds more answers than `replay.max-cases` (50,000 by default; the test lowers it to 3 over 4 answers). (c) A candidate whose output is `decision: string` with no `allow`. (d) A recorded answer whose job payload has no guard spec.
+- **When:** Each is requested or reached.
+- **Then:** (a) `400 QUERY_INVALID`, because the longest period is `query.max-range` (`P31D`). (b) `422 REPLAY_TOO_LARGE`, with `cases` and `limit`. (c) `422 GUARDRAIL_CONTRACT_INVALID` (`PRE-016`), and no run is created. (d) The case is reported `NOT_REPLAYED` with code `GUARD_SPEC_INVALID`, and the run completes. Runs and their reports are deleted `replay.retention` (`P30D`) after they were created; they are not audit records.
+- **Example:** `45 days -> 400 QUERY_INVALID; 4 answers over a limit of 3 -> 422 REPLAY_TOO_LARGE`.
+- **Test ID:** `PRE_094_replay_is_bounded_and_a_candidate_that_breaks_the_contract_fails_before_any_case_runs`; `PRE_094_*` in `AgentReplayCheckTest`
+
+### PRE-095 Replays read only the caller's tenant and need their own permission
+- **Traces to:** `TR-TEN-01`, `TR-SEC-05`, PD-128, #98
+- **Milestone:** M3
+- **Given:** Run `R1` of tenant A, a user of another tenant, and a tenant A user with `processes:read` only.
+- **When:** The other tenant's user reads `R1`, its report and one of its cases, and names tenant A's candidate; the `processes:read` user starts a run and reads `R1`.
+- **Then:** The other tenant's user gets `404 REPLAY_NOT_FOUND` and `404 RULE_SET_NOT_FOUND`; the `processes:read` user gets `403 PERMISSION_DENIED`. Cases and the candidate are read in the caller's tenant only. With `processes:agent:replay`, `GET /agent-replays/{id}/cases/{attemptId}/answer` shows the recorded answer as history keeps it: masked output fields as `***` and masked inputs as keyed hashes. A repeat of the start with the same `Idempotency-Key` returns the original run.
+- **Example:** `other tenant reads R1 -> 404, nothing returned`.
+- **Test ID:** `PRE_095_replay_reads_only_the_callers_tenant_and_needs_its_own_permission`
+
+### PRE-096 An agent step calls one allowed MCP tool, keyed by the job id, and its result is checked where it is recorded
+- **Traces to:** `TR-AGT-04`, `TR-IDEM-04`, `TR-ASY-01`, #99
+- **Milestone:** M3
+- **Given:** The example host `examples/mcp-tool-adapter` registers adapter `mcp-risk` with the server URL, a bearer token and `allowed-tools: [lookup_customer_risk]` from host configuration. Step `score-customer` names the tool with the literal input `tool` and passes `customerId: C-778`, with an output schema `{ riskBand: A|B|C|D, score: integer 0..100 }`. The demo server answers `structuredContent { "riskBand": "B", "score": 62 }`, the first time after the step's one-second timeout.
+- **When:** An instance reaches the step, the first attempt times out, and after the backoff the job is claimed again.
+- **Then:** Both attempts send `tools/call` for `lookup_customer_risk` with `_meta.idempotencyKey` = the job id and their own attempt id as `_meta.correlationId`. The server runs the tool once and returns the stored result to the second call. The result is accepted in the result transaction after the schema and guardrail checks, and the token moves on. No engine module depends on the example.
+- **Example:** `lookup_customer_risk(C-778) twice, same key -> tool ran once, riskBand B, score 62 accepted`.
+- **Test ID:** `PRE_096_an_agent_step_calls_one_allowed_mcp_tool_keyed_by_the_job_id_and_its_result_is_checked` (`McpToolAdapterIT`); `PRE_096_*` in `McpToolAdapterTest` and `EngineIndependenceTest` (all in `examples/mcp-tool-adapter`)
+
+### PRE-097 Tool errors, unstructured answers and tools outside the allow-list fail the attempt with a named code
+- **Traces to:** `TR-AGT-04`, `TR-AGT-01`, #99
+- **Milestone:** M3
+- **Given:** (a) a step that names `delete_customer`, which is not allowed; (b) a tool answer with `isError: true`; (c) a JSON-RPC error, an HTTP 5xx or a timeout; (d) a text-only answer that asks for another tool; (e) a structured answer the guardrail refuses.
+- **When:** Each attempt is recorded.
+- **Then:** (a) `MCP_TOOL_NOT_ALLOWED`, not retryable, and no request is sent; (b) `MCP_TOOL_ERROR`, not retryable; (c) `MCP_PROTOCOL_ERROR` or `ADAPTER_TIMEOUT`, retryable; (d) the adapter returns an empty answer and the result check refuses it with `AGENT_SCHEMA_INVALID`; (e) `GUARDRAIL_VIOLATION`, and the step goes to its reviewer (`PRE-059`). No server message text is kept: history records the code, and the adapter's detail holds at most the JSON-RPC error number or the HTTP status. The adapter returns data and calls no second tool. A call for another tenant's customer is refused by the server's own authorisation and the tool writes nothing.
+- **Example:** `isError true -> MCP_TOOL_ERROR, not retryable; text only -> AGENT_SCHEMA_INVALID`.
+- **Test ID:** `PRE_097_*` in `McpToolAdapterTest` and `McpToolAdapterIT` (`examples/mcp-tool-adapter`)
+
 ### PRE-107 A CMMN file is refused by name at every BPMN import, before any other check
 - **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
 - **Milestone:** M3

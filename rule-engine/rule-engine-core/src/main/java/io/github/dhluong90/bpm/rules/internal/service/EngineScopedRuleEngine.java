@@ -54,6 +54,27 @@ final class EngineScopedRuleEngine implements TenantScopedRuleEngine {
         return engine.signatureAs(tenantId, ruleSet, at);
     }
 
+    @Override
+    public io.github.dhluong90.bpm.rules.embedded.RuleSetSignature signature(String tenantId, String ruleSet,
+            int version) {
+        requireTenant(tenantId);
+        return engine.signatureOfVersionAs(tenantId, ruleSet, version);
+    }
+
+    @Override
+    public java.util.List<DecisionResult.Outcome> simulate(String tenantId, String ruleSet, int version,
+            java.util.List<io.github.dhluong90.bpm.rules.embedded.TimedInput> cases) {
+        requireTenant(tenantId);
+        Objects.requireNonNull(cases, "cases must not be null");
+        return engine.simulateAs(tenantId, ruleSet, version, cases);
+    }
+
+    private static void requireTenant(String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new IllegalArgumentException("tenantId must not be blank");
+        }
+    }
+
     private static void check(String tenantId, DecisionRequest request) {
         Objects.requireNonNull(request, "request must not be null");
         if (tenantId == null || tenantId.isBlank()) {

@@ -94,6 +94,27 @@ class KernelContractArchitectureTest {
     }
 
     @Test
+    void PRE_092_offline_replay_calls_no_adapter_and_no_network() {
+        // A replay re-runs the result check over recorded answers (#98): it may read storage and simulate decisions,
+        // never call an adapter, a runner, the executor that calls them, or the network.
+        noClasses().that().haveFullyQualifiedName("io.github.dhluong90.bpm.process.internal.service.AgentReplays")
+                .or().haveFullyQualifiedName("io.github.dhluong90.bpm.process.internal.service.AgentReplayCheck")
+                .should().dependOnClassesThat().resideInAnyPackage("java.net..", "java.net.http..", "java.io..",
+                        "java.nio.file..", "java.lang.reflect..", "javax.script..")
+                .orShould().dependOnClassesThat().belongToAnyOf(io.github.dhluong90.bpm.process.spi.ServiceAdapter.class,
+                        io.github.dhluong90.bpm.process.spi.AdapterCall.class,
+                        io.github.dhluong90.bpm.process.spi.AgentAdapter.class,
+                        io.github.dhluong90.bpm.process.spi.AgentInvocation.class,
+                        io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner.class,
+                        io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor.class,
+                        io.github.dhluong90.bpm.process.internal.service.ServiceInvoker.class,
+                        io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker.class,
+                        io.github.dhluong90.bpm.process.internal.service.ProcessServices.class,
+                        Thread.class)
+                .check(CORE);
+    }
+
+    @Test
     void core_does_not_depend_on_frameworks() {
         noClasses().should().dependOnClassesThat().resideInAnyPackage("org.springframework..", "jakarta..",
                 "java.sql..", "com.fasterxml.jackson.databind..")

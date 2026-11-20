@@ -46,4 +46,50 @@ public interface DecisionPort {
         return new DecisionSignature.Unavailable("SIGNATURE_UNAVAILABLE",
                 "The host's decision engine cannot describe rule set " + decisionRef);
     }
+
+    /**
+     * Describes a stored version of a rule set by number, in any status, without evaluating it: used before an offline
+     * replay to check that a candidate guardrail meets its contract (PRE-094). Reads only. The default cannot describe
+     * anything, so the replay is refused (fail closed).
+     *
+     * @param tenantId the tenant resolved from the authenticated context; never from a request body
+     * @param decisionRef the rule set name
+     * @param version the version number
+     * @return the signature, or why there is none ({@code VERSION_NOT_FOUND} for an unknown version or rule set);
+     *     never throws for a missing rule set
+     */
+    default DecisionSignature signature(String tenantId, String decisionRef, int version) {
+        return new DecisionSignature.Unavailable("SIGNATURE_UNAVAILABLE",
+                "The host's decision engine cannot describe rule set " + decisionRef + " version " + version);
+    }
+
+    /**
+     * Evaluates a stored version of a rule set over recorded cases, each at its own evaluation time, writing nothing
+     * (offline replay, PRE-092): no decision row, no idempotency record, no event. The default cannot simulate, so
+     * every case fails with {@code SIMULATION_UNAVAILABLE}.
+     *
+     * @param tenantId the tenant resolved from the authenticated context
+     * @param decisionRef the rule set name
+     * @param version the version number
+     * @param cases the inputs and evaluation time of each case
+     * @return one outcome per case, in order; a matched or unmatched outcome has no decision id
+     */
+    default java.util.List<DecisionOutcome> simulate(String tenantId, String decisionRef, int version,
+            java.util.List<SimulatedCase> cases) {
+        return cases.stream().<DecisionOutcome>map(c -> new DecisionOutcome.Failed("SIMULATION_UNAVAILABLE",
+                "The host's decision engine cannot simulate")).toList();
+    }
+
+    /**
+     * One case of {@link #simulate}.
+     *
+     * @param inputs the inputs
+     * @param evaluationTime the instant the case was originally decided at; feeds {@code today()}
+     */
+    record SimulatedCase(Map<String, Object> inputs, Instant evaluationTime) {
+        public SimulatedCase {
+            inputs = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(inputs));
+            java.util.Objects.requireNonNull(evaluationTime, "evaluationTime must not be null");
+        }
+    }
 }

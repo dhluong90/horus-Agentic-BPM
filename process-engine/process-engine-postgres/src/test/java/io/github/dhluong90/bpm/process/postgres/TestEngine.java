@@ -112,11 +112,19 @@ final class TestEngine {
     final List<ProcessEventPublisher.Event> events = new CopyOnWriteArrayList<>();
     /** The decision port the engine of this replica calls, or empty without a Rule Engine. */
     final Optional<io.github.dhluong90.bpm.process.internal.service.DecisionPort> decisions;
+    private final DataSource replicaDataSource;
+    private final ProcessEngineTransactions replicaTransactions;
+    private final TestClock replicaClock;
+    private final io.github.dhluong90.bpm.process.spi.OutputSchemaValidator replicaSchemas;
 
     private TestEngine(Builder b) {
         DataSource ds = b.dataSource != null ? b.dataSource : dataSource();
         DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
         ProcessEngineTransactions tx = new ProcessEngineTransactions(transactionManager);
+        this.replicaDataSource = ds;
+        this.replicaTransactions = tx;
+        this.replicaClock = b.clock;
+        this.replicaSchemas = b.outputSchemas;
         JdbcJobStore jobStore = new JdbcJobStore(ds);
         SubsetBpmnReader reader = new SubsetBpmnReader(Limits.DEFAULTS);
         JobSettings jobSettings = JobSettings.defaults(b.replicaId).withTimerLease(b.lease);
@@ -166,6 +174,20 @@ final class TestEngine {
                                         io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner::jobKind)
                                         .toList())),
                 java.util.concurrent.Executors.newSingleThreadScheduledExecutor());
+    }
+
+    /**
+     * The offline agent replay of this replica (#98), over the same decision port, transactions and clock.
+     *
+     * @param settings replay settings
+     * @return the replay service; its worker is {@code pollOnce()}
+     */
+    io.github.dhluong90.bpm.process.internal.service.AgentReplays agentReplays(
+            io.github.dhluong90.bpm.process.internal.service.ReplaySettings settings) {
+        Identity id = identity;
+        return new io.github.dhluong90.bpm.process.internal.service.AgentReplays(() -> id.tenant, id, replicaClock,
+                replicaTransactions, new JdbcAgentReplayStore(replicaDataSource), decisions, replicaSchemas, settings,
+                io.github.dhluong90.bpm.process.internal.service.EngineDefaults.MAX_RANGE);
     }
 
     /** Stops this replica's adapter executor. */
@@ -403,7 +425,7 @@ final class TestEngine {
         // triggers off for this one statement batch, on one connection.
         jdbc().sql("SET session_replication_role = replica; "
                 + "TRUNCATE pre_incident, pre_timer, pre_history, pre_task, pre_token, pre_instance, pre_idempotency, "
-                + "pre_definition_history, pre_definition CASCADE; "
+                + "pre_definition_history, pre_definition, pre_agent_replay_case, pre_agent_replay CASCADE; "
                 + "SET session_replication_role = origin").update();
     }
 
