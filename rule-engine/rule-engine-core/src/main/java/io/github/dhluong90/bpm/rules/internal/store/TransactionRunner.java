@@ -25,4 +25,15 @@ public interface TransactionRunner {
     default <T> T inReadOnlyTransaction(Supplier<T> work) {
         return inTransaction(work);
     }
+
+    /**
+     * Runs work after the current transaction commits, or at once when there is no transaction. Work registered in a
+     * transaction that rolls back never runs. Used to evict compiled entries only once a publication is visible to
+     * every replica (ADR-0009).
+     *
+     * @param work the work; it must not throw
+     */
+    default void afterCommit(Runnable work) {
+        work.run();
+    }
 }

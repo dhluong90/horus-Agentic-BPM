@@ -19,10 +19,12 @@ import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
  * @param maskingCheck the start-up check of the masking key (RLE-035), run after the migrations
  * @param lifecycleSweep retires superseded versions; the starter runs it every {@code lifecycle.sweep-interval}
  * @param decisionLogQuery decision log search
+ * @param cache the compiled versions of this replica, shared by evaluation and approval; the host's scheduler runs
+ *     {@link CompiledCache#checkEpochs()} and its notification listener calls {@link CompiledCache#evict}
  */
 public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, CursorKeys cursorKeys,
         DecisionLogService decisionLog, MaskingStartupCheck maskingCheck, LifecycleSweep lifecycleSweep,
-        DecisionLogQuery decisionLogQuery) {
+        DecisionLogQuery decisionLogQuery, CompiledCache cache) {
 
     /**
      * Builds the entry points with the default search bounds.
@@ -51,11 +53,13 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
     public static RuleEngines create(EngineContext context, RuleStore store, DecisionLog log, EventOutbox outbox,
             DecisionQuerySettings querySettings) {
         CursorKeys keys = new CursorKeys(store, context.transactions(), context.clock());
+        CompiledCache cache = new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions());
         Supersession supersession = new Supersession(store, outbox, context.settings());
-        return new RuleEngines(new DefaultRuleEngine(context, store, log),
-                new DefaultVersionService(context, store, outbox, keys, supersession), keys,
+        return new RuleEngines(new DefaultRuleEngine(context, store, log, cache),
+                new DefaultVersionService(context, store, outbox, keys, supersession, cache), keys,
                 new DefaultDecisionLogService(context, log, outbox), new MaskingStartupCheck(store, context.masking()),
-                new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, keys, querySettings));
+                new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, keys, querySettings),
+                cache);
     }
 
     /**

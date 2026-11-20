@@ -111,6 +111,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** `Pod A` approves `card-fee` v2 (`effectiveFrom <= now`); `Pod B` evaluates `card-fee` every 100 ms.
 - **Then:** `Pod A` publishes `rules.version.published.v1`, increments `cache_epoch` and notifies after commit; in the direct run `Pod B` evaluates v2 within 1 s of the commit; in the pooler run, with no notification delivered, `Pod B` evaluates v2 within 5 s of the commit (the epoch sweep bound) and never after; neither run opens a session-mode connection behind the pooler.
 - **Example:** `Pod A approves v2 -> Pod B returns version=2 within 1 s (NOTIFY) or within 5 s (PgBouncer, epoch sweep only)`.
+- **Delivery:** the two-copy runs are `MultiReplicaCacheIT` (example host); the lost-listener failure path is `RLE_010_a_lost_listener_connection_still_refreshes_within_the_interval_and_logs_the_reconnect_once`. The pooler run allows one 100 ms evaluation step on top of the 5 s interval, because copy B polls every 100 ms.
 - **Test ID:** `RLE_010_multi_replica_cache_invalidates_on_publish`
 
 ---
