@@ -32,6 +32,15 @@ public final class MaskingKey {
     /** Key id of a key configured without one. */
     public static final String DEFAULT_KEY_ID = "k1";
 
+    /**
+     * The message whose HMAC under a key gives the key's check value. It is not a value any input can hold in a
+     * token's place, because every token is made over an input value and this label is fixed by the engine.
+     */
+    public static final String CHECK_VALUE_LABEL = "horus-bpm/masking/v1/kcv";
+
+    /** Bytes of the HMAC kept in a check value. */
+    public static final int CHECK_VALUE_BYTES = 8;
+
     private static final String ALGORITHM = "HmacSHA256";
     private static final java.util.regex.Pattern KEY_ID = java.util.regex.Pattern.compile("^[A-Za-z0-9_-]{1,32}$");
     private static final java.util.regex.Pattern FINGERPRINT =
@@ -170,6 +179,25 @@ public final class MaskingKey {
             }
             java.util.Arrays.fill(prk, (byte) 0);
             return okm;
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("HmacSHA256 is not available in this JVM", e);
+        }
+    }
+
+    /**
+     * Returns the key check value: the first {@value #CHECK_VALUE_BYTES} bytes of
+     * {@code HMAC-SHA256(key, "horus-bpm/masking/v1/kcv")} as 16 lower-case hex digits. Not secret: it tells two keys
+     * apart without revealing either, so it may be stored, compared and shown beside the key id. Two keys with one
+     * id but different check values are two different keys.
+     *
+     * @return the check value, 16 hex digits
+     */
+    public String checkValue() {
+        try {
+            Mac mac = Mac.getInstance(ALGORITHM);
+            mac.init(key);
+            byte[] full = mac.doFinal(CHECK_VALUE_LABEL.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(full, 0, CHECK_VALUE_BYTES);
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("HmacSHA256 is not available in this JVM", e);
         }
