@@ -109,6 +109,13 @@ public final class EngineDefaults {
     public static final int EVALUATE_BODY_MAX_BYTES = 1_048_576;
 
     /**
+     * Default and ceiling of {@code simulation.max-inputs}: the most sample input sets one simulation accepts
+     * (RLE-016). A simulation runs in the request, so the bound keeps its time and memory close to a batch
+     * evaluation; its body is read with {@link #EVALUATE_BODY_MAX_BYTES}. May be lowered, never raised.
+     */
+    public static final int SIMULATION_MAX_SAMPLES = 1_000;
+
+    /**
      * How long a replica keeps the cursor key before reading it again from {@code rle_engine_key}. Deleting the row
      * rotates the key; every replica uses the new key within this time, and one that meets a cursor it cannot
      * verify re-reads at once. A bound of the engine, not a setting.

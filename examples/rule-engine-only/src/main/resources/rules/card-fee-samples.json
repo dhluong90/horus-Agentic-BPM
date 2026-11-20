@@ -1,0 +1,9 @@
+{
+  "samples": [
+    { "inputs": { "tier": "GOLD", "txCount": 5 } },
+    { "inputs": { "tier": "SILVER", "txCount": 4 } },
+    { "inputs": { "tier": "SILVER", "txCount": 3 } },
+    { "inputs": { "tier": "SILVER", "txCount": 0 } },
+    { "inputs": { "tier": "STANDARD", "txCount": 1 } }
+  ]
+}

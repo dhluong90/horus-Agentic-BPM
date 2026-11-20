@@ -86,7 +86,7 @@ Source: [`diagrams/version-lifecycle.mmd`](diagrams/version-lifecycle.mmd).
 | *(none)* | `POST /rule-sets` (new rule set) or `POST /rule-sets/{name}/versions` (document, or `?copyOf={v}`) | Valid schema; document `ruleSet` equals `{name}`; `rules:author` | `DRAFT` | Next `version_num`; canonical JSON and hash stored; `effectiveFrom` of the document moved to `effective_from` (section 3.1); history row `CREATED`; emit `rules.version.created.v1` (minimal outbox row from #1) |
 | `DRAFT` | `replaceDraft` (`PUT /rule-sets/{name}/versions/{v}`, #165, `RLE-047`) | `rules:author`; caller is the draft's author (`created_by`), else `403 PERMISSION_DENIED` with a detail pointing to importing their own document as a new version (`POST .../rule-sets/{name}/versions`); `authoring.cockpit-drafts` on, else `403 DRAFT_AUTHORING_DISABLED`; the import checks; `lockVersion` matches (`If-Match`, required); `Idempotency-Key` required | `DRAFT` | Canonical JSON and hash, source document, format and hash, hit policy, `effective_from` and the `rle_rule` rows replaced in one transaction; `lock_version + 1`; version number, author and `created_at` kept; history row `DRAFT_UPDATED` with actor, the `lockVersion` after and the canonical hash before and after (migration `V6`); emit `rules.version.draft-updated.v1`. What is approved is still the canonical hash frozen at `requestPublish` |
 | `DRAFT` | `requestPublish(effectiveFrom)` | Zero validation errors; `effectiveFrom` absent (means at approval) or not in the past; valid `Idempotency-Key` | `PENDING_APPROVAL` | Freeze snapshot and effective date; record `requested_by`, `requested_at`; history row `REQUESTED`; emit `rules.version.publish-requested.v1` |
-| `PENDING_APPROVAL` | `approve(comment)` | The approver is no maker of the version: not `created_by`, not `requested_by`; only the author may replace a draft, so there is no other editor (PD-096, `TR-SEC-04`), else `403 SELF_APPROVAL_FORBIDDEN`. The Rule Engine always applies `makers`, whatever `lifecycle.approver-must-differ-from` says: its `V2` constraint `rle_version_four_eyes` refuses an approval by the author in the database, and in the Rule Engine `requester` mode would only let the author approve their own content once someone else requested it, which is the case four eyes exists to stop. Its `/api/bpm/meta` setting therefore reports `makers`, and a host that sets `requester` for the Process Engine gets one WARN saying the Rule Engine keeps `makers` (architecture decision, #273); `rules:approve`; `lockVersion` given (`If-Match`, required in REST and the Java API, else `428 PRECONDITION_REQUIRED`) and matching, else `409 VERSION_CONFLICT`: one version number can carry other content over time (replace in place, withdraw, request again), so the lock version is what ties the approval to the content reviewed (#234 security review, #275) | `PUBLISHED` | Set `approved_at`, `approved_by`, `approval_comment`, and `effective_from = approved_at` when it was absent; history row `APPROVED`; emit `rules.version.published.v1`; increment `cache_epoch`; `pg_notify` after commit. If `effective_from <= now`, the versions it supersedes are retired in the same transaction (row below) |
+| `PENDING_APPROVAL` | `approve(comment)` | The approver is no maker of the version: not `created_by`, not `requested_by`; only the author may replace a draft, so there is no other editor (PD-096, `TR-SEC-04`), else `403 SELF_APPROVAL_FORBIDDEN`. The Rule Engine always applies `makers`, whatever `lifecycle.approver-must-differ-from` says: its constraint `rle_version_four_eyes` (`V2`, replaced by `V12` without any exemption, #299) refuses an approval by the author in the database, and in the Rule Engine `requester` mode would only let the author approve their own content once someone else requested it, which is the case four eyes exists to stop. Its `/api/bpm/meta` setting therefore reports `makers`, and a host that sets `requester` for the Process Engine gets one WARN saying the Rule Engine keeps `makers` (architecture decision, #273); `rules:approve`; `lockVersion` given (`If-Match`, required in REST and the Java API, else `428 PRECONDITION_REQUIRED`) and matching, else `409 VERSION_CONFLICT`: one version number can carry other content over time (replace in place, withdraw, request again), so the lock version is what ties the approval to the content reviewed (#234 security review, #275) | `PUBLISHED` | Set `approved_at`, `approved_by`, `approval_comment`, and `effective_from = approved_at` when it was absent; history row `APPROVED`; emit `rules.version.published.v1`; increment `cache_epoch`; `pg_notify` after commit. If `effective_from <= now`, the versions it supersedes are retired in the same transaction (row below) |
 | `PENDING_APPROVAL` | `reject(reason)` | `rules:approve`; caller is not `requested_by` (`403 SELF_APPROVAL_FORBIDDEN`, detail pointing to `:withdraw`; PD-089); `reason` not blank (at most 2,000 characters, else `400 INPUT_INVALID`); `lockVersion` given (`If-Match`, required, else `428 PRECONDITION_REQUIRED`) and matching | `DRAFT` | Clear `requested_by`, `requested_at`; history row `REJECTED` with actor and reason; emit `rules.version.rejected.v1` |
 | `PENDING_APPROVAL` | `withdraw(reason?)` (`POST .../versions/{v}:withdraw`, PD-089) | `rules:author`; caller is `requested_by`, anyone else, an approver included, gets `403 PERMISSION_DENIED`; `reason` optional (at most 2,000 characters); `lockVersion` matches (`If-Match`); `Idempotency-Key` | `DRAFT` | Clear `requested_by`, `requested_at`; history row `WITHDRAWN` with actor and the reason if given; emit `rules.version.withdrawn.v1`; the effective version is unchanged and nothing is published |
 | `PUBLISHED` | Superseded: a newer `PUBLISHED` version of the rule set has `effective_from <= now` | Conditional update, exactly once across replicas (section 3.3.2) | `RETIRED` | `retired_at = now`; history row `RETIRED`, actor `system:supersession`, reason `SUPERSEDED`; emit `rules.version.retired.v1` with `supersededBy`; keep readable forever for explain and replay |
@@ -249,6 +249,7 @@ public interface RuleEngine {
   DecisionResult evaluate(DecisionRequest request); // clock, version (pin), idempotencyKey, correlationId
   DecisionResult replay(String decisionId);         // the logged version, inputs and clock; writes nothing (#22)
   <T> T evaluateAs(String ruleSet, DecisionInput input, Class<T> outputType); // throws instead of returning Failed
+  SimulationResult simulate(String ruleSet, int version, List<DecisionInput> samples); // rules:simulate; logs nothing (RLE-016)
 }
 
 // package io.github.dhluong90.bpm.rules.embedded: engine to engine, not for hosts
@@ -279,7 +280,7 @@ Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `ru
 | `POST /decisions/{ruleSet}/versions/{v}:evaluate` | `rules:pin`, plus `rules:simulate` when the body sets `clock` | Optional `Idempotency-Key`. Only approved versions: a `DRAFT` is `409 INVALID_STATE` and is tried with `:simulate`; a `RETIRED` version is `409 INVALID_STATE` unless `evaluation.pin-retired` is `true`. A decision evaluated with a chosen clock carries `clockChosen: true` in the response and keeps `eval_clock` apart from `created_at` in the log, so a back-dated decision is visible | `403 PERMISSION_DENIED`, `403 CLOCK_NOT_ALLOWED`, `404 VERSION_NOT_FOUND`, `409 INVALID_STATE`, `422 UNIQUE_HIT_VIOLATION`, `422 EVALUATION_ERROR` |
 | `POST /decisions/{decisionId}:replay` | `rules:log:read` | No body; writes nothing; the logged version, inputs and clock (`TR-DET-05`, section 4.1) | `404 DECISION_NOT_FOUND`, `422 REPLAY_NOT_POSSIBLE` (a masked input had a value), `422 UNIQUE_HIT_VIOLATION` and `422 EVALUATION_ERROR` when the logged decision failed |
 | `POST /decisions/{ruleSet}:evaluate-batch` | `rules:evaluate` | At most 1,000 items; `Idempotency-Key`; per-item outcome in a `207`-style body with `200` status | `400 INPUT_INVALID`, `404 NO_EFFECTIVE_VERSION`; item errors `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR` |
-| `POST /rule-sets/{name}/versions/{v}:simulate` | `rules:simulate` | Sample inputs, at most 1,000 sets; writes no decision row (`RLE-016`) | `400 INPUT_INVALID`, `404 VERSION_NOT_FOUND`, `422 VALIDATION_FAILED` |
+| `POST /rule-sets/{name}/versions/{v}:simulate` | `rules:simulate`, checked before the body is read | Body `{ "samples": [{ "inputs": {...} }] }`, 1 to `simulation.max-inputs` sets (default and ceiling 1,000), at most 1,048,576 bytes. Runs the version in any status and the version effective at the host clock in memory; writes nothing (no decision row, idempotency record or event), so no `Idempotency-Key`; no generated id in the response, so the same version, samples and clock give the same body (`RLE-016`, `TR-DET-01`). See section 4.2.1 | `400 INPUT_INVALID` (no samples, too many, or a sample invalid, named `samples[i]`), `404 VERSION_NOT_FOUND` (also for another tenant's version and an unknown rule set), `413 PAYLOAD_TOO_LARGE`, `422 VALIDATION_FAILED` |
 | `GET /rule-sets`, `GET /rule-sets/{name}` | `rules:read` | Signed keyset cursor by name (byte order), `limit` 1 to `query.max-page-size` (default 50, at most 200); each item: `ruleSet`, `latestVersion`, `latestStatus`, `publishedVersion` (the version selected at the host clock, section 3.3.1, or null), `lastChangedAt` (latest version timestamp or history row) (`RLE-039`) | `400 QUERY_INVALID` (limit or cursor), `404 RULE_SET_NOT_FOUND` |
 | `GET /rule-sets/{name}/versions` | `rules:read` | Keyset cursor by version number, newest first, same `limit`; items carry the lifecycle fields and `allowedActions`, never the definition (`RLE-040`) | `400 QUERY_INVALID`, `404 RULE_SET_NOT_FOUND` |
 | `GET /rule-sets/{name}/versions/{v}` | `rules:read` | `ETag`; `?include=source` adds `sourceFormat`, `sourceDocument` and `sourceHash` (M1, DN-01). Every version response carries `allowedActions` for the caller (`RLE-043`) | `404 VERSION_NOT_FOUND` |
@@ -306,6 +307,36 @@ Violations are ordered rule by rule; within a rule the conditions, then the outp
 `allowedActions` is a hint computed at response time from the version's status, `createdBy`, `requestedBy`, the caller and the caller's permissions (`VersionActions`): `request-publish` on a draft for `rules:author`; `approve` on a pending version for `rules:approve` when the caller is neither requester nor author; `reject` on a pending version for `rules:approve` when the caller is not the requester; `withdraw` on a pending version for `rules:author` when the caller is the requester (PD-089), so the requester sees `withdraw` and never `approve` or `reject`. It is never stored with an idempotency record, so a replay shows the caller's current actions. Commands check again and are the authority.
 
 A caller without the endpoint's permission gets `403 PERMISSION_DENIED`; an unauthenticated call, or one whose tenant cannot be resolved, gets `401 UNAUTHENTICATED`. The REST module checks the permission against the caller's `rules:*` authorities itself, so it does not depend on the host enabling method security. All errors are RFC 9457 `application/problem+json` with `code`, `detail` and `correlationId`; `type` is `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#<code in lower case>` (ADR-0010). `409` is used only for state conflicts a client resolves by reloading; `UNIQUE_HIT_VIOLATION` is `422` because it is an authoring defect in the published rule set (ADR-0010, PD-008). Every endpoint that writes accepts `Idempotency-Key`, and also returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` for a key reused with a different request hash and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` while the first request runs (ADR-0006, `RLE-014`). The first request holds a transaction-scoped advisory lock on tenant, operation and key; a duplicate does not wait for it, and once the first commits, the same request replays its stored status and body. Every endpoint returns `403 TENANT_NOT_ALLOWED` when `X-Tenant-Id` names a tenant outside the token's allowed list (ADR-0014, `RLE-018`).
+
+#### 4.2.1 Simulation over sample inputs (`RLE-016`)
+
+An approver asked to publish a changed fee table needs to see which customers get a different fee, which a row diff does not show. `:simulate` answers per sample with the simulated version's `matchedRuleIds` and `outputs`, the same for the baseline, and a `changed` flag.
+
+- **Validation first.** The stored version is integrity-checked against its `canonical_hash` and compiled before any sample is evaluated; a failure is `422 VALIDATION_FAILED` and nothing is evaluated. The baseline is the version selected at the host clock (section 3.3.1), checked the same way.
+- **What counts as changed.** The outcome kind (`MATCHED`, `NO_MATCH`, `FAILED`), any output value compared by exact value (`30000` equals `30000.00`; money by currency and minor units), or the failure code. A different matched rule giving the same outputs is not a change, because the approver's question is who pays a different fee; both rule lists are shown. With no effective version, `baselineVersion` and every `baseline` are null and every sample is `changed`.
+- **Inputs.** Each sample passes the evaluation input bounds and, with `evaluation.reject-undeclared-inputs`, may name only inputs the simulated version declares. Inputs the baseline does not declare (a new input of the draft) are left out of the baseline's side.
+- **No side effects.** Both sides run in memory in one read-only use of the connection; the decision log, the idempotency table, the outbox and the history are untouched. The compiled cache is keyed by version id and canonical hash, so a cached entry is never served for other content.
+- **Beside the lifecycle.** Simulation reads a version in any status. Approving v2 with an `effectiveFrom` at or before now retires v1 as superseded in the same transaction (`RLE-027`), so from then on the baseline is v2 and v1 can still be simulated. The pinned evaluate (DESIGN 4.2) is logged, so it refuses a draft, a version pending approval and, unless `evaluation.pin-retired` is on, a `RETIRED` version; simulation is how those are run.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Approver (rules:simulate)
+    participant R as SimulationController
+    participant E as RuleEngine.simulate
+    participant S as rle_version (read only)
+    C->>R: POST .../card-fee/versions/2:simulate {samples}
+    R->>R: permission, bounded body, 1 to 1,000 samples
+    R->>E: simulate("card-fee", 2, samples)
+    E->>S: find v2 in the caller's tenant
+    alt not in this tenant
+        E-->>C: 404 VERSION_NOT_FOUND
+    end
+    E->>E: integrity check and compile v2 (else 422 VALIDATION_FAILED)
+    E->>S: find the version effective at the host clock (v1)
+    E->>E: evaluate v2 and v1 per sample, compare outputs
+    E-->>C: 200 results with changed flags, nothing written
+```
 
 ### 4.3 Host metadata
 
@@ -337,7 +368,7 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `evaluation.max-output-bytes` | `1048576` | Estimated JSON size of one decision's outputs, checked as `collect` values accumulate; a breach is a logged `EVALUATION_ERROR`; lower only |
 | `evaluation.max-string-length` | `65536` | String inputs (`INPUT_INVALID`) and strings built by `+` (`EVALUATION_ERROR`); lower only. The three limits bound the heap one decision can use, which every tenant of the host shares |
 | `idempotency.retention` | `PT24H` | Lifetime of idempotency records, `PT1M` to `P30D` |
-| `evaluation.max-batch`, `simulation.max-inputs` | `1000`, `1000` | Items per `:evaluate-batch` and per `:simulate`; may be lowered, never raised |
+| `evaluation.max-batch`, `simulation.max-inputs` | `1000`, `1000` | Items per `:evaluate-batch` and per `:simulate`; may be lowered, never raised. `simulation.max-inputs` is built (RLE-016) |
 | `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | Bounds of `GET /decisions` and list reads (ADR-0015); range and page size may be lowered only |
 | `idempotency.retention` | `PT24H` | How long an idempotency record answers replays |
 | `tenancy.claim` | `tenant_id` | Attribute of the session principal, or claim of a validated token, that the default `TenantResolver` reads (PD-079, ADR-0014 decision 6). No header-based resolver is shipped; a host replaces the resolver with its own bean |
@@ -465,6 +496,7 @@ CREATE TABLE rle_version (
   source_document   TEXT        NOT NULL,        -- the document as received, never executed (TR-STD-01); UTF-8 only, no NUL or BOM (ADR-0026)
   source_hash       CHAR(64)    NOT NULL,        -- SHA-256 of the raw request bytes, before any decoding
   lock_version      BIGINT      NOT NULL DEFAULT 0,
+  created_by        TEXT,                        -- author (V2); null for versions written before V2
   requested_by      TEXT,
   requested_at      TIMESTAMPTZ,
   approved_by       TEXT,
@@ -479,7 +511,9 @@ CREATE TABLE rle_version (
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, rule_set_id, version_num),
   FOREIGN KEY (tenant_id, rule_set_id) REFERENCES rle_rule_set (tenant_id, id),
-  CHECK (approved_by IS NULL OR approved_by <> requested_by OR approved_by = 'system:dev-auto-publish')
+  -- Four eyes in the database (TR-SEC-04): V2 added the author; V12 (#299) dropped the 'system:dev-auto-publish' exemption.
+  CONSTRAINT rle_version_four_eyes CHECK (approved_by IS NULL
+    OR (approved_by IS DISTINCT FROM requested_by AND approved_by IS DISTINCT FROM created_by))
 );
 CREATE INDEX idx_rle_version_effective
   ON rle_version (tenant_id, rule_set_id, status, effective_from DESC);

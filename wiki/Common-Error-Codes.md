@@ -95,18 +95,12 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `500`. Unexpected failure. The body carries only the fixed `detail` text and the `correlationId`, never a stack trace, class name, SQL or table name. Give the `correlationId` to the host's operators: the server log has the same id with the cause. Send `X-Correlation-Id` with your request to choose the id yourself.
 
 ### PRECONDITION_REQUIRED
-`428`. A command that must be conditional was sent without the header it needs: `If-Match` on a Rule Engine command such as `:withdraw`, `If-Match` and `Idempotency-Key` on a Process Engine task completion, or a business key or `Idempotency-Key` on a Process Engine instance start. Read the resource, then send its `ETag` as `If-Match: "<lockVersion>"` (and a new `Idempotency-Key` where asked), so the command cannot overwrite a change you have not seen or run twice.
+`428`. A command that must be conditional was sent without the header it needs: `If-Match` on a Rule Engine command (`PUT` of a draft, `:approve`, `:reject`, `:withdraw` or `:retire`), `If-Match` and `Idempotency-Key` on a Process Engine task completion, or a business key or `Idempotency-Key` on a Process Engine instance start. An approval must name the lock version of the content the approver reviewed. Read the resource, then send its `ETag` as `If-Match: "<lockVersion>"` (and a new `Idempotency-Key` where asked), so the command cannot overwrite a change you have not seen or run twice. `:simulate` writes nothing and needs neither header.
 
 ## Versions and approvals
 
 ### SELF_APPROVAL_FORBIDDEN
 `403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve. A requester who rejects their own rule set request gets this code too, with a detail pointing to `:withdraw`: take the request back with `POST .../versions/{v}:withdraw` instead (PD-089).
-
-### PRECONDITION_REQUIRED
-`428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft, `:approve`, `:reject`, `:withdraw` or `:retire`. An approval must name the lock version of the content the approver reviewed. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
-
-### PRECONDITION_REQUIRED
-`428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft, `:approve` or `:reject`. An approval must name the lock version of the content the approver reviewed. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
 
 ### NO_EFFECTIVE_VERSION
 `404`. No approved version is effective at the clock: nothing is published or active yet, the effective date is in the future, the last version was retired, or the request names a tenant with no version. Publish or approve a version, or check the tenant.
@@ -143,7 +137,7 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 `404`. No rule set of that name in the caller's tenant. Another tenant's rule set also answers `404`, so names do not leak.
 
 ### VERSION_NOT_FOUND
-`404`. The rule set has no version with that number.
+`404`. The rule set has no version with that number in the caller's tenant. On `:simulate` a version of another tenant answers the same, so versions do not leak.
 
 ### DECISION_NOT_FOUND
 `404`. Unknown decision id, or a decision of another tenant, on `GET /decisions/{id}` or `POST /decisions/{id}:replay`. Ids of other tenants answer the same, so they do not leak.

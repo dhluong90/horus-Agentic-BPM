@@ -27,6 +27,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param authoring how rule changes may be made on this host
  * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
  * @param decisionLog what the decision log records and how far ahead its partitions are created
+ * @param simulation limits of {@code :simulate}
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -40,7 +41,17 @@ public record RuleEngineProperties(
         @DefaultValue Security security,
         @DefaultValue Authoring authoring,
         @DefaultValue Masking masking,
-        @DefaultValue DecisionLog decisionLog) {
+        @DefaultValue DecisionLog decisionLog,
+        @DefaultValue Simulation simulation) {
+
+    /**
+     * Limits of {@code POST .../versions/{v}:simulate} (RLE-016).
+     *
+     * @param maxInputs the most sample input sets one simulation accepts, 1 to 1000; default 1000. May be lowered,
+     *     never raised
+     */
+    public record Simulation(Integer maxInputs) {
+    }
 
     /**
      * Keys of the keyed fingerprints (HMAC-SHA256) of masked inputs (RLE-012, RLE-035). Supply every key from an
@@ -277,7 +288,9 @@ public record RuleEngineProperties(
                 .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired())
                 .withLifecycle(
                         lifecycle.systemActor() == null ? EngineDefaults.SYSTEM_ACTOR : lifecycle.systemActor(),
-                        EngineDefaults.RETIRE_APPROVAL);
+                        EngineDefaults.RETIRE_APPROVAL)
+                .withSimulationMaxInputs(
+                        simulation.maxInputs() == null ? EngineDefaults.SIMULATION_MAX_SAMPLES : simulation.maxInputs());
     }
 
     /**
