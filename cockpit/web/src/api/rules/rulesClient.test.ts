@@ -7,6 +7,7 @@ import { allVersions } from './catalogue';
 import { everyRuleSet } from '../../features/overview/useRuleOverview';
 import type { RulesClient } from './rulesClient';
 import { createRulesClient } from './rulesClient';
+import { versionDiff } from './schemas';
 import { createFakeEngine, demoSeed } from '../../mocks/ruleEngine';
 
 interface Sent { url: string; method: string; headers: Record<string, string>; body: string | undefined }
@@ -118,6 +119,37 @@ describe('rules client', () => {
     expect(await everyRuleSet(createRulesClient('', fetchImpl), 1, undefined)).toMatchObject({ truncated: false });
   });
 
+  it('RLE_028_the_client_reads_the_engine_diff_and_sends_the_base_as_a_query', async () => {
+    const { sent, fetchImpl } = engineFetch('minh');
+    const diff = await createRulesClient('', fetchImpl).diffVersions('card-fee', 2, 1);
+    expect(sent.map((s) => `${s.method} ${new URL(s.url, 'http://host').pathname}${new URL(s.url, 'http://host').search}`)).toEqual(['GET /api/bpm/rules/v1/rule-sets/card-fee/versions/2/diff?base=1']);
+    expect(diff.rows.map((row) => `${row.ruleId}:${row.change}`)).toEqual(['R6:ADDED', 'R3:CHANGED', 'R4:REMOVED']);
+    expect(diff.rows[1]?.fields).toEqual([{ path: '/then/fee', from: { currency: 'VND', amount: 30000 }, to: { currency: 'VND', amount: 35000 }, nonAscii: false }]);
+    expect(diff.unchangedCount).toBe(3);
+  });
+
+  it('RLE_028_the_contract_example_of_a_diff_parses', () => {
+    // The 200 example of diffVersions in rule-engine/api/openapi.yaml.
+    const example = {
+      ruleSet: 'card-fee', version: 2, base: 1, canonicalHash: '4be1d7a0c35e9f2b8a6d4c1e0f9b7a5d3c2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a', baseCanonicalHash: '9c07e5d3b1a9f7e5d3c1b9a7f5e3d1c9b7a5f3e1d9c7b5a3f1e9d7c5b3a1f9e7',
+      sourceHashChanged: true, effectiveFrom: { from: '2026-11-01T00:00:00Z', to: null }, header: [],
+      inputs: { added: [], removed: [], changed: [], reordered: false }, outputs: { added: [], removed: [], changed: [], reordered: false },
+      rows: [
+        { ruleId: 'R2', change: 'CHANGED', position: 2, basePosition: 2, moved: false, fields: [{ path: '/then/fee', from: { currency: 'VND', amount: 30000 }, to: { currency: 'VND', amount: 0 }, nonAscii: false }] },
+        { ruleId: 'R6', change: 'ADDED', position: 3 },
+      ],
+      unchangedCount: 2,
+    };
+    expect(versionDiff.safeParse(example).success).toBe(true);
+    expect(versionDiff.safeParse({ ...example, rows: [{ ruleId: 'R2', change: 'RENAMED' }] }).success).toBe(false);
+  });
+
+  it('RLE_028_a_missing_base_is_refused_as_input_invalid', async () => {
+    const { fetchImpl } = engineFetch('minh');
+    const error: unknown = await createRulesClient('', fetchImpl).diffVersions('card-fee', 2, 2).catch((e: unknown) => e);
+    expect(error instanceof HostCallError ? error.hostError : undefined).toMatchObject({ kind: 'problem', status: 400, code: 'INPUT_INVALID' });
+  });
+
   it('TR_UI_02_csrf_token_is_read_from_the_host_cookie', () => {
     expect(csrfToken('a=1; XSRF-TOKEN=abc%3D; b=2')).toBe('abc=');
     expect(csrfToken('a=1')).toBeUndefined();
@@ -126,7 +158,7 @@ describe('rules client', () => {
   it('TR_UI_02_every_client_path_is_an_operation_of_the_engine_contract', () => {
     // The contract the client is written from: rule-engine/api/openapi.yaml in this repository.
     const contract = readFileSync(resolve(process.cwd(), '../../rule-engine/api/openapi.yaml'), 'utf8');
-    for (const path of ['/rule-sets:', '/rule-sets/{name}/versions:', '/rule-sets/{name}/versions/{version}:', '/rule-sets/{name}/versions/{version}/history:', '/rule-sets/{name}/versions/{version}:request-publish:', '/rule-sets/{name}/versions/{version}:approve:', '/rule-sets/{name}/versions/{version}:reject:', '/decisions/{ruleSet}:evaluate:']) {
+    for (const path of ['/rule-sets:', '/rule-sets/{name}/versions:', '/rule-sets/{name}/versions/{version}:', '/rule-sets/{name}/versions/{version}/history:', '/rule-sets/{name}/versions/{version}/diff:', '/rule-sets/{name}/versions/{version}:request-publish:', '/rule-sets/{name}/versions/{version}:approve:', '/rule-sets/{name}/versions/{version}:reject:', '/decisions/{ruleSet}:evaluate:']) {
       expect(contract, path).toContain(`  ${path}\n`);
     }
   });

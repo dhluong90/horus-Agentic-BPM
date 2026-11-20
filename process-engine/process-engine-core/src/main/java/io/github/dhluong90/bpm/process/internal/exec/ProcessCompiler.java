@@ -111,7 +111,9 @@ public final class ProcessCompiler {
                 }
                 if (out.size() > 1) {
                     for (SequenceFlow f : out) {
-                        if (!f.id().equals(gateway.defaultFlow()) && f.conditionExpression() == null) {
+                        // A condition with no text is no condition: the kernel must never evaluate an empty one.
+                        if (!f.id().equals(gateway.defaultFlow()) && (f.conditionExpression() == null
+                                || f.conditionExpression().text() == null)) {
                             problems.add(DefinitionProblem.of("CONDITION_MISSING", "Every non-default outgoing flow of"
                                     + " a diverging exclusive gateway needs a condition", f.id()));
                         }

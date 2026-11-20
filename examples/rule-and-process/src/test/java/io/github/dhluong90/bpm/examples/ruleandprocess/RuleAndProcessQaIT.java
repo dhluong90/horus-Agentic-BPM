@@ -170,8 +170,8 @@ class RuleAndProcessQaIT {
     void complete_replayed_with_the_same_idempotency_key_returns_the_stored_answer_and_completes_once() throws Exception {
         String taskPath = openTask("QA-C001");
 
-        HttpResponse<String> first = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"0\"", "qa-c1");
-        HttpResponse<String> replay = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"0\"", "qa-c1");
+        HttpResponse<String> first = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"1\"", "qa-c1");
+        HttpResponse<String> replay = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"1\"", "qa-c1");
 
         assertThat(first.statusCode()).as(first.body()).isEqualTo(200);
         assertThat(replay.statusCode()).as(replay.body()).isEqualTo(200);
@@ -187,7 +187,7 @@ class RuleAndProcessQaIT {
         String taskPath = openTask("QA-C002");
 
         List<HttpResponse<String>> answers = concurrently(8,
-                () -> send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"0\"", null));
+                () -> send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"1\"", null));
 
         assertThat(answers).extracting(HttpResponse::statusCode).as(bodies(answers)).containsOnly(200, 409);
         assertThat(answers).filteredOn(a -> a.statusCode() == 200).hasSize(1);
@@ -202,8 +202,8 @@ class RuleAndProcessQaIT {
     void complete_with_a_stale_if_match_after_a_replay_is_a_conflict_not_a_second_transition() throws Exception {
         String taskPath = openTask("QA-C003");
 
-        send("an", "POST", taskPath, "{\"result\":{\"approved\":false}}", "\"0\"", "qa-c3");
-        HttpResponse<String> stale = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"0\"", "qa-c3-other");
+        send("an", "POST", taskPath, "{\"result\":{\"approved\":false}}", "\"1\"", "qa-c3");
+        HttpResponse<String> stale = send("an", "POST", taskPath, "{\"result\":{\"approved\":true}}", "\"1\"", "qa-c3-other");
 
         assertThat(stale.statusCode()).isEqualTo(409);
         assertThat(JSON.readTree(stale.body()).get("code").stringValue()).isEqualTo("VERSION_CONFLICT");
@@ -240,8 +240,8 @@ class RuleAndProcessQaIT {
         assertThat(decisionVersion(decisionA)).isEqualTo(1);
 
         String taskA = instanceA.at("/tasks/0/id").stringValue();
-        HttpResponse<String> done = send("an", "POST", "/api/bpm/processes/v1/tasks/" + taskA + ":complete",
-                "{\"result\":{\"approved\":true}}", "\"0\"", null);
+        HttpResponse<String> done = send("an", "POST", claimedBy("an", taskA),
+                "{\"result\":{\"approved\":true}}", "\"1\"", null);
         assertThat(done.statusCode()).as(done.body()).isEqualTo(200);
         assertThat(jdbc.sql("SELECT fee_minor FROM card_application WHERE tenant_id = 'bank-a' AND application_id = 'QA-P001'")
                 .query(Long.class).single()).isEqualTo(10_000L);
@@ -269,8 +269,8 @@ class RuleAndProcessQaIT {
 
         // Then I1 continues and completes on v1; I2 runs on v2
         String task1 = instance1.at("/tasks/0/id").stringValue();
-        HttpResponse<String> done = send("an", "POST", "/api/bpm/processes/v1/tasks/" + task1 + ":complete",
-                "{\"result\":{\"approved\":true}}", "\"0\"", null);
+        HttpResponse<String> done = send("an", "POST", claimedBy("an", task1),
+                "{\"result\":{\"approved\":true}}", "\"1\"", null);
         assertThat(done.statusCode()).as(done.body()).isEqualTo(200);
         assertThat(JSON.readTree(done.body()).get("definitionVersion").intValue()).isEqualTo(1);
         JsonNode instance2 = get("an", START + "/" + i2.get("instanceId").stringValue());
@@ -284,7 +284,15 @@ class RuleAndProcessQaIT {
         JsonNode submitted = post("tuan", "/api/cards/applications",
                 "{\"applicationId\":\"" + applicationId + "\",\"customerId\":\"C-002\"}");
         JsonNode instance = get("an", START + "/" + submitted.get("instanceId").stringValue());
-        return "/api/bpm/processes/v1/tasks/" + instance.at("/tasks/0/id").stringValue() + ":complete";
+        return claimedBy("an", instance.at("/tasks/0/id").stringValue());
+    }
+
+    /** Claims the open task (lock version 0 to 1) and returns its completion path; complete with If-Match "1". */
+    private String claimedBy(String user, String taskId) throws Exception {
+        HttpResponse<String> claimed = send(user, "POST", "/api/bpm/processes/v1/tasks/" + taskId + ":claim", "", "\"0\"",
+                "qa-claim-" + taskId);
+        assertThat(claimed.statusCode()).as(claimed.body()).isEqualTo(200);
+        return "/api/bpm/processes/v1/tasks/" + taskId + ":complete";
     }
 
     private static String startBody(String businessKey, String customerId) {
@@ -379,8 +387,11 @@ class RuleAndProcessQaIT {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", contentType)
                 .method(method, HttpRequest.BodyPublishers.ofString(body));
-        if (ifMatch != null) {
-            request.header("If-Match", ifMatch);
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        String lock = ifMatch == null && path.matches(".*:(approve|reject)$") ? "\"1\"" : ifMatch;
+        if (lock != null) {
+            request.header("If-Match", lock);
         }
         if (idempotencyKey != null) {
             request.header("Idempotency-Key", idempotencyKey);
