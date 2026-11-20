@@ -54,6 +54,7 @@ public class ProblemDetails {
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
+            Map.entry("WARNINGS_NOT_ACKNOWLEDGED", HttpStatus.CONFLICT),
             Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
             Map.entry("PRECONDITION_REQUIRED", HttpStatus.PRECONDITION_REQUIRED),
@@ -91,6 +92,16 @@ public class ProblemDetails {
                 item.put("message", v.message());
             }
             body.put("violationsTruncated", failed.truncated());
+        }
+        if (e instanceof io.github.dhluong90.bpm.rules.api.WarningsNotAcknowledgedException unacknowledged) {
+            // RLE-053: the client shows these again and the approver resends with the codes; never retried on its own.
+            ArrayNode warnings = body.putArray("warnings");
+            for (var w : unacknowledged.warnings()) {
+                warnings.addObject().put("code", w.code()).put("input", w.input())
+                        .set("matchedName", EngineValues.value(w.matchedName()));
+            }
+            ArrayNode setting = body.putArray("setting");
+            unacknowledged.setting().forEach(setting::add);
         }
         if (e instanceof io.github.dhluong90.bpm.rules.api.LastVersionInEffectException last) {
             // PD-101: what a client needs to word the warning and to retry with the confirmation

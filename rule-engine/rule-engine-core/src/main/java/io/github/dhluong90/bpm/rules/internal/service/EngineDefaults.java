@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
  * The one place where the Rule Engine's numeric and duration defaults are declared (ADR-0024,
@@ -175,4 +176,10 @@ public final class EngineDefaults {
 
     private EngineDefaults() {
     }
+
+    /** Default of {@code lifecycle.acknowledge-warnings} (PD-104): personal-data warnings need an acknowledgement. */
+    public static final List<String> ACKNOWLEDGE_WARNINGS = List.of("UNMASKED_PERSONAL_DATA");
+
+    /** Most codes {@code lifecycle.acknowledge-warnings} may list. */
+    public static final int ACKNOWLEDGE_WARNINGS_MAX = 20;
 }

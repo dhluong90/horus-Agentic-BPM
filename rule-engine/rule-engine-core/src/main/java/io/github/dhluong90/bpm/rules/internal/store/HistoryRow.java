@@ -1,9 +1,11 @@
 package io.github.dhluong90.bpm.rules.internal.store;
 
+import io.github.dhluong90.bpm.rules.api.AcknowledgedWarning;
 import io.github.dhluong90.bpm.rules.api.LifecycleAction;
 import io.github.dhluong90.bpm.rules.api.VersionHistoryEntry;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * A row of {@code rle_version_history}: one transition of one version, appended in the transition's transaction.
@@ -24,11 +26,46 @@ import java.time.Instant;
  *     otherwise null
  * @param canonicalHash on a {@code DRAFT_UPDATED} row, the canonical hash after the replacement; otherwise null
  * @param previousCanonicalHash on a {@code DRAFT_UPDATED} row, the canonical hash before it; otherwise null
+ * @param acknowledgedWarnings on {@code APPROVED}: the warnings the approver accepted (RLE-053), else empty
+ * @param maskedByDefaultInputs on {@code APPROVED}: the inputs masked by the tenant's {@code decision-log.mask-default}
+ *     rather than by their declaration at approval (PD-104), else empty
  */
 public record HistoryRow(String tenantId, String id, String versionId, LifecycleAction action,
         VersionStatus fromStatus, VersionStatus toStatus, String actor, String reason, long lockVersion,
         Instant occurredAt, Integer supersededBy, String approvalMode, Boolean noVersionInEffect, String canonicalHash,
-        String previousCanonicalHash) {
+        String previousCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs) {
+
+    public HistoryRow {
+        acknowledgedWarnings = acknowledgedWarnings == null ? List.of() : List.copyOf(acknowledgedWarnings);
+        maskedByDefaultInputs = maskedByDefaultInputs == null ? List.of() : List.copyOf(maskedByDefaultInputs);
+    }
+
+    /**
+     * Creates a row without an acknowledgement.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param versionId see the record
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     * @param noVersionInEffect see the record
+     * @param canonicalHash see the record
+     * @param previousCanonicalHash see the record
+     */
+    public HistoryRow(String tenantId, String id, String versionId, LifecycleAction action, VersionStatus fromStatus,
+            VersionStatus toStatus, String actor, String reason, long lockVersion, Instant occurredAt,
+            Integer supersededBy, String approvalMode, Boolean noVersionInEffect, String canonicalHash,
+            String previousCanonicalHash) {
+        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy,
+                approvalMode, noVersionInEffect, canonicalHash, previousCanonicalHash, List.of(), List.of());
+    }
 
     /**
      * Creates the row of a retirement.
@@ -104,6 +141,7 @@ public record HistoryRow(String tenantId, String id, String versionId, Lifecycle
      */
     public VersionHistoryEntry toEntry() {
         return new VersionHistoryEntry(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt,
-                supersededBy, approvalMode, noVersionInEffect, canonicalHash, previousCanonicalHash);
+                supersededBy, approvalMode, noVersionInEffect, canonicalHash, previousCanonicalHash, acknowledgedWarnings,
+                maskedByDefaultInputs);
     }
 }
