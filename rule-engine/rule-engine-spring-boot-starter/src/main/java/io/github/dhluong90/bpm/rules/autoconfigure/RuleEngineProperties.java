@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
+import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import java.time.Duration;
@@ -39,9 +40,10 @@ public record RuleEngineProperties(
     /**
      * How rule changes may be made on this host (PD-075, PD-094).
      *
-     * @param cockpitDrafts whether the cockpit may create and edit drafts; default false (PD-094). Published to
-     *     clients as the rules setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta}. Import from a
-     *     file is not affected
+     * @param cockpitDrafts whether drafts may be created and edited from the cockpit; default false (PD-094). Published
+     *     to clients as the rules setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta}, and enforced by
+     *     the engine: when false, replacing a draft ({@code PUT .../versions/{v}}) is refused with
+     *     {@code 403 DRAFT_AUTHORING_DISABLED}. Import from a file is not affected
      */
     public record Authoring(Boolean cockpitDrafts) {
     }
@@ -72,9 +74,20 @@ public record RuleEngineProperties(
      * @param maxOutputBytes estimated JSON size of one decision's outputs, 1 to 1048576; default 1048576. Lower only
      * @param maxStringLength longest string input or string built by {@code +}, 1 to 65536; default 65536. Lower only
      * @param maxRows most rules a version may contain, checked at import, 1 to 5000; default 5000. Lower only
+     * @param regexTimeoutMs longest time one {@code matches()} may run, in milliseconds, 1 to 1000; default 50. A
+     *     match past it fails the decision with {@code EVALUATION_ERROR}, reason {@code REGEX_TIMEOUT}
+     * @param regexMaxInputLength longest text {@code matches()} looks at, 1 to {@code max-string-length}; default
+     *     4096. A longer text fails the decision without running the match, reason {@code REGEX_INPUT_TOO_LONG}
+     * @param regexMaxReads characters one {@code matches()} may read, 1 to 1000000; default 1000000. The deterministic
+     *     primary bound, the same on every machine; past it the decision fails with {@code REGEX_TIMEOUT}. Lower only
+     * @param regexMaxReadsPerDecision characters all the {@code matches()} of one decision may read together, 1 to
+     *     5000000; default 5000000. Counted the same deterministic way as {@code regex-max-reads}, so a rule set of
+     *     many {@code matches()} rows stops at this total; past it the decision fails with {@code REGEX_TIMEOUT}.
+     *     Lower only
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
-            Integer maxStringLength, Integer maxRows) {
+            Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
+            Integer regexMaxReads, Integer regexMaxReadsPerDecision) {
     }
 
     /**
@@ -111,7 +124,18 @@ public record RuleEngineProperties(
                 lifecycle.reasonMaxLength() == null ? EngineDefaults.REASON_MAX_LENGTH : lifecycle.reasonMaxLength(),
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
-                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows());
+                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows(),
+                new RegexLimits(
+                        evaluation.regexTimeoutMs() == null ? RegexLimits.TIMEOUT_MILLIS : evaluation.regexTimeoutMs(),
+                        evaluation.regexMaxInputLength() != null ? evaluation.regexMaxInputLength()
+                                // A host that lowers max-string-length lowers the default regex length with it;
+                                // an invalid max-string-length is reported by the settings, naming that property.
+                                : Math.max(1, Math.min(RegexLimits.MAX_INPUT_LENGTH, evaluation.maxStringLength() == null
+                                        ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength())),
+                        evaluation.regexMaxReads() == null ? RegexLimits.MAX_READS : evaluation.regexMaxReads(),
+                        evaluation.regexMaxReadsPerDecision() == null
+                                ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision()))
+                .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()));
     }
 
     /**

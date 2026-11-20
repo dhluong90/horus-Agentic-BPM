@@ -32,7 +32,7 @@ class HitPolicyTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml));
         engines.versionService().requestPublish(name, 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve(name, 1, WriteOptions.none());
+        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
         caller.become("bank-a", "teller");
     }
 
