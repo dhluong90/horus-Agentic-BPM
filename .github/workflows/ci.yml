@@ -46,8 +46,10 @@ jobs:
       - name: Tests of the Maven retry script (stub mvn, no network)
         run: tools/test-mvn-retry.sh
 
-      - name: Tests of the image pin check
-        run: python3 tools/test_check_image_pins.py -v
+      - name: Tests of the image pin check and of the weekly test-image rescan
+        run: |
+          python3 tools/test_check_image_pins.py -v
+          python3 tools/test_rescan_test_images.py -v
 
       # PD-100: every container image in tests, workflows, POMs and tool scripts is pinned by digest.
       - name: Container images pinned by digest

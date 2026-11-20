@@ -350,6 +350,18 @@ To move to a new JRE release:
 
 The Deploy workflow also runs every Monday at 03:17 UTC on `main`: it rebuilds the image, runs the smoke test and the image gates, so a vulnerability published since the last change to the deployment files fails a run without anyone touching them. GitHub notifies the repository owner when a scheduled run fails. Run the same jobs at any time from the Actions tab (Deploy, "Run workflow").
 
+The same weekly and manual runs rescan two more things (#293):
+
+- **The latest release.** The job "Released tag rescan" finds the newest `vX.Y.Z` tag (v0.1.0 today), builds its example image from that tag's own `deploy/docker/Dockerfile` with no layer cache, on x64 and arm64, and runs today's image gates and `.grype.yaml` on it. It also downloads `bom-release.json` from that GitHub Release, checks it against the release's `SHA256SUMS`, and scans it with `tools/scan-dependencies.sh`, which covers every released jar and the cockpit bundle. A high or critical finding fails the run and names the tag. The fix is a patch release.
+- **The test images pinned by digest.** The job "Pinned test images rescan" scans every image `python3 tools/check-image-pins.py --list` prints (PostgreSQL 14, 16 and 18, PgBouncer, the Testcontainers reaper and the Playwright image of CI) with Grype, from the registry, for linux/amd64. These images never ship, so a finding never fails the run: the Monday run opens one issue per image, titled `Platform: Update Pinned Test Image <name>@<digest prefix>`, or comments on the open one. A manual run opens issues only with the input `open-issues`; otherwise it lists them in the summary. Move the pin to a fixed digest as described under "Test container images" in `wiki/Contributing.md`.
+
+The job "Weekly rescan summary" puts the three results in one table. To rescan the test images locally (Grype, or Docker for the pinned Grype image):
+
+```bash
+python3 tools/rescan-test-images.py target/test-image-rescan
+cat target/test-image-rescan/summary.md
+```
+
 The JRE is a build argument with a pinned checksum, which Dependabot does not track. The same workflow runs [`deploy/check-jre-release.py`](../deploy/check-jre-release.py), which asks the Adoptium API for the latest Temurin 21 JRE for Alpine on x64 and aarch64 and compares it with `JRE_RELEASE`. It fails the scheduled run when a newer release exists and only warns on a pull request. It never edits the Dockerfile; follow [Updating the JRE](#updating-the-jre). It also says whether the official `eclipse-temurin` image carries the pinned release for both architectures, the signal to evaluate switching back to it.
 
 ```bash

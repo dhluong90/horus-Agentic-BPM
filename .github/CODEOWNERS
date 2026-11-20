@@ -17,6 +17,8 @@
 /tools/check-test-oracle.py      @dhluong90
 /tools/test_check_test_oracle.py @dhluong90
 /tools/test_check_image_pins.py  @dhluong90
+/tools/rescan-test-images.py     @dhluong90
+/tools/test_rescan_test_images.py @dhluong90
 /tools/architecture/          @dhluong90
 /tools/scan-dependencies.sh     @dhluong90
 /tools/mvn-retry.sh             @dhluong90
