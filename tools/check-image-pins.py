@@ -2,6 +2,8 @@
 """Refuses container image references that are not pinned by digest (PD-100, #288).
 
 Usage:   python3 tools/check-image-pins.py [ROOT]          (ROOT defaults to the repository root)
+         python3 tools/check-image-pins.py --list [ROOT]   prints each pinned image once, as <name>@sha256:<digest>
+                                                           (the weekly rescan of the test images reads it, #293)
 Why:     test-only images stay off the licence allow-list on the condition that they are pinned by digest.
          A tag can be pushed again, so a reference by tag alone can change what the tests run.
 Where:   Java, properties and YAML under src/test/ of every module; .github/workflows/*.yml; every pom.xml;
@@ -129,6 +131,17 @@ def check(root: Path) -> list[str]:
     return errors
 
 
+def pinned(root: Path) -> list[str]:
+    """Every image reference pinned by digest, once each, as <name>@sha256:<digest>, sorted."""
+    found: set[str] = set()
+    for path, _, kind in files(root):
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            for value, _ in references(kind, line):
+                if value and not value.startswith("$") and DIGEST.search(value):
+                    found.add(untagged(value))
+    return sorted(found)
+
+
 def runtime_guard(root: Path) -> list[str]:
     """A module whose tests use Testcontainers must register the runtime guard in its testcontainers.properties."""
     errors: list[str] = []
@@ -150,7 +163,15 @@ def runtime_guard(root: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    root = Path(argv[1]) if len(argv) > 1 else Path(__file__).resolve().parent.parent
+    args = argv[1:]
+    listing = bool(args) and args[0] == "--list"
+    if listing:
+        args = args[1:]
+    root = Path(args[0]) if args else Path(__file__).resolve().parent.parent
+    if listing:
+        for image in pinned(root):
+            print(image)
+        return 0
     errors = check(root) + runtime_guard(root)
     for error in errors:
         print(f"::error title=Image not pinned by digest::{error}")
