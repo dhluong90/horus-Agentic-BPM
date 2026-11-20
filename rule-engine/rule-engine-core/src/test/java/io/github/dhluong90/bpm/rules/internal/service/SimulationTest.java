@@ -64,7 +64,7 @@ class SimulationTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
         caller.become("bank-a", "alice");
         engines.versionService().importVersion("card-fee", ImportRequest.yaml(cardFeeV2()));
     }
@@ -222,6 +222,27 @@ class SimulationTest {
         // Then
         assertThat(result.status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
         assertThat(result.changedCount()).isEqualTo(2);
+        assertThat(stores.decisions).isEmpty();
+    }
+
+    @Test
+    void RLE_016_after_v2_is_approved_v1_is_retired_and_still_simulates_against_v2() {
+        // Given bob approves v2 at once, which retires v1 as superseded (RLE-027)
+        engines.versionService().requestPublish("card-fee", 2, WriteOptions.none());
+        caller.become("bank-a", "bob");
+        engines.versionService().approve("card-fee", 2, new WriteOptions(null, 1L, null));
+        caller.become("bank-a", "bob", SIMULATOR);
+
+        // When the retired v1 is simulated
+        SimulationResult result = engines.ruleEngine().simulate("card-fee", 1, fiveCustomers());
+
+        // Then the baseline is v2, and the two customers on the default fee go back from 30,000 to 50,000 VND
+        assertThat(result.status()).isEqualTo(VersionStatus.RETIRED);
+        assertThat(result.baselineVersion()).isEqualTo(2);
+        assertThat(result.samples()).extracting(SimulationResult.Sample::changed)
+                .containsExactly(false, false, false, true, true);
+        assertThat(result.samples().get(3).simulated()).isEqualTo(new DecisionResult.Matched(List.of("R3"),
+                Map.of("fee", Money.ofMinor("VND", 50_000))));
         assertThat(stores.decisions).isEmpty();
     }
 
