@@ -5,13 +5,17 @@ What shipped in each release. The project has one version for every module, and 
 | Release | Tag | Date | Modules | Notes |
 |---|---|---|---|---|
 | 0.1.0 | `v0.1.0` | 20 Nov 2026 | The 13 artifacts pinned by `bpm-bom` 0.1.0, all at `0.1.0`: `bpm-host-metadata`, the Rule Engine (`rule-engine-core`, `-postgres`, `-rest`, `-spring-boot-starter`), the Process Engine preview (`process-engine-core`, `-bpmn`, `-test`, `-postgres`, `-rest`, `-spring-boot-starter`), `cockpit-spring-boot-starter`, and `bpm-bom` itself | First release, published as a GitHub Release with its bill of materials and checksums |
-| 0.2.0 | `v0.2.0` | 15 Jan 2027 (planned) | As 0.1.0, at `0.2.0`, plus the new `bpm-expression` (14 artifacts) | **Breaking change of a 0.x release: `Money` and the expression types moved to `bpm-expression`** (see [0.2.0](#020)). **Upgrade note (PD-104): finish a rolling upgrade before relying on approval acknowledgements.** A replica still on 0.1.x approves without asking for an acknowledgement and writes no `acknowledged_warnings` or `masked_by_default_inputs`, so until every replica runs 0.2.0 an approval can reach the decision log without the acknowledgement on the record. **Upgrade note (PD-105): a pending rule set version written before V2 has no recorded author and can no longer be approved** (`409 AUTHOR_UNKNOWN`); import the change again, have it approved, and reject or withdraw the old version. Migrations: `rle_setting_seen` and the two acknowledgement columns on `rle_version_history` (numbered at merge, after V13), and `V17__rle_decision_on_behalf_of` |
+| 0.2.0 | `v0.2.0` | 21 Nov 2026 | As 0.1.0, at `0.2.0`, plus the new `bpm-expression` (14 artifacts) | **Breaking change of a 0.x release: `Money` and the expression types moved to `bpm-expression`** (see [0.2.0](#020)). **Upgrade note (PD-104): finish a rolling upgrade before relying on approval acknowledgements.** A replica still on 0.1.x approves without asking for an acknowledgement and writes no `acknowledged_warnings` or `masked_by_default_inputs`, so until every replica runs 0.2.0 an approval can reach the decision log without the acknowledgement on the record. **Upgrade note (PD-105): a pending rule set version written before V2 has no recorded author and can no longer be approved** (`409 AUTHOR_UNKNOWN`); import the change again, have it approved, and reject or withdraw the old version. Migrations: see [0.2.0](#020) |
 
 Every release note lists the database migrations it adds (TR-OPS-01) and the "should" requirements it meets ([[Technical Requirements]]).
 
 ## 0.2.0
 
-Planned for 15 Jan 2027. Still a 0.x release, so it makes no compatibility promise; the changes below need a code change in a host that uses the moved types.
+Released 21 Nov 2026. Still a 0.x release, so it makes no compatibility promise; the changes below need a code change in a host that uses the moved types.
+
+- **Tag:** `v0.2.0`. Every module is at `0.2.0`.
+- **Runs on:** Java 21 or 25, Spring Boot 4.x or 3.5.x, PostgreSQL 14 or later. CI tests these combinations on PostgreSQL 14, 16 and 18.
+- **Migrations:** Rule Engine `V6__rle_version_history_draft_updated`, `V10__rle_decision_pinned`, `V11__rle_version_retired_at`, `V12__rle_version_four_eyes_no_exemption`, `V14__rle_setting_seen`, `V15__rle_version_history_acknowledged_warnings`, `V16__rle_masking_key_check`, `V17__rle_decision_on_behalf_of`. Process Engine `V3__pre_engine_key`, `V4__pre_task_claim`, `V6__pre_timer`, `V7__pre_definition_lifecycle`, `V8__pre_async_completion_token`, `V9__pre_timer_kind_index`, `V10__pre_task_review`. Versions V7, V8, V9 and V13 of the Rule Engine and V5 of the Process Engine are unused.
 
 ### Breaking changes
 
