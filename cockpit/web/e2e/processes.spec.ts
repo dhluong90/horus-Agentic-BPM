@@ -63,6 +63,7 @@ const T = {
   loan: { en: 'Loan origination', vi: 'Khởi tạo khoản vay' },
   started: { en: 'You started this case, so someone else decides.', vi: 'Bạn đã khởi tạo hồ sơ này, nên người khác quyết định.' },
   reported: { en: 'You reported this answer, so someone else decides.', vi: 'Bạn đã gửi câu trả lời này, nên người khác quyết định.' },
+  secondPerson: { en: 'A second person decides this answer, not you.', vi: 'Người thứ hai quyết định câu trả lời này, không phải bạn.' },
   masked: { en: 'Part of the answer is masked, so only an override is possible.', vi: 'Một phần câu trả lời đã được che, nên chỉ có thể sửa.' },
 } as const;
 
@@ -208,7 +209,7 @@ for (const locale of LOCALES) {
   const fourEyes = async (page: Page, seed: Omit<ProcessSeed, 'locale'>, line: string) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await rememberLocale(page, locale);
-    await mockEngines(page, { ...seed, locale });
+    const engine = await mockEngines(page, { ...seed, locale });
     await page.goto(`./#/tasks/${REVIEW_TASK_ID}`);
     const dock = page.getByRole('region', { name: locale === 'en' ? 'Your decision' : 'Quyết định của bạn' });
     const reason = dock.getByText(line);
@@ -216,9 +217,27 @@ for (const locale of LOCALES) {
     // One line: the text box is no taller than one line of body text plus its padding.
     expect((await reason.boundingBox())?.height ?? 99).toBeLessThanOrEqual(40);
     const start = dock.getByRole('button', { name: T.start[locale] });
-    await expect(start).toBeDisabled();
     await expect(start).toHaveAccessibleDescription(line);
     await expect(dock.getByRole('button', { name: T.approve[locale] })).toHaveCount(0);
+    // The subtitle agrees with the line: a second person decides.
+    await expect(page.getByText(T.secondPerson[locale])).toBeVisible();
+    // Not actionable: marked disabled, drawn without the primary fill, and a click or Enter sends nothing.
+    await expect(start).toHaveAttribute('aria-disabled', 'true');
+    const look = await start.evaluate((element) => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--primary-fill)';
+      document.body.append(probe);
+      const primary = getComputedStyle(probe).color;
+      probe.remove();
+      return { background: getComputedStyle(element).backgroundColor, primary, cursor: getComputedStyle(element).cursor };
+    });
+    expect(look.background).not.toBe(look.primary);
+    expect(look.cursor).toBe('not-allowed');
+    await start.click({ force: true });
+    await start.focus();
+    await page.keyboard.press('Enter');
+    await expect(start).toHaveText(T.start[locale]);
+    expect(engine.requests.some((request) => request.path.endsWith(':claim'))).toBe(false);
   };
 
   test(`CKP_007_the_starter_is_told_in_one_line_why_they_cannot_decide_${locale}`, async ({ page }) => {

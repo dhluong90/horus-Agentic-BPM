@@ -177,6 +177,7 @@ export const en = {
   'review.crumb': 'Agent review',
   'review.title': "Review the agent's answer",
   'review.subtitle': 'An agent answer was stopped. Approve or override it.',
+  'review.subtitleBlocked': 'A second person decides this answer, not you.',
   'review.notAgentSubtitle': 'This task has no agent answer to review.',
   'review.notAgent': 'Only escalated agent steps open here. Other tasks arrive with the inbox.',
   'review.case': 'Case {key}',

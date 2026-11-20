@@ -152,8 +152,11 @@ describe('CKP-007 agent task inspector', () => {
     const line = await within(await screen.findByRole('region', { name: 'Your decision' })).findByText('You started this case, so someone else decides.');
     // The action stays in its place, disabled, and says why.
     const start = within(dock()).getByRole('button', { name: 'Start review' });
-    expect(start).toBeDisabled();
+    expect(start).toHaveAttribute('aria-disabled', 'true');
     expect(start).toHaveAccessibleDescription('You started this case, so someone else decides.');
+    expect(screen.getByText('A second person decides this answer, not you.')).toBeInTheDocument();
+    await userEvent.click(start);
+    expect(currentProcessEngine().requests.some((request) => request.path.endsWith(':claim'))).toBe(false);
     expect(line).toHaveAttribute('id', start.getAttribute('aria-describedby'));
     expect(within(dock()).queryByRole('button', { name: 'Approve answer' })).not.toBeInTheDocument();
   });
@@ -164,7 +167,7 @@ describe('CKP-007 agent task inspector', () => {
     open(`#/tasks/${REVIEW_TASK_ID}`);
 
     expect(await within(await screen.findByRole('region', { name: 'Your decision' })).findByText('You reported this answer, so someone else decides.')).toBeInTheDocument();
-    expect(within(dock()).getByRole('button', { name: 'Start review' })).toBeDisabled();
+    expect(within(dock()).getByRole('button', { name: 'Start review' })).toHaveAttribute('aria-disabled', 'true');
     expect(within(dock()).getByRole('button', { name: 'Start review' })).toHaveAccessibleDescription('You reported this answer, so someone else decides.');
   });
 

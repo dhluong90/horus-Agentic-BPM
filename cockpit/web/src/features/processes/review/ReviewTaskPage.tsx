@@ -80,11 +80,15 @@ function Review({ task, review }: { task: Task; review: ReviewContext }) {
   const [texts, setTexts] = useState<Record<string, string>>({});
   const [tried, setTried] = useState(false);
   const complete = useCompleteTask(task);
+  const { userId } = useProcessesSession();
+  const instance = useInstance(task.instanceId);
+  const open = task.status === 'OPEN' || task.status === 'CLAIMED';
+  const block = open ? fourEyesBlock(userId, review, instance.data) : undefined;
   const serverViolations = violationsOf(complete.error);
   const built = buildAnswer(review.output, texts);
   return (
     <section className="workspace review" aria-labelledby="review-title">
-      <PageHead id="review-title" title={t('review.title')} subtitle={t('review.subtitle')} action={<TaskStatus task={task} />} />
+      <PageHead id="review-title" title={t('review.title')} subtitle={block !== undefined ? t('review.subtitleBlocked') : t('review.subtitle')} action={<TaskStatus task={task} />} />
       <ReviewMeta task={task} />
       <div className="review-grid">
         <article className="card review-card" aria-labelledby="review-inputs">
@@ -103,7 +107,7 @@ function Review({ task, review }: { task: Task; review: ReviewContext }) {
         </article>
         <Guardrail review={review} />
       </div>
-      <ReviewDock task={task} review={review} mode={mode} onMode={setMode} built={built} complete={complete} otherViolations={serverViolations.other} tried={tried} onTry={() => { setTried(true); }} />
+      <ReviewDock task={task} review={review} block={block} mode={mode} onMode={setMode} built={built} complete={complete} otherViolations={serverViolations.other} tried={tried} onTry={() => { setTried(true); }} />
     </section>
   );
 }
@@ -251,8 +255,10 @@ function AnswerEditor({ output, texts, onChange, problems, showAll, serverViolat
 
 type Built = ReturnType<typeof buildAnswer>;
 
-function ReviewDock({ task, review, mode, onMode, built, complete, otherViolations, tried, onTry }: {
+function ReviewDock({ task, review, block, mode, onMode, built, complete, otherViolations, tried, onTry }: {
   task: Task;
+  /** Why four eyes keep this user from deciding, when they do. */
+  block: ReturnType<typeof fourEyesBlock>;
   review: ReviewContext;
   mode: Mode;
   onMode: (mode: Mode) => void;
@@ -264,19 +270,16 @@ function ReviewDock({ task, review, mode, onMode, built, complete, otherViolatio
 }) {
   const { t, locale } = useI18n();
   const { userId } = useProcessesSession();
-  const instance = useInstance(task.instanceId);
   const claim = useClaimTask(task);
   const [reason, setReason] = useState('');
   const reasonId = useId();
   const noteId = useId();
-  const block = fourEyesBlock(userId, review, instance.data);
   const allowed = new Set(task.allowedActions);
   const masked = containsMasked(review.output);
   const changes = changesOf(review.output, built.result);
 
   const maskedId = useId();
-  const open = task.status === 'OPEN' || task.status === 'CLAIMED';
-  const blockedLine = !open ? undefined : block === 'reported' ? t('review.dock.selfReported') : block === 'started' ? t('review.dock.selfStarted') : undefined;
+  const blockedLine = block === 'reported' ? t('review.dock.selfReported') : block === 'started' ? t('review.dock.selfStarted') : undefined;
   let note: string | undefined;
   if (task.status === 'COMPLETED') note = t('review.dock.completed', { who: task.completedBy ?? '', when: formatDateTime(task.completedAt, locale) ?? '' });
   else if (task.status === 'CANCELLED') note = t('review.dock.cancelled');
@@ -312,7 +315,8 @@ function ReviewDock({ task, review, mode, onMode, built, complete, otherViolatio
       {blockedLine !== undefined ? (
         <div className="review-dock__row">
           <p className="review-dock__line review-dock__line--blocked" id={noteId}><span className="review-dock__icon" aria-hidden="true">⊘</span>{blockedLine}</p>
-          <button type="button" className="btn btn--primary" disabled aria-describedby={noteId}>{t('review.dock.start')}</button>
+          {/* Kept in its place so the reason sits beside it, but not actionable: aria-disabled keeps it focusable for the reason. */}
+          <button type="button" className="btn btn--primary" aria-disabled="true" aria-describedby={noteId} onClick={(e) => { e.preventDefault(); }}>{t('review.dock.start')}</button>
         </div>
       ) : note !== undefined ? (
         <p className="dock__note review-dock__line">{note}</p>

@@ -179,6 +179,7 @@ export const vi: Record<MessageKey, string> = {
   'review.crumb': 'Xem xét tác tử AI',
   'review.title': 'Xem xét câu trả lời của tác tử AI',
   'review.subtitle': 'Một câu trả lời của tác tử bị chặn. Hãy duyệt hoặc sửa.',
+  'review.subtitleBlocked': 'Người thứ hai quyết định câu trả lời này, không phải bạn.',
   'review.notAgentSubtitle': 'Tác vụ này không có câu trả lời của tác tử để xem xét.',
   'review.notAgent': 'Chỉ các bước tác tử bị chuyển lên mới mở ở đây. Tác vụ khác có trong hộp việc.',
   'review.case': 'Hồ sơ {key}',

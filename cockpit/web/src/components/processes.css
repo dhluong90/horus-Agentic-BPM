@@ -101,6 +101,10 @@
 .review-dock__foot .btn, .review-dock__row .btn { flex: none; min-width: 168px; }
 .review-dock__row > .review-dock__line { flex: 1 1 320px; }
 .review-dock__error { margin: 0; }
+/* A primary action four eyes withhold: the styleguide's disabled look, not the primary fill. */
+.review-dock .btn[aria-disabled="true"], .review-dock .btn[aria-disabled="true"]:hover, .review-dock .btn[aria-disabled="true"]:active {
+  background: var(--surface-3); border-color: var(--line); color: var(--muted); cursor: not-allowed; box-shadow: none;
+}
 .review-changes { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; font: var(--type-label); }
 .review-changes__field { color: var(--muted); margin-right: 6px; }
 .review-changes__from { color: var(--ink-2); text-decoration: line-through; }
