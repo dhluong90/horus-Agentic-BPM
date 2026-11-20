@@ -52,7 +52,7 @@ class ParallelJoinPostgresIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     private static final int ITERATIONS = Integer.getInteger("bpm.join.iterations", 1_000);
     private static final List<String> TABLES = List.of("pre_instance", "pre_token", "pre_task", "pre_history",
