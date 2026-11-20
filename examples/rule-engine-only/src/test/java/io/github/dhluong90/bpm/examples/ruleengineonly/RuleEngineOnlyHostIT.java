@@ -67,7 +67,7 @@ class RuleEngineOnlyHostIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     // Plain properties, not @ServiceConnection: the same test runs on both Spring Boot lines (TR-EMB-02).
     @DynamicPropertySource
