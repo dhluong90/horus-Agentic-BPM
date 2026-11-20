@@ -104,6 +104,8 @@ final class TestEngine {
 
     final ProcessServices services;
     final JobExecutor jobs;
+    /** Async step executor of this replica; its pools are closed by {@link #close()}. */
+    final io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor async;
     final Identity identity = new Identity();
     final RuleIdentity ruleIdentity = new RuleIdentity();
     /** The Rule Engine of this replica on the same database and transaction manager, or null without one. */
@@ -111,7 +113,7 @@ final class TestEngine {
     final List<ProcessEventPublisher.Event> events = new CopyOnWriteArrayList<>();
 
     private TestEngine(Builder b) {
-        DataSource ds = dataSource();
+        DataSource ds = b.dataSource != null ? b.dataSource : dataSource();
         DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
         ProcessEngineTransactions tx = new ProcessEngineTransactions(transactionManager);
         JdbcJobStore jobStore = new JdbcJobStore(ds);
@@ -141,11 +143,23 @@ final class TestEngine {
                 ? Optional.empty()
                 : Optional.ofNullable(rules).map(r -> r.forEmbeddedEngine(DecisionCaller.ENGINE_IDENTITY));
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, new JdbcProcessStore(ds),
-                Map.of(SourceFormat.BPMN_XML, reader::read),
+                Map.of(SourceFormat.BPMN_XML, reader::read), Map.of(),
                 new LocalServiceInvoker(b.handlers.stream().collect(Collectors.toMap(ServiceTaskHandler::name, h -> h)),
                         ruleEngine, engineWork, Duration.ofSeconds(5)),
-                publisher, settings, BehaviorCatalog.registry(), new V1ExpressionEvaluator(100), jobStore, jobSettings);
+                publisher, settings, BehaviorCatalog.registry(), new V1ExpressionEvaluator(100), jobStore, jobSettings,
+                b.asyncSettings, b.adapters.stream().map(io.github.dhluong90.bpm.process.spi.ServiceAdapter::name)
+                        .collect(Collectors.toSet()));
         this.jobs = new JobExecutor(jobStore, tx, b.clock, jobSettings, services.jobHandlers());
+        this.async = new io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor(jobStore, tx, b.clock,
+                jobSettings, b.asyncSettings, b.adapters.stream().collect(Collectors.toMap(
+                        io.github.dhluong90.bpm.process.spi.ServiceAdapter::name, a -> a)), services,
+                java.util.concurrent.Executors.newFixedThreadPool(b.asyncSettings.executorThreads()),
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor());
+    }
+
+    /** Stops this replica's adapter executor. */
+    void close() {
+        async.close();
     }
 
     static Builder replica(String replicaId, TestClock clock) {
@@ -166,6 +180,10 @@ final class TestEngine {
         private ProcessEventPublisher publisher;
         private boolean withRuleEngine;
         private io.github.dhluong90.bpm.rules.api.RuleEngine ruleEngine;
+        private List<io.github.dhluong90.bpm.process.spi.ServiceAdapter> adapters = List.of();
+        private io.github.dhluong90.bpm.process.internal.service.AsyncSettings asyncSettings =
+                io.github.dhluong90.bpm.process.internal.service.AsyncSettings.DEFAULTS;
+        private DataSource dataSource;
 
         private Builder(String replicaId, TestClock clock) {
             this.replicaId = replicaId;
@@ -209,6 +227,22 @@ final class TestEngine {
 
         Builder handlers(ServiceTaskHandler... value) {
             handlers = List.of(value);
+            return this;
+        }
+
+        Builder adapters(io.github.dhluong90.bpm.process.spi.ServiceAdapter... value) {
+            adapters = List.of(value);
+            return this;
+        }
+
+        Builder async(io.github.dhluong90.bpm.process.internal.service.AsyncSettings value) {
+            asyncSettings = value;
+            return this;
+        }
+
+        /** Uses this data source (already migrated through {@link TestEngine#dataSource()}) instead of the shared one. */
+        Builder dataSource(DataSource value) {
+            dataSource = value;
             return this;
         }
 
@@ -260,6 +294,26 @@ final class TestEngine {
         new io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions(ds,
                 new io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions(transactionManager))
                 .ensureCurrentAndNextMonth(now);
+    }
+
+    /**
+     * A HikariCP pool on the shared database, sized like a small host.
+     *
+     * @param maxConnections the pool size
+     * @param connectionTimeout how long a borrower waits before the pool times out
+     * @return the pool; close it after the test
+     */
+    static com.zaxxer.hikari.HikariDataSource pool(int maxConnections, Duration connectionTimeout) {
+        dataSource();
+        com.zaxxer.hikari.HikariConfig config = new com.zaxxer.hikari.HikariConfig();
+        config.setJdbcUrl(POSTGRES.getJdbcUrl());
+        config.setUsername(POSTGRES.getUsername());
+        config.setPassword(POSTGRES.getPassword());
+        config.setMaximumPoolSize(maxConnections);
+        config.setMinimumIdle(maxConnections);
+        config.setConnectionTimeout(connectionTimeout.toMillis());
+        config.setPoolName("host-pool-" + maxConnections);
+        return new com.zaxxer.hikari.HikariDataSource(config);
     }
 
     static JdbcClient jdbc() {

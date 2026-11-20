@@ -365,15 +365,35 @@ public final class SubsetBpmnReader {
             if (type != null) {
                 unsupported("serviceTask horus:type=\"" + type + "\"", id, "the next sprint (agentTask)");
             }
-            if (mode != null && !"local".equals(mode)) {
-                unsupported("serviceTask horus:mode=\"" + mode + "\"", id, "the next sprint (Async Wait-State)");
+            String timeoutText = horus("timeout");
+            if (mode != null && !"local".equals(mode) && !"remote".equals(mode)) {
+                invalid.add(new DefinitionProblem("MODE_INVALID", "horus:mode is local or remote", "serviceTask",
+                        safe(id), line));
+            }
+            java.time.Duration timeout = null;
+            if (timeoutText != null) {
+                if (!"remote".equals(mode)) {
+                    invalid.add(new DefinitionProblem("TIMEOUT_INVALID", "horus:timeout applies to horus:mode=\"remote\""
+                            + " only", "serviceTask", safe(id), line));
+                } else {
+                    try {
+                        timeout = java.time.Duration.parse(timeoutText.strip());
+                    } catch (java.time.format.DateTimeParseException e) {
+                        timeout = null;
+                    }
+                    if (timeout == null || timeout.isNegative() || timeout.isZero()) {
+                        invalid.add(new DefinitionProblem("TIMEOUT_INVALID", "horus:timeout must be a positive ISO-8601"
+                                + " duration, for example PT30S", "serviceTask", safe(id), line));
+                        timeout = null;
+                    }
+                }
             }
             if (handler == null) {
                 invalid.add(new DefinitionProblem("HANDLER_MISSING", "A serviceTask needs horus:handler", "serviceTask",
                         id, line));
             }
             List<HorusExtension> ext = new ArrayList<>();
-            ext.add(new HandlerRef(handler, mode, null));
+            ext.add(new HandlerRef(handler, mode, timeout));
             if (result != null) {
                 ext.add(new ResultVariable(result));
             }

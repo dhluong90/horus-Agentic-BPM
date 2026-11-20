@@ -17,6 +17,18 @@ public interface JobStore {
     String TIMER = "TIMER";
     /** Job kind of a definition version that becomes effective at a later date. */
     String DEFINITION_EFFECTIVE = "DEFINITION_EFFECTIVE";
+    /** Job kind of a remote service step attempt (Async Wait-State, ADR-0008). */
+    String ASYNC_SERVICE = "ASYNC_SERVICE";
+    /** Job kind of an agent step attempt (Async Wait-State, ADR-0008). */
+    String ASYNC_AGENT = "ASYNC_AGENT";
+
+    /**
+     * @param jobKind a job kind
+     * @return whether jobs of that kind call outside the JVM and are run by the async executor
+     */
+    static boolean isAsync(String jobKind) {
+        return ASYNC_SERVICE.equals(jobKind) || ASYNC_AGENT.equals(jobKind);
+    }
 
     /**
      * One job row.
@@ -81,7 +93,7 @@ public interface JobStore {
     void insertJob(JobRow job, Instant now);
 
     /**
-     * Claims due jobs of every tenant: rows {@code DUE} with {@code next_fire_at <= now}, and rows {@code CLAIMED}
+     * Claims due jobs of every tenant except async step jobs: rows {@code DUE} with {@code next_fire_at <= now}, and rows {@code CLAIMED}
      * whose lease has expired. Rows locked by a concurrent claim are skipped ({@code FOR UPDATE SKIP LOCKED}), never
      * waited for. Each claimed row gets {@code locked_by = replicaId}, {@code locked_until = now + lease_duration} and
      * {@code attempt + 1}. Run in its own short transaction, committed before any job fires.
@@ -92,6 +104,28 @@ public interface JobStore {
      * @return the claimed rows, oldest due first
      */
     List<JobRow> claimDue(String replicaId, Instant now, int limit);
+
+    /**
+     * Claims due async step jobs ({@link #isAsync}) of every tenant, the same way as {@link #claimDue}; that method
+     * never returns them. The caller passes as limit the adapter slots it has free, so a claimed job never waits in
+     * the JVM while its lease runs (ADR-0008).
+     *
+     * @param replicaId the claiming replica
+     * @param now the claim time
+     * @param limit at most this many rows
+     * @return the claimed rows, oldest due first
+     */
+    List<JobRow> claimDueAsync(String replicaId, Instant now, int limit);
+
+    /**
+     * Locks a job row ({@code FOR UPDATE}) whatever its status, for the result transaction of an async step, which
+     * decides from the status, attempt and lease whether the result is current.
+     *
+     * @param tenant tenant
+     * @param id job id
+     * @return the job in the tenant
+     */
+    Optional<JobRow> lockJob(String tenant, String id);
 
     /**
      * Locks a claimed job ({@code FOR UPDATE}) and returns it only while this replica still holds the claim: status
@@ -147,6 +181,36 @@ public interface JobStore {
     int cancelJob(String tenant, String id, Instant now);
 
     /**
+     * Stores the SHA-256 of the completion token issued to the current claim of an async job, in the claim
+     * transaction (ADR-0008). Only the hash is stored; the token itself goes to the adapter and nowhere else.
+     *
+     * @param tenant tenant
+     * @param id job id
+     * @param attempt the attempt of that claim
+     * @param tokenHash SHA-256 of the token, 32 bytes
+     * @return true when the job is still claimed under that attempt
+     */
+    boolean issueCompletionToken(String tenant, String id, int attempt, byte[] tokenHash);
+
+    /**
+     * @param tenant tenant
+     * @param id job id
+     * @return the hash of the completion token of the job's latest claim, or empty when none was issued
+     */
+    Optional<byte[]> completionTokenHash(String tenant, String id);
+
+    /**
+     * Marks that a late result for a cancelled job has been recorded, once per job, so repeated late callbacks write
+     * one history row in total.
+     *
+     * @param tenant tenant
+     * @param id job id
+     * @param now current time
+     * @return true for the first late result of the job; false when one was already recorded
+     */
+    boolean markLateResult(String tenant, String id, Instant now);
+
+    /**
      * @param tenant tenant
      * @param id job id
      * @return the job in the tenant
@@ -176,6 +240,16 @@ public interface JobStore {
         }
 
         @Override
+        public List<JobRow> claimDueAsync(String replicaId, Instant now, int limit) {
+            return List.of();
+        }
+
+        @Override
+        public Optional<JobRow> lockJob(String tenant, String id) {
+            return Optional.empty();
+        }
+
+        @Override
         public Optional<JobRow> lockClaim(String tenant, String id, String replicaId, int attempt, Instant now) {
             return Optional.empty();
         }
@@ -194,6 +268,21 @@ public interface JobStore {
         @Override
         public int cancelJob(String tenant, String id, Instant now) {
             return 0;
+        }
+
+        @Override
+        public boolean issueCompletionToken(String tenant, String id, int attempt, byte[] tokenHash) {
+            return false;
+        }
+
+        @Override
+        public Optional<byte[]> completionTokenHash(String tenant, String id) {
+            return Optional.empty();
+        }
+
+        @Override
+        public boolean markLateResult(String tenant, String id, Instant now) {
+            return false;
         }
 
         @Override

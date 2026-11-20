@@ -22,7 +22,10 @@ import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
+import io.github.dhluong90.bpm.process.internal.service.AsyncSettings;
+import io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
+import io.github.dhluong90.bpm.process.spi.ServiceAdapter;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
 import io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService;
 import io.github.dhluong90.bpm.process.internal.service.ProcessQueries;
@@ -83,7 +86,8 @@ public class ProcessEngineAutoConfiguration {
 
     static final String DEV_PROFILE = "dev";
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
-            "processes:approve", "processes:start", "processes:cancel", "processes:task:work");
+            "processes:approve", "processes:start", "processes:cancel", "processes:task:work",
+            "processes:step:complete");
     /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
     static final String REMOVED_AUTO_APPROVE = "horus.bpm.processes.definitions-auto-approve";
     private static final Log LOG = LogFactory.getLog(ProcessEngineAutoConfiguration.class);
@@ -141,13 +145,55 @@ public class ProcessEngineAutoConfiguration {
         return new JobExecutor(jobs, transactions, clock.getIfUnique(Clock::systemUTC), settings, services.jobHandlers());
     }
 
+    /** Async step settings: lease margin, default timeout and adapter slots (ADR-0008). */
+    @Bean
+    @ConditionalOnMissingBean
+    AsyncSettings processEngineAsyncSettings(ProcessEngineProperties properties) {
+        return properties.toAsyncSettings();
+    }
+
+    /**
+     * Runs remote steps outside any transaction on {@code adapters.executor-threads} daemon threads, with one daemon
+     * thread that abandons calls at their timeout. Closed with the context.
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnMissingBean
+    AsyncStepExecutor processEngineAsyncStepExecutor(JdbcJobStore jobs, ProcessEngineTransactions transactions,
+            ObjectProvider<Clock> clock, JobSettings settings, AsyncSettings async,
+            ObjectProvider<ServiceAdapter> adapters, ProcessServices services) {
+        java.util.concurrent.atomic.AtomicInteger n = new java.util.concurrent.atomic.AtomicInteger();
+        return new AsyncStepExecutor(jobs, transactions, clock.getIfUnique(Clock::systemUTC), settings, async,
+                adaptersByName(adapters),
+                services, java.util.concurrent.Executors.newFixedThreadPool(async.executorThreads(), r -> {
+                    Thread t = new Thread(r, "horus-bpm-adapter-" + n.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                }), java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "horus-bpm-adapter-timeouts");
+                    t.setDaemon(true);
+                    return t;
+                }));
+    }
+
+    static Map<String, ServiceAdapter> adaptersByName(ObjectProvider<ServiceAdapter> adapters) {
+        Map<String, ServiceAdapter> byName = new LinkedHashMap<>();
+        adapters.orderedStream().forEach(a -> {
+            if (byName.putIfAbsent(a.name(), a) != null) {
+                throw new IllegalStateException("Two ServiceAdapter beans are named " + a.name());
+            }
+        });
+        return byName;
+    }
+
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnProperty(prefix = "horus.bpm.processes.jobs", name = "enabled", havingValue = "true",
             matchIfMissing = true)
-    ProcessJobPoller processEngineJobPoller(JobExecutor executor, ProcessEngineProperties properties) {
-        return new ProcessJobPoller(executor::pollOnce, executor.replicaId(), properties.jobs().pollInterval(),
-                Clock.systemUTC());
+    ProcessJobPoller processEngineJobPoller(JobExecutor executor, AsyncStepExecutor async,
+            ProcessEngineProperties properties) {
+        // One poll runs the timers and starts the async attempts there are free adapter slots for.
+        return new ProcessJobPoller(() -> executor.pollOnce() + async.pollOnce(), executor.replicaId(),
+                properties.jobs().pollInterval(), Clock.systemUTC());
     }
 
     /** Bean name of the job poller health contributor on both Spring Boot lines ({@code processEngineJobs}). */
@@ -193,7 +239,8 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnMissingBean
     ProcessServices processEngineServices(ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
-            JdbcJobStore jobs, JobSettings jobSettings, ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
+            JdbcJobStore jobs, JobSettings jobSettings, AsyncSettings async, ObjectProvider<ServiceAdapter> adapters,
+            ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<RuleEngine> ruleEngine,
             ObjectProvider<RuleEngines> ruleEngines, ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
@@ -217,7 +264,8 @@ public class ProcessEngineAutoConfiguration {
                 properties.toSettings(EngineSettings.ApproverRule.valueOf(ApproverMustDifferFrom.from(environment).name()),
                         EngineSettings.RetireLastVersionRule.valueOf(RetireLastVersion.from(environment).name())),
                 BehaviorCatalog.registry(),
-                new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings);
+                new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings, async,
+                adaptersByName(adapters).keySet());
     }
 
     /**
