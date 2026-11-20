@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { cspViolations, mockHost, rememberLocale } from './mockHost';
+import { UNREADABLE_PERMISSION } from '../src/mocks/fixtures';
+import { cspViolations, mockHost, mockRuleEngine, rememberLocale } from './mockHost';
 
 async function box(locator: Locator) {
   const value = await locator.boundingBox();
@@ -87,6 +88,44 @@ test.describe('embedded cockpit, case A', () => {
     const main = await box(page.locator('main'));
     expect(main.y).toBe(at1200.y + at1200.height);
     expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(1200);
+  });
+});
+
+test.describe('tolerant reading of /me', () => {
+  /** The menu items a scenario's user is offered, in order. */
+  async function menuFor(page: Page, scenario: 'ready' | 'me-unknown-permission'): Promise<string[]> {
+    await mockHost(page, scenario);
+    await mockRuleEngine(page, scenario);
+    await page.goto('./#/service');
+    await expect(page.getByTestId('session-header').getByTestId('header-user')).toHaveText('Nguyễn Thị Lan');
+    return page.getByTestId('nav-rail').getByRole('link').allInnerTexts();
+  }
+
+  test('CKP_001_me_with_an_unreadable_permission_signs_the_user_in_and_offers_nothing_for_it', async ({ page }) => {
+    const notes: string[] = [];
+    page.on('console', (message) => {
+      if (message.type() === 'warning' && message.text().includes('/api/bpm/me')) notes.push(message.text());
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const menu = await menuFor(page, 'me-unknown-permission');
+
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(page.getByTestId('session-header').getByTestId('header-tenant')).toHaveText('bank-a');
+    // rules:read and rules:author still open the rule areas; the dropped name adds nothing.
+    expect(menu.map((item) => item.split('\n')[0])).toEqual(expect.arrayContaining(['Home', 'Rules', 'Approvals', 'Decisions']));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain(UNREADABLE_PERMISSION);
+  });
+
+  test('CKP_001_the_dropped_permission_leaves_the_same_menu_as_without_it', async ({ browser }) => {
+    const baseURL = test.info().project.use.baseURL;
+    const options = { viewport: { width: 1440, height: 900 }, ...(baseURL === undefined ? {} : { baseURL }) };
+    const withName = await browser.newContext(options);
+    const without = await browser.newContext(options);
+    expect(await menuFor(await withName.newPage(), 'me-unknown-permission')).toEqual(await menuFor(await without.newPage(), 'ready'));
+    await withName.close();
+    await without.close();
   });
 });
 

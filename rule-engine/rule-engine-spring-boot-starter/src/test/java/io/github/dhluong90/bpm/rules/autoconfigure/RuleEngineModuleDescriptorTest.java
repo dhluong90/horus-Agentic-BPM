@@ -26,7 +26,7 @@ class RuleEngineModuleDescriptorTest {
             .withUserConfiguration(RuleEngineAutoConfigurationTest.HostWithEngineStandIns.class);
 
     @Test
-    void RLE_019_rules_entry_has_api_v1_the_build_version_and_the_six_permissions() {
+    void RLE_019_rules_entry_has_api_v1_the_build_version_and_the_seven_permissions() {
         runner.run(context -> {
             ModuleDescriptor rules = context.getBean(ModuleDescriptor.class);
 
@@ -36,9 +36,21 @@ class RuleEngineModuleDescriptorTest {
                     .doesNotContain("${").matches("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$");
             assertThat(rules.features()).isEmpty();
             assertThat(rules.permissions()).containsExactly(
-                    "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read");
+                    "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read",
+                    "rules:masked:search");
             assertThat(rules.rolePermissions()).isEmpty();
         });
+    }
+
+    @Test
+    void RLE_019_every_permission_fits_the_published_me_pattern_so_older_cockpits_accept_it() throws Exception {
+        // The pattern of cockpit/api/schema/bpm-me.v1.schema.json, unchanged since 0.1.0: a cockpit of that release
+        // rejects the whole /api/bpm/me response when one permission does not match.
+        String schema = java.nio.file.Files.readString(
+                java.nio.file.Path.of("../../cockpit/api/schema/bpm-me.v1.schema.json"));
+        assertThat(schema).contains("\"^(rules|processes)(:[a-z]+){1,2}$\"");
+        assertThat(RuleEngineModule.PERMISSIONS).contains("rules:masked:search")
+                .allMatch(permission -> permission.matches("^(rules|processes)(:[a-z]+){1,2}$"));
     }
 
     @Test

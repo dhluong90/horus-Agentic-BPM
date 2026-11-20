@@ -83,9 +83,10 @@ public class RuleEngineAutoConfiguration {
             DecisionLogPartitions partitions,
             RuleEngineProperties properties,
             ObjectProvider<Clock> clock,
-            ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys) {
+            ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys,
+            ObjectProvider<RuleEngineMaskingCheck> maskingCheck) {
         return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
-                cursorKeys.getIfAvailable());
+                cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable());
     }
 
     /**

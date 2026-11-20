@@ -17,7 +17,8 @@ final class RuleEngineModule {
 
     /** Every permission the Rule Engine checks, in the order clients show them (ADR-0010). */
     static final List<String> PERMISSIONS = List.of(
-            "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read");
+            "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read",
+            "rules:masked:search");
 
     /**
      * Feature flags turned on in this build. None yet: a flag is added with the feature it announces, so a

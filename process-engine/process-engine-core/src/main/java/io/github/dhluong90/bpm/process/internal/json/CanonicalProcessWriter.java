@@ -5,10 +5,13 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
@@ -86,6 +89,25 @@ public final class CanonicalProcessWriter {
                     }
                     flows.stream().filter(f -> f.id().equals(g.defaultFlow())).findFirst()
                             .ifPresent(f -> step.put("default", f.targetRef()));
+                }
+                case IntermediateCatchEvent c when c.eventDefinitions().size() == 1
+                        && c.eventDefinitions().get(0) instanceof TimerEventDefinition timer -> {
+                    // process-definition.v1 timerStep: duration or until (DESIGN section 5.1).
+                    step.put("type", "timer");
+                    if (timer.timeDuration() != null && timer.timeDuration().text() != null) {
+                        step.put("duration", timer.timeDuration().text().strip());
+                    }
+                    if (timer.timeDate() != null && timer.timeDate().text() != null) {
+                        step.put("until", timer.timeDate().text().strip());
+                    }
+                }
+                case ParallelGateway g -> {
+                    step.put("type", "parallelGateway");
+                    // A fork lists every branch in document order; a single next is written below.
+                    if (out.size() > 1) {
+                        ArrayNode next = step.putArray("next");
+                        out.forEach(f -> next.add(f.targetRef()));
+                    }
                 }
                 default -> step.put("type", node.getClass().getSimpleName());
             }
