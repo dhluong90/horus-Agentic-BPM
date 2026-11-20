@@ -255,12 +255,33 @@ Run again on the same database, the test finds `card-fee` already published and 
 
 [`deploy/scan-image.sh`](../deploy/scan-image.sh) applies the release gates to the built image: no secret in any layer or in the image configuration (it searches for the values in `secrets/`), and no high or critical vulnerability (Grype, with the repository's [`.grype.yaml`](../.grype.yaml)).
 
+The secrets gate reads every layer, including files a later layer deletes, and unpacks every jar (and the jars nested in it), so a value inside a compressed jar entry is found too. It fails on:
+
+- a key or keystore file by name (`.env`, `*.pem`, `*.key`, `*.p8`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `*.truststore`, `*.bcfks`, `cacerts`, `id_rsa` and the other SSH key names, in any letter case), in a layer or inside a jar. The only exception is an exact path: the JRE's public CA store `opt/java/openjdk/lib/security/cacerts`. The Alpine signing keys end in `.rsa.pub`, are public, and are not matched;
+- a secret-like variable in the image configuration;
+- the value of `HORUS_DB_ADMIN_PASSWORD`, `HORUS_DB_PASSWORD` or `HORUS_DEMO_PASSWORD` anywhere in the image. Each value is taken from the environment, else from its file in `secrets/`, else from `.env` if that file exists.
+
+[`deploy/scan-image-canaries.sh`](../deploy/scan-image-canaries.sh) proves the gate on every Deploy run: it plants a `.pem` under `/usr/local/share` and a random value in a deflated entry of a jar in `BOOT-INF/lib`. Both must fail, the jar again when the value is read only from a secret file, while the image itself passes:
+
+```bash
+deploy/scan-image-canaries.sh horus-bpm/rule-engine-only:local
+```
+
+```
+PASS  canary 1: a .pem under /usr/local/share fails the gate: usr/local/share/canary/canary.pem
+PASS  canary 2: a value inside a deflated jar entry in BOOT-INF/lib fails the gate (not visible in the raw bytes)
+PASS  canary 3: the same value read from a secret file (secrets/demo_password) fails the gate
+PASS  the image horus-bpm/rule-engine-only:local passes: PASS  no secrets in the image layers, jars or config (...)
+```
+
+Both scripts need `unzip`; the canaries also need `zip`.
+
 ```bash
 deploy/scan-image.sh horus-bpm/rule-engine-only:local
 ```
 
 ```
-PASS  no secrets in the image layers or config (1031 files checked, 3 password values searched)
+PASS  no secrets in the image layers, jars or config (... files and jar entries checked, ... jars unpacked, 3 password values searched)
 NAME           INSTALLED   TYPE  VULNERABILITY   SEVERITY  EPSS         RISK
 busybox        1.37.0-r31  apk   CVE-2025-60876  Medium    0.3% (24th)  0.2
 busybox-binsh  1.37.0-r31  apk   CVE-2025-60876  Medium    0.3% (24th)  0.2
