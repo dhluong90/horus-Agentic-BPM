@@ -120,4 +120,14 @@ public interface DefinitionService {
      * @throws DefinitionNotFoundException when the tenant has no such version
      */
     List<DefinitionHistoryEntry> history(DefinitionRef ref);
+
+    /**
+     * Reads one version of a definition in the caller's tenant. Needs {@code processes:read}.
+     *
+     * @param key the definition key
+     * @param version the version number, from 1
+     * @return the version, without its source document
+     * @throws DefinitionNotFoundException when the tenant has no such version
+     */
+    DefinitionVersion version(String key, int version);
 }

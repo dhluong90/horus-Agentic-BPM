@@ -43,6 +43,8 @@ horus:
           ROLE_PROCESS_APPROVER: [processes:approve, processes:read]
           ROLE_TELLER: [processes:start, processes:read]
           ROLE_CARD_OFFICER: [processes:read, processes:task:work]
+          # Cancelling an application's process is its own permission (PD-103); starting does not grant it.
+          ROLE_BRANCH_SUPERVISOR: [processes:read, processes:cancel]
     cockpit:
       # How the cockpit header names this service.
       host-label: Card issuing

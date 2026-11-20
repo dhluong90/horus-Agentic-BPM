@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
@@ -31,6 +32,7 @@ public class ProcessProblemDetails {
     private static final HttpStatus UNPROCESSABLE = HttpStatus.valueOf(422);
     static final Map<String, HttpStatus> STATUS = Map.ofEntries(
             Map.entry("INPUT_INVALID", HttpStatus.BAD_REQUEST),
+            Map.entry("QUERY_INVALID", HttpStatus.BAD_REQUEST),
             Map.entry("UNAUTHENTICATED", HttpStatus.UNAUTHORIZED),
             Map.entry("PERMISSION_DENIED", HttpStatus.FORBIDDEN),
             Map.entry("TASK_NOT_ASSIGNED", HttpStatus.FORBIDDEN),
@@ -41,9 +43,9 @@ public class ProcessProblemDetails {
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("EVENT_LISTENER_FAILED", HttpStatus.INTERNAL_SERVER_ERROR),
             Map.entry("NO_EFFECTIVE_VERSION", HttpStatus.NOT_FOUND),
+            Map.entry("DEFINITION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("INSTANCE_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("TASK_NOT_FOUND", HttpStatus.NOT_FOUND),
-            Map.entry("DEFINITION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("VERSION_SUPERSEDED", HttpStatus.CONFLICT),
             Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
@@ -63,15 +65,13 @@ public class ProcessProblemDetails {
     @ExceptionHandler(ProcessException.class)
     public ResponseEntity<byte[]> handle(ProcessException e, WebRequest request) {
         HttpStatus status = STATUS.getOrDefault(e.code(), HttpStatus.INTERNAL_SERVER_ERROR);
-        String header = request.getHeader("X-Correlation-Id");
         ObjectNode body = EngineJson.NODES.objectNode()
                 .put("type", TYPE_BASE + e.code().toLowerCase(Locale.ROOT))
                 .put("title", status.getReasonPhrase())
                 .put("status", status.value())
                 .put("code", e.code())
                 .put("detail", e.getMessage())
-                .put("correlationId", header != null && CORRELATION.matcher(header).matches() ? header
-                        : Ulid.next(Instant.now()));
+                .put("correlationId", correlationId(request));
         switch (e) {
             case BpmnUnsupportedElementException u -> body.set("problems", Views.problems(u.problems()));
             case ValidationFailedException v -> body.set("problems", Views.problems(v.problems()));
@@ -94,14 +94,30 @@ public class ProcessProblemDetails {
     }
 
     /**
-     * Anything else is {@code 500 INTERNAL} as problem details with a correlation id only; the cause stays in the log.
+     * A request the framework refused before the engine ran (an unreadable body, an unsupported media type, a missing
+     * parameter) keeps its 4xx status as {@code INPUT_INVALID}, as on the Rule Engine endpoints; anything else is
+     * {@code 500 INTERNAL} with a correlation id only, the cause staying in the log. Neither answer carries a stack
+     * trace, a class name or SQL (TR-SEC-08). A refusal of the host contract ({@code EngineAccessDeniedException})
+     * never reaches this handler: the host module answers it at the highest precedence.
      *
      * @param e the exception
      * @param request the request
      * @return the problem response
      */
-    @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<byte[]> unexpected(RuntimeException e, WebRequest request) {
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<byte[]> unexpected(Exception e, WebRequest request) {
+        if (e instanceof ErrorResponse framework && framework.getStatusCode().is4xxClientError()) {
+            HttpStatus status = HttpStatus.valueOf(framework.getStatusCode().value());
+            ObjectNode body = EngineJson.NODES.objectNode()
+                    .put("type", TYPE_BASE + "input_invalid")
+                    .put("title", status.getReasonPhrase())
+                    .put("status", status.value())
+                    .put("code", "INPUT_INVALID")
+                    .put("detail", "The request could not be read: " + status.getReasonPhrase())
+                    .put("correlationId", correlationId(request));
+            return ResponseEntity.status(status).contentType(PROBLEM)
+                    .body(EngineJson.JSON.writeValueAsString(body).getBytes(StandardCharsets.UTF_8));
+        }
         String correlationId = Ulid.next(Instant.now());
         LOG.log(System.Logger.Level.ERROR, "process.rest.internal correlationId=" + correlationId, e);
         ObjectNode body = EngineJson.NODES.objectNode()
@@ -112,5 +128,10 @@ public class ProcessProblemDetails {
                 .put("correlationId", correlationId);
         return ResponseEntity.status(500).contentType(PROBLEM)
                 .body(EngineJson.JSON.writeValueAsString(body).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String correlationId(WebRequest request) {
+        String header = request.getHeader("X-Correlation-Id");
+        return header != null && CORRELATION.matcher(header).matches() ? header : Ulid.next(Instant.now());
     }
 }

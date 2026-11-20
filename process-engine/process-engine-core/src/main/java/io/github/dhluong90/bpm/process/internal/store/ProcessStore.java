@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.process.internal.store;
 
 import io.github.dhluong90.bpm.process.internal.exec.HistoryEntry;
 import io.github.dhluong90.bpm.process.internal.exec.Token;
+import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -83,10 +84,10 @@ public interface ProcessStore {
             Instant startedAt, Instant endedAt) {
     }
 
-    /** User task row. */
+    /** User task row; {@code claimedBy} is set while it is {@code CLAIMED} and kept once completed or cancelled. */
     record TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId, String nodeId,
-            String name, String assignee, boolean fourEyes, String status, long lockVersion, String completedBy,
-            Instant createdAt, Instant completedAt) {
+            String name, String assignee, boolean fourEyes, String status, long lockVersion, String claimedBy,
+            Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt) {
     }
 
     /** Recorded answer to an idempotent write; {@code responseJson} is null while the claim is pending. */
@@ -100,9 +101,16 @@ public interface ProcessStore {
 
     Optional<StoredDefinition> definition(String tenant, String id);
 
-    void insertDefinition(StoredDefinition definition);
+    Optional<StoredDefinition> definitionVersion(String tenant, String key, int version);
 
-    Optional<StoredDefinition> definitionByVersion(String tenant, String key, int version);
+    /**
+     * One row per key, ordered by key, after {@code afterKey} (exclusive) when it is not null.
+     *
+     * @param now the time that decides the effective version
+     */
+    List<DefinitionSummary> definitionKeys(String tenant, String afterKey, int limit, Instant now);
+
+    void insertDefinition(StoredDefinition definition);
 
     /**
      * Locks every version row of a key ({@code FOR UPDATE}, in version order), so lifecycle commands and the
@@ -137,6 +145,18 @@ public interface ProcessStore {
 
     Optional<InstanceRow> findInstanceByBusinessKey(String tenant, String key, String businessKey);
 
+    /**
+     * Instances newest first ({@code started_at DESC, id DESC}), strictly after the keyset position when
+     * {@code afterStartedAt} is not null.
+     *
+     * @param statuses the statuses, never empty, each one of the instance statuses
+     * @param definitionKey null for every key
+     * @param from inclusive lower bound, or null
+     * @param to exclusive upper bound, or null
+     */
+    List<InstanceRow> instances(String tenant, List<String> statuses, String definitionKey, Instant from, Instant to,
+            Instant afterStartedAt, String afterId, int limit);
+
     /** Updates status, variables, sequence and end time, and increments the lock version. */
     void updateInstance(InstanceRow row);
 
@@ -149,8 +169,14 @@ public interface ProcessStore {
 
     Optional<TaskRow> findTask(String tenant, String id);
 
-    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not open */
+    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not claimed by {@code completedBy} */
     int completeTask(String tenant, String id, long expectedLockVersion, String completedBy, Instant at);
+
+    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not open */
+    int claimTask(String tenant, String id, long expectedLockVersion, String claimant, Instant at);
+
+    /** @return rows updated: 1, or 0 when the lock version is stale or the task is not claimed by {@code claimant} */
+    int unclaimTask(String tenant, String id, long expectedLockVersion, String claimant);
 
     void cancelTask(String tenant, String id);
 
@@ -171,4 +197,16 @@ public interface ProcessStore {
 
     /** Stores the answer of a claimed key in the same transaction as the work. */
     void completeIdempotency(String tenant, String operation, String key, String responseJson);
+
+    /**
+     * Creates the engine secret of this purpose unless one exists, and returns the stored one. Not tenant data: one
+     * key per database serves every tenant (the cursor MAC covers the tenant). Concurrent first calls on two replicas
+     * neither fail nor differ.
+     *
+     * @param name the purpose, for example {@code cursor-hmac}
+     * @param candidate the key to store when none exists, at least 32 bytes
+     * @param now creation time
+     * @return the stored key
+     */
+    byte[] engineKey(String name, byte[] candidate, Instant now);
 }

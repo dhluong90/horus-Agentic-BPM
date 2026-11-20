@@ -21,7 +21,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param handlers local step settings
  * @param jobs timer and job settings
  * @param makerChecker four eyes on definition approval
- * @param lifecycle definition lifecycle settings
+ * @param query read limits of the list endpoints
+ * @param lifecycle definition and instance lifecycle settings
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -33,6 +34,7 @@ public record ProcessEngineProperties(
         @DefaultValue Handlers handlers,
         @DefaultValue Jobs jobs,
         @DefaultValue MakerChecker makerChecker,
+        @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle) {
 
     public ProcessEngineProperties {
@@ -95,8 +97,8 @@ public record ProcessEngineProperties(
      * {@code horus.bpm.lifecycle.approver-must-differ-from} (PD-096), read for both engines by
      * {@code ApproverMustDifferFrom} in the host module.
      *
-     * @param reasonMaxLength longest reason or approval comment, which land in the immutable history; 2,000 by
-     *     default, may be lowered, never raised (PD-103)
+     * @param reasonMaxLength longest reason or approval comment, which land in the immutable history, and longest
+     *     cancellation reason; 2,000 by default, may be lowered, never raised (PD-103)
      */
     public record Lifecycle(@DefaultValue("2000") int reasonMaxLength) {
 
@@ -160,6 +162,23 @@ public record ProcessEngineProperties(
     }
 
     /**
+     * @param maxPageSize most items per list page; may be lowered, never raised
+     * @param maxRange longest start-time range of a list query; may be lowered, never raised
+     */
+    public record Query(@DefaultValue("200") int maxPageSize, @DefaultValue("P31D") Duration maxRange) {
+        public Query {
+            if (maxPageSize < 1 || maxPageSize > EngineDefaults.MAX_PAGE_SIZE) {
+                throw new IllegalArgumentException("horus.bpm.processes.query.max-page-size must be 1 to "
+                        + EngineDefaults.MAX_PAGE_SIZE + " (it may be lowered, never raised)");
+            }
+            if (maxRange.isNegative() || maxRange.isZero() || maxRange.compareTo(EngineDefaults.MAX_RANGE) > 0) {
+                throw new IllegalArgumentException("horus.bpm.processes.query.max-range must be positive and at most "
+                        + EngineDefaults.MAX_RANGE + " (it may be lowered, never raised)");
+            }
+        }
+    }
+
+    /**
      * @param rolePermissions host authority (for example {@code ROLE_CARD_OFFICER}) to engine permissions
      */
     public record Security(@DefaultValue Map<String, List<String>> rolePermissions) {
@@ -168,7 +187,7 @@ public record ProcessEngineProperties(
     EngineSettings toSettings(EngineSettings.ApproverRule approverRule,
             EngineSettings.RetireLastVersionRule retireLastVersion) {
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
-                idempotencyRetention, handlers.slowCallWarning(), makerChecker.enabled(), lifecycle.reasonMaxLength(),
-                approverRule, retireLastVersion);
+                idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange(),
+                lifecycle.reasonMaxLength(), makerChecker.enabled(), approverRule, retireLastVersion);
     }
 }

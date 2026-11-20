@@ -123,7 +123,7 @@ class DevOnlyRelaxationTest {
                 .hasStackTraceContaining("horus.bpm.processes.lifecycle.reason-max-length must be 1 to 2000");
         assertThatThrownBy(() -> bindReasonLength("0")).hasStackTraceContaining("reason-max-length");
         assertThatThrownBy(() -> new io.github.dhluong90.bpm.process.internal.service.EngineSettings(false, 500,
-                1_048_576, java.time.Duration.ofHours(24), java.time.Duration.ofMillis(200), true, 2001))
+                1_048_576, java.time.Duration.ofHours(24), java.time.Duration.ofMillis(200), 200, java.time.Duration.ofDays(31), 2001))
                 .hasMessageContaining("lifecycle.reason-max-length must be 1 to 2000");
     }
 

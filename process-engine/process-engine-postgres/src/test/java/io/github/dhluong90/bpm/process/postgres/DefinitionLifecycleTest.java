@@ -10,6 +10,8 @@ import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.EventListenerFailedException;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.InputInvalidException;
+import io.github.dhluong90.bpm.process.api.InstanceQuery;
+import io.github.dhluong90.bpm.process.api.PageRequest;
 import io.github.dhluong90.bpm.process.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.process.api.ProcessException;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
@@ -224,7 +226,7 @@ class DefinitionLifecycleTest {
     // ---- reserved system identities: refused at every entry point (403 PERMISSION_DENIED) ----------------------
 
     private static final String[] EVERY_PERMISSION = {"processes:deploy", "processes:author", "processes:approve",
-        "processes:start", "processes:read", "processes:task:work"};
+        "processes:start", "processes:cancel", "processes:read", "processes:task:work"};
 
     /** Acts as a host user named like an engine identity, holding every permission; asserts the refusal. */
     private void refusedAsSystem(String systemId, Runnable call) {
@@ -306,6 +308,60 @@ class DefinitionLifecycleTest {
     }
 
     @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_definition_list_and_version_read() {
+        importAs(1);
+        refusedAsSystem("system:startup", () -> engine.services.definitions(PageRequest.first()));
+        refusedAsSystem("system:startup", () -> engine.services.version(KEY, 1));
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_instance_list() {
+        activate(1);
+        start("KYC-SYS-4");
+        refusedAsSystem("system:timer", () -> engine.services.instances(InstanceQuery.running()));
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_instance_cancel() {
+        // A user named system:timer must never cancel a case: the history would show the engine stopping it
+        activate(1);
+        ProcessInstance instance = start("KYC-SYS-5");
+        refusedAsSystem("system:timer", () -> engine.services.cancel(instance.id(), instance.lockVersion(),
+                "Customer withdrew the application", "cancel-sys-5"));
+        assertThat(count("SELECT count(*) FROM pre_instance WHERE status = 'RUNNING'")).isEqualTo(1);
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_task_read() {
+        activate(1);
+        ProcessInstance.Task task = start("KYC-SYS-6").tasks().get(0);
+        refusedAsSystem("system:timer", () -> engine.services.task(task.id()));
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_task_claim() {
+        activate(1);
+        ProcessInstance.Task task = start("KYC-SYS-7").tasks().get(0);
+        refusedAsSystem("system:timer", () -> engine.services.claim(task.id(), task.lockVersion(), "claim-sys-7"));
+        assertThat(count("SELECT count(*) FROM pre_task WHERE status = 'OPEN' AND claimed_by IS NULL")).isEqualTo(1);
+    }
+
+    @Test
+    void TR_SEC_04_reserved_system_identity_is_refused_on_task_unclaim() {
+        // Given the task claimed by a real officer
+        activate(1);
+        ProcessInstance.Task task = start("KYC-SYS-8").tasks().get(0);
+        engine.identity.as("bank-a", "officer", "processes:task:work", "processes:read").roles = java.util.Set.of(
+                "KYC_OFFICER");
+        long claimed = engine.services.claim(task.id(), task.lockVersion(), "claim-sys-8").lockVersion();
+
+        // When a user named system:timer unclaims it, then it is refused and the claim stays
+        refusedAsSystem("system:timer", () -> engine.services.unclaim(task.id(), claimed, "unclaim-sys-8"));
+        assertThat(count("SELECT count(*) FROM pre_task WHERE status = 'CLAIMED' AND claimed_by = 'officer'"))
+                .isEqualTo(1);
+    }
+
+    @Test
     void PRE_019_the_table_refuses_an_approver_equal_to_the_requester() {
         DefinitionVersion pending = request(importAs(1), null);
 
@@ -352,7 +408,8 @@ class DefinitionLifecycleTest {
         engine.identity.as("bank-a", "officer", "processes:task:work", "processes:read").roles = java.util.Set.of(
                 "KYC_OFFICER");
         ProcessInstance.Task review = onV1.tasks().get(0);
-        ProcessInstance completed = engine.services.complete(review.id(), Map.of("approved", true), review.lockVersion(),
+        long claimed = engine.services.claim(review.id(), review.lockVersion(), "claim-kyc-0100").lockVersion();
+        ProcessInstance completed = engine.services.complete(review.id(), Map.of("approved", true), claimed,
                 "complete-kyc-0100");
         assertThat(completed.definitionVersion()).isEqualTo(1);
         assertThat(completed.status()).isEqualTo("COMPLETED");
@@ -597,7 +654,8 @@ class DefinitionLifecycleTest {
         engine.identity.as("bank-a", "officer", "processes:task:work", "processes:read").roles = java.util.Set.of(
                 "KYC_OFFICER");
         ProcessInstance.Task task = running.get(0).tasks().get(0);
-        ProcessInstance advanced = engine.services.complete(task.id(), Map.of("approved", true), task.lockVersion(),
+        long claimed = engine.services.claim(task.id(), task.lockVersion(), "claim-ln-0001").lockVersion();
+        ProcessInstance advanced = engine.services.complete(task.id(), Map.of("approved", true), claimed,
                 "complete-ln-0001");
         assertThat(advanced.status()).isEqualTo("COMPLETED");
         assertThat(running).allSatisfy(i -> assertThat(i.definitionVersion()).isEqualTo(1));

@@ -38,7 +38,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 final class TestEngine {
 
     private static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
     private static volatile DataSource dataSource;
 
     /** The caller and tenant of this replica's calls; tests change them between calls. */
@@ -87,8 +87,9 @@ final class TestEngine {
         jobSettings = new JobSettings(jobSettings.replicaId(), jobSettings.timerLease(), b.batchSize,
                 jobSettings.maxAttempts(), b.retryBackoff);
         EngineSettings settings = new EngineSettings(b.autoApprove, EngineDefaults.MAX_NODES, EngineDefaults.MAX_BYTES,
-                EngineDefaults.IDEMPOTENCY_RETENTION, EngineDefaults.SLOW_CALL_WARNING, b.makerChecker,
-                EngineDefaults.MAX_REASON_LENGTH, b.approverRule, b.retireLastVersion);
+                EngineDefaults.IDEMPOTENCY_RETENTION, EngineDefaults.SLOW_CALL_WARNING, EngineDefaults.MAX_PAGE_SIZE,
+                EngineDefaults.MAX_RANGE, EngineDefaults.MAX_REASON_LENGTH, b.makerChecker, b.approverRule,
+                b.retireLastVersion);
         Identity id = identity;
         ProcessEventPublisher publisher = b.publisher != null ? b.publisher : events::add;
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, new JdbcProcessStore(ds),

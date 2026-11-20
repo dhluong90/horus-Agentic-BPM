@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
+import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.TaskService;
 import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnReader;
@@ -76,7 +77,7 @@ public class ProcessEngineAutoConfiguration {
 
     static final String DEV_PROFILE = "dev";
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
-            "processes:approve", "processes:start", "processes:task:work");
+            "processes:approve", "processes:start", "processes:cancel", "processes:task:work");
     /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
     static final String REMOVED_AUTO_APPROVE = "horus.bpm.processes.definitions-auto-approve";
     private static final Log LOG = LogFactory.getLog(ProcessEngineAutoConfiguration.class);
@@ -285,6 +286,12 @@ public class ProcessEngineAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(ProcessQueryService.class)
+    ProcessQueryService processQueryService(ProcessServices services) {
+        return services;
+    }
+
+    @Bean
     @ConditionalOnMissingBean
     ProcessEngineInitializer processEngineInitializer(ProcessEngineSchemaMigrator migrator, ProcessServices services,
             ProcessEngineProperties properties, ResourceLoader resources) {
@@ -326,8 +333,8 @@ public class ProcessEngineAutoConfiguration {
         @Bean
         @ConditionalOnMissingBean
         ProcessController processEngineController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
-                ProcessEngineProperties properties) {
-            return new ProcessController(definitions, engine, tasks, properties.definitions().maxBytes());
+                ProcessQueryService queries, ProcessEngineProperties properties) {
+            return new ProcessController(definitions, engine, tasks, queries, properties.definitions().maxBytes());
         }
 
         @Bean

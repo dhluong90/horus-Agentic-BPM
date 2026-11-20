@@ -6,6 +6,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
@@ -98,6 +99,14 @@ public final class CanonicalProcessWriter {
                     }
                     if (timer.timeDate() != null && timer.timeDate().text() != null) {
                         step.put("until", timer.timeDate().text().strip());
+                    }
+                }
+                case ParallelGateway g -> {
+                    step.put("type", "parallelGateway");
+                    // A fork lists every branch in document order; a single next is written below.
+                    if (out.size() > 1) {
+                        ArrayNode next = step.putArray("next");
+                        out.forEach(f -> next.add(f.targetRef()));
                     }
                 }
                 default -> step.put("type", node.getClass().getSimpleName());

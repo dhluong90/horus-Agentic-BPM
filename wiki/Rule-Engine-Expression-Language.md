@@ -33,9 +33,9 @@ Design preview: describes the 0.1 target.
 | Comparison | `==` `!=` `<` `<=` `>` `>=` | Both sides must have the same type. Money compares only within one currency; a currency mismatch is an evaluation error (TR-DET-03) |
 | Logic | `and` `or` `not` | Three-valued with `null`, as in FEEL; see [Null values](#null-values) |
 | Membership | `in [..]`, `not in [..]` | List element type must match |
-| Range | `between a and b` | Inclusive on both ends |
+| Range | `between a and b` | Inclusive on both ends; means `x >= a and x <= b`, as in DMN |
 | Arithmetic | `+` `-` `*` `/` | Number with number; money with money of the same currency for `+` and `-`; `money * number` and `money / number`; `money / money` is not allowed |
-| String | `startsWith(s, 'x')`, `endsWith(s, 'x')`, `contains(s, 'x')`, `matches(s, 'regex')` | Plain function form only; there is no method-call syntax. `matches` is bounded by `evaluation.regex-timeout-ms` and `evaluation.regex-max-input-length` |
+| String | `startsWith(s, 'x')`, `endsWith(s, 'x')`, `contains(s, 'x')`, `matches(s, 'regex')` | Plain function form only; there is no method-call syntax. `matches` is an unanchored search (use `^` and `$` to anchor); the pattern is a string literal of at most 1,000 characters in the part of the XPath regex dialect that Java reads the same way, checked at import: back-references, look-around, inline flags such as `(?i)`, possessive quantifiers such as `a++`, nested classes and `&&`, Unicode block names (use general categories such as `\p{L}`) and Java-only escapes such as `\x41` are refused. In a condition cell, `matches('^FT[0-9]{8}$')` tests the cell's own input. A null text gives null. Each match is bounded by `evaluation.regex-max-reads` (deterministic), all the matches of one decision together by `evaluation.regex-max-reads-per-decision`, `evaluation.regex-timeout-ms` and `evaluation.regex-max-input-length`; past any of them the decision fails with `EVALUATION_ERROR` (`REGEX_TIMEOUT`, `REGEX_INPUT_TOO_LONG`, or `REGEX_TOO_DEEP` when backtracking runs out of stack). A v1 string escapes a backslash as `\\`, so `\d` is written `'\\d'` |
 | Null | `is null`, `is not null` | Always `true` or `false`. Other operators follow [Null values](#null-values) |
 
 Precedence from lowest to highest: `or`, `and`, `not`, comparison, `+ -`, `* /`, unary minus. Parentheses override.
@@ -47,10 +47,13 @@ A missing input or a `null` value follows FEEL, the DMN expression language, so 
 | Expression with `tier = null` and `income = null` | Result | Matches |
 |---|---|---|
 | `income < 5000000 VND`, `income between 1 VND and 9 VND` | `null` | No |
+| `txCount between 1 and limit` with `txCount = 5`, `limit = null` | `null` (`true and null`) | No |
+| `txCount between 1 and limit` with `txCount = 0`, `limit = null` | `false` (`false and null`) | No |
 | `tier == 'GOLD'` | `false` | No |
 | `tier != 'GOLD'` | `true` | Yes |
 | `tier in ['GOLD', 'PLATINUM']` | `false` | No |
 | `tier not in ['GOLD', 'PLATINUM']` | `true` | Yes |
+| `tier in ['GOLD', null]` | `true` (an element equals the missing value) | Yes |
 | `tier is null` | `true` | Yes |
 | `not(income < 5000000 VND)` | `null` | No |
 | `income + 1 VND > 0 VND`, `len(tier) > 3` (arithmetic and functions give `null`) | `null` | No |

@@ -40,10 +40,26 @@ class ExpressionSemanticsTest {
         "false and income > 0 VND                | false",
         "true or income > 0 VND                  | true",
         "income + 1 VND is null                  | true",
-        "income between 1 VND and 2 VND          | NULL"
+        "income between 1 VND and 2 VND          | NULL",
+        "tier in ['GOLD', null]                  | true",
+        "tier not in ['GOLD', null]              | false"
     })
     void null_follows_feel_three_valued_logic(String condition, Boolean expected) {
         assertThat(eval(condition.strip(), null, null)).isEqualTo(expected);
+    }
+
+    @Test
+    void RLE_006_in_and_between_follow_dmn_1_5_with_a_null_operand() {
+        // in: true when an element equals the target, so a missing tier is in a list only when the list holds null
+        assertThat(eval("tier in ['GOLD', null]", null, null)).isEqualTo(true);
+        assertThat(eval("tier not in ['GOLD', null]", null, null)).isEqualTo(false);
+        assertThat(eval("tier in ['GOLD', 'PLATINUM']", null, null)).isEqualTo(false);
+
+        // between: x >= a and x <= b, here with an unknown upper limit (balance used as the limit)
+        assertThat(eval("txCount between 1 and balance", null, null, new BigDecimal(5), null)).isNull();
+        assertThat(eval("txCount between 1 and balance", null, null, BigDecimal.ZERO, null)).isEqualTo(false);
+        assertThat(eval("txCount between balance and 3", null, null, new BigDecimal(5), null)).isEqualTo(false);
+        assertThat(eval("txCount between 1 and 3", null, null, null, null)).isNull();
     }
 
     @Test
@@ -99,5 +115,40 @@ class ExpressionSemanticsTest {
 
         assertThatThrownBy(() -> Parser.parse(deep, name -> -1)).isInstanceOf(ExpressionException.class)
                 .hasMessageContaining("nested deeper");
+    }
+
+    @Test
+    void matches_is_an_unanchored_search_and_null_text_gives_null() {
+        assertThat(eval("matches('ab12', '[0-9]+')")).isEqualTo(true);
+        assertThat(eval("matches('ab12', '^[0-9]+$')")).isEqualTo(false);
+        assertThat(eval("matches(tier, 'GOLD')", null, "PLATINUM-GOLD")).isEqualTo(true);
+        assertThat(eval("matches(tier, 'GOLD')", null, null)).isNull();
+        assertThat(eval("not(matches(tier, 'GOLD'))", null, null)).isNull();
+        assertThat(Parser.parse("matches(tier, 'G')", name -> SLOTS.getOrDefault(name, -1)))
+                .isEqualTo(Parser.parse("matches(tier, 'G')", name -> SLOTS.getOrDefault(name, -1)));
+    }
+
+    @Test
+    void matches_with_one_argument_needs_a_condition_cell() {
+        assertThatThrownBy(() -> Parser.parse("matches('GOLD')", name -> SLOTS.getOrDefault(name, -1)))
+                .isInstanceOf(ExpressionException.class).hasMessageContaining("matches(input, 'pattern')");
+        assertThat(evaluator.evaluate(Parser.parse("matches('^GO')", name -> SLOTS.getOrDefault(name, -1), "tier"),
+                new Object[] {null, "GOLD", null, null})).isEqualTo(true);
+    }
+
+    /** The fixed cases of RLE-021 for {@code matches}, shared with the FEEL alignment slice (#19). */
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource(delimiter = '|', value = {
+        "matches('ab12', '[0-9]+')        | true",
+        "matches('xaby', 'ab')            | true",
+        "matches('AB', '^a')              | false",
+        "matches('VN-001', '^VN-[0-9]{3}$') | true",
+        "matches('a.b', 'a\\\\.b')        | true",
+        "matches('axb', 'a\\\\.b')        | false",
+        "matches('12 34', '\\\\d+\\\\s\\\\d+') | true",
+        "matches('', 'a*')                | true"
+    })
+    void matches_is_an_unanchored_search_in_the_fixed_cases_shared_with_the_feel_slice(String expression, boolean expected) {
+        assertThat(eval(expression.strip())).isEqualTo(expected);
     }
 }

@@ -81,13 +81,16 @@ class RuleEngineAutoConfigurationTest {
                 return java.util.Set.of();
             }
         };
+        io.github.dhluong90.bpm.rules.spi.MaskingPolicy masking = io.github.dhluong90.bpm.rules.spi.MaskingPolicy.none();
         runner.withUserConfiguration(HostWithEngineStandIns.class)
                 .withBean(io.github.dhluong90.bpm.rules.spi.TenantResolver.class, () -> tenants)
                 .withBean(io.github.dhluong90.bpm.rules.spi.CallerResolver.class, () -> callers)
+                .withBean(io.github.dhluong90.bpm.rules.spi.MaskingPolicy.class, () -> masking)
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBean(io.github.dhluong90.bpm.rules.spi.TenantResolver.class)).isSameAs(tenants);
                     assertThat(context.getBean(io.github.dhluong90.bpm.rules.spi.CallerResolver.class)).isSameAs(callers);
+                    assertThat(context.getBean(io.github.dhluong90.bpm.rules.spi.MaskingPolicy.class)).isSameAs(masking);
                     assertThat(context).hasSingleBean(io.github.dhluong90.bpm.rules.api.RuleEngine.class);
                 });
     }
@@ -465,6 +468,12 @@ class RuleEngineAutoConfigurationTest {
         @Bean
         RuleEngineCursorKeyInitializer customCursorKeys() {
             return new RuleEngineCursorKeyInitializer(() -> { }, () -> { });
+        }
+
+        /** No database here: the masking start-up check runs against PostgreSQL in the example host (RLE-035). */
+        @Bean
+        RuleEngineMaskingCheck customMaskingCheck() {
+            return new RuleEngineMaskingCheck(() -> { });
         }
     }
 
