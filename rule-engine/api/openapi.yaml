@@ -5,7 +5,7 @@ info:
   description: |
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
-    export, request publication, approve, reject, history and evaluate. The remaining endpoints of
+    export, replace a draft, diff two versions, request publication, approve, reject, withdraw, history and evaluate. The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
     The tenant is never part of a request: it comes from the host's authenticated context
@@ -234,6 +234,142 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [rule-sets]
+      operationId: replaceDraft
+      summary: Replace the document of a DRAFT version in place
+      description: |
+        Permission `rules:author`, checked before the body is read; only the draft's author
+        (`createdBy`) may replace it. Anyone else gets `403 PERMISSION_DENIED`, with a detail pointing
+        to importing their own document as a new version (`POST .../rule-sets/{name}/versions`); so the four-eyes check on
+        `createdBy` keeps holding. When the host sets
+        `horus.bpm.rules.authoring.cockpit-drafts` to `false` the answer is
+        `403 DRAFT_AUTHORING_DISABLED` (DESIGN section 4.4).
+
+        The body is read and validated exactly as for `importVersion`: YAML or DMN 1.2 to 1.5,
+        at most 1,048,576 bytes (`413 PAYLOAD_TOO_LARGE`), the document's `ruleSet` must equal
+        `{name}` (`400 INPUT_INVALID`), and a refused document is `422 VALIDATION_FAILED` with every
+        cell problem in `violations`. A refused document stores nothing.
+
+        On success the version keeps its number, status `DRAFT`, author and creation time; its
+        canonical document, `canonicalHash`, source document, `sourceHash`, `sourceFormat`, hit
+        policy and `effectiveFrom` are replaced and `lockVersion` is incremented. One history entry
+        `DRAFT_UPDATED` (actor, `lockVersion`, the canonical hash before and after) and one
+        `rules.version.draft-updated.v1` event (`rule-engine/api/schema/rules.version.draft-updated.v1.schema.json`)
+        are written in the same transaction (DESIGN section 3.3).
+        Only a `DRAFT` can be replaced; any other status is `409 INVALID_STATE`.
+
+        `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
+        `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`; a stale
+        `If-Match` is `409 VERSION_CONFLICT`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: true
+        content:
+          application/yaml:
+            schema:
+              type: string
+            example: |
+              schemaVersion: 1
+              ruleSet: card-fee
+              hitPolicy: first
+              inputs:
+                - { name: tier, type: string }
+              outputs:
+                - { name: fee, type: money }
+              rules:
+                - id: R1
+                  when: { tier: "== 'GOLD'" }
+                  then: { fee: "0 VND" }
+          application/xml:
+            schema:
+              type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}/diff:
+    get:
+      tags: [rule-sets]
+      operationId: diffVersions
+      summary: Compare two versions of a rule set row by row
+      description: |
+        Permission `rules:read`. Compares the canonical models of version `{version}` and version
+        `base` of the same rule set (DESIGN section 4.5, `RLE-028`). Source text, comments and
+        `effectiveFrom` never show as content changes; `effectiveFrom` is reported beside the content
+        diff and `sourceHashChanged` says whether the source files differ. Any statuses may be
+        compared. Writes nothing.
+
+        Rows are matched by rule id, never by position: `ADDED` (only in `{version}`), `REMOVED`
+        (only in `base`), `CHANGED` (same id, different cells; `fields` lists JSON Pointer paths
+        into the row with canonical values, money as `Money`), `MOVED` (same id and cells, order
+        changed relative to the other common rows; the moved set is the common rows outside the
+        longest common subsequence of the two orders, ties broken by keeping the earlier rows of
+        `{version}`). A row both moved and changed is `CHANGED` with `moved: true`. Rows are ordered
+        by `position`, then removed rows by `basePosition`, so the same request returns a
+        byte-identical body. Every changed value whose text holds a character outside printable
+        ASCII, or an escaped character such as `\u200B`, has `nonAscii: true` (ADR-0026 decision 6).
+
+        No `base`, or `base` equal to `{version}`, is `400 INPUT_INVALID`; a `base` that does not
+        exist is `404 VERSION_NOT_FOUND`; a rule set of another tenant is `404 RULE_SET_NOT_FOUND`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - name: base
+          in: query
+          required: true
+          description: The version to compare against, usually the version in effect
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: The diff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionDiff'
+              example:
+                ruleSet: card-fee
+                version: 2
+                base: 1
+                canonicalHash: 4be1d7a0c35e9f2b8a6d4c1e0f9b7a5d3c2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a
+                baseCanonicalHash: 9c07e5d3b1a9f7e5d3c1b9a7f5e3d1c9b7a5f3e1d9c7b5a3f1e9d7c5b3a1f9e7
+                sourceHashChanged: true
+                effectiveFrom: { from: '2026-11-01T00:00:00Z', to: null }
+                header: []
+                inputs: { added: [], removed: [], changed: [], reordered: false }
+                outputs: { added: [], removed: [], changed: [], reordered: false }
+                rows:
+                  - ruleId: R2
+                    change: CHANGED
+                    position: 2
+                    basePosition: 2
+                    moved: false
+                    fields:
+                      - path: /then/fee
+                        from: { currency: VND, amount: 30000 }
+                        to: { currency: VND, amount: 0 }
+                        nonAscii: false
+                  - ruleId: R6
+                    change: ADDED
+                    position: 3
+                unchangedCount: 2
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/export:
     get:
       tags: [rule-sets]
@@ -277,7 +413,7 @@ paths:
       summary: Read the lifecycle history of one version, oldest first
       description: |
         Permission `rules:read`. One entry per transition (`CREATED`, `REQUESTED`, `APPROVED`,
-        `REJECTED`), with actor, reason or comment, statuses before and after and the
+        `REJECTED`, `WITHDRAWN`) and per replacement of a draft (`DRAFT_UPDATED`, with both canonical hashes), with actor, reason or comment, statuses before and after and the
         `lockVersion` after (DESIGN section 3.3.3). A version created before the history table
         existed starts with a backfilled `CREATED` entry; its earlier request and approval have
         no entries.
@@ -346,11 +482,19 @@ paths:
         `403 SELF_APPROVAL_FORBIDDEN`, and the version stays `PENDING_APPROVAL`. Without an
         `effectiveFrom` in the document the version takes effect at approval. A body over
         16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+
+        `If-Match` is required and must be the `lockVersion` of the version the approver reviewed:
+        without it the answer is `428 PRECONDITION_REQUIRED`, and a stale value is
+        `409 VERSION_CONFLICT`, with nothing published. A version can be sent back, replaced in place
+        and requested again under the same number, so the lock version is what ties an approval to
+        the content reviewed (#275). A client that receives `409 VERSION_CONFLICT` here must show the
+        approver the current version (its content and diff) again and let them decide; it must never
+        retry automatically with the new `ETag`, because that would approve content nobody reviewed.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: false
         content:
@@ -373,6 +517,7 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:reject:
     post:
       tags: [rule-sets]
@@ -387,11 +532,14 @@ paths:
         DESIGN section 3.3, `RLE-025`).
         A blank reason, or one longer than `lifecycle.reason-max-length` (default 2,000
         characters), is `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+        `If-Match` is required, as for `:approve`: `428 PRECONDITION_REQUIRED` without it,
+        `409 VERSION_CONFLICT` when stale. On `409 VERSION_CONFLICT` a client shows the current
+        version again and never retries automatically with the new `ETag`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: true
         content:
@@ -410,6 +558,52 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:withdraw:
+    post:
+      tags: [rule-sets]
+      operationId: withdraw
+      summary: Take back your own publication request; the version returns to DRAFT
+      description: |
+        Permission `rules:author`, checked before the body is read. Only the identity that requested
+        publication (`requestedBy`) may withdraw it; anyone else, an approver included, gets
+        `403 PERMISSION_DENIED` (an approver uses `:reject`). Only a `PENDING_APPROVAL` version can be
+        withdrawn; any other status is `409 INVALID_STATE` (PD-089, DESIGN section 3.3, `RLE-046`).
+
+        The version returns to `DRAFT` with `requestedBy` and `requestedAt` cleared and `lockVersion`
+        incremented, one history entry `WITHDRAWN` and one `rules.version.withdrawn.v1` event
+        (`rule-engine/api/schema/rules.version.withdrawn.v1.schema.json`). Nothing is published and
+        the version in effect does not change. The draft can be edited and requested again, which
+        starts a new approval.
+
+        `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
+        `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`. The reason is
+        optional; one longer than `lifecycle.reason-max-length` (default 2,000 characters) is
+        `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawRequest'
+            example:
+              reason: Wrong fee for GOLD
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}:evaluate:
     post:
       tags: [decisions]
@@ -528,6 +722,29 @@ components:
       schema:
         type: string
         example: '"1"'
+    IfMatchRequired:
+      name: If-Match
+      in: header
+      required: true
+      description: |
+        The `lockVersion` the change is based on, quoted; a stale value is `409 VERSION_CONFLICT`.
+        Required: without it the answer is `428 PRECONDITION_REQUIRED`.
+      schema:
+        type: string
+        example: '"3"'
+    IdempotencyKeyRequired:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Required: without it the answer is `400 INPUT_INVALID`. A replay with the same request
+        returns the original result and changes nothing. The same key with a different request is
+        `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; while the first request runs it is
+        `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`. Remembered 24 hours.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
   headers:
     ETag:
       description: The version's `lockVersion`, quoted.
@@ -560,8 +777,8 @@ components:
         RFC 9457 problem; see the wiki page Common Error Codes. `401 UNAUTHENTICATED` carries a
         `WWW-Authenticate` challenge (the host's `horus.bpm.security.challenge`, `Bearer` by default, with
         `error="invalid_token"` when no tenant could be resolved for the caller). `403` is
-        `PERMISSION_DENIED` when the caller lacks the endpoint's permission, `SELF_APPROVAL_FORBIDDEN` for a
-        maker approving their own version, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
+        `PERMISSION_DENIED` when the caller lacks the endpoint's permission (or, on `:withdraw`, is not the
+        requester), `SELF_APPROVAL_FORBIDDEN` for a maker approving or rejecting their own version, `DRAFT_AUTHORING_DISABLED` when the host turned draft editing off, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
         another tenant than the caller's while tenant switching is off, or the principal's tenant attribute
         contradicts the resolved tenant (RLE-018, RLE-037).
       headers:
@@ -632,11 +849,12 @@ components:
         caller's permissions and the four-eyes rule: `request-publish` on a `DRAFT` with
         `rules:author`; `approve` on a `PENDING_APPROVAL` with `rules:approve` when the caller is
         neither the requester nor the author; `reject` on a `PENDING_APPROVAL` with
-        `rules:approve` when the caller is not the requester. A hint for screens only: the engine
-        checks again on every command.
+        `rules:approve` when the caller is not the requester; `withdraw` on a `PENDING_APPROVAL`
+        with `rules:author` for its requester only (PD-089), who never gets `approve` or `reject`.
+        A hint for screens only: the engine checks again on every command.
       items:
         type: string
-        enum: [request-publish, approve, reject]
+        enum: [request-publish, approve, reject, withdraw]
     RuleSetSummary:
       type: object
       required: [ruleSet, latestVersion, latestStatus, publishedVersion, lastChangedAt]
@@ -711,7 +929,7 @@ components:
       properties:
         action:
           type: string
-          enum: [CREATED, REQUESTED, APPROVED, REJECTED]
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED]
         fromStatus:
           type: [string, 'null']
           enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, null]
@@ -721,9 +939,17 @@ components:
         actor: { type: string }
         reason:
           type: [string, 'null']
-          description: The rejection reason or the approval comment
+          description: The rejection or withdrawal reason, or the approval comment
         lockVersion: { type: integer }
         occurredAt: { type: string, format: date-time }
+        canonicalHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: On `DRAFT_UPDATED` only; the canonical hash after the replacement
+        previousCanonicalHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: On `DRAFT_UPDATED` only; the canonical hash before the replacement
     VersionHistory:
       type: object
       required: [data]
@@ -741,6 +967,114 @@ components:
           minLength: 1
           maxLength: 2000
           description: Why the version goes back to its author; stored in the history and the event
+    WithdrawRequest:
+      type: object
+      properties:
+        reason:
+          type: [string, 'null']
+          maxLength: 2000
+          description: Optional; why the requester takes the request back. Stored in the history and the event
+    FieldChange:
+      type: object
+      required: [path, from, to, nonAscii]
+      properties:
+        path:
+          type: string
+          description: JSON Pointer of the member, relative to the row, the column or the document (`/then/fee`, `/when/tier`, `/type`, `/hitPolicy`)
+        from:
+          description: The canonical value in `base`, or null when the member is absent there. A money literal in a `then` cell or an output default is `Money`; other cells are their canonical text
+        to:
+          description: The canonical value in `{version}`, or null when the member is absent there
+        nonAscii:
+          type: boolean
+          description: True when either value holds a character outside printable ASCII or an escaped character such as `\u200B`, so a look-alike is visible to the approver
+    ColumnChanges:
+      type: object
+      required: [added, removed, changed, reordered]
+      properties:
+        added:
+          type: array
+          items: { type: string }
+          description: Column names only in `{version}`, in its order
+        removed:
+          type: array
+          items: { type: string }
+          description: Column names only in `base`, in its order
+        changed:
+          type: array
+          items:
+            type: object
+            required: [name, fields]
+            properties:
+              name: { type: string }
+              fields:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FieldChange'
+        reordered:
+          type: boolean
+          description: True when the columns both versions have are in a different order
+    RowChange:
+      type: object
+      required: [ruleId, change]
+      properties:
+        ruleId: { type: string }
+        change:
+          type: string
+          enum: [ADDED, REMOVED, CHANGED, MOVED]
+        position:
+          type: integer
+          minimum: 1
+          description: 1-based place in `{version}`; absent on `REMOVED`
+        basePosition:
+          type: integer
+          minimum: 1
+          description: 1-based place in `base`; absent on `ADDED`
+        moved:
+          type: boolean
+          description: On `CHANGED` only; true when the row also moved
+        fields:
+          type: array
+          description: On `CHANGED` only, in canonical member order
+          items:
+            $ref: '#/components/schemas/FieldChange'
+    VersionDiff:
+      type: object
+      required: [ruleSet, version, base, canonicalHash, baseCanonicalHash, sourceHashChanged, effectiveFrom,
+        header, inputs, outputs, rows, unchangedCount]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        base: { type: integer, minimum: 1 }
+        canonicalHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        baseCanonicalHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        sourceHashChanged:
+          type: boolean
+          description: True when the source documents differ, even if the canonical models are equal
+        effectiveFrom:
+          type: object
+          required: [from, to]
+          description: Version metadata reported beside the content diff
+          properties:
+            from: { type: [string, 'null'], format: date-time }
+            to: { type: [string, 'null'], format: date-time }
+        header:
+          type: array
+          description: Changed document members other than the columns and rules (hit policy, aggregate, time zone, money rounding, expression language, description), in canonical order; empty when none changed
+          items:
+            $ref: '#/components/schemas/FieldChange'
+        inputs:
+          $ref: '#/components/schemas/ColumnChanges'
+        outputs:
+          $ref: '#/components/schemas/ColumnChanges'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/RowChange'
+        unchangedCount:
+          type: integer
+          minimum: 0
+          description: Rows in both versions with the same cells and not moved
     Violation:
       type: object
       required: [ruleId, column, message]
@@ -795,7 +1129,8 @@ components:
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION,
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
-            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SCHEMA_NOT_READY]
+            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, SCHEMA_NOT_READY,
+            PRECONDITION_REQUIRED, DRAFT_AUTHORING_DISABLED]
         detail: { type: string }
         correlationId: { type: string }
         violations:
