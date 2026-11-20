@@ -6,6 +6,7 @@ import './components/tokens.css';
 import './components/base.css';
 import './components/shell.css';
 import './components/rules.css';
+import './components/processes.css';
 
 applyTheme(initialTheme());
 

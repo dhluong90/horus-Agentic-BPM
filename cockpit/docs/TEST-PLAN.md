@@ -20,7 +20,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-004 | `CKP_004_simulation_displays_outcome_changes_safely` | Playwright | M1 | `TR-UI-02` | Planned |
 | CKP-005 | `CKP_005_decision_log_masks_pii_and_highlights_matched_row` | Testing Library | M1 | `TR-SEC-05`, `TR-OBS-05` | Planned |
 | CKP-006 | `CKP_006_grid_editor_shows_row_validation_errors` | Playwright | M2 | `TR-DET-02`, `TR-UI-02` | Planned |
-| CKP-007 | `CKP_007_agent_task_inspector_shows_guardrail_and_override_controls` | Testing Library | M2 | `TR-AGT-01`, `TR-AGT-02` | Planned |
+| CKP-007 | `CKP_007_*` (`cockpit/web/src/features/processes/ProcessScreens.test.tsx`, `cockpit/web/src/features/processes/model/review.test.ts`, `cockpit/web/e2e/processes.spec.ts`) | Testing Library with the fake Process Engine; Playwright at 1440x900 and 1440x1200, light and dark, English and Vietnamese, keyboard and axe-core | M2 | `TR-AGT-01`, `TR-AGT-02` | Automated. Inspector, masked inputs, schema verdict, guardrail rules, approve and override with a required reason, four eyes for the starter and the reporter, the engine's schema refusal on its field |
 | CKP-008 | `CKP_008_incident_queue_retries_and_updates_status` | Playwright | M2 | `TR-OPS-03` | Planned |
 | CKP-009 | `CKP_009_wcag_aa_and_keyboard_navigation_pass` | Playwright, axe-core | M1 (Cockpit 0.1 screens); re-run at M2 over Cockpit 0.2 screens | `TR-UI-03` | Planned |
 | CKP-010 | `CKP_010_en_and_vi_i18n_coverage_complete` | Vitest, key parity | M1 (Cockpit 0.1 screens); re-run at M2 over Cockpit 0.2 screens | `TR-UI-04` | Planned |
@@ -51,6 +51,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-035 | `CKP_035_diagram_step_list_and_text_states` | Playwright keyboard and axe-core, both themes | M2 | `TR-UI-03` | Planned |
 | CKP-036 | `CKP_036_canvas_exemption_names_import_path` | Playwright with screen-reader assertions | M3 | `TR-UI-03`, `TR-DEF-04` | Planned |
 | CKP-037 | `CKP_037_*` (`cockpit/web/e2e/personal-data.spec.ts`, `cockpit/web/src/features/rules/PersonalData.test.tsx`, `cockpit/web/src/features/rules/model/masking.test.ts`) | Playwright at 1440x900 and 1440x1200, light and dark, English and Vietnamese, axe-core; Vitest with the fake engine | M1 | `TR-UI-02`, `TR-UI-03`, `TR-UI-04` | Automated |
+| CKP-069 | `CKP_069_*` (`cockpit/web/src/features/processes/model/diagram.test.ts`, `cockpit/web/src/features/processes/ProcessScreens.test.tsx`, `cockpit/web/e2e/processes.spec.ts`) | Vitest with a 200-step layout timing, Testing Library, Playwright at 1440x900 and 1440x1200 with axe-core and the lazy chunk check | M2 | `TR-UI-07`, `TR-DEF-02`, `TR-UI-03`, `TR-UI-06` | Automated |
+| CKP-070 | `CKP_070_*` (`cockpit/web/src/features/processes/model/diagram.test.ts`, `cockpit/web/src/features/processes/ProcessScreens.test.tsx`) | Vitest, Testing Library | M2 | `TR-UI-07`, `TR-UI-08` | Automated |
 
 ## Known gaps
 | Gap | Plan |

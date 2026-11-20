@@ -1,5 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { scenarioPermissions, scenarioResponses, scenarioUser, type MockResponse, type Scenario } from './fixtures';
+import { createFakeProcessEngine, type ProcessSeed } from './processEngine';
 import { createFakeEngine, demoSeed, type AcknowledgementSettings, type StoredVersion } from './ruleEngine';
 
 function reply(response: MockResponse) {
@@ -18,6 +19,19 @@ export function resetRuleEngine(seed: StoredVersion[] = demoSeed(), acknowledgem
   engine = createFakeEngine(seed, acknowledgement);
 }
 
+let processEngine = createFakeProcessEngine();
+
+/** A fresh mock Process Engine with the demo data, for test isolation. */
+export function resetProcessEngine(seed: ProcessSeed = {}): ReturnType<typeof createFakeProcessEngine> {
+  processEngine = createFakeProcessEngine(seed);
+  return processEngine;
+}
+
+/** The mock Process Engine in use, to read what it recorded. */
+export function currentProcessEngine(): ReturnType<typeof createFakeProcessEngine> {
+  return processEngine;
+}
+
 /** MSW handlers of the mock host. Paths match any origin, so they serve the embedded (same-origin) case. */
 export function handlers(scenario: Scenario | (() => Scenario)) {
   const currentScenario = () => (typeof scenario === 'function' ? scenario() : scenario);
@@ -30,10 +44,19 @@ export function handlers(scenario: Scenario | (() => Scenario)) {
     const answer = engine.handle({ method: request.method, path: request.url, headers, body: await request.text(), user: scenarioUser(currentScenario()), permissions: scenarioPermissions(currentScenario()) });
     return new HttpResponse(answer.body, { status: answer.status, headers: answer.headers });
   };
+  const processes = async ({ request }: { request: Request }) => {
+    const headers: Record<string, string> = {};
+    request.headers.forEach((value, key) => {
+      headers[key] = value;
+    });
+    const answer = processEngine.handle({ method: request.method, path: request.url, headers, body: await request.text(), user: scenarioUser(currentScenario()), permissions: scenarioPermissions(currentScenario()) });
+    return new HttpResponse(answer.body, { status: answer.status, headers: answer.headers });
+  };
   return [
     http.get('*/cockpit-hosts.json', () => reply(current().registry)),
     http.get('*/api/bpm/meta', () => reply(current().meta)),
     http.get('*/api/bpm/me', () => reply(current().me)),
     http.all('*/api/bpm/rules/v1/*', rules),
+    http.all('*/api/bpm/processes/v1/*', processes),
   ];
 }

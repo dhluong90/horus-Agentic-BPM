@@ -16,7 +16,9 @@ export type Route =
   | { name: 'rule-set'; ruleSet: string; version: number | undefined; lens: Lens | undefined }
   | { name: 'approvals' }
   | { name: 'decisions' }
-  | { name: 'processes' };
+  | { name: 'processes' }
+  | { name: 'process'; key: string; version: number }
+  | { name: 'task'; taskId: string };
 
 /** The menu areas. Every route belongs to exactly one. */
 export const AREAS = ['home', 'rules', 'approvals', 'decisions', 'processes'] as const;
@@ -31,6 +33,9 @@ export function areaOf(route: Route): Area {
     case 'rule-sets':
     case 'rule-set':
       return 'rules';
+    case 'process':
+    case 'task':
+      return 'processes';
     default:
       return route.name;
   }
@@ -58,6 +63,11 @@ export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Ro
     const number = version !== undefined && /^\d+$/.test(version) ? Number(version) : undefined;
     return { name: 'rule-set', ruleSet, version: number, lens: isLens(lens) ? lens : undefined };
   }
+  if (area === 'processes' && ruleSet !== undefined) {
+    // #/processes/<key>/<version>: one version's diagram. A key without a version number opens the list.
+    return version !== undefined && /^[1-9]\d*$/.test(version) ? { name: 'process', key: ruleSet, version: Number(version) } : { name: 'processes' };
+  }
+  if (area === 'tasks' && ruleSet !== undefined) return { name: 'task', taskId: ruleSet };
   if (area === 'home' || area === 'approvals' || area === 'decisions' || area === 'processes') return { name: area };
   return { name: 'home' };
 }
@@ -80,6 +90,10 @@ export function formatRoute(route: Route): string {
       if (route.version !== undefined && route.lens !== undefined) parts.push(route.lens);
       return `#/${parts.join('/')}`;
     }
+    case 'process':
+      return `#/processes/${encodeURIComponent(route.key)}/${String(route.version)}`;
+    case 'task':
+      return `#/tasks/${encodeURIComponent(route.taskId)}`;
     default:
       return `#/${route.name}`;
   }

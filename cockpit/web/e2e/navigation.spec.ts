@@ -78,7 +78,7 @@ const SCREENS: readonly Screen[] = [
   { name: 'approvals-author', user: 'lan', hash: '#/approvals', title: { en: 'Approvals', vi: 'Phê duyệt' } },
   { name: 'menu-collapsed', user: 'minh', hash: '#/home', collapsed: true, title: { en: /Trần Văn Minh/, vi: /Trần Văn Minh/ }, action: { en: 'Review', vi: 'Xem xét' } },
   { name: 'decisions', user: 'minh', hash: '#/decisions', title: { en: 'Decisions Preview', vi: 'Quyết định Xem trước' } },
-  { name: 'processes', user: 'lan', hash: '#/processes', title: { en: 'Processes Preview', vi: 'Quy trình Xem trước' } },
+  { name: 'processes', user: 'lan', hash: '#/processes', title: { en: 'Processes', vi: 'Quy trình' } },
 ];
 
 async function openScreen(page: Page, screen: Screen, viewport: { width: number; height: number }, theme: 'light' | 'dark', locale: 'en' | 'vi') {
@@ -171,7 +171,7 @@ test('TR_UI_03_every_menu_item_and_the_primary_action_are_reachable_with_tab_and
 
 test('TR_UI_08_moving_through_every_menu_item_shows_a_title_never_a_blank_page', async ({ page }) => {
   await openScreen(page, SCREENS[1] as Screen, { width: 1440, height: 900 }, 'light', 'en');
-  const items: [RegExp, string | RegExp][] = [[/^Rules$/, 'Rules'], [/^Approvals.*2 to review$/, 'Approvals'], [/^Decisions$/, 'Decisions Preview'], [/^Processes$/, 'Processes Preview'], [/^Home$/, /Trần Văn Minh/]];
+  const items: [RegExp, string | RegExp][] = [[/^Rules$/, 'Rules'], [/^Approvals.*2 to review$/, 'Approvals'], [/^Decisions$/, 'Decisions Preview'], [/^Processes$/, 'Processes'], [/^Home$/, /Trần Văn Minh/]];
   for (const [item, title] of items) {
     await page.getByRole('navigation', { name: 'Cockpit menu' }).getByRole('link', { name: item }).click();
     await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
