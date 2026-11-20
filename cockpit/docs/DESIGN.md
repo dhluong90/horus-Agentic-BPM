@@ -46,7 +46,7 @@ Source: [`diagrams/components.mmd`](diagrams/components.mmd).
 | `features/processes` | Definitions, instances, agent task inspector, compensation runs, migration |
 | `features/inbox`, `features/incidents` | Merged lists across hosts (section 8) |
 | `features/approvals`, `features/modeller` | Process approval with graph diff and the canvas (M3) |
-| `diagram` | React Flow canvas, dagre layout, overlays and the node list; a separate chunk loaded on first use |
+| `diagram` | Diagram canvas (SVG in the first slice, see the React Flow row below), dagre layout, overlays and the node list; a separate chunk loaded on first use |
 | `components` | Design tokens as CSS variables, light and dark themes, focus styles |
 
 Runtime dependencies and their justification (licences re-checked at adoption; the build fails on any licence outside Apache 2.0, MIT and BSD, `TR-LIC-01`):
@@ -59,6 +59,8 @@ Runtime dependencies and their justification (licences re-checked at adoption; t
 | `oidc-client-ts` | Apache 2.0 | Authorization code with PKCE, refresh grants and token expiry handling as a public client. Writing OAuth flows by hand is a common source of security defects; this library is the maintained successor of `oidc-client-js` and has no runtime dependencies of its own |
 | `@xyflow/react` (React Flow) | MIT | Canvas for read-only diagrams in M2 and the modeller in M3: custom node types, viewport culling, keyboard focus hooks. `bpmn-js` and `diagram-js` fail `TR-LIC-01` (the bpmn.io licence requires a visible watermark); with full BPMN on the roadmap (ADR-0017) the licence is the remaining reason, and the BPMN symbol set is drawn as React Flow node types (section 10); JointJS (MPL-2.0) fails the licence rule. Fallback: maxGraph (Apache 2.0) |
 | `@dagrejs/dagre` | MIT | Layered automatic layout for definitions without a stored layout. elkjs gives better layouts but is EPL-2.0 and fails `TR-LIC-01` |
+
+First slice (`CKP-069`, `CKP-070`): React Flow 13 depends on `d3-zoom`, `d3-drag`, `d3-selection`, `d3-transition`, `d3-interpolate`, `d3-color`, `d3-dispatch` and `d3-timer`, all ISC, which the cockpit's licence check refuses because `TR-LIC-01` names Apache 2.0, MIT and BSD only. The read-only diagram is therefore drawn as plain SVG with dagre (MIT, its one dependency `@dagrejs/graphlib` MIT). Whether ISC joins the permitted list, or the modeller (M3) moves to maxGraph, is an open decision; nothing in the first slice depends on it.
 
 ## 3. Screen hierarchy
 
@@ -281,6 +283,7 @@ Source: [`diagrams/diagram-render.mmd`](diagrams/diagram-render.mmd).
 | Topic | Design |
 |---|---|
 | Source | `GET /definitions/{key}/versions/{v}?include=layout`. Immutable per version and layout revision, so the response is cached by `ETag` |
+| Graph source (first slice) | Until the definition read returns the graph and its stored layout, the cockpit reads the graph from `GET .../versions/{v}/export?format=bpmn` (permission `processes:read`): flow nodes and sequence flows of the first executable process, keyed by element type and `horus:type`; the export's generated BPMNDI is not a stored layout and is ignored. A document with a `DOCTYPE`, without a process or not well-formed is shown as an error, never guessed (`CKP-069`, `CKP-070`) |
 | Layout | Stored positions when the layout covers every node; when it covers some, dagre places the rest with the stored nodes fixed; with no layout (definitions kept in Git), dagre lays out everything, `rankdir LR`, node separation 40, rank separation 60 |
 | Node types | Keyed by BPMN element type plus a HORUS subtype (M2, DN-11): `startEvent`, `endEvent`, `userTask`, `serviceTask`, `serviceTask:agentTask` (with its guardrail), `businessRuleTask`, gateways, `intermediateCatchEvent:timer`, `callActivity`, `transaction` (a group node for `saga`), `intermediateThrowEvent:compensate`. The cockpit maps the v1 step types onto these keys. A type the cockpit does not know renders as a labelled generic node with its BPMN type name, never as an error, so a newer host can be viewed by an older cockpit. The S1 to S3 symbols (events with every definition, boundary events, subprocesses, pools and lanes, data objects, artifacts) are added as node types per stage ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 6.1). The modeller (M3) offers only what the host lists in `/api/bpm/meta` `standards.bpmnExecutableElements` and its step catalogue |
 | Edges | From `next`, `branches[].when` (label), `default` (marked), and `parallelGateway` lists |
@@ -290,6 +293,19 @@ Source: [`diagrams/diagram-render.mmd`](diagrams/diagram-render.mmd).
 | Migration (M3) | Source and target diagrams side by side with mapped steps linked (CK-F-33) |
 | Accessibility | Status and counts are shown as text and icon as well as colour (WCAG 1.4.1, `TR-UI-03`). A keyboard-usable node list beside every diagram and the canvas exemption notice are proposed, pending PD-048 |
 | Layout edits | Moving boxes and saving writes a new layout revision through `PUT .../layout` with `If-Match`; no approval, and allowed even when cockpit drafts are off (M3) |
+
+### 10.1 Agent review (`CKP-007`)
+
+The review task of a refused agent answer opens at `#/tasks/{taskId}` from `GET /tasks/{id}`, whose `review` holds the refusal code, the matched rule ids, the reasons, the inputs the agent received and the masked answer (`PRE-012`). One screen, three cards and a docked decision: what the agent received, the answer with its schema verdict, and why it was stopped (violet, the colour of route-to-human). The verdict is read from the code: the engine checks the schema before the guardrail, so `GUARDRAIL_VIOLATION` and `GUARDRAIL_EVALUATION_ERROR` mean the schema passed and `AGENT_SCHEMA_INVALID` means it failed. Masked values stay masked: `***` reads "Masked", and a keyed fingerprint shows only its first characters (`hmac:k2026:9f4a…`).
+
+| Step | Call | Rule |
+|---|---|---|
+| Take the review | `POST /tasks/{id}:claim` with `If-Match` and `Idempotency-Key` | Shown only when `allowedActions` has `claim` |
+| Approve the answer | `POST /tasks/{id}:complete` with `result` = the agent's answer and a required `reason` | Unavailable when the answer holds a masked value: the cockpit never holds the original, so it cannot send it back |
+| Override | The same call with the reviewer's answer and a required `reason`; the changed fields are listed as from and to before sending | Number fields need a number and masked fields a new value; the output schema is the engine's check, and its `422 FORM_VALIDATION_FAILED` violations are shown on their fields |
+| Four eyes | None | The identity in `review.reportedBy` and the instance's `startedBy` (read when the user holds `processes:read`) see why they cannot decide, and no action; the engine refuses them anyway (`403 SELF_APPROVAL_FORBIDDEN`) |
+
+A queue of escalated reviews needs a task query, which the Process Engine API does not offer yet; until the inbox (`CKP-019`) the review opens from its link.
 
 ## 11. Governed change from the cockpit (PD-033, PD-036)
 

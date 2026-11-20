@@ -1,0 +1,103 @@
+/* Process screens: the definition diagram (CKP-069, CKP-070) and the agent review (CKP-007).
+ * Colours come from tokens.css only. Violet marks agent steps and route-to-human, nothing else (styleguide 2). */
+
+/* ---------- Definition diagram ---------- */
+.card.card--diagram { padding: 12px 20px 20px; gap: 0; }
+.dg { position: relative; display: flex; flex-direction: column; gap: 8px; }
+.dg__tools { align-self: flex-end; }
+.dg__frame {
+  overflow: auto; max-height: calc(100vh - var(--topbar-h) - 260px); min-height: 320px;
+  border: 1px solid var(--line); border-radius: var(--radius-l);
+  background-color: var(--canvas);
+  background-image: radial-gradient(var(--dot) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+.dg__svg { display: block; margin: 0 auto; }
+
+.dg-edge path { fill: none; stroke: var(--edge); stroke-width: 1.5; }
+.dg-edge .dg-edge__default { stroke-width: 2; }
+.dg-arrow { fill: var(--edge); stroke: none; }
+.dg-edge__label-box { overflow: visible; }
+.dg-edge__label {
+  display: block; width: max-content; max-width: 120px; margin: 0 auto; padding: 1px 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border-radius: var(--radius-pill); background: var(--canvas); color: var(--edge-label);
+  font: var(--type-caption); line-height: 20px;
+}
+
+.dg-node { color: var(--ink-2); outline: none; }
+.dg-node rect, .dg-node circle, .dg-node path { fill: var(--node); stroke: var(--node-stroke); stroke-width: 1.5; }
+.dg-node:hover rect, .dg-node:hover circle, .dg-node:hover > path { filter: var(--node-hover); }
+.dg-node:focus-visible rect, .dg-node:focus-visible circle, .dg-node:focus-visible > path { stroke: var(--focus); stroke-width: 3; }
+.dg-node g path, .dg-node g circle, .dg-node g rect { fill: none; stroke: currentColor; filter: none; }
+.dg-node--endEvent circle { stroke-width: 3.5; }
+.dg-node--agent { color: var(--violet); }
+.dg-node--agent rect { stroke: var(--violet); fill: var(--violet-soft); }
+.dg-node--generic rect { stroke-dasharray: 5 4; fill: var(--surface-2); }
+.dg-node__glyph { fill: var(--ink-2); font: 700 20px/1 var(--font-ui); }
+.dg-node__text { display: flex; flex-direction: column; justify-content: center; height: 100%; gap: 2px; }
+.dg-node__name {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  color: var(--ink); font: var(--type-label); font-weight: 600; line-height: 1.35;
+}
+.dg-node__type { color: var(--muted); font: var(--type-caption); }
+.dg-node--agent .dg-node__type { color: var(--violet); }
+.dg-node__type--raw { font-family: var(--font-data); font-size: 11px; overflow-wrap: anywhere; line-height: 1.3; }
+.dg-node__caption {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  text-align: center; color: var(--ink); font: var(--type-caption); line-height: 1.4;
+}
+
+.step-list { list-style: decimal; margin: 8px 0 0; padding: 0 0 0 28px; display: flex; flex-direction: column; }
+.step-list__item { display: list-item; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+.step-list__item:last-child { border-bottom: 0; }
+.step-list__name { font-weight: 600; color: var(--ink); }
+.step-list__type { margin-left: 12px; color: var(--muted); font: var(--type-label); }
+.step-list__type--agent { color: var(--violet); }
+
+/* ---------- Agent review ---------- */
+.badge--violet { background: var(--violet-soft); color: var(--violet); border-color: transparent; }
+.badge--bad { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+
+.review .page-head { margin-bottom: 4px; }
+.review__meta { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 16px; color: var(--muted); font: var(--type-label); }
+.review-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+@media (max-width: 1180px) { .review-grid { grid-template-columns: minmax(0, 1fr); } }
+.review-card { max-height: calc(100vh - var(--topbar-h) - 330px); min-height: 180px; overflow: auto; }
+.review-card__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.review-card__note { font: var(--type-caption); }
+.review-card--guardrail { box-shadow: var(--sh-1), inset 3px 0 0 var(--violet); }
+
+.review-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; }
+.review-fields > div { display: contents; }
+.review-fields dt { color: var(--muted); font: var(--type-label); }
+.review-fields dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.review-value__text { white-space: pre-wrap; }
+
+.masked { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.masked__tag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--ink-2); font: var(--type-caption); font-weight: 600; line-height: 20px; }
+.masked__hint { color: var(--muted); font-size: 12px; }
+
+.review-why__sentence { margin: 0; color: var(--ink); font-weight: 600; }
+.rule-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.review-reasons { margin: 0; padding-left: 18px; color: var(--ink-2); display: flex; flex-direction: column; gap: 4px; }
+.review-why__facts { margin-top: 4px; }
+.review-why__ref { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.review-why__id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.review-editor { display: flex; flex-direction: column; gap: 12px; }
+.review-editor__fixed { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; padding: 8px 0; }
+.review-editor .field__input { min-height: var(--target-min); }
+
+.review-dock { grid-template-columns: auto minmax(0, 1fr) auto; }
+.review-dock .seg { align-self: flex-start; }
+.review-dock .seg button { min-height: 36px; padding: 4px 14px; }
+.review-dock > .dock__note, .review-dock > .gate__reason { grid-column: 2 / -1; margin: 0; }
+.review-dock > .review-dock__hint { grid-column: auto; }
+.review-dock__error { grid-column: 1 / -1; }
+.review-changes { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; font: var(--type-label); }
+.review-changes__field { color: var(--muted); margin-right: 6px; }
+.review-changes__from { color: var(--ink-2); text-decoration: line-through; }
+.review-changes__to { color: var(--ink); font-weight: 600; background: var(--indigo-soft); padding: 0 4px; border-radius: var(--radius-xs); }
+.review-changes__none { margin: 0; font: var(--type-label); }
+.dg-node--generic .dg-node__name { -webkit-line-clamp: 1; }

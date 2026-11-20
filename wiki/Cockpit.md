@@ -163,11 +163,11 @@ A host that keeps production rule changes in Git can turn off cockpit editing pe
 
 | Area | What you can do |
 |---|---|
-| Definitions | Browse versions and see each version as a diagram. A definition with no stored layout is laid out automatically |
+| Definitions | Browse versions and see each version as a diagram. A definition with no stored layout is laid out automatically. Available now: the list of definitions and the diagram of the version in effect, laid out left to right, with a step list; a step type the cockpit does not know shows as a dashed box naming its type. Stored layouts follow |
 | Instances | Open an instance and see its diagram with the live token positions, its history timeline, and per step when it ran, how long it took, the attempts and who acted |
 | Inbox | Work one task inbox merged across the hosts in the registry, ordered by due date; claim, complete, reassign; filter to SLA breaches |
 | Task forms | Complete a task through the form it declares, or follow its link to the host's own screen |
-| Agent tasks | Inspect bounded inputs, the JSON Schema verdict, the agent's output and the guardrail rules that fired; approve or override an escalated task with a reason |
+| Agent tasks | Inspect bounded inputs, the JSON Schema verdict, the agent's output and the guardrail rules that fired; approve or override an escalated task with a reason. Available now from the review's link: masked values stay masked, the person who started the case or reported the answer cannot decide it, and an answer with masked values can only be overridden |
 | Incidents | Work one incident list merged across hosts; read cause and retry count; retry or resolve |
 | Compensation runs | See which handlers ran, in which order, with which result |
 | SLA | List breaches |
