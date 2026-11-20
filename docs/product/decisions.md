@@ -128,6 +128,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-104](#pd-104-approving-a-version-with-personal-data-warnings-needs-an-acknowledgement) | Approving a version with personal-data warnings needs an acknowledgement | Decided (product manager, delegated, PD-073) |
 | [PD-105](#pd-105-pending-rule-versions-with-no-recorded-author-cannot-be-approved) | Pending rule versions with no recorded author cannot be approved | Decided (product manager, delegated, PD-073) |
 | [PD-106](#pd-106-the-condition-builder-lens-moves-from-10-to-11) | The condition builder lens moves from 1.0 to 1.1 | Decided (product manager, delegated, PD-073) |
+| [PD-130](#pd-130-decision-log-retention-is-required-from-10-0x-warns-and-keeps-everything) | Decision log retention is required from 1.0; 0.x warns and keeps everything | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -1573,6 +1574,8 @@ The architect reviewed the technical, non-functional and developer requirements 
 **Follow-ups.** Architect: the warning and the 12-month floor in DESIGN. Documentation: retention guidance in the decision log page.
 
 **Applied, 2026-11-19.** The product owner chose option 3, the stricter option: retention is required. Outside the `dev` profile the engine refuses to start until a retention period is set; the minimum is 12 months, in whole months. The `dev` profile needs no setting, so the 30-minute Getting Started path is unaffected; this answers the objection in the rationale above, which assumed demos run outside `dev`. No audit data is deleted by a product default, because the bank always chooses the period. Feature RE-F-31 in the [feature map](feature-map.md) is reworded. Timing, settled by [PD-020](#pd-020-conflict-partitioning-milestone-on-the-roadmap) (option 2, decided the same day): the setting, the start-up refusal and the purge arrive together with RE-F-31 in M3; before M3 nothing is deleted. Not applied here: `TR-OPS-04` in [requirements.md](requirements.md) (architecture and QA), DESIGN (architect, which now needs the refusal rather than a warning), the decision log wiki page (documentation).
+
+**Amended, 2026-11-20 by [PD-130](#pd-130-decision-log-retention-is-required-from-10-0x-warns-and-keeps-everything).** The requirement stands as the 1.0 rule. Before 1.0, an unset period warns at start-up and keeps everything instead of refusing to start.
 
 ### PD-051 Tenant exit: export and purge
 
@@ -3196,3 +3199,29 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Consequences.** CK-F-45 moves from M3 to after 1.0, targeted 1.1, and leaves the M3 cut list. Issue #190 is retargeted to 1.1 and stays open. The open question (nested groups, Or as rows, or one expression cell) is not decided here and must be decided before the lens is sized for 1.1; the DMN export must stay exact. The roadmap, the feature map and the cockpit PRD follow. PD-076 still holds for placement.
 
 **Follow-ups.** Product manager: the roadmap, feature map and cockpit PRD counts (M3 33 to 32, later 13 to 14). Architect: none for 1.0. Maintainers (engineering): retarget #190.
+
+### PD-130 Decision log retention is required from 1.0; 0.x warns and keeps everything
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | PD-050 requires a host to set decision log retention and refuses start-up outside `dev` without it. The retention change for issue #104 (PR #371) first did that, then was changed so an unset period keeps everything with an INFO line, without checking PD-050. Keep PD-050, or replace it with "keep forever by default"? |
+| Raised by | Maintainers (engineering), issue #104 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1: keep PD-050 as the 1.0 rule, with a warn-and-keep transition in 0.x |
+
+**Options considered**
+
+1. Keep PD-050 and add an upgrade path (chosen). Consequence: 0.x hosts that upgrade from 0.1.0, which has no retention setting, keep running and lose nothing. Enforcement arrives at 1.0, a major version, with a release note.
+2. Replace PD-050 with "keep forever by default". Consequence: no upgrade friction, but a bank can run for years without ever choosing a period. Storage grows without notice, and a later switch to a finite period drops the oldest months in one step.
+
+**Recommendation and decision.** Option 1. Banks must keep decision records for a minimum period set by their regulator and often longer for credit decisions, while data-protection law (GDPR, PDPD) pushes the other way for personal data. Both are the bank's call and neither has a safe product default, so the product must make the bank choose. A dropped partition cannot be undone, so the transition must never delete: an unset period deletes nothing, ever. The audit trail stays immutable between the bank's explicit choices. Retention is not an erasure mechanism for one person's data; that stays with the tenant exit and personal-data decisions.
+
+**Consequences.**
+
+- Until 1.0, with no period set: start-up succeeds outside `dev`, nothing is dropped, and a WARN line (not INFO) says that retention is unset, that everything is kept, the growth per row (PD-045) and the setting name. The line repeats on every start-up.
+- From 1.0, outside `dev`: start-up is refused with a message naming the setting, as PD-050 says. The `dev` profile needs no setting.
+- The set of valid values stays whole months, minimum 12 (PD-050), plus an explicit `keep-forever` value. An explicit `keep-forever` satisfies the 1.0 requirement, so a bank that must keep everything makes that choice on purpose and is not forced to invent a long number.
+- No purge runs unless a period is set. The first purge for a host that sets a period follows the existing drop rules for whole monthly partitions; nothing in this decision changes them.
+- The 1.0 release notes and the upgrade guide state the new required setting.
+
+**Follow-ups.** Maintainers (engineering): issue #104 and PR #371 (change the INFO line to WARN, add `keep-forever`, add the 1.0 enforcement as a tracked item, test that an unset period never drops a partition). Architect: DESIGN follows. Product manager: roadmap and feature map RE-F-31 wording. Documentation: retention guidance and the upgrade note.
