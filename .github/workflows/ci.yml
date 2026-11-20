@@ -92,7 +92,9 @@ jobs:
       # POMs changed, restore-keys fall back to the newest cache of the same line, then of any line; a
       # pull request can restore caches saved on main, so a branch never starts from an empty repository.
       # The last prefix reads the caches setup-java saved on main before this change.
+      # Not on a tag run (called by the release workflow): a release restores no dependency cache.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref_type != 'tag'
         with:
           # Written as setup-java writes it (os.homedir() on the hosted runner), so the caches setup-java
           # saved on main have the same cache version and match the last restore key.
@@ -206,7 +208,9 @@ jobs:
 
       # Maven repository cache (#171), as in the verify job: exact key, then the newest cache of this job,
       # then of any job, including those saved on main.
+      # Not on a tag run (called by the release workflow): a release restores no dependency cache.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref_type != 'tag'
         with:
           # Written as setup-java writes it (os.homedir() on the hosted runner), so the caches setup-java
           # saved on main have the same cache version and match the last restore key.
