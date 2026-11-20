@@ -209,6 +209,25 @@ class RuleEnginePartitionMaintenanceTest {
     }
 
     @Test
+    void RLE_017_default_rows_gauge_survives_a_garbage_collection_after_binding() {
+        // Given a gauge whose binder nothing but the registry references
+        DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
+        when(partitions.defaultRows()).thenReturn(1L);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        new RuleEngineMetrics(partitions).bindTo(registry);
+
+        // When a garbage collection has run: a weakly reachable sentinel is cleared only by one
+        java.lang.ref.WeakReference<Object> sentinel = new java.lang.ref.WeakReference<>(new Object());
+        for (int i = 0; i < 50 && sentinel.get() != null; i++) {
+            System.gc();
+        }
+        assertThat(sentinel.get()).as("a garbage collection ran").isNull();
+
+        // Then the gauge still reads the default partition instead of NaN
+        assertThat(registry.get("horus.rle.partition.default.rows").gauge().value()).isEqualTo(1.0);
+    }
+
+    @Test
     void TR_OPS_05_an_error_in_one_run_does_not_end_the_loop_and_the_next_run_happens(CapturedOutput output) {
         // Given a run that throws an Error from a library, then one that succeeds
         DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
