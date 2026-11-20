@@ -110,7 +110,10 @@ class DecisionStepIdentityTest {
 
         // Then the decision used bank-g's rule set, as the engine, on behalf of nobody
         assertThat(decisionRow(overdue.id())).isEqualTo("bank-g system:process-engine - 20000");
-        assertThat(count("SELECT count(*) FROM rle_decision WHERE tenant_id <> 'bank-g'")).isZero();
+        // Other tests share the database, so only this test's instances and tenants are counted.
+        assertThat(count("SELECT count(*) FROM rle_decision WHERE tenant_id <> 'bank-g' AND correlation_id IN (?, ?)",
+                reviewed.id(), overdue.id())).isZero();
+        assertThat(count("SELECT count(*) FROM rle_decision WHERE tenant_id = 'bank-h'")).isZero();
 
     }
 }
