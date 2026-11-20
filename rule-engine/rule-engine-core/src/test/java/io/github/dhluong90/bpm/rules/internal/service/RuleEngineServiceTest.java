@@ -33,7 +33,7 @@ class RuleEngineServiceTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
         caller.become("bank-a", "teller-01");
     }
 
@@ -98,7 +98,7 @@ class RuleEngineServiceTest {
                 .isInstanceOf(NoEffectiveVersionException.class);
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
         assertThatThrownBy(() -> engines.ruleEngine().evaluate("card-fee", DecisionInput.of(Map.of("txCount", 2.5d))))
                 .isInstanceOf(InputInvalidException.class);
         assertThat(stores.decisions).isEmpty();
