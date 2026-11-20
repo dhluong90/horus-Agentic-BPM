@@ -152,12 +152,15 @@ Within that range a host can still be newer than the cockpit, so the cockpit rea
 | Field | What the cockpit does with a name it does not know |
 |---|---|
 | `/me` `permissions[]` | A well-formed name the cockpit has no screen for is kept and never checked. A string outside the pattern `^(rules\|processes)(:[a-z]+){1,2}$` is dropped before validation, with one browser console warning per page load for each distinct set of dropped names. The warning prints at most 10 names, each cut to 64 characters and quoted with control and bidi characters escaped, so a host cannot flood the console or disguise a name. The user signs in and the cockpit offers nothing for that name |
+| `/meta` `modules[]` | An entry for an engine module the cockpit does not know is skipped before validation, as described below |
 | `/meta` `features[]` | A well-formed flag the cockpit does not know is ignored; screens turn on only for flags the cockpit knows |
 | `/meta` `settings` | An unknown key is ignored |
 | Extra properties on either object | Kept and ignored |
 | Everything else | Validated exactly as published. A missing or empty user id, a missing tenant, a repeated permission, a permission that is not a string, a feature flag outside its pattern or another `schemaVersion` makes the answer an unexpected response (section 12), never a partial render |
 
 The `/me` reader is `cockpit/web/src/api/meReader.ts`. `contract.test.ts` records the one place it reads more leniently than the JSON Schema validates: a permission name outside the pattern.
+
+A host can also report an engine module this cockpit does not know, for example a future case module. The cockpit skips that `modules[]` entry before it validates `/api/bpm/meta` and notes the skipped names once per page load in the browser console (at most 10 names, each cut to 64 characters and escaped). The engines it knows keep the strict schema, so a malformed `rules` or `processes` entry is still an unexpected response (section 12), and so is a host left with no known module. The reader is `cockpit/web/src/api/metaReader.ts`; the published JSON Schema stays strict.
 
 ### 5.3 Host connection states
 
