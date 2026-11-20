@@ -47,7 +47,7 @@ jobs:
       GRYPE_VERSION: "0.122.1"
       # SHA-256 of grype_0.122.1_linux_amd64.tar.gz, from the signed checksum file of that release.
       GRYPE_SHA256: "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538"
-      IMAGE: horus-bpm/rule-engine-only:local
+      IMAGE: horus-bpm/rule-engine-only:local # pin-exempt: built in this job from deploy/docker/Dockerfile
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
