@@ -184,18 +184,18 @@ H=localhost:8080/api/bpm/rules/v1
    # {..., "sourceDocument":"# Monthly card fee, the rule set of the Rule Engine walking skeleton (RLE-001).\n...", ...}
    ```
 
-9. Lists for an editor: rule sets by name and versions newest first, a page at a time (`limit` 1 to 200, default 50; pass `nextCursor` back as `cursor`). Each version carries `allowedActions` for the caller:
+9. Lists for an editor. Set up first: import `loan-pricing.yaml` and `risk-flags.yaml` as drafts the same way, and add a second `card-fee` version and request it with `curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' --data-binary @examples/rule-engine-only/src/main/resources/rules/card-fee.yaml` and then `:request-publish` on version 2. Rule sets by name and versions newest first, rule sets by name and versions newest first, a page at a time (`limit` 1 to 200, default 50; pass `nextCursor` back as `cursor`). Each version carries `allowedActions` for the caller:
 
    ```bash
    curl -s -u minh:demo-only "$H/rule-sets?limit=2"
    # {"data":[{"ruleSet":"card-fee","latestVersion":2,"latestStatus":"PENDING_APPROVAL","publishedVersion":1,
-   #           "lastChangedAt":"..."},{"ruleSet":"fx-margin",...}],"nextCursor":"cnVsZS1zZXRzOmZ4LW1hcmdpbg","hasNext":true}
+   #           "lastChangedAt":"..."},{"ruleSet":"loan-pricing","latestVersion":1,"latestStatus":"DRAFT",...}],"nextCursor":"cnVsZS1zZXRzOmxvYW4tcHJpY2luZw.kO1EG8-56ZILiBWSL2lnrw","hasNext":true}
    curl -s -u minh:demo-only "$H/rule-sets/card-fee/versions"
    # {"data":[{"version":2,"status":"PENDING_APPROVAL","createdBy":"hoa","requestedBy":"hoa",
    #           "allowedActions":["approve","reject"],...},{"version":1,"status":"PUBLISHED","approvedBy":"minh",...}],...}
    ```
 
-10. Minh sends a pending version back with a reason; it is a draft again and the reason is in its history:
+10. With version 2 pending from step 9, Minh sends it back with a reason; it is a draft again and the reason is in its history:
 
     ```bash
     curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:reject -H 'Content-Type: application/json' \
@@ -206,12 +206,35 @@ H=localhost:8080/api/bpm/rules/v1
     #          {"action":"REJECTED","actor":"minh","reason":"R2 waiver needs pricing committee minutes",...}]}
     ```
 
-11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them:
+11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them. Save this as `bad.yaml` (rule `R2` compares the money input `balance` with a number, `R3` has no currency):
+
+    ```yaml
+    schemaVersion: 1
+    ruleSet: card-fee-bad
+    hitPolicy: first
+    inputs:
+      - { name: tier,    type: string }
+      - { name: balance, type: money }
+    outputs:
+      - { name: fee, type: money }
+    rules:
+      - id: R1
+        when: { tier: "== 'GOLD'" }
+        then: { fee: "0 VND" }
+      - id: R2
+        when: { balance: ">= 3" }
+        then: { fee: "10000 VND" }
+      - id: R3
+        when: {}
+        then: { fee: "30000" }
+    ```
 
     ```bash
-    # 422 {"code":"VALIDATION_FAILED","violations":[
+    curl -s -w '\nHTTP %{http_code}\n' -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' --data-binary @bad.yaml
+    # {"code":"VALIDATION_FAILED","violations":[
     #   {"ruleId":"R2","column":"balance","message":"compares a money with a number"},
     #   {"ruleId":"R3","column":"fee","message":"output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code"}]}
+    # HTTP 422
     ```
 
 ### Hit policies: exactly one row, or every matching row
@@ -262,9 +285,13 @@ public Money cardFee(String tier, int txCount) {
 
 A `.dmn` file goes through the same import endpoint as YAML, with `Content-Type: application/xml` (or `text/xml`, `application/dmn+xml`). It becomes a `DRAFT` that a second person approves before it evaluates. The sample is a hand-written table in the style a common DMN modeller writes: [`card-fee-modeller.dmn`](src/test/resources/rules/dmn/card-fee-modeller.dmn).
 
-Start the host on the `dev` profile as in [Host metadata with two demo users](#host-metadata-with-two-demo-users), then sign in `lan` (author), `minh` (approver) and `tuan` (teller), each with their own cookie jar, and send the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on every `POST`:
+Start the host on the `dev` profile as in [Host metadata with two demo users](#host-metadata-with-two-demo-users), on a fresh database (the YAML demo above already created `card-fee`), with `HORUS_DEMO_PASSWORD=demo-only`. Then sign in `lan` (author), `minh` (approver) and `tuan` (teller), each with their own cookie jar, and send the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on every `POST`:
 
 ```bash
+for u in lan minh tuan; do
+  CSRF=$(curl -s -c $u -b $u localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
+  curl -s -c $u -b $u -o /dev/null -d "username=$u&password=demo-only&_csrf=$CSRF" localhost:8080/login
+done
 DMN=examples/rule-engine-only/src/test/resources/rules/dmn/card-fee-modeller.dmn
 xsrf() { awk '$6=="XSRF-TOKEN"{print $7}' "$1"; }
 
@@ -310,7 +337,7 @@ Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..
 
 ## Open the cockpit
 
-The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`), on the `dev` profile with the demo users. Build the cockpit bundle before packaging:
+The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`), on the `dev` profile with the demo users. Prerequisite: this section needs the cockpit bundle (Node and `npm`). The Java-only build used above does not include it. Build the bundle before packaging:
 
 ```bash
 npm --prefix cockpit/web ci && npm --prefix cockpit/web run build      # from the repository root
