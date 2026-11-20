@@ -22,4 +22,9 @@ public final class ProcessEngineTransactions implements TransactionRunner {
     public <T> T inTransaction(Supplier<T> work) {
         return template.execute(status -> work.get());
     }
+
+    @Override
+    public boolean activeOnThisThread() {
+        return org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive();
+    }
 }

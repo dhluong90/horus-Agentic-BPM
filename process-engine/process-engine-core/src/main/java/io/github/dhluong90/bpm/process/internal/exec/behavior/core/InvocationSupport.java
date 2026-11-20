@@ -20,12 +20,22 @@ final class InvocationSupport {
 
     static void invoke(FlowNode node, Token token, ExecutionContext ctx, ServiceKind kind, String target,
             ExecutionMode mode) {
+        invoke(node, token, ctx, kind, target, mode, null);
+    }
+
+    /**
+     * Parks the token in {@code WAITING_ASYNC} under a new attempt id and asks the shell for the call. For
+     * {@link ExecutionMode#ASYNC} the attempt id is also the id of the job the shell stores, so cancelling the token
+     * cancels the job (ADR-0008).
+     */
+    static void invoke(FlowNode node, Token token, ExecutionContext ctx, ServiceKind kind, String target,
+            ExecutionMode mode, java.time.Duration timeout) {
         Map<String, Object> inputs = StepSupport.inputs(node, token, ctx);
         String attemptId = ctx.nextId();
         Token waiting = new Token(token.id(), token.kind(), TokenStatus.WAITING_ASYNC, token.scopeTokenId(),
                 token.nodeId(), attemptId, token.locals());
         ctx.update(waiting);
-        ctx.effect(new Effect.InvokeService(token.id(), node.id(), attemptId, kind, target, inputs, mode));
+        ctx.effect(new Effect.InvokeService(token.id(), node.id(), attemptId, kind, target, inputs, mode, timeout));
     }
 
     static void resume(FlowNode node, Token token, Command trigger, ExecutionContext ctx) {

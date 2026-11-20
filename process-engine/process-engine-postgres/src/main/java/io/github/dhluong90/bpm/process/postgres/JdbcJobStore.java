@@ -46,10 +46,27 @@ public final class JdbcJobStore implements JobStore {
 
     @Override
     public List<JobRow> claimDue(String replicaId, Instant now, int limit) {
+        return claim("NOT IN", replicaId, now, limit);
+    }
+
+    @Override
+    public List<JobRow> claimDueAsync(String replicaId, Instant now, int limit) {
+        return limit < 1 ? List.of() : claim("IN", replicaId, now, limit);
+    }
+
+    @Override
+    public Optional<JobRow> lockJob(String tenant, String id) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM pre_timer WHERE tenant_id = ? AND id = ? FOR UPDATE")
+                .params(tenant, id).query(JdbcJobStore::job).optional();
+    }
+
+    /** One claim statement; {@code kinds} is {@code IN} or {@code NOT IN} the async kinds, never caller text. */
+    private List<JobRow> claim(String kinds, String replicaId, Instant now, int limit) {
         return jdbc.sql("WITH due AS ("
                         + "SELECT tenant_id, id FROM pre_timer "
                         + "WHERE status IN ('DUE','CLAIMED') AND next_fire_at <= ? "
                         + "AND (status = 'DUE' OR locked_until <= ?) "
+                        + "AND job_kind " + kinds + " ('" + ASYNC_SERVICE + "','" + ASYNC_AGENT + "') "
                         + "ORDER BY next_fire_at, id LIMIT ? FOR UPDATE SKIP LOCKED) "
                         + "UPDATE pre_timer t SET status = 'CLAIMED', locked_by = ?, "
                         + "locked_until = ?::timestamptz + t.lease_duration, attempt = t.attempt + 1 "

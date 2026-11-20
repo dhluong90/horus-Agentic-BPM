@@ -80,6 +80,32 @@ class SubsetBpmnReaderTest {
     }
 
     @Test
+    void a_remote_service_step_reads_with_its_timeout_and_bad_modes_or_timeouts_are_refused() {
+        Process process = reader.read(doc("<bpmn:startEvent id=\"s\"/>"
+                + "<bpmn:serviceTask id=\"bureau\" horus:handler=\"creditBureau.score\" horus:mode=\"remote\""
+                + " horus:timeout=\"PT2S\"/><bpmn:endEvent id=\"e\"/>"
+                + "<bpmn:sequenceFlow id=\"f1\" sourceRef=\"s\" targetRef=\"bureau\"/>"
+                + "<bpmn:sequenceFlow id=\"f2\" sourceRef=\"bureau\" targetRef=\"e\"/>"));
+        io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef ref = process.flowElements().stream()
+                .filter(e -> e.id().equals("bureau")).findFirst().orElseThrow()
+                .extensions().first(io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef.class).orElseThrow();
+        assertThat(ref.mode()).isEqualTo("remote");
+        assertThat(ref.timeout()).isEqualTo(java.time.Duration.ofSeconds(2));
+
+        for (String bad : new String[] {"horus:mode=\"later\"", "horus:timeout=\"PT2S\"",
+                "horus:mode=\"remote\" horus:timeout=\"two seconds\"", "horus:mode=\"remote\" horus:timeout=\"PT0S\""}) {
+            assertThatThrownBy(() -> reader.read(doc("<bpmn:startEvent id=\"s\"/>"
+                    + "<bpmn:serviceTask id=\"bureau\" horus:handler=\"creditBureau.score\" " + bad + "/>"
+                    + "<bpmn:sequenceFlow id=\"f1\" sourceRef=\"s\" targetRef=\"bureau\"/>")))
+                    .as(bad)
+                    .isInstanceOf(io.github.dhluong90.bpm.process.api.ValidationFailedException.class)
+                    .satisfies(e -> assertThat(((io.github.dhluong90.bpm.process.api.ValidationFailedException) e)
+                            .problems()).extracting(DefinitionProblem::code).containsAnyOf("MODE_INVALID",
+                                    "TIMEOUT_INVALID"));
+        }
+    }
+
+    @Test
     void only_utf8_is_read_so_the_stored_source_is_what_was_parsed() {
         byte[] latin1 = ("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>" + HEAD.substring(HEAD.indexOf("?>") + 2)
                 + "<bpmn:startEvent id=\"s\" name=\"caf\u00e9\"/>" + TAIL).getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);

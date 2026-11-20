@@ -3,7 +3,6 @@
 # Remove the line in the pull request that adds the test. Format: <ID> <milestone>, the milestone as in SPEC.md.
 
 PRE-008 M2
-PRE-009 M2
 PRE-010 M2
 PRE-011 M2
 PRE-012 M2
@@ -11,7 +10,6 @@ PRE-013 M2
 PRE-014 M2
 PRE-015 M2
 PRE-016 M2
-PRE-017 M2
 PRE-023 M2
 PRE-024 M2
 PRE-025 M2
@@ -27,7 +25,6 @@ PRE-036 M2
 PRE-038 M2
 PRE-039 M2
 PRE-040 M2
-PRE-041 M2
 PRE-042 M2
 PRE-043 M2
 PRE-044 M2

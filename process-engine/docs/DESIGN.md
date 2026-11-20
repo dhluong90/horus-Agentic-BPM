@@ -190,6 +190,32 @@ Guards run in this order under the `pre_instance` row lock, and a refused comman
 
 Source: [`diagrams/async-wait-state.mmd`](diagrams/async-wait-state.mmd). TX2 requires `status = 'CLAIMED'` as well as the lease, so a job cancelled meanwhile is never completed (DN-10). The worker claims a job only when an adapter executor slot is free, so time spent queued inside the JVM never consumes the lease. The lease is the step timeout plus `jobs.lease-margin` (default 30 s), stored per row in `pre_timer.lease_duration` so a batch claim computes `locked_until` per job in SQL.
 
+#### Async steps as built in 0.2.0 (#51, `PRE-009`, `PRE-017`, `PRE-041`, `TR-ASY-01`, `TR-ASY-02`)
+
+The first async step is the remote `serviceTask` (`horus:mode="remote"`, optional `horus:timeout`, default `adapters.default-timeout`); `agentTask` (#52) runs on the same executor with its own job kind.
+
+- **Park.** The step transaction moves the token to `WAITING_ASYNC` and inserts one `ASYNC_SERVICE` job, `DUE` now, whose id is the token's activity instance id, with `lease_duration = timeout + jobs.lease-margin` and a payload of the adapter name, the timeout, the business key and the bounded inputs. History records `ASYNC_STEP_SCHEDULED`. Cancelling the token cancels the job in the same transaction. Nothing is called.
+- **TX1.** `AsyncStepExecutor` claims due async jobs, `FOR UPDATE SKIP LOCKED`, at most as many as adapter slots are free (`adapters.executor-threads`); the timer claim of section 4.4 never returns async jobs. Each claim increments `attempt`, and the attempt id is derived from the job id and the attempt number, so every claim has a new one without a write.
+- **Call.** `ServiceAdapter.execute(AdapterCall)` runs on the adapter executor with no transaction (the executor refuses to call when one is active, and an ArchUnit rule allows no other caller). The call carries tenant, instance, node, business key, job id, attempt id, attempt number and deadline. At the deadline the executor interrupts the call and records `ADAPTER_TIMEOUT`.
+- **TX2.** `ProcessServices.recordAttempt` locks the instance row, then the job row, and accepts the result only when the job is `CLAIMED` under that attempt with an unexpired lease. A completed result appends `ASYNC_RESULT_ACCEPTED`, delivers the result to the token and marks the job `DONE`. A failed result appends `ASYNC_ATTEMPT_FAILED` with the code only and sets the job `DUE` after `jobs.retry-backoff` times the attempt, or `FAILED` when it is not retryable, is a business error, or used `jobs.max-attempts`; the token stays on the step until incidents exist.
+- **Hand-off.** An adapter may answer `Accepted`: the slot is freed, no thread waits, and the job keeps its lease while the remote side works. The remote side reports the result through `AsyncStepService.complete(jobId, attemptId, result)` or `POST /async-steps/{jobId}:complete`, on any replica, with `processes:step:complete`; the tenant comes from the resolver and another tenant's job is `404 ASYNC_STEP_NOT_FOUND` with nothing written. If no result arrives before the lease ends, the job is claimed again and the adapter called with a new attempt id.
+- **Outcomes.** `ACCEPTED`; `DUPLICATE` for a repeat of an attempt that is already `DONE` (writes nothing); `DISCARDED` for a lease that ended or an attempt that was taken over (writes nothing) and for a cancelled job (writes only `LATE_RESULT_DISCARDED` with the attempt id).
+
+```mermaid
+stateDiagram-v2
+    [*] --> DUE: step reached, token WAITING_ASYNC
+    DUE --> CLAIMED: TX1, free adapter slot, attempt + 1
+    CLAIMED --> DONE: TX2 accepts a completed result
+    CLAIMED --> DUE: TX2 failed attempt, retry after back-off
+    CLAIMED --> FAILED: not retryable, business error, or last attempt
+    CLAIMED --> CLAIMED: lease ended, another replica claims, attempt + 1
+    DUE --> CANCELLED: instance cancelled
+    CLAIMED --> CANCELLED: instance cancelled, late result discarded
+    DONE --> [*]
+    FAILED --> [*]
+    CANCELLED --> [*]
+```
+
 ### 4.1 `agentTask` guardrail pipeline (`TR-AGT-01` to `TR-AGT-03`)
 
 1. Bounded inputs: `${instance.<path>}` references (schema `$defs/variableRef`) resolve into an explicit input map; fields marked `mask: true` are hashed before any history write.
@@ -391,6 +417,7 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `GET /tasks?assignment=&status=&role=&group=&dueBefore=&slaBreached=` | `processes:task:work`; `any` needs `processes:task:manage` | Task query (section 8.2): `assignment` is one or more of `mine`, `candidate`, `any`; `status` one or more of `OPEN`, `CLAIMED`; ordered by `(dueAt, id)` | Cursor, at most 200, `ETag` | `400 QUERY_INVALID` | M2 |
 | `GET /tasks/{id}`, `GET /tasks/{id}/form` | `processes:task:work` | Task context and resolved form | `ETag` | `404 TASK_NOT_FOUND` | M2 |
 | `POST /tasks/{id}:claim`, `:unclaim`, `:complete` | `processes:task:work` | Section 3.5 | `Idempotency-Key`, `If-Match` | `403 SELF_APPROVAL_FORBIDDEN`, `422 FORM_VALIDATION_FAILED` | M2 |
+| `POST /async-steps/{jobId}:complete` | `processes:step:complete` | Report the result of a remote step attempt whose adapter answered `Accepted`; body `attemptId`, `status` (`COMPLETED`, `FAILED`, `BUSINESS_ERROR`), `output` or `errorCode` and `retryable`; answers `outcome` `ACCEPTED`, `DUPLICATE` or `DISCARDED` (section 4) | The attempt id is the idempotency key; the lease fences late results | `404 ASYNC_STEP_NOT_FOUND` | M2 (0.2.0) |
 | `POST /tasks/{id}:delegate`, `:reassign` | `processes:task:manage` | Section 3.5 | `Idempotency-Key`, `If-Match` | | M2 |
 | `GET /incidents?status=OPEN&definitionKey=&nodeId=` | `processes:read` | Incident list | Cursor, at most 200, `ETag` | | M2 |
 | `POST /incidents/{id}:retry`, `:resolve` | `processes:incident:manage` | Retry or resolve | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
@@ -402,7 +429,7 @@ Common set on every endpoint: `400 INPUT_INVALID`, `401`, `403 FORBIDDEN` (permi
 
 ### 6.3 Permissions
 
-From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage`.
+From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:step:complete` (report the result of a remote step attempt, for the integration that receives a partner's callback; 0.2.0), `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage`.
 
 ### 6.4 Events
 

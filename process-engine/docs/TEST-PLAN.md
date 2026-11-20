@@ -24,7 +24,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-006 | `PRE_006_timer_lease_recovers_after_worker_crash`, `PRE_006_two_replicas_fire_each_timer_exactly_once` | Testcontainers, replicas as separate engines on one database, TestClock; stalled-claim fencing | M2 | `TR-PERF-05`, `TR-ASY-02` | Done (`ExactlyOnceTimersTest`) |
 | PRE-007 | `PRE_007_four_eyes_blocks_same_actor_approval` (`RuleAndProcessIT`, REST and Java API), `PRE_007_*` in `TaskLifecycleIT` | Testcontainers host over HTTP, Java API | M2 | `TR-SEC-04` | Done for claim and completion; delegate and reassign follow with their slice |
 | PRE-008 | `PRE_008_business_calendar_skips_holidays_and_weekends` | Unit across holidays and DST | M2 | `TR-CAL-01`, `TR-CAL-02` | Planned |
-| PRE-009 | `PRE_009_agent_task_executes_outside_db_transaction` | Testcontainers, 2-connection pool | M2 | `TR-AGT-03`, `TR-EMB-04` | Planned |
+| PRE-009 | `PRE_009_remote_step_executes_outside_db_transaction` | Testcontainers, HikariCP 2-connection pool, latched stub adapter, no sleeps | M2 | `TR-AGT-03`, `TR-EMB-04`, `TR-ASY-01` | Done for the remote `serviceTask` (`AsyncWaitStateTest`); `agentTask` reuses the executor (#52) |
 | PRE-010 | `PRE_010_agent_task_guardrail_violation_routes_to_human` | Integration, stub adapter | M2 | `TR-AGT-01` | Planned |
 | PRE-011 | `PRE_011_agent_task_exhausted_retries_raises_incident` | Fault injection | M2 | `TR-AGT-01`, `TR-AGT-03`, `TR-OPS-03` | Planned |
 | PRE-012 | `PRE_012_agent_task_audits_masked_io_and_human_override` | Integration, history capture | M2 | `TR-AGT-02`, `TR-OBS-01` | Planned |
@@ -32,7 +32,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-014 | `PRE_014_migration_validate_reports_unmapped_steps_without_mutation` | Integration | M2 | `TR-MIG-01` | Planned |
 | PRE-015 | `PRE_015_migration_execute_isolates_instance_failure` | Fault injection, 250 instances | M2 | `TR-MIG-02` | Planned |
 | PRE-016 | `PRE_016_deploy_rejects_guardrail_rule_set_breaking_contract` | WebMvc | M2 | `TR-AGT-01` | Planned |
-| PRE-017 | `PRE_017_async_lease_is_timeout_plus_margin` | Two-replica fault injection | M2 | `TR-AGT-03`, `TR-PERF-05` | Planned |
+| PRE-017 | `PRE_017_async_lease_is_timeout_plus_margin`, `PRE_017_a_crashed_attempt_is_reclaimed_at_the_end_of_its_lease_with_a_new_attempt_id` | Two replicas on one database, TestClock, crash between TX1 and the call | M2 | `TR-AGT-03`, `TR-PERF-05`, `TR-ASY-02` | Done (`AsyncWaitStateTest`); `TR_ASY_02_*` cover a result after takeover or lease end |
 | PRE-018 | `PRE_018_import_creates_draft_not_active_version` | Testcontainers service test, REST integration (`DefinitionLifecycleIT`) | M2 | `TR-DEF-03`, `TR-DEF-04` | Done |
 | PRE-019 | `PRE_019_no_maker_of_a_definition_version_can_approve`, `PRE_019_the_requester_rule_lets_the_importer_approve_records_it_and_still_refuses_the_requester`, `PRE_019_shared_approver_setting_is_published_in_meta_for_the_process_module`, `PRE_019_start_up_logs_one_warn_for_the_requester_relaxation_and_none_for_makers`, `PRE_019_the_table_refuses_an_approver_equal_to_the_requester` | Java API and REST, table `CHECK`, `/api/bpm/meta`, start-up log capture | M2 | `TR-SEC-04`, `TR-DEF-03` | Done |
 | PRE-020 | `PRE_020_effective_date_switches_version_and_retires_previous` | Testcontainers, TestClock, effective-date job on two replicas | M2 | `TR-DEF-03`, `TR-DET-01` | Done |
@@ -56,7 +56,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-038 | `PRE_038_tenant_header_accepted_only_within_allowed_tenants` | WebMvc, log capture | M2 | `TR-SEC-03`, `TR-TEN-01` | Planned |
 | PRE-039 | `PRE_039_import_keeps_source_document_and_fixed_hash` | Integration, WebMvc | M2 | `TR-STD-01`, `TR-STD-03` | Planned |
 | PRE-040 | `PRE_040_business_error_result_opens_incident` | Integration | M2 | `TR-OPS-03`, `TR-IDEM-04` | Planned |
-| PRE-041 | `PRE_041_cancel_during_adapter_call_discards_late_result` | Testcontainers fault injection, 2-connection pool | M2 | `TR-ASY-01`, `TR-ASY-02`, `TR-STD-12` | Planned |
+| PRE-041 | `PRE_041_cancel_during_adapter_call_discards_late_result` | Testcontainers, cancel committed during the adapter call, TestClock | M2 | `TR-ASY-01`, `TR-ASY-02`, `TR-STD-12` | Done for the remote `serviceTask` (`AsyncWaitStateTest`) |
 | PRE-042 | `PRE_042_bpmn_style_step_ids_kept` | Unit, integration | M2 | `TR-STD-03`, `TR-DEF-01` | Planned |
 | PRE-043 | `PRE_043_v1_definition_round_trips_through_bpmn_model` | Unit over every example definition, RFC 8785 vectors | M2 | `TR-STD-28`, `TR-STD-03`, `TR-DEF-04` | Planned |
 | PRE-044 | `PRE_044_joins_and_compensation_keyed_by_scope_token` | Testcontainers integration, SQL capture of `pre_token` and `pre_compensation_stack` | M2 | `TR-STD-29`, `TR-ASY-03`, `TR-COMP-01` | Planned |

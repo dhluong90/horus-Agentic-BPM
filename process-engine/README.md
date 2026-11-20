@@ -52,3 +52,27 @@ An intermediate timer catch event (`timeDuration` such as `P3D`, or `timeDate` w
 The poller survives an `Error` in one poll and logs it; a `VirtualMachineError` stops it and turns the `processEngineJobs` health contributor `DOWN` (details: replica id, last successful poll), so the orchestrator restarts the host.
 
 The proof is `ExactlyOnceTimersTest` in `process-engine-postgres`: four replicas on one PostgreSQL database fire 120 due timers, each exactly once, while a fifth replica that stalled past its lease fires none of its old claims.
+
+## Remote steps (Async Wait-State)
+
+A `serviceTask` with `horus:mode="remote"` calls a `ServiceAdapter` bean (named by `horus:handler`) with no database connection and no row lock held (ADR-0008). The step stores a job; the poller claims it when an adapter slot is free, with a lease of the step's `horus:timeout` plus `jobs.lease-margin`; the adapter runs on the adapter executor; the result is recorded in a second short transaction only while the attempt still holds its lease. Every attempt carries a new `attemptId` for the remote side to deduplicate on. An adapter may answer `Accepted` and let the remote side report the result later through `POST /api/bpm/processes/v1/async-steps/{jobId}:complete` (permission `processes:step:complete`).
+
+```java
+@Bean
+ServiceAdapter creditBureau(BureauClient client) {
+    return new ServiceAdapter() {
+        public String name() { return "creditBureau.score"; }
+        public AdapterResult execute(AdapterCall call) {
+            return AdapterResult.completed(client.score(call.inputs(), call.attemptId()));
+        }
+    };
+}
+```
+
+| Property | Default | Meaning |
+|---|---|---|
+| `horus.bpm.processes.adapters.default-timeout` | `PT30S` | Timeout of a remote step without `horus:timeout`; the engine abandons the call then |
+| `horus.bpm.processes.adapters.executor-threads` | `16` | Adapter calls in flight per copy; size this, not the connection pool, for slow partners |
+| `horus.bpm.processes.jobs.lease-margin` | `30s` | Added to the timeout to give the lease, so a live attempt is never taken over |
+
+The proof is `AsyncWaitStateTest`: ten bureau calls in flight on a 2-connection pool with no connection active, a crashed attempt reclaimed exactly at the end of its lease, late and duplicate results that change nothing, and a cancelled loan whose late answer is only recorded as discarded.

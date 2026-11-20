@@ -91,13 +91,13 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ## `agentTask` Async Wait-State, Guardrails & Audit
 
 ### PRE-009 `agentTask` releases DB connections before invoking adapter (Async Wait-State)
-- **Traces to:** `TR-AGT-03`, `TR-EMB-04`
+- **Traces to:** `TR-AGT-03`, `TR-EMB-04`, `TR-ASY-01`
 - **Milestone:** M2
-- **Given:** Host configured with a 2-connection HikariCP pool; `agentTask` calls a mock adapter sleeping `2 seconds`.
-- **When:** Start 10 concurrent process instances reaching `agentTask` while another thread executes normal DB queries.
-- **Then:** All 10 adapters run concurrently without exhausting the 2-connection pool (`TX 1` commits claim lease `< 10 ms` before adapter sleep; `TX 2` commits output after adapter returns).
-- **Example:** `10 concurrent 2s agent calls on 2-conn pool -> 0 pool timeouts, total wall time ~2.1s`.
-- **Test ID:** `PRE_009_agent_task_executes_outside_db_transaction`
+- **Given:** Host configured with a 2-connection HikariCP pool (borrow timeout 500 ms); an async step calls a stub adapter that holds every call until all 10 are in flight. The async step is a remote `serviceTask` (`horus:mode="remote"`) `bureau-score` of `loan-bureau-check`; `agentTask` runs on the same executor from #52.
+- **When:** 10 instances reach the step, one poll starts all 10 calls, and while they are in flight another thread runs 20 queries on the same pool.
+- **Then:** All 10 adapters run concurrently with 0 pool connections active and no adapter call inside a transaction; all 20 queries get a connection; after the calls return, each instance records the result once (`TX 1` committed the claim before the call; `TX 2` commits the result after it).
+- **Example:** `10 concurrent bureau calls on a 2-connection pool -> 0 active connections while calling, 0 pool timeouts, 10 instances on underwrite`.
+- **Test ID:** `PRE_009_remote_step_executes_outside_db_transaction`
 
 ### PRE-010 `agentTask` validates JSON Schema and evaluates Rule Engine guardrail before advancing
 - **Traces to:** `TR-AGT-01`
@@ -177,7 +177,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Pod 2 polls continuously from the claim instant `T0`.
 - **Then:** TX1 sets `locked_until = T0 + 32s`. In the first run Pod 2 never claims the job, and Pod 1's TX2 records the result once. In the crash run Pod 2 skips the job until `T0 + 32s`, then reclaims it with `attempt = 2` and a new `attemptId`.
 - **Example:** `timeout PT2S -> lease 32s; live attempt completes at 1.9s untouched; after crash reclaimed at T0+32s`.
-- **Test ID:** `PRE_017_async_lease_is_timeout_plus_margin`
+- **Test ID:** `PRE_017_async_lease_is_timeout_plus_margin`, `PRE_017_a_crashed_attempt_is_reclaimed_at_the_end_of_its_lease_with_a_new_attempt_id` (both on the remote `serviceTask` `bureau-score`, the same executor `agentTask` uses)
 
 ---
 

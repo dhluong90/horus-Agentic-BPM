@@ -279,6 +279,11 @@ final class WorkingContext implements ExecutionContext {
                 if (child.status() == TokenStatus.WAITING_USER && child.activityInstanceId() != null) {
                     effect(new Effect.CancelUserTask(child.activityInstanceId()));
                 }
+                if (child.status() == TokenStatus.WAITING_ASYNC && child.activityInstanceId() != null) {
+                    // The attempt id of an async step is its job id; a running call's TX2 then finds the job
+                    // CANCELLED and discards the result (DN-10). A local call never leaves a token waiting.
+                    effect(new Effect.CancelJob(child.activityInstanceId()));
+                }
                 if (child.status() == TokenStatus.WAITING_TIMER && child.activityInstanceId() != null) {
                     // The waiting token's activity instance is its timer job; cancel it now (ADR-0020).
                     effect(new Effect.CancelJob(child.activityInstanceId()));

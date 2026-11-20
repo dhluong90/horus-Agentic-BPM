@@ -17,6 +17,18 @@ public interface JobStore {
     String TIMER = "TIMER";
     /** Job kind of a definition version that becomes effective at a later date. */
     String DEFINITION_EFFECTIVE = "DEFINITION_EFFECTIVE";
+    /** Job kind of a remote service step attempt (Async Wait-State, ADR-0008). */
+    String ASYNC_SERVICE = "ASYNC_SERVICE";
+    /** Job kind of an agent step attempt (Async Wait-State, ADR-0008). */
+    String ASYNC_AGENT = "ASYNC_AGENT";
+
+    /**
+     * @param jobKind a job kind
+     * @return whether jobs of that kind call outside the JVM and are run by the async executor
+     */
+    static boolean isAsync(String jobKind) {
+        return ASYNC_SERVICE.equals(jobKind) || ASYNC_AGENT.equals(jobKind);
+    }
 
     /**
      * One job row.
@@ -81,7 +93,7 @@ public interface JobStore {
     void insertJob(JobRow job, Instant now);
 
     /**
-     * Claims due jobs of every tenant: rows {@code DUE} with {@code next_fire_at <= now}, and rows {@code CLAIMED}
+     * Claims due jobs of every tenant except async step jobs: rows {@code DUE} with {@code next_fire_at <= now}, and rows {@code CLAIMED}
      * whose lease has expired. Rows locked by a concurrent claim are skipped ({@code FOR UPDATE SKIP LOCKED}), never
      * waited for. Each claimed row gets {@code locked_by = replicaId}, {@code locked_until = now + lease_duration} and
      * {@code attempt + 1}. Run in its own short transaction, committed before any job fires.
@@ -92,6 +104,28 @@ public interface JobStore {
      * @return the claimed rows, oldest due first
      */
     List<JobRow> claimDue(String replicaId, Instant now, int limit);
+
+    /**
+     * Claims due async step jobs ({@link #isAsync}) of every tenant, the same way as {@link #claimDue}; that method
+     * never returns them. The caller passes as limit the adapter slots it has free, so a claimed job never waits in
+     * the JVM while its lease runs (ADR-0008).
+     *
+     * @param replicaId the claiming replica
+     * @param now the claim time
+     * @param limit at most this many rows
+     * @return the claimed rows, oldest due first
+     */
+    List<JobRow> claimDueAsync(String replicaId, Instant now, int limit);
+
+    /**
+     * Locks a job row ({@code FOR UPDATE}) whatever its status, for the result transaction of an async step, which
+     * decides from the status, attempt and lease whether the result is current.
+     *
+     * @param tenant tenant
+     * @param id job id
+     * @return the job in the tenant
+     */
+    Optional<JobRow> lockJob(String tenant, String id);
 
     /**
      * Locks a claimed job ({@code FOR UPDATE}) and returns it only while this replica still holds the claim: status
@@ -173,6 +207,16 @@ public interface JobStore {
         @Override
         public List<JobRow> claimDue(String replicaId, Instant now, int limit) {
             return List.of();
+        }
+
+        @Override
+        public List<JobRow> claimDueAsync(String replicaId, Instant now, int limit) {
+            return List.of();
+        }
+
+        @Override
+        public Optional<JobRow> lockJob(String tenant, String id) {
+            return Optional.empty();
         }
 
         @Override

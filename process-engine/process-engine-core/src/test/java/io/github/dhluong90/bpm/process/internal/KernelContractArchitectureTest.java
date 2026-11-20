@@ -35,6 +35,25 @@ class KernelContractArchitectureTest {
     }
 
     @Test
+    void TR_ASY_01_only_the_async_executor_calls_an_adapter_and_it_opens_no_transaction_around_the_call() {
+        // The one caller of ServiceAdapter.execute is AsyncStepExecutor, which reaches the database only through
+        // TransactionRunner (claim, result) and refuses to call while a transaction is active (ADR-0008).
+        noClasses().that().doNotHaveFullyQualifiedName(
+                        "io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor")
+                .should(com.tngtech.archunit.lang.conditions.ArchConditions.callMethodWhere(
+                        com.tngtech.archunit.base.DescribedPredicate.describe("ServiceAdapter.execute",
+                                call -> call.getTargetOwner().isAssignableTo(
+                                        io.github.dhluong90.bpm.process.spi.ServiceAdapter.class)
+                                        && call.getName().equals("execute"))))
+                .check(CORE);
+        noClasses().that().haveFullyQualifiedName("io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor")
+                .should().dependOnClassesThat().resideInAnyPackage("java.sql..", "javax.sql..")
+                .orShould().dependOnClassesThat().haveFullyQualifiedName(
+                        "io.github.dhluong90.bpm.process.internal.store.ProcessStore")
+                .check(CORE);
+    }
+
+    @Test
     void core_does_not_depend_on_frameworks() {
         noClasses().should().dependOnClassesThat().resideInAnyPackage("org.springframework..", "jakarta..",
                 "java.sql..", "com.fasterxml.jackson.databind..")
