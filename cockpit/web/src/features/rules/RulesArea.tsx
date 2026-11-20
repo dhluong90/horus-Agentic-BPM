@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import type { RuleSetSummary, VersionStatus } from '../../api/rules/schemas';
 import { formatRoute, type Route } from '../../app/route';
-import { AreaError, PageHead } from '../../components/PageParts';
+import { PageHead } from '../../components/PageParts';
 import { useI18n } from '../../i18n/I18nProvider';
 import { mapLoadable, useEveryRuleSet, useRuleSetsCut } from '../overview/useRuleOverview';
 import { useRulesSession } from './api/rulesContext';
 import { useImportRuleSet } from './api/useRules';
 import { ImportFileButton } from './components/ImportFileButton';
+import { ProblemNotice } from './components/ProblemNotice';
+import { columnLabel } from './model/reading';
 import { RuleSetPage } from './RuleSetPage';
 import { RuleSetTable } from './RuleSetTable';
 
@@ -29,6 +31,7 @@ function RuleSetList({ pageLimit }: { pageLimit: number }) {
   const cut = useRuleSetsCut(pageLimit);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [pickedFile, setPickedFile] = useState<string | undefined>(undefined);
   const importFile = useImportRuleSet((version) => {
     window.location.hash = formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'table' });
   });
@@ -43,9 +46,13 @@ function RuleSetList({ pageLimit }: { pageLimit: number }) {
         id="rules-title"
         title={t('rulesArea.title')}
         subtitle={t('rulesArea.subtitle')}
-        action={mayImport ? <ImportFileButton label={t('rulesArea.import')} busyLabel={t('rulesArea.importing')} busy={importFile.isPending} primary onDocument={(document) => { importFile.start(document); }} /> : undefined}
+        action={mayImport ? <ImportFileButton label={t('rulesArea.import')} busyLabel={t('rulesArea.importing')} busy={importFile.isPending} primary onDocument={(document, fileName) => { setPickedFile(fileName); importFile.start(document); }} /> : undefined}
       />
-      {importFile.isError ? <div className="page-alert"><AreaError error={importFile.error} onRetry={() => { importFile.reset(); }} /></div> : null}
+      {importFile.isError ? (
+        <div className="page-alert">
+          <ProblemNotice error={importFile.error} located refusedFile={pickedFile !== undefined ? { fileName: pickedFile, columnLabel: (name) => columnLabel(name, undefined) } : undefined} />
+        </div>
+      ) : null}
       <div className="toolbar">
         <label className="search">
           <span className="sr-only">{t('rulesArea.find')}</span>

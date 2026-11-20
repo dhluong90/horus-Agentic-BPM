@@ -119,9 +119,12 @@ export function columnCurrency(definition: RuleSetDefinition, part: 'when' | 'th
   return found.size === 1 ? [...found][0] : undefined;
 }
 
-/** An enum code as words: PLATINUM -> Platinum, FIRST_TIME -> First time. Other text stays as it is. */
+/**
+ * An enum code as words: PLATINUM -> Platinum, FIRST_TIME -> First time. A code of one or two characters is an
+ * abbreviation, such as a country (VN, SG), and stays as written. Other text stays as it is.
+ */
 export function valueLabel(value: string): string {
-  if (!/^[A-Z][A-Z0-9_]*$/.test(value)) return value;
+  if (!/^[A-Z][A-Z0-9_]*$/.test(value) || value.length <= 2) return value;
   const words = value.toLowerCase().replaceAll('_', ' ');
   return words.charAt(0).toUpperCase() + words.slice(1);
 }

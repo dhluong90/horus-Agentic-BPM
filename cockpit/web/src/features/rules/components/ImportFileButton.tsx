@@ -13,14 +13,14 @@ async function readDocument(file: File): Promise<RuleDocument> {
 }
 
 /** A hidden file input for YAML, JSON or DMN and a function that opens it; one request per pick. */
-export function useFilePicker(onDocument: (document: RuleDocument) => void): { input: ReactNode; open: () => void } {
+export function useFilePicker(onDocument: (document: RuleDocument, fileName: string) => void): { input: ReactNode; open: () => void } {
   const fileInput = useRef<HTMLInputElement>(null);
   const input = (
     <input ref={fileInput} type="file" accept=".yaml,.yml,.json,.dmn,.xml" className="sr-only" tabIndex={-1} aria-hidden="true"
       onChange={(e) => {
         const file = e.target.files?.[0];
         e.target.value = '';
-        if (file) void readDocument(file).then(onDocument);
+        if (file) void readDocument(file).then((document) => { onDocument(document, file.name); });
       }} />
   );
   return { input, open: () => fileInput.current?.click() };
@@ -32,7 +32,7 @@ export function ImportFileButton({ label, busyLabel, busy, primary, onDocument }
   busyLabel: string;
   busy: boolean;
   primary: boolean;
-  onDocument: (document: RuleDocument) => void;
+  onDocument: (document: RuleDocument, fileName: string) => void;
 }) {
   const picker = useFilePicker(onDocument);
   return (

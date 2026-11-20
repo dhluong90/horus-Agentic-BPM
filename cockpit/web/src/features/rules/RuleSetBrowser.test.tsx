@@ -116,18 +116,22 @@ describe('rule set browser (CKP-030)', () => {
 
     // card-fee-bad.yaml: refused whole, located by row and column, no version 4.
     await user.upload(fileInput(), new File([BAD], 'card-fee-bad.yaml', { type: 'application/yaml' }));
-    expect(await screen.findByText('Row R4, column balance')).toBeInTheDocument();
+    expect(await screen.findByText('Import refused. Nothing was saved.')).toBeInTheDocument();
+    expect(screen.getByText('card-fee-bad.yaml, row R4, column Balance')).toBeInTheDocument();
+    expect(screen.getByText('compares a money amount with a plain number')).toBeInTheDocument();
     expect(screen.queryByText('Draft version 4 created')).not.toBeInTheDocument();
     expect(within(screen.getByLabelText('Versions')).getAllByRole('option')).toHaveLength(3);
   });
 
   it('CKP_030_a_reader_sees_export_and_no_import', async () => {
-    open('#/rules/card-fee/1', 'ready-approver');
+    open('#/rules/card-fee/1', 'rules-reader');
     expect(await screen.findByRole('button', { name: 'Export' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Import new version' })).not.toBeInTheDocument();
     window.location.hash = '#/rules';
     await screen.findByRole('table');
     expect(screen.queryByRole('button', { name: 'Import rule set' })).not.toBeInTheDocument();
+    // A reader cannot approve, so the menu shows no count of requests to review.
+    expect(document.querySelector('.navrail__count')).toBeNull();
   });
 
   it('CKP_030_a_double_pick_sends_one_key_and_creates_one_version', async () => {
@@ -159,7 +163,8 @@ describe('rule set browser (CKP-030)', () => {
     )));
     open('#/rules/card-fee/1');
     await exportAs(user, 'As DMN decision table');
-    expect(await screen.findByText('Row R2, column fee')).toBeInTheDocument();
+    expect(await screen.findByText('Row R2, column Fee')).toBeInTheDocument();
+    expect(screen.getByText('a calculated cell has no decision table form')).toHaveAttribute('lang', 'en');
     expect(downloads).toEqual([]);
   });
 
@@ -176,5 +181,41 @@ describe('rule set browser (CKP-030)', () => {
     await screen.findByRole('button', { name: 'Import new version' });
     await userEvent.setup().upload(fileInput(), new File(['<definitions/>'], 'card-fee.dmn', { type: 'application/xml' }));
     await waitFor(() => { expect(types).toEqual(['application/xml']); });
+  });
+
+  it('CKP_030_an_imported_version_names_who_imported_it_and_the_file', async () => {
+    const user = userEvent.setup();
+    open('#/rules/card-fee/1');
+    await screen.findByRole('button', { name: 'Import new version' });
+    await user.upload(fileInput(), new File([GOOD], 'card-fee-v3.yaml', { type: 'application/yaml' }));
+    expect(await screen.findByText('Imported by lan from card-fee-v3.yaml')).toBeInTheDocument();
+    // The new version's title takes the focus, so the import button no longer holds it.
+    await waitFor(() => { expect(screen.getByRole('heading', { level: 1 })).toHaveFocus(); });
+  });
+
+  it('CKP_030_a_refused_import_says_why_in_vietnamese', async () => {
+    open('#/rules/card-fee/1', 'rules-author', 'vi');
+    await screen.findByRole('button', { name: 'Nhập phiên bản mới' });
+    await userEvent.setup().upload(fileInput(), new File([BAD], 'card-fee-bad.yaml', { type: 'application/yaml' }));
+    expect(await screen.findByText('Đã từ chối nhập tệp. Không có thay đổi nào được lưu.')).toBeInTheDocument();
+    expect(screen.getByText('card-fee-bad.yaml, dòng R4, cột Balance')).toBeInTheDocument();
+    expect(screen.getByText('so sánh số tiền với một số thường')).toBeInTheDocument();
+  });
+
+  it('CKP_030_a_refused_new_rule_set_names_the_file_on_the_list', async () => {
+    open('#/rules');
+    await screen.findByRole('table');
+    const input = document.body.querySelector<HTMLInputElement>('.workspace input[type=file]');
+    if (!input) throw new Error('file input missing');
+    await userEvent.setup().upload(input, new File([BAD.replace('card-fee', 'new-fee')], 'new-fee.yaml', { type: 'application/yaml' }));
+    expect(await screen.findByText('Import refused. Nothing was saved.')).toBeInTheDocument();
+    expect(screen.getByText('new-fee.yaml, row R4, column Balance')).toBeInTheDocument();
+  });
+
+  it('CKP_030_short_codes_and_labelled_columns_read_as_written', async () => {
+    open('#/rules/kyc-risk/1', 'rules-reader');
+    expect(await screen.findByRole('columnheader', { name: 'PEP' })).toBeInTheDocument();
+    expect(screen.getByText('VN')).toBeInTheDocument();
+    expect(screen.getByText('SG')).toBeInTheDocument();
   });
 });

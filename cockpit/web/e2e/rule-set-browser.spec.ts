@@ -12,8 +12,8 @@ const VIEWPORTS = [
 ] as const;
 
 const WORDS = {
-  en: { importSet: 'Import rule set', importVersion: 'Import new version', export: 'Export', json: 'As JSON', dmn: 'As DMN decision table', created: 'Draft version 3 created', saved: 'Saved card-fee-v1.json', located: 'Row R4, column balance', versions: 'Versions' },
-  vi: { importSet: 'Nhập bộ quy tắc', importVersion: 'Nhập phiên bản mới', export: 'Xuất tệp', json: 'Dạng JSON', dmn: 'Dạng bảng quyết định DMN', created: 'Đã tạo bản nháp phiên bản 3', saved: 'Đã lưu card-fee-v1.json', located: 'Dòng R4, cột balance', versions: 'Phiên bản' },
+  en: { importSet: 'Import rule set', importVersion: 'Import new version', export: 'Export', json: 'As JSON', dmn: 'As DMN decision table', created: 'Draft version 3 created', saved: 'Saved card-fee-v1.json', refused: 'Import refused. Nothing was saved.', located: 'card-fee-bad.yaml, row R4, column Balance', reason: 'compares a money amount with a plain number', importedBy: 'Imported by lan from card-fee-v3.yaml', versions: 'Versions' },
+  vi: { importSet: 'Nhập bộ quy tắc', importVersion: 'Nhập phiên bản mới', export: 'Xuất tệp', json: 'Dạng JSON', dmn: 'Dạng bảng quyết định DMN', created: 'Đã tạo bản nháp phiên bản 3', saved: 'Đã lưu card-fee-v1.json', refused: 'Đã từ chối nhập tệp. Không có thay đổi nào được lưu.', located: 'card-fee-bad.yaml, dòng R4, cột Balance', reason: 'so sánh số tiền với một số thường', importedBy: 'lan nhập từ card-fee-v3.yaml', versions: 'Phiên bản' },
 } as const;
 type Locale = keyof typeof WORDS;
 
@@ -104,12 +104,19 @@ for (const viewport of VIEWPORTS) {
       await expect(page.locator('.rs-head__sub')).toHaveText(/3 ·/);
       expect(traffic.filter((t) => t.startsWith('POST'))).toEqual(['POST /rule-sets/card-fee/versions']);
       expect(keys).toHaveLength(1);
+      await expect(page.getByText(w.importedBy)).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+      // The pointer leaves the button, as it does once the user reads the result.
+      await page.mouse.move(viewport.width / 2, viewport.height - 40);
       await shoot(page, `ckp030-imported-v3-${size}-${locale}`);
 
       // card-fee-bad.yaml: refused whole, located by row and column, nothing created.
       await pick(page, w.importVersion, 'card-fee-bad.yaml', document3('50000000'));
+      await expect(page.getByText(w.refused)).toBeVisible();
       await expect(page.getByText(w.located)).toBeVisible();
-      await aboveTheFold(page.getByText(w.located), viewport.height);
+      await expect(page.getByText(w.reason)).toBeVisible();
+      await aboveTheFold(page.getByText(w.reason), viewport.height);
+      await expect(page.locator('main')).not.toContainText(/engine|Engine/);
       await expect(page.getByLabel(w.versions, { exact: true }).locator('option')).toHaveCount(3);
       await shoot(page, `ckp030-import-refused-${size}-${locale}`);
       await axe(page);
@@ -119,9 +126,12 @@ for (const viewport of VIEWPORTS) {
 
   test(`CKP_030_a_reader_sees_export_and_no_import_${String(viewport.width)}x${String(viewport.height)}`, async ({ page }) => {
     await page.setViewportSize(viewport);
-    await mockHost(page, 'ready-approver');
-    await mockRuleEngine(page, 'ready-approver');
+    await mockHost(page, 'rules-reader');
+    await mockRuleEngine(page, 'rules-reader');
     await page.goto('./#/rules/kyc-risk/1');
+    await expect(page.getByRole('columnheader', { name: 'PEP' })).toBeVisible();
+    await expect(page.getByText('VN', { exact: true })).toBeVisible();
+    await expect(page.locator('.navrail__count')).toHaveCount(0);
     await aboveTheFold(page.getByRole('button', { name: 'Export', exact: true }), viewport.height);
     await expect(page.getByRole('button', { name: 'Import new version' })).toHaveCount(0);
     await shoot(page, `ckp030-reader-${String(viewport.width)}x${String(viewport.height)}-en`);

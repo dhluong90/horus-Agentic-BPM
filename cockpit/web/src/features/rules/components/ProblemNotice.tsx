@@ -2,6 +2,8 @@ import { useId, useState } from 'react';
 import { toHostError, type HostError, type Violation } from '../../../api/hostError';
 import { CopyButton } from '../../../components/CopyButton';
 import type { MessageKey } from '../../../i18n/en';
+import { placeError } from '../model/engineErrors';
+import { refusalReason } from '../model/refusalReasons';
 import { useI18n } from '../../../i18n/I18nProvider';
 
 const KNOWN_CODES = [
@@ -33,22 +35,33 @@ function messageKey(error: HostError): MessageKey {
   }
 }
 
+/** A refused file: its name, and how a column name reads in the table (its display name). */
+export interface RefusedFile {
+  fileName: string;
+  columnLabel: (name: string) => string;
+}
+
 /**
- * An engine refusal in place, next to the action that caused it: one plain sentence in the user's language.
- * The error code, the correlation id with Copy and the engine's own (English) sentence stay behind Details.
+ * Every located problem of a refused document: the place (the file when known, the row and the column by its
+ * display name) and the reason in the user's language; a reason not known here is the engine's English sentence.
  */
-function Located({ violations, english }: { violations: readonly Violation[]; english: boolean }) {
+function Located({ violations, file, columnLabel }: { violations: readonly Violation[]; file: string | undefined; columnLabel: (name: string) => string }) {
   const { t } = useI18n();
-  const place = (v: Violation) =>
-    v.ruleId !== null && v.column !== null ? t('editor.errorCell', { row: v.ruleId, column: v.column }) : v.ruleId !== null ? t('editor.errorRow', { row: v.ruleId }) : undefined;
+  const place = (v: Violation): string | undefined => {
+    if (v.ruleId === null) return file;
+    if (file !== undefined) return v.column !== null ? t('import.placeCell', { file, row: v.ruleId, column: columnLabel(v.column) }) : t('import.placeRow', { file, row: v.ruleId });
+    return v.column !== null ? t('editor.errorCell', { row: v.ruleId, column: columnLabel(v.column) }) : t('editor.errorRow', { row: v.ruleId });
+  };
   return (
     <ul className="notice__located" aria-label={t('problem.locatedTitle')}>
       {violations.map((v, index) => {
         const where = place(v);
+        const reason = refusalReason(v.message);
         return (
           <li key={index}>
             {where !== undefined ? <strong>{where}</strong> : null}
-            {english ? <span>{where !== undefined ? `: ${v.message}` : v.message}</span> : null}
+            {where !== undefined ? ': ' : null}
+            {reason !== undefined ? <span>{t(reason)}</span> : <span lang="en">{v.message}</span>}
           </li>
         );
       })}
@@ -56,11 +69,38 @@ function Located({ violations, english }: { violations: readonly Violation[]; en
   );
 }
 
-/** `located` lists every violation of a refused document by row and column, for screens without the editor grid. */
-export function ProblemNotice({ error, onReload, onRestart, showDetail = true, located = false }: { error: unknown; onReload?: () => void; onRestart?: () => void; showDetail?: boolean; located?: boolean }) {
-  const { t, locale } = useI18n();
+/** The located problems of a 422; an engine that names one place only in `detail` is read as one problem. */
+function violationsOf(problem: Extract<HostError, { kind: 'problem' }>): readonly Violation[] {
+  if (problem.violations && problem.violations.length > 0) return problem.violations;
+  if (problem.code !== 'VALIDATION_FAILED' || problem.detail === undefined) return [];
+  const place = placeError(problem.detail);
+  if (place.kind === 'cell') return [{ ruleId: place.ruleId, column: place.column, message: place.message }];
+  if (place.kind === 'row') return [{ ruleId: place.ruleId, column: null, message: place.message }];
+  return [{ ruleId: null, column: null, message: place.message }];
+}
+
+const asIs = (name: string) => name;
+
+/**
+ * `located` lists every violation of a refused document by row and column, for screens without the editor grid.
+ * `refusedFile` is for an import: the title says nothing was saved, and each place names the file.
+ */
+export function ProblemNotice({ error, onReload, onRestart, showDetail = true, located = false, refusedFile, columnLabel = asIs }: {
+  error: unknown;
+  onReload?: () => void;
+  onRestart?: () => void;
+  showDetail?: boolean;
+  located?: boolean;
+  refusedFile?: RefusedFile | undefined;
+  columnLabel?: (name: string) => string;
+}) {
+  const { t } = useI18n();
   const hostError = toHostError(error);
   const problem = hostError.kind === 'problem' ? hostError : undefined;
+  // A 4xx refusal of an import stored nothing; an answer that never came (or a 5xx) cannot promise that.
+  const refused = refusedFile !== undefined && problem !== undefined && problem.status >= 400 && problem.status < 500;
+  const places = (located || refused) && problem ? violationsOf(problem) : [];
+  const title = refused ? t('import.refused') : t(messageKey(hostError));
   const correlationId = hostError.kind === 'problem' || hostError.kind === 'unexpected-response' ? hostError.correlationId : undefined;
   const detail = showDetail ? problem?.detail : undefined;
   const hasDetails = problem?.code !== undefined || correlationId !== undefined || detail !== undefined;
@@ -71,7 +111,7 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true, l
       <div className="notice__row">
         <p className="notice__title">
           <span className="notice__icon" aria-hidden="true">✕</span>
-          {t(messageKey(hostError))}
+          {title}
         </p>
         {hasDetails ? (
           <button type="button" className="notice__toggle hit" aria-expanded={open} aria-controls={detailsId} onClick={() => { setOpen((value) => !value); }}>
@@ -79,10 +119,11 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true, l
           </button>
         ) : null}
       </div>
-      {located && problem?.violations ? <Located violations={problem.violations} english={locale === 'en'} /> : null}
+      {places.length > 0 ? <Located violations={places} file={refused ? refusedFile.fileName : undefined} columnLabel={refusedFile?.columnLabel ?? columnLabel} /> : null}
+      {refused && places.length === 0 ? <p className="notice__subject"><strong>{refusedFile.fileName}</strong>: {t(messageKey(hostError))}</p> : null}
       {hasDetails ? (
         <div id={detailsId} className="notice__more" hidden={!open}>
-          {detail !== undefined && !(located && problem?.violations) ? <p className="notice__detail" lang="en">{detail}</p> : null}
+          {detail !== undefined ? <p className="notice__detail" lang="en">{detail}</p> : null}
           <dl className="notice__facts">
             {problem?.code !== undefined ? (
               <div>

@@ -573,7 +573,7 @@ const CARD_FEE_V2: Definition = {
 
 const KYC_RISK_V1: Definition = {
   schemaVersion: 1, ruleSet: 'kyc-risk', hitPolicy: 'first',
-  inputs: [{ name: 'country', type: 'string' }, { name: 'monthlyIncome', type: 'money' }, { name: 'pep', type: 'boolean' }],
+  inputs: [{ name: 'country', type: 'string' }, { name: 'monthlyIncome', type: 'money' }, { name: 'pep', type: 'boolean', description: 'PEP' }],
   outputs: [{ name: 'risk', type: 'string' }],
   rules: [
     { id: 'K1', when: { pep: '== true' }, then: { risk: "'HIGH'" } },
