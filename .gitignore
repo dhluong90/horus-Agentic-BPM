@@ -41,3 +41,6 @@ target/
 
 # Local Maven repository used by some build commands.
 .m2repo/
+
+# Password files for docker compose (deploy/create-secrets.sh, docs/DEPLOYING.md).
+/secrets/

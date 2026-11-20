@@ -55,7 +55,7 @@ class HostMetadataIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @DynamicPropertySource
     static void databaseAndTokenValidation(DynamicPropertyRegistry registry) throws Exception {
@@ -91,6 +91,8 @@ class HostMetadataIT {
         // PD-094: off by default; this profile (no dev) leaves it unset, so the engine publishes false.
         assertThat(metaBody.path("modules").get(0).path("settings").path("authoring.cockpit-drafts").isBoolean()).isTrue();
         assertThat(metaBody.path("modules").get(0).path("settings").path("authoring.cockpit-drafts").asBoolean()).isFalse();
+        assertThat(metaBody.path("modules").get(0).path("settings").path("lifecycle.approver-must-differ-from").asString())
+                .isEqualTo("makers");
         assertThat(metaBody.path("modules").get(0).path("engineVersion").asString())
                 .isEqualTo(System.getProperty("rule-engine.version"));
         assertThat(meta.headers().firstValue("Cache-Control")).hasValue("private, max-age=60");

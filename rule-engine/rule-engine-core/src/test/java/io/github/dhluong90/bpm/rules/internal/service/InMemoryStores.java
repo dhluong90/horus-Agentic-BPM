@@ -13,6 +13,7 @@ import io.github.dhluong90.bpm.rules.internal.store.IdempotencyStore;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
 import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
 import io.github.dhluong90.bpm.rules.internal.store.TransactionRunner;
+import io.github.dhluong90.bpm.rules.internal.store.VersionInputs;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -97,16 +98,98 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     @Override
+    public void replaceDraft(StoredVersion updated, long expectedLockVersion) {
+        for (int i = 0; i < versions.size(); i++) {
+            StoredVersion v = versions.get(i);
+            if (v.tenantId().equals(updated.tenantId()) && v.id().equals(updated.id())) {
+                if (v.lockVersion() != expectedLockVersion || v.status() != io.github.dhluong90.bpm.rules.api.VersionStatus.DRAFT) {
+                    throw new VersionConflictException("stale");
+                }
+                versions.set(i, updated);
+                return;
+            }
+        }
+        throw new IllegalStateException("no such version");
+    }
+
+    @Override
     public Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at) {
         return versions.stream()
                 .filter(v -> v.tenantId().equals(tenantId) && v.ruleSet().equals(ruleSet)
-                        && v.status() == VersionStatus.PUBLISHED && !v.effectiveFrom().isAfter(at))
-                .max(Comparator.comparing(StoredVersion::effectiveFrom).thenComparing(StoredVersion::version));
+                        && v.approvedAt() != null && !v.effectiveFrom().isAfter(at)
+                        && (v.retiredAt() == null || v.retiredAt().isAfter(at)))
+                .max(Comparator.comparing(StoredVersion::version));
+    }
+
+    @Override
+    public void lockRuleSet(String tenantId, String ruleSetId) {
+        // single-threaded tests: nothing to lock
+    }
+
+    @Override
+    public Optional<StoredVersion> nextScheduled(String tenantId, String ruleSetId, Instant after,
+            String excludingVersionId) {
+        return versions.stream().filter(v -> v.tenantId().equals(tenantId) && v.ruleSetId().equals(ruleSetId)
+                        && !v.id().equals(excludingVersionId) && v.approvedAt() != null && v.retiredAt() == null
+                        && v.effectiveFrom().isAfter(after))
+                .min(Comparator.comparing(StoredVersion::effectiveFrom));
+    }
+
+    @Override
+    public synchronized List<Superseded> retireSuperseded(String tenantId, String ruleSetId, Instant now) {
+        List<Superseded> retired = new ArrayList<>();
+        for (int i = 0; i < versions.size(); i++) {
+            StoredVersion old = versions.get(i);
+            if (old.status() != VersionStatus.PUBLISHED || (tenantId != null && !old.tenantId().equals(tenantId))
+                    || (ruleSetId != null && !old.ruleSetId().equals(ruleSetId))) {
+                continue;
+            }
+            java.util.OptionalInt newer = versions.stream()
+                    .filter(n -> n.tenantId().equals(old.tenantId()) && n.ruleSetId().equals(old.ruleSetId())
+                            && n.status() == VersionStatus.PUBLISHED && n.version() > old.version()
+                            && !n.effectiveFrom().isAfter(now))
+                    .mapToInt(StoredVersion::version).max();
+            if (newer.isPresent()) {
+                StoredVersion done = old.retired(now);
+                versions.set(i, done);
+                retired.add(new Superseded(done.tenantId(), done.id(), done.ruleSet(), done.version(),
+                        done.lockVersion(), newer.getAsInt()));
+            }
+        }
+        return retired;
     }
 
     @Override
     public void append(DecisionRecord record) {
         decisions.add(record);
+    }
+
+    @Override
+    public Optional<DecisionRecord> find(String tenantId, String id) {
+        return decisions.stream().filter(d -> d.tenantId().equals(tenantId) && d.id().equals(id)).findFirst();
+    }
+
+    @Override
+    public List<DecisionRecord> findByLoggedInput(String tenantId, String ruleSet, String input, List<String> texts,
+            Instant from, Instant to, int limit) {
+        return decisions.stream()
+                .filter(d -> d.tenantId().equals(tenantId) && d.ruleSet().equals(ruleSet)
+                        && !d.createdAt().isBefore(from) && d.createdAt().isBefore(to))
+                .filter(d -> {
+                    var value = io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(d.maskedInputsJson()).get(input);
+                    return value != null && value.isString() && texts.contains(value.stringValue());
+                })
+                .sorted(Comparator.comparing(DecisionRecord::createdAt).thenComparing(DecisionRecord::id).reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public List<VersionInputs> liveVersionInputs() {
+        return versions.stream().filter(v -> v.status() != VersionStatus.RETIRED)
+                .map(v -> new VersionInputs(v.tenantId(), v.ruleSet(), v.version(),
+                        io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(v.canonicalJson()).get("inputs").toString()))
+                .toList();
     }
 
     @Override

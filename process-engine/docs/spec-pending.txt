@@ -2,8 +2,6 @@
 # The spec-to-test gate (tools/spec-coverage.py, TR-QA-01) skips these ids and warns when one gains a test.
 # Remove the line in the pull request that adds the test. Format: <ID> <milestone>, the milestone as in SPEC.md.
 
-PRE-005 M2
-PRE-006 M2
 PRE-008 M2
 PRE-009 M2
 PRE-010 M2
@@ -14,10 +12,6 @@ PRE-014 M2
 PRE-015 M2
 PRE-016 M2
 PRE-017 M2
-PRE-018 M2
-PRE-019 M2
-PRE-020 M2
-PRE-021 M2
 PRE-023 M2
 PRE-024 M2
 PRE-025 M2
@@ -32,7 +26,6 @@ PRE-033 M3
 PRE-034 M3
 PRE-035 M2
 PRE-036 M2
-PRE-037 M2
 PRE-038 M2
 PRE-039 M2
 PRE-040 M2
@@ -40,8 +33,8 @@ PRE-041 M2
 PRE-042 M2
 PRE-043 M2
 PRE-044 M2
-PRE-045 M2
 PRE-046 M2
 PRE-047 M2
 PRE-048 M2
 PRE-052 M2
+PRE-053 M2

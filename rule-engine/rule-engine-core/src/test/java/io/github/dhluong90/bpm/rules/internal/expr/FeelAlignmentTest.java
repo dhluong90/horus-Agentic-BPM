@@ -14,7 +14,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Number, rounding and date semantics aligned with FEEL (rule-engine DESIGN 3.2 item 3, ADR-0019). The
- * fixed cases are those of RLE-021 ({@code matches} arrives with #266); the generated cases, against a
+ * fixed cases are those of RLE-021; the generated cases, against a
  * reference FEEL implementation, are in {@link FeelDifferentialTest}.
  */
 class FeelAlignmentTest {
@@ -38,6 +38,7 @@ class FeelAlignmentTest {
         assertThat(eval("7 / 2")).isEqualTo(new BigDecimal("3.5"));
         assertThat((BigDecimal) eval("round(2.5, 0)")).isEqualByComparingTo("2");
         assertThat((BigDecimal) eval("daysBetween(date('2027-01-01'), date('2027-03-01'))")).isEqualByComparingTo("59");
+        assertThat(eval("matches('ab12', '[0-9]+')")).isEqualTo(true);
     }
 
     @ParameterizedTest(name = "{0} -> {1}")

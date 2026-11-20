@@ -1,0 +1,32 @@
+sequenceDiagram
+  autonumber
+  box rgb(224,242,241) Replica A
+    participant A as Engine, sweep and commands
+  end
+  box rgb(224,242,241) Replica B
+    participant B as Engine, sweep
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as rle_version, rle_version_history, rle_decision_outbox
+  end
+  Note over A,DB: 2026-12-01T00:00:01Z, card-fee v2 in effect, v1 still PUBLISHED
+  par same moment, ordinary transactions, no advisory lock
+    A->>DB: UPDATE ... WHERE old.status = 'PUBLISHED' ... RETURNING
+    DB-->>A: v1, superseded_by 2 (row locked)
+  and
+    B->>DB: UPDATE ... WHERE old.status = 'PUBLISHED' ... RETURNING
+    Note over B,DB: waits on the row lock of v1
+  end
+  A->>DB: INSERT history RETIRED (system, SUPERSEDED, 2), then outbox rules.version.retired.v1
+  A->>DB: COMMIT
+  DB-->>B: re-checks v1 on the committed row, status RETIRED, returns no row
+  B->>DB: COMMIT, nothing written
+  Note over A,DB: Retire by hand: bob retires v2 on replica A
+  A->>DB: SELECT v2 FOR UPDATE, status PUBLISHED, lockVersion matches
+  alt a newer version in effect supersedes v2
+    A-->>A: 409 INVALID_STATE before any write
+  else v2 in force or scheduled
+    A->>DB: supersession for card-fee first, while v2 is still PUBLISHED
+    A->>DB: UPDATE v2 RETIRED, retired_at now, history RETIRED (bob, reason, single), outbox event
+    A->>DB: COMMIT, every replica stops selecting v2
+  end

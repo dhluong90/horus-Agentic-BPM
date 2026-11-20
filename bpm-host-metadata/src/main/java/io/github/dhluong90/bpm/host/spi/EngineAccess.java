@@ -9,7 +9,11 @@ package io.github.dhluong90.bpm.host.spi;
  * read the security context or apply a role mapping themselves; they call this type.
  *
  * <p>The host metadata module registers a default unless the host declares its own bean of this type. The
- * default takes the caller from the host's Spring Security context, finds the tenant with the
+ * default takes the caller from the host's Spring Security context and first refuses an id that starts
+ * with {@code system:}, the prefix the engines reserve for their own actions, with {@code PERMISSION_DENIED}
+ * and a {@code caller.reserved.refused} security log entry (the match is exact, so {@code systems-admin} is
+ * an ordinary caller). A host bean that replaces the default must make the same refusal; the engines refuse
+ * such ids again on their own. The default then finds the tenant with the
  * {@link TenantResolver}, then applies the engines' tenant checks whatever the resolver: when the
  * principal carries the {@code horus.bpm.tenancy.claim} attribute the resolved tenant must equal it, and
  * while tenant switching is off an {@code X-Tenant-Id} header must equal it too. A refusal writes a
@@ -35,7 +39,8 @@ public interface EngineAccess {
      *
      * @return the caller, never {@code null}
      * @throws EngineAccessDeniedException {@code UNAUTHENTICATED} without an authenticated principal or
-     *     without a tenant; {@code TENANT_NOT_ALLOWED} for a tenant the caller is not signed in for
+     *     without a tenant; {@code TENANT_NOT_ALLOWED} for a tenant the caller is not signed in for;
+     *     {@code PERMISSION_DENIED} for an id with the reserved {@code system:} prefix
      */
     EngineCaller currentCaller();
 

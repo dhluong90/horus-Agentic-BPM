@@ -34,7 +34,7 @@ import org.junit.jupiter.params.provider.CsvSource;
  * clock. The reference runs in test scope only and never ships (ArchUnit and the root POM's enforcer rule).
  *
  * <p>The generators cover {@code string}, {@code integer}, {@code decimal}, {@code boolean}, {@code date},
- * {@code datetime} and {@code in} lists, with every input {@code null} one time in four. Money is excluded: it is a
+ * {@code datetime}, {@code in} lists and {@code matches}, with every input {@code null} one time in four. Money is excluded: it is a
  * HORUS extension with no FEEL type. 1,000 tries per property in CI; the nightly job sets
  * {@code -Dbpm.property.tries=100000}. A failure prints the seed, the try, the v1 text, the FEEL text and both
  * results.
@@ -82,6 +82,14 @@ class FeelDifferentialTest {
     static final int[] ALPHABET = {'a', 'b', 'G', 'O', 'L', 'D', '0', '7', ' ', '-', '\'', '"',
         0x1EA1, 0x00E2, 0x0110, 0x4E2D, 0x1F600};
 
+    /**
+     * Patterns that the XPath dialect and Java read the same way, over the alphabet: anchors, classes, alternation,
+     * repetition and a general category. No backslash escape other than the category, for the reason of
+     * {@link #ALPHABET}.
+     */
+    static final String[] PATTERNS = {"a", "^a", "b$", "^$", "[0-9]+", "G.L", "a|b", "(ab)+", "[^a-z]", "^[ạâ]",
+        "\\p{Lu}", "O{2}", "a*b?"};
+
     static final Instant[] INSTANTS = {Instant.parse("2026-12-01T00:00:00Z"), Instant.parse("2026-11-30T17:00:00Z"),
         Instant.parse("2027-01-15T18:30:00Z"), Instant.parse("2028-02-29T12:00:00Z")};
 
@@ -123,7 +131,8 @@ class FeelDifferentialTest {
     @CsvSource(delimiter = '|', value = {
         "7 / 2                                                 | 3.5",
         "round(2.5, 0)                                         | 2",
-        "daysBetween(date('2027-01-01'), date('2027-03-01'))   | 59"
+        "daysBetween(date('2027-01-01'), date('2027-03-01'))   | 59",
+        "matches('ab12', '[0-9]+')                             | true"
     })
     void RLE_021_the_fixed_cases_agree_with_the_reference(String v1, String expected) {
         // When
@@ -136,7 +145,7 @@ class FeelDifferentialTest {
     }
 
     @Test
-    void the_condition_generator_gives_true_false_and_null_and_reaches_every_construct() {
+    void RLE_021_the_condition_generator_gives_true_false_and_null_and_reaches_every_construct() {
         // Given 2,000 generated conditions with generated inputs, from a fixed seed
         SplittableRandom random = new SplittableRandom(Property.DEFAULT_SEED);
         Map<Object, Integer> outcomes = new HashMap<>();
@@ -145,7 +154,7 @@ class FeelDifferentialTest {
             String v1 = expression(random, Type.BOOLEAN, MAX_DEPTH);
             Object[] slots = INPUTS.next(random);
             for (String construct : List.of(" in [", " not in [", " between ", " is null", " is not null",
-                    "round(", "daysBetween(", " / ", "not (", " and ", " or ", " == null", "datetime(")) {
+                    "round(", "daysBetween(", "matches(", " / ", "not (", " and ", " or ", " == null", "datetime(")) {
                 if (v1.contains(construct)) {
                     constructs.add(construct.strip());
                 }
@@ -163,7 +172,7 @@ class FeelDifferentialTest {
         assertThat(outcomes.getOrDefault(true, 0)).isGreaterThan(300);
         assertThat(outcomes.getOrDefault(false, 0)).isGreaterThan(300);
         assertThat(outcomes.getOrDefault("null", 0)).isGreaterThan(200);
-        assertThat(constructs).hasSize(13);
+        assertThat(constructs).hasSize(14);
     }
 
     // ------------------------------------------------------------------ the check
@@ -306,6 +315,7 @@ class FeelDifferentialTest {
             case 7 -> "(" + expression(random, operand, depth) + " between " + expression(random, operand, depth)
                     + " and " + expression(random, operand, depth) + ")";
             case 8 -> "(" + expression(random, ordered(random), depth) + (random.nextBoolean() ? " is null)" : " is not null)");
+            case 9 -> "matches(" + expression(random, Type.STRING, depth) + ", " + v1String(pick(random, PATTERNS)) + ")";
             default -> leaf(random, Type.BOOLEAN);
         };
     }

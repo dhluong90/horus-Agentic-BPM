@@ -109,8 +109,20 @@ final class RestSupport {
         node.put("toStatus", entry.toStatus().name());
         node.put("actor", entry.actor());
         node.set("reason", EngineValues.value(entry.reason()));
+        if (entry.action() == io.github.dhluong90.bpm.rules.api.LifecycleAction.RETIRED) {
+            // Only a retirement has these: by hand (approvalMode single) or superseded (system, supersededBy).
+            node.set("supersededBy", entry.supersededBy() == null
+                    ? EngineJson.NODES.nullNode() : EngineJson.NODES.numberNode(entry.supersededBy()));
+            node.set("approvalMode", EngineValues.value(entry.approvalMode()));
+            node.set("noVersionInEffect", entry.noVersionInEffect() == null
+                    ? EngineJson.NODES.nullNode() : EngineJson.NODES.booleanNode(entry.noVersionInEffect()));
+        }
         node.put("lockVersion", entry.lockVersion());
         node.put("occurredAt", entry.occurredAt().toString());
+        if (entry.canonicalHash() != null) {
+            node.put("canonicalHash", entry.canonicalHash());
+            node.put("previousCanonicalHash", entry.previousCanonicalHash());
+        }
         return node;
     }
 
@@ -150,6 +162,101 @@ final class RestSupport {
         } catch (NumberFormatException e) {
             throw new io.github.dhluong90.bpm.rules.api.InputInvalidException("If-Match must be a quoted lock version, for example \"3\"");
         }
+    }
+
+    /**
+     * Parses a required {@code If-Match}; absent or blank is {@code 428 PRECONDITION_REQUIRED}.
+     *
+     * @param header the header value
+     * @param operation the command, named in the problem detail
+     * @return the lock version
+     */
+    static long requiredIfMatch(String header, String operation) {
+        Long lock = ifMatch(header);
+        if (lock == null) {
+            throw new io.github.dhluong90.bpm.rules.api.PreconditionRequiredException(operation);
+        }
+        return lock;
+    }
+
+    /**
+     * Returns a required {@code Idempotency-Key}; absent or blank is {@code 400 INPUT_INVALID} naming the header.
+     *
+     * @param key the header value
+     * @param operation the command, named in the problem detail
+     * @return the key
+     */
+    static String requiredIdempotencyKey(String key, String operation) {
+        if (key == null || key.isBlank()) {
+            throw new io.github.dhluong90.bpm.rules.api.InputInvalidException(operation + " requires an Idempotency-Key header");
+        }
+        return key;
+    }
+
+    /**
+     * Writes a version diff (RLE-028, RLE-048). Field values are the canonical JSON the engine computed, embedded as
+     * JSON; member order is fixed, so a repeated request returns a byte-identical body.
+     */
+    static ObjectNode diff(io.github.dhluong90.bpm.rules.api.VersionDiff diff) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", diff.ruleSet());
+        node.put("version", diff.version());
+        node.put("base", diff.base());
+        node.put("canonicalHash", diff.canonicalHash());
+        node.put("baseCanonicalHash", diff.baseCanonicalHash());
+        node.put("sourceHashChanged", diff.sourceHashChanged());
+        ObjectNode effective = node.putObject("effectiveFrom");
+        effective.set("from", EngineValues.value(diff.baseEffectiveFrom()));
+        effective.set("to", EngineValues.value(diff.effectiveFrom()));
+        ArrayNode header = node.putArray("header");
+        diff.header().forEach(f -> header.add(field(f)));
+        node.set("inputs", columns(diff.inputs()));
+        node.set("outputs", columns(diff.outputs()));
+        ArrayNode rows = node.putArray("rows");
+        for (io.github.dhluong90.bpm.rules.api.VersionDiff.RowChange row : diff.rows()) {
+            ObjectNode item = rows.addObject();
+            item.put("ruleId", row.ruleId());
+            item.put("change", row.change().name());
+            if (row.position() != null) {
+                item.put("position", row.position());
+            }
+            if (row.basePosition() != null) {
+                item.put("basePosition", row.basePosition());
+            }
+            if (row.change() == io.github.dhluong90.bpm.rules.api.VersionDiff.Change.CHANGED) {
+                item.put("moved", row.moved());
+                ArrayNode fields = item.putArray("fields");
+                row.fields().forEach(f -> fields.add(field(f)));
+            }
+        }
+        node.put("unchangedCount", diff.unchangedCount());
+        return node;
+    }
+
+    private static ObjectNode columns(io.github.dhluong90.bpm.rules.api.VersionDiff.ColumnChanges changes) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        ArrayNode added = node.putArray("added");
+        changes.added().forEach(added::add);
+        ArrayNode removed = node.putArray("removed");
+        changes.removed().forEach(removed::add);
+        ArrayNode changed = node.putArray("changed");
+        for (io.github.dhluong90.bpm.rules.api.VersionDiff.ColumnChange column : changes.changed()) {
+            ObjectNode item = changed.addObject();
+            item.put("name", column.name());
+            ArrayNode fields = item.putArray("fields");
+            column.fields().forEach(f -> fields.add(field(f)));
+        }
+        node.put("reordered", changes.reordered());
+        return node;
+    }
+
+    private static ObjectNode field(io.github.dhluong90.bpm.rules.api.VersionDiff.FieldChange change) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("path", change.path());
+        node.set("from", change.from() == null ? EngineJson.NODES.nullNode() : EngineValues.read(change.from()));
+        node.set("to", change.to() == null ? EngineJson.NODES.nullNode() : EngineValues.read(change.to()));
+        node.put("nonAscii", change.nonAscii());
+        return node;
     }
 
     /**

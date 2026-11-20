@@ -137,6 +137,26 @@ class CoreArchitectureTest {
     }
 
     @Test
+    void TR_TEN_01_the_engine_to_engine_entry_point_stays_out_of_the_host_api() {
+        noClasses()
+                .that().resideInAnyPackage("io.github.dhluong90.bpm.rules.api..", "io.github.dhluong90.bpm.rules.spi..")
+                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules.embedded..")
+                .because("the host-facing API never leads to the tenant-scoped entry point (ADR-0027)")
+                .check(core);
+        noClasses()
+                .that().resideInAPackage("io.github.dhluong90.bpm.rules.embedded..")
+                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules.internal..")
+                .because("the engine-to-engine package uses only JDK and rules.api types (ADR-0016)")
+                .check(core);
+        noClasses()
+                .that().resideOutsideOfPackages("io.github.dhluong90.bpm.rules.embedded..",
+                        "io.github.dhluong90.bpm.rules.internal.service..")
+                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules.embedded..")
+                .because("only RuleEngines builds the tenant-scoped entry point (ADR-0027)")
+                .check(core);
+    }
+
+    @Test
     void TR_AGT_03_core_uses_no_http_or_model_client_library() {
         noClasses()
                 .should().dependOnClassesThat().resideInAnyPackage(HTTP_AND_MODEL_CLIENTS)

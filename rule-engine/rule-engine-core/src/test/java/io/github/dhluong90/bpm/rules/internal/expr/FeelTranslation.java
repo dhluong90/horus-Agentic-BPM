@@ -21,7 +21,7 @@ final class FeelTranslation {
      *
      * @param expr the v1 tree
      * @return the FEEL text
-     * @throws IllegalArgumentException for a money value
+     * @throws IllegalArgumentException for a money value or a clock reading
      */
     static String feel(Expr expr) {
         return switch (expr) {
@@ -47,6 +47,10 @@ final class FeelTranslation {
                 case ROUND -> "decimal(" + feel(call.args().get(0)) + ", " + feel(call.args().get(1)) + ")";
                 case DAYS_BETWEEN -> "((" + feel(call.args().get(1)) + " - " + feel(call.args().get(0)) + ").days)";
             };
+            // FEEL matches(input, pattern) is an unanchored XPath search, as v1's
+            case Expr.Matches matches -> "matches(" + feel(matches.target()) + ", " + string(matches.pattern()) + ")";
+            case Expr.Clock clock -> throw new IllegalArgumentException(
+                    "no FEEL translation for " + clock.function().text() + "(): the differential test has no clock slot");
         };
     }
 

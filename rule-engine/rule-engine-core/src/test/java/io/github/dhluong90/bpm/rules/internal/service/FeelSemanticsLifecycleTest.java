@@ -41,9 +41,9 @@ class FeelSemanticsLifecycleTest {
 
     void publish(String yaml, String name) {
         importYaml(yaml);
-        engines.versionService().requestPublish(name, 1, WriteOptions.none());
+        long lock = engines.versionService().requestPublish(name, 1, WriteOptions.none()).lockVersion();
         caller.become("bank-a", "bob");
-        engines.versionService().approve(name, 1, WriteOptions.none());
+        engines.versionService().approve(name, 1, new WriteOptions(null, lock, null));
         caller.become("bank-a", "teller");
     }
 

@@ -41,6 +41,7 @@ final class ConditionTypes {
         return switch (expr) {
             case Expr.Literal literal -> literal.value() instanceof Boolean ? null : NOT_BOOLEAN;
             case Expr.Var var -> kindOf(var, inputs) == Kind.BOOLEAN ? null : NOT_BOOLEAN;
+            case Expr.Clock ignored -> NOT_BOOLEAN;
             case Expr.Unary unary -> unary.op() == Expr.UnaryOp.NOT ? booleanProblem(unary.operand(), inputs) : NOT_BOOLEAN;
             case Expr.Binary binary -> switch (binary.op()) {
                 case AND, OR -> firstOf(booleanProblem(binary.left(), inputs), booleanProblem(binary.right(), inputs));
@@ -58,6 +59,11 @@ final class ConditionTypes {
                     comparableProblem(between.target(), between.high(), inputs));
             case Expr.IsNull ignored -> null;
             case Expr.Call ignored -> NOT_BOOLEAN;
+            case Expr.Matches matches -> {
+                Kind text = kindOf(matches.target(), inputs);
+                yield text == Kind.STRING || text == Kind.UNKNOWN || text == Kind.NULL ? null
+                        : "matches() tests text, but it is given a " + name(text);
+            }
         };
     }
 
@@ -168,6 +174,8 @@ final class ConditionTypes {
             case Expr.Between between -> List.of(between.target(), between.low(), between.high());
             case Expr.IsNull isNull -> List.of(isNull.target());
             case Expr.Call call -> call.args();
+            case Expr.Clock ignored -> List.of();
+            case Expr.Matches matches -> List.of(matches.target());
         };
     }
 
@@ -227,6 +235,7 @@ final class ConditionTypes {
                 case java.time.Instant ignored -> Kind.DATETIME;
                 default -> Kind.UNKNOWN;
             };
+            case Expr.Clock clock -> clock.function() == Expr.ClockFunction.TODAY ? Kind.DATE : Kind.DATETIME;
             case Expr.Var var -> {
                 ValueType type = inputs.get(var.slot()).type();
                 yield type.list() ? Kind.LIST : kindOf(type);
@@ -258,6 +267,7 @@ final class ConditionTypes {
             case Expr.Between ignored -> Kind.BOOLEAN;
             case Expr.IsNull ignored -> Kind.BOOLEAN;
             case Expr.Call ignored -> Kind.NUMBER;
+            case Expr.Matches ignored -> Kind.BOOLEAN;
         };
     }
 
