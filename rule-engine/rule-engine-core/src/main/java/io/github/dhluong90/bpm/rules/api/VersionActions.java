@@ -51,7 +51,8 @@ public final class VersionActions {
                 if (permissions.contains(Permissions.APPROVE) && caller != null && !caller.equals(requestedBy)) {
                     // Four eyes: neither the requester nor the author may approve. The requester may not reject
                     // either; they take the request back with :withdraw (PD-089).
-                    if (!caller.equals(createdBy)) {
+                    // A version with no recorded author cannot be approved by anyone (PD-105); it can be rejected.
+                    if (createdBy != null && !caller.equals(createdBy)) {
                         actions.add(APPROVE);
                     }
                     actions.add(REJECT);

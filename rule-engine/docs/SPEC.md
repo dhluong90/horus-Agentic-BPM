@@ -459,6 +459,27 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `approve with a nationalId warning -> 409 WARNINGS_NOT_ACKNOWLEDGED, nothing written; only the nationalId pair after contact note was added -> 409 listing both; both pairs -> PUBLISHED, acknowledgement on the history row and the event; masked by default -> no acknowledgement needed`.
 - **Test ID:** `RLE_053_approval_with_an_unmasked_personal_data_warning_needs_an_acknowledgement`
 
+---
+
+### RLE-054 A pending version with no recorded author cannot be approved
+- **Traces to:** `TR-SEC-04`, PD-105, PD-096
+- **Milestone:** M1
+- **Given:**
+  - Tenant `bank-a`. `card-fee` v1 is `PENDING_APPROVAL`, requested by `lan`, and has no recorded author: it was written before schema V2 added `created_by`, and the upgrade assigned none.
+  - `bob` and `carol` hold `rules:approve`; neither requested v1.
+- **When:**
+  1. `bob` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve` with `Idempotency-Key` and `If-Match` set to v1's lock version; then `carol` does the same.
+  2. `bob` reads v1.
+  3. `bob` rejects v1 with a reason (or `lan` withdraws it). `lan` imports the same document as v2 and requests publication; `bob` approves v2.
+  - **Order case:** `lan`, the requester, also holds `rules:approve` and approves v1.
+- **Then:**
+  - **Step 1** returns `409 AUTHOR_UNKNOWN` to both, with a detail naming `card-fee v1` and saying the change must be imported again. v1 stays `PENDING_APPROVAL` at the same lock version, `created_by` and `approved_by` stay null, and no history row or event is written. No author is ever assigned, by the upgrade or by the refusal.
+  - **Step 2:** `allowedActions` for `bob` is `[reject]`; `approve` is never offered for a version with no author.
+  - **Step 3:** the rejection (or withdrawal) succeeds and v1 is `DRAFT`. v2 records `lan` as author, and `bob`'s approval publishes it.
+  - **Order case:** `403 SELF_APPROVAL_FORBIDDEN`: four eyes is checked first, then the recorded author, then the lock version.
+- **Example:** `pending v1 without author -> bob approves -> 409 AUTHOR_UNKNOWN, nothing written; reject v1, lan imports v2 -> bob approves v2 -> PUBLISHED`.
+- **Test ID:** `RLE_054_a_pending_version_with_no_recorded_author_cannot_be_approved`
+
 ## Platform Requirements Made Testable (RE-F-10, RE-F-13, X-F-05)
 
 ### RLE-034 The compiled cache holds at most `cache.max-entries` versions and heap stays flat

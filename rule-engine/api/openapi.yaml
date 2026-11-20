@@ -538,8 +538,15 @@ paths:
         turned on) is `422 VALIDATION_FAILED` naming the input, and stays `PENDING_APPROVAL`
         (`RLE-050`).
 
+        A version with no recorded author (written before the author was recorded, schema V2) cannot
+        be approved by anyone: `409 AUTHOR_UNKNOWN`, and it stays `PENDING_APPROVAL` with nothing
+        written (PD-105, `RLE-054`). No author is ever assigned. It can still be rejected or withdrawn;
+        importing the change again records its author, and that version can be approved. Its
+        `allowedActions` never contain `approve`.
+
         Acknowledged warnings (PD-104, `RLE-053`, DESIGN 3.3.5). Checks run in this order: permission,
-        `If-Match` present, status, four eyes, lock version, strict mode, acknowledgement. The engine
+        `If-Match` present, status, four eyes (then a recorded author), lock version, strict mode,
+        acknowledgement. The engine
         recomputes the `{ code, input }` pairs that need an acknowledgement: the version's warnings whose
         code is in `lifecycle.acknowledge-warnings` (default `[UNMASKED_PERSONAL_DATA]`), under the
         tenant's personal-data names and masking default in force, leaving out inputs that the tenant's
@@ -2011,7 +2018,7 @@ components:
             IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
-            WARNINGS_NOT_ACKNOWLEDGED]
+            WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN]
         detail: { type: string }
         correlationId: { type: string }
         violations:

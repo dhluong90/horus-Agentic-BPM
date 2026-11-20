@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
+import io.github.dhluong90.bpm.rules.api.AuthorUnknownException;
 import io.github.dhluong90.bpm.rules.api.DraftAuthoringDisabledException;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
@@ -309,6 +310,10 @@ public final class DefaultVersionService implements VersionService {
             // Four eyes: neither the person who requested publication nor the author of the content may approve it.
             if (actor.equals(current.requestedBy()) || actor.equals(current.createdBy())) {
                 throw new SelfApprovalForbiddenException(ruleSet, version);
+            }
+            // PD-105: a version written before the author was recorded cannot pass four eyes; no author is invented.
+            if (current.createdBy() == null) {
+                throw new AuthorUnknownException(ruleSet, version);
             }
             // DESIGN 3.3.5 order: permission, If-Match present, status, four eyes, lock, strict mode, acknowledgement.
             checkLock(current, opts);

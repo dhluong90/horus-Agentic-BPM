@@ -42,6 +42,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 409 | [VERSION_SUPERSEDED](#version_superseded) | processes | M2 |
 | 409 | [LAST_VERSION_IN_EFFECT](#last_version_in_effect) | both | 0.2.0 |
 | 409 | [WARNINGS_NOT_ACKNOWLEDGED](#warnings_not_acknowledged) | rules | 0.2.0 |
+| 409 | [AUTHOR_UNKNOWN](#author_unknown) | rules | 0.2.0 |
 | 413 | [PAYLOAD_TOO_LARGE](#payload_too_large) | rules | M1 |
 | 422 | [VALIDATION_FAILED](#validation_failed) | both | M1 |
 | 422 | [IDEMPOTENCY_KEY_REUSE_MISMATCH](#idempotency_key_reuse_mismatch) | both | M1 |
@@ -104,6 +105,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `409`. The version carries a warning the host requires the approver to accept, for example an input that looks like personal data and would be logged without masking (PD-104). The body lists the `warnings` (`code`, `input`, `matchedName`) and the codes the host requires (`setting`, from `lifecycle.acknowledge-warnings`). Nothing was published.
 - **What to do:** read the warnings. To publish anyway, send the approval again with exactly the pairs in `warnings`, for example `"acknowledgedWarnings": [{ "code": "UNMASKED_PERSONAL_DATA", "input": "nationalId" }]`. The engine accepts only the exact current set; the acceptance is recorded on the approval history row and the published event.
 - **What not to do:** a client never retries on its own with the codes added. Otherwise nobody would have accepted the risk.
+
+### AUTHOR_UNKNOWN
+`409`. The pending rule set version has no recorded author, so four eyes cannot tell whether the approver made it (PD-105). Only versions written before the author was recorded (schema V2) have none. Nobody can approve it, and the engine never assigns an author. Import the change again, which records you as its author, and have someone else approve that version; reject or withdraw the old one.
 
 ### SELF_APPROVAL_FORBIDDEN
 `403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve. A requester who rejects their own rule set request gets this code too, with a detail pointing to `:withdraw`: take the request back with `POST .../versions/{v}:withdraw` instead (PD-089).
