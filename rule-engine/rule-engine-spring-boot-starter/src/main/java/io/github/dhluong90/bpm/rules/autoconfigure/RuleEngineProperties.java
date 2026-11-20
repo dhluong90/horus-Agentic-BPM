@@ -39,9 +39,10 @@ public record RuleEngineProperties(
     /**
      * How rule changes may be made on this host (PD-075, PD-094).
      *
-     * @param cockpitDrafts whether the cockpit may create and edit drafts; default false (PD-094). Published to
-     *     clients as the rules setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta}. Import from a
-     *     file is not affected
+     * @param cockpitDrafts whether drafts may be created and edited from the cockpit; default false (PD-094). Published
+     *     to clients as the rules setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta}, and enforced by
+     *     the engine: when false, replacing a draft ({@code PUT .../versions/{v}}) is refused with
+     *     {@code 403 DRAFT_AUTHORING_DISABLED}. Import from a file is not affected
      */
     public record Authoring(Boolean cockpitDrafts) {
     }
@@ -111,7 +112,8 @@ public record RuleEngineProperties(
                 lifecycle.reasonMaxLength() == null ? EngineDefaults.REASON_MAX_LENGTH : lifecycle.reasonMaxLength(),
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
-                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows());
+                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows())
+                .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()));
     }
 
     /**

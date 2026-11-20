@@ -28,4 +28,24 @@ public interface ProcessEngine {
      * @throws InstanceNotFoundException when no such instance exists in the tenant
      */
     ProcessInstance instance(String instanceId);
+
+    /**
+     * Cancels a running instance of the caller's tenant: every live token and open task, with an
+     * {@code INSTANCE_ENDED} history entry and {@code processes.instance.cancelled.v1}, both with the actor and the
+     * reason, in one transaction. Needs {@code processes:cancel}, which {@code processes:start} does not grant (PD-103).
+     * Cancel makes no adapter call and runs no compensation in 0.2.0 (ADR-0020 decision 2).
+     *
+     * @param instanceId the instance id
+     * @param expectedLockVersion the instance's lock version ({@link ProcessInstance#lockVersion()}), sent as
+     *     {@code If-Match}
+     * @param reason why, required, at most {@code lifecycle.reason-max-length} (2,000) characters
+     * @param idempotencyKey required; a replay with the same key and request returns the original result
+     * @return the cancelled instance
+     * @throws InstanceNotFoundException when no such instance exists in the tenant
+     * @throws VersionConflictException when {@code expectedLockVersion} is stale
+     * @throws InvalidStateException when the instance is not running
+     * @throws PreconditionRequiredException when {@code idempotencyKey} is null
+     * @throws InputInvalidException when the reason is missing, blank or too long
+     */
+    ProcessInstance cancel(String instanceId, long expectedLockVersion, String reason, String idempotencyKey);
 }

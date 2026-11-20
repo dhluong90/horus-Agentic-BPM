@@ -32,7 +32,7 @@ docker run -d --name horus-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
   -e POSTGRES_PASSWORD=change-me -p 5432:5432 postgres:16-alpine
 
 mvn -B -pl examples/rule-engine-only -am package -DskipTests      # from the repository root
-HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 ```
 
 Check it (health is public; everything else needs a caller):
@@ -53,6 +53,7 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  3       | V3__rle_version_history.sql
 #  4       | V4__rle_version_history_append_only.sql
 #  5       | V5__rle_engine_key.sql
+#  6       | V6__rle_version_history_draft_updated.sql
 ```
 
 ### The cursor key
@@ -77,7 +78,7 @@ On the `dev` profile the host has two demo users, Lan (role `PRICING_AUTHOR`) an
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=choose-one HORUS_DB_PASSWORD=change-me \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 
 # sign in as lan with the form, keeping the session cookie in ./jar
 CSRF=$(curl -s -c jar -b jar localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
@@ -87,7 +88,7 @@ curl -s -b jar localhost:8080/api/bpm/me
 # {"schemaVersion":1,"user":{"id":"lan"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:author"],"roles":["ROLE_PRICING_AUTHOR"],"groups":[]}
 
 curl -s -b jar localhost:8080/api/bpm/meta
-# {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0-SNAPSHOT","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
+# {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
 
 curl -s -i localhost:8080/api/bpm/meta
 # HTTP/1.1 401
@@ -116,7 +117,7 @@ Start PostgreSQL as above, then start the host on the `dev` profile:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 H=localhost:8080/api/bpm/rules/v1
 ```
 
@@ -141,14 +142,14 @@ H=localhost:8080/api/bpm/rules/v1
 3. Hoa tries to approve her own request and is refused:
 
    ```bash
-   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
    # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
    ```
 
-4. Minh approves; the version is published and takes effect now:
+4. Minh approves; the version is published and takes effect now. `If-Match` names the lock version he reviewed (the `ETag` of the version he read); without it the answer is `428 PRECONDITION_REQUIRED`, and if the version changed since, `409 VERSION_CONFLICT`:
 
    ```bash
-   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve \
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"' \
      -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
    # 200 {"status":"PUBLISHED","requestedBy":"hoa","approvedBy":"minh",...}
    ```
@@ -199,6 +200,18 @@ H=localhost:8080/api/bpm/rules/v1
     curl -s -u hoa:demo-only $H/rule-sets/card-fee/versions/2/history
     # {"data":[{"action":"CREATED",...},{"action":"REQUESTED",...},
     #          {"action":"REJECTED","actor":"minh","reason":"R2 waiver needs pricing committee minutes",...}]}
+    ```
+
+    Hoa, the author, fixes the draft in place instead of importing a v3 (the `dev` profile turns `authoring.cockpit-drafts` on; with it off the answer is `403 DRAFT_AUTHORING_DISABLED`). Both headers are required, and only the draft's author may replace it. Minh then compares v2 with the version in effect; the engine computes the diff, so the approver sees exactly what is hashed:
+
+    ```bash
+    sed 's/"10000 VND"/"5000 VND"/' examples/rule-engine-only/src/main/resources/rules/card-fee.yaml |
+      curl -s -u hoa:demo-only -X PUT $H/rule-sets/card-fee/versions/2 -H 'Content-Type: application/yaml' \
+        -H 'Idempotency-Key: demo-replace-1' -H 'If-Match: "2"' --data-binary @-
+    # 200 {"version":2,"status":"DRAFT","lockVersion":3,"canonicalHash":"...",...}   ETag: "3"
+    curl -s -u minh:demo-only "$H/rule-sets/card-fee/versions/2/diff?base=1"
+    # {"ruleSet":"card-fee","version":2,"base":1,...,"rows":[{"ruleId":"R2","change":"CHANGED","position":2,
+    #   "basePosition":2,"moved":false,"fields":[{"path":"/then/fee","from":{...},"to":{...},"nonAscii":false}]}],...}
     ```
 
 11. A file with mistakes is refused whole, each problem on its rule and column. A `money` output without a currency (`fee: "30000"`) is one of them:
@@ -296,7 +309,7 @@ curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -H 'Content-Type: applicati
 
 curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:request-publish
-curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -X POST \
+curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -H 'If-Match: "1"' -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve
 # {"ruleSet":"card-fee","version":1,"status":"PUBLISHED",...,"requestedBy":"lan",...,"approvedBy":"minh",...}
 
@@ -328,6 +341,8 @@ Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..
 | `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the two demo users. Never in a shared environment |
 | `HORUS_DEMO_PASSWORD` | none | Password of the demo users `lan` and `minh` on the `dev` profile. Without it nobody can sign in |
 
+The two passwords can also come as files: with `SPRING_CONFIG_IMPORT=configtree:/run/secrets/`, a file `/run/secrets/HORUS_DB_PASSWORD` or `/run/secrets/HORUS_DEMO_PASSWORD` sets the property of the same name. The docker compose deployment does this, so no password is in the container environment ([docs/DEPLOYING.md](../../docs/DEPLOYING.md#configuration)).
+
 ## Open the cockpit
 
 The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`), on the `dev` profile with the demo users. Build the cockpit bundle before packaging:
@@ -336,7 +351,7 @@ The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`Host
 npm --prefix cockpit/web ci && npm --prefix cockpit/web run build      # from the repository root
 mvn -B -pl examples/rule-engine-only -am package -DskipTests
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 ```
 
 Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
@@ -368,7 +383,7 @@ Draft editing in the cockpit is off by default in 0.1.0 (PD-094); this example t
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate' \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:evaluate'
 ```
@@ -379,7 +394,7 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choos
 4. As `minh`, open version 2: Changes lists the added and changed rows with the same labels and amounts as the table. Write a reason and choose **Reject**: version 2 goes back to `lan` as a draft, and **History** under the approval dock shows who rejected it and why. As `lan`, **Request publish** again; as `minh`, approve it.
 5. As either user, use **Try it**: tier `GOLD` matches R1 and the table marks the row.
 
-To bring in a file prepared elsewhere, open the rule set and choose **Import new version**: the file becomes the next draft. Only a person other than the author and the requester can approve or reject a version; a requester withdraws through the engine's withdraw action once it ships. A host that keeps rule changes in Git sets `horus.bpm.rules.authoring.cockpit-drafts: false`; the cockpit then hides New draft and Edit draft and keeps Import new version.
+To bring in a file prepared elsewhere, open the rule set and choose **Import new version**: the file becomes the next draft. Only a person other than the author and the requester can approve or reject a version; a requester takes their own pending request back with `POST /api/bpm/rules/v1/rule-sets/{name}/versions/{v}:withdraw` (headers `Idempotency-Key` and `If-Match` with the version's `ETag`, optional body `{ "reason": "..." }`); the version returns to draft and nothing is published. A host that keeps rule changes in Git sets `horus.bpm.rules.authoring.cockpit-drafts: false`; the cockpit then hides New draft and Edit draft and keeps Import new version.
 
 A save creates a new draft version each time, because the engine has no endpoint to replace a draft yet (issue #165). A `.json` file is sent as YAML text (JSON is valid YAML), because this engine release imports YAML only.
 

@@ -8,7 +8,15 @@ import io.github.dhluong90.bpm.process.api.TenantNotAllowedException;
 import io.github.dhluong90.bpm.process.api.SelfApprovalForbiddenException;
 import io.github.dhluong90.bpm.process.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
+import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
+import io.github.dhluong90.bpm.process.api.DefinitionSummary;
+import io.github.dhluong90.bpm.process.api.InstanceQuery;
+import io.github.dhluong90.bpm.process.api.InstanceSummary;
+import io.github.dhluong90.bpm.process.api.Page;
+import io.github.dhluong90.bpm.process.api.PageRequest;
+import io.github.dhluong90.bpm.process.api.ProcessQueryService;
+import io.github.dhluong90.bpm.process.api.QueryInvalidException;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.IdempotencyKeyReuseException;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
@@ -83,7 +91,7 @@ import java.util.function.Function;
  * store state and history. {@code SYNC_LOCAL} invocations run in the transaction; {@code ASYNC} is not in this
  * release. Thread-safe.
  */
-public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService {
+public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService, ProcessQueryService {
 
     /**
      * The result of a start: the instance, and whether this request created it ({@code false} when an instance with
@@ -97,9 +105,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     static final String PERMISSION_DEPLOY = "processes:deploy";
     static final String PERMISSION_START = "processes:start";
+    static final String PERMISSION_CANCEL = "processes:cancel";
     static final String PERMISSION_READ = "processes:read";
     static final String PERMISSION_TASK_WORK = "processes:task:work";
     static final String DEV_APPROVER = "system:dev-auto-approve";
+    static final String CURSOR_KEY_NAME = "cursor-hmac";
+    static final List<String> INSTANCE_STATUSES = List.of("RUNNING", "COMPLETED", "CANCELLED", "COMPENSATING", "FAILED");
+    private static final java.util.regex.Pattern KEY = java.util.regex.Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
+    private static final int MAX_KEY_LENGTH = 200;
+    private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
     private static final System.Logger LOG = System.getLogger(ProcessServices.class.getName());
 
     private final TenantResolver tenants;
@@ -115,6 +129,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final ExpressionEvaluator expressions;
     private final ProcessCompiler compiler;
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
+    private volatile Cursors cursors;
 
     private record Compiled(CompiledProcess process, ExecutionKernel kernel) {
     }
@@ -209,6 +224,154 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 }, Views::definitionToJson, Views::definitionFromJson));
     }
 
+    @Override
+    public DefinitionVersion version(String key, int version) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        if (!isKey(key) || version < 1) {
+            throw new DefinitionNotFoundException("No definition " + safe(key) + " v" + version);
+        }
+        return transactions.inTransaction(() -> store.definitionVersion(tenant, key, version).map(ProcessServices::view)
+                .orElseThrow(() -> new DefinitionNotFoundException("No definition " + key + " v" + version)));
+    }
+
+    // ---- ProcessQueryService ------------------------------------------------------------------------------
+
+    @Override
+    public Page<DefinitionSummary> definitions(PageRequest page) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        PageRequest request = page == null ? PageRequest.first() : page;
+        int limit = limit(request);
+        String after = cursors().verify(tenant, "", "definitions", request.cursor());
+        if (after != null && !isKey(after)) {
+            throw Cursors.invalid();
+        }
+        List<DefinitionSummary> rows = transactions.inTransaction(() -> store.definitionKeys(tenant, after, limit + 1,
+                clock.instant()));
+        if (rows.size() <= limit) {
+            return new Page<>(rows, null);
+        }
+        List<DefinitionSummary> items = rows.subList(0, limit);
+        return new Page<>(items, cursors().sign(tenant, "", "definitions", items.get(limit - 1).key()));
+    }
+
+    @Override
+    public Page<InstanceSummary> instances(InstanceQuery query) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        InstanceQuery q = query == null ? InstanceQuery.running() : query;
+        int limit = limit(q.page());
+        List<String> statuses = q.statuses().isEmpty() ? List.of("RUNNING") : q.statuses().stream().sorted().toList();
+        for (String status : statuses) {
+            if (!INSTANCE_STATUSES.contains(status)) {
+                throw new QueryInvalidException("status must be one or more of " + String.join(", ", INSTANCE_STATUSES));
+            }
+        }
+        if (q.definitionKey() != null && !isKey(q.definitionKey())) {
+            throw new QueryInvalidException("definitionKey is not a definition key");
+        }
+        Instant from = q.startedFrom();
+        Instant to = q.startedTo();
+        if (from != null && to == null) {
+            to = from.plus(settings.maxRange());
+        } else if (from == null && to != null) {
+            from = to.minus(settings.maxRange());
+        }
+        if (from != null) {
+            if (!to.isAfter(from)) {
+                throw new QueryInvalidException("startedTo must be after startedFrom");
+            }
+            if (java.time.Duration.between(from, to).compareTo(settings.maxRange()) > 0) {
+                throw new QueryInvalidException("The start-time range is longer than " + settings.maxRange()
+                        + " (query.max-range)");
+            }
+        }
+        // The cursor is bound to the filters it was issued for, so it cannot be replayed on another list.
+        String scope = String.join(",", statuses) + "|" + (q.definitionKey() == null ? "" : q.definitionKey()) + "|"
+                + (from == null ? "" : from) + "|" + (to == null ? "" : to);
+        String after = cursors().verify(tenant, scope, "instances", q.page().cursor());
+        Instant afterStartedAt = null;
+        String afterId = null;
+        if (after != null) {
+            int bar = after.lastIndexOf('|');
+            try {
+                afterStartedAt = Instant.parse(after.substring(0, bar));
+                afterId = after.substring(bar + 1);
+            } catch (RuntimeException e) {
+                throw Cursors.invalid();
+            }
+        }
+        Instant lower = from;
+        Instant upper = to;
+        Instant afterAt = afterStartedAt;
+        String afterInstance = afterId;
+        List<InstanceRow> rows = transactions.inTransaction(() -> store.instances(tenant, statuses, q.definitionKey(),
+                lower, upper, afterAt, afterInstance, limit + 1));
+        List<InstanceSummary> items = rows.stream().limit(limit).map(r -> new InstanceSummary(r.id(), r.definitionKey(),
+                r.definitionVersion(), r.businessKey(), r.status(), r.lockVersion(), r.startedBy(), r.startedAt(),
+                r.endedAt())).toList();
+        if (rows.size() <= limit) {
+            return new Page<>(items, null);
+        }
+        InstanceSummary last = items.get(limit - 1);
+        return new Page<>(items, cursors().sign(tenant, scope, "instances", last.startedAt() + "|" + last.id()));
+    }
+
+    /**
+     * Creates or reads the cursor key in its own short transaction. The starter calls it once at start-up, after the
+     * migrations; a list call that finds no key loads it the same way.
+     */
+    public void loadCursorKey() {
+        byte[] candidate = new byte[32];
+        RANDOM.nextBytes(candidate);
+        byte[] key;
+        try {
+            key = transactions.inTransaction(() -> store.engineKey(CURSOR_KEY_NAME, candidate, clock.instant()));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("The Process Engine could not create or read its cursor key in "
+                    + "pre_engine_key; run the engine migrations, and give the database user SELECT and INSERT on it", e);
+        }
+        cursors = new Cursors(key);
+    }
+
+    private Cursors cursors() {
+        Cursors held = cursors;
+        if (held == null) {
+            synchronized (this) {
+                if (cursors == null) {
+                    loadCursorKey();
+                }
+                held = cursors;
+            }
+        }
+        return held;
+    }
+
+    private int limit(PageRequest page) {
+        Integer limit = page.limit();
+        if (limit == null) {
+            return Math.min(EngineDefaults.DEFAULT_PAGE_SIZE, settings.maxPageSize());
+        }
+        if (limit < 1 || limit > settings.maxPageSize()) {
+            throw new QueryInvalidException("limit must be 1 to " + settings.maxPageSize() + " (query.max-page-size)");
+        }
+        return limit;
+    }
+
+    private static boolean isKey(String key) {
+        return key != null && key.length() <= MAX_KEY_LENGTH && KEY.matcher(key).matches();
+    }
+
+    /** A value safe to echo in a message: bounded, no control characters. */
+    private static String safe(String value) {
+        if (value == null) {
+            return "null";
+        }
+        String bounded = value.length() > 80 ? value.substring(0, 80) : value;
+        return bounded.replaceAll("\\p{Cntrl}", "?");
+    }
+
     /** Every handler a definition names must be registered, and decisions need a Rule Engine. */
     private void checkBindings(Process process) {
         List<DefinitionProblem> problems = new ArrayList<>();
@@ -283,6 +446,37 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         callerWith(PERMISSION_READ);
         return transactions.inTransaction(() -> read(tenant, store.findInstance(tenant, instanceId)
                 .orElseThrow(() -> new InstanceNotFoundException("No instance " + instanceId))));
+    }
+
+    @Override
+    public ProcessInstance cancel(String instanceId, long expectedLockVersion, String reason, String idempotencyKey) {
+        String tenant = tenant();
+        // PD-103: cancelling has its own permission; processes:start does not grant it.
+        String caller = callerWith(PERMISSION_CANCEL);
+        if (idempotencyKey == null) {
+            throw new PreconditionRequiredException("Cancelling an instance needs an Idempotency-Key");
+        }
+        if (reason == null || reason.isBlank() || reason.length() > settings.reasonMaxLength()) {
+            throw new InputInvalidException("reason is required, 1 to " + settings.reasonMaxLength()
+                    + " characters (lifecycle.reason-max-length)");
+        }
+        String requestHash = Hashes.sha256Parts("cancel", caller, instanceId, reason, String.valueOf(expectedLockVersion));
+        return transactions.inTransaction(() -> idempotent(tenant, "cancel", idempotencyKey, requestHash, () -> {
+            InstanceRow row = store.lockInstance(tenant, instanceId)
+                    .orElseThrow(() -> new InstanceNotFoundException("No instance " + instanceId));
+            if (row.lockVersion() != expectedLockVersion) {
+                throw new VersionConflictException("Instance " + instanceId + " is at lock version " + row.lockVersion());
+            }
+            if (!"RUNNING".equals(row.status())) {
+                throw new InvalidStateException("Instance " + instanceId + " is " + row.status());
+            }
+            StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
+            InstanceState state = new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
+                    InstanceStatus.valueOf(row.status()), store.tokens(tenant, row.id()), Values.readMap(row.variablesJson()),
+                    participants(tenant, row), row.sequence());
+            run(definition, row, state, new Command.Cancel(reason, caller));
+            return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
+        }, Views::instanceToJson, Views::instanceFromJson));
     }
 
     // ---- TaskService --------------------------------------------------------------------------------------
@@ -509,8 +703,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     private static DefinitionVersion view(StoredDefinition d) {
         return new DefinitionVersion(d.id(), d.key(), d.version(), d.status(), d.name(), d.definitionHash(),
-                SourceFormat.valueOf(d.sourceFormat()), d.sourceHash(), d.nodeCount(), d.approvedBy(), d.createdBy(),
-                d.createdAt());
+                SourceFormat.valueOf(d.sourceFormat()), d.sourceHash(), d.nodeCount(), d.approvedBy(), d.approvedAt(),
+                d.effectiveFrom(), d.createdBy(), d.createdAt());
     }
 
     private <T> T idempotent(String tenant, String operation, String key, String requestHash,

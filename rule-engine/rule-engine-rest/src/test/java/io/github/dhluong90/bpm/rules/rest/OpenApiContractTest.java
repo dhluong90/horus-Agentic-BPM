@@ -12,6 +12,7 @@ import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import tools.jackson.databind.JsonNode;
 
@@ -31,6 +32,10 @@ class OpenApiContractTest {
             for (Method method : controller.getDeclaredMethods()) {
                 PostMapping post = method.getAnnotation(PostMapping.class);
                 GetMapping get = method.getAnnotation(GetMapping.class);
+                PutMapping put = method.getAnnotation(PutMapping.class);
+                if (put != null) {
+                    implemented.add("PUT " + normalise(base, put.value()));
+                }
                 if (post != null) {
                     implemented.add("POST " + normalise(base, post.value()));
                 }

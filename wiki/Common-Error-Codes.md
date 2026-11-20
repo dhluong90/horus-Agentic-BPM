@@ -27,7 +27,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 403 | [TENANT_NOT_ALLOWED](#tenant_not_allowed) | both | M1 on `/api/bpm/meta` and `/api/bpm/me` (switching off); M2 everywhere |
 | 403 | [SELF_APPROVAL_FORBIDDEN](#self_approval_forbidden) | both | M1 |
 | 403 | [CLOCK_NOT_ALLOWED](#clock_not_allowed) | rules | M1 |
-| 403 | [DRAFT_AUTHORING_DISABLED](#draft_authoring_disabled) | processes | M2 |
+| 403 | [DRAFT_AUTHORING_DISABLED](#draft_authoring_disabled) | both | rules from 0.2.0 (`PUT` of a draft); processes M2 |
 | 404 | [NO_EFFECTIVE_VERSION](#no_effective_version) | both | M1 |
 | 404 | [RULE_SET_NOT_FOUND](#rule_set_not_found) | rules | M1 |
 | 404 | [VERSION_NOT_FOUND](#version_not_found) | rules | M1 |
@@ -64,7 +64,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `400`. The body is malformed JSON, an input is missing or has the wrong type, or a money amount is a float, a string or outside plus or minus 2^53 - 1. Fix the request; `detail` names the field.
 
 ### QUERY_INVALID
-`400`. A list query breaks a read limit (ADR-0015): `limit` below 1 or above `query.max-page-size` (200 by default), a `cursor` the list did not issue to this tenant (cursors are signed, so an edited, forged or replayed cursor is refused), a time range longer than 31 days, or `GET /decisions` without `ruleSet`, `from` and `to`. Narrow the query and page with the cursor, passing `nextCursor` back unchanged.
+`400`. A list query breaks a read limit (ADR-0015): `limit` below 1 or above `query.max-page-size` (200 by default), a `cursor` the list did not issue to this tenant (cursors are signed, so an edited, forged or replayed cursor is refused), a time range longer than 31 days (`GET /instances` with `startedFrom` and `startedTo`), a `status` that is not an instance status, a cursor sent with other filters than the page it came from, or `GET /decisions` without `ruleSet`, `from` and `to`. Narrow the query and page with the cursor, passing `nextCursor` back unchanged.
 
 ### UNAUTHENTICATED
 `401`. No principal, a token whose audience is another host, or a principal with no tenant the `TenantResolver` can read (for example no `tenant_id` attribute). Sign in again, request a token for this host, or give the user a tenant in your identity provider. Every `401` carries `WWW-Authenticate`; when the challenge says `error="invalid_token"`, the account has no tenant on this host, so sign in again at most once. The host returns this body from its security chain when the chain uses `BpmProblemAuthenticationEntryPoint` ([[Host Metadata and Permissions]]).
@@ -82,7 +82,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `422`. The `Idempotency-Key` was used before with a different request body. This is a client defect, so retrying the same request never helps. Use a new key for a new request.
 
 ### VERSION_CONFLICT
-`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again.
+`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again. A client that receives `409 VERSION_CONFLICT` on `:approve` or `:reject` must show the approver the current version (its content and diff) again and let them decide; it must never retry automatically with the new `ETag`, because that would approve content nobody reviewed.
 
 ### INVALID_STATE
 `409`. The action does not fit the current state, for example `:approve` on a `DRAFT`. Follow the lifecycle order.
@@ -99,7 +99,13 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 ## Versions and approvals
 
 ### SELF_APPROVAL_FORBIDDEN
-`403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve.
+`403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve. A requester who rejects their own rule set request gets this code too, with a detail pointing to `:withdraw`: take the request back with `POST .../versions/{v}:withdraw` instead (PD-089).
+
+### PRECONDITION_REQUIRED
+`428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft, `:approve`, `:reject` or `:withdraw`. An approval must name the lock version of the content the approver reviewed. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
+
+### PRECONDITION_REQUIRED
+`428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft, `:approve` or `:reject`. An approval must name the lock version of the content the approver reviewed. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
 
 ### NO_EFFECTIVE_VERSION
 `404`. No approved version is effective at the clock: nothing is published or active yet, the effective date is in the future, the last version was retired, or the request names a tenant with no version. Publish or approve a version, or check the tenant.
@@ -113,7 +119,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is the rule (row), `column` the input or output name, and either is `null` when the problem is outside them; `message` carries no location prefix. Every cell problem of the document is listed at once, in document order, up to 100 entries (`violationsTruncated: true` when there were more), so an editor can mark each cell; a structural problem (an unknown property, a missing key) stops reading and is the only entry. Example: `[{ "ruleId": "R3", "column": "fee", "message": "output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code" }]`.
 
 ### PAYLOAD_TOO_LARGE
-`413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve` and `:reject`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
+`413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve`, `:reject` and `:withdraw`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
 
 ### LAST_VERSION_IN_EFFECT
 `409`. The retirement would leave no version of the rule set or definition key in effect. After it, evaluations or new starts would fail until a new version is approved (PD-101).
@@ -125,7 +131,7 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 `409`. Processes only. An older pending version cannot be approved because a version with a higher number is already `ACTIVE` (ADR-0012). Create a new draft from the effective version and request approval again.
 
 ### DRAFT_AUTHORING_DISABLED
-`403`. Processes only. The host sets `horus.bpm.processes.authoring.cockpit-drafts: false`, so creating or editing drafts through the `processes:author` endpoints is refused. Imports with `processes:deploy`, approvals and layout saves still work. Change the definition in Git and let the release pipeline import it.
+`403`. The host keeps definition changes in its release pipeline. Rules: `horus.bpm.rules.authoring.cockpit-drafts` is `false` (the 0.1.0 default, PD-094), so `PUT /rule-sets/{name}/versions/{v}` is refused; importing a document as a new version, approvals and simulation still work. Processes: `horus.bpm.processes.authoring.cockpit-drafts: false` refuses creating or editing drafts through the `processes:author` endpoints; imports with `processes:deploy`, approvals and layout saves still work. Change the definition in Git and let the release pipeline import it.
 
 ## Rule Engine
 
