@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.rest;
 
+import io.github.dhluong90.bpm.process.api.DefinitionExport;
 import io.github.dhluong90.bpm.process.api.DefinitionHistoryEntry;
 import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
@@ -15,7 +16,9 @@ import io.github.dhluong90.bpm.process.api.InputInvalidException;
 import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
 import io.github.dhluong90.bpm.process.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
+import io.github.dhluong90.bpm.process.api.NodeCounts;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
+import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
 import io.github.dhluong90.bpm.process.api.TaskService;
@@ -48,6 +51,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Process Engine REST endpoints under {@code /api/bpm/processes/v1}. Bodies are read and written with the
@@ -71,7 +75,7 @@ public class ProcessController {
      * @param definitions definition service
      * @param engine process engine
      * @param tasks task service
-     * @param queries list queries
+     * @param queries list and count queries
      * @param maxDefinitionBytes largest BPMN document accepted ({@code definitions.max-bytes})
      */
     public ProcessController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
@@ -238,6 +242,34 @@ public class ProcessController {
     }
 
     /**
+     * Exports a definition version of the caller's tenant ({@code processes:read}, PRE-034). {@code format=bpmn}
+     * returns BPMN 2.0 XML that imports back to the same {@code definitionHash}, which is also the {@code ETag}.
+     */
+    @GetMapping("/definitions/{key}/versions/{version}/export")
+    public ResponseEntity<byte[]> exportDefinition(@PathVariable("key") String key,
+            @PathVariable("version") String version, @RequestParam(value = "format", required = false) String format) {
+        if (!"bpmn".equals(format)) {
+            throw new InputInvalidException("format must be bpmn");
+        }
+        int number;
+        try {
+            number = Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException("version must be a positive whole number");
+        }
+        if (number < 1) {
+            throw new InputInvalidException("version must be a positive whole number");
+        }
+        DefinitionExport export = definitions.exportDefinition(key, number, SourceFormat.BPMN_XML);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/bpmn+xml"))
+                .header(HttpHeaders.ETAG, "\"" + export.definitionHash() + "\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + export.key() + "-v"
+                        + export.version() + ".bpmn\"")
+                .body(export.document().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
      * Starts an instance ({@code processes:start}). Body: {@code definitionKey}, {@code businessKey}, {@code variables}.
      * A request without a {@code businessKey} needs an {@code Idempotency-Key} ({@code 428 PRECONDITION_REQUIRED}).
      */
@@ -348,6 +380,39 @@ public class ProcessController {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot " + action + " twice");
         }
+    }
+
+    /**
+     * Live tokens per node of one definition version, from the live token index ({@code processes:read}, PRE-028).
+     * Only {@code mode=live} in this release; the window mode follows with the hourly rollup.
+     */
+    @GetMapping("/definitions/{key}/versions/{version}/node-stats")
+    public ResponseEntity<byte[]> nodeStats(@PathVariable("key") String key, @PathVariable("version") String version,
+            @RequestParam(value = "mode", defaultValue = "live") String mode) {
+        if (!"live".equals(mode)) {
+            throw new InputInvalidException("mode must be live in this release");
+        }
+        int number;
+        try {
+            number = Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException("version must be a positive integer");
+        }
+        if (number < 1) {
+            throw new InputInvalidException("version must be a positive integer");
+        }
+        NodeCounts counts = queries.liveNodeCounts(key, number);
+        ObjectNode body = EngineJson.NODES.objectNode();
+        body.put("definitionKey", counts.definitionKey());
+        body.put("version", counts.version());
+        body.put("mode", "live");
+        body.put("asOf", counts.asOf().toString());
+        ObjectNode nodes = body.putObject("nodes");
+        counts.nodes().forEach((node, byStatus) -> {
+            ObjectNode statuses = nodes.putObject(node);
+            byStatus.forEach(statuses::put);
+        });
+        return json(HttpStatus.OK, body, counts.asOf().toEpochMilli(), null);
     }
 
     /**

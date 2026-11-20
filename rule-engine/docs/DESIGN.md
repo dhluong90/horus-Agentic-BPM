@@ -63,7 +63,7 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
    - Pass explicit `Clock` / `Instant evaluationTime` so `today()` and `now()` are deterministic (`TR-DET-01`, `TR-DET-05`). `today()` is the date of the evaluation instant in the rule set's `timeZone` (default `UTC`); the zone is part of the versioned definition, so the decision row's version identifies it (M1, DN-06, `RLE-022`).
 3. **Semantics aligned with FEEL (M1, DN-07, ADR-0019).** These rules were unspecified and are fixed now so that every expression has a FEEL equivalent with the same result ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) sections 4.3 and 4.4, `RLE-021`):
    - Numbers: `integer` and `decimal` are declared constraints on one number type, evaluated as `BigDecimal` with `MathContext.DECIMAL128` (34 significant digits, `HALF_EVEN`); `7 / 2` is `3.5`; division by zero is `EVALUATION_ERROR`.
-   - `round(x, scale)` rounds half-even. Money arithmetic keeps its own rounding (`moneyRounding`, section 3.4).
+   - `round(x, scale)` rounds half-even, as FEEL `decimal(x, scale)` (DMN 1.5 `round half even`); the scale is a whole number from -34 to 34, refused at import otherwise when it is a literal and `null` when it is not. Money arithmetic keeps its own rounding (`moneyRounding`, section 3.4). `daysBetween(d1, d2)` is FEEL `(d2 - d1).days`, negative when `d2` is earlier.
    - `matches(s, p)` is an unanchored search with the XPath `fn:matches` regex dialect: no back-references, no look-around; bounded as `TR-SEC-02`.
    - Strings compare by Unicode code point. `datetime` is a FEEL `date and time` with offset `Z` (Java `Instant`).
    - Null (PD-058, from M1, `RLE-006`): FEEL three-valued logic. `<`, `<=`, `>`, `>=`, arithmetic and functions with a `null` operand give `null`, except `coalesce`, which exists to handle `null`. `x between a and b` is `x >= a and x <= b` (DMN 1.5), evaluated as `and` is: a null target gives `null`, and a null bound gives `false` when the other comparison is already `false`. `==` and `!=` are two-valued: `null == null` is `true`, `null == 'GOLD'` is `false`, `null != 'GOLD'` is `true`. `x in [...]` is `true` only when an element equals `x` (FEEL `list contains`), so it is `false` for a null `x` unless the list holds `null`, and `x not in [...]` (FEEL `not(x in [...])`) is its negation. `is null` and `is not null` are always `true` or `false`. `and`, `or` and `not` follow the FEEL truth tables: `false and null` is `false`, `true and null` is `null`, `true or null` is `true`, `false or null` is `null`, `not(null)` is `null`. A `when` cell or a gateway condition matches only when it evaluates to `true`; `null` never matches. The type checker reports a warning, not an error, when an input that may be null is used with `!=` or `not in`, because those now match a missing value.
@@ -72,6 +72,8 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
      ![Bounded regular expressions](images/regex-bounds.svg)
 
      Source: [`diagrams/regex-bounds.mmd`](diagrams/regex-bounds.mmd).
+   - Money is a HORUS extension with no FEEL type: two money operands whose currencies are fixed by literals and differ are refused at import (`422 VALIDATION_FAILED`, rule and column); otherwise a mismatch is `EVALUATION_ERROR` at run time (`RLE-005`).
+   - The differential test of `RLE-021` (`FeelDifferentialTest`) evaluates generated trees here and their FEEL translation in a reference FEEL implementation, in test scope only. Money and the clock readings are not generated; `matches` is, with patterns that the XPath dialect and Java read the same way. It accepts two documented differences: strict error mode (PD-066) fails where FEEL gives `null` for a division by zero; the reference orders strings by UTF-16 unit, so the generators leave out U+E000 to U+FFFF.
 
 ### 3.3 Version lifecycle
 
@@ -93,20 +95,34 @@ Source: [`diagrams/version-lifecycle.mmd`](diagrams/version-lifecycle.mmd).
 | `PUBLISHED`, retirement pending | `confirmRetire()` | `rules:approve`; caller is not `retire_requested_by` (`403 SELF_APPROVAL_FORBIDDEN`); `lockVersion` matches; the last-version rule is checked again, so a confirmation that would now leave no version in effect needs `confirmNoVersionInEffect: true` unless the request carried it | `RETIRED` | Same effects as the `single` row, with actor the confirmer, the requester and reason from the request, and `approval_mode = four-eyes` |
 | `PUBLISHED`, retirement pending | `cancelRetire(reason)` | `rules:approve`; reason not blank | `PUBLISHED` | Request columns cleared; history row `RETIRE_CANCELLED` |
 
-Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` for this engine and `processes` for the Process Engine. The Rule Engine emits exactly these types: `rules.version.created.v1` (a draft was imported; minimal outbox row from #1), `rules.version.draft-updated.v1` (a draft's document was replaced in place, #165), `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`, `rules.version.withdrawn.v1` (PD-089), `rules.version.retire-requested.v1` (from M3, `four-eyes` mode), `rules.version.retired.v1` (with `approvalMode`: `single`, `four-eyes` or `system`), and `rules.decision.evaluated.v1` (off by default, `events.decision-evaluated`). A breaking payload change publishes a `.v2` type alongside `.v1`; additive fields stay in `.v1`.
+Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` for this engine and `processes` for the Process Engine. The Rule Engine emits exactly these types: `rules.version.created.v1` (a draft was imported), `rules.version.draft-updated.v1` (a draft was replaced in place, section 4.2), `rules.version.publish-requested.v1`, `rules.version.published.v1`, `rules.version.rejected.v1`, `rules.version.withdrawn.v1`, `rules.version.retire-requested.v1` (from M3, `four-eyes` mode), `rules.version.retired.v1` (with `approvalMode`: `single`, `four-eyes` or `system`), and `rules.decision.evaluated.v1` (off by default, `events.decision-evaluated`). A breaking payload change publishes a `.v2` type alongside `.v1`; additive fields stay in `.v1`.
 
 | Event | Payload beyond the envelope (`eventId`, `eventType`, `occurredAt`, `tenantId`, `correlationId`, `causationId`, `producer`, `schemaVersion`) |
 |---|---|
-| `rules.version.draft-updated.v1` | `ruleSet`, `version`, `updatedBy`, `canonicalHash`, `previousCanonicalHash` (schema `rule-engine/api/schema/rules.version.draft-updated.v1.schema.json`) |
+| `rules.version.created.v1` | `ruleSet`, `version`, `actor` (the author); schema `rule-engine/api/schema/rules.version.created.v1.schema.json` |
+| `rules.version.draft-updated.v1` | `ruleSet`, `version`, `canonicalHash` (after the replacement), `previousCanonicalHash`, `lockVersion` (after the update), `updatedBy`; schema `rule-engine/api/schema/rules.version.draft-updated.v1.schema.json` |
 | `rules.version.publish-requested.v1` | `ruleSet`, `version`, `canonicalHash`, `requestedBy`, `effectiveFrom` (null when the version takes effect at approval); schema `rule-engine/api/schema/rules.version.publish-requested.v1.schema.json` |
 | `rules.version.published.v1` | `ruleSet`, `version`, `canonicalHash`, `effectiveFrom`, `requestedBy`, `approvedBy`; schema `rule-engine/api/schema/rules.version.published.v1.schema.json` |
-| `rules.version.rejected.v1` | `ruleSet`, `version`, `rejectedBy`, `reason` |
-| `rules.version.withdrawn.v1` | `ruleSet`, `version`, `withdrawnBy`, `reason` (null when none was given) |
+| `rules.version.rejected.v1` | `ruleSet`, `version`, `rejectedBy`, `reason`; schema `rule-engine/api/schema/rules.version.rejected.v1.schema.json` |
+| `rules.version.withdrawn.v1` | `ruleSet`, `version`, `withdrawnBy`, `reason` (null when none was given); schema `rule-engine/api/schema/rules.version.withdrawn.v1.schema.json` |
 | `rules.version.retire-requested.v1` (M3, `four-eyes` mode) | `ruleSet`, `version`, `requestedBy`, `reason`; the request instant is the envelope's `occurredAt` |
-| `rules.version.retired.v1` | `ruleSet`, `version`, `retiredBy` (`lifecycle.system-actor`, `system:supersession` by default, when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version or null), `retiredAt`, `noVersionInEffect` (PD-101, section 3.3.4), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the four-eyes requester, else null) |
-| `rules.decision.evaluated.v1` | `decisionId`, `ruleSet`, `version`, `outcome` |
+| `rules.version.retired.v1` | `ruleSet`, `version`, `retiredBy` (`lifecycle.system-actor`, `system:supersession` by default, when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version or null), `retiredAt`, `noVersionInEffect` (PD-101, section 3.3.4), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the four-eyes requester, else null); schema `rule-engine/api/schema/rules.version.retired.v1.schema.json` |
+| `rules.decision.evaluated.v1` | `decisionId`, `ruleSet`, `version`, `outcome` (`MATCHED`, `NO_MATCH` or `FAILED`); no inputs or outputs, which stay in the decision log; schema `rule-engine/api/schema/rules.decision.evaluated.v1.schema.json` |
 
-Envelope in 0.1.0: every outbox payload carries `eventType`, `tenantId`, `occurredAt` and `actor` next to the fields above, and the event id is the outbox row id (`rle_decision_outbox.id`, a ULID). `eventId`, `correlationId`, `causationId`, `producer` and `schemaVersion` are not sent in 0.1.0; they arrive later as additive fields within each `.v1` type (#239).
+Envelope (0.2.0, #241). Every outbox payload carries the envelope as members next to the fields above, so the 0.1.0 fields (`eventType`, `tenantId`, `occurredAt` and, on lifecycle events, `actor`) keep their place and the additions stay within `.v1`:
+
+| Member | Value |
+|---|---|
+| `eventId` | The outbox row id (`rle_decision_outbox.id`), a ULID string. Consumers de-duplicate by it |
+| `eventType` | The type with its `.v<N>` suffix |
+| `occurredAt` | When the state change committed, ISO 8601 UTC |
+| `tenantId` | The tenant from the host security context, never from a request body |
+| `correlationId` | The caller's: the `X-Correlation-Id` header on REST (a missing or malformed header is replaced by a generated id, as on `:evaluate`), or `ImportRequest.withCorrelationId` and `WriteOptions.withCorrelationId` on the Java API, where a malformed id is `400 INPUT_INVALID`. When a Java caller passes none, the event id: the event starts its own chain. It is not part of the idempotent request, so a replay with another correlation id returns the original result and writes no event |
+| `causationId` | The id of the command or event that caused this one, or null. A caller's command has no id of its own, so it is null on every event the engine writes in 0.2.0 |
+| `producer` | `rule-engine/<engine version>`, for example `rule-engine/0.2.0` |
+| `schemaVersion` | `1`, the version of the envelope layout |
+
+Every type has a schema file in `rule-engine/api/schema/`, named `<eventType>.schema.json`, with `additionalProperties: true`. Core tests check every payload the engine writes against its file, and each file's example against the file itself, so the types whose emitting features come later are checked too.
 
 A host that wants tamper evidence for approvals relays these events to a store outside the database administrator's control (an append-only log or a separate audit system) and reconciles the stored versions against it, because rows in the host database, outbox included, can be changed by whoever administers it. The publication events carry `canonicalHash`, `effectiveFrom`, `requestedBy` and `approvedBy` for that purpose.
 

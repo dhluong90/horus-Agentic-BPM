@@ -76,6 +76,43 @@ public sealed interface Expr {
     }
 
     /**
+     * A call of a whitelisted pure function (rule-engine DESIGN 3.2 item 3). A {@code null} argument gives
+     * {@code null}, as in FEEL.
+     *
+     * @param function the function
+     * @param args the arguments, as many as the function takes
+     */
+    record Call(Function function, List<Expr> args) implements Expr {
+        public Call {
+            args = List.copyOf(args);
+        }
+    }
+
+    /** The pure functions of {@code horus-expr-v1}, with their FEEL translation. */
+    enum Function {
+        /** {@code round(x, scale)}, half-even; FEEL {@code decimal(x, scale)}, the same as {@code round half even}. */
+        ROUND("round"),
+        /** {@code daysBetween(d1, d2)}, calendar days from d1 to d2; FEEL {@code (d2 - d1).days}. */
+        DAYS_BETWEEN("daysBetween");
+
+        private final String text;
+
+        Function(String text) {
+            this.text = text;
+        }
+
+        /** The name as written in an expression. */
+        public String text() {
+            return text;
+        }
+
+        /** The number of arguments. */
+        public int arity() {
+            return 2;
+        }
+    }
+
+    /**
      * {@code today()} or {@code now()}: the evaluation clock, never the system time (TR-DET-01). The compiler binds
      * both to slots after the inputs, filled for each evaluation from the decision's clock in the rule set's
      * {@code timeZone}; a parse without a clock (printing, translation) leaves the slot at -1.

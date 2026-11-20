@@ -237,11 +237,27 @@ class NormalFormTest {
     }
 
     /**
-     * The pin of the schema version 1 golden file. Changed in 0.2.0 (#20) only by appending the three rows of
-     * {@code matches}, a production the 0.1.0 parser refused, so no stored 0.1.0 rule set contains one: appending rows
-     * for a new production is allowed within schema version 1 (architect ruling on #252, ADR-0026 decision 3).
+     * The pin of the schema version 1 golden file. Changed in 0.2.0 only by appending the rows of two new productions,
+     * {@code matches} (#20) and the function calls round and daysBetween (#19): appending rows for a new production is allowed within schema version 1,
+     * by the architect's ruling on pull request #252 (ADR-0026 decision 3); editing a shipped row is not, and
+     * {@link #RLE_045_the_golden_lines_of_0_1_0_are_an_unchanged_prefix} proves no 0.1.0 row changed.
      */
-    static final String GOLDEN_V1_SHA256 = "ba6c05f2dd2ab459709727745e4a0e917dc64c7746c115708ae2bf6d1b6f9deb";
+    static final String GOLDEN_V1_SHA256 = "9ceeb15c518cdde9d78ce42c2e0374d5cf014fedcb6a98ea1514271d2c9927cb";
+
+    @Test
+    void RLE_045_the_golden_lines_of_0_1_0_are_an_unchanged_prefix() throws Exception {
+        // A later release may append golden lines for a new production (0.2.0: round and daysBetween, #19); it may never
+        // change a line that 0.1.0 shipped. The first GOLDEN_0_1_0_LENGTH bytes are the 0.1.0 file, byte for byte.
+        byte[] golden = DmnRuleSetTest.resource("/rules/normal-form.v1.txt");
+        byte[] prefix = java.util.Arrays.copyOf(golden, GOLDEN_0_1_0_LENGTH);
+        String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(prefix));
+        assertThat(sha).isEqualTo(GOLDEN_0_1_0_SHA256);
+    }
+
+    /** The golden file as 0.1.0 shipped it: its length and SHA-256, the pin of that release. */
+    static final int GOLDEN_0_1_0_LENGTH = 4003;
+
+    static final String GOLDEN_0_1_0_SHA256 = "dc44beae55cd278fe820d7c9e22def959b854655946bbfa4711387ca6f7eb40f";
 
     @Test
     void RLE_022_the_clock_golden_file_is_pinned() throws Exception {
