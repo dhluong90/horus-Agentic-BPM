@@ -32,6 +32,9 @@ final class RuleEngineModule {
     /** The rules setting clients read to offer or hide draft editing (PD-075, PD-094). */
     static final String COCKPIT_DRAFTS = "authoring.cockpit-drafts";
 
+    /** The warning codes an approval must acknowledge (PD-104, RLE-053), comma-separated; empty when none. */
+    static final String ACKNOWLEDGE_WARNINGS = "lifecycle.acknowledge-warnings";
+
     /** The masking default in force for the caller's tenant (PD-099 mitigation 4, RLE-052). */
     static final String MASK_DEFAULT = "decision-log.mask-default";
 
@@ -59,14 +62,32 @@ final class RuleEngineModule {
      */
     static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
             String retireApproval, String retireLastVersion) {
+        return descriptor(rolePermissions, cockpitDrafts, retireApproval, retireLastVersion,
+                io.github.dhluong90.bpm.rules.internal.service.EngineDefaults.ACKNOWLEDGE_WARNINGS);
+    }
+
+    /**
+     * The descriptor for this host.
+     *
+     * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
+     * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}; null (unset) is published as false
+     * @param retireApproval the validated {@code horus.bpm.lifecycle.retire-approval}
+     * @param retireLastVersion the validated {@code horus.bpm.lifecycle.retire-last-version}
+     * @param acknowledgeWarnings the validated {@code lifecycle.acknowledge-warnings}, published comma-separated
+     *     because {@code /meta} settings hold scalars only
+     * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
+     */
+    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
+            String retireApproval, String retireLastVersion, List<String> acknowledgeWarnings) {
         // Always published, so clients never guess: draft editing false unless the host turns it on (PD-094), and
         // the retirement mode in force (PD-080). The approver rule is always makers here, whatever the host sets
         // (#273): V2 rle_version_four_eyes refuses an approval by the author in the database.
-        Map<String, Object> settings = new java.util.LinkedHashMap<>();
+        Map<String, Object> settings = new LinkedHashMap<>();
         settings.put(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
         settings.put(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.MAKERS.value());
         settings.put(RETIRE_APPROVAL, retireApproval);
         settings.put(RETIRE_LAST_VERSION, retireLastVersion);
+        settings.put(ACKNOWLEDGE_WARNINGS, String.join(",", acknowledgeWarnings));
         return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);
     }
 

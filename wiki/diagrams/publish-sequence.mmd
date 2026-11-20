@@ -34,9 +34,11 @@ sequenceDiagram
     Note over API,DB: TX: approve
     Bob->>API: POST .../versions/2:approve (Idempotency-Key, If-Match "5")
     API->>SVC: approve(approver=bob)
-    alt bob != requested_by and status PENDING_APPROVAL
-      SVC->>DB: status=PUBLISHED, approved_by=bob, cache_epoch+1, COMMIT, pg_notify
-      SVC-->>Bob: 200, event rules.version.published.v1
+    alt an unmasked personal-data warning and no acknowledgedWarnings (PD-104)
+      SVC-->>Bob: 409 WARNINGS_NOT_ACKNOWLEDGED with the warnings, nothing written
+    else bob != requested_by, status PENDING_APPROVAL, warnings acknowledged
+      SVC->>DB: status=PUBLISHED, approved_by=bob, history APPROVED with acknowledged_warnings, cache_epoch+1, COMMIT, pg_notify
+      SVC-->>Bob: 200, event rules.version.published.v1 with acknowledgedWarnings
     else stale If-Match or already approved
       SVC-->>Bob: 409 VERSION_CONFLICT or 409 INVALID_STATE
     end

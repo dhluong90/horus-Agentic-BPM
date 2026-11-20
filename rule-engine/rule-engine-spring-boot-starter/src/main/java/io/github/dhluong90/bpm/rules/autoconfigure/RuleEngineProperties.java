@@ -295,8 +295,13 @@ public record RuleEngineProperties(
      *     {@code PT1S} to {@code PT1H}; default {@code PT1M}. Status only: selection follows the effective date
      * @param systemActor the actor recorded on the history row and event of a superseded version; it must start with
      *     {@code system:}, a namespace no caller id may use; default {@code system:supersession}
+     * @param acknowledgeWarnings warning codes an approver must accept with acknowledgedWarnings before a version is
+     *     published, else 409 WARNINGS_NOT_ACKNOWLEDGED; default [UNMASKED_PERSONAL_DATA]. A list without
+     *     UNMASKED_PERSONAL_DATA relaxes a control: it is accepted, logged at WARN at start-up and shown in
+     *     /api/bpm/meta. A code this release never raises stops start-up
      */
-    public record Lifecycle(Integer reasonMaxLength, Duration sweepInterval, String systemActor) {
+    public record Lifecycle(Integer reasonMaxLength, Duration sweepInterval, String systemActor,
+            List<String> acknowledgeWarnings) {
 
         /** Shortest accepted {@code sweep-interval}. */
         static final Duration SWEEP_MIN = Duration.ofSeconds(1);
@@ -369,7 +374,9 @@ public record RuleEngineProperties(
                         lifecycle.systemActor() == null ? EngineDefaults.SYSTEM_ACTOR : lifecycle.systemActor(),
                         EngineDefaults.RETIRE_APPROVAL)
                 .withSimulationMaxInputs(
-                        simulation.maxInputs() == null ? EngineDefaults.SIMULATION_MAX_SAMPLES : simulation.maxInputs());
+                        simulation.maxInputs() == null ? EngineDefaults.SIMULATION_MAX_SAMPLES : simulation.maxInputs())
+                .withAcknowledgeWarnings(lifecycle.acknowledgeWarnings() == null
+                        ? EngineDefaults.ACKNOWLEDGE_WARNINGS : lifecycle.acknowledgeWarnings());
     }
 
     /**

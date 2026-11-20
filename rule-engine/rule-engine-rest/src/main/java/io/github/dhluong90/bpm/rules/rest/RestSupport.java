@@ -123,6 +123,13 @@ final class RestSupport {
             node.put("canonicalHash", entry.canonicalHash());
             node.put("previousCanonicalHash", entry.previousCanonicalHash());
         }
+        if (entry.action() == io.github.dhluong90.bpm.rules.api.LifecycleAction.APPROVED) {
+            // RLE-053: always present on an approval, empty when nothing needed an acknowledgement.
+            ArrayNode accepted = node.putArray("acknowledgedWarnings");
+            entry.acknowledgedWarnings().forEach(w -> accepted.addObject().put("code", w.code()).put("input", w.input()));
+            ArrayNode maskedByDefault = node.putArray("maskedByDefaultInputs");
+            entry.maskedByDefaultInputs().forEach(maskedByDefault::add);
+        }
         return node;
     }
 

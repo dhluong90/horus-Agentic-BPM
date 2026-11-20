@@ -334,6 +334,25 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     final Map<String, Map<String, String>> settingsSeen = new ConcurrentHashMap<>();
 
     @Override
+    public io.github.dhluong90.bpm.rules.internal.store.MaskedByDefaultVersions publishedMaskedByDefault(
+            String tenantId, int limit) {
+        List<io.github.dhluong90.bpm.rules.internal.store.MaskedByDefaultVersions.Version> all = versions.stream()
+                .filter(v -> v.tenantId().equals(tenantId) && v.status() == VersionStatus.PUBLISHED)
+                .sorted(java.util.Comparator.comparing(StoredVersion::ruleSet).thenComparingInt(StoredVersion::version))
+                .map(v -> history.stream()
+                        .filter(h -> h.versionId().equals(v.id())
+                                && h.action() == io.github.dhluong90.bpm.rules.api.LifecycleAction.APPROVED)
+                        .reduce((first, second) -> second)
+                        .filter(h -> !h.maskedByDefaultInputs().isEmpty())
+                        .map(h -> new io.github.dhluong90.bpm.rules.internal.store.MaskedByDefaultVersions.Version(
+                                v.ruleSet(), v.version(), h.maskedByDefaultInputs())))
+                .flatMap(java.util.Optional::stream)
+                .toList();
+        return new io.github.dhluong90.bpm.rules.internal.store.MaskedByDefaultVersions(
+                all.subList(0, Math.min(limit, all.size())), all.size());
+    }
+
+    @Override
     public Map<String, String> settingsSeen(String setting) {
         return Map.copyOf(settingsSeen.getOrDefault(setting, Map.of()));
     }

@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.rules.internal.service;
 
 import io.github.dhluong90.bpm.rules.api.MaskingKey;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
+import io.github.dhluong90.bpm.rules.internal.store.MaskedByDefaultVersions;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
 import io.github.dhluong90.bpm.rules.internal.store.TransactionRunner;
 import io.github.dhluong90.bpm.rules.internal.store.VersionInputs;
@@ -268,7 +269,39 @@ public final class MaskingStartupCheck {
         }
         LOG.log(level, line);
         lines.add(line);
+        if (!tenant.equals(HOST_DEFAULT_ROW) && "true".equals(before) && "false".equals(now)) {
+            affectedVersions(tenant).ifPresent(affected -> {
+                LOG.log(System.Logger.Level.WARNING, affected);
+                lines.add(affected);
+            });
+        }
         store.recordSettingSeen(tenant, MASK_DEFAULT_SETTING, now, at);
+    }
+
+    /** Most versions the WARN after a masking default turned off lists. */
+    static final int AFFECTED_VERSIONS_MAX = 20;
+
+    /**
+     * After a tenant's masking default goes from true to false, names what is affected (PD-104, security review of
+     * #316): the tenant's published versions whose latest approval recorded inputs masked only by the default. Their
+     * values reach the decision log in plain text from now on. At most {@value #AFFECTED_VERSIONS_MAX}, then
+     * "and N more". One read-only query.
+     */
+    private java.util.Optional<String> affectedVersions(String tenant) {
+        MaskedByDefaultVersions affected = store.publishedMaskedByDefault(tenant, AFFECTED_VERSIONS_MAX);
+        if (affected.versions().isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        StringBuilder line = new StringBuilder("Tenant ").append(tenant)
+                .append(" no longer masks undeclared inputs; these published versions now log in plain text inputs"
+                        + " that only the default masked: ");
+        line.append(affected.versions().stream()
+                .map(v -> v.ruleSet() + " v" + v.version() + " " + v.inputs())
+                .collect(java.util.stream.Collectors.joining(", ")));
+        if (affected.total() > affected.versions().size()) {
+            line.append(" and ").append(affected.total() - affected.versions().size()).append(" more");
+        }
+        return java.util.Optional.of(line.toString());
     }
 
     /** The first input of a version that is masked, or null. */
