@@ -20,12 +20,16 @@ import java.util.Objects;
  * @param matchedRuleIds the matched rule ids
  * @param callerId the caller, or null
  * @param correlationId the correlation id, or null
+ * @param evalClock the instant the decision reasoned about: the selection of the version in force and
+ *     {@code today()} and {@code now()}; differs from {@code evaluatedAt} when the caller chose the clock
  * @param evaluatedAt when the decision was made
  * @param durationMicros evaluation time in microseconds
+ * @param pinned true when the caller named the version ({@code rules:pin}) instead of the engine selecting the
+ *     version in force; set by the engine, never by a request
  */
 public record LoggedDecision(String decisionId, String ruleSet, int version, String hitPolicy, String outcome,
         String errorCode, String inputsJson, String outputsJson, List<String> matchedRuleIds, String callerId,
-        String correlationId, Instant evaluatedAt, long durationMicros) {
+        String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned) {
 
     public LoggedDecision {
         Objects.requireNonNull(decisionId, "decisionId must not be null");
@@ -33,6 +37,18 @@ public record LoggedDecision(String decisionId, String ruleSet, int version, Str
         Objects.requireNonNull(outcome, "outcome must not be null");
         Objects.requireNonNull(inputsJson, "inputsJson must not be null");
         matchedRuleIds = List.copyOf(matchedRuleIds);
+        Objects.requireNonNull(evalClock, "evalClock must not be null");
         Objects.requireNonNull(evaluatedAt, "evaluatedAt must not be null");
+    }
+
+    /**
+     * Tells whether the decision was back-dated or forward-dated: it reasoned about another instant than the one it
+     * ran at, because the caller chose the clock ({@code rules:simulate}). Derived from two server-set timestamps,
+     * so no caller can unset it.
+     *
+     * @return true when {@code evalClock} differs from {@code evaluatedAt}
+     */
+    public boolean clockChosen() {
+        return !evalClock.equals(evaluatedAt);
     }
 }

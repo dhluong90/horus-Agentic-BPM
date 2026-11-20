@@ -5,8 +5,10 @@ info:
   description: |
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
-    export, replace a draft, diff two versions, request publication, approve, reject, history, evaluate,
-    and decision-log reads (one decision, and the search by a masked input's plain value). The remaining endpoints of
+    export, replace a draft, diff two versions, request publication, approve, reject, withdraw, retire, history,
+    simulate a version over sample inputs, evaluate (at the host clock, at a chosen clock, or pinned to a version), replay of a logged decision,
+    and decision-log reads (one decision, and the search by a masked input's plain value).
+    The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
     The tenant is never part of a request: it comes from the host's authenticated context
@@ -56,6 +58,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
     post:
       tags: [rule-sets]
@@ -83,6 +86,7 @@ paths:
         nothing is stored (`RLE-050`).
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
       requestBody:
         required: true
         content:
@@ -123,6 +127,7 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}:
     get:
       tags: [rule-sets]
@@ -141,6 +146,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions:
     get:
       tags: [rule-sets]
@@ -184,6 +190,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
     post:
       tags: [rule-sets]
@@ -202,6 +209,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
       requestBody:
         required: true
         content:
@@ -215,10 +223,13 @@ paths:
         '201':
           $ref: '#/components/responses/VersionCreated'
         '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:
     get:
       tags: [rule-sets]
@@ -247,6 +258,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
     put:
       tags: [rule-sets]
       operationId: replaceDraft
@@ -280,6 +292,7 @@ paths:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: true
@@ -313,6 +326,7 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/diff:
     get:
       tags: [rule-sets]
@@ -395,6 +409,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/export:
     get:
       tags: [rule-sets]
@@ -431,6 +446,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/history:
     get:
       tags: [rule-sets]
@@ -438,8 +454,9 @@ paths:
       summary: Read the lifecycle history of one version, oldest first
       description: |
         Permission `rules:read`. One entry per transition (`CREATED`, `REQUESTED`, `APPROVED`,
-        `REJECTED`) and per replacement of a draft (`DRAFT_UPDATED`, with both canonical hashes), with actor, reason or comment, statuses before and after and the
-        `lockVersion` after (DESIGN section 3.3.3). A version created before the history table
+        `REJECTED`, `WITHDRAWN`, `RETIRED`) and per replacement of a draft (`DRAFT_UPDATED`, with both canonical hashes), with actor, reason or comment, statuses before and after and the
+        `lockVersion` after (DESIGN section 3.3.3). A `RETIRED` entry also carries `approvalMode`
+        (`single` by hand, `system` when superseded) and, when superseded, `supersededBy`. A version created before the history table
         existed starts with a backfilled `CREATED` entry; its earlier request and approval have
         no entries.
       parameters:
@@ -478,6 +495,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:request-publish:
     post:
       tags: [rule-sets]
@@ -493,15 +511,18 @@ paths:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatch'
       responses:
         '200':
           $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:approve:
     post:
       tags: [rule-sets]
@@ -527,6 +548,7 @@ paths:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: false
@@ -544,6 +566,7 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
@@ -551,6 +574,7 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:reject:
     post:
       tags: [rule-sets]
@@ -572,6 +596,7 @@ paths:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: true
@@ -592,17 +617,193 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:simulate:
+    post:
+      tags: [rule-sets]
+      operationId: simulate
+      summary: Run a version over sample inputs beside the version effective now, without logging anything
+      description: |
+        Permission `rules:simulate`, checked before the body is read. Runs the version (normally a
+        `DRAFT`, or a version `PENDING_APPROVAL` an approver is looking at) and the version effective
+        at the host clock over 1 to 1,000 sample input sets, and flags each sample whose outcome
+        changed: the outcome kind, an output value or the failure code differs. A different matched
+        rule giving the same outputs is not a change; with no effective version every sample is
+        `changed`. Validation runs first: a stored version that no longer compiles or matches its hash
+        is `422 VALIDATION_FAILED`, and no sample is evaluated. Inputs the effective version does not
+        declare are left out of its side. Writes nothing (no decision row, no idempotency record, no
+        event), so it takes no `Idempotency-Key`; the same version, samples and clock give the same
+        body. A version of another tenant is `404 VERSION_NOT_FOUND`. Members other than `samples` and
+        their `inputs` are ignored, including `tenantId`. A body over 1,048,576 bytes is
+        `413 PAYLOAD_TOO_LARGE`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationRequest'
+            example:
+              samples:
+                - inputs: { tier: GOLD, txCount: 5 }
+                - inputs: { tier: SILVER, txCount: 2 }
+      responses:
+        '200':
+          description: One result per sample, in the order sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationResult'
+              example:
+                ruleSet: card-fee
+                version: 2
+                status: DRAFT
+                baselineVersion: 1
+                evaluatedAt: '2026-12-15T02:00:00Z'
+                sampleCount: 2
+                changedCount: 1
+                results:
+                  - index: 0
+                    changed: false
+                    simulated: { outcome: MATCHED, matchedRuleIds: [R1], outputs: { fee: { currency: VND, amount: 0 } } }
+                    baseline: { outcome: MATCHED, matchedRuleIds: [R1], outputs: { fee: { currency: VND, amount: 0 } } }
+                  - index: 1
+                    changed: true
+                    simulated: { outcome: MATCHED, matchedRuleIds: [R3], outputs: { fee: { currency: VND, amount: 30000 } } }
+                    baseline: { outcome: MATCHED, matchedRuleIds: [R3], outputs: { fee: { currency: VND, amount: 50000 } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:retire:
+    post:
+      tags: [rule-sets]
+      operationId: retire
+      summary: Take a published version out of service by hand, with a reason
+      description: |
+        Permission `rules:approve`, checked before the body is read. Only a `PUBLISHED` version can be
+        retired; any other status is `409 INVALID_STATE`. The reason is required: blank, or longer than
+        `lifecycle.reason-max-length` (default 2,000 characters), is `400 INPUT_INVALID`
+        (ADR-0025, DESIGN section 3.3, `RLE-026`).
+
+        In the default mode `lifecycle.retire-approval: single` one identity is enough (PD-080). The
+        version becomes `RETIRED` with `retiredAt` set to the transaction's clock and `lockVersion`
+        incremented. One history entry `RETIRED` (actor, reason, `approvalMode: single`) and one
+        `rules.version.retired.v1` event (`rule-engine/api/schema/rules.version.retired.v1.schema.json`)
+        are written in the same transaction. Older `PUBLISHED` versions already in effect are retired
+        with it as superseded, so a retire never brings an older version back. Evaluation stops
+        selecting the version from `retiredAt` on, on every replica, because selection reads the
+        database; with no other version in force the answer is `404 NO_EFFECTIVE_VERSION`. A retired
+        version stays readable, replays, and is still selected for a clock before `retiredAt`.
+
+        `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
+        `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`, and a stale
+        `If-Match` is `409 VERSION_CONFLICT`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+
+        Retiring the version in force when no other would remain leaves the rule set with no version in
+        effect, so every evaluation fails until a new version is approved (PD-101). Under the shared host
+        setting `horus.bpm.lifecycle.retire-last-version: confirm` (default) the request must then carry
+        `confirmNoVersionInEffect: true` with its reason, otherwise it is `409 LAST_VERSION_IN_EFFECT`
+        naming the rule set; under `refuse` it is always `409 LAST_VERSION_IN_EFFECT`. The problem body
+        carries `ruleSet`, `version`, `setting` and `nextEffectiveFrom` (the start of a later approved
+        version, or null). A version that only starts later does not count as in effect. The history
+        entry and the event record `noVersionInEffect: true`. The transaction locks the rule set row first,
+        so two concurrent retirements of its last versions run one after the other.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetireRequest'
+            example:
+              reason: Tet promotion ended
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:withdraw:
+    post:
+      tags: [rule-sets]
+      operationId: withdraw
+      summary: Take back your own publication request; the version returns to DRAFT
+      description: |
+        Permission `rules:author`, checked before the body is read. Only the identity that requested
+        publication (`requestedBy`) may withdraw it; anyone else, an approver included, gets
+        `403 PERMISSION_DENIED` (an approver uses `:reject`). Only a `PENDING_APPROVAL` version can be
+        withdrawn; any other status is `409 INVALID_STATE` (PD-089, DESIGN section 3.3, `RLE-046`).
+
+        The version returns to `DRAFT` with `requestedBy` and `requestedAt` cleared and `lockVersion`
+        incremented, one history entry `WITHDRAWN` and one `rules.version.withdrawn.v1` event
+        (`rule-engine/api/schema/rules.version.withdrawn.v1.schema.json`). Nothing is published and
+        the version in effect does not change. The draft can be edited and requested again, which
+        starts a new approval.
+
+        `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
+        `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`. The reason is
+        optional; one longer than `lifecycle.reason-max-length` (default 2,000 characters) is
+        `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawRequest'
+            example:
+              reason: Wrong fee for GOLD
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}:evaluate:
     post:
       tags: [decisions]
       operationId: evaluate
-      summary: Evaluate the version effective at the host clock and log one decision
+      summary: Evaluate the version in force at the clock and log one decision
       description: |
-        Permission `rules:evaluate`. Writes exactly one `rle_decision` row in the request's
-        transaction. A failed evaluation (`EVALUATION_ERROR`, or `UNIQUE_HIT_VIOLATION` when a
-        `unique` table matches several rules; no match is outcome `NO_MATCH`) is logged and answered `422` with the
-        `decisionId` and `matchedRuleIds`, never with partial outputs. Members other than `inputs` are ignored, including `tenantId`. A body over
-        1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
+        Permission `rules:evaluate`; a request that sets `clock` also needs `rules:simulate`, otherwise
+        `403 CLOCK_NOT_ALLOWED`. The clock defaults to the host clock. It selects the version in force
+        (the highest approved version whose `effectiveFrom` is at or before the clock; DESIGN 3.3.1) and
+        feeds `today()` and `now()`, which read it in the rule set's `timeZone`.
+
+        Writes exactly one `rle_decision` row in the request's transaction, with the version and the
+        clock, so the decision replays (`POST /decisions/{decisionId}:replay`). A failed evaluation
+        (`EVALUATION_ERROR`, or `UNIQUE_HIT_VIOLATION` when a `unique` table matches several rules; no
+        match is outcome `NO_MATCH`) is logged and answered `422` with the `decisionId` and
+        `matchedRuleIds`, never with partial outputs. Members other than `inputs` and `clock` are
+        ignored, including `tenantId`. A body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - name: ruleSet
           in: path
@@ -610,11 +811,7 @@ paths:
           schema:
             type: string
         - $ref: '#/components/parameters/IdempotencyKey'
-        - name: X-Correlation-Id
-          in: header
-          required: false
-          schema:
-            type: string
+        - $ref: '#/components/parameters/CorrelationId'
       requestBody:
         required: true
         content:
@@ -636,7 +833,10 @@ paths:
                 decisionId: 01KDG7Z0RQ6V2Y8M1C4N5P7T9W
                 ruleSet: card-fee
                 version: 1
+                evalClock: '2026-12-15T02:00:00Z'
                 evaluatedAt: '2026-12-15T02:00:00Z'
+                clockChosen: false
+                pinned: false
                 outcome: MATCHED
                 matchedRuleIds: [R1]
                 outputs:
@@ -648,13 +848,127 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /decisions/{ruleSet}/versions/{version}:evaluate:
+    post:
+      tags: [decisions]
+      operationId: evaluateVersion
+      summary: Evaluate one approved version, at the host clock or a chosen clock, and log one decision
+      description: |
+        Pins the version instead of selecting it, for example to show what version 1 gave on a past
+        date. A pin bypasses the selection of the version in force, so its permission is `rules:pin`
+        (`403 PERMISSION_DENIED`), not `rules:evaluate`; no role holds `rules:pin` by default. Setting `clock`
+        also needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`). The version must be `PUBLISHED`; a
+        `RETIRED` version is `409 INVALID_STATE` unless the host sets
+        `horus.bpm.rules.evaluation.pin-retired: true` (replay of its logged decisions is not
+        affected). A `DRAFT` or `PENDING_APPROVAL`
+        version is `409 INVALID_STATE`, because it would put an unapproved rule in the decision log;
+        simulate it with `:simulate`, which writes no decision row. Writes one `rle_decision` row with
+        the version and the clock, as `:evaluate` does, with the same `422` answers and body limit.
+      parameters:
+        - name: ruleSet
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateRequest'
+            example:
+              inputs:
+                tier: STANDARD
+                txCount: 1
+              clock: '2026-11-20T10:00:00Z'
+      responses:
+        '200':
+          description: The logged decision of the pinned version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionResult'
+              example:
+                decisionId: 01KCS3W1DQ0M8V6T2B9R5N7K4E
+                ruleSet: card-fee
+                version: 1
+                evalClock: '2026-11-20T10:00:00Z'
+                evaluatedAt: '2026-12-05T08:00:00Z'
+                clockChosen: true
+                pinned: true
+                outcome: MATCHED
+                matchedRuleIds: [R3]
+                outputs:
+                  fee: { currency: VND, amount: 50000 }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /decisions/{decisionId}:replay:
+    post:
+      tags: [decisions]
+      operationId: replayDecision
+      summary: Re-evaluate a logged decision with its recorded version, inputs and clock
+      description: |
+        Permission `rules:log:read`, because the answer is built from logged inputs. Reads the
+        decision row of the caller's tenant, loads the version it names (never selecting, so a
+        version superseded or retired since still replays) and evaluates the logged inputs at the
+        logged clock, in the version's own `timeZone`. The result carries the logged `decisionId`
+        and `evalClock`; the same version, outputs and `matchedRuleIds` as the logged decision prove that
+        the decision is reproducible (`TR-DET-05`). Writes nothing: no decision row, no event. No
+        request body.
+
+        An unknown id, or a decision of another tenant, is `404 DECISION_NOT_FOUND`. A decision whose
+        logged inputs include a masked value (`mask: true`, stored only as `masked`) cannot be
+        re-evaluated and is `422 REPLAY_NOT_POSSIBLE`, naming the inputs and never their values. A
+        logged failure replays as the same `422` problem as at evaluation, with the logged `decisionId`.
+      parameters:
+        - name: decisionId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+      responses:
+        '200':
+          description: The re-evaluated decision, identical to the logged one
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionResult'
+              example:
+                decisionId: 01KCS3W1DQ0M8V6T2B9R5N7K4E
+                ruleSet: card-fee
+                version: 1
+                evalClock: '2026-11-20T10:00:00Z'
+                evaluatedAt: '2026-11-20T10:00:00Z'
+                clockChosen: false
+                pinned: false
+                outcome: MATCHED
+                matchedRuleIds: [R3]
+                outputs:
+                  fee: { currency: VND, amount: 50000 }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /decisions/{id}:
     get:
       tags: [decisions]
       operationId: getDecision
       summary: Read one logged decision of the caller's tenant
       description: |
-        Permission `rules:log:read`. Returns the `rle_decision` row as stored. An input declared
+        Permission `rules:log:read`. Returns the `rle_decision` row as stored, with `evalClock`,
+        `clockChosen` and `pinned`, so a back-dated or pinned decision never reads as a normal one. An input declared
         `mask: true` (or masked by the host's or tenant's `decision-log.mask-default`) appears as
         `hmac:<keyId>:<hex>`, the HMAC-SHA256 of its plain value under the tenant's masking key; the plain
         value is not available anywhere after evaluation (RLE-012). A decision of another tenant is
@@ -687,11 +1001,15 @@ paths:
                 matchedRuleIds: [R1]
                 callerId: teller
                 correlationId: 7f3c2a10-5b2e-4f7a-9c1d-2e6b8a4d0f13
+                evalClock: '2027-01-15T02:00:00Z'
                 evaluatedAt: '2027-01-15T02:00:00Z'
+                clockChosen: false
+                pinned: false
                 durationMicros: 41
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /decisions:find-by-masked-input:
     post:
       tags: [decisions]
@@ -734,16 +1052,8 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
-        '429':
-          description: Past `masking.search.max-per-minute` for this caller; retry after the given seconds
-          headers:
-            Retry-After:
-              description: Seconds until the next search is allowed
-              schema: { type: integer, minimum: 1 }
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
+        '429': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     hostAuth:
@@ -765,14 +1075,29 @@ components:
       schema:
         type: integer
         minimum: 1
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: |
+        Written to the decision row of an evaluation and carried as `correlationId` by the event a command
+        writes. Not part of the idempotent request: a replay
+        with another correlation id returns the original result. When absent or malformed (more than 128 characters,
+        or characters outside `A-Z a-z 0-9 . _ : -`), the engine uses a generated id.
+      schema:
+        type: string
     IdempotencyKey:
       name: Idempotency-Key
       in: header
       required: false
       description: |
-        A replay with the same request returns the original result and changes nothing. The same
-        key with a different request is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; while the first
-        request runs it is `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`. Remembered 24 hours.
+        Accepted by every endpoint that writes. A replay with the same request returns the original
+        status and body and changes nothing. The same key with a different request is
+        `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` (a client defect: do not retry). A second request with the
+        key while the first is still running is `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`: wait
+        that many seconds and send the same request again, which then replays the first result.
+        Keys are scoped to the tenant and the operation and remembered 24 hours
+        (`idempotency.retention`).
       schema:
         type: string
         minLength: 1
@@ -861,10 +1186,15 @@ components:
         RFC 9457 problem; see the wiki page Common Error Codes. `401 UNAUTHENTICATED` carries a
         `WWW-Authenticate` challenge (the host's `horus.bpm.security.challenge`, `Bearer` by default, with
         `error="invalid_token"` when no tenant could be resolved for the caller). `403` is
-        `PERMISSION_DENIED` when the caller lacks the endpoint's permission, `SELF_APPROVAL_FORBIDDEN` for a
-        maker approving their own version, `DRAFT_AUTHORING_DISABLED` when the host turned draft editing off, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
+        `PERMISSION_DENIED` when the caller lacks the endpoint's permission (or, on `:withdraw`, is not the
+        requester), `CLOCK_NOT_ALLOWED` for a chosen `clock` without `rules:simulate`,
+        `SELF_APPROVAL_FORBIDDEN` for a maker approving or rejecting their own version, `DRAFT_AUTHORING_DISABLED` when the host turned draft editing off, or `TENANT_NOT_ALLOWED` when an `X-Tenant-Id` header names
         another tenant than the caller's while tenant switching is off, or the principal's tenant attribute
-        contradicts the resolved tenant (RLE-018, RLE-037).
+        contradicts the resolved tenant (RLE-018, RLE-037). `428 PRECONDITION_REQUIRED` is a command
+        that must be conditional sent without `If-Match`. `500 INTERNAL_ERROR` carries only a
+        `correlationId`, never a stack trace, class name, SQL or table name; the same id is in the
+        server log. `type` is
+        `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#<code in lower case>`.
       headers:
         WWW-Authenticate:
           description: Sent with every `401`
@@ -917,6 +1247,10 @@ components:
         requestedAt: { type: [string, 'null'], format: date-time }
         approvedBy: { type: [string, 'null'] }
         approvedAt: { type: [string, 'null'], format: date-time }
+        retiredAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the version was retired, by hand or as superseded; null while it is not retired
         createdBy:
           type: [string, 'null']
           description: Who imported the version; neither the author nor the requester may approve it
@@ -960,11 +1294,13 @@ components:
         caller's permissions and the four-eyes rule: `request-publish` on a `DRAFT` with
         `rules:author`; `approve` on a `PENDING_APPROVAL` with `rules:approve` when the caller is
         neither the requester nor the author; `reject` on a `PENDING_APPROVAL` with
-        `rules:approve` when the caller is not the requester. A hint for screens only: the engine
-        checks again on every command.
+        `rules:approve` when the caller is not the requester; `withdraw` on a `PENDING_APPROVAL`
+        with `rules:author` for its requester only (PD-089), who never gets `approve` or `reject`;
+        `retire` on a `PUBLISHED` version with `rules:approve`.
+        A hint for screens only: the engine checks again on every command.
       items:
         type: string
-        enum: [request-publish, approve, reject]
+        enum: [request-publish, approve, reject, withdraw, retire]
     RuleSetSummary:
       type: object
       required: [ruleSet, latestVersion, latestStatus, publishedVersion, lastChangedAt]
@@ -1039,7 +1375,7 @@ components:
       properties:
         action:
           type: string
-          enum: [CREATED, REQUESTED, APPROVED, REJECTED, DRAFT_UPDATED]
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRED]
         fromStatus:
           type: [string, 'null']
           enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, null]
@@ -1049,7 +1385,17 @@ components:
         actor: { type: string }
         reason:
           type: [string, 'null']
-          description: The rejection reason or the approval comment
+          description: The rejection, withdrawal or retirement reason (`SUPERSEDED` when superseded), or the approval comment
+        supersededBy:
+          type: [integer, 'null']
+          description: Present on a `RETIRED` entry only; the version that took over when superseded, null when retired by hand
+        approvalMode:
+          type: [string, 'null']
+          enum: [single, four-eyes, system, null]
+          description: Present on a `RETIRED` entry only; how the retirement was approved (`system` when superseded)
+        noVersionInEffect:
+          type: [boolean, 'null']
+          description: Present on a `RETIRED` entry only; true when the retirement left the rule set with no version in effect (PD-101)
         lockVersion: { type: integer }
         occurredAt: { type: string, format: date-time }
         canonicalHash:
@@ -1068,6 +1414,21 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/HistoryEntry'
+    RetireRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Why the version is taken out of service; stored in the history and the event
+        confirmNoVersionInEffect:
+          type: boolean
+          default: false
+          description: |
+            True to accept that the retirement leaves the rule set with no version in effect (PD-101);
+            needed when the version is the last one in effect, unless the host refuses it outright
     RejectRequest:
       type: object
       required: [reason]
@@ -1077,6 +1438,13 @@ components:
           minLength: 1
           maxLength: 2000
           description: Why the version goes back to its author; stored in the history and the event
+    WithdrawRequest:
+      type: object
+      properties:
+        reason:
+          type: [string, 'null']
+          maxLength: 2000
+          description: Optional; why the requester takes the request back. Stored in the history and the event
     FieldChange:
       type: object
       required: [path, from, to, nonAscii]
@@ -1232,14 +1600,114 @@ components:
           type: object
           description: Input values by name; money as `Money`
           additionalProperties: true
+        clock:
+          type: string
+          format: date-time
+          description: |
+            The instant the decision reasons about, ISO 8601 with `Z` or an offset, for example
+            `2026-11-20T10:00:00Z`. Selects the version in force and feeds `today()` and `now()`.
+            Needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`); default the host clock.
+    SimulationRequest:
+      type: object
+      required: [samples]
+      properties:
+        samples:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [inputs]
+            properties:
+              inputs:
+                type: object
+                description: Input values by name; money as `Money`
+                additionalProperties: true
+    SimulationResult:
+      type: object
+      required: [ruleSet, version, status, baselineVersion, evaluatedAt, sampleCount, changedCount, results]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        status:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+        baselineVersion:
+          type: [integer, 'null']
+          description: The version effective at `evaluatedAt`, or null when nothing is effective
+        evaluatedAt: { type: string, format: date-time }
+        sampleCount: { type: integer }
+        changedCount:
+          type: integer
+          description: How many results have `changed` set
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatedSample'
+    SimulatedSample:
+      type: object
+      required: [index, changed, simulated, baseline]
+      properties:
+        index:
+          type: integer
+          description: Position of the sample in the request, from 0
+        changed:
+          type: boolean
+          description: The outcome kind, an output value or the failure code differs, or there is no baseline
+        simulated:
+          $ref: '#/components/schemas/SimulatedOutcome'
+        baseline:
+          oneOf:
+            - $ref: '#/components/schemas/SimulatedOutcome'
+            - type: 'null'
+    SimulatedOutcome:
+      type: object
+      required: [outcome, matchedRuleIds, outputs]
+      properties:
+        outcome:
+          type: string
+          enum: [MATCHED, NO_MATCH, FAILED]
+        matchedRuleIds:
+          type: array
+          items: { type: string }
+        outputs:
+          type: object
+          additionalProperties: true
+          description: Output values by name; money as `Money`. Empty on `FAILED`
+        error:
+          type: object
+          description: Present on `FAILED` only
+          required: [code, detail]
+          properties:
+            code:
+              type: string
+              enum: [EVALUATION_ERROR, UNIQUE_HIT_VIOLATION]
+            detail: { type: string }
     DecisionResult:
       type: object
-      required: [decisionId, ruleSet, version, evaluatedAt, outcome, matchedRuleIds, outputs]
+      required: [decisionId, ruleSet, version, evalClock, evaluatedAt, clockChosen, pinned, outcome, matchedRuleIds, outputs]
       properties:
         decisionId: { type: string }
         ruleSet: { type: string }
         version: { type: integer }
-        evaluatedAt: { type: string, format: date-time }
+        evalClock:
+          type: string
+          format: date-time
+          description: The instant the decision reasoned about, the request's `clock` or the host clock; logged as `eval_clock` and used again by replay
+        evaluatedAt:
+          type: string
+          format: date-time
+          description: When the evaluation ran; equals `evalClock` unless a clock was chosen
+        clockChosen:
+          type: boolean
+          description: |
+            True when the caller chose the clock, so the decision is back-dated or forward-dated. The
+            decision row records it the same way, as an `eval_clock` different from `created_at`.
+        pinned:
+          type: boolean
+          description: |
+            True when the caller named the version (`rules:pin`) instead of the clock selecting the
+            version in force. Set by the engine and stored on the decision row; never read from a request.
         outcome:
           type: string
           enum: [MATCHED, NO_MATCH]
@@ -1255,7 +1723,8 @@ components:
           additionalProperties: true
     LoggedDecision:
       type: object
-      required: [decisionId, ruleSet, version, hitPolicy, outcome, inputs, matchedRuleIds, evaluatedAt, durationMicros]
+      required: [decisionId, ruleSet, version, hitPolicy, outcome, inputs, matchedRuleIds, evalClock, evaluatedAt,
+        clockChosen, pinned, durationMicros]
       properties:
         decisionId: { type: string }
         ruleSet: { type: string }
@@ -1286,7 +1755,24 @@ components:
           items: { type: string }
         callerId: { type: [string, 'null'] }
         correlationId: { type: [string, 'null'] }
-        evaluatedAt: { type: string, format: date-time }
+        evalClock:
+          type: string
+          format: date-time
+          description: The instant the decision reasoned about (`eval_clock`), the request's `clock` or the host clock
+        evaluatedAt:
+          type: string
+          format: date-time
+          description: When the decision ran (`created_at`)
+        clockChosen:
+          type: boolean
+          description: |
+            True when the caller chose the clock, so the decision is back-dated or forward-dated:
+            `evalClock` differs from `evaluatedAt`. Derived from two server-set timestamps.
+        pinned:
+          type: boolean
+          description: |
+            True when the caller named the version (`rules:pin`) instead of the engine selecting the
+            version in force. Set by the engine on the decision row; never read from a request.
         durationMicros: { type: integer, format: int64 }
     MaskedInputSearch:
       type: object
@@ -1323,8 +1809,9 @@ components:
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, DECISION_NOT_FOUND,
             VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
-          IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE, RATE_LIMITED, INTERNAL_ERROR, SCHEMA_NOT_READY,
-          PRECONDITION_REQUIRED, DRAFT_AUTHORING_DISABLED]
+            IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
+            PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
+            DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT]
         detail: { type: string }
         correlationId: { type: string }
         violations:
@@ -1347,6 +1834,20 @@ components:
         decisionId:
           type: string
           description: Present on `EVALUATION_ERROR` and `UNIQUE_HIT_VIOLATION`; the failed decision is logged
+        ruleSet:
+          type: string
+          description: Present on `LAST_VERSION_IN_EFFECT`; the rule set that would be left with no version in effect
+        version:
+          type: integer
+          description: Present on `LAST_VERSION_IN_EFFECT`; the version being retired
+        setting:
+          type: string
+          enum: [confirm, refuse]
+          description: Present on `LAST_VERSION_IN_EFFECT`; the host's `lifecycle.retire-last-version`
+        nextEffectiveFrom:
+          type: [string, 'null']
+          format: date-time
+          description: Present on `LAST_VERSION_IN_EFFECT`; the start of a later approved version, or null
         matchedRuleIds:
           type: array
           items: { type: string }

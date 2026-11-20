@@ -54,7 +54,7 @@ class RuleLifecycleIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     // Plain properties, not @ServiceConnection: the same test runs on both Spring Boot lines (TR-EMB-02).
     @org.springframework.test.context.DynamicPropertySource
@@ -127,6 +127,35 @@ class RuleLifecycleIT {
         assertThat(approved.json().path("approvedBy").asString()).isEqualTo("bob");
         assertThat(jdbc.sql("SELECT count(*) FROM rle_decision_outbox WHERE tenant_id = 'bank-a' AND payload->>'ruleSet' = 'card-fee-mc'")
                 .query(Long.class).single()).isEqualTo(3L);
+    }
+
+    /** #241: a lifecycle command's X-Correlation-Id is the correlationId of the event it writes. */
+    @Test
+    void TR_OBS_06_x_correlation_id_of_a_command_is_carried_by_its_event() throws Exception {
+        for (String[] step : new String[][] {
+                {"alice", "/rule-sets", "req-import-41"},
+                {"alice", "/rule-sets/card-fee-corr/versions/1:request-publish", "req-request-41"},
+                {"bob", "/rule-sets/card-fee-corr/versions/1:approve", "req-approve-41"}}) {
+            HttpRequest.Builder request = HttpRequest.newBuilder(uri(step[1]))
+                    .header("Authorization", TestTokens.bearer(step[0])).header("X-Correlation-Id", step[2]);
+            request = step[1].equals("/rule-sets")
+                    ? request.header("Content-Type", "application/yaml")
+                            .POST(HttpRequest.BodyPublishers.ofByteArray(renamed("card-fee-corr")))
+                    : request.POST(HttpRequest.BodyPublishers.noBody());
+            if (step[1].endsWith(":approve")) {
+                // The approver names the lock version reviewed: the version is at 1 after the request.
+                request = request.header("If-Match", "\"1\"");
+            }
+            assertThat(HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString()).statusCode()).isBetween(200, 201);
+        }
+        assertThat(jdbc.sql("""
+                SELECT (payload->>'eventType') || ' ' || (payload->>'correlationId') || ' '
+                  || (payload->>'eventId' = id)::text || ' ' || (payload->>'schemaVersion')
+                FROM rle_decision_outbox WHERE tenant_id = 'bank-a' AND payload->>'ruleSet' = 'card-fee-corr' ORDER BY id
+                """).query(String.class).list()).containsExactly(
+                "rules.version.created.v1 req-import-41 true 1",
+                "rules.version.publish-requested.v1 req-request-41 true 1",
+                "rules.version.published.v1 req-approve-41 true 1");
     }
 
     @Test
@@ -345,8 +374,9 @@ class RuleLifecycleIT {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(renamed("card-fee-roles-2"))).build(),
                 HttpResponse.BodyHandlers.ofString());
 
-        // Then /me lists read and approve, and the engine allows exactly those
-        assertThat(JSON.readTree(me.body()).path("permissions").toString()).isEqualTo("[\"rules:read\",\"rules:approve\"]");
+        // Then /me lists read, approve and simulate, and the engine allows exactly those
+        assertThat(JSON.readTree(me.body()).path("permissions").toString())
+                .isEqualTo("[\"rules:read\",\"rules:approve\",\"rules:simulate\"]");
         assertThat(approve.statusCode()).isEqualTo(200);
         assertThat(JSON.readTree(approve.body()).path("approvedBy").asString()).isEqualTo("minh");
         assertThat(importAttempt.statusCode()).isEqualTo(403);

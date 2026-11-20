@@ -62,6 +62,17 @@ class CoreArchitectureTest {
     }
 
     @Test
+    void RLE_021_the_reference_feel_engine_is_reachable_from_tests_only() {
+        // The reference FEEL implementation is the oracle of the differential test; it never ships. The enforcer
+        // rule of the root POM refuses it, and Scala, in compile, runtime and provided scope in every module.
+        noClasses()
+                .should().dependOnClassesThat()
+                .resideInAnyPackage("org.camunda.feel..", "scala..", "fastparse..")
+                .because("the reference FEEL implementation is test scope only (RLE-021, TR-STD-02)")
+                .check(core);
+    }
+
+    @Test
     void TR_EMB_03_core_has_no_framework_or_sql_imports() {
         noClasses()
                 .should().dependOnClassesThat()
@@ -122,6 +133,26 @@ class CoreArchitectureTest {
                 .should().dependOnClassesThat().resideInAnyPackage("io.github.dhluong90.bpm.rules.internal..",
                         "io.github.dhluong90.bpm.rules.internal..")
                 .because("internal has no compatibility promise (ADR-0016)")
+                .check(core);
+    }
+
+    @Test
+    void TR_TEN_01_the_engine_to_engine_entry_point_stays_out_of_the_host_api() {
+        noClasses()
+                .that().resideInAnyPackage("io.github.dhluong90.bpm.rules.api..", "io.github.dhluong90.bpm.rules.spi..")
+                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules.embedded..")
+                .because("the host-facing API never leads to the tenant-scoped entry point (ADR-0027)")
+                .check(core);
+        noClasses()
+                .that().resideInAPackage("io.github.dhluong90.bpm.rules.embedded..")
+                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules.internal..")
+                .because("the engine-to-engine package uses only JDK and rules.api types (ADR-0016)")
+                .check(core);
+        noClasses()
+                .that().resideOutsideOfPackages("io.github.dhluong90.bpm.rules.embedded..",
+                        "io.github.dhluong90.bpm.rules.internal.service..")
+                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules.embedded..")
+                .because("only RuleEngines builds the tenant-scoped entry point (ADR-0027)")
                 .check(core);
     }
 

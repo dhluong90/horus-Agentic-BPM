@@ -1,0 +1,12 @@
+# The normal form of the clock readings today() and now() in rule-set.v1 cells (ADR-0026), added in 0.2.0 (#22).
+# Additive to normal-form.v1.txt, which stays byte for byte as frozen: before 0.2.0 no document holding these texts
+# could be imported, so no stored hash depends on them. Frozen from 0.2.0 like that file: a changed line is a new
+# schema version, never a patch. A comparison with a clock reading is not a literal test, so it keeps its text.
+# Format: kind | type of x | cell as authored | normal form.
+when | date     | == today()                                  | == today()
+when | date     | x == today()                                | x == today()
+when | date     | <= today()                                  | <= today()
+when | datetime | < now()                                     | < now()
+when | datetime |   >=  now()                                 | >=  now()
+then | date     | today()                                     | today()
+then | datetime | now()                                       | now()

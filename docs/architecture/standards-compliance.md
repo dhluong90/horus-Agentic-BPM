@@ -180,7 +180,7 @@ Licences checked on 2026-11-18 from each project's repository licence file; they
 | `12.50 USD` | `money(12.50, "USD")` (HORUS extension function) |
 | `startsWith`, `endsWith`, `contains`, `matches` | `starts with`, `ends with`, `contains`, `matches` |
 | `len(s)`, `lower(s)`, `upper(s)`, `trim(s)` | `string length(s)`, `lower case(s)`, `upper case(s)`, `replace(s, "^\s+|\s+$", "")` |
-| `min(a, b)`, `max(a, b)`, `abs(x)`, `floor(x)`, `ceil(x)`, `round(x, n)` | `min(a, b)`, `max(a, b)`, `abs(x)`, `floor(x)`, `ceiling(x)`, `round half even(x, n)` |
+| `min(a, b)`, `max(a, b)`, `abs(x)`, `floor(x)`, `ceil(x)`, `round(x, n)` | `min(a, b)`, `max(a, b)`, `abs(x)`, `floor(x)`, `ceiling(x)`, `round half even(x, n)` (DMN 1.4 and later; `decimal(x, n)` in every DMN version, the same half-even rounding) |
 | `coalesce(a, b)` | `if a != null then a else b` |
 | `daysBetween(d1, d2)`, `monthsBetween(d1, d2)` | `(d2 - d1).days`, `years and months duration(d1, d2).years * 12 + years and months duration(d1, d2).months` |
 | `addDays(d, n)`, `yearOf(d)`, `monthOf(d)` | `d + duration("P1D") * n`, `d.year`, `d.month` |

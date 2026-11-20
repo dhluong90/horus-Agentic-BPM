@@ -73,13 +73,13 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `income = null, tier = null -> matched R2, R3, R5, R7; R1, R4, R6, R8 not matched`.
 - **Test ID:** `RLE_006_null_follows_feel_three_valued_logic`
 
-### RLE-007 Regex execution is bounded by length and timeout
+### RLE-007 Regex execution is bounded by reads, length and time
 - **Traces to:** `TR-SEC-02`
 - **Milestone:** M1
-- **Given:** Rule using `matches('(a+)+$')` evaluated against adversarial input `"aaaaaaaaaaaaaaaaaaaaaaaaaaaa!"` with `regex-timeout-ms = 50`.
+- **Given:** Rule using `matches('^(a+?)+?$')` evaluated against adversarial input `"aaaaaaaaaaaaaaaaaaaaaaaaaaaa!"` with the defaults `regex-max-reads = 1000000` and `regex-timeout-ms = 50`.
 - **When:** Evaluate the rule set.
-- **Then:** Either publish-time static check rejects nested quantifiers OR runtime aborts within `<= 50 ms` returning `EVALUATION_ERROR` (`REGEX_TIMEOUT`) without hanging the thread.
-- **Example:** `28 'a' + '!' -> abort <= 50ms with EVALUATION_ERROR`.
+- **Then:** The match stops when it has read 1,000,000 characters, a deterministic budget that gives the same outcome on every machine and on replay, or at the latest after `50 ms` (the backstop on a slow machine), returning `EVALUATION_ERROR` with `REGEX_TIMEOUT` on the decision row, without hanging the thread. A text longer than `regex-max-input-length` (default 4,096) fails with `REGEX_INPUT_TOO_LONG` without running the match; a pattern whose backtracking runs out of thread stack fails with `REGEX_TOO_DEEP`. Every character any `matches` reads in one evaluation also counts against `regex-max-reads-per-decision` (default 5,000,000, lower only), the same deterministic count, so a rule set of many `matches` rows stops at that total: `EVALUATION_ERROR` with `REGEX_TIMEOUT`, no partial outputs, the reason on the decision row, and the `detail` naming `evaluation.regex-max-reads-per-decision`. Back-references, look-around, inline flags, possessive quantifiers, character class nesting and intersection, Unicode block names and Java-only escapes are refused at import. Regex engines differ between JVM versions; the example is one the supported JVMs run in exponential time, and the bounds apply to any pattern.
+- **Example:** `28 'a' + '!' against ^(a+?)+?$ -> stopped after 1,000,000 reads, within 50 ms, EVALUATION_ERROR / REGEX_TIMEOUT`; a screening table of 200 rows `matches('[0-9]*K<n>')` on a 500-digit remittance reference, about 125,000 reads per row -> stopped at 5,000,000 reads for the decision, the same detail on every run, EVALUATION_ERROR / REGEX_TIMEOUT.
 - **Test ID:** `RLE_007_regex_timeout_aborts_adversarial_input`
 
 ---
@@ -100,7 +100,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** User `alice` (`rules:author`, `rules:approve`) creates `card-fee` v2 and calls `:request-publish`.
 - **When:** `alice` invokes `VersionService.approve(...)` directly OR calls `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve`.
-- **Then:** Both Java API and REST (`403 SELF_APPROVAL_FORBIDDEN`) reject the approval; version remains `PENDING_APPROVAL`. Only distinct identity `bob` (`rules:approve`) succeeds.
+- **Then:** Both Java API and REST (`403 SELF_APPROVAL_FORBIDDEN`) reject the approval; version remains `PENDING_APPROVAL`. Only distinct identity `bob` (`rules:approve`) succeeds. The Rule Engine always applies `makers`: the same refusal holds when the host sets `lifecycle.approver-must-differ-from` to `requester`, and `/api/bpm/meta` reports `makers`.
 - **Example:** `requester=alice, approver=alice -> 403; approver=bob -> 200 PUBLISHED`.
 - **Test ID:** `RLE_009_maker_checker_blocks_self_approval`
 
@@ -295,7 +295,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v1 `PUBLISHED`, effective since `2026-11-01T00:00:00Z`; `card-fee` v2 approved at `2026-11-25T10:00:00Z` with `effectiveFrom: 2026-12-01T00:00:00Z`; two replicas share one database; `TestClock` drives both. Second case: rule set `fx-margin` v3 `PUBLISHED` and v4 approved with `effectiveFrom` equal to the approval instant.
 - **When:** The clock moves from `2026-11-30T23:59:59Z` to `2026-12-01T00:00:01Z`; each replica evaluates `card-fee`; then the lifecycle sweep (`DESIGN.md` section 3.3.2) runs on both replicas at the same moment, through PgBouncer in transaction mode in the pooler leg. In the second case v4's approval commits.
-- **Then:** At `2026-11-30T23:59:59Z` v1 is `PUBLISHED` and evaluation selects v1. At `2026-12-01T00:00:01Z` evaluation selects v2 on both replicas whether or not v1's status has changed yet, because selection follows the effective date (`RLE-008`). After the maintenance run v1 is `RETIRED` and exactly one `rules.version.retired.v1` event exists for it, with actor `system`, reason `SUPERSEDED` and `supersededBy: 2`, and exactly one history row `RETIRED`, although both replicas ran; no advisory lock was taken. An evaluation of v1's decision with `clock = 2026-11-20T10:00:00Z` still selects v1. In the second case v3 is `RETIRED` in the transaction that publishes v4, with one retired event.
+- **Then:** At `2026-11-30T23:59:59Z` v1 is `PUBLISHED` and evaluation selects v1. At `2026-12-01T00:00:01Z` evaluation selects v2 on both replicas whether or not v1's status has changed yet, because selection follows the effective date (`RLE-008`). After the maintenance run v1 is `RETIRED` and exactly one `rules.version.retired.v1` event exists for it, with actor `system:supersession`, reason `SUPERSEDED` and `supersededBy: 2`, and exactly one history row `RETIRED`, although both replicas ran; no advisory lock was taken. An evaluation of v1's decision with `clock = 2026-11-20T10:00:00Z` still selects v1. In the second case v3 is `RETIRED` in the transaction that publishes v4, with one retired event.
 - **Example:** `clock 2026-12-01T00:00:01Z -> evaluate selects v2; after the sweep on 2 replicas -> v1 RETIRED, 1 retired event (actor system, reason SUPERSEDED)`.
 - **Test ID:** `RLE_027_previous_version_retires_once_when_newer_becomes_effective`
 
@@ -553,8 +553,8 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Tenant `bank-a`; `card-fee` v2 `PENDING_APPROVAL`, created and requested by `lan`; v3 `DRAFT` created by `lan`; v1 `PUBLISHED`. `lan` holds `rules:read`, `rules:author` and `rules:approve`; `minh` holds `rules:read` and `rules:approve`; `dan` holds `rules:read` only.
 - **When:** Each of them reads v1, v2 and v3 with `GET .../versions/{v}` and lists the versions.
-- **Then:** On v2 `lan` gets `allowedActions: []` (`approve` and `reject` are absent because `lan` requested it; `withdraw` arrives with `RLE-046`), `minh` gets `["approve", "reject"]`, `dan` gets `[]`. On v3 `lan` gets `["request-publish"]` and `minh` gets `[]`. On v1 everyone gets `[]`. The list items carry the same values. `lan`'s `approve` of v2 is still refused with `403 SELF_APPROVAL_FORBIDDEN`, because `allowedActions` is a hint and the command checks again. An idempotent replay of a command returns the actions computed for the caller at replay time, not the stored ones.
-- **Example:** `v2 requested by lan -> lan: [], minh: [approve, reject], dan: []`.
+- **Then:** On v2 `lan` gets `allowedActions: ["withdraw"]` (`approve` and `reject` are absent because `lan` requested it; `withdraw` is the requester's action, `RLE-046`), `minh` gets `["approve", "reject"]`, `dan` gets `[]`. On v3 `lan` gets `["request-publish"]` and `minh` gets `[]`. On v1 `lan` and `minh` get `["retire"]` (they hold `rules:approve`, #28) and `dan` gets `[]`; a retired version gives everyone `[]`. The list items carry the same values. `lan`'s `approve` of v2 is still refused with `403 SELF_APPROVAL_FORBIDDEN`, because `allowedActions` is a hint and the command checks again. An idempotent replay of a command returns the actions computed for the caller at replay time, not the stored ones.
+- **Example:** `v2 requested by lan -> lan: [withdraw], minh: [approve, reject], dan: []`.
 - **Test ID:** `RLE_043_allowed_actions_follow_permissions_and_four_eyes`
 
 ### RLE-044 Command and evaluation bodies are read up to their limit; a larger body is `413 PAYLOAD_TOO_LARGE`
