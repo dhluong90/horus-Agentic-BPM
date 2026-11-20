@@ -247,6 +247,83 @@ class AcknowledgeWarningsTest {
     }
 
     @Test
+    void RLE_053_each_warning_says_whether_the_approval_must_acknowledge_it_and_the_approve_check_agrees() {
+        // Given the same kyc-routing v1 pending at bank-a, which logs undeclared inputs in plain text, and at bank-c,
+        // which masks them by default; both tenants list "contact note" as personal data
+        policy.names.put("bank-a", PersonalDataNames.builtIn().plus(List.of("contact note")));
+        policy.names.put("bank-c", PersonalDataNames.builtIn().plus(List.of("contact note")));
+        policy.maskByDefault.add("bank-c");
+        VersionService versions = versions();
+        RuleSetVersion atBankA = pending(versions, "bank-a");
+        RuleSetVersion atBankC = pending(versions, "bank-c");
+
+        // When each approver reads the version
+        caller.become("bank-a", "bob", APPROVER);
+        RuleSetVersion readAtBankA = versions.find("kyc-routing", 1, false).orElseThrow();
+        caller.become("bank-c", "bob", APPROVER);
+        RuleSetVersion readAtBankC = versions.find("kyc-routing", 1, false).orElseThrow();
+
+        // Then bank-a marks both warnings and bank-c, whose default masks them, marks neither
+        assertThat(atBankA.warnings()).extracting(w -> w.input() + "=" + w.requiresAcknowledgement())
+                .containsExactly("nationalId=true", "contactNote=true");
+        assertThat(readAtBankA.warnings()).isEqualTo(atBankA.warnings());
+        assertThat(readAtBankC.warnings()).extracting(w -> w.input() + "=" + w.requiresAcknowledgement())
+                .containsExactly("nationalId=false", "contactNote=false");
+
+        // And the approve check accepts exactly the marked pairs: none is refused at bank-a, none needed at bank-c
+        caller.become("bank-a", "bob", APPROVER);
+        assertThatThrownBy(() -> versions.approve("kyc-routing", 1, approval(atBankA, "m-1")))
+                .isInstanceOfSatisfying(WarningsNotAcknowledgedException.class,
+                        e -> assertThat(e.warnings()).extracting(Unacknowledged::input)
+                                .containsExactly("nationalId", "contactNote"));
+        assertThat(versions.approve("kyc-routing", 1, approval(atBankA, "m-2", marked(readAtBankA))).status())
+                .isEqualTo(VersionStatus.PUBLISHED);
+        caller.become("bank-c", "bob", APPROVER);
+        assertThat(marked(readAtBankC)).isEmpty();
+        assertThat(versions.approve("kyc-routing", 1, approval(atBankC, "m-3", marked(readAtBankC))).status())
+                .isEqualTo(VersionStatus.PUBLISHED);
+    }
+
+    @Test
+    void RLE_053_a_host_that_lists_no_code_marks_no_warning() {
+        // Given a host whose lifecycle.acknowledge-warnings is empty
+        VersionService versions = versions(EngineSettings.defaults().withAcknowledgeWarnings(List.of()));
+
+        // When
+        RuleSetVersion pending = pending(versions, "bank-a");
+
+        // Then the warning is still shown, and needs no acknowledgement
+        assertThat(pending.warnings()).singleElement().satisfies(w -> {
+            assertThat(w.input()).isEqualTo("nationalId");
+            assertThat(w.requiresAcknowledgement()).isFalse();
+        });
+    }
+
+    @Test
+    void RLE_053_the_mark_is_written_with_the_response_and_a_response_recorded_before_it_reads_as_false() {
+        // Given kyc-routing v1 pending at bank-a, its nationalId warning marked
+        RuleSetVersion pending = pending(versions(), "bank-a");
+        String json = io.github.dhluong90.bpm.rules.internal.json.EngineValues.write(
+                io.github.dhluong90.bpm.rules.internal.json.EngineValues.version(pending));
+
+        // When the JSON is read back, and read again without the field, as a replay recorded before it existed
+        RuleSetVersion replayed = io.github.dhluong90.bpm.rules.internal.json.EngineValues.versionFromJson(json);
+        RuleSetVersion older = io.github.dhluong90.bpm.rules.internal.json.EngineValues.versionFromJson(
+                json.replace(",\"requiresAcknowledgement\":true", ""));
+
+        // Then
+        assertThat(json).contains("\"input\":\"nationalId\"", "\"requiresAcknowledgement\":true");
+        assertThat(replayed.warnings()).isEqualTo(pending.warnings());
+        assertThat(older.warnings()).singleElement().satisfies(w -> assertThat(w.requiresAcknowledgement()).isFalse());
+    }
+
+    /** The pairs a client sends: exactly the warnings the engine marked. */
+    static AcknowledgedWarning[] marked(RuleSetVersion version) {
+        return version.warnings().stream().filter(w -> w.requiresAcknowledgement())
+                .map(w -> new AcknowledgedWarning(w.code(), w.input())).toArray(AcknowledgedWarning[]::new);
+    }
+
+    @Test
     void RLE_053_without_the_code_in_the_setting_no_acknowledgement_is_needed() {
         // Given a host whose lifecycle.acknowledge-warnings is empty
         VersionService versions = versions(EngineSettings.defaults().withAcknowledgeWarnings(List.of()));

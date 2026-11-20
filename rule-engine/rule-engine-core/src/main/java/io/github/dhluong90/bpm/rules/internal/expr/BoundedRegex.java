@@ -20,6 +20,9 @@ import java.util.regex.PatternSyntaxException;
  *   <li>the same reads are charged to the decision: every match of one evaluation reads from
  *       {@code evaluation.regex-max-reads-per-decision} (5,000,000 by default), so a rule set of many {@code matches}
  *       rows stops at that total, deterministically too ({@value #REGEX_TIMEOUT});</li>
+ *   <li>and to the request: every decision of one request of many items reads from
+ *       {@code evaluation.regex-max-reads-per-request} (50,000,000 by default), so a request of many items stops at
+ *       that total, at the same item on every replay ({@value #REGEX_TIMEOUT});</li>
  *   <li>the wall-clock {@code evaluation.regex-timeout-ms} is the backstop on a slow machine, checked every
  *       {@value #CHECK_EVERY} reads ({@value #REGEX_TIMEOUT});</li>
  *   <li>a pattern whose backtracking recurses past the thread's stack fails the decision instead of the thread
@@ -186,19 +189,33 @@ public final class BoundedRegex {
             throw new EvaluationException(REGEX_INPUT_TOO_LONG, "matches() was given " + text.length()
                     + " characters; the limit is " + limits.maxInputLength() + " (evaluation.regex-max-input-length)");
         }
-        // The decision's remainder binds when it is below one match's own cap.
-        boolean decisionBinds = decision.left() < limits.maxReads();
-        int reads = decisionBinds ? (int) decision.left() : limits.maxReads();
-        Budget budget = new Budget(reads, System.nanoTime() + limits.timeoutMillis() * 1_000_000L);
+        // The smallest of the match's own cap, the decision's remainder and the request's remainder binds.
+        RequestReads request = decision.request();
+        Bound bound = Bound.MATCH;
+        long reads = limits.maxReads();
+        if (decision.left() < reads) {
+            bound = Bound.DECISION;
+            reads = decision.left();
+        }
+        if (request != null && request.left() < reads) {
+            bound = Bound.REQUEST;
+            reads = request.left();
+        }
+        Budget budget = new Budget((int) reads, System.nanoTime() + limits.timeoutMillis() * 1_000_000L);
         try {
             return pattern.matcher(new BudgetedText(text, budget, 0, text.length())).find();
         } catch (ReadsSpent e) {
-            throw new EvaluationException(REGEX_TIMEOUT, decisionBinds
-                    ? "matches() stopped: the decision's regular expressions read " + limits.maxReadsPerDecision()
-                            + " characters in all (evaluation.regex-max-reads-per-decision); simplify the patterns"
-                            + " or use fewer matches() rows"
-                    : "matches() stopped after reading " + limits.maxReads()
-                            + " characters (evaluation.regex-max-reads); simplify the pattern");
+            throw new EvaluationException(REGEX_TIMEOUT, switch (bound) {
+                case MATCH -> "matches() stopped after reading " + limits.maxReads()
+                        + " characters (evaluation.regex-max-reads); simplify the pattern";
+                case DECISION -> "matches() stopped: the decision's regular expressions read "
+                        + limits.maxReadsPerDecision() + " characters in all (evaluation.regex-max-reads-per-decision);"
+                        + " simplify the patterns or use fewer matches() rows";
+                case REQUEST -> {
+                    request.stop();
+                    yield requestSpentDetail(request);
+                }
+            });
         } catch (Expired e) {
             throw new EvaluationException(REGEX_TIMEOUT, "matches() ran longer than " + limits.timeoutMillis()
                     + " ms and was stopped (evaluation.regex-timeout-ms)");
@@ -211,6 +228,21 @@ public final class BoundedRegex {
             decision.spend(budget.used());
         }
     }
+
+    /**
+     * The detail of an item stopped by, or not run because of, the request's budget.
+     *
+     * @param request the request
+     * @return the detail, naming {@code evaluation.regex-max-reads-per-request}
+     */
+    public static String requestSpentDetail(RequestReads request) {
+        return "matches() stopped: the request's regular expressions read " + request.budget()
+                + " characters in all (evaluation.regex-max-reads-per-request); send fewer items or simplify the"
+                + " patterns";
+    }
+
+    /** Which budget limited a match. */
+    private enum Bound { MATCH, DECISION, REQUEST }
 
     /** Reads left and the deadline of one match, shared by every view of its text. */
     private static final class Budget {

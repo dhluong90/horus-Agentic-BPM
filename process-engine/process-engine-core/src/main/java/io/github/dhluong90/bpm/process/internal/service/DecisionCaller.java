@@ -14,11 +14,36 @@ public sealed interface DecisionCaller {
      * Engine-owned work with no caller signed in: a step reached after a timer. The decision is evaluated in the
      * tenant read from the locked instance row, as {@link #ENGINE_IDENTITY}, on behalf of nobody.
      *
-     * @param actor the engine actor that triggered the step, for example {@code system:timer}
+     * <p>Not a record: its constructor is package-private, so only the engine's timer path can ask for engine work,
+     * and host code holding a {@link ServiceInvoker} cannot use the tenant-scoped entry point (#336).
      */
-    record Engine(String actor) implements DecisionCaller {
-        public Engine {
-            Objects.requireNonNull(actor, "actor must not be null");
+    final class Engine implements DecisionCaller {
+
+        private final String actor;
+
+        /** @param actor the engine actor that triggered the step, for example {@code system:timer} */
+        Engine(String actor) {
+            this.actor = Objects.requireNonNull(actor, "actor must not be null");
+        }
+
+        /** @return the engine actor that triggered the step */
+        public String actor() {
+            return actor;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Engine other && actor.equals(other.actor);
+        }
+
+        @Override
+        public int hashCode() {
+            return actor.hashCode();
+        }
+
+        @Override
+        public String toString() {
+            return "Engine[actor=" + actor + "]";
         }
     }
 

@@ -1,7 +1,7 @@
 package io.github.dhluong90.bpm.process.internal.service;
 
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
-import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
+import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.process.internal.exec.Effect;
 import io.github.dhluong90.bpm.process.internal.exec.StepResult;
 import io.github.dhluong90.bpm.process.spi.HandlerResult;
@@ -38,14 +38,15 @@ public final class LocalServiceInvoker implements ServiceInvoker {
     /**
      * @param handlers registered handlers by name
      * @param ruleEngine the Rule Engine, or empty when the host has none
-     * @param engineWork the Rule Engine's tenant-scoped entry point for this engine's identity, built by the wiring
-     *     and never a bean; empty fails a decision after a timer closed with {@code TENANT_NOT_ALLOWED}
+     * @param grant the Rule Engine's one-time grant of the tenant-scoped entry point; the decision port claims it
+     *     here, once, so a second invoker over the same grant fails. Empty fails a decision after a timer closed with
+     *     {@code TENANT_NOT_ALLOWED}
      * @param slowCallWarning calls longer than this are logged at WARNING ({@code handlers.slow-call-warning})
      */
     public LocalServiceInvoker(Map<String, ServiceTaskHandler> handlers, Optional<RuleEngine> ruleEngine,
-            Optional<TenantScopedRuleEngine> engineWork, java.time.Duration slowCallWarning) {
+            Optional<EmbeddedEngineGrant> grant, java.time.Duration slowCallWarning) {
         this.handlers = Map.copyOf(handlers);
-        this.decisions = ruleEngine.map(engine -> new RuleEngineDecisionPort(engine, engineWork));
+        this.decisions = ruleEngine.map(engine -> new RuleEngineDecisionPort(engine, grant));
         this.slowCallNanos = slowCallWarning.toNanos();
     }
 

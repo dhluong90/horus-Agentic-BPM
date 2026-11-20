@@ -265,12 +265,17 @@ public record RuleEngineProperties(
      *     5000000; default 5000000. Counted the same deterministic way as {@code regex-max-reads}, so a rule set of
      *     many {@code matches()} rows stops at this total; past it the decision fails with {@code REGEX_TIMEOUT}.
      *     Lower only
+     * @param regexMaxReadsPerRequest characters all the {@code matches()} of one request of many decisions (a
+     *     simulation over sample inputs) may read together, 1 to 5000000000; default 50000000. Counted the same
+     *     deterministic way, so a request of many items stops at the first item over this total, at the same item on
+     *     every replay; that item fails with {@code REGEX_TIMEOUT} and no later item is evaluated. May be raised up to
+     *     the ceiling, which is 1000 items times the per-decision ceiling
      * @param pinRetired whether a pinned evaluation ({@code rules:pin}) may name a {@code RETIRED} version; default
      *     false. Replay of a logged decision is not affected
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
             Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
-            Integer regexMaxReads, Integer regexMaxReadsPerDecision, Boolean pinRetired) {
+            Integer regexMaxReads, Integer regexMaxReadsPerDecision, Long regexMaxReadsPerRequest, Boolean pinRetired) {
     }
 
     /**
@@ -367,7 +372,9 @@ public record RuleEngineProperties(
                                         ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength())),
                         evaluation.regexMaxReads() == null ? RegexLimits.MAX_READS : evaluation.regexMaxReads(),
                         evaluation.regexMaxReadsPerDecision() == null
-                                ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision()))
+                                ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision(),
+                        evaluation.regexMaxReadsPerRequest() == null
+                                ? RegexLimits.MAX_READS_PER_REQUEST : evaluation.regexMaxReadsPerRequest()))
                 .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()))
                 .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired())
                 .withLifecycle(

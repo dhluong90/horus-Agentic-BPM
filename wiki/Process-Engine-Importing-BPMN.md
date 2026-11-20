@@ -90,7 +90,20 @@ Inputs to a service or rule step are `horus:input` elements inside `extensionEle
 </bpmn:businessRuleTask>
 ```
 
-The engine skips diagram interchange (`bpmndi`), `documentation`, and extensions of other vendors. They are kept in the stored file but never executed.
+### Accepted and skipped
+
+These parts of a file are accepted and never executed. They do not change the definition hash, and the stored file keeps them as received.
+
+| Part | What the engine does |
+|---|---|
+| Diagram interchange (`bpmndi`) | Skipped. The BPMN export writes a new layout of its own |
+| `documentation` | Skipped |
+| Extensions of other vendors | Skipped. The BPMN export leaves them out |
+| `textAnnotation` and its `text` | Kept as a note on the diagram. The BPMN export writes it back |
+| `association` | Kept as the line from an element to a note. `associationDirection` is `None`, `One` or `Both`. The BPMN export writes it back |
+| `group`, and the `category` with the `categoryValue` it refers to | Kept with the category label. The BPMN export writes the group and its category back |
+
+BPMN modellers add notes, their lines and groups to a diagram, so a file saved from a modeller imports without removing them first. Each note, line and group needs an `id` that no other element in the file uses.
 
 A gateway takes a flow only when its condition is true. A condition that is null or false is not taken; then the `default` flow is taken, and without a `default` the step fails. Money compares only within one currency. The full rules are on [[Rule Engine Expression Language|Rule-Engine-Expression-Language]].
 
@@ -142,6 +155,7 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `RESULT_VARIABLE_REQUIRED` | Add `horus:resultVariable` to the `userTask`, so a completion never overwrites other variables |
 | `INPUT_INVALID`, `INPUT_DUPLICATE` | Give each `horus:input` a unique `name` (letters, digits, `_`) and a `value` |
 | `FLOW_REF_INVALID` | Give the `sequenceFlow` both `sourceRef` and `targetRef` |
+| `ASSOCIATION_DIRECTION_INVALID` | Set `associationDirection` on the `association` to `None`, `One` or `Both`, or leave it out |
 | `NOT_BPMN` | The root element must be `definitions` in `http://www.omg.org/spec/BPMN/20100524/MODEL` |
 | `NO_PROCESS` | Add a `process` element |
 | `XML_MALFORMED` | Fix the XML at the line given |

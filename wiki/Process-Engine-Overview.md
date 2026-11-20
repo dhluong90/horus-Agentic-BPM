@@ -237,4 +237,4 @@ The engine never embeds a model and never calls the network itself (`TR-AGT-03`,
 | `processes:migration:manage` | Create, validate and execute migration plans |
 | `processes:calendar:manage` | Edit business calendars and holidays |
 
-Four-eyes is enforced in `TaskService`: a task with `fourEyes: true` rejects completion by any identity listed in `forbidden_users` with `403 SELF_APPROVAL_FORBIDDEN`, whatever the caller's permissions (`PRE-007`). See [[Multi Tenancy and Security]].
+Four-eyes is enforced in `TaskService`: a task with `fourEyes: true` refuses the identity that started the instance and every identity that completed an earlier task of it, at claim and again at completion, with `403 SELF_APPROVAL_FORBIDDEN`, whatever the caller's permissions (`PRE-007`). The check at completion catches a claimant who completed a parallel task after claiming. See [[Multi Tenancy and Security]].
