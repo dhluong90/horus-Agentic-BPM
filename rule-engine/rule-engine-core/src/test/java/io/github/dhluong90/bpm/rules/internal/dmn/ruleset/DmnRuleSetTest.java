@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.SourceFormat;
+import io.github.dhluong90.bpm.rules.api.UnsupportedStandardException;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.internal.eval.CompiledRuleSet;
 import io.github.dhluong90.bpm.rules.internal.read.ParsedRuleSet;
@@ -286,7 +287,7 @@ class DmnRuleSetTest {
         String rule = "<rule id=\"R1\"><inputEntry><text>-</text></inputEntry><outputEntry><text>true</text></outputEntry></rule>";
 
         assertRefused(table(input, rule).replace("hitPolicy=\"FIRST\"", "hitPolicy=\"PRIORITY\""),
-                "Hit policy PRIORITY arrives in stage S1 (release 1.1)");
+                "Hit policy PRIORITY arrives in stage S1");
         assertRefused(table(input, rule).replace("hitPolicy=\"FIRST\"", "hitPolicy=\"COLLECT\" aggregation=\"SUM\""),
                 "Hit policy COLLECT with aggregation SUM arrives in stage S1");
         assertRefused(table(input, rule.replace("<text>true</text></outputEntry>", "<text>age * 2</text></outputEntry>")),
@@ -295,21 +296,22 @@ class DmnRuleSetTest {
                 "Input expression 'applicant.age' must be a plain input name");
         assertRefused(table(input.replace("typeRef=\"number\"", "typeRef=\"tAge\""), rule),
                 "typeRef 'tAge' of input 'age' is not supported; item definitions arrive in stage S1");
-        assertRefused(table(input, rule).replace("<decision ", "<businessKnowledgeModel id=\"bkm1\" name=\"b\"/><decision "),
-                "<businessKnowledgeModel id=\"bkm1\"> is not supported in this release; it arrives in stage S2 (release 1.2)");
-        assertRefused(table(input, rule).replace("<decision ", "<itemDefinition id=\"tAge\" name=\"tAge\"/><decision "),
-                "<itemDefinition id=\"tAge\"> is not supported in this release; it arrives in stage S1");
-        assertRefused(DMN15 + "<decision id=\"a\" name=\"a\"><literalExpression><text>1</text></literalExpression></decision>"
-                + "</definitions>", "<literalExpression> is not supported in this release; it arrives in stage S1");
+        assertUnsupported(table(input, rule).replace("<decision ", "<businessKnowledgeModel id=\"bkm1\" name=\"b\"/><decision "),
+                "<businessKnowledgeModel id=\"bkm1\"> is not supported; it is added in stage S2");
+        assertUnsupported(table(input, rule).replace("<decision ", "<itemDefinition id=\"tAge\" name=\"tAge\"/><decision "),
+                "<itemDefinition id=\"tAge\"> is not supported; it is added in stage S1");
+        assertUnsupported(DMN15 + "<decision id=\"a\" name=\"a\"><literalExpression><text>1</text></literalExpression></decision>"
+                + "</definitions>", "<literalExpression id=\"a\"> is not supported; it is added in stage S1");
         assertRefused(table(input, rule).replace("</definitions>", "<decision id=\"second\" name=\"second\"/></definitions>"),
                 "More than one <decision>");
         assertRefused(table(input, rule).replace("id=\"rate-check\"", "id=\"Decision_1\"").replace("name=\"rate-check\"", "name=\"Rate check\"")
                         .replace("id=\"d\" name=\"d\"", "id=\"Definitions_1\" name=\"DRD\""),
                 "give the decision a kebab-case id such as card-fee");
-        assertRefused(table(input, rule).replace("<inputExpression ", "<inputExpression expressionLanguage=\"javascript\" "),
-                "expressionLanguage 'javascript' is not FEEL");
-        assertRefused("<definitions xmlns=\"http://www.omg.org/spec/CMMN/20151109/MODEL\"/>",
-                "The root element must be a DMN 1.2 to 1.5 <definitions>");
+        assertThatThrownBy(() -> RuleSetReader.read(SourceFormat.DMN_XML, utf8(table(input, rule)
+                .replace("<inputExpression ", "<inputExpression expressionLanguage=\"javascript\" "))))
+                .isInstanceOf(UnsupportedStandardException.class)
+                .hasMessageContaining("Expression language 'javascript' is not supported");
+        assertRefused("<definitions xmlns=\"urn:xpdl\"/>", "The root element must be a DMN 1.2 to 1.5 <definitions>");
     }
 
     // ------------------------------------------------------------------ XML safety
@@ -364,6 +366,12 @@ class DmnRuleSetTest {
     static String table(String inputs, String rules) {
         return DMN15 + "<decision id=\"rate-check\" name=\"rate-check\"><decisionTable hitPolicy=\"FIRST\">" + inputs
                 + "<output name=\"ok\" typeRef=\"boolean\"/>" + rules + "</decisionTable></decision></definitions>";
+    }
+
+    static void assertUnsupported(String dmn, String message) {
+        assertThatThrownBy(() -> RuleSetReader.read(SourceFormat.DMN_XML, utf8(dmn)))
+                .isInstanceOf(UnsupportedStandardException.class)
+                .hasMessageContaining(message);
     }
 
     static void assertRefused(String dmn, String message) {

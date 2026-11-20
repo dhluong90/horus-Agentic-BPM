@@ -53,6 +53,57 @@ record XmlTree(String namespace, String name, Map<String, String> attributes, Li
         throw new XMLStreamException("External resources are not allowed");
     };
 
+    /** The namespace and start line of a document's root element. */
+    record Root(String namespace, int line) {
+    }
+
+    /**
+     * Reads only as far as the root element's start tag, with the same hardening as {@link #parse(byte[])}. The
+     * answer is empty when the document declares a DTD or an entity, or fails before its root; the full parse then
+     * reports that.
+     *
+     * @param source the UTF-8 bytes
+     * @return the root, if one was reached without a DTD or entity
+     */
+    static Optional<Root> peekRoot(byte[] source) {
+        String document = Quote.utf8(source);
+        if (document.startsWith("\uFEFF")) {
+            document = document.substring(1);
+        }
+        XMLInputFactory factory = XMLInputFactory.newDefaultFactory();
+        factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
+        factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
+        factory.setProperty(XMLInputFactory.IS_NAMESPACE_AWARE, true);
+        factory.setXMLResolver(REFUSE_RESOLVER);
+        factory.setXMLReporter((message, errorType, relatedInformation, location) -> { });
+        XMLStreamReader reader = null;
+        try {
+            reader = factory.createXMLStreamReader(new StringReader(document));
+            while (reader.hasNext()) {
+                int event = reader.next();
+                if (event == XMLStreamConstants.DTD || event == XMLStreamConstants.ENTITY_REFERENCE
+                        || event == XMLStreamConstants.ENTITY_DECLARATION) {
+                    return Optional.empty();
+                }
+                if (event == XMLStreamConstants.START_ELEMENT) {
+                    String ns = reader.getNamespaceURI() == null ? "" : reader.getNamespaceURI();
+                    return Optional.of(new Root(ns, reader.getLocation().getLineNumber()));
+                }
+            }
+            return Optional.empty();
+        } catch (XMLStreamException e) {
+            return Optional.empty();
+        } finally {
+            if (reader != null) {
+                try {
+                    reader.close();
+                } catch (XMLStreamException ignored) {
+                    // nothing to release beyond the byte array
+                }
+            }
+        }
+    }
+
     /**
      * Parses a document.
      *

@@ -700,3 +700,31 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The allowed answer is the step result as given, and `ASYNC_RESULT_ACCEPTED` records it masked by the policy of `ASYNC_RESULT_REFUSED` (`PRE-059`): `{ riskScore: 20, recommendation: APPROVE, summary: "***" }`, `outputFields: 3`, with `guardrailDecisionId`; no history row of the loan contains the national id. The refused answer opens the review task, whose `review` object (task view, `GET /tasks/{id}`, migration V10 `pre_task.review`) carries `code: GUARDRAIL_VIOLATION`, `reasons: [HIGH_RISK_SCORE]`, `ruleIds: [R2]`, `guardrailDecisionId`, the `inputs` the agent saw and the masked `output` with `outputFields`; every other task has no `review`. The reviewer's answer `{ riskScore: 85, recommendation: REFER }` completes the step and the loan moves on to `underwrite`.
 - **Example:** `summary with a national id -> history "***", review task output.summary "***"`.
 - **Test ID:** `PRE_063_an_accepted_agent_answer_is_recorded_masked_by_the_output_schema`, `PRE_063_the_review_task_carries_why_the_answer_was_refused_and_the_masked_answer`
+
+### PRE-107 A CMMN file is refused by name at every BPMN import, before any other check
+- **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
+- **Milestone:** M3
+- **Given:** `claim-case.cmmn`, whose root is `definitions` in namespace `http://www.omg.org/spec/CMMN/20151109/MODEL` (CMMN 1.1), with a `casePlanModel` on line 4.
+- **When:** It is posted to `POST /api/bpm/processes/v1/definitions` as XML (the import path of the design's `definitions:import-bpmn`).
+- **Then:**
+  - It answers `422 CMMN_UNSUPPORTED`. The Problem Details body has the detail "CMMN is not supported; model the case as a BPMN process", the `namespace` and the `line` of the root element (1).
+  - The reader stops at the root element: no other check runs, no transaction is opened, and nothing is written.
+  - A root element in another unknown namespace, such as XPDL or BPEL, is `422 VALIDATION_FAILED` (`NOT_BPMN`) naming the root, as before.
+  - The XML hardening of `PRE-033` (no DTD, no external entities) runs before the namespace check.
+- **Example:** `claim-case.cmmn -> 422 CMMN_UNSUPPORTED, 0 rows`.
+- **Test ID:** `PRE_107_a_cmmn_file_is_refused_by_name_with_its_namespace_and_line`, `PRE_107_the_reader_stops_at_the_root_so_no_other_check_runs`, `PRE_107_a_root_in_another_unknown_namespace_is_a_validation_failure_naming_the_namespace`, `PRE_107_a_dtd_is_refused_before_the_namespace_is_looked_at`, `PRE_107_cmmn_is_422_with_the_detail_the_namespace_and_the_line`, `PRE_107_a_cmmn_file_is_422_cmmn_unsupported_at_the_process_import_and_writes_nothing`
+
+### PRE-108 Every BPMN element, behaviour attribute and expression language outside the stage is listed with its id, line and stage
+- **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
+- **Milestone:** M3
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **When:** It is imported.
+- **Then:**
+  - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 5 entries in document order, each `{ element, elementId, line, stage }`. The XPath entry has the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`.
+  - `camunda:class` is a foreign extension and is not refused. It is listed under `warnings` as `FOREIGN_EXTENSION_IGNORED` with its namespace and line, and the stored source keeps it byte for byte.
+  - An attribute that changes how a step runs is refused by name: `isForCompensation="true"` (`S2`), `isInterrupting="false"` (`S1`), `parallelMultiple="true"` (`S3`), `startQuantity` or `completionQuantity` other than 1 and `implementation` other than `##unspecified` (`not planned`).
+  - At most 100 entries are returned, with `violationsTruncated: true` beyond that.
+  - Ids are printed safely: control characters are removed and ids are cut at 200 characters.
+  - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, intermediate throw event). No stage label names a sprint or a date.
+- **Example:** `5 unsupported -> 422 with stages S1, S1, S2, S3, not planned; camunda:class -> warning`.
+- **Test ID:** `PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage`, `PRE_108_a_vendor_attribute_is_a_warning_with_its_namespace_and_line_and_is_not_refused`, `PRE_108_a_file_with_only_a_vendor_attribute_is_not_refused`, `PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name`, `PRE_108_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `PRE_108_ids_lose_control_characters_and_are_cut_at_200_characters`, `PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date`, `PRE_108_event_definitions_take_the_stage_of_their_kind`, `PRE_108_each_entry_carries_element_id_line_and_stage_and_the_list_says_when_it_was_cut`, `PRE_108_unsupported_bpmn_elements_are_listed_with_their_stage_and_nothing_is_stored`

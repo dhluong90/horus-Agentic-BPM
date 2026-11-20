@@ -620,3 +620,28 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - A stored version whose `canonical_json` is altered in the database so that it no longer hashes to `canonical_hash` is not served. Evaluation returns `EVALUATION_ERROR` with a detail naming the integrity check, and one audit entry and one alert are written.
 - **Example:** `x >= 3 (YAML) == >= 3 (YAML) == >= 3 (DMN) -> one canonical_hash; 0.1 vs 0.1000000000000000055511151231257827 -> 422 as numbers, two hashes as strings; y >= 3 stays y >= 3; Cyrillic V -> different hash, marked in the diff`.
 - **Test ID:** `RLE_045_one_hash_per_behaviour_in_any_style_and_never_for_different_behaviour`
+
+### RLE-060 A CMMN file is refused by name at the rule set import, before any other check
+- **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
+- **Milestone:** M3
+- **Given:** `claim-case.cmmn`, whose root is `definitions` in namespace `http://www.omg.org/spec/CMMN/20151109/MODEL` (CMMN 1.1), with a `casePlanModel` on line 4.
+- **When:** It is posted to `POST /api/bpm/rules/v1/rule-sets/{name}/versions` with `Content-Type: application/xml`.
+- **Then:**
+  - It answers `422 CMMN_UNSUPPORTED` with the detail "CMMN is not supported; model the case as a BPMN process", the `namespace` and the `line` of the root element (1).
+  - The reader stops at the root element: no other check runs, no transaction is opened, and nothing is written.
+  - A root element in another unknown namespace, such as XPDL or BPEL, is `422 VALIDATION_FAILED` naming the namespace, as before. A DTD or an entity is refused before the namespace is looked at.
+- **Example:** `claim-case.cmmn -> 422 CMMN_UNSUPPORTED, 0 rows`.
+- **Test ID:** `RLE_060_a_cmmn_file_is_refused_by_name_with_its_namespace_and_line`, `RLE_060_the_reader_stops_at_the_root_so_no_other_check_runs`, `RLE_060_a_root_in_another_unknown_namespace_is_a_validation_failure_naming_it`, `RLE_060_a_dtd_is_refused_before_the_namespace_is_looked_at`, `RLE_060_cmmn_is_422_with_the_detail_the_namespace_and_the_line`, `RLE_060_a_cmmn_file_is_422_cmmn_unsupported_at_the_rule_set_import_and_writes_nothing`
+
+### RLE-061 A DMN element outside the current stage is refused by name with its id, line and stage
+- **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
+- **Milestone:** M3
+- **Given:** `fees.dmn` contains a decision table `fee-table` (supported), a second `decision` `risk-adj` with an `informationRequirement` that names a required decision on line 40 (`S1`), a `businessKnowledgeModel` `bkm-1` on line 55 (`S2`), a `decisionService` `ds-1` on line 70 (`S2`), and a `context` boxed expression on line 81 (`S2`).
+- **When:** It is imported as a rule set version.
+- **Then:**
+  - The answer is `422 DMN_UNSUPPORTED_ELEMENT` with 4 entries `{ element, id, line, stage }` in `elements`, in document order. An element with no `id` of its own is named by the `id` of the decision that holds it. Nothing is written.
+  - A wire to input data (`requiredInput`), documentation, vendor extensions and elements in other namespaces are not refused.
+  - At most 100 entries are returned, with `violationsTruncated: true` beyond that; ids lose control characters and are cut at 200 characters.
+  - An unknown `expressionLanguage` or `typeLanguage` is `422 EXPRESSION_LANGUAGE_UNSUPPORTED` with the element, its line and its stage (`not planned`).
+- **Example:** `fees.dmn with BKM and decision service -> 422 DMN_UNSUPPORTED_ELEMENT, 4 entries`.
+- **Test ID:** `RLE_061_dmn_elements_outside_the_stage_are_listed_with_id_line_and_stage_in_document_order`, `RLE_061_a_wire_to_input_data_is_not_a_refusal`, `RLE_061_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `RLE_061_ids_lose_control_characters_and_are_cut_at_200_characters`, `RLE_061_an_unknown_expression_language_is_refused_with_its_line_and_stage`, `RLE_061_each_entry_carries_element_id_line_and_stage`, `RLE_061_a_list_over_100_entries_is_cut_and_says_so`, `RLE_061_dmn_elements_outside_the_stage_are_listed_and_nothing_is_stored`

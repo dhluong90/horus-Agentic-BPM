@@ -2,13 +2,13 @@ package io.github.dhluong90.bpm.process.bpmn.subset;
 
 import io.github.dhluong90.bpm.process.api.BpmnUnsafeXmlException;
 import io.github.dhluong90.bpm.process.api.BpmnUnsupportedElementException;
+import io.github.dhluong90.bpm.process.api.CmmnUnsupportedException;
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
 import io.github.dhluong90.bpm.process.api.DefinitionTooLargeException;
 import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.bpmn.xml.XmlHardening;
-import io.github.dhluong90.bpm.process.internal.json.Quote;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
@@ -98,26 +98,13 @@ public final class SubsetBpmnReader {
     static final QName CATEGORY_VALUE_LABEL = new QName(BpmnNamespaces.BPMN, "categoryValue");
     /** Where a group carries the id of the category that holds its category value. */
     static final QName CATEGORY_ID = new QName(BpmnNamespaces.BPMN, "category");
-    private static final Map<String, String> LATER = Map.ofEntries(
-            Map.entry("intermediateCatchEvent", "S1 or S2 (message, signal and conditional catch events)"),
-            Map.entry("callActivity", "the next sprint"),
-            Map.entry("transaction", "the next sprint (saga)"),
-            Map.entry("intermediateThrowEvent", "the next sprint (compensate throw)"),
-            Map.entry("boundaryEvent", "S1"),
-            Map.entry("subProcess", "S1"),
-            Map.entry("inclusiveGateway", "S1"),
-            Map.entry("scriptTask", "S1"),
-            Map.entry("task", "S1"),
-            Map.entry("manualTask", "S1"),
-            Map.entry("dataObject", "S1"),
-            Map.entry("dataObjectReference", "S1"),
-            Map.entry("dataStoreReference", "S1"),
-            Map.entry("laneSet", "S1 (display)"),
-            Map.entry("sendTask", "S2"),
-            Map.entry("receiveTask", "S2"),
-            Map.entry("eventBasedGateway", "S2"),
-            Map.entry("complexGateway", "S3"),
-            Map.entry("adHocSubProcess", "S3"));
+    /** Every CMMN version's model namespace starts with this. */
+    private static final String CMMN_NAMESPACE_PREFIX = "http://www.omg.org/spec/CMMN/";
+    /** Namespaces whose attributes are part of BPMN or its diagram interchange. */
+    private static final Set<String> KNOWN_ATTRIBUTE_NAMESPACES = Set.of(BpmnNamespaces.BPMN, BpmnNamespaces.HORUS,
+            BpmnNamespaces.XSI, BpmnNamespaces.BPMNDI, BpmnNamespaces.DC, BpmnNamespaces.DI,
+            "http://www.w3.org/XML/1998/namespace");
+    private static final int MAX_WARNINGS = 100;
 
     private final Limits limits;
 
@@ -177,6 +164,8 @@ public final class SubsetBpmnReader {
 
         private final XMLStreamReader xml;
         private final List<DefinitionProblem> unsupported = new ArrayList<>();
+        private boolean unsupportedTruncated;
+        private final List<DefinitionProblem> warnings = new ArrayList<>();
         private final List<DefinitionProblem> invalid = new ArrayList<>();
         private final Set<String> ids = new HashSet<>();
         private int depth;
@@ -195,6 +184,10 @@ public final class SubsetBpmnReader {
 
         Process document() throws XMLStreamException {
             nextStart();
+            // CMMN is refused at the root, before any other check (PRE-107): the XML hardening has already run.
+            if (xml.getNamespaceURI() != null && xml.getNamespaceURI().startsWith(CMMN_NAMESPACE_PREFIX)) {
+                throw new CmmnUnsupportedException(safe(xml.getNamespaceURI()), line());
+            }
             if (!BPMN.equals(xml.getNamespaceURI()) || !"definitions".equals(xml.getLocalName())) {
                 throw new ValidationFailedException(List.of(new DefinitionProblem("NOT_BPMN",
                         "The root element must be definitions in namespace " + BPMN, xml.getLocalName(), null, line())));
@@ -206,7 +199,7 @@ public final class SubsetBpmnReader {
                 String local = xml.getLocalName();
                 if (BPMN.equals(ns) && "process".equals(local)) {
                     if (process != null) {
-                        unsupported(local, attr("id"), "S1 (more than one process, collaboration)");
+                        unsupported(local, attr("id"), BpmnStages.S1);
                         skip();
                     } else {
                         process = process();
@@ -217,7 +210,7 @@ public final class SubsetBpmnReader {
                     if (local.endsWith("EventDefinition") && attr("id") != null) {
                         sharedDefinitionIds.add(attr("id"));
                     }
-                    unsupported(local, attr("id"), "S1 (collaboration and shared root elements)");
+                    unsupported(local, attr("id"), BpmnStages.of(local));
                     skip();
                 } else {
                     skip();
@@ -230,7 +223,7 @@ public final class SubsetBpmnReader {
                 }
             }
             if (!unsupported.isEmpty()) {
-                throw new BpmnUnsupportedElementException(unsupported);
+                throw new BpmnUnsupportedElementException(unsupported, warnings, unsupportedTruncated);
             }
             if (process == null) {
                 invalid.add(DefinitionProblem.of("NO_PROCESS", "The document has no process", null));
@@ -252,7 +245,7 @@ public final class SubsetBpmnReader {
                     children("categoryValue", valueId, false);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && !"documentation".equals(local)
                         && !"extensionElements".equals(local)) {
-                    unsupported("category child " + local, categoryId, "a later stage");
+                    unsupported("category child " + local, categoryId, BpmnStages.of(local));
                     skip();
                 } else {
                     skip();
@@ -301,6 +294,7 @@ public final class SubsetBpmnReader {
                     skip();
                     continue;
                 }
+                behaviourAttributes();
                 switch (local) {
                     case "startEvent" -> elements.add(event(true));
                     case "endEvent" -> elements.add(event(false));
@@ -334,12 +328,42 @@ public final class SubsetBpmnReader {
                     }
                     case "documentation", "extensionElements" -> skip();
                     default -> {
-                        unsupported(local, attr("id"), LATER.getOrDefault(local, "a later stage"));
+                        unsupported(local, attr("id"), BpmnStages.of(local));
                         skip();
                     }
                 }
             }
             return withRefs(new Process(key, name, ProcessType.NONE, true, false, elements, artifacts, List.of(), null));
+        }
+
+        /**
+         * Names the attributes of the current element that change how it runs and that this release does not honour:
+         * a compensation activity, a quantity other than one, a non-interrupting start, a parallel multiple event or
+         * an implementation other than a registered handler. Ignoring them would run the element differently from
+         * what the model says.
+         */
+        private void behaviourAttributes() {
+            String id = attr("id");
+            if ("true".equals(attr("isForCompensation"))) {
+                unsupported("isForCompensation", id, BpmnStages.S2);
+            }
+            for (String quantity : List.of("startQuantity", "completionQuantity")) {
+                String value = attr(quantity);
+                if (value != null && !"1".equals(value)) {
+                    unsupported(quantity, id, BpmnStages.NOT_PLANNED);
+                }
+            }
+            if ("false".equals(attr("isInterrupting"))) {
+                unsupported("isInterrupting", id, BpmnStages.S1);
+            }
+            if ("true".equals(attr("parallelMultiple"))) {
+                unsupported("parallelMultiple", id, BpmnStages.S3);
+            }
+            String implementation = attr("implementation");
+            if (implementation != null && !"##unspecified".equals(implementation)) {
+                unsupported("implementation", id, BpmnStages.NOT_PLANNED,
+                        "is not supported; bind the step with horus:handler instead of a service implementation");
+            }
         }
 
         /** A note on the diagram: its {@code text} is kept exactly, nothing is executed. */
@@ -353,7 +377,7 @@ public final class SubsetBpmnReader {
                     text = text();
                 } else if (BPMN.equals(xml.getNamespaceURI()) && !"documentation".equals(local)
                         && !"extensionElements".equals(local)) {
-                    unsupported("textAnnotation child " + local, id, "a later stage");
+                    unsupported("textAnnotation child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
                     skip();
@@ -397,11 +421,11 @@ public final class SubsetBpmnReader {
                             + safe(ref) + "' does not resolve to an event definition of this document", element,
                             safe(id), line));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
-                    unsupported(element + " with " + local, id, "S1 or S2 (event definitions)");
+                    unsupported(element + " with " + local, id, BpmnStages.of(local));
                     skip();
                 } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
                         && !"extensionElements".equals(local)) {
-                    unsupported(element + " child " + local, id, "a later stage");
+                    unsupported(element + " child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
                     skip();
@@ -430,31 +454,31 @@ public final class SubsetBpmnReader {
                     timer = timer(id);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     definitions++;
-                    unsupported(element + " with " + local, id, "S1 or S2 (event definitions)");
+                    unsupported(element + " with " + local, id, BpmnStages.of(local));
                     skip();
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "eventDefinitionRef".equals(local)) {
                     definitions++;
-                    unsupported(element + " with eventDefinitionRef", id, "S1 (shared event definitions)");
+                    unsupported(element + " with eventDefinitionRef", id, BpmnStages.S1);
                     skip();
                 } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
                         && !"extensionElements".equals(local)) {
-                    unsupported(element + " child " + local, id, "a later stage");
+                    unsupported(element + " child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
                     skip();
                 }
             }
             if (definitions == 0) {
-                unsupported(element + " without an event definition", id, "S1 (link and none catch events)");
+                unsupported(element, id, BpmnStages.S1, "has no event definition; link and none catch events are not supported");
             } else if (definitions > 1) {
-                unsupported(element + " with several event definitions", id, "S1 (multiple events)");
+                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
             }
             if (timer != null && definitions == 1) {
                 TimerSchedule.problem(timer).ifPresent(problem -> {
                     if (problem.startsWith("timeCycle")) {
-                        unsupported.add(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                                "is not supported in this release; planned for S1 (timer cycles)", "timeCycle",
-                                safe(id), line));
+                        addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
+                                "is not supported in this release; stage S1 adds it", "timeCycle",
+                                safe(id), line, BpmnStages.S1));
                     } else {
                         invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line));
                     }
@@ -481,7 +505,7 @@ public final class SubsetBpmnReader {
                     case "timeCycle" -> cycle = new Expression(text().strip(), null, null);
                     case "documentation", "extensionElements" -> skip();
                     default -> {
-                        unsupported("timerEventDefinition child " + local, eventId, "a later stage");
+                        unsupported("timerEventDefinition child " + local, eventId, BpmnStages.of(local));
                         skip();
                     }
                 }
@@ -501,7 +525,7 @@ public final class SubsetBpmnReader {
                 return agentTask(id, line, name, result, handler, mode);
             }
             if (type != null) {
-                unsupported("serviceTask horus:type=\"" + type + "\"", id, "a later stage (only agentTask is a type)");
+                unsupported("horus:type", id, BpmnStages.NOT_PLANNED, "\"" + safe(type) + "\" is not a service task type; only agentTask is");
             }
             String timeoutText = horus("timeout");
             if (mode != null && !"local".equals(mode) && !"remote".equals(mode)) {
@@ -574,7 +598,7 @@ public final class SubsetBpmnReader {
                 } else if (BPMN.equals(ns) && "extensionElements".equals(local)) {
                     extensions("serviceTask", id, true, horusParts, foreign, parts);
                 } else if (BPMN.equals(ns)) {
-                    unsupported("serviceTask child " + local, id, LATER.getOrDefault(local, "S1"));
+                    unsupported("serviceTask child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
                     skip();
@@ -754,14 +778,16 @@ public final class SubsetBpmnReader {
                     int line = line();
                     String text = text();
                     if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
-                        unsupported.add(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language "
-                                + language + " is not supported; use " + BpmnNamespaces.EXPR_V1 + " (FEEL follows)",
-                                "conditionExpression", id, line));
+                        // FEEL is stage S1; XPath, JavaScript, Groovy and the rest are deviations (principle 4).
+                        String stage = BpmnNamespaces.FEEL.equals(language) ? BpmnStages.S1 : BpmnStages.NOT_PLANNED;
+                        addProblem(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language "
+                                + safe(language) + " is not supported; use " + BpmnNamespaces.EXPR_V1,
+                                "conditionExpression", safe(id), line, stage));
                     }
                     condition = new Expression(text.strip(), language == null ? BpmnNamespaces.EXPR_V1 : language, null);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && !"documentation".equals(local)
                         && !"extensionElements".equals(local)) {
-                    unsupported("sequenceFlow child " + local, id, "a later stage");
+                    unsupported("sequenceFlow child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
                     skip();
@@ -787,7 +813,7 @@ public final class SubsetBpmnReader {
                 } else if (BPMN.equals(ns) && "extensionElements".equals(local)) {
                     extensions(element, id, inputs, horus, foreign);
                 } else if (BPMN.equals(ns)) {
-                    unsupported(element + " child " + local, id, LATER.getOrDefault(local, "S1"));
+                    unsupported(element + " child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
                     skip();
@@ -835,11 +861,12 @@ public final class SubsetBpmnReader {
                     }
                     skip();
                 } else if (HORUS.equals(ns)) {
-                    unsupported("horus:" + xml.getLocalName(), id, "the next sprint");
+                    unsupported("horus:" + xml.getLocalName(), id, BpmnStages.NOT_PLANNED);
                     skip();
                 } else {
                     // Vendor extensions stay opaque and are never executed; the stored source keeps them.
                     foreign.add(new ForeignFragment(ns == null ? "" : ns, xml.getLocalName(), ""));
+                    foreignIgnored(xml.getLocalName(), ns, id);
                     skip();
                 }
             }
@@ -935,6 +962,24 @@ public final class SubsetBpmnReader {
             if (elements > limits.maxElements()) {
                 throw new BpmnUnsafeXmlException("More than " + limits.maxElements() + " elements");
             }
+            if (BPMN.equals(xml.getNamespaceURI())) {
+                for (int i = 0; i < xml.getAttributeCount(); i++) {
+                    String ns = xml.getAttributeNamespace(i);
+                    if (ns != null && !ns.isEmpty() && !KNOWN_ATTRIBUTE_NAMESPACES.contains(ns)) {
+                        String prefix = xml.getAttributePrefix(i);
+                        foreignIgnored((prefix == null || prefix.isEmpty() ? "" : prefix + ":")
+                                + xml.getAttributeLocalName(i), ns, xml.getAttributeValue(null, "id"));
+                    }
+                }
+            }
+        }
+
+        /** A vendor attribute or extension element: never read or executed, kept only in the stored source. */
+        private void foreignIgnored(String name, String namespace, String id) {
+            if (warnings.size() < MAX_WARNINGS) {
+                warnings.add(new DefinitionProblem("FOREIGN_EXTENSION_IGNORED", "is in namespace " + safe(namespace)
+                        + "; it is ignored and the stored source keeps it", safe(name), safe(id), line()));
+            }
         }
 
         private void guard(int event) {
@@ -971,18 +1016,39 @@ public final class SubsetBpmnReader {
         }
 
         private void unsupported(String element, String id, String stage) {
-            unsupported.add(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                    "is not supported in this release; planned for " + stage, element, safe(id), line()));
+            unsupported(element, id, stage, BpmnStages.message(stage));
+        }
+
+        private void unsupported(String element, String id, String stage, String message) {
+            addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT", message, element, safe(id), line(), stage));
+        }
+
+        /** Keeps the first {@link BpmnUnsupportedElementException#MAX_PROBLEMS} problems; counts the rest. */
+        private void addProblem(DefinitionProblem problem) {
+            if (unsupported.size() < BpmnUnsupportedElementException.MAX_PROBLEMS) {
+                unsupported.add(problem);
+            } else {
+                unsupportedTruncated = true;
+            }
         }
     }
 
-    /** An id echoed in a problem: at most 80 characters, control characters escaped. */
+    /** Longest id echoed in a problem. */
+    private static final int MAX_ECHO = 200;
+
+    /** An id echoed in a problem: control characters removed, at most 200 characters. */
     static String safe(String id) {
         if (id == null) {
             return null;
         }
-        String quoted = Quote.of(id);
-        return quoted.substring(1, quoted.length() - 1);
+        StringBuilder out = new StringBuilder(Math.min(id.length(), MAX_ECHO));
+        for (int i = 0; i < id.length() && out.length() < MAX_ECHO; i++) {
+            char c = id.charAt(i);
+            if (!Character.isISOControl(c) && c != '\u2028' && c != '\u2029') {
+                out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     private static ElementInfo info(List<HorusExtension> horus, List<ForeignFragment> foreign) {

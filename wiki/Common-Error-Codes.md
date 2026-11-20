@@ -54,7 +54,10 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [GUARDRAIL_CONTRACT_INVALID](#guardrail_contract_invalid) | processes | M2 |
 | 422 | [FORM_VALIDATION_FAILED](#form_validation_failed) | processes | M2 |
 | 422 | [LAYOUT_INVALID](#layout_invalid) | processes | M3 |
+| 422 | [CMMN_UNSUPPORTED](#cmmn_unsupported) | both | 0.2.0 |
 | 422 | [BPMN_UNSUPPORTED_ELEMENT](#bpmn_unsupported_element) | processes | M3 |
+| 422 | [DMN_UNSUPPORTED_ELEMENT](#dmn_unsupported_element) | rules | 0.2.0 |
+| 422 | [EXPRESSION_LANGUAGE_UNSUPPORTED](#expression_language_unsupported) | rules | 0.2.0 |
 | 422 | [BPMN_UNSAFE_XML](#bpmn_unsafe_xml) | processes | M3 |
 | 428 | [PRECONDITION_REQUIRED](#precondition_required) | both | M1 |
 | 429 | [RATE_LIMITED](#rate_limited) | both | M1 |
@@ -213,8 +216,17 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 ### LAYOUT_INVALID
 `422`. A layout save names a node id that is not in the definition, or exceeds 256 KB. Remove the unknown node or reduce the layout. Layout saves need no approval.
 
+### CMMN_UNSUPPORTED
+`422`. The file is a CMMN case model: its root element is in a CMMN namespace such as `http://www.omg.org/spec/CMMN/20151109/MODEL`. CMMN is not supported and not planned. The body has `detail` "CMMN is not supported; model the case as a BPMN process", the `namespace` and the `line` of the root element. The reader stops at the root: nothing else in the file is checked and nothing is stored. Model the case as a BPMN process and import that. Both engines answer it, at the BPMN import of the Process Engine and at the rule set import of the Rule Engine (`Content-Type: application/xml`). A root element in another unknown namespace, such as XPDL or BPEL, is `VALIDATION_FAILED` naming the namespace.
+
 ### BPMN_UNSUPPORTED_ELEMENT
-`422`. A BPMN import contains an element outside the supported subset, such as a boundary event or an inclusive gateway. The body lists each element with its `id` and line, for example `boundaryEvent be-timeout line 42`. Remove or replace the element and import again.
+`422`. A BPMN import contains an element, an attribute that changes how a step runs, or an expression language outside what the release executes. `problems` lists each one in document order as `{ code, message, element, elementId, line, stage }`, up to 100 (`violationsTruncated: true` when there were more). `stage` is the stage of the [standards coverage table](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md) that adds it: `S1`, `S2`, `S3`, or `not planned`; `S0` marks an element the table lists for the current stage that this release has not finished. A condition in a language other than `urn:horus-bpm:expr:v1` has the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` (XPath and the other languages are `not planned`). Vendor attributes and extension elements are not refused: `warnings` lists them as `FOREIGN_EXTENSION_IGNORED` with the namespace and line, and the stored source keeps them. Ids are printed without control characters and cut at 200 characters. Remove or replace each element and import again. See [[Process Engine Importing BPMN|Process-Engine-Importing-BPMN]].
+
+### DMN_UNSUPPORTED_ELEMENT
+`422`. A DMN import contains elements outside the current stage, such as a business knowledge model, a decision service, a boxed expression other than a decision table, or a wire from one decision to another. `elements` lists each one in document order as `{ element, id, line, stage }`, up to 100 (`violationsTruncated: true` when there were more); `stage` is `S1`, `S2`, `S3` or `not planned`, from the DMN coverage table. Nothing is stored. Remove the elements, or keep one decision table per file.
+
+### EXPRESSION_LANGUAGE_UNSUPPORTED
+`422`. A DMN file names an `expressionLanguage` or `typeLanguage` other than FEEL, for example JUEL or Groovy. `elements` holds the element that names it with its `line` and `stage` (`not planned`). Nothing is stored.
 
 ### BPMN_UNSAFE_XML
 `422`. A BPMN import contains a `DOCTYPE`, or exceeds 1 MB, nesting depth 32 or 5,000 elements. The file is refused before any transaction opens. Export the file again without a document type declaration.

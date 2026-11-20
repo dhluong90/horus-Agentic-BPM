@@ -80,6 +80,13 @@ paths:
         DTDs and entities are refused, and the file must be UTF-8. A body over 1 MB (1,048,576 bytes)
         is `413 PAYLOAD_TOO_LARGE`, for every content type.
 
+        A file in another standard, or with an element outside the current stage, is refused by name and
+        nothing is stored. A CMMN root element is `422 CMMN_UNSUPPORTED` (`RLE-060`), decided at the root
+        before anything else is read. DMN elements the engine does not execute are `422
+        DMN_UNSUPPORTED_ELEMENT`, listing every one with its `element`, `id`, `line` and `stage` (`S1`, `S2`,
+        `S3` or `not planned`) in `elements` (`RLE-061`). An expression language other than FEEL is `422
+        EXPRESSION_LANGUAGE_UNSUPPORTED` with its line and stage.
+
         Personal data (PD-099): every input that declares no `mask` and whose name matches the
         tenant's personal-data names is listed in `warnings` (`UNMASKED_PERSONAL_DATA`, `RLE-049`).
         With `decision-log.require-explicit-mask` on for the tenant, an input that declares no
@@ -1807,6 +1814,20 @@ components:
         `MASKED` and `NOT_MASKED`: the input declares `mask: true` or `mask: false`. `MASKED_BY_DEFAULT`
         and `NOT_MASKED_BY_DEFAULT`: it declares nothing, and the tenant's `decision-log.mask-default`
         in force when the diff is read decides.
+    UnsupportedElement:
+      type: object
+      required: [element, id, line, stage]
+      properties:
+        element: { type: string, description: 'The element name, for example `businessKnowledgeModel`' }
+        id:
+          type: [string, 'null']
+          maxLength: 200
+          description: The element's `id`; control characters are removed and it is cut at 200 characters
+        line: { type: integer, minimum: 1 }
+        stage:
+          type: string
+          enum: [S1, S2, S3, not planned]
+          description: The stage of the coverage table that adds the element, or `not planned`
     Violation:
       type: object
       required: [ruleId, column, message]
@@ -2080,9 +2101,22 @@ components:
             IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
-            WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN]
+            WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN, CMMN_UNSUPPORTED, DMN_UNSUPPORTED_ELEMENT,
+            EXPRESSION_LANGUAGE_UNSUPPORTED]
         detail: { type: string }
         correlationId: { type: string }
+        namespace:
+          type: string
+          description: Present on `CMMN_UNSUPPORTED`, the namespace of the root element
+        line:
+          type: integer
+          description: Present on `CMMN_UNSUPPORTED`, the line of the root element
+        elements:
+          type: array
+          description: >-
+            Present on `DMN_UNSUPPORTED_ELEMENT` and `EXPRESSION_LANGUAGE_UNSUPPORTED`, in document order, at most
+            100 (`violationsTruncated` is true when there were more)
+          items: { $ref: '#/components/schemas/UnsupportedElement' }
         violations:
           type: array
           description: |
@@ -2099,7 +2133,9 @@ components:
             - { ruleId: R3, column: fee, message: 'output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code' }
         violationsTruncated:
           type: boolean
-          description: Present on `VALIDATION_FAILED`; true when the document has more than the 100 problems listed
+          description: >-
+            Present on `VALIDATION_FAILED`, and on `DMN_UNSUPPORTED_ELEMENT` when true; true when the document
+            has more than the 100 problems or elements listed
         decisionId:
           type: string
           description: Present on `EVALUATION_ERROR` and `UNIQUE_HIT_VIOLATION`; the failed decision is logged

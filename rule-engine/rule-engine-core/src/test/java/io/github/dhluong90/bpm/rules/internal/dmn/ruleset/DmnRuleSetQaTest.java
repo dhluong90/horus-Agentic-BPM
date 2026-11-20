@@ -279,7 +279,7 @@ class DmnRuleSetQaTest {
                 + numInput("age") + "<output name=\"o\" typeRef=\"boolean\"/><rule id=\"R1\"><inputEntry><text>-</text>"
                 + "</inputEntry><outputEntry><text>true</text></outputEntry></rule></decisionTable></decision></definitions>";
 
-        assertThatThrownBy(() -> dmn(xml)).isInstanceOf(ValidationFailedException.class)
+        assertThatThrownBy(() -> dmn(xml)).isInstanceOf(io.github.dhluong90.bpm.rules.api.UnsupportedStandardException.class)
                 .hasMessageContaining(message).hasMessageContaining("(line 2)");
     }
 

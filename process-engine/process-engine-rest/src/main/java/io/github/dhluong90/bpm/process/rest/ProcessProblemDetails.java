@@ -54,6 +54,7 @@ public class ProcessProblemDetails {
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("FORM_VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("BPMN_UNSUPPORTED_ELEMENT", UNPROCESSABLE),
+            Map.entry("CMMN_UNSUPPORTED", UNPROCESSABLE),
             Map.entry("BPMN_UNSAFE_XML", UNPROCESSABLE),
             Map.entry("DEFINITION_TOO_LARGE", UNPROCESSABLE),
             Map.entry("IDEMPOTENCY_KEY_REUSE_MISMATCH", UNPROCESSABLE),
@@ -75,7 +76,17 @@ public class ProcessProblemDetails {
                 .put("detail", e.getMessage())
                 .put("correlationId", correlationId(request));
         switch (e) {
-            case BpmnUnsupportedElementException u -> body.set("problems", Views.problems(u.problems()));
+            case BpmnUnsupportedElementException u -> {
+                body.set("problems", Views.problems(u.problems()));
+                if (u.truncated()) {
+                    body.put("violationsTruncated", true);
+                }
+                if (!u.warnings().isEmpty()) {
+                    body.set("warnings", Views.problems(u.warnings()));
+                }
+            }
+            case io.github.dhluong90.bpm.process.api.CmmnUnsupportedException c ->
+                    body.put("namespace", c.namespace()).put("line", c.line());
             case ValidationFailedException v -> body.set("problems", Views.problems(v.problems()));
             case StepFailedException s -> body.put("nodeId", s.nodeId()).put("reason", s.reason());
             case io.github.dhluong90.bpm.process.api.FormValidationException f -> {
