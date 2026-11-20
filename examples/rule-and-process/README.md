@@ -81,6 +81,8 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=demo-pass HORUS_DB_PASSWORD=chang
 | `HORUS_DEMO_PASSWORD` | empty | Password of the demo users, `dev` profile only |
 | `PORT` | `8080` | HTTP port |
 | `HORUS_BPM_PROCESSES_HANDLERS_SLOW_CALL_WARNING` | `200ms` | A local handler or decision slower than this is logged at WARN as `process.step.slow`: it holds the instance row lock and a connection, which usually means a network call in a handler |
+| `HORUS_BPM_PROCESSES_QUERY_MAX_PAGE_SIZE` | `200` | Most items per page of the process lists; may be lowered, never raised |
+| `HORUS_BPM_PROCESSES_QUERY_MAX_RANGE` | `P31D` | Longest start-time range of `GET /api/bpm/processes/v1/instances`; may be lowered, never raised |
 | `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the demo users, the fixed tenant `bank-a`, the start-up import and auto-approval of the sample process |
 
 At start-up the log shows, in order: the host's own migration, the Rule Engine schema (`rle_schema_history`), the Process Engine schema (`pre_schema_history`), the sample process imported as version 1 `ACTIVE` for `bank-a`, and the `card-fee` rule set published by two seed identities (one requests, the other approves).
@@ -100,9 +102,9 @@ Demo users on the `dev` profile, all with the password from `HORUS_DEMO_PASSWORD
 |---|---|---|
 | `tuan` | `TELLER` | `processes:start`, `processes:read`, `rules:evaluate` |
 | `an` | `CARD_OFFICER` | `processes:read`, `processes:task:work`, `rules:evaluate` |
-| `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:read`; `rules:evaluate` on `dev` only |
-| `minh` | `PRICING_APPROVER` | `rules:read`, `rules:approve`; `rules:evaluate` on `dev` only |
-| `hoa` | `TELLER`, `CARD_OFFICER` (a branch supervisor) | both of the above sets; the four-eyes review refuses her on applications she submitted |
+| `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER`, `PROCESS_APPROVER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:approve`, `processes:read`; `rules:evaluate` on `dev` only |
+| `minh` | `PRICING_APPROVER`, `PROCESS_APPROVER` | `rules:read`, `rules:approve`, `processes:approve`, `processes:read`; `rules:evaluate` on `dev` only |
+| `hoa` | `TELLER`, `CARD_OFFICER`, `BRANCH_SUPERVISOR` | both of the above sets plus `processes:cancel`; the four-eyes review refuses her on applications she submitted |
 
 On the `dev` profile the author and the approver may also evaluate, so the cockpit's Try it works for them ([`application-dev.yml`](src/main/resources/application-dev.yml)).
 
@@ -135,28 +137,73 @@ curl -s -u an:$P localhost:8080/api/bpm/processes/v1/instances/01M7S2PPTM395C88Y
 #  "tasks":[{"id":"01M7S2PPTM395C88YQ14000005","nodeId":"officer-review","assignee":"role:CARD_OFFICER","status":"OPEN","lockVersion":0,...}],...}
 ```
 
-Only a card officer may complete it, and never the person who submitted it: the review is a four-eyes task (`horus:fourEyes="true"`). `If-Match` carries the task's `lockVersion` (from the task in the instance view, not the instance `ETag`) and `Idempotency-Key` makes a retry safe; both are required (`428 PRECONDITION_REQUIRED` without them):
+Only a card officer may work it, and never the person who submitted it: the review is a four-eyes task (`horus:fourEyes="true"`). The officer claims the task, then completes it. Each call sends the task's `lockVersion` as `If-Match` (the `ETag` of `GET /tasks/{id}`, not the instance `ETag`) and an `Idempotency-Key` that makes a retry safe; both are required (`428 PRECONDITION_REQUIRED` without them):
 
 ```bash
 T=01M7S2PPTM395C88YQ14000005
-curl -s -u tuan:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' \
-  -d '{"result":{"approved":true}}' "localhost:8080/api/bpm/processes/v1/tasks/${T}:complete"
+curl -s -u an:$P "localhost:8080/api/bpm/processes/v1/tasks/${T}"
+# {"id":"01M7S2PPTM395C88YQ14000005",...,"assignee":"role:CARD_OFFICER","fourEyes":true,"status":"OPEN","lockVersion":0,
+#  "claimedBy":null,...,"allowedActions":["claim"]}
+
+curl -s -u tuan:$P -X POST -H 'If-Match: "0"' -H 'Idempotency-Key: claim-tuan' \
+  "localhost:8080/api/bpm/processes/v1/tasks/${T}:claim"
 # {"status":403,"code":"PERMISSION_DENIED","detail":"Needs processes:task:work",...}
 
-curl -s -u an:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Idempotency-Key: review-1002' \
+curl -s -u an:$P -X POST -H 'If-Match: "0"' -H 'Idempotency-Key: claim-1002' \
+  "localhost:8080/api/bpm/processes/v1/tasks/${T}:claim"
+# {...,"status":"CLAIMED","lockVersion":1,"claimedBy":"an",...,"allowedActions":["unclaim","complete"]}
+
+curl -s -u an:$P -H 'Content-Type: application/json' -H 'If-Match: "1"' -H 'Idempotency-Key: review-1002' \
   -d '{"result":{"approved":true}}' "localhost:8080/api/bpm/processes/v1/tasks/${T}:complete"
 # {...,"status":"COMPLETED","tokens":[{"kind":"SCOPE",...,"status":"COMPLETED"},{"kind":"FLOW","nodeId":"end-approved","status":"COMPLETED"}],
-#  "tasks":[{...,"status":"COMPLETED","lockVersion":1,"completedBy":"an"}],...}
+#  "tasks":[{...,"status":"COMPLETED","lockVersion":2,"claimedBy":"an","completedBy":"an"}],...}
 
-curl -s -u an:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Idempotency-Key: review-1002b' \
+curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "1"' -H 'Idempotency-Key: review-1002b' \
   -d '{"result":{"approved":true}}' "localhost:8080/api/bpm/processes/v1/tasks/${T}:complete"
-# {"status":409,"code":"VERSION_CONFLICT","detail":"Task 01M7S2PPTM395C88YQ14000005 is at lock version 1",...}
+# {"status":409,"code":"VERSION_CONFLICT","detail":"Task 01M7S2PPTM395C88YQ14000005 is at lock version 2",...}
+```
 
+A claimed task goes back to the queue with `:unclaim` (claimant only, same headers). Completing a task nobody claimed is `409 INVALID_STATE`; completing one another officer claimed is `403 TASK_NOT_ASSIGNED`.
+
+```bash
 curl -s -u tuan:$P localhost:8080/api/cards/applications/APP-1002
 # {"applicationId":"APP-1002","customerId":"C-002","status":"APPROVED","fee":{"currency":"VND","amount":10000}}
 ```
 
 `POST /api/bpm/processes/v1/instances` needs a `businessKey` or an `Idempotency-Key` (`428` without either), so a client retry can never start a second instance. Starting again with the same `businessKey` returns the existing instance with `200` (a new instance is `201`), and a retry with the same `Idempotency-Key` returns the first answer, also when the two requests run at the same time.
+
+List what is running and what is deployed. Pages carry `nextCursor`; pass it back unchanged as `cursor`:
+
+```bash
+curl -s -u an:$P "localhost:8080/api/bpm/processes/v1/instances?definitionKey=card-fee-review&limit=2"
+# {"data":[{"id":"01M7S2PPTM395C88YQ14BX2E6F","definitionKey":"card-fee-review","definitionVersion":1,"businessKey":"APP-1002",
+#   "status":"RUNNING","lockVersion":1,"startedBy":"tuan","startedAt":"2027-02-01T09:00:00.120Z","endedAt":null}],
+#  "nextCursor":null,"hasNext":false}
+curl -s -u an:$P "localhost:8080/api/bpm/processes/v1/instances?status=COMPLETED,CANCELLED&startedFrom=2027-02-01T00:00:00Z"
+curl -s -u an:$P localhost:8080/api/bpm/processes/v1/definitions
+# {"data":[{"key":"card-fee-review","name":"Card fee review","latestVersion":1,"latestStatus":"ACTIVE","effectiveVersion":1,
+#   "lastChangedAt":"2027-02-01T08:59:58.004Z"}],"nextCursor":null,"hasNext":false}
+curl -s -u an:$P "localhost:8080/api/bpm/processes/v1/instances?limit=500"
+# {"status":400,"code":"QUERY_INVALID","detail":"limit must be 1 to 200 (query.max-page-size)",...}
+```
+
+A branch supervisor may cancel a running application: cancelling needs `processes:cancel`, which starting (`processes:start`) does not grant. The reason is required, at most 2,000 characters, and is recorded on the history entry and the `processes.instance.cancelled.v1` event with the actor. `If-Match` carries the instance `ETag` (its `lockVersion`), and `Idempotency-Key` makes a retry safe:
+
+```bash
+curl -s -u tuan:$P -H 'Content-Type: application/json' \
+  -d '{"applicationId":"APP-1003","customerId":"C-002"}' localhost:8080/api/cards/applications
+# {"instanceStatus":"RUNNING","instanceId":"01M7S2Q4B1XWJ3T7N9D2E5K8H0",...}
+I=01M7S2Q4B1XWJ3T7N9D2E5K8H0
+curl -s -u tuan:$P -H 'Content-Type: application/json' -H 'If-Match: "1"' -H 'Idempotency-Key: cancel-1003t' \
+  -d '{"reason":"Customer withdrew the card application"}' "localhost:8080/api/bpm/processes/v1/instances/${I}:cancel"
+# {"status":403,"code":"PERMISSION_DENIED","detail":"Needs processes:cancel",...}
+curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "1"' -H 'Idempotency-Key: cancel-1003' \
+  -d '{"reason":"Customer withdrew the card application"}' "localhost:8080/api/bpm/processes/v1/instances/${I}:cancel"
+# {"id":"01M7S2Q4B1XWJ3T7N9D2E5K8H0",...,"status":"CANCELLED","tasks":[{...,"status":"CANCELLED"}],"lockVersion":2,...}
+curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "2"' -H 'Idempotency-Key: cancel-1003b' \
+  -d '{"reason":"Duplicate"}' "localhost:8080/api/bpm/processes/v1/instances/${I}:cancel"
+# {"status":409,"code":"INVALID_STATE","detail":"Instance 01M7S2Q4B1XWJ3T7N9D2E5K8H0 is CANCELLED",...}
+```
 
 An unknown customer fails the first step, and the host's row rolls back with the engine's:
 
@@ -181,9 +228,9 @@ curl -s -u lan:$P -H 'Content-Type: application/yaml' --data-binary @/tmp/card-f
 # {"ruleSet":"card-fee","version":2,"status":"DRAFT","createdBy":"lan",...}
 curl -s -u lan:$P -X POST $R/versions/2:request-publish
 # {"version":2,"status":"PENDING_APPROVAL","requestedBy":"lan",...}
-curl -s -u lan:$P -X POST $R/versions/2:approve
+curl -s -u lan:$P -X POST $R/versions/2:approve -H 'If-Match: "1"'
 # {"status":403,"code":"PERMISSION_DENIED","detail":"The caller lacks permission rules:approve",...}
-curl -s -u minh:$P -X POST $R/versions/2:approve
+curl -s -u minh:$P -X POST $R/versions/2:approve -H 'If-Match: "1"'
 # {"version":2,"status":"PUBLISHED","requestedBy":"lan","approvedBy":"minh",...}
 
 curl -s -u tuan:$P -H 'Content-Type: application/json' \
@@ -193,14 +240,37 @@ curl -s -u tuan:$P -H 'Content-Type: application/json' \
 # rle_decision holds the evaluation with version_num 2.
 ```
 
+## Approve a process definition change with four eyes
+
+The `dev` profile of this sample auto-approves imports; start it with `--horus.bpm.processes.definitions.auto-approve=false` to see the lifecycle every other profile has. An imported definition is then a draft, and the effective version changes only when a second person approves it. `lan` and `minh` both hold `processes:approve`; the one who requests can never approve:
+
+```bash
+D=localhost:8080/api/bpm/processes/v1/definitions
+sed 's/Officer reviews the fee/Officer reviews the fee and the limit/' \
+  examples/rule-and-process/src/main/resources/processes/card-fee-review.bpmn > /tmp/card-fee-review-v2.bpmn
+curl -s -u lan:$P -H 'Content-Type: application/xml' --data-binary @/tmp/card-fee-review-v2.bpmn $D
+# {"key":"card-fee-review","version":2,"status":"DRAFT","source":"IMPORT","lockVersion":0,...}
+curl -s -u lan:$P -H 'If-Match: "0"' -H 'Content-Type: application/json' \
+  -d '{"effectiveFrom":"2027-04-01T00:00:00+07:00"}' -X POST $D/card-fee-review/versions/2:request-approval
+# {"version":2,"status":"PENDING_APPROVAL","requestedBy":"lan","lockVersion":1,...}
+curl -s -u lan:$P -H 'If-Match: "1"' -X POST $D/card-fee-review/versions/2:approve
+# {"status":403,"code":"SELF_APPROVAL_FORBIDDEN",...}
+curl -s -u minh:$P -H 'If-Match: "1"' -X POST $D/card-fee-review/versions/2:approve
+# {"version":2,"status":"ACTIVE","approvedBy":"minh","effectiveFrom":"2027-03-31T17:00:00Z",...}
+curl -s -u minh:$P $D/card-fee-review/versions/2/history
+# {"items":[{"action":"IMPORTED",...},{"action":"REQUESTED","actor":"lan",...},{"action":"APPROVED","actor":"minh",...}]}
+```
+
+Version 1 stays the effective version until 1 April 00:00 (+07:00); then the effective-date job retires it once, whichever copy of the host runs the job, and publishes `processes.definition.retired.v1` with `supersededBy: 2`. A reject (`:reject` with `{"reason":"missing fraud check"}`) returns a version to draft; approving an older version while a newer one is active is `409 VERSION_SUPERSEDED`.
+
 The supervisor `hoa` may submit and may review, but not both on one application:
 
 ```bash
 curl -s -u hoa:$P -H 'Content-Type: application/json' \
   -d '{"applicationId":"APP-3001","customerId":"C-002"}' localhost:8080/api/cards/applications
 # take the task id from GET /api/bpm/processes/v1/instances/<instanceId>, then:
-curl -s -u hoa:$P -H 'Content-Type: application/json' -H 'If-Match: "0"' -H 'Idempotency-Key: review-3001' \
-  -d '{"result":{"approved":true}}' "localhost:8080/api/bpm/processes/v1/tasks/<taskId>:complete"
+curl -s -u hoa:$P -X POST -H 'If-Match: "0"' -H 'Idempotency-Key: claim-3001' \
+  "localhost:8080/api/bpm/processes/v1/tasks/<taskId>:claim"
 # {"status":403,"code":"SELF_APPROVAL_FORBIDDEN",...}
 ```
 
@@ -225,7 +295,7 @@ curl -s -u lan:$P -H 'Content-Type: application/xml' \
 #   {"element":"endEvent with terminateEventDefinition","elementId":"end","line":8,...}],...}
 ```
 
-Supported in this release: none start and end events, `serviceTask` (local), `businessRuleTask`, `userTask` (with `horus:resultVariable`; `horus:fourEyes` optional), `exclusiveGateway` with conditions and a default flow. Everything else is refused by name with the stage that adds it. Files must be UTF-8; bodies above `definitions.max-bytes` (1 MB) are refused with `413` before they are read.
+Supported in this release: none start and end events, `serviceTask` (local), `businessRuleTask`, `userTask` (with `horus:resultVariable`; `horus:fourEyes` optional), `exclusiveGateway` with conditions and a default flow, `parallelGateway` (fork and join; no conditions on its outgoing flows). Everything else is refused by name with the stage that adds it. Files must be UTF-8; bodies above `definitions.max-bytes` (1 MB) are refused with `413` before they are read.
 
 Conditions follow the Rule Engine's rules: null follows FEEL three-valued logic (`income < 5000000 VND` is null when `income` is unset, `tier != 'GOLD'` is true), only a true condition is taken, otherwise the default flow; numbers are decimals; money compares only within one currency, and a type error fails the step.
 

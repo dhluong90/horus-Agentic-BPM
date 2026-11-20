@@ -47,7 +47,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Test ID:** `PRE_004_exclusive_gateway_routes_single_matching_branch`
 
 ### PRE-005 Concurrent parallel gateway join prevents lost wakeup under multi-replica race
-- **Traces to:** `TR-PERF-05`
+- **Traces to:** `TR-PERF-05`, `TR-ASY-03`
 - **Milestone:** M2
 - **Given:** `parallelGateway` forks into Branch A (`credit-bureau`) and Branch B (`fraud-check`) which converge at `join-checks`.
 - **When:** Pod 1 finishes Branch A and Pod 2 finishes Branch B **at the exact same millisecond**.
@@ -449,8 +449,8 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-045 Engine REST bodies ignore the host's JSON settings
 - **Traces to:** `TR-EMB-07`, `TR-API-06`
 - **Milestone:** M2
-- **Given:** A host with the Process Engine starter and REST module, and host properties `spring.jackson.property-naming-strategy=SNAKE_CASE` and `spring.jackson.serialization.write-dates-as-timestamps=true`; the same test runs in the Spring Boot 4.x leg and in the Spring Boot 3.5 leg, where the host's own Jackson 2 stays at the version its dependency management pins.
-- **When:** `POST /api/bpm/processes/v1/instances` with `Idempotency-Key: 01JD2X5K9T1Q4N8V2M7B3C6D0E` and body `{ "definition": "kyc-onboarding", "businessKey": "APP-1001", "variables": { "applicantName": "Tran Thi B" } }`, then `GET /api/bpm/processes/v1/instances/{id}`.
+- **Given:** A host with the Process Engine starter and REST module, and host properties `spring.jackson.property-naming-strategy=SNAKE_CASE` and dates written as timestamps (`spring.jackson.serialization.write-dates-as-timestamps=true` on Spring Boot 3.5, `spring.jackson.datatype.datetime.write-dates-as-timestamps=true` on Spring Boot 4, where Jackson 3 moved the switch); the same test runs in the Spring Boot 4.x leg and in the Spring Boot 3.5 leg, where the host's own Jackson 2 stays at the version its dependency management pins.
+- **When:** `POST /api/bpm/processes/v1/instances` with `Idempotency-Key: 01JD2X5K9T1Q4N8V2M7B3C6D0E` and body `{ "definitionKey": "card-fee-review", "businessKey": "APP-1001", "variables": { "applicationId": "APP-1001", "customerId": "C-002", "applicantName": "Tran Thi B" } }`, then `GET /api/bpm/processes/v1/instances/{id}`.
 - **Then:** The start is accepted (`201`) because the engine reads the camelCase body with its own Jackson 3 mapper; the response keys are camelCase (`businessKey`, `startedAt`), `startedAt` is an ISO 8601 string, and the host's own controllers still answer in snake case; the dependency tree of the 3.5 leg shows Jackson 3 from the engine next to the host's Jackson 2, with no host version override.
 - **Example:** `host SNAKE_CASE -> engine response {"businessKey":"APP-1001","startedAt":"2027-02-01T09:00:00Z"}`.
 - **Test ID:** `PRE_045_engine_rest_bodies_ignore_host_json_settings`
@@ -487,6 +487,33 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - (b) The version compiles and runs, and a WARN log line names the definition and both reader versions.
 - **Example:** `source swapped with a matching row hash -> refused, incident, audit, alert; reader upgraded -> runs, WARN`.
 - **Test ID:** `PRE_048_kernel_runs_only_the_approved_source`
+
+### PRE-049 Definition and instance lists are keyset pages with cursors signed for the tenant and the list
+- **Traces to:** `TR-TEN-01`, `TR-PERF-07`, ADR-0015
+- **Milestone:** M2
+- **Given:** Tenant `bank-a` with definitions `card-fee-review` (v1 `ACTIVE`) and `card-limit-review`, and five running instances of `card-fee-review` started one after another; tenant `bank-b` with none. `query.max-page-size = 200`, `query.max-range = P31D`.
+- **When:** A `bank-a` caller with `processes:read` reads `GET /definitions?limit=1` and `GET /instances?definitionKey=card-fee-review&limit=2`, following `nextCursor` until `hasNext` is false; then sends `limit=0`, `limit=201`, `status=OPEN`, a 32-day range, `startedTo` before `startedFrom`, a cursor with an edited payload, a cursor with other filters; and a `bank-b` caller replays a `bank-a` cursor.
+- **Then:** Pages are `{data, nextCursor, hasNext}`; definitions come ordered by key with `latestVersion`, `latestStatus`, `effectiveVersion` and `lastChangedAt`; instances come newest first (`startedAt`, then `id`, both descending) with no gap and no duplicate across pages and no variables, tokens or tasks; every refused query is `400 QUERY_INVALID`; the `bank-b` caller gets `400 QUERY_INVALID`, lists no `bank-a` row and reads no `bank-a` version (`404 DEFINITION_NOT_FOUND`). `GET /definitions/{key}/versions/{v}` answers the version with its definition hash as `ETag`, which is the `Location` an import returns.
+- **Example:** `5 instances, limit=2 -> pages of 2, 2, 1, newest first; bank-a cursor sent by bank-b -> 400 QUERY_INVALID`.
+- **Test ID:** `PRE_049_definition_and_instance_lists_are_signed_keyset_pages`
+
+### PRE-050 Cancelling an instance is idempotent, optimistically locked and ends every live token and open task
+- **Traces to:** `TR-IDEM-01`, `TR-IDEM-03`, `TR-OBS-04`
+- **Milestone:** M2
+- **Given:** Instance `I1` of `card-fee-review` in `bank-a`, waiting at the officer review task, `lockVersion = 1`; branch supervisor `hoa` with `processes:cancel`; teller `tuan` with `processes:start` only.
+- **When:** (a) `hoa` posts `POST /instances/I1:cancel` with `If-Match: "1"`, `Idempotency-Key: k1` and `{ "reason": "Customer withdrew the card application" }`, then replays it, then sends `k1` with another reason, then cancels again with a new key. (b) Two requests cancel another running instance at the same moment with the same `If-Match` and different keys. (c) Four requests cancel a third instance at the same moment with one key. (d) `If-Match` is stale; `tuan`, who may start but not cancel, cancels; the reason is missing, blank or 2,001 characters; or `If-Match` or `Idempotency-Key` is missing.
+- **Then:** (a) `200` with status `CANCELLED`, the task `CANCELLED` and `endedAt` set; one `INSTANCE_ENDED` history entry with actor `hoa` and the reason, and one `processes.instance.cancelled.v1` carrying `cancelledBy: hoa` and the reason, both in the transaction of the change; the replay returns the same body and writes nothing; the other reason is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; the second cancel is `409 INVALID_STATE`. (b) One `200` and one `409 VERSION_CONFLICT`, one history entry. (c) Four `200` with one body, one history entry. (d) `409 VERSION_CONFLICT`, `403 PERMISSION_DENIED`, `400 INPUT_INVALID`, `428 PRECONDITION_REQUIRED`; nothing is written. `/api/bpm/me` lists `processes:cancel` for `hoa` and not for `tuan`. The permission, the reason and the absence of compensation are stated by `PRE-054` (PD-103): cancel cancels tokens and tasks under the instance lock, makes no adapter call and runs no compensation in 0.2.0.
+- **Example:** `cancel(I1, If-Match "1", k1) -> 200 CANCELLED; replay -> same body; second cancel -> 409 INVALID_STATE`.
+- **Test ID:** `PRE_050_cancel_is_idempotent_locked_and_ends_tokens_and_tasks`
+
+### PRE-051 A user task is claimed before it is completed, and only its claimant completes or hands it back
+- **Traces to:** `TR-IDEM-01`, `TR-IDEM-03`, `TR-SEC-04`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:** Card application `IT-T-CLAIM` submitted by `tuan`; its `officer-review` task `T1` is `OPEN` at `lockVersion = 0`, assigned to `role:CARD_OFFICER` and marked four-eyes; officers `an` and `hoa`; `zoe` is an officer of `bank-b`.
+- **When:** (a) `an` reads `GET /tasks/T1`, claims it with `If-Match: "0"` and `Idempotency-Key: claim-1`, replays the claim, then sends `claim-1` with `If-Match: "5"`. (b) `hoa` unclaims it; `an` unclaims it with `If-Match: "1"` and replays. (c) `an` and `hoa` claim another open task at the same moment with `If-Match: "0"`. (d) `an` completes an `OPEN` task; `hoa` completes a task `an` has claimed. (e) `zoe` reads, claims, unclaims or completes `T1`. (f) A caller without `processes:task:work` claims; a claim without `If-Match` or `Idempotency-Key`.
+- **Then:** (a) The read has `ETag: "0"` and `allowedActions: ["claim"]`; the claim is `200` with `status: CLAIMED`, `claimedBy: an`, `lockVersion: 1`, `ETag: "1"`, `allowedActions: ["unclaim", "complete"]`; the replay returns the same body; the reused key is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. (b) `hoa` gets `403 TASK_NOT_ASSIGNED`; `an` gets `200` with `status: OPEN` and no claimant; the replay returns the same body; one `TASK_CLAIMED` and one `TASK_UNCLAIMED` history entry and one `processes.task.claimed.v1` and one `processes.task.unclaimed.v1` exist. (c) One `200` and one `409 VERSION_CONFLICT`, one `TASK_CLAIMED` entry. (d) `409 INVALID_STATE` ("claim it first") and `403 TASK_NOT_ASSIGNED`; nothing is written. (e) `404 TASK_NOT_FOUND` each time; no row of `bank-b` is written and `T1` stays at `lockVersion 0`. (f) `403 PERMISSION_DENIED`, `428 PRECONDITION_REQUIRED`.
+- **Example:** `claim(T1, "0") by an -> 200 CLAIMED, lockVersion 1; complete(T1, "1") by hoa -> 403 TASK_NOT_ASSIGNED; complete(T1, "1") by an -> 200`.
+- **Test ID:** `PRE_051_task_is_claimed_before_completion_and_only_its_claimant_completes`
 
 ### PRE-052 The requester withdraws their own pending definition, and it returns to draft without a rejection
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-097

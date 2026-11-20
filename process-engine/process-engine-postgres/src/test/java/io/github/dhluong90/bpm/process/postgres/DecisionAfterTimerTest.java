@@ -49,9 +49,10 @@ class DecisionAfterTimerTest {
         engine.ruleIdentity.as(tenant, "lan");
         engine.rules.versionService().importRuleSet(io.github.dhluong90.bpm.rules.api.ImportRequest.yaml(
                 TestEngine.resource(yaml)));
-        engine.rules.versionService().requestPublish("card-reminder-fee", 1, WriteOptions.none());
+        long requested = engine.rules.versionService().requestPublish("card-reminder-fee", 1, WriteOptions.none())
+                .lockVersion();
         engine.ruleIdentity.as(tenant, "minh");
-        engine.rules.versionService().approve("card-reminder-fee", 1, WriteOptions.none());
+        engine.rules.versionService().approve("card-reminder-fee", 1, new WriteOptions(null, requested, null));
     }
 
     private static ProcessInstance overdue(TestEngine engine, String tenant, String card) {

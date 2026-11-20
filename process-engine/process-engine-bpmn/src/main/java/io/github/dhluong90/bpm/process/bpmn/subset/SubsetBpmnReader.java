@@ -21,6 +21,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.GatewayDirection;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.exec.behavior.event.TimerSchedule;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ProcessType;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
@@ -49,8 +50,8 @@ import javax.xml.stream.XMLStreamReader;
 /**
  * Reads the executable BPMN subset of the first release into the semantic model: none {@code startEvent} and
  * {@code endEvent}, {@code serviceTask} ({@code horus:handler}), {@code businessRuleTask} ({@code horus:ruleSet}),
- * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} with {@code default}, an intermediate timer
- * catch event with {@code timeDuration} or {@code timeDate}, and
+ * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} with {@code default}, {@code parallelGateway},
+ * an intermediate timer catch event with {@code timeDuration} or {@code timeDate}, and
  * {@code sequenceFlow} with an optional {@code conditionExpression} in {@code urn:horus-bpm:expr:v1}. Inputs are
  * {@code horus:input} elements and the result variable is {@code horus:resultVariable}.
  *
@@ -72,7 +73,6 @@ public final class SubsetBpmnReader {
     private static final Pattern ASSIGNEE = Pattern.compile("^(user|role|group):[A-Za-z0-9_.@-]{1,100}$");
     private static final Set<String> IGNORED_CHILDREN = Set.of("incoming", "outgoing", "documentation");
     private static final Map<String, String> LATER = Map.ofEntries(
-            Map.entry("parallelGateway", "the next sprint"),
             Map.entry("intermediateCatchEvent", "S1 or S2 (message, signal and conditional catch events)"),
             Map.entry("callActivity", "the next sprint"),
             Map.entry("transaction", "the next sprint (saga)"),
@@ -228,6 +228,13 @@ public final class SubsetBpmnReader {
                         Node children = children(local, id, false);
                         elements.add(new ExclusiveGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
                                 defaultFlow, children.info()));
+                    }
+                    case "parallelGateway" -> {
+                        String id = id();
+                        String gwName = attr("name");
+                        Node children = children(local, id, false);
+                        elements.add(new ParallelGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
+                                children.info()));
                     }
                     case "sequenceFlow" -> elements.add(sequenceFlow());
                     case "documentation", "extensionElements" -> skip();
@@ -679,6 +686,7 @@ public final class SubsetBpmnReader {
                         g.defaultFlow(), g.info());
                 case IntermediateCatchEvent c -> new IntermediateCatchEvent(c.id(), c.name(), in, o, c.eventDefinitions(),
                         c.eventDefinitionRefs(), c.data(), c.parallelMultiple(), c.info());
+                case ParallelGateway g -> new ParallelGateway(g.id(), g.name(), in, o, g.gatewayDirection(), g.info());
                 default -> e;
             });
         }

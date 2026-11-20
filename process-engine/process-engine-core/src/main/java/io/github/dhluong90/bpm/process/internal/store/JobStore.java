@@ -153,6 +153,16 @@ public interface JobStore {
      */
     Optional<JobRow> findJob(String tenant, String id);
 
+    /**
+     * Cancels the open {@code DEFINITION_EFFECTIVE} jobs of a definition version (PRE-053).
+     *
+     * @param tenant tenant
+     * @param definitionId the version
+     * @param now current time
+     * @return jobs cancelled
+     */
+    int cancelDefinitionJobs(String tenant, String definitionId, Instant now);
+
     /** A store without jobs: refuses every timer. For hosts and tests that build the services without one. */
     JobStore NONE = new JobStore() {
         @Override
@@ -189,6 +199,11 @@ public interface JobStore {
         @Override
         public Optional<JobRow> findJob(String tenant, String id) {
             return Optional.empty();
+        }
+
+        @Override
+        public int cancelDefinitionJobs(String tenant, String definitionId, Instant now) {
+            return 0;
         }
     };
 }

@@ -38,9 +38,9 @@ class TenantScopedEvaluationTest {
     void publishCardFee(String tenant) {
         caller.become(tenant, "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
-        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        long requested = engines.versionService().requestPublish("card-fee", 1, WriteOptions.none()).lockVersion();
         caller.become(tenant, "bob");
-        engines.versionService().approve("card-fee", 1, WriteOptions.none());
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, requested, null));
     }
 
     @Test

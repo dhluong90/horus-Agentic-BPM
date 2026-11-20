@@ -312,8 +312,39 @@ class ProcessServicesQaTest {
         }
 
         @Override
+        public Optional<StoredDefinition> definitionVersion(String tenant, String key, int version) {
+            return definitions.stream().filter(d -> d.key().equals(key) && d.version() == version).findFirst();
+        }
+
+        @Override
+        public List<io.github.dhluong90.bpm.process.api.DefinitionSummary> definitionKeys(String tenant, String afterKey,
+                int limit, Instant now) {
+            return List.of();
+        }
+
+        @Override
         public void insertDefinition(StoredDefinition definition) {
             definitions.add(definition);
+        }
+
+        @Override
+        public List<StoredDefinition> lockDefinitions(String tenant, String key) {
+            return definitions.stream().filter(d -> d.key().equals(key)).toList();
+        }
+
+        @Override
+        public int updateDefinition(StoredDefinition updated) {
+            definitions.replaceAll(d -> d.id().equals(updated.id()) ? updated : d);
+            return 1;
+        }
+
+        @Override
+        public void appendDefinitionHistory(DefinitionHistoryRow row) {
+        }
+
+        @Override
+        public List<DefinitionHistoryRow> definitionHistory(String tenant, String definitionId) {
+            return List.of();
         }
 
         @Override
@@ -335,6 +366,12 @@ class ProcessServicesQaTest {
         @Override
         public Optional<InstanceRow> findInstanceByBusinessKey(String tenant, String key, String businessKey) {
             return instances.values().stream().filter(i -> businessKey.equals(i.businessKey())).findFirst();
+        }
+
+        @Override
+        public List<InstanceRow> instances(String tenant, List<String> statuses, String definitionKey, Instant from,
+                Instant to, Instant afterStartedAt, String afterId, int limit) {
+            return List.of();
         }
 
         @Override
@@ -368,6 +405,16 @@ class ProcessServicesQaTest {
         }
 
         @Override
+        public int claimTask(String tenant, String id, long expectedLockVersion, String claimant, Instant at) {
+            return 1;
+        }
+
+        @Override
+        public int unclaimTask(String tenant, String id, long expectedLockVersion, String claimant) {
+            return 1;
+        }
+
+        @Override
         public void cancelTask(String tenant, String id) {
         }
 
@@ -390,6 +437,11 @@ class ProcessServicesQaTest {
                 Instant expiresAt, Instant now) {
             return idempotency.putIfAbsent(operation + "/" + key,
                     new IdempotencyRecord(tenant, operation, key, requestHash, null, expiresAt)) == null;
+        }
+
+        @Override
+        public byte[] engineKey(String name, byte[] candidate, Instant now) {
+            return candidate;
         }
 
         @Override

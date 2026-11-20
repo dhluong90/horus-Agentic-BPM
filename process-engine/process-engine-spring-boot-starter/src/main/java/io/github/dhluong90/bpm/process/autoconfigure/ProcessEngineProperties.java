@@ -20,6 +20,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param security mapping of the host's roles to engine permissions
  * @param handlers local step settings
  * @param jobs timer and job settings
+ * @param makerChecker four eyes on definition approval
+ * @param query read limits of the list endpoints
+ * @param lifecycle definition and instance lifecycle settings
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -29,7 +32,10 @@ public record ProcessEngineProperties(
         @DefaultValue("PT24H") Duration idempotencyRetention,
         @DefaultValue Security security,
         @DefaultValue Handlers handlers,
-        @DefaultValue Jobs jobs) {
+        @DefaultValue Jobs jobs,
+        @DefaultValue MakerChecker makerChecker,
+        @DefaultValue Query query,
+        @DefaultValue Lifecycle lifecycle) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -74,6 +80,32 @@ public record ProcessEngineProperties(
         public Handlers {
             if (slowCallWarning.isNegative() || slowCallWarning.isZero()) {
                 throw new IllegalArgumentException("horus.bpm.processes.handlers.slow-call-warning must be positive");
+            }
+        }
+    }
+
+    /**
+     * @param enabled the requester of a definition version can never approve it; {@code false} is accepted on the
+     *     {@code dev} profile only (TR-SEC-11, PRE-022), and a self-approval is then recorded as
+     *     {@code system:dev-auto-approve}
+     */
+    public record MakerChecker(@DefaultValue("true") boolean enabled) {
+    }
+
+    /**
+     * Definition lifecycle settings. Whom the approver must differ from is not here: it is the shared host setting
+     * {@code horus.bpm.lifecycle.approver-must-differ-from} (PD-096), read for both engines by
+     * {@code ApproverMustDifferFrom} in the host module.
+     *
+     * @param reasonMaxLength longest reason or approval comment, which land in the immutable history, and longest
+     *     cancellation reason; 2,000 by default, may be lowered, never raised (PD-103)
+     */
+    public record Lifecycle(@DefaultValue("2000") int reasonMaxLength) {
+
+        public Lifecycle {
+            if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.MAX_REASON_LENGTH) {
+                throw new IllegalArgumentException("horus.bpm.processes.lifecycle.reason-max-length must be 1 to "
+                        + EngineDefaults.MAX_REASON_LENGTH + " (it may be lowered, never raised, PD-103)");
             }
         }
     }
@@ -130,13 +162,32 @@ public record ProcessEngineProperties(
     }
 
     /**
+     * @param maxPageSize most items per list page; may be lowered, never raised
+     * @param maxRange longest start-time range of a list query; may be lowered, never raised
+     */
+    public record Query(@DefaultValue("200") int maxPageSize, @DefaultValue("P31D") Duration maxRange) {
+        public Query {
+            if (maxPageSize < 1 || maxPageSize > EngineDefaults.MAX_PAGE_SIZE) {
+                throw new IllegalArgumentException("horus.bpm.processes.query.max-page-size must be 1 to "
+                        + EngineDefaults.MAX_PAGE_SIZE + " (it may be lowered, never raised)");
+            }
+            if (maxRange.isNegative() || maxRange.isZero() || maxRange.compareTo(EngineDefaults.MAX_RANGE) > 0) {
+                throw new IllegalArgumentException("horus.bpm.processes.query.max-range must be positive and at most "
+                        + EngineDefaults.MAX_RANGE + " (it may be lowered, never raised)");
+            }
+        }
+    }
+
+    /**
      * @param rolePermissions host authority (for example {@code ROLE_CARD_OFFICER}) to engine permissions
      */
     public record Security(@DefaultValue Map<String, List<String>> rolePermissions) {
     }
 
-    EngineSettings toSettings() {
+    EngineSettings toSettings(EngineSettings.ApproverRule approverRule,
+            EngineSettings.RetireLastVersionRule retireLastVersion) {
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
-                idempotencyRetention, handlers.slowCallWarning());
+                idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange(),
+                lifecycle.reasonMaxLength(), makerChecker.enabled(), approverRule, retireLastVersion);
     }
 }
