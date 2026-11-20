@@ -96,7 +96,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-072](#pd-072-fixed-or-configurable-rule-engine-table-prefix) | Fixed or configurable Rule Engine table prefix | Decided |
 | [PD-073](#pd-073-decision-rights-for-business-and-use-case-questions) | Decision rights for business and use-case questions | Decided |
 | [PD-074](#pd-074-product-principle-generic-by-design) | Product principle: generic by design | Decided |
-| [PD-075](#pd-075-minimal-cockpit-editing-in-m1-async-decision-log-to-m2) | Minimal cockpit editing in M1, async decision log to M2 | Decided (product manager, delegated, PD-073) |
+| [PD-075](#pd-075-minimal-cockpit-editing-in-m1-async-decision-log-to-m2) | Minimal cockpit editing in M1, async decision log to M2 | Decided (product manager, delegated, PD-073); async half superseded by PD-122 |
 | [PD-076](#pd-076-placement-of-the-condition-builder-lens) | Placement of the condition builder lens | Decided (product manager, delegated, PD-073) |
 | [PD-077](#pd-077-fallback-for-plain-language-readings-in-m1) | Fallback for plain-language readings in M1 | Decided (product manager, delegated, PD-073) |
 | [PD-078](#pd-078-cockpit-home-screen-in-cockpit-01) | Cockpit home screen in Cockpit 0.1 | Decided (product manager, delegated, PD-073; default landing superseded by PD-092) |
@@ -140,6 +140,17 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-116](#pd-116-evidence-exports-are-produced-by-the-engine-hashed-and-recorded) | Evidence exports are produced by the engine, hashed and recorded | Decided (product manager, delegated, PD-073) |
 | [PD-117](#pd-117-the-documentation-site-is-built-from-the-wiki-at-each-release) | The documentation site is built from the wiki at each release | Decided (product manager, delegated, PD-073) |
 | [PD-118](#pd-118-business-calendars-are-edited-in-the-cockpit-by-one-person-on-the-record) | Business calendars are edited in the cockpit by one person, on the record | Decided (product manager, delegated, PD-073) |
+| [PD-119](#pd-119-host-functions-are-pure-calculations-and-a-changed-function-version-warns-by-default) | Host functions are pure calculations, and a changed function version warns by default | Decided (product manager, delegated, PD-073) |
+| [PD-120](#pd-120-rule-coverage-reports-by-default-and-fails-the-build-only-when-the-host-asks) | Rule coverage reports by default and fails the build only when the host asks | Decided (product manager, delegated, PD-073) |
+| [PD-121](#pd-121-restoring-an-earlier-version-is-allowed-when-cockpit-drafts-are-off) | Restoring an earlier version is allowed when cockpit drafts are off | Decided (product manager, delegated, PD-073) |
+| [PD-122](#pd-122-no-decision-log-mode-may-lose-a-decision-asynchronous-writing-moves-out-of-10) | No decision log mode may lose a decision; asynchronous writing moves out of 1.0 | Decided (product manager, delegated, PD-073) |
+| [PD-123](#pd-123-explanation-templates-are-written-per-row-with-one-sentence-for-no-match) | Explanation templates are written per row, with one sentence for no match | Decided (product manager, delegated, PD-073) |
+| [PD-124](#pd-124-a-what-if-comparison-over-too-large-a-period-is-refused-not-sampled) | A what-if comparison over too large a period is refused, not sampled | Decided (product manager, delegated, PD-073) |
+| [PD-125](#pd-125-imported-dmn-tables-keep-the-strict-error-mode-until-stage-s1) | Imported DMN tables keep the strict error mode until stage S1 | Decided (product manager, delegated, PD-073) |
+| [PD-126](#pd-126-resolving-an-incident-with-an-operators-output-needs-a-second-person) | Resolving an incident with an operator's output needs a second person | Decided (product manager, delegated, PD-073) |
+| [PD-127](#pd-127-a-completed-child-process-is-undone-only-by-its-call-steps-handler) | A completed child process is undone only by its call step's handler | Decided (product manager, delegated, PD-073) |
+| [PD-128](#pd-128-offline-replay-covers-guardrail-and-schema-changes-prompt-replay-is-a-host-harness) | Offline replay covers guardrail and schema changes; prompt replay is a host harness | Decided (product manager, delegated, PD-073) |
+| [PD-129](#pd-129-the-example-model-adapters-are-openai-compatible-and-anthropic-messages) | The example model adapters are OpenAI-compatible and Anthropic Messages | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2326,6 +2337,8 @@ On 2026-11-19 the product owner delegated business and use-case decisions for th
 
 ### PD-075 Minimal cockpit editing in M1, async decision log to M2
 
+The async decision log half is superseded by [PD-122](#pd-122-no-decision-log-mode-may-lose-a-decision-asynchronous-writing-moves-out-of-10); the cockpit editing half stands.
+
 | Field | Value |
 |---|---|
 | Date | 2026-11-19 |
@@ -3453,3 +3466,232 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Consequences.** Contract change in the process engine: calendar read and edit endpoints with `If-Match` and `Idempotency-Key`, a calendar history, event `processes.calendar.changed.v1`, and the `/meta` feature `processes.calendars.editable`. Creating or deleting a calendar stays configuration. Configurable: no.
 
 **Follow-ups.** Architect: the process engine SPEC and OpenAPI change. Maintainers (engineering): #72 and #125.
+
+### PD-119 Host functions are pure calculations, and a changed function version warns by default
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Host-registered functions in rule cells (RE-F-27, issue #34): may a function look up data, such as a customer segment held in core banking? And when a function's version label changes after a rule set version was approved, does evaluation go on or fail closed? |
+| Raised by | Specification of issue #34 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 on both questions |
+
+**Options considered**
+
+1. Pure calculations only; a version change warns by default (chosen). A function sees only its arguments: no tenant, caller, clock, connection or network. Data the host looks up is passed as an input. Setting `evaluation.function-version-change`: `warn` (default; evaluation goes on, start-up logs a WARN naming the function, both labels and the versions that call it, `/api/bpm/meta` shows it, and each decision records the version it used) or `refuse` (evaluation fails closed with `FUNCTION_CHANGED` until a new rule set version is approved under four eyes).
+2. Functions may look up data; a version change refuses by default. Consequence: lookups make decisions non-repeatable, put a network call inside the host transaction and break replay; a `refuse` default stops every fee calculation on each redeploy of the host.
+
+**Recommendation and decision.** Option 1. Replay and explanation are what make a decision auditable, and they need pure functions. A function is host code, which passes the host's own change control; the decision row records the exact version used, and a bank that treats a function change as a rule change chooses `refuse`.
+
+**Consequences.** RE-F-27 wording is unchanged ("pure functions"). The `refuse` value and `FUNCTION_CHANGED` ship with the feature. Configurable: yes, `evaluation.function-version-change`.
+
+**Follow-ups.** Architect: `RLE-055` to `RLE-058` in the rule engine SPEC and the setting in DESIGN 4.4. Maintainers (engineering): #34. Documentation: the function how-to states the purity obligation.
+
+### PD-120 Rule coverage reports by default and fails the build only when the host asks
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | The JUnit rule tests and coverage report (RE-F-28, issue #35): what fails the build by default? The wiki says an uncovered row in a `unique` table fails it. |
+| Raised by | Specification of issue #35 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Report only by default (`horus.rules.coverage.fail-on: none`); a rule set repository sets `any` to fail on any uncovered row (chosen). Consequence: a new adopter's first build passes, and a bank that wants proof that every row is tested turns it on in one line.
+2. Keep the wiki rule: an uncovered row in a `unique` table fails the build. Consequence: a first build breaks for a reason the adopter did not choose, and `first` tables, where a shadowed row is the more common defect, are treated as safer.
+
+**Recommendation and decision.** Option 1. Coverage is a development control a bank chooses for its rule repository; production controls (four eyes, validation, the decision log) do not depend on it.
+
+**Consequences.** The wiki page on rule testing changes in the implementing pull request. Configurable: yes, `horus.rules.coverage.fail-on` (`none`, `unique`, `any`).
+
+**Follow-ups.** Maintainers (engineering): #35 and the wiki page. Documentation: the testing how-to recommends `any` for bank rule repositories.
+
+### PD-121 Restoring an earlier version is allowed when cockpit drafts are off
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Restoring an earlier version as a new draft (`?copyOf=`, RE-F-33, issue #40): is it allowed when `authoring.cockpit-drafts` is `false`, the 0.1.0 default? DESIGN 4.4 refuses it today. |
+| Raised by | Specification of issue #40 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Allow `?copyOf=` whatever the setting says (chosen). The restored draft still passes today's import checks and needs four-eyes approval; the restorer counts as its maker. The setting goes on governing in-place editing (`PUT`).
+2. Refuse it, as DESIGN 4.4 says. Consequence: a bank on the default cannot roll back from the API without finding and re-importing an old file, at the moment it most needs speed.
+
+**Recommendation and decision.** Option 1. A restore brings in no new authored content: its canonical hash is one the bank approved before, and the second person still approves it.
+
+**Consequences.** The DESIGN 4.4 row changes in the implementing pull request. No approval, effective date or acknowledgement is copied. Configurable: no.
+
+**Follow-ups.** Architect: DESIGN 4.4 and `RLE-062` and `RLE-063`. Maintainers (engineering): #40.
+
+### PD-122 No decision log mode may lose a decision; asynchronous writing moves out of 1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | The asynchronous decision log mode (RE-F-15, issue #45) writes decisions after the host transaction commits, from an in-memory queue. A crash loses what is queued, up to `max-queued` decisions of business transactions that did commit. Is that loss acceptable for rule sets a bank opts in? |
+| Raised by | Specification of issue #45 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 2. Supersedes the RE-F-15 half of PD-075 |
+
+**Options considered**
+
+1. Opt-in asynchronous mode per listed rule set, with the loss window documented, a WARN at start-up, the mode in `/api/bpm/meta` and a fall-back to transactional writing when the queue is full. Consequence: the insert leaves the business transaction, but a crash can leave a fee charged or a limit set with no decision record behind it.
+2. Ship no mode that can lose a committed decision (chosen). RE-F-15 leaves M2 and 1.0. It returns only as a design that survives a crash, for example a durable local journal written before the host transaction commits, proven by a crash test, and through a new decision. High-volume hosts add replicas: the capacity math gives about 2,000 transactional decisions per second per replica (DESIGN section 6).
+
+**Recommendation and decision.** Option 2. The decision log is the bank's immutable audit trail; a gap after a crash is the moment an auditor or a complaint needs the record. "Opt-in" moves the risk to the bank without removing it, and nothing in the 1.0 pilots needs more than replicas give.
+
+**Consequences.** RE-F-15 moves from M2 (head of the cut list) to later and leaves the cut list; `decision-log.mode` keeps one value, `transactional`, in 1.0. Issue #45 stays open for the lossless design and is retargeted after 1.0. PD-075 keeps its cockpit half. Configurable: no.
+
+**Follow-ups.** Product manager: the feature map row and counts. Architect: DESIGN 4.4 (the `async` value removed) and, when a lossless design exists, its ADR. Maintainers (engineering): retarget #45.
+
+### PD-123 Explanation templates are written per row, with one sentence for no match
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Explanation templates (RE-F-19, issue #97): does the author write one sentence per rule set, or one per row plus a rule-set sentence for no match? |
+| Raised by | Specification of issue #97 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. One template per row (`explain`, per language) and `explanations.noMatch` at rule-set level (chosen). A row without a template falls back to the generated sentence. Templates live in the rule set document, so they are versioned, hashed, diffed and approved with the rules.
+2. One sentence per rule set. Consequence: it cannot say why a Gold customer pays nothing and a Silver customer pays 10,000 VND, which is the question a customer or an auditor asks.
+
+**Recommendation and decision.** Option 1, with one condition: a placeholder that names a `mask: true` input is refused at import, so a template never prints a masked value or its token.
+
+**Consequences.** RE-F-19 is reworded to "per row, with a sentence for no match". Placeholders are plain names, never expressions. Configurable: no.
+
+**Follow-ups.** Architect: `RLE-072` to `RLE-074` and the masked-placeholder refusal in the rule engine SPEC. Maintainers (engineering): #97. Product manager: the feature map row.
+
+### PD-124 A what-if comparison over too large a period is refused, not sampled
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Comparing two versions over a past period (RE-F-24, issue #120) re-evaluates every logged decision of that period. What happens when the period holds more decisions than one request can re-evaluate? |
+| Raised by | Specification of issue #120 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Refuse above a cap (chosen): `simulation.max-history-decisions`, default 50,000, at most 200,000; a larger period is `422 HISTORY_TOO_LARGE` and the committee narrows the period.
+2. Take a deterministic sample and scale the totals. Consequence: totals that look exact but are estimates, the wrong failure for a pricing decision.
+3. Run an asynchronous job. Consequence: the right route for a full month of a busy table, but a job framework the milestone does not have.
+
+**Recommendation and decision.** Option 1. A pricing committee signs on totals; they must be exact or absent. An asynchronous job can follow after 1.0.
+
+**Consequences.** Configurable: yes, the cap within its ceiling.
+
+**Follow-ups.** Architect: `RLE-075` to `RLE-077` and the setting. Maintainers (engineering): #120.
+
+### PD-125 Imported DMN tables keep the strict error mode until stage S1
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | PD-066 gives imported DMN models the `spec` error mode. The mode is part of the canonical document and its hash, and in the single-table subset no construct behaves differently in the two modes. Which mode does an imported DMN table get before stage S1 (issue #121)? |
+| Raised by | Specification of issue #121 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. `strict` until stage S1 brings a construct whose result depends on the mode; from then on a newly imported DMN model gets `spec` as PD-066 decided (chosen). Stored versions keep their recorded mode and hash, never recomputed.
+2. `spec` now. Consequence: the same behaviour gets two hashes, one from YAML and one from DMN, breaking the 0.1.0 promise of `RLE-045` for no difference in results.
+
+**Recommendation and decision.** Option 1. It applies PD-066 when the mode starts to matter, without a hash change that carries no meaning.
+
+**Consequences.** PD-066 stands; its start for DMN imports is stage S1. Configurable: no.
+
+**Follow-ups.** Architect: `RLE-078` to `RLE-081`. Maintainers (engineering): #121.
+
+### PD-126 Resolving an incident with an operator's output needs a second person
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Retry or resolve incidents by API (PE-F-25, issue #68). `:resolve` completes the waiting step with an output the operator supplies, or marks an undo done by hand. Does that need a second person? |
+| Raised by | Specification of issue #68 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 3 |
+
+**Options considered**
+
+1. One operator resolves, with a required reason; a host setting leaves room for four-eyes later. Consequence: one person can push an output of their choosing, such as an approved limit, into a financial process, or declare a reversal done, with no second check. That is a maker-checker gap.
+2. Resolve only closes the incident; the operator then cancels or migrates the instance. Consequence: no output is injected, but the token is stranded and the case cannot finish.
+3. Four-eyes from the start (chosen). `:resolve` records a proposed resolution (the output or "undone by hand", and the reason); a second holder of `processes:incident:manage`, never the proposer, approves or rejects it. Only the approval moves the token. Retry stays a one-person action, because it runs the same step again under the same job id.
+
+**Recommendation and decision.** Option 3. Maker-checker is a non-negotiable control: a manual output or a declared manual reversal in a financial process is exactly what a second person must see.
+
+**Consequences.**
+- Setting `incidents.resolve-approval`: `four-eyes` by default. `single` is accepted only in the `dev` profile; start-up is refused with it in any other profile.
+- The output still passes the step's output schema; the guardrail is not run on a person's answer. History records proposer, approver, reason and output; `processes.incident.resolved.v1` carries both.
+- #68 grows by the proposal state and the approve and reject commands. If they miss M2, resolve does not ship in M2 and operators retry or cancel; it never ships without the second person.
+- Configurable: only the `dev` relaxation.
+
+**Follow-ups.** Architect: `PRE-078` rewritten for the proposal and approval, the states and error codes in the process engine SPEC and DESIGN. Maintainers (engineering): #68. Product manager: the cockpit incident screen shows a pending resolution (later slice).
+
+### PD-127 A completed child process is undone only by its call step's handler
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | When a parent's saga compensates past a completed `callProcess` step (PE-F-12, issue #92), what happens to the completed child? Open question 11.1 of the process engine DESIGN. |
+| Raised by | Specification of issue #92 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 with a condition |
+
+**Options considered**
+
+1. The parent treats the call as one step; the child is undone only by the call step's own `compensate` handler, which may be a service step or another `callProcess` such as `reverse-kyc` (chosen). The child's own stack is not walked.
+2. The engine walks the completed child's compensation stack, as BPMN compensation of a subprocess does. Consequence: closer to the standard, but child stacks must outlive the child and the walk locks two instances.
+3. Refuse `callProcess` inside a saga until stage S2. Consequence: safest, but it blocks KYC inside onboarding.
+
+**Recommendation and decision.** Option 1, with one condition: a `callProcess` inside a `saga` must declare its undo. Import refuses it without a `compensate` handler unless the author declares the undo manual, which raises `COMPENSATION_MANUAL_REQUIRED` when reached. No completed child is ever left silently in place.
+
+**Consequences.** DESIGN 11.1 closes. Option 2 stays the standards-track target (S2). Configurable: no.
+
+**Follow-ups.** Architect: DESIGN 11.1, `PRE-091` and the import check. Maintainers (engineering): #92.
+
+### PD-128 Offline replay covers guardrail and schema changes; prompt replay is a host harness
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Offline replay of recorded agent traces (PE-F-37, issue #98): does M3 replay prompt or model changes, or only guardrail and output schema changes? |
+| Raised by | Specification of issue #98 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Guardrail and output schema changes only, inside the engine (chosen). Deterministic, no model calls, using only what history holds. A changed prompt is replayed by a documented host harness: the host's adapter re-runs selected cases outside the engine and writes outputs in the replay input format, and the engine runs the same report over them.
+2. The engine re-calls the adapter with recorded inputs. Consequence: inputs would have to be kept in plain text, but masked inputs are stored only as keyed hashes (`TR-SEC-05`); it also spends model calls and sends customer data out again.
+3. Both in M3. Consequence: the widest scope, with the cost of option 2.
+
+**Recommendation and decision.** Option 1. Masking is a control the engine does not weaken for a test tool, and the host already holds the data and the model access a prompt replay needs.
+
+**Consequences.** PE-F-37 is reworded to "against a changed guardrail or output schema; prompt changes through a host harness". Configurable: no.
+
+**Follow-ups.** Architect: `PRE-092` to `PRE-095` and the `processes:agent:replay` amendment of ADR-0010. Maintainers (engineering): #98. Documentation: the host harness how-to. Product manager: the feature map row.
+
+### PD-129 The example model adapters are OpenAI-compatible and Anthropic Messages
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Reference adapters for model APIs (PE-F-35, issue #100): which two APIs do the examples target? |
+| Raised by | Specification of issue #100 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. An OpenAI-compatible Chat Completions adapter and an Anthropic Messages adapter (chosen). The first serves many hosted vendors and the self-hosted servers banks use for models on their own premises; the second shows a different request shape, which is what a team writing its own adapter needs to see.
+2. Two cloud vendors only, such as Azure OpenAI and Google Gemini. Consequence: common in enterprise accounts, but no self-hosted path.
+3. One OpenAI-compatible adapter and a local-model demo. Consequence: neutral, but it shows one request shape only.
+
+**Recommendation and decision.** Option 1. The self-hosted path matters most to banks that keep customer data on premises, and two request shapes teach adapter writing better than two similar ones.
+
+**Consequences.** The examples say they are examples, not endorsements or supported artifacts; no vendor SDK is used; keys come from the environment. Configurable: the endpoint and model in each example's configuration.
+
+**Follow-ups.** Maintainers (engineering): #100. Documentation: the adapter how-to.
