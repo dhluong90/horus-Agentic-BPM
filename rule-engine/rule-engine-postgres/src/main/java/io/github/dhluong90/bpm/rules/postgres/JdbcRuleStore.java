@@ -39,7 +39,7 @@ public final class JdbcRuleStore implements RuleStore {
             v.tenant_id, v.id, v.rule_set_id, s.name, v.version_num, v.status, v.hit_policy, v.effective_from,
             v.canonical_json::text AS canonical_json, v.canonical_hash, v.source_format, v.source_document,
             v.source_hash, v.lock_version, v.requested_by, v.requested_at, v.approved_by, v.approved_at,
-            v.approval_comment, v.created_by, v.created_at, v.retired_at
+            v.approval_comment, v.created_by, v.created_at, v.retired_at, v.copied_from
             """;
 
     /**
@@ -111,10 +111,12 @@ public final class JdbcRuleStore implements RuleStore {
         jdbc.sql("""
                 INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy, effective_from,
                   canonical_json, canonical_hash, source_format, source_document, source_hash, lock_version,
-                  requested_by, requested_at, approved_by, approved_at, approval_comment, created_by, created_at)
+                  requested_by, requested_at, approved_by, approved_at, approval_comment, created_by, created_at,
+                  copied_from)
                 VALUES (:tenant, :id, :ruleSetId, :num, :status, :hitPolicy, :effectiveFrom,
                   CAST(:canonicalJson AS jsonb), :canonicalHash, :sourceFormat, :sourceDocument, :sourceHash, :lock,
-                  :requestedBy, :requestedAt, :approvedBy, :approvedAt, :comment, :createdBy, :createdAt)
+                  :requestedBy, :requestedAt, :approvedBy, :approvedAt, :comment, :createdBy, :createdAt,
+                  :copiedFrom)
                 """)
                 .param("tenant", v.tenantId()).param("id", v.id()).param("ruleSetId", v.ruleSetId())
                 .param("num", v.version()).param("status", v.status().name()).param("hitPolicy", v.hitPolicy())
@@ -125,7 +127,7 @@ public final class JdbcRuleStore implements RuleStore {
                 .param("requestedBy", v.requestedBy()).param("requestedAt", timestamp(v.requestedAt()))
                 .param("approvedBy", v.approvedBy()).param("approvedAt", timestamp(v.approvedAt()))
                 .param("comment", v.approvalComment()).param("createdBy", v.createdBy())
-                .param("createdAt", Timestamp.from(v.createdAt()))
+                .param("createdAt", Timestamp.from(v.createdAt())).param("copiedFrom", v.copiedFrom())
                 .update();
         insertRules(v, v.createdAt());
     }
@@ -330,9 +332,11 @@ public final class JdbcRuleStore implements RuleStore {
         jdbc.sql("""
                 INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor,
                   reason, superseded_by, approval_mode, no_version_in_effect, lock_version, occurred_at,
-                  canonical_hash, previous_canonical_hash, acknowledged_warnings, masked_by_default_inputs)
+                  canonical_hash, previous_canonical_hash, acknowledged_warnings, masked_by_default_inputs,
+                  copied_from)
                 VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :supersededBy, :mode, :none,
-                  :lock, :at, :hash, :previousHash, CAST(:acknowledged AS jsonb), CAST(:maskedByDefault AS jsonb))
+                  :lock, :at, :hash, :previousHash, CAST(:acknowledged AS jsonb), CAST(:maskedByDefault AS jsonb),
+                  :copiedFrom)
                 """)
                 .param("supersededBy", row.supersededBy()).param("mode", row.approvalMode())
                 .param("none", row.noVersionInEffect())
@@ -344,6 +348,7 @@ public final class JdbcRuleStore implements RuleStore {
                 .param("hash", row.canonicalHash()).param("previousHash", row.previousCanonicalHash())
                 .param("acknowledged", approved ? acknowledgedJson(row.acknowledgedWarnings()) : null)
                 .param("maskedByDefault", approved ? stringsJson(row.maskedByDefaultInputs()) : null)
+                .param("copiedFrom", row.copiedFrom())
                 .update();
     }
 
@@ -385,7 +390,7 @@ public final class JdbcRuleStore implements RuleStore {
                 SELECT tenant_id, id, version_id, action, from_status, to_status, actor, reason, superseded_by,
                   approval_mode, no_version_in_effect, lock_version, occurred_at, canonical_hash,
                   previous_canonical_hash, acknowledged_warnings::text AS acknowledged,
-                  masked_by_default_inputs::text AS masked_by_default
+                  masked_by_default_inputs::text AS masked_by_default, copied_from
                 FROM rle_version_history
                 WHERE tenant_id = :tenant AND version_id = :versionId
                   AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED','WITHDRAWN','DRAFT_UPDATED','RETIRED')
@@ -397,6 +402,8 @@ public final class JdbcRuleStore implements RuleStore {
                     Integer superseded = rs.wasNull() ? null : supersededBy;
                     boolean none = rs.getBoolean("no_version_in_effect");
                     Boolean noVersionInEffect = rs.wasNull() ? null : none;
+                    int copied = rs.getInt("copied_from");
+                    Integer copiedFrom = rs.wasNull() ? null : copied;
                     return new HistoryRow(rs.getString("tenant_id"), rs.getString("id"), rs.getString("version_id"),
                             LifecycleAction.valueOf(rs.getString("action")),
                             rs.getString("from_status") == null ? null : VersionStatus.valueOf(rs.getString("from_status")),
@@ -404,7 +411,7 @@ public final class JdbcRuleStore implements RuleStore {
                             rs.getString("reason"), rs.getLong("lock_version"), instant(rs, "occurred_at"), superseded,
                             rs.getString("approval_mode"), noVersionInEffect, rs.getString("canonical_hash"),
                             rs.getString("previous_canonical_hash"), acknowledged(rs.getString("acknowledged")),
-                            strings(rs.getString("masked_by_default")));
+                            strings(rs.getString("masked_by_default")), copiedFrom);
                 })
                 .list();
     }
@@ -592,6 +599,8 @@ public final class JdbcRuleStore implements RuleStore {
     }
 
     private static StoredVersion version(ResultSet rs, int row) throws SQLException {
+        int copied = rs.getInt("copied_from");
+        Integer copiedFrom = rs.wasNull() ? null : copied;
         return new StoredVersion(rs.getString("tenant_id"), rs.getString("id"), rs.getString("rule_set_id"),
                 rs.getString("name"), rs.getInt("version_num"), VersionStatus.valueOf(rs.getString("status")),
                 rs.getString("hit_policy"), instant(rs, "effective_from"), canonical(rs.getString("canonical_json")),
@@ -599,7 +608,7 @@ public final class JdbcRuleStore implements RuleStore {
                 rs.getString("source_document"), rs.getString("source_hash"), rs.getLong("lock_version"),
                 rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("approved_by"),
                 instant(rs, "approved_at"), rs.getString("approval_comment"), rs.getString("created_by"),
-                instant(rs, "created_at"), instant(rs, "retired_at"));
+                instant(rs, "created_at"), instant(rs, "retired_at"), copiedFrom);
     }
 
     /**

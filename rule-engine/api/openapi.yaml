@@ -215,12 +215,30 @@ paths:
         With `decision-log.require-explicit-mask` on for the tenant, an input that declares no
         `mask` is `422 VALIDATION_FAILED` with one violation per input, its `column` naming it, and
         nothing is stored (`RLE-050`).
+
+        With `copyOf={v}` and no body, the next draft is a copy of version `v` of the same rule set
+        (`RLE-062`): a restore of an earlier version. It carries `v`'s canonical document byte for
+        byte, so it has the same `canonicalHash`, and names it in `copiedFrom`. Any status of `v`
+        may be copied. No approval, effective date or acknowledgement is copied: the draft is made
+        by the caller, so the caller cannot approve it, and it follows the normal request and
+        approval path. It is checked as an import of the same document would be today, the step
+        budget and the mask rules included (`RLE-063`). It is allowed whatever
+        `authoring.cockpit-drafts` says (PD-121). `v` is read in the caller's tenant only. A
+        `copyOf` that is not a version number of 1 or more, or a body sent with it, is
+        `400 INPUT_INVALID`; an unknown `v` is `404 VERSION_NOT_FOUND`. A failure writes nothing.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
+        - name: copyOf
+          in: query
+          required: false
+          description: The version of this rule set to restore as the next draft; send no body with it
+          schema:
+            type: integer
+            minimum: 1
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CorrelationId'
       requestBody:
-        required: true
+        required: false
         content:
           application/yaml:
             schema:
@@ -1524,6 +1542,10 @@ components:
           type: [string, 'null']
           format: date-time
           description: When the version was retired, by hand or as superseded; null while it is not retired
+        copiedFrom:
+          type: integer
+          minimum: 1
+          description: 'Present on a draft restored from an earlier version (`RLE-062`), naming the version it was copied from; absent on an imported version'
         createdBy:
           type: [string, 'null']
           description: Who imported the version; neither the author nor the requester may approve it
@@ -1751,6 +1773,10 @@ components:
         noVersionInEffect:
           type: [boolean, 'null']
           description: Present on a `RETIRED` entry only; true when the retirement left the rule set with no version in effect (PD-101)
+        copiedFrom:
+          type: integer
+          minimum: 1
+          description: On the `CREATED` entry of a restore only (`RLE-062`); the version it was copied from
         lockVersion: { type: integer }
         occurredAt: { type: string, format: date-time }
         canonicalHash:
