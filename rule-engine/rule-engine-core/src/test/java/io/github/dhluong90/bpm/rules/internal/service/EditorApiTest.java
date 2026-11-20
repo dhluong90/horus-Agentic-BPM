@@ -615,7 +615,7 @@ class EditorApiTest {
 
         assertThatThrownBy(() -> versions.importRuleSet(ImportRequest.yaml(bad)))
                 .isInstanceOfSatisfying(ValidationFailedException.class, e -> assertThat(e.violations())
-                        .singleElement().isEqualTo(new Violation("R2", "txCnt", "unknown input 'txCnt'")));
+                        .singleElement().isEqualTo(new Violation("R2", "txCnt", "unknown input 'txCnt'", "UNKNOWN_INPUT")));
     }
 
     // ---------------------------------------------------------------- RLE-042 money output needs a currency

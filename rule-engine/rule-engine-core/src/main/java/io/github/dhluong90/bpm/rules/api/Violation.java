@@ -9,11 +9,42 @@ import java.util.Objects;
  * @param ruleId the rule (row) the problem is in, or null for a problem outside the rules
  * @param column the input or output name (column) the problem is in, or null when it concerns the row or the document
  * @param message the problem in English, without the rule id or column
+ * @param code a stable code for a program to act on, for example {@code UNKNOWN_INPUT}, {@code TYPE_MISMATCH} or
+ *     {@code FORBIDDEN_CONSTRUCT} (RLE-004), or null for a problem that has none
+ * @param position the zero-based character position of the problem in the cell text as written, or null when the
+ *     problem concerns the cell as a whole or is not in a cell
  */
-public record Violation(String ruleId, String column, String message) implements Serializable {
+public record Violation(String ruleId, String column, String message, String code, Integer position)
+        implements Serializable {
 
     public Violation {
         Objects.requireNonNull(message, "message must not be null");
+        if (position != null && position < 0) {
+            throw new IllegalArgumentException("position must not be negative, was " + position);
+        }
+    }
+
+    /**
+     * Creates a problem with no code and no position.
+     *
+     * @param ruleId the rule (row), or null
+     * @param column the input or output name (column), or null
+     * @param message the problem
+     */
+    public Violation(String ruleId, String column, String message) {
+        this(ruleId, column, message, null, null);
+    }
+
+    /**
+     * Creates a problem with a code and no position.
+     *
+     * @param ruleId the rule (row), or null
+     * @param column the input or output name (column), or null
+     * @param message the problem
+     * @param code the code, or null
+     */
+    public Violation(String ruleId, String column, String message, String code) {
+        this(ruleId, column, message, code, null);
     }
 
     /**

@@ -490,7 +490,7 @@ public final class DefaultRuleEngine implements RuleEngine {
         }
         CompiledRuleSet fresh = CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()),
                 context.settings().maxOutputBytes(), context.settings().maxStringLength(),
-                context.settings().regexLimits());
+                context.settings().regexLimits(), context.settings().evaluationLimits());
         compiled.put(key, fresh);
         return fresh;
     }

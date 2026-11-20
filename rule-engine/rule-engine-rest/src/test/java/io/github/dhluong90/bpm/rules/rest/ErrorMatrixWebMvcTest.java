@@ -264,6 +264,36 @@ class ErrorMatrixWebMvcTest {
     }
 
     @Test
+    void TR_SEC_01_a_decision_past_its_step_budget_names_the_limit_it_reached() throws Exception {
+        // Given a large collect tariff table that ran past the step budget on this input
+        scene.outcome = new DecisionResult.Failed("EVALUATION_ERROR",
+                "EVALUATION_BUDGET_EXCEEDED: the decision took more than 100000 evaluation steps", List.of(), "STEPS");
+        byte[] gold = "{\"inputs\":{\"tier\":\"GOLD\",\"txCount\":5}}".getBytes(StandardCharsets.UTF_8);
+
+        // When
+        MockHttpServletResponse response = mvc.perform(post("/api/bpm/rules/v1/decisions/card-fee:evaluate")
+                .contentType("application/json").content(gold)).andReturn().getResponse();
+
+        // Then the stable field tells a rule problem (STEPS) from a slow machine (TIME), not only the detail text
+        JsonNode problem = EngineJson.JSON.readTree(response.getContentAsByteArray());
+        assertThat(response.getStatus()).isEqualTo(422);
+        assertThat(problem.path("code").asString()).isEqualTo("EVALUATION_ERROR");
+        assertThat(problem.path("limit").asString()).isEqualTo("STEPS");
+        assertThat(problem.path("detail").asString()).startsWith("EVALUATION_BUDGET_EXCEEDED:");
+    }
+
+    @Test
+    void TR_SEC_01_a_failure_that_reached_no_limit_has_no_limit_field() throws Exception {
+        scene.outcome = new DecisionResult.Failed("EVALUATION_ERROR", "Division by zero in output fee");
+        byte[] gold = "{\"inputs\":{\"tier\":\"GOLD\",\"txCount\":5}}".getBytes(StandardCharsets.UTF_8);
+
+        MockHttpServletResponse response = mvc.perform(post("/api/bpm/rules/v1/decisions/card-fee:evaluate")
+                .contentType("application/json").content(gold)).andReturn().getResponse();
+
+        assertThat(EngineJson.JSON.readTree(response.getContentAsByteArray()).has("limit")).isFalse();
+    }
+
+    @Test
     void TR_SEC_08_injected_internal_failure_is_500_without_internals_and_logged_with_the_correlation_id()
             throws Exception {
         // Given the version repository fails as a missing table would

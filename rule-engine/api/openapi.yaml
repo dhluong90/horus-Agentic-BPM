@@ -507,7 +507,12 @@ paths:
         the approver also sees on every read of the version (`RLE-049`). With
         `decision-log.require-explicit-mask` on for the tenant, a draft with an input that declares no
         `mask` (one imported before strict mode was turned on) is `422 VALIDATION_FAILED` naming the
-        input, and stays a draft (`RLE-050`).
+        input, and stays a draft (`RLE-050`). The draft is read, parsed and type-checked again exactly
+        as import does today, so a draft stored before a check existed cannot reach an approver: a
+        problem is `422 VALIDATION_FAILED` with every violation located by rule, column, `code` and
+        `position`, and the version stays a draft (`RLE-004`). The check uses the host's configured
+        limits, the ones evaluation applies, and refuses a table whose worst-case step count is over
+        the step budget (`EVALUATION_BUDGET_EXCEEDED`).
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -1797,6 +1802,28 @@ components:
         message:
           type: string
           description: The problem, in English, without the rule id and column
+        code:
+          type: [string, 'null']
+          description: |
+            A stable code a client can act on; the message beside it may change. Expression problems
+            (`when` and `then` cells): `SYNTAX_ERROR`, `UNKNOWN_INPUT` (a name that is not a declared
+            input, for example `creditScoreX`), `TYPE_MISMATCH` (for example `balance + 100` where
+            `balance` is money), `FORBIDDEN_CONSTRUCT` (a method call, member access or class reference
+            such as `T(java.lang.Runtime).getRuntime()`; refused before anything inside it is read),
+            `INVALID_LITERAL`, `INVALID_PATTERN`, `EXPRESSION_TOO_LONG`, `EXPRESSION_TOO_DEEP` (more than
+            64 levels, a chain such as `a + a + ...` included). Other cell problems: `UNKNOWN_OUTPUT`,
+            `MASKED_INPUT_IN_OUTPUT`. A table whose worst case is over the step budget:
+            `EVALUATION_BUDGET_EXCEEDED`, on the first rule from which it is over, with a null `column`.
+            Null for a problem of the document as a whole. New codes may be added.
+          examples: [TYPE_MISMATCH]
+        position:
+          type: [integer, 'null']
+          minimum: 0
+          description: |
+            Zero-based character position of the problem in the cell text as written (a shorthand
+            such as `> 600 + tier` is counted from its first character), or null when the problem
+            concerns the whole cell or is not in a cell.
+          examples: [8]
     EvaluateRequest:
       type: object
       required: [inputs]
@@ -1812,6 +1839,16 @@ components:
             The instant the decision reasons about, ISO 8601 with `Z` or an offset, for example
             `2026-11-20T10:00:00Z`. Selects the version in force and feeds `today()` and `now()`.
             Needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`); default the host clock.
+    EvaluationLimit:
+      type: string
+      enum: [STEPS, TIME]
+      description: |
+        Present on an `EVALUATION_ERROR` whose `detail` starts with `EVALUATION_BUDGET_EXCEEDED`, and
+        absent otherwise: the limit the decision reached. `STEPS` is the step budget (expression nodes
+        visited, 100,000 by default): deterministic, so the same input fails the same way on every
+        machine and the rule set must change. `TIME` is the wall-clock backstop (10 s by default): the
+        machine was slow, so a retry may pass. New values may be added.
+      examples: [STEPS]
     SimulationRequest:
       type: object
       required: [samples]
@@ -1888,6 +1925,8 @@ components:
               type: string
               enum: [EVALUATION_ERROR, UNIQUE_HIT_VIOLATION]
             detail: { type: string }
+            limit:
+              $ref: '#/components/schemas/EvaluationLimit'
     DecisionResult:
       type: object
       required: [decisionId, ruleSet, version, evalClock, evaluatedAt, clockChosen, pinned, outcome, matchedRuleIds, outputs]
@@ -2064,3 +2103,5 @@ components:
           type: array
           items: { type: string }
           description: On `UNIQUE_HIT_VIOLATION`, every matched rule (two or more); empty on `EVALUATION_ERROR`
+        limit:
+          $ref: '#/components/schemas/EvaluationLimit'

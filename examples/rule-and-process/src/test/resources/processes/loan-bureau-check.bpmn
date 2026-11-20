@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A loan application asks the credit bureau for a score. The bureau answers in seconds or calls back later, so the
+     call runs as an Async Wait-State: no database connection or row lock is held while the bureau works. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-bureau-check"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-bureau-check" name="Loan bureau check" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:serviceTask id="bureau-score" name="Score at the credit bureau" horus:handler="creditBureau.score"
+                      horus:mode="remote" horus:timeout="PT2S" horus:resultVariable="bureau">
+      <bpmn:extensionElements>
+        <horus:input name="nationalId" value="${instance.nationalId}"/>
+        <horus:input name="amount" value="${instance.amount}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="underwrite" name="Underwrite the loan" horus:assignee="role:UNDERWRITER" horus:resultVariable="decision"/>
+    <bpmn:endEvent id="end" name="Decided"/>
+    <bpmn:sequenceFlow id="start__score" sourceRef="start" targetRef="bureau-score"/>
+    <bpmn:sequenceFlow id="score__underwrite" sourceRef="bureau-score" targetRef="underwrite"/>
+    <bpmn:sequenceFlow id="underwrite__end" sourceRef="underwrite" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

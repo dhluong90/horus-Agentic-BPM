@@ -173,6 +173,10 @@ public class DecisionController {
                     correlation);
             problem.put("decisionId", result.decisionId());
             problem.set("matchedRuleIds", EngineValues.value(failed.matchedRuleIds()));
+            if (failed.limit() != null) {
+                // EVALUATION_BUDGET_EXCEEDED: STEPS or TIME, so a client tells a rule problem from a slow machine.
+                problem.put("limit", failed.limit());
+            }
             return ProblemDetails.response(ProblemDetails.UNPROCESSABLE, problem);
         }
         return RestSupport.json(HttpStatus.OK, EngineValues.decision(result));

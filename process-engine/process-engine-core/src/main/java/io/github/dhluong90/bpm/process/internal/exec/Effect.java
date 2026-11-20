@@ -87,10 +87,28 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
      * @param target handler name, rule set key or agent name
      * @param inputs bounded inputs
      * @param mode in or outside the transaction
+     * @param timeout the step timeout of an {@link ExecutionMode#ASYNC} call, or null for the engine default; always
+     *     null for {@link ExecutionMode#SYNC_LOCAL}
      */
-    record InvokeService(String tokenId, String nodeId, String attemptId, ServiceKind kind, String target, Map<String, Object> inputs, ExecutionMode mode) implements Effect {
+    record InvokeService(String tokenId, String nodeId, String attemptId, ServiceKind kind, String target, Map<String, Object> inputs, ExecutionMode mode, java.time.Duration timeout) implements Effect {
         public InvokeService {
             inputs = inputs == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(inputs));
+        }
+
+        /**
+         * A call with no step timeout of its own.
+         *
+         * @param tokenId token
+         * @param nodeId node
+         * @param attemptId attempt id
+         * @param kind what to call
+         * @param target target
+         * @param inputs inputs
+         * @param mode mode
+         */
+        public InvokeService(String tokenId, String nodeId, String attemptId, ServiceKind kind, String target,
+                Map<String, Object> inputs, ExecutionMode mode) {
+            this(tokenId, nodeId, attemptId, kind, target, inputs, mode, null);
         }
     }
 

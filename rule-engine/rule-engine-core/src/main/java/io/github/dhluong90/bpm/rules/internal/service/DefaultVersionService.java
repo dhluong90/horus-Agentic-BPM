@@ -145,7 +145,7 @@ public final class DefaultVersionService implements VersionService {
             throw new ValidationFailedException("The rule set has " + rows + " rules; evaluation.max-rows allows "
                     + context.settings().maxRows());
         }
-        CompiledRuleSet.compile(parsed.model(), context.settings().maxOutputBytes(), context.settings().maxStringLength());
+        compileForPublication(parsed.model());
         return parsed;
     }
 
@@ -274,6 +274,9 @@ public final class DefaultVersionService implements VersionService {
                 throw new InvalidStateException(ruleSet, version, current.status(), "request-publish");
             }
             checkLock(current, opts);
+            // RLE-004: the draft is checked again with today's checker, so a draft stored before a check existed
+            // cannot reach an approver; a refusal leaves it DRAFT.
+            recheck(current);
             // A draft imported before strict mode was turned on is checked again before anyone can approve it.
             requireMaskDeclarations(tenant, current.canonicalJson());
             Instant now = context.clock().instant();
@@ -596,6 +599,42 @@ public final class DefaultVersionService implements VersionService {
         }
         return context.withoutDooming(() ->
                 store.findVersion(tenant, ruleSet, version, false).map(v -> view(v, includeSource)));
+    }
+
+    @Override
+    public void validate(String ruleSet, int version) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        requireRuleSetName(ruleSet);
+        StoredVersion stored = context.withoutDooming(() -> store.findVersion(tenant, ruleSet, version, false)
+                .orElseThrow(() -> store.findRuleSetId(tenant, ruleSet).isPresent()
+                        ? new VersionNotFoundException(ruleSet, version)
+                        : new RuleSetNotFoundException(ruleSet)));
+        recheck(stored);
+        requireMaskDeclarations(tenant, stored.canonicalJson());
+    }
+
+    /**
+     * Reads and compiles a stored version exactly as import would today: from the source document when it is kept,
+     * so violations follow the order cells are written in (RLE-041), else from the canonical form.
+     */
+    private void recheck(StoredVersion stored) {
+        if (stored.sourceDocument() != null
+                && (stored.sourceFormat() == SourceFormat.YAML || stored.sourceFormat() == SourceFormat.DMN_XML)) {
+            checkedDocument(stored.sourceFormat(), stored.sourceDocument().getBytes(StandardCharsets.UTF_8));
+        } else {
+            compileForPublication(RuleSetReader.readCanonical(stored.canonicalJson()));
+        }
+    }
+
+    /**
+     * Compiles a model with the host's configured limits, the ones evaluation will apply, and refuses a table whose
+     * worst-case step count is over the step budget (TR-SEC-01), so it fails here and not on every evaluation.
+     */
+    private void compileForPublication(io.github.dhluong90.bpm.rules.internal.model.Definitions model) {
+        EngineSettings settings = context.settings();
+        CompiledRuleSet.compile(model, settings.maxOutputBytes(), settings.maxStringLength(), settings.regexLimits(),
+                settings.evaluationLimits()).requireWithinStepBudget();
     }
 
     @Override

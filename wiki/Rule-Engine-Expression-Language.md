@@ -8,10 +8,11 @@ Design preview: describes the 0.1 target.
 
 | Property | Statement |
 |---|---|
-| No code execution | No method calls, reflection, class loading, file or network access (TR-SEC-01) |
-| Termination | No loops, no recursion, no unbounded allocation; regular expressions are bounded in length and time (TR-SEC-02) |
+| No code execution | No method calls, member access, reflection, class loading, file or network access (TR-SEC-01). A call of a function the language does not have, such as `T(java.lang.Runtime)`, or a statement character is refused at import as `FORBIDDEN_CONSTRUCT`, before anything inside it is read. In this version of the language a `.` outside a number or a string is refused the same way; FEEL path expressions (ADR-0019) may make forms such as `applicant.age` legal in a later version |
+| Termination | No loops, no recursion, no unbounded allocation. An expression is at most 4,096 characters and 64 levels deep, counted on the tree, so a chain such as `a + a + ...` of more than 64 terms is `EXPRESSION_TOO_DEEP` too. One decision visits at most 100,000 nodes of its expressions (step budget), with a 10-second backstop, or fails with `EVALUATION_BUDGET_EXCEEDED`; regular expressions are bounded in length and time (TR-SEC-02) |
+| Step budget | A step is one expression node visited. The contract is the default budget, its ceiling and the reason code; the exact count of a given expression may change between minor releases (constant folding, FEEL). There is one budget per top-level evaluation, shared by every decision that evaluation requires (ADR-0027); each item of a batch has its own. The language has no loops, so a table's worst case is the sum of its node counts: every condition, plus the outputs of the rules its hit policy can evaluate (one for `first` and `unique`, all for `collect`). Import, draft replacement and `:request-publish` refuse a table whose worst case is over the host's budget, as `VALIDATION_FAILED` with code `EVALUATION_BUDGET_EXCEEDED` on the first rule from which it is over. Example: a `unique` tariff of 5,000 rules over 8 inputs, each cell such as `>= 18`, can take 155,001 steps and is refused at import |
 | Determinism | Same inputs and clock give the same result (TR-DET-01); `today()` and `now()` read the decision's clock, which the decision log records |
-| Static typing | Unknown identifiers and type errors are rejected at publication time (TR-DET-02) |
+| Static typing | Unknown identifiers and type errors are rejected at import and again at publication request (TR-DET-02), with the rule, column, `code` and character position: `balance + 100 > 0` with money `balance` is `TYPE_MISMATCH` at the `+`. Operands are checked under every operator, in conditions and in outputs computed from inputs; an operand that is the literal `null` passes and gives `null` at evaluation |
 
 ## Literals
 
