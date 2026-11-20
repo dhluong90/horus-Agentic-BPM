@@ -57,7 +57,7 @@ created  /home/you/horus-Agentic-BPM/secrets/db_password
 created  /home/you/horus-Agentic-BPM/secrets/demo_password
 ```
 
-The first build downloads dependencies and takes 2 to 5 minutes; later builds reuse the cache. `--wait` returns when both containers report healthy:
+The first build downloads dependencies and takes 2 to 5 minutes. Later builds reuse the dependency layer until a `pom.xml` changes (see [Build cache](#build-cache)). `--wait` returns when both containers report healthy:
 
 ```
  Image horus-bpm/rule-engine-only:local Built
@@ -301,6 +301,17 @@ PASS  no high or critical vulnerability in horus-bpm/rule-engine-only:local (rep
 | Size | about 82 MB |
 
 Base images are pinned by digest. To update one, resolve the new digest, replace tag, digest and version comment together in [`deploy/docker/Dockerfile`](../deploy/docker/Dockerfile) or [`docker-compose.yml`](../docker-compose.yml), then rebuild and run steps 6 and 7.
+
+### Build cache
+
+The build stage resolves Maven dependencies in a layer of their own, before the sources are copied: it runs the `package` lifecycle of the example host on the `pom.xml` files alone, with `.mvn/`, `LICENSE` and `COMMERCIAL-LICENSE.md`. It also fetches the compiler's annotation processor, which Maven resolves only when there are sources. That layer changes only when one of those files changes, so a commit that touches only sources reuses it. The build step that follows runs online, as before, so every plugin behaves as in CI; Maven then fetches only what the layer lacks, and the step's last log lines count and name those downloads (`Maven downloads in this step, beyond the dependency layer: 0` when the layer is complete).
+
+| You want | Command |
+|---|---|
+| The normal build, reusing layers | `docker compose build` |
+| A build with no cache at all, as a release would | `docker compose build --no-cache` |
+
+The Deploy workflow keeps the layers between runs in the GitHub Actions cache (`docker/build-push-action`, `cache-from` and `cache-to` of type `gha`). Its log shows the dependency layer as `CACHED` after a source-only change, and the step summary prints a content digest of `/app`: the SHA-256 of every file and of every entry inside each jar (the engine jars carry their build time in zip timestamps, so their bytes always differ). A manual run with the `no-cache` input builds with no layer cache, for comparison with a cached build of the same commit. The release workflow builds no image.
 
 ### Updating the JRE
 

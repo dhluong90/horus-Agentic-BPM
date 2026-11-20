@@ -25,7 +25,7 @@ sequenceDiagram
 
 ## Run locally
 
-Needs JDK 21 or later and Docker.
+Needs JDK 21 or later and Docker. To run the host as a container beside PostgreSQL instead, with one command, see [docs/DEPLOYING.md](../../docs/DEPLOYING.md); its image build reuses a dependency layer until a `pom.xml` changes.
 
 ```bash
 docker run -d --name horus-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
@@ -265,6 +265,31 @@ public Money cardFee(String tier, int txCount) {
     return (Money) result.outputs().get("fee");   // rolls back with the host's work; one rle_decision row on commit
 }
 ```
+
+## Demo: one error shape, and a duplicate sent while the first still runs
+
+Every Rule Engine error is an `application/problem+json` body with `code`, `detail`, `correlationId` and a `type` link to [Common Error Codes](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes). The integration test triggers each code through this host, prints one line per code, and replays the in-flight duplicate with the first request paused inside the engine:
+
+```bash
+mvn -B -pl examples/rule-engine-only -am verify -Dit.test=ErrorsAndDuplicatesIT -Dtest=NoSuchTest \
+  -Dsurefire.failIfNoSpecifiedTests=false -Dfailsafe.failIfNoSpecifiedTests=false -Dcockpit.bundle.skip=true
+# RLE-036 error matrix over the example host
+#   INPUT_INVALID                   expected 400 got 400  application/problem+json  correlationId=01M9...
+#   ...
+#   UNIQUE_HIT_VIOLATION            expected 422 got 422  application/problem+json  correlationId=01M9...
+# Tests run: 3, Failures: 0, Errors: 0, Skipped: 0
+```
+
+By hand, a second request with the same `Idempotency-Key` that arrives while the first is still running is answered at once:
+
+```bash
+# HTTP/1.1 409
+# Retry-After: 1
+# Content-Type: application/problem+json
+# {"type":"https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#idempotency_in_flight","title":"Conflict","status":409,"code":"IDEMPOTENCY_IN_FLIGHT","detail":"A request with the same idempotency key is still running","correlationId":"01M9..."}
+```
+
+Wait one second and send the same request again: once the first has finished, the answer is its `201` and body, and only one version exists.
 
 ## Demo: import a DMN decision table
 

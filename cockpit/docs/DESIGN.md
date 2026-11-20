@@ -147,6 +147,18 @@ Source: [`diagrams/signin-sequence.mmd`](diagrams/signin-sequence.mmd).
 
 A cockpit release `0.N` supports hosts whose engine minor is `0.N` or `0.(N-1)`; from 1.0 the same rule applies to `1.N` (`TR-UI-08`). A host older than that is `UNSUPPORTED_VERSION`: it stays in the host list with its version and the supported range, and none of its screens are offered. Within the supported range, screens turn on by the feature flags in `/api/bpm/meta`, never by comparing version numbers, so a host that has not enabled a feature simply does not show it.
 
+Within that range a host can still be newer than the cockpit, so the cockpit reads `/api/bpm/me` and `/api/bpm/meta` as a tolerant reader: it ignores names it does not know instead of rejecting the answer. The published JSON Schemas stay strict; only the cockpit's reading is lenient, and only where a newer host is expected to add names.
+
+| Field | What the cockpit does with a name it does not know |
+|---|---|
+| `/me` `permissions[]` | A well-formed name the cockpit has no screen for is kept and never checked. A string outside the pattern `^(rules\|processes)(:[a-z]+){1,2}$` is dropped before validation, with one browser console warning per page load for each distinct set of dropped names. The warning prints at most 10 names, each cut to 64 characters and quoted with control and bidi characters escaped, so a host cannot flood the console or disguise a name. The user signs in and the cockpit offers nothing for that name |
+| `/meta` `features[]` | A well-formed flag the cockpit does not know is ignored; screens turn on only for flags the cockpit knows |
+| `/meta` `settings` | An unknown key is ignored |
+| Extra properties on either object | Kept and ignored |
+| Everything else | Validated exactly as published. A missing or empty user id, a missing tenant, a repeated permission, a permission that is not a string, a feature flag outside its pattern or another `schemaVersion` makes the answer an unexpected response (section 12), never a partial render |
+
+The `/me` reader is `cockpit/web/src/api/meReader.ts`. `contract.test.ts` records the one place it reads more leniently than the JSON Schema validates: a permission name outside the pattern.
+
 ### 5.3 Host connection states
 
 ![Host connection states](images/host-connection-states.svg)

@@ -24,6 +24,11 @@ on:
       - "examples/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
+    inputs:
+      no-cache:
+        description: "Build the image with no layer cache, to compare its content digest with a cached build"
+        type: boolean
+        default: false
 
 # Actions are pinned by commit SHA; the comment names the release. Update both together.
 permissions:
@@ -56,8 +61,50 @@ jobs:
           git check-ignore -q .env
           git check-ignore -q secrets/db_password
 
-      - name: Build the image
-        run: docker compose build
+      # Layer cache across runs (GitHub Actions cache, this workflow's scope). The dependency layer of
+      # deploy/docker/Dockerfile is reused while no POM changes. GitHub keeps caches per branch, so a
+      # pull request's cache is never restored on main.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the image (layer cache from earlier runs)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64
+          build-args: EXAMPLE=rule-engine-only
+          tags: ${{ env.IMAGE }}
+          load: true
+          push: false
+          provenance: false
+          no-cache: ${{ inputs.no-cache == true }}
+          cache-from: type=gha,scope=deploy-rule-engine-only
+          cache-to: type=gha,scope=deploy-rule-engine-only,mode=max
+
+      # The engine jars in BOOT-INF/lib carry their build time in zip entry timestamps, so their bytes
+      # differ between any two builds. The digest covers what they contain: the name and SHA-256 of every
+      # file under /app, and of every entry inside each jar.
+      - name: Content digest of the application files and jar entries (compare across runs)
+        run: |
+          set -euo pipefail
+          cid="$(docker create "$IMAGE")"; docker cp "$cid:/app" "$RUNNER_TEMP/app"; docker rm "$cid" > /dev/null
+          python3 - "$RUNNER_TEMP/app" > "$RUNNER_TEMP/app-content.txt" <<'PY'
+          import hashlib, os, sys, zipfile
+          root = sys.argv[1]
+          for folder, _, files in sorted(os.walk(root)):
+              for name in sorted(files):
+                  path = os.path.join(folder, name); rel = os.path.relpath(path, root)
+                  if name.endswith(".jar"):
+                      with zipfile.ZipFile(path) as jar:
+                          for entry in sorted(jar.namelist()):
+                              if not entry.endswith("/"):
+                                  print(hashlib.sha256(jar.read(entry)).hexdigest(), f"{rel}!{entry}")
+                  else:
+                      with open(path, "rb") as f:
+                          print(hashlib.sha256(f.read()).hexdigest(), rel)
+          PY
+          echo "Built with no-cache: ${{ inputs.no-cache == true }}. $(wc -l < "$RUNNER_TEMP/app-content.txt") files and jar entries, content digest $(sha256sum < "$RUNNER_TEMP/app-content.txt" | cut -d' ' -f1)" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Start PostgreSQL and the host, wait for healthy
         run: docker compose up --wait --wait-timeout 180
