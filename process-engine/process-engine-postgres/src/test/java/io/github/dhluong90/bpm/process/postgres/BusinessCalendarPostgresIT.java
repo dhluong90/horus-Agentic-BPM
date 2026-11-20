@@ -84,10 +84,15 @@ class BusinessCalendarPostgresIT {
     }
 
     private Instant startReview(String businessKey) {
+        return engine.services.task(startReviewTask(businessKey)).dueAt();
+    }
+
+    /** Starts a credit review for minh of bank-a; returns its task id. */
+    private String startReviewTask(String businessKey) {
         as("bank-a", "minh", OFFICER);
         ProcessInstance started = engine.services.start(new StartRequest("loan-credit-review", businessKey,
                 Map.of("amount", Map.of("amount", "250000000", "currency", "VND")), null));
-        return engine.services.task(started.tasks().get(0).id()).dueAt();
+        return started.tasks().get(0).id();
     }
 
     private static int count(String sql, Object... params) {
@@ -112,7 +117,8 @@ class BusinessCalendarPostgresIT {
     void PRE_008_a_later_calendar_change_does_not_move_an_existing_due_time() {
         // Given a review due Monday 4 Jan 10:00 +07:00
         calendarInForce();
-        Instant first = startReview("LN-2027-000123");
+        String firstTask = startReviewTask("LN-2027-000123");
+        Instant first = engine.services.task(firstTask).dueAt();
 
         // When Kim proposes 4 Jan as an extra holiday, cannot approve it herself, and Lan approves it
         as("bank-a", "kim", MANAGER);
@@ -128,8 +134,9 @@ class BusinessCalendarPostgresIT {
         Instant second = startReview("LN-2027-000124");
 
         // Then the first task keeps its due time, and only the new task skips 4 Jan
-        assertThat(engine.services.task(TestEngine.jdbc().sql("SELECT id FROM pre_task WHERE tenant_id = 'bank-a' "
-                + "ORDER BY created_at, id LIMIT 1").query(String.class).single()).dueAt()).isEqualTo(first);
+        assertThat(engine.services.task(firstTask).dueAt()).isEqualTo(first);
+        assertThat(TestEngine.jdbc().sql("SELECT due_at FROM pre_task WHERE id = ?").param(firstTask)
+                .query(java.sql.Timestamp.class).single().toInstant()).isEqualTo(first);
         assertThat(first).isEqualTo(at("2027-01-04T10:00:00+07:00"));
         assertThat(second).isEqualTo(at("2027-01-05T10:00:00+07:00"));
         // And the record and the event name both people, with the old and the new value
