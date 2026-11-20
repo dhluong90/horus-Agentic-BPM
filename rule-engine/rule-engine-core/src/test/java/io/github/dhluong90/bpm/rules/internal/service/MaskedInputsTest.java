@@ -614,6 +614,45 @@ class MaskedInputsTest {
         assertThat(MaskingKey.of(host).checkValue()).isEqualTo("71bc8598cb47cb6d");
     }
 
+    @Test
+    void TR_SEC_10_a_known_key_id_that_comes_back_with_other_key_bytes_stops_start_up() {
+        MaskingPolicy first = configured(Map.of(MaskingPolicy.HOST_SCOPE, List.of(MaskingKey.of("k1", KEY_A)),
+                "bank-b", List.of(MaskingKey.of("b1", KEY_B))));
+        engines(first).maskingCheck().verify(List.of());
+        assertThat(stores.maskingKeyChecks).hasSize(2)
+                .containsEntry("*\u0000k1", MaskingKey.of(KEY_A).checkValue());
+        // The same keys again, on another replica or after a restart: accepted.
+        engines(first).maskingCheck().verify(List.of());
+
+        byte[] other = seeded(32, 7L);
+        MaskingPolicy reused = configured(Map.of(MaskingPolicy.HOST_SCOPE, List.of(MaskingKey.of("k1", other))));
+        assertThatThrownBy(() -> engines(reused).maskingCheck().verify(List.of()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("host masking key id k1")
+                .hasMessageContaining(MaskingKey.of(KEY_A).checkValue())
+                .hasMessageContaining(MaskingKey.of(other).checkValue())
+                .hasMessageNotContaining(HexFormat.of().formatHex(other))
+                .hasMessageNotContaining(java.util.Base64.getEncoder().encodeToString(other));
+        MaskingPolicy tenantReused = configured(Map.of("bank-b", List.of(MaskingKey.of("b1", other))));
+        assertThatThrownBy(() -> engines(tenantReused).maskingCheck().verify(List.of()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("masking key id b1 of tenant bank-b");
+    }
+
+    static MaskingPolicy configured(Map<String, List<MaskingKey>> keys) {
+        return new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenantId) {
+                return Optional.empty();
+            }
+
+            @Override
+            public Map<String, List<MaskingKey>> configuredKeys() {
+                return keys;
+            }
+        };
+    }
+
     static String hmacHex(byte[] key, String value) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));

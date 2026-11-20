@@ -52,20 +52,40 @@ public record RuleEngineProperties(
      *     letters, digits, {@code _} or {@code -}; default {@code k1}. Not secret. Change it together with the key
      * @param tenants per-tenant settings, by tenant id; a tenant listed here with a key never uses the host key
      * @param search limits of the masked-input search
+     * @param previousKeys earlier host keys, kept after a rotation so the masked-input search still finds rows written
+     *     under them; used for search only, never for writing. Each tenant on the host key searches with its own
+     *     subkey of each. A key removed from this list is no longer searched, and its id stays reserved for good
      */
     public record Masking(String hmacKey, String hmacKeyId, Map<String, TenantMasking> tenants,
-            @DefaultValue Search search) {
+            @DefaultValue Search search, List<PreviousKey> previousKeys) {
 
-        /** Copies the tenants; unset is empty. */
+        /** Copies the tenants and previous keys; unset is empty. */
         public Masking {
             tenants = tenants == null ? Map.of() : Map.copyOf(tenants);
+            previousKeys = previousKeys == null ? List.of() : java.util.Collections.unmodifiableList(
+                    new java.util.ArrayList<>(previousKeys));
         }
 
         /** Never prints a key. */
         @Override
         public String toString() {
             return "Masking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", hmacKeyId=" + hmacKeyId + ", tenants="
-                    + tenants.keySet() + "]";
+                    + tenants.keySet() + ", previousKeys=" + previousKeys + "]";
+        }
+    }
+
+    /**
+     * An earlier masking key, kept for search only after a rotation (RLE-012).
+     *
+     * @param hmacKey the earlier Base64 key of at least 32 bytes after decoding
+     * @param hmacKeyId the id its tokens carry; required, and different from every other key id of the host or tenant
+     */
+    public record PreviousKey(String hmacKey, String hmacKeyId) {
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "PreviousKey[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", hmacKeyId=" + hmacKeyId + "]";
         }
     }
 
@@ -86,14 +106,22 @@ public record RuleEngineProperties(
      * @param maskDefault whether this tenant's inputs that declare no {@code mask} are masked; unset uses
      *     {@code decision-log.mask-default}
      * @param search the tenant's own search limit; unset uses {@code masking.search}
+     * @param previousKeys the tenant's earlier keys, for search only, never for writing
      */
-    public record TenantMasking(String hmacKey, String hmacKeyId, Boolean maskDefault, Search search) {
+    public record TenantMasking(String hmacKey, String hmacKeyId, Boolean maskDefault, Search search,
+            List<PreviousKey> previousKeys) {
+
+        /** Copies the previous keys; unset is empty. */
+        public TenantMasking {
+            previousKeys = previousKeys == null ? List.of() : java.util.Collections.unmodifiableList(
+                    new java.util.ArrayList<>(previousKeys));
+        }
 
         /** Never prints a key. */
         @Override
         public String toString() {
             return "TenantMasking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", hmacKeyId=" + hmacKeyId
-                    + ", maskDefault=" + maskDefault + "]";
+                    + ", maskDefault=" + maskDefault + ", previousKeys=" + previousKeys + "]";
         }
     }
 

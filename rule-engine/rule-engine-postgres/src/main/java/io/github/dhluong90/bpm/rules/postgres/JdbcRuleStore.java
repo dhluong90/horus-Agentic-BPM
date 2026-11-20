@@ -279,6 +279,21 @@ public final class JdbcRuleStore implements RuleStore {
     }
 
     @Override
+    public String maskingKeyCheck(String scope, String keyId, String checkValue, Instant now) {
+        // Engine-internal, across tenants on purpose: runs once at start-up outside any request. ON CONFLICT so
+        // replicas starting together neither fail nor doom the transaction; the first insert wins.
+        jdbc.sql("""
+                INSERT INTO rle_masking_key_check (tenant_id, key_id, check_value, first_seen_at)
+                VALUES (:scope, :keyId, :checkValue, :at)
+                ON CONFLICT (tenant_id, key_id) DO NOTHING
+                """)
+                .param("scope", scope).param("keyId", keyId).param("checkValue", checkValue)
+                .param("at", Timestamp.from(now)).update();
+        return jdbc.sql("SELECT check_value FROM rle_masking_key_check WHERE tenant_id = :scope AND key_id = :keyId")
+                .param("scope", scope).param("keyId", keyId).query(String.class).single();
+    }
+
+    @Override
     public List<VersionInputs> liveVersionInputs() {
         // Engine-internal, across tenants on purpose: the start-up masking check (RLE-035) runs outside any request.
         return jdbc.sql("""

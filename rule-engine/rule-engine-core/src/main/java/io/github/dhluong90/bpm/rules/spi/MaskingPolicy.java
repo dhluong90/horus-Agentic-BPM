@@ -24,13 +24,31 @@ public interface MaskingPolicy {
 
     /**
      * Returns every key a tenant still holds, the current one first. A masked-input search fingerprints the plain
-     * value with each of them, so rows written before a key rotation are still found.
+     * value with each of them, so rows written before a key rotation are still found. Only {@link #hmacKey(String)}
+     * is ever used for writing; an earlier key is used for search only, and a key no longer returned here is no
+     * longer searched.
      *
      * @param tenantId the tenant
      * @return the keys, possibly empty; the default is the current key only
      */
     default java.util.List<MaskingKey> searchKeys(String tenantId) {
         return hmacKey(tenantId).map(java.util.List::of).orElse(java.util.List.of());
+    }
+
+    /** Scope of the host keys in {@link #configuredKeys()}: keys shared by every tenant without a key of its own. */
+    String HOST_SCOPE = "*";
+
+    /**
+     * Returns every key this policy is configured with, current and earlier, by scope: {@value #HOST_SCOPE} for the
+     * host keys as configured (before any tenant derivation) and a tenant id for a tenant's own keys. At start-up the
+     * engine records each key's check value ({@link MaskingKey#checkValue()}) by scope and key id, and refuses to
+     * start when a known key id comes back with a different check value, so one id never names two keys. A tenant
+     * must not be named {@value #HOST_SCOPE}.
+     *
+     * @return the keys by scope; the default is empty, which leaves the check value check out
+     */
+    default java.util.Map<String, java.util.List<MaskingKey>> configuredKeys() {
+        return java.util.Map.of();
     }
 
     /**

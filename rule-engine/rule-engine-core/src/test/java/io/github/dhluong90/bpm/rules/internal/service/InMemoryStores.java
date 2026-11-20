@@ -222,4 +222,12 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     public Optional<byte[]> findEngineKey(String name) {
         return Optional.ofNullable(engineKeys.get(name)).map(byte[]::clone);
     }
+
+    /** Recorded check values by scope, then key id. */
+    final Map<String, String> maskingKeyChecks = new ConcurrentHashMap<>();
+
+    @Override
+    public String maskingKeyCheck(String scope, String keyId, String checkValue, Instant now) {
+        return maskingKeyChecks.computeIfAbsent(scope + "\u0000" + keyId, ignored -> checkValue);
+    }
 }

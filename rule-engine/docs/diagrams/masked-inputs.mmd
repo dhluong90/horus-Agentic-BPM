@@ -9,7 +9,7 @@ sequenceDiagram
     participant L as DecisionLogService
   end
   box rgb(255,248,225) Host PostgreSQL
-    participant DB as rle_version, rle_decision, rle_decision_outbox
+    participant DB as rle_version, rle_decision, rle_decision_outbox, rle_masking_key_check
   end
   rect rgb(255,248,225)
     Note over P,DB: Start-up, after the migrations, outside any request
@@ -17,6 +17,11 @@ sequenceDiagram
     E->>P: hmacKey(tenant), maskByDefault(tenant)
     alt a tenant masks an input and has no valid key
       E-->>H: start-up fails naming horus.bpm.rules.masking.hmac-key and the rule set
+    end
+    E->>P: configuredKeys(), current and previous, host keys under scope *
+    E->>DB: INSERT check value per scope and key id ON CONFLICT DO NOTHING, then SELECT, one transaction
+    alt a known key id comes back with a different check value
+      E-->>H: start-up fails naming the key id and both check values, never the key
     end
   end
   rect rgb(232,245,233)
