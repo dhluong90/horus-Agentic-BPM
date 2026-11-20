@@ -225,3 +225,50 @@ describe('export (CKP-030, RLE-032)', () => {
     expect((await client.listVersions('card-fee')).data.map((v) => v.version)).toEqual([3, 2, 1]);
   });
 });
+
+describe('audit reads and evidence', () => {
+  const auditor = () => engineFetch('ha', ['rules:read', 'rules:log:read']);
+
+  it('CKP_071_search_sends_the_rule_set_or_the_case_reference_and_the_period', async () => {
+    const { sent, fetchImpl } = auditor();
+    const client = createRulesClient('', fetchImpl);
+    const page = await client.searchDecisions({ ruleSet: 'card-fee', from: '2026-11-01T00:00:00Z', to: '2026-12-01T00:00:00Z', limit: 50 });
+    expect(page.data).toHaveLength(50);
+    expect(page.hasNext).toBe(true);
+    expect(sent[0]?.url).toBe('/api/bpm/rules/v1/decisions?ruleSet=card-fee&from=2026-11-01T00%3A00%3A00Z&to=2026-12-01T00%3A00%3A00Z&limit=50');
+    const byCase = await client.searchDecisions({ correlationId: 'LN-2026-0042', from: '2026-11-01T00:00:00Z', to: '2026-12-01T00:00:00Z' });
+    expect(byCase.data.map((d) => d.ruleSet)).toEqual(['card-fee', 'kyc-risk']);
+  });
+
+  it('CKP_072_explain_asks_for_the_screen_language', async () => {
+    const { sent, fetchImpl } = auditor();
+    const client = createRulesClient('', fetchImpl);
+    const explanation = await client.explainDecision('01KF2Q8Z0RQ6V2Y8M1C4N5P7T9', 'vi');
+    expect(sent[0]?.url).toBe('/api/bpm/rules/v1/decisions/01KF2Q8Z0RQ6V2Y8M1C4N5P7T9/explain?lang=vi');
+    expect(sent[0]?.headers['accept-language']).toBe('vi');
+    expect(explanation.language).toBe('vi');
+    expect(explanation.matched[0]?.ruleId).toBe('R2');
+  });
+
+  it('CKP_074_evidence_keeps_the_bytes_and_reads_the_sha256_the_engine_stated', async () => {
+    const { sent, fetchImpl } = auditor();
+    const client = createRulesClient('', fetchImpl);
+    const file = await client.exportEvidence('card-fee', { format: 'csv', versions: [1], decisionIds: ['01KF2Q8Z0RQ6V2Y8M1C4N5P7T9'] }, 'key-9');
+    expect(sent[0]?.headers['idempotency-key']).toBe('key-9');
+    expect(JSON.parse(sent[0]?.body ?? '{}')).toEqual({ format: 'csv', versions: [1], decisionIds: ['01KF2Q8Z0RQ6V2Y8M1C4N5P7T9'] });
+    const text = await file.file.text();
+    expect(text).toContain(`# Content SHA-256: ${file.contentSha256}`);
+    expect(file.bytes).toBe(file.file.size);
+    expect(file.contentDigest).toMatch(/^sha-256=:.+:$/);
+    // A repeat with the same key gets the same bytes and records nothing more.
+    const again = await client.exportEvidence('card-fee', { format: 'csv', versions: [1], decisionIds: ['01KF2Q8Z0RQ6V2Y8M1C4N5P7T9'] }, 'key-9');
+    expect(await again.file.text()).toBe(text);
+    expect((await client.getRuleSetHistory('card-fee')).ruleSetEvents).toHaveLength(1);
+  });
+
+  it('CKP_074_an_answer_without_the_sha256_is_not_evidence', async () => {
+    const { fetchImpl } = recordingFetch(() => new Response('# x', { status: 200, headers: { 'Content-Type': 'text/csv' } }));
+    const client = createRulesClient('', fetchImpl);
+    await expect(client.exportEvidence('card-fee', { format: 'csv', versions: [1], decisionIds: [] }, 'key-1')).rejects.toBeInstanceOf(HostCallError);
+  });
+});

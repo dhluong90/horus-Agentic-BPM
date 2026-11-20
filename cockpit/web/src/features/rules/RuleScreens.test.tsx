@@ -271,9 +271,10 @@ describe('four eyes', () => {
     expect(await screen.findByText('Version 2 is back with its author.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Draft');
     await user.click(screen.getByRole('tab', { name: 'History' }));
-    expect(await screen.findByText('History (3)')).toBeInTheDocument();
-    expect(screen.getByText('Rejected by minh')).toBeInTheDocument();
-    expect(screen.getByText('R2 waiver needs pricing committee minutes')).toBeInTheDocument();
+    const events = await screen.findByRole('list', { name: 'Events of version 2' });
+    expect(within(events).getAllByRole('listitem')).toHaveLength(3);
+    expect(within(events).getByText('Rejected by Trần Văn Minh')).toBeInTheDocument();
+    expect(within(events).getByText('R2 waiver needs pricing committee minutes')).toBeInTheDocument();
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.path)).toEqual(['/rule-sets/card-fee/versions/2:reject']);
   });
 

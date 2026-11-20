@@ -14,13 +14,20 @@ const metaBoth: BpmMetaV1 = {
 
 describe('menu areas (PD-093)', () => {
   it('TR_UI_08_authors_and_approvers_see_home_rules_approvals_and_decisions', () => {
-    expect(availableAreas(metaRulesOnly, meLan)).toEqual(['home', 'rules', 'approvals', 'decisions']);
+    expect(availableAreas(metaRulesOnly, meLan)).toEqual(['home', 'rules', 'approvals']);
     expect(availableAreas(metaRulesOnly, meMinh)).toEqual(['home', 'rules', 'approvals', 'decisions']);
   });
 
   it('TR_UI_08_any_rule_permission_opens_the_rule_areas', () => {
-    expect(availableAreas(metaRulesOnly, withPermissions(['rules:read']))).toEqual(['home', 'rules', 'approvals', 'decisions']);
+    expect(availableAreas(metaRulesOnly, withPermissions(['rules:read']))).toEqual(['home', 'rules', 'approvals']);
     expect(availableAreas(metaRulesOnly, withPermissions(['rules:log:read']))).toEqual(['home', 'rules', 'approvals', 'decisions']);
+  });
+
+  it('CKP_071_decisions_shows_only_to_users_who_may_read_the_decision_log', () => {
+    for (const permissions of [['rules:read'], ['rules:author'], ['rules:approve'], ['rules:read', 'rules:author', 'rules:approve']]) {
+      expect(availableAreas(metaRulesOnly, withPermissions(permissions))).not.toContain('decisions');
+    }
+    expect(availableAreas(metaRulesOnly, withPermissions(['rules:read', 'rules:log:read']))).toContain('decisions');
   });
 
   it('TR_UI_08_a_user_with_no_rule_permission_sees_home_only_never_a_dead_link', () => {
@@ -30,7 +37,7 @@ describe('menu areas (PD-093)', () => {
 
   it('TR_UI_08_processes_shows_only_where_a_process_engine_is_registered', () => {
     expect(availableAreas(metaRulesOnly, meLan)).not.toContain('processes');
-    expect(availableAreas(metaBoth, meLan)).toEqual(['home', 'rules', 'approvals', 'decisions', 'processes']);
+    expect(availableAreas(metaBoth, meMinh)).toEqual(['home', 'rules', 'approvals', 'decisions', 'processes']);
     expect(availableAreas(metaBoth, withPermissions(['processes:read']))).toEqual(['home', 'processes']);
   });
 

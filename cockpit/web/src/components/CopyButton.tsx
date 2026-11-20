@@ -2,10 +2,21 @@ import { useState } from 'react';
 import { useI18n } from '../i18n/I18nProvider';
 
 /**
- * Copies a reference. `label` names what is copied when the default "Copy reference" is too long for the place;
+ * Copies a reference in full. `label` names what is copied when the default "Copy reference" is too long for the
+ * place or it is not a support reference (for example a SHA-256); `copiedLabel` is announced once copied;
  * `iconOnly` shows a copy icon with the label as its accessible name and tooltip, for a tight row.
  */
-export function CopyButton({ value, label, iconOnly = false }: { value: string; label?: string; iconOnly?: boolean }) {
+export function CopyButton({
+  value,
+  label,
+  copiedLabel,
+  iconOnly = false,
+}: {
+  value: string;
+  label?: string | undefined;
+  copiedLabel?: string | undefined;
+  iconOnly?: boolean;
+}) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -31,7 +42,7 @@ export function CopyButton({ value, label, iconOnly = false }: { value: string; 
         </button>
       )}
       <span className="sr-only" role="status" aria-live="polite">
-        {copied ? t('action.referenceCopied') : ''}
+        {copied ? (copiedLabel ?? t('action.referenceCopied')) : ''}
       </span>
     </>
   );

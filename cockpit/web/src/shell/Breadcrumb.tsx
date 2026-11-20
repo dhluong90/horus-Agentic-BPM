@@ -1,9 +1,11 @@
 import { useCrumbLabel } from '../app/crumbs';
 import { formatRoute, useRoute, type Route } from '../app/route';
+import { lastDecisionQuery } from '../features/decisions/lastQuery';
+import { shortId } from '../features/decisions/model/references';
 import type { MessageKey } from '../i18n/en';
 import { useI18n } from '../i18n/I18nProvider';
 
-const AREA_TITLE: Record<Exclude<Route['name'], 'home' | 'rule-set' | 'process' | 'task'>, MessageKey> = {
+const AREA_TITLE: Record<Exclude<Route['name'], 'home' | 'rule-set' | 'process' | 'task' | 'decision'>, MessageKey> = {
   'rule-sets': 'menu.rules',
   approvals: 'menu.approvals',
   decisions: 'menu.decisions',
@@ -54,6 +56,11 @@ function trail(route: Route, t: (key: MessageKey, params?: Record<string, string
       ];
     case 'task':
       return [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }, { label: t('review.crumb') }];
+    case 'decision':
+      return [
+        { label: t('menu.decisions'), href: formatRoute({ name: 'decisions', query: lastDecisionQuery() }) },
+        { label: t('dlog.crumb', { id: shortId(route.decisionId) }) },
+      ];
     default:
       return [{ label: t(AREA_TITLE[route.name]) }];
   }

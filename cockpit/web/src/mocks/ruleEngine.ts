@@ -9,11 +9,13 @@
  * It accepts JSON text only (JSON is YAML), which is what the cockpit's editor sends.
  */
 
+import { createAuditRoutes, type AuditOptions } from './auditEngine';
+
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 interface Rule { id: string; when: Record<string, string>; then: Record<string, Json> }
 interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string }[]; outputs: { name: string; type: string }[]; rules: Rule[]; description?: string }
 
-export interface StoredHistory { action: 'CREATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
+export interface StoredHistory { action: 'CREATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
 
 export interface StoredVersion {
   ruleSet: string;
@@ -393,7 +395,7 @@ function exportOf(v: StoredVersion, format: string | null): FakeResponse {
   return problem(400, 'INPUT_INVALID', 'format must be one of json, dmn');
 }
 
-export function createFakeEngine(seed: StoredVersion[], acknowledgement: AcknowledgementSettings = {}) {
+export function createFakeEngine(seed: StoredVersion[], acknowledgement: AcknowledgementSettings = {}, auditOptions: AuditOptions = {}) {
   /** First answers by Idempotency-Key and request, replayed when the same request comes again. */
   const replays = new Map<string, FakeResponse>();
   const store: StoredVersion[] = seed.map((v) => structuredClone(v));
@@ -402,6 +404,17 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
   const now = () => new Date('2026-11-19T03:00:00Z').toISOString();
   const find = (name: string, version: number) => store.find((v) => v.ruleSet === name && v.version === version);
   const versionsOf = (name: string) => store.filter((v) => v.ruleSet === name);
+  const audit = createAuditRoutes({
+    versions: () => store.map((v) => ({
+      ruleSet: v.ruleSet, version: v.version, status: v.status, createdBy: v.createdBy, createdAt: v.createdAt, requestedBy: v.requestedBy, requestedAt: v.requestedAt,
+      approvedBy: v.approvedBy, approvedAt: v.approvedAt, effectiveFrom: v.effectiveFrom, canonicalHash: hash(JSON.stringify(v.definition)), hitPolicy: v.definition.hitPolicy,
+      inputs: v.definition.inputs, rules: v.definition.rules, history: v.history ?? [],
+    })),
+    problem,
+    hash,
+    now,
+    options: auditOptions,
+  });
 
   function importVersion(name: string | undefined, request: FakeRequest): FakeResponse {
     // The import limit as #145 answers it (an engine before #145 says 422 "Document larger than ...").
@@ -561,10 +574,12 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       if (request.method === 'POST' && tail?.startsWith(':')) return transition(v, request, tail.slice(1) as 'request-publish' | 'approve' | 'reject');
     }
     if (request.method === 'POST' && (m = /^\/decisions\/([^/:]+):evaluate$/.exec(path))) return evaluate(m[1] ?? '', request);
+    const audited = audit.route(path, url, request);
+    if (audited) return audited;
     return problem(404, 'VERSION_NOT_FOUND', `No route ${request.method} ${path}`);
   }
 
-  return { handle, store };
+  return { handle, store, audit };
 }
 
 const CARD_FEE_V1: Definition = {
@@ -619,6 +634,34 @@ export function demoSeed(): StoredVersion[] {
         { action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: 'lan', reason: null, lockVersion: 0, occurredAt: '2026-11-18T08:00:00Z' },
         { action: 'REQUESTED', fromStatus: 'DRAFT', toStatus: 'PENDING_APPROVAL', actor: 'lan', reason: null, lockVersion: 1, occurredAt: '2026-11-18T08:30:00Z' },
       ] },
+    { ruleSet: 'kyc-risk', version: 1, status: 'PUBLISHED', createdBy: 'lan', createdAt: '2026-10-20T01:00:00Z', requestedBy: 'lan', approvedBy: 'minh', source: JSON.stringify(KYC_RISK_V1, null, 2), definition: KYC_RISK_V1, ...base },
+  ];
+}
+
+/**
+ * card-fee for the history and evidence screens (CKP-072): v1 created by Lan, approved by Minh and retired when v2
+ * took effect; v2 rejected by Minh with a reason, sent again and approved with a comment; v3 a draft. kyc-risk v1 published.
+ */
+export function auditSeed(): StoredVersion[] {
+  const v3: Definition = { ...CARD_FEE_V2, rules: CARD_FEE_V2.rules.map((rule) => (rule.id === 'R3' ? { ...rule, then: { fee: '40000 VND', waived: false } } : rule)) };
+  return [
+    { ruleSet: 'card-fee', version: 1, status: 'RETIRED', lockVersion: 3, createdBy: 'lan', createdAt: '2026-11-01T01:00:00Z', requestedBy: 'lan', requestedAt: '2026-11-01T02:00:00Z', approvedBy: 'minh', approvedAt: '2026-11-01T03:00:00Z', effectiveFrom: '2026-11-01T03:00:00Z', source: JSON.stringify(CARD_FEE_V1, null, 2), definition: CARD_FEE_V1,
+      history: [
+        { action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: 'lan', reason: null, lockVersion: 0, occurredAt: '2026-11-01T01:00:00Z' },
+        { action: 'REQUESTED', fromStatus: 'DRAFT', toStatus: 'PENDING_APPROVAL', actor: 'lan', reason: null, lockVersion: 1, occurredAt: '2026-11-01T02:00:00Z' },
+        { action: 'APPROVED', fromStatus: 'PENDING_APPROVAL', toStatus: 'PUBLISHED', actor: 'minh', reason: 'Matches the tariff', lockVersion: 2, occurredAt: '2026-11-01T03:00:00Z' },
+        { action: 'RETIRED', fromStatus: 'PUBLISHED', toStatus: 'RETIRED', actor: 'minh', reason: null, lockVersion: 3, occurredAt: '2026-11-19T03:00:00Z' },
+      ] },
+    { ruleSet: 'card-fee', version: 2, status: 'PUBLISHED', lockVersion: 4, createdBy: 'lan', createdAt: '2026-11-15T01:00:00Z', requestedBy: 'lan', requestedAt: '2026-11-18T08:30:00Z', approvedBy: 'minh', approvedAt: '2026-11-19T03:00:00Z', effectiveFrom: '2026-11-19T03:00:00Z', source: JSON.stringify(CARD_FEE_V2, null, 2), definition: CARD_FEE_V2,
+      history: [
+        { action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: 'lan', reason: null, lockVersion: 0, occurredAt: '2026-11-15T01:00:00Z' },
+        { action: 'REQUESTED', fromStatus: 'DRAFT', toStatus: 'PENDING_APPROVAL', actor: 'lan', reason: null, lockVersion: 1, occurredAt: '2026-11-15T02:00:00Z' },
+        { action: 'REJECTED', fromStatus: 'PENDING_APPROVAL', toStatus: 'DRAFT', actor: 'minh', reason: 'R2 waiver needs pricing committee minutes', lockVersion: 2, occurredAt: '2026-11-16T03:00:00Z' },
+        { action: 'REQUESTED', fromStatus: 'DRAFT', toStatus: 'PENDING_APPROVAL', actor: 'lan', reason: null, lockVersion: 3, occurredAt: '2026-11-18T08:30:00Z' },
+        { action: 'APPROVED', fromStatus: 'PENDING_APPROVAL', toStatus: 'PUBLISHED', actor: 'minh', reason: 'Committee minutes attached', lockVersion: 4, occurredAt: '2026-11-19T03:00:00Z' },
+      ] },
+    { ruleSet: 'card-fee', version: 3, status: 'DRAFT', lockVersion: 0, createdBy: 'lan', createdAt: '2026-11-20T02:00:00Z', requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: JSON.stringify(v3, null, 2), definition: v3,
+      history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: 'lan', reason: null, lockVersion: 0, occurredAt: '2026-11-20T02:00:00Z' }] },
     { ruleSet: 'kyc-risk', version: 1, status: 'PUBLISHED', createdBy: 'lan', createdAt: '2026-10-20T01:00:00Z', requestedBy: 'lan', approvedBy: 'minh', source: JSON.stringify(KYC_RISK_V1, null, 2), definition: KYC_RISK_V1, ...base },
   ];
 }

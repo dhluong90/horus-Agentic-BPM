@@ -1,6 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import { scenarioPermissions, scenarioResponses, scenarioUser, type MockResponse, type Scenario } from './fixtures';
 import { createFakeProcessEngine, type ProcessSeed } from './processEngine';
+import type { AuditOptions } from './auditEngine';
 import { createFakeEngine, demoSeed, type AcknowledgementSettings, type StoredVersion } from './ruleEngine';
 
 function reply(response: MockResponse) {
@@ -13,10 +14,10 @@ let engine = createFakeEngine(demoSeed());
 
 /**
  * A fresh mock Rule Engine with the demo data, or the given versions, for test isolation; optionally with the
- * acknowledgement settings the engine marks warnings by (PD-104, RLE-053).
+ * acknowledgement settings the engine marks warnings by (PD-104, RLE-053), and the audit options (decision log, evidence limit).
  */
-export function resetRuleEngine(seed: StoredVersion[] = demoSeed(), acknowledgement: AcknowledgementSettings = {}): void {
-  engine = createFakeEngine(seed, acknowledgement);
+export function resetRuleEngine(seed: StoredVersion[] = demoSeed(), acknowledgement: AcknowledgementSettings = {}, audit: AuditOptions = {}): void {
+  engine = createFakeEngine(seed, acknowledgement, audit);
 }
 
 let processEngine = createFakeProcessEngine();

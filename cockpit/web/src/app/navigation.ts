@@ -8,10 +8,14 @@ import type { Area } from './route';
  */
 const RULE_PERMISSIONS: ReadonlySet<string> = new Set(['rules:read', 'rules:author', 'rules:approve', 'rules:log:read']);
 
+/** The permission to read the decision log; Decisions holds its data, so the area shows only with it. */
+const DECISION_LOG = 'rules:log:read';
+
 /**
- * The menu (PD-093): Home always; Rules, Approvals and Decisions for anyone with a rule permission on a host
- * that runs the Rule Engine; Processes only where a Process Engine is registered. A user with no rule
- * permission sees Home only. Nothing depends on a role name.
+ * The menu (PD-093): Home always; Rules and Approvals for anyone with a rule permission on a host that runs the
+ * Rule Engine; Decisions only for those who may read the decision log (an area is hidden, never shown disabled,
+ * when it holds data the user may not read); Processes only where a Process Engine is registered. A user with no
+ * rule permission sees Home only. Nothing depends on a role name.
  */
 export function availableAreas(meta: BpmMetaV1, me: BpmMeV1): Area[] {
   const modules = new Set(meta.modules.map((module) => module.module));
@@ -19,7 +23,8 @@ export function availableAreas(meta: BpmMetaV1, me: BpmMeV1): Area[] {
   const processes = modules.has('processes') && (rules || me.permissions.some((permission) => permission.startsWith('processes:')));
   return [
     'home',
-    ...(rules ? (['rules', 'approvals', 'decisions'] as const) : []),
+    ...(rules ? (['rules', 'approvals'] as const) : []),
+    ...(rules && me.permissions.includes(DECISION_LOG) ? (['decisions'] as const) : []),
     ...(processes ? (['processes'] as const) : []),
   ];
 }

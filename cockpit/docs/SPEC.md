@@ -412,3 +412,52 @@ These two statements are the part of `CKP-016` and `CKP-029` that ships before s
 - **Then:** Nodes are keyed `startEvent`, `userTask`, `serviceTask:agentTask`, `businessRuleTask`, `exclusiveGateway`, `serviceTask`, `endEvent`, `parallelGateway` and `intermediateCatchEvent:timer`, each drawn with its own symbol and named in the user's language (`Wait one day, Hẹn giờ`). The boundary timer is kept with the key `boundaryEvent:timer`, drawn as a dashed generic box with its outgoing flow, showing its name and its kind in words from its event definition, with the timer icon (`Timer`, `Hẹn giờ`); a type with no known event definition reads `Other step` (`Bước khác`). The key is never shown as text. The rest of the diagram is intact and no error is shown. In the second case the diagram shows an error with Try again instead of a guessed drawing.
 - **Example:** `boundaryEvent + timerEventDefinition -> dashed node "No documents in 2 days", "Timer" with the clock icon, flow to remind kept`.
 - **Test ID:** `CKP_070_steps_are_keyed_by_bpmn_type_with_the_horus_subtype`, `CKP_070_an_unknown_type_stays_in_the_graph_with_its_type_name_and_the_rest_is_intact`, `CKP_070_a_document_with_a_doctype_or_no_process_is_refused_not_guessed`, `CKP_070_an_unknown_node_type_renders_as_a_generic_node_naming_its_type`, `CKP_070_vietnamese_names_every_known_type_in_words`
+
+## Decision Explorer, Version History and Evidence Export (PD-027, PD-108, PD-116)
+
+The engine decides and the cockpit shows: the explanation sentence, the masked values, the history and the evidence file with its SHA-256 all come from the Rule Engine (`GET /decisions`, `GET /decisions/{id}`, `GET /decisions/{id}/explain`, `GET /rule-sets/{name}/history`, `POST /rule-sets/{name}/evidence`). The cockpit computes none of them.
+
+### CKP-071 An auditor finds a rule set's or a case's decisions in a month and opens one
+- **Traces to:** `TR-OBS-05`, `TR-UI-02`, `TR-UI-04`, `RLE-029`, PD-108
+- **Milestone:** M1
+- **Given:** `card-fee` has 124 decisions logged in November 2026 and case reference `LN-2026-0042` has one `card-fee` and one `kyc-risk` decision. Ha holds `rules:read` and `rules:log:read`. Second case: Lan holds no `rules:log:read`.
+- **When:** Ha opens Decisions, chooses `card-fee` and November 2026 and shows the decisions; then searches by case reference `LN-2026-0042`; then types `LN 42`; then opens a decision from the list.
+- **Then:** One `GET /decisions?ruleSet=card-fee&from=2026-11-01T00:00:00Z&to=2026-12-01T00:00:00Z&limit=50` is sent; the list shows the first 50, newest first, with when, the rule set and version, the outcome in words with an icon ("Rule R2 matched", "No rule matched", "Failed"), the case reference and a short decision id, and "Show more decisions" reads the next page with the cursor. The search lives in the URL (`#/decisions?ruleSet=card-fee&month=2026-11`). The case search sends `correlationId=LN-2026-0042` and lists both decisions. `LN 42` is refused on the field before any request. A row opens `#/decisions/{id}`. Nothing is searched until the user asks. In the second case Decisions is not in the menu (an area is hidden when it holds data the user may not read), a link to it reads "Not available", and no decision endpoint is called.
+- **Example:** `card-fee, November 2026 -> "card-fee, November 2026", "First 50 decisions", newest 20 Nov 2026 10:00 "Rule R2 matched" LN-2026-0042 01KF2Q…P7T9`.
+- **Test ID:** `CKP_071_decisions_of_a_rule_set_or_a_case_in_a_month_newest_first`
+
+### CKP-072 A decision reads as the engine's sentence, its conditions and its inputs, with masked inputs masked
+- **Traces to:** `TR-SEC-05`, `TR-OBS-05`, `TR-UI-04`, `RLE-030`, `RLE-031`, PD-027, PD-108
+- **Milestone:** M1
+- **Given:** Decision `01KF2Q8Z0RQ6V2Y8M1C4N5P7T9` of `card-fee` v1 matched `R2` with `tier` `GOLD` and `balance` 60,000,000 VND, and logged `nationalId` as `hmac:k1:9f4a6c…`. A second decision failed with `EVALUATION_ERROR`. Ha holds `rules:log:read` and `rules:read`.
+- **When:** Ha opens the first decision in English and in Vietnamese, opens Inputs and Rule table; then the failed decision; then an id of another tenant; then `#/decisions/not-a-decision`.
+- **Then:** One `GET /decisions/{id}` and one `GET /decisions/{id}/explain?lang=en` (`lang=vi` in Vietnamese) are sent; the engine's `text` shows unchanged as the focal sentence, with the outcome as an icon and words. Conditions lists each condition of `R2` with the input's readable name ("Tier", "Balance"), the rule's condition as in the table ("Gold", "≥ 50,000,000 VND"), the recorded value with grouped amounts ("60,000,000 VND") and "Held". Inputs lists every logged input; `nationalId` reads "Masked" with a padlock and the reference `9f4a6c`, never a plain value and never as an error. Rule table shows the version with `R2` marked. The decision id shows in full with "Copy decision id", which copies exactly what is shown. The failed decision reads "The rule set could not be evaluated, so no result was produced." with the error edge, not the accent; the error code and the engine's sentence sit behind Details; Conditions says nothing was produced. Another tenant's decision reads "No decision with this id in tenant bank-a." A string that is not a decision id reads "This link does not name a decision." and no request is sent. No raw JSON is shown.
+- **Example:** `open 01KF2Q…P7T9 -> engine sentence; Tier Gold Held; Balance ≥ 50,000,000 VND 60,000,000 VND Held; National id Masked 9f4a6c`.
+- **Test ID:** `CKP_072_decision_shows_engine_sentence_conditions_and_masked_inputs`
+
+### CKP-073 The history lists every version, newest first, with its people, comments and events
+- **Traces to:** `TR-OBS-01`, `TR-UI-02`, `TR-UI-04`, PD-116
+- **Milestone:** M3
+- **Given:** `card-fee` v1 (created by Lan, approved by Minh with "Matches the tariff", retired when v2 took effect), v2 (rejected by Minh with "R2 waiver needs pricing committee minutes", sent again and approved with "Committee minutes attached") and v3 draft. Ha holds `rules:read`.
+- **When:** Ha opens `card-fee`, then History.
+- **Then:** One `GET /rule-sets/card-fee/history` is sent. One line per version, newest first, shows the status in words with an icon, "In effect from …" or "In effect … to …" or "Not in effect", who created, sent, approved and rejected it with when, and the approval comment and rejection reason. Each line opens to its events, oldest first, in words ("Rejected by Trần Văn Minh"), with the reason, which then replace that summary so nothing shows twice; an event the engine sends twice shows once; the version open on screen starts open. Evidence exports are listed below with who, what and when. Export evidence is beside the history; both are visible without scrolling at 1440x900.
+- **Example:** `History -> "Version 3 · Draft · Not in effect", "Version 2 · Published · In effect from 19 Nov 2026 03:00", "Version 1 · Retired · In effect 01 Nov 2026 03:00 to 19 Nov 2026 03:00"`.
+- **Test ID:** `CKP_073_history_lists_every_version_newest_first_with_people_and_events`
+
+### CKP-074 Evidence of chosen versions and decisions is exported by the engine and its SHA-256 is shown
+- **Traces to:** `TR-SEC-05`, `TR-OBS-01`, `TR-IDEM-01`, PD-116
+- **Milestone:** M3
+- **Given:** The history of `CKP-073`. Ha also holds `rules:log:read`.
+- **When:** Ha ticks versions 1 and 2, picks November 2026 and ticks decisions `01KF2Q8Z0RQ6V2Y8M1C4N5P7T9`, `01KF2Q8Z0RQ6V2Y8M1C4N5P7TA` and `01KF2Q8Z0RQ6V2Y8M1C4N5P7TB`, keeps CSV and exports; then clicks Export again quickly on a second export.
+- **Then:** One `POST /rule-sets/card-fee/evidence` with an `Idempotency-Key` and `{ format: csv, versions: [1, 2], decisionIds: [three ids] }` is sent; the saved file is the response bytes under the engine's file name; the card reads "Evidence exported", "Versions 1, 2 · 3 decisions", the file name, format and size, and "SHA-256" with all 64 hex digits of `X-Evidence-Sha256` and "Copy SHA-256", which copies exactly what is shown. A refusal shows just above Export and is scrolled into view beside it. The history then lists "Evidence exported by Phạm Thu Hà: 2 versions, 3 decisions". The file shows masked inputs as their keyed hash. A repeated click while the export runs sends nothing more.
+- **Example:** `versions 1, 2 + 3 decisions, CSV -> "Evidence exported", "SHA-256" with 64 hex digits, Copy SHA-256 -> the same 64 hex digits`.
+- **Test ID:** `CKP_074_export_sends_one_request_saves_the_bytes_and_shows_the_sha256`
+
+### CKP-075 Export says why it is unavailable, and shows each refusal in words
+- **Traces to:** `TR-SEC-05`, `TR-UI-02`, `TR-UI-04`, PD-116
+- **Milestone:** M3
+- **Given:** The history of `CKP-073`. First case: Ha holds `rules:read` only. Second case: Ha holds `rules:log:read` and the 124 decisions of November 2026 are listed. Third case: the engine answers `422 EVIDENCE_TOO_LARGE`. Fourth case: it answers `403 PERMISSION_DENIED`. Fifth case: it answers `400 INPUT_INVALID` naming a chosen decision as one of another rule set. Sixth case: the history answers `404 RULE_SET_NOT_FOUND`.
+- **When:** Ha opens Export evidence and chooses as described.
+- **Then:** With nothing chosen, Export is unavailable with "Choose at least one version or decision." In the first case the decision picker is not shown, one line says adding decisions needs permission to read the decision log, and a versions-only export sends no `decisionIds`. In the second case the picker says "One file holds at most 100 decisions." and offers "Choose first 100" instead of choosing all; it ticks the first 100, the count reads "100 chosen", the other boxes are unavailable until one is unticked, and Export stays available. The third case reads "The file would be larger than 8 MB. Choose fewer decisions.", the fourth "You may not export this evidence on this service.", the fifth "Decision 01KF2Q…P7TA belongs to another rule set and cannot be exported here.", the sixth "This rule set was not found on this service."; each keeps the choices, and the code and reference sit behind Details with Copy.
+- **Example:** `124 listed -> "Choose first 100" -> "100 chosen", the rest unavailable; 422 EVIDENCE_TOO_LARGE -> "The file would be larger than 8 MB. Choose fewer decisions."`.
+- **Test ID:** `CKP_075_export_limits_and_refusals_read_in_words`
