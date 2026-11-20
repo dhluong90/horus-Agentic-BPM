@@ -24,7 +24,7 @@ class RuleEngineSchemaMigratorIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     private static final AtomicInteger DATABASES = new AtomicInteger();
 
@@ -36,7 +36,7 @@ class RuleEngineSchemaMigratorIT {
 
         assertThat(result.initialVersion()).isNull();
         assertThat(result.currentVersion()).isEqualTo("12");
-        assertThat(result.migrationsExecuted()).isEqualTo(6);
+        assertThat(result.migrationsExecuted()).isEqualTo(9);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
                 "rle_rule_set",
@@ -122,9 +122,9 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.currentVersion()).isEqualTo("12");
-        assertThat(result.migrationsExecuted()).isEqualTo(6);
+        assertThat(result.migrationsExecuted()).isEqualTo(9);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3", "4", "5", "12");
+                .containsExactly("0", "1", "2", "3", "4", "5", "6", "10", "11", "12");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -142,7 +142,68 @@ class RuleEngineSchemaMigratorIT {
         assertThat(second.migrationsExecuted()).isZero();
         assertThat(migrator.currentVersion()).contains("12");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
-                .isEqualTo(6L);
+                .isEqualTo(9L);
+    }
+
+    @Test
+    void RLE_026_V11_adds_retired_at_its_check_and_its_index_and_its_rollback_step_runs() {
+        // Given a migrated database with one published and one retired version
+        DataSource db = freshDatabase();
+        new RuleEngineSchemaMigrator(db).migrate();
+        JdbcClient jdbc = JdbcClient.create(db);
+        jdbc.sql("INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES ('bank-a', 'RS1', 'card-fee', now())")
+                .update();
+        String insert = "INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy,"
+                + " canonical_json, canonical_hash, source_format, source_document, source_hash, created_at, retired_at)"
+                + " VALUES ('bank-a', :id, 'RS1', :num, :status, 'FIRST', '{}', repeat('a', 64), 'YAML', '', repeat('b', 64),"
+                + " now(), CAST(:retiredAt AS TIMESTAMPTZ))";
+        jdbc.sql(insert).param("id", "V1").param("num", 1).param("status", "RETIRED")
+                .param("retiredAt", "2027-02-17T08:00:00Z").update();
+        jdbc.sql(insert).param("id", "V2").param("num", 2).param("status", "PUBLISHED").param("retiredAt", null).update();
+
+        // Then status and retired_at cannot disagree, and the sweep's partial index exists
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql(insert).param("id", "V3").param("num", 3)
+                .param("status", "PUBLISHED").param("retiredAt", "2027-02-17T08:00:00Z").update())
+                .hasMessageContaining("rle_version_retired_at_check");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql(insert).param("id", "V4").param("num", 4)
+                .param("status", "RETIRED").param("retiredAt", null).update())
+                .hasMessageContaining("rle_version_retired_at_check");
+        assertThat(jdbc.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_rle_version_published'")
+                .query(String.class).single()).contains("WHERE (status = 'PUBLISHED'::text)");
+
+        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE table_name = 'rle_version_history'"
+                + " AND column_name = 'no_version_in_effect'").query(Long.class).single()).isEqualTo(1L);
+
+        // When the documented rollback step of V11 runs
+        jdbc.sql("ALTER TABLE rle_version_history DROP COLUMN no_version_in_effect").update();
+        jdbc.sql("ALTER TABLE rle_version DROP CONSTRAINT rle_version_retired_at_check").update();
+        jdbc.sql("DROP INDEX idx_rle_version_published").update();
+        jdbc.sql("ALTER TABLE rle_version DROP COLUMN retired_at").update();
+
+        // Then the table is back to its shape before V11, with its rows
+        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE table_name = 'rle_version'"
+                + " AND column_name = 'retired_at'").query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_version").query(Long.class).single()).isEqualTo(2L);
+    }
+
+    @Test
+    void RLE_008_V10_adds_the_pinned_mark_to_every_partition_and_its_rollback_step_runs() {
+        DataSource db = freshDatabase();
+        new RuleEngineSchemaMigrator(db).migrate();
+        JdbcClient jdbc = JdbcClient.create(db);
+        insertDecision(jdbc, "01KCS3W1DQ0M8V6T2B9R5N7K4E", "2026-11-20T10:00:00Z");
+
+        // Then the column exists on the parent and the default partition, false for rows that did not pin
+        assertThat(jdbc.sql("SELECT pinned FROM rle_decision").query(Boolean.class).single()).isFalse();
+        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE column_name = 'pinned'"
+                + " AND table_name IN ('rle_decision', 'rle_decision_default')").query(Long.class).single())
+                .isEqualTo(2L);
+
+        // When the documented rollback step runs, Then the column is gone and the row stays
+        jdbc.sql("ALTER TABLE rle_decision DROP COLUMN pinned").update();
+        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE column_name = 'pinned'"
+                + " AND table_name = 'rle_decision'").query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision").query(Long.class).single()).isEqualTo(1L);
     }
 
     @Test
@@ -150,7 +211,7 @@ class RuleEngineSchemaMigratorIT {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 6));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 9));
         assertThat(migrator.status().isCurrent()).isFalse();
 
         migrator.migrate();

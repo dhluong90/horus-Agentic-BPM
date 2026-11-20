@@ -38,7 +38,7 @@
             }
           },
           "settings": {
-            "description": "Host settings the cockpit must respect, for example { \"authoring.cockpit-drafts\": false }.",
+            "description": "Host settings the cockpit must respect, for example { \"authoring.cockpit-drafts\": false }, followed by settings of the caller's own tenant, for example { \"masking.hmac-key\": \"set\", \"masking.hmac-key-id\": \"k1\" }. Secrets appear only as set or unset.",
             "type": "object",
             "additionalProperties": { "type": ["boolean", "integer", "string"] }
           }

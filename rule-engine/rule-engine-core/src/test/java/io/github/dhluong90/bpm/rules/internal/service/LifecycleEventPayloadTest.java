@@ -8,11 +8,8 @@ import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Set;
-import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
@@ -88,9 +85,9 @@ class LifecycleEventPayloadTest {
         // When minh approves both on 15 Dec
         clock.set(DEC_15);
         caller.become("bank-a", "minh", Set.of("rules:read", "rules:approve"));
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
         JsonNode atApproval = lastEvent("rules.version.published.v1");
-        versions.approve("fx-margin", 1, WriteOptions.none());
+        versions.approve("fx-margin", 1, new WriteOptions(null, 1L, null));
         JsonNode scheduled = lastEvent("rules.version.published.v1");
 
         // Then the event names what was approved, from when, and both people of the four eyes
@@ -108,42 +105,7 @@ class LifecycleEventPayloadTest {
         conformsTo("rules.version.published.v1.schema.json", scheduled);
     }
 
-    /** Checks the schema's required members, const, types and patterns: the subset these two schemas use. */
     static void conformsTo(String schemaFile, JsonNode payload) {
-        JsonNode schema;
-        try {
-            schema = EngineJson.JSON.readTree(Files.readAllBytes(Path.of("../api/schema/" + schemaFile)));
-        } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
-        }
-        for (JsonNode required : schema.path("required")) {
-            assertThat(payload.has(required.asString())).as("%s requires %s", schemaFile, required.asString()).isTrue();
-        }
-        schema.path("properties").properties().forEach(property -> {
-            JsonNode value = payload.get(property.getKey());
-            JsonNode rule = property.getValue();
-            if (value == null) {
-                return;
-            }
-            if (rule.has("const")) {
-                assertThat(value.asString()).as(property.getKey()).isEqualTo(rule.path("const").asString());
-            }
-            Set<String> types = new java.util.HashSet<>();
-            JsonNode type = rule.path("type");
-            if (type.isArray()) {
-                type.forEach(t -> types.add(t.asString()));
-            } else if (type.isString()) {
-                types.add(type.asString());
-            }
-            if (!types.isEmpty()) {
-                String actual = value.isNull() ? "null" : value.isString() ? "string" : value.isIntegralNumber() ? "integer"
-                        : value.isBoolean() ? "boolean" : value.isObject() ? "object" : "other";
-                assertThat(types).as("%s of %s", property.getKey(), schemaFile).contains(actual);
-            }
-            if (rule.has("pattern") && value.isString()) {
-                assertThat(Pattern.compile(rule.path("pattern").asString()).matcher(value.asString()).find())
-                        .as("%s matches %s", property.getKey(), rule.path("pattern").asString()).isTrue();
-            }
-        });
+        EventSchemas.conformsTo(EventSchemas.DIRECTORY.resolve(schemaFile), payload);
     }
 }

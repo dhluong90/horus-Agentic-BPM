@@ -13,6 +13,8 @@ import {
   type RuleSetSummary,
   type RuleSetVersion,
   type VersionSummary,
+  versionDiff,
+  type VersionDiff,
 } from './schemas';
 
 type Fetch = typeof fetch;
@@ -49,6 +51,8 @@ export interface RulesClient {
   withdraw(name: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<RuleSetVersion>;
   /** getVersion */
   getVersion(name: string, version: number, options?: { source?: boolean; signal?: AbortSignal }): Promise<RuleSetVersion>;
+  /** diffVersions: the engine's row-level diff of `version` against `base`; writes nothing (RLE-028) */
+  diffVersions(name: string, version: number, base: number, signal?: AbortSignal): Promise<VersionDiff>;
   /** importRuleSet: version 1 of a new rule set */
   importRuleSet(document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** importVersion: the next draft version of an existing rule set */
@@ -119,6 +123,10 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
     async getVersion(name, version, options = {}) {
       const query = options.source ? '?include=source' : '';
       const answer = await call({ method: 'GET', path: `${versionPath(name, version)}${query}`, ...(options.signal ? { signal: options.signal } : {}) }, ruleSetVersion);
+      return answer.data;
+    },
+    async diffVersions(name, version, base, signal) {
+      const answer = await call({ method: 'GET', path: `${versionPath(name, version)}/diff?base=${String(base)}`, ...(signal ? { signal } : {}) }, versionDiff);
       return answer.data;
     },
     async importRuleSet(document, idempotencyKey) {

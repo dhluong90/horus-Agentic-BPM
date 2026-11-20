@@ -115,7 +115,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-091](#pd-091-no-tag-ruleset-or-immutable-releases-for-now) | No tag ruleset or immutable releases for now | Decided (revisitable) |
 | [PD-092](#pd-092-the-cockpit-opens-on-home-for-every-role) | The cockpit opens on Home for every role | Decided (product manager, delegated, PD-073) |
 | [PD-093](#pd-093-cockpit-menu-for-authors-and-two-changes-to-the-approved-prototype) | Cockpit menu for authors and two changes to the approved prototype | Decided (product manager, delegated, PD-073) |
-| [PD-094](#pd-094-cockpit-draft-editing-is-off-by-default-in-010) | Cockpit draft editing is off by default in 0.1.0 | Decided (product manager, delegated, PD-073) |
+| [PD-094](#pd-094-cockpit-draft-editing-is-off-by-default-in-010) | Cockpit draft editing is off by default in 0.1.0 | Decided (product manager, delegated, PD-073; superseded in 0.2.0 by PD-095) |
+| [PD-095](#pd-095-cockpit-draft-editing-on-by-default-again-in-020) | Cockpit draft editing on by default again in 0.2.0 | Decided (product manager, delegated, PD-073) |
 | [PD-096](#pd-096-the-approver-differs-from-everyone-who-made-the-change) | The approver differs from everyone who made the change | Decided (product manager, delegated, PD-073) |
 | [PD-097](#pd-097-process-definitions-follow-the-rule-engine-withdraw-not-self-reject) | Process definitions follow the Rule Engine: withdraw, not self-reject | Decided (product manager, delegated, PD-073) |
 | [PD-098](#pd-098-reference-feel-engine-as-a-test-only-oracle) | Reference FEEL engine as a test-only oracle | Decided (product manager, delegated, PD-073) |
@@ -124,6 +125,9 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-101](#pd-101-retiring-the-last-version-in-effect-needs-an-explicit-confirmation) | Retiring the last version in effect needs an explicit confirmation | Decided (product manager, delegated, PD-073) |
 | [PD-102](#pd-102-process-definitions-follow-the-rule-engines-retirement-rules) | Process definitions follow the Rule Engine's retirement rules | Decided (product manager, delegated, PD-073) |
 | [PD-103](#pd-103-cancelling-a-process-instance-needs-its-own-permission) | Cancelling a process instance needs its own permission | Decided (product manager, delegated, PD-073) |
+| [PD-104](#pd-104-approving-a-version-with-personal-data-warnings-needs-an-acknowledgement) | Approving a version with personal-data warnings needs an acknowledgement | Decided (product manager, delegated, PD-073) |
+| [PD-105](#pd-105-pending-rule-versions-with-no-recorded-author-cannot-be-approved) | Pending rule versions with no recorded author cannot be approved | Decided (product manager, delegated, PD-073) |
+| [PD-106](#pd-106-the-condition-builder-lens-moves-from-10-to-11) | The condition builder lens moves from 1.0 to 1.1 | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -2839,6 +2843,8 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 
 ### PD-094 Cockpit draft editing is off by default in 0.1.0
 
+From 0.2.0 the default is on again: superseded by [PD-095](#pd-095-cockpit-draft-editing-on-by-default-again-in-020). The 0.1.0 default and release note stand for 0.1.0.
+
 | Field | Value |
 |---|---|
 | Date | 2026-11-19 |
@@ -2865,6 +2871,34 @@ Moves to `0.2.0` on 15 Jan 2027: #2, #3, #10, #11, #13, #18, #19, #22, #23, #24,
 - **Import button:** the cockpit's "Import rule set" action depends on `rules:author` only, not on this setting.
 
 **Follow-ups.** Maintainers (engineering): the cockpit default, the example host setting and the import action. Architect: DESIGN section 4.4. Documentation: the release notes and the wiki Rule Engine Configuration page.
+
+### PD-095 Cockpit draft editing on by default again in 0.2.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 (decided ahead; applies when #165 merges, after the `v0.1.0` tag) |
+| Question | PD-094 turned cockpit draft editing off by default in 0.1.0, because each save created a new draft version. #165 (pull request #234) lets an author replace their draft in place, and the engine now enforces `authoring.cockpit-drafts`. Should the default go back to on in 0.2.0? |
+| Raised by | Product manager, the revisit named in PD-094 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-19, option 1. Supersedes PD-094 from 0.2.0. Returns to the default of PD-036 and PD-075 |
+
+**Options considered**
+
+1. On by default from 0.2.0 (chosen). A host that keeps production rule changes in Git sets `authoring.cockpit-drafts: false` per environment, as PD-036 intended. Consequence: business users edit a draft in place in the cockpit out of the box. Every change still needs a second approver before it takes effect, so four-eyes is untouched. The engine refuses editing with `403 DRAFT_AUTHORING_DISABLED` where the host turns it off.
+2. Keep it off by default. Consequence: safest for Git-driven banks. Every evaluator must find and set one more setting before the cockpit's main business feature works, against the newcomer target (K26).
+
+**Recommendation and decision.** Option 1. The reason for PD-094 was the known limit, which #165 removes. Turning editing on adds no new way to publish, so under PD-074 rule 2 it relaxes no control: approvals, the decision log and the audit trail are unchanged.
+
+**Condition.** This applies only when #165 merges with its definition of done, including the replace-in-place and diff specification statements (proposed as `RLE-047` and `RLE-048`). If #165 slips out of 0.2.0, the 0.1.0 default stays, and this entry is superseded.
+
+**Release note line (0.2.0).** "Cockpit draft editing is on by default again, and a save now replaces your draft instead of creating a new version. Hosts that keep production rule changes in Git set `authoring.cockpit-drafts: false` per environment. Upgrade note: a host on 0.1.0 that relied on the off default and wants to keep editing off must now set the setting explicitly."
+
+**Consequences.**
+- **Cockpit:** a missing setting means on again (the reverse of the PD-094 change in `cockpitDraftsOn`).
+- **Rule engine DESIGN section 4.4:** the default is `true` again.
+- **Example host:** the explicit setting can stay, so the demo does not depend on the default.
+- **Wiki Rule Engine Configuration page:** names the default and the upgrade note.
+
+**Follow-ups.** Maintainers (engineering): the cockpit default and its tests, with or right after #234. Architect: DESIGN section 4.4 and the two specification statements. Documentation: the 0.2.0 release notes, the upgrade note and the wiki page.
 
 ### PD-096 The approver differs from everyone who made the change
 
@@ -3082,3 +3116,83 @@ The value in force is shown in `/api/bpm/meta`. In the `four-eyes` retirement mo
 **Configuration.** Through role mapping only. Whether a second person must confirm a cancellation is not decided here. It returns as a decision if a pilot bank asks for it.
 
 **Follow-ups.** Architect: the permission catalogue, the process DESIGN REST row and a `PRE` statement for cancel. Maintainers (engineering): #253, and the `processes:cancel` entry in the module's permission catalogue and in the examples' role mapping.
+
+### PD-104 Approving a version with personal-data warnings needs an acknowledgement
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | A version can carry `UNMASKED_PERSONAL_DATA` warnings (PD-099, mitigation 1): an input looks like personal data and is not masked. The approval screen shows the warning (#312), but the approval record does not say the approver saw and accepted it. Should approval require an explicit acknowledgement? |
+| Raised by | Review of pull request #312 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Context.** The decision log is append-only. An approval that lets an unmasked personal-data input go live is the moment a bank accepts that risk, and an auditor must be able to see that someone accepted it knowingly.
+
+**Options considered**
+
+1. Require an explicit acknowledgement, recorded with the approval (chosen).
+   - The approve request carries the warning codes the approver accepts, for example `acknowledgedWarnings: ["UNMASKED_PERSONAL_DATA"]`.
+   - An approval of a version with an unacknowledged listed warning is refused with `409 WARNINGS_NOT_ACKNOWLEDGED`. The refusal names the warnings and the inputs.
+   - The approval history row and the published event record the acknowledged codes and the input names.
+   - In the cockpit the approver ticks a box worded "I accept that these inputs are logged without masking: nationalId", and Approve stays unavailable until it is ticked.
+
+   Consequence: the record shows who accepted the risk and for which inputs. One extra click, and only on versions that carry the warning.
+2. Show the warning only, as today. Consequence: no friction, but nothing proves the approver read it.
+
+**Configuration (PD-074).** Setting `lifecycle.acknowledge-warnings`, a list of warning codes that need an acknowledgement before approval. The default is `[UNMASKED_PERSONAL_DATA]`.
+- A host may add codes as new warnings appear.
+- Removing `UNMASKED_PERSONAL_DATA` relaxes a control. It is allowed, logged at WARN at start-up, and shown in `/api/bpm/meta`.
+- Strict mode (`decision-log.require-explicit-mask`, PD-099) turns the same case into a publish error, so no acknowledgement is ever needed there.
+
+**Recommendation and decision.** Option 1, in 0.2.0, with the other PD-099 mitigations, before the first pilot on real data. It completes mitigation 1: the warning is not only shown, it is accepted on the record.
+
+**Inputs masked by the tenant default (confirmed with the architect, 2026-11-20).** An undeclared input that the tenant's `decision-log.mask-default: true` masks still raises `UNMASKED_PERSONAL_DATA` (`RLE-049`), because its declaration is missing. Its values are never logged in clear, though, so "logged without masking" would be false for it.
+- Such an input needs no acknowledgement. If no input needs one, the approval records an empty list.
+- The approval history row records that the input is masked by the tenant default, not by its declaration.
+- If the tenant later turns the default off, that change is the moment the risk is accepted. It is logged with the old and new value and shown in `/api/bpm/meta` (PD-099, mitigation 4). That later change does not need a new approval of each version.
+
+The acknowledgement therefore covers exactly the inputs that will be logged in clear under the tenant's masking in force at the approval.
+
+**Amended 2026-11-20 (security finding, architect's ruling).** The approve request carries the exact `{code, input}` pairs the approver was shown, not codes alone. A mismatch with the set the engine recomputes at approval is refused with `409 WARNINGS_NOT_ACKNOWLEDGED`, so a changed pattern list can never let one code cover inputs the approver never saw.
+
+**Follow-ups.** Architect: a statement in the rule engine SPEC for the approve request, the error code and the history and event fields, and the setting in DESIGN 4.4. Maintainers (engineering): the implementation issue (engine and cockpit). Documentation: the approval how-to.
+
+### PD-105 Pending rule versions with no recorded author cannot be approved
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Rule versions written before the author column existed (migration V2) have no recorded author. If one is still pending at upgrade, its importer could approve it, which breaks the four-eyes rule that PD-096 sets: the approver differs from everyone who made the change. Is approval refused, or are such versions given an author at upgrade? |
+| Raised by | Maintainers (engineering), issue #320 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Refuse approval of any pending version that has no recorded author (chosen). The refusal states the reason: the author is unknown, so the change must be submitted again. Rejecting or withdrawing such a version stays allowed, and so does importing it again, which records the importer as author. Consequence: four-eyes holds without exception, and no author is invented. The cost falls only on installations that hold a pending version written before V2 at upgrade. 0.1.0 is the first release, so such installations are unlikely, and for them the cost is one re-import.
+2. Assign an author to such versions at upgrade. Consequence: the check applies, but the assigned name is a guess presented as a fact in an audit trail. Any choice (a system user, the approver, a host-supplied name) either hides a gap or lets the wrong person pass the check. It also adds an upgrade step that the 0.1.0 adopters do not need.
+
+**Recommendation and decision.** Option 1. A control that cannot identify the maker must fail closed, and an audit trail must not hold a name nobody recorded. The migration cost for adopters is near zero because the first release has no earlier installed base to carry.
+
+**Consequences.** Under the `makers` setting and under any other approver setting, approving a pending version with no recorded author is refused with a clear error. A test with an author-less pending version shows the refusal. The upgrade notes say that pending versions written before V2 must be submitted again. Configurable: no.
+
+**Follow-ups.** Architect: a statement in the rule engine SPEC and the error code. Maintainers (engineering): the test for issue #320. Documentation: a line in the upgrade notes.
+
+### PD-106 The condition builder lens moves from 1.0 to 1.1
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | The condition builder lens (CK-F-45, issue #190) is the first item on the 1.0 cut list. It is sized L, priority P2, blocked by the grid editor (#82) and the plain-language readings (CK-F-44), and has an open design question (nested groups or one level of And per row). Does it stay in 1.0 or move to 1.1? |
+| Raised by | Maintainers (engineering), issue #190 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 2 |
+
+**Options considered**
+
+1. Keep it in 1.0. Consequence: the largest, lowest-priority cockpit item competes with the editor and readings it depends on, in the last milestone before the 1.0 candidate. A late or rushed lens risks the 1.0 promise (a frozen API and every Must green) for a feature that is optional and off by default.
+2. Move it to 1.1 (chosen). Consequence: 1.0 ships the grid editor, the plain-language readings and the spreadsheet round-trip, which already let a business user read and change a rule row. The lens follows as an addition on the same draft and validation path, so it needs no change to a frozen API.
+
+**Recommendation and decision.** Option 2. The lens adds convenience, not a capability: every condition it can write can already be written in the table, and it is off by default (PD-076). It is the largest item on the cut list, with the lowest priority and an unanswered design question, so its value per week of 1.0 effort is the lowest of the cockpit scope.
+
+**Consequences.** CK-F-45 moves from M3 to after 1.0, targeted 1.1, and leaves the M3 cut list. Issue #190 is retargeted to 1.1 and stays open. The open question (nested groups, Or as rows, or one expression cell) is not decided here and must be decided before the lens is sized for 1.1; the DMN export must stay exact. The roadmap, the feature map and the cockpit PRD follow. PD-076 still holds for placement.
+
+**Follow-ups.** Product manager: the roadmap, feature map and cockpit PRD counts (M3 33 to 32, later 13 to 14). Architect: none for 1.0. Maintainers (engineering): retarget #190.
