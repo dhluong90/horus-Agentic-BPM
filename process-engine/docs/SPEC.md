@@ -348,10 +348,10 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-036 Every list query passes the CI query-plan check
 - **Traces to:** `TR-PERF-07`
 - **Milestone:** M2
-- **Given:** A seeded database with 2 tenants, 1 million instances, 20 million history rows over 12 monthly partitions, and the query registry of `process-engine-postgres`.
-- **When:** The query-plan check runs `EXPLAIN (FORMAT JSON)` for every registered query with representative parameters.
-- **Then:** No plan contains a sequential scan of a table above 10,000 rows or touches more partitions than its declared bound; a query added without a declared bound fails the build.
-- **Example:** `unregistered GROUP BY on pre_history -> build fails`.
+- **Given:** The query registry of `process-engine-postgres`, where every multi-row read declares its bound (a page ordered on an index and ended by `LIMIT ?`, or one parent key), and a seeded database with 2 tenants (5,000 instances, 10,000 tokens, 5,000 tasks, 2,000 jobs and 20,000 history rows each) with sequential scans disabled, so the planner scans a table in full only where no index serves the query.
+- **When:** The query-plan check runs `EXPLAIN (FORMAT JSON)` for every registered query with representative parameters, and an architecture test looks for multi-row reads outside the registry.
+- **Then:** No plan scans an engine table sequentially or walks a whole index without an index condition; every page plan has a `Limit`; every parent-key plan has an index condition on its key; a multi-row read outside the registry, or a query whose SQL breaks its declared bound, fails the build. Partition bounds join the check with the first list query on `pre_history`.
+- **Example:** `unregistered GROUP BY on pre_history -> build fails`; `GROUP BY on pre_history registered under a parent key it has no index for -> plan check fails`.
 - **Test ID:** `PRE_036_list_queries_pass_query_plan_check`
 
 ---

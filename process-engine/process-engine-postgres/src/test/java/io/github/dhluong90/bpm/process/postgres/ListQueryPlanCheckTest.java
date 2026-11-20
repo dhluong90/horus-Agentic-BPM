@@ -1,0 +1,236 @@
+package io.github.dhluong90.bpm.process.postgres;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import io.github.dhluong90.bpm.process.postgres.ListQuery.Bound;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.postgresql.ds.PGSimpleDataSource;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+/**
+ * {@code PRE-036}: {@code EXPLAIN (FORMAT JSON)} for every query of {@link ProcessListQueries} on a seeded database
+ * with two tenants, with sequential scans disabled. The planner still falls back to a sequential scan when no
+ * index can serve a query, so a small seed gives the verdict a large bank database would, in seconds. A plan fails
+ * when it scans an engine table sequentially, when a page query has no {@code Limit}, or when a parent-key query
+ * reaches its rows through an index condition that does not name its key.
+ */
+@Testcontainers
+class ListQueryPlanCheckTest {
+
+    @Container
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
+
+    static final Instant NOW = Instant.parse("2026-11-20T07:00:00Z");
+    static final Timestamp T = Timestamp.from(NOW);
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+
+    /** Version 2 of loan-origination at bank-a, and one of its applications; ids as the seed writes them. */
+    static final String DEFINITION = "ADEF" + "%022d".formatted(2);
+    static final String INSTANCE = "AIN" + "%023d".formatted(42);
+
+    static SingleConnectionDataSource connection;
+    static JdbcClient jdbc;
+
+    @BeforeAll
+    static void seed() {
+        PGSimpleDataSource pg = new PGSimpleDataSource();
+        pg.setUrl(POSTGRES.getJdbcUrl());
+        pg.setUser(POSTGRES.getUsername());
+        pg.setPassword(POSTGRES.getPassword());
+        new ProcessEngineSchemaMigrator(pg).migrate();
+        JdbcClient seed = JdbcClient.create(pg);
+        for (String tenant : List.of("bank-a", "bank-b")) {
+            String p = tenant.equals("bank-a") ? "A" : "B";
+            // Two keys with two versions each: loan-origination and card-dispute
+            seed.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
+                            + "definition_hash, source_format, source_document, source_hash, node_count, source, "
+                            + "effective_from, created_by, created_at, approved_by, approved_at) "
+                            + "SELECT ?, ? || 'DEF' || lpad(g::text, 22, '0'), "
+                            + "CASE WHEN g <= 2 THEN 'loan-origination' ELSE 'card-dispute' END, 2 - g % 2, 'ACTIVE', "
+                            + "'Process', '{}'::jsonb, repeat('a', 64), 'BPMN_XML', '<definitions/>', repeat('b', 64), 6, "
+                            + "'IMPORT', ?, 'lan', ?, 'minh', ? FROM generate_series(1, 4) g")
+                    .params(tenant, p, T, T, T).update();
+            seed.sql("INSERT INTO pre_definition_history (tenant_id, id, definition_id, action, to_status, actor_id, "
+                            + "occurred_at) SELECT ?, ? || 'DH' || lpad(g::text, 23, '0'), "
+                            + "? || 'DEF' || lpad((g % 4 + 1)::text, 22, '0'), 'APPROVED', 'ACTIVE', 'minh', ? "
+                            + "FROM generate_series(1, 400) g")
+                    .params(tenant, p, p, T).update();
+            // 5,000 loan applications, newest every minute, a quarter of them finished
+            seed.sql("INSERT INTO pre_instance (tenant_id, id, definition_id, definition_key, definition_ver, "
+                            + "business_key, status, variables, started_at) "
+                            + "SELECT ?, ? || 'IN' || lpad(g::text, 23, '0'), ? || 'DEF' || lpad('2', 22, '0'), "
+                            + "'loan-origination', 2, 'APP-' || g, CASE WHEN g % 4 = 0 THEN 'COMPLETED' ELSE 'RUNNING' END, "
+                            + "'{}', ?::timestamptz - (g || ' minutes')::interval FROM generate_series(1, 5000) g")
+                    .params(tenant, p, p, T).update();
+            seed.sql("INSERT INTO pre_token (tenant_id, id, instance_id, definition_id, token_kind, current_node_id, "
+                            + "status, entered_at, created_at) SELECT ?, ? || 'TS' || lpad(g::text, 23, '0'), "
+                            + "? || 'IN' || lpad(g::text, 23, '0'), ? || 'DEF' || lpad('2', 22, '0'), 'SCOPE', "
+                            + "'loan-origination', 'WAITING_SCOPE', ?, ? FROM generate_series(1, 5000) g")
+                    .params(tenant, p, p, p, T, T).update();
+            seed.sql("INSERT INTO pre_token (tenant_id, id, instance_id, definition_id, token_kind, scope_token_id, "
+                            + "current_node_id, status, entered_at, created_at) SELECT ?, ? || 'TF' || lpad(g::text, 23, '0'), "
+                            + "? || 'IN' || lpad(g::text, 23, '0'), ? || 'DEF' || lpad('2', 22, '0'), 'FLOW', "
+                            + "? || 'TS' || lpad(g::text, 23, '0'), 'credit-review', "
+                            + "CASE WHEN g % 4 = 0 THEN 'COMPLETED' ELSE 'WAITING_USER' END, ?, ? "
+                            + "FROM generate_series(1, 5000) g")
+                    .params(tenant, p, p, p, p, T, T).update();
+            seed.sql("INSERT INTO pre_task (tenant_id, id, instance_id, token_id, definition_id, node_id, name, "
+                            + "assignee_role, status, created_at) SELECT ?, ? || 'TK' || lpad(g::text, 23, '0'), "
+                            + "? || 'IN' || lpad(g::text, 23, '0'), ? || 'TF' || lpad(g::text, 23, '0'), "
+                            + "? || 'DEF' || lpad('2', 22, '0'), 'credit-review', 'Credit review', 'CREDIT_OFFICER', 'OPEN', ? "
+                            + "FROM generate_series(1, 5000) g")
+                    .params(tenant, p, p, p, p, T).update();
+            seed.sql("INSERT INTO pre_timer (tenant_id, id, instance_id, definition_id, token_id, job_kind, node_id, "
+                            + "status, next_fire_at, lease_duration, created_at) SELECT ?, ? || 'JB' || lpad(g::text, 23, '0'), "
+                            + "? || 'IN' || lpad(g::text, 23, '0'), ? || 'DEF' || lpad('2', 22, '0'), "
+                            + "? || 'TF' || lpad(g::text, 23, '0'), CASE WHEN g % 2 = 0 THEN 'TIMER' ELSE 'ASYNC_SERVICE' END, "
+                            + "'credit-review', 'DUE', ?::timestamptz + (g || ' minutes')::interval, interval '30 seconds', ? "
+                            + "FROM generate_series(1, 2000) g")
+                    .params(tenant, p, p, p, p, T, T).update();
+            // 20,000 history rows, the table a careless report would group over
+            seed.sql("INSERT INTO pre_history (tenant_id, occurred_at, id, instance_id, definition_id, event_type, node_id, "
+                            + "details) SELECT ?, ?::timestamptz - (g || ' seconds')::interval, ? || 'HI' || lpad(g::text, 23, '0'), "
+                            + "? || 'IN' || lpad((g % 5000 + 1)::text, 23, '0'), ? || 'DEF' || lpad('2', 22, '0'), "
+                            + "'NODE_ENTERED', 'credit-review', '{}' FROM generate_series(1, 20000) g")
+                    .params(tenant, T, p, p, p).update();
+        }
+        seed.sql("ANALYZE").update();
+        connection = new SingleConnectionDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),
+                POSTGRES.getPassword(), true);
+        jdbc = JdbcClient.create(connection);
+        jdbc.sql("SET enable_seqscan = off").update();
+    }
+
+    @AfterAll
+    static void close() {
+        if (connection != null) {
+            connection.destroy();
+        }
+    }
+
+    /** Representative parameters per registered query: bank-a, its loan-origination key, a 31-day range. */
+    static Map<String, List<Object>> samples() {
+        Timestamp from = Timestamp.from(NOW.minusSeconds(31L * 24 * 3600));
+        Map<String, List<Object>> samples = new LinkedHashMap<>();
+        samples.put("live-token-counts", List.of("bank-a", DEFINITION));
+        samples.put("lock-definition-versions", List.of("bank-a", "loan-origination"));
+        samples.put("definition-history", List.of("bank-a", DEFINITION));
+        samples.put("instance-tokens", List.of("bank-a", INSTANCE));
+        samples.put("instance-tasks", List.of("bank-a", INSTANCE));
+        samples.put("definition-keys", List.of(T, "bank-a", 50));
+        samples.put("definition-keys-after", List.of(T, "bank-a", "card-dispute", 50));
+        samples.put("claim-timers", List.of(T, T, 20, "replica-1", T));
+        samples.put("claim-async-steps", List.of(T, T, 20, "replica-1", T));
+        samples.put("instances-1", List.of("bank-a", "RUNNING", 50));
+        samples.put("instances-3-key-range-after", List.of("bank-a", "RUNNING", "COMPLETED", "FAILED", "loan-origination",
+                from, T, T, INSTANCE, 50));
+        return samples;
+    }
+
+    @Test
+    void PRE_036_list_queries_pass_query_plan_check() {
+        Map<String, List<Object>> samples = samples();
+        List<String> violations = new ArrayList<>();
+        for (ListQuery query : ProcessListQueries.all()) {
+            List<Object> params = samples.get(query.name());
+            if (params == null) {
+                violations.add(query.name() + ": no sample parameters; add them to ListQueryPlanCheckTest.samples()");
+                continue;
+            }
+            violations.addAll(violations(query, plan(query, params)));
+        }
+
+        assertThat(violations).as("list queries whose plan is not bounded").isEmpty();
+        assertThat(samples.keySet()).as("sample parameters of queries no longer registered")
+                .containsExactlyInAnyOrderElementsOf(ProcessListQueries.all().stream().map(ListQuery::name).toList());
+    }
+
+    @Test
+    void PRE_036_a_group_by_over_pre_history_fails_the_plan_check() {
+        // Given a report registered as if one event type bounded it: every history row of bank-a, grouped
+        ListQuery report = new ListQuery("history-event-counts",
+                new Bound.ParentKey("event_type", "claimed: one event type"),
+                "SELECT event_type, count(*) FROM pre_history WHERE tenant_id = ? AND event_type = ? GROUP BY event_type");
+
+        // When the check reads its plan
+        List<String> violations = violations(report, plan(report, List.of("bank-a", "NODE_ENTERED")));
+
+        // Then it fails: no index on event_type, so the plan reads the tenant's whole history
+        assertThat(violations).singleElement().asString()
+                .startsWith("history-event-counts: no index condition on event_type");
+    }
+
+    @Test
+    void PRE_036_a_page_without_a_usable_index_fails_the_plan_check() {
+        // Given a page of tasks ordered by a column no index leads with
+        ListQuery page = new ListQuery("tasks-by-name", new Bound.Page("claimed: by name"),
+                "SELECT id FROM pre_task WHERE name = ? ORDER BY name LIMIT ?");
+
+        // Then the plan scans pre_task sequentially and the check names it
+        assertThat(violations(page, plan(page, List.of("Credit review", 50))))
+                .anySatisfy(v -> assertThat(v).startsWith("tasks-by-name: ").contains(" scan of pre_task"));
+    }
+
+    private static JsonNode plan(ListQuery query, List<Object> params) {
+        String json = jdbc.sql("EXPLAIN (FORMAT JSON) " + query.sql()).params(params).query(String.class).single();
+        return JSON.readTree(json).get(0).get("Plan");
+    }
+
+    /** What makes a plan unbounded, one line per finding. */
+    static List<String> violations(ListQuery query, JsonNode plan) {
+        List<JsonNode> nodes = new ArrayList<>();
+        collect(plan, nodes);
+        List<String> found = new ArrayList<>();
+        for (JsonNode node : nodes) {
+            String type = node.path("Node Type").asString("");
+            String relation = node.path("Relation Name").asString(node.path("Index Name").asString(""));
+            if (!relation.startsWith("pre_") && !relation.startsWith("idx_pre_") && !relation.startsWith("uq_pre_")) {
+                continue;
+            }
+            if (type.equals("Seq Scan")) {
+                found.add(query.name() + ": sequential scan of " + relation + " (" + query.bound() + ")");
+            } else if (type.endsWith("Index Scan") || type.equals("Index Only Scan")) {
+                if (node.path("Index Cond").asString("").isEmpty()) {
+                    // With sequential scans off, a whole-index walk is how the planner reads every row
+                    found.add(query.name() + ": full scan of " + relation + " through " + node.path("Index Name").asString()
+                            + " (" + query.bound() + ")");
+                }
+            }
+        }
+        switch (query.bound()) {
+            case Bound.Page page -> {
+                if (nodes.stream().noneMatch(n -> n.path("Node Type").asString("").equals("Limit"))) {
+                    found.add(query.name() + ": no Limit in the plan (" + page.why() + ")");
+                }
+            }
+            case Bound.ParentKey parent -> {
+                boolean keyed = nodes.stream().anyMatch(n -> n.path("Index Cond").asString("").contains(parent.column()));
+                if (!keyed) {
+                    found.add(query.name() + ": no index condition on " + parent.column() + " (" + parent.why() + ")");
+                }
+            }
+        }
+        return found;
+    }
+
+    private static void collect(JsonNode node, List<JsonNode> into) {
+        into.add(node);
+        for (JsonNode child : node.path("Plans")) {
+            collect(child, into);
+        }
+    }
+}
