@@ -198,9 +198,15 @@ class CoreArchitectureTest {
                 .that().resideInAPackage("io.github.dhluong90.bpm.rules.internal.service..")
                 .should().callMethod(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class, "claim",
                         String.class, Object.class)
-                .orShould().callMethod("io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants", "open",
+                .because("the Rule Engine hands the entry point out and never claims a grant itself (#336)")
+                .check(core);
+        noClasses()
+                .that().doNotHaveFullyQualifiedName("io.github.dhluong90.bpm.rules.internal.service.RuleEngines")
+                .should().callMethod("io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants", "open",
                         "io.github.dhluong90.bpm.rules.internal.service.RuleEngines")
-                .because("the Rule Engine hands the entry point out and never opens or claims a grant itself (#336)")
+                .orShould().callMethod("io.github.dhluong90.bpm.rules.internal.service.RuleEngines",
+                        "openEmbeddedEngineGrant")
+                .because("only the starter opens a grant, once per Rule Engine, never the engine itself (#336)")
                 .check(core);
     }
 

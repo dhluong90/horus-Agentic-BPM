@@ -15,6 +15,7 @@ import java.time.ZoneOffset;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -24,7 +25,7 @@ import org.junit.jupiter.api.Test;
  */
 class EmbeddedEngineGrantTest {
 
-    /** Stands in for the Process Engine's decision port, registered as the claimant of the grant under test. */
+    /** Stands in for the process starter's decision port, registered as the claimant of the grant under test. */
     static final class RegisteredClaimant {
     }
 
@@ -40,8 +41,9 @@ class EmbeddedEngineGrantTest {
             stores, stores, stores);
 
     OneTimeEmbeddedEngineGrant grantFor(Class<?> claimant) {
+        // The sealing and version check is EmbeddedEngineClaimantVerificationTest's; here every resolved class passes it
         return new OneTimeEmbeddedEngineGrant((DefaultRuleEngine) engines.ruleEngine(),
-                Map.of("system:process-engine", claimant.getName()));
+                Map.of("system:process-engine", claimant.getName()), type -> Optional.empty());
     }
 
     @Test
@@ -54,7 +56,7 @@ class EmbeddedEngineGrantTest {
     @Test
     void TR_TEN_01_host_code_holding_the_grant_is_refused() {
         // Given the grant of a Rule Engine, as host code that imports internals could reach it
-        EmbeddedEngineGrant grant = EmbeddedEngineGrants.open(engines);
+        EmbeddedEngineGrant grant = engines.openEmbeddedEngineGrant();
 
         // When a host class claims the process engine's entry point, then it is refused and nothing is spent
         assertThatThrownBy(() -> grant.claim("system:process-engine", new HostController()))
@@ -71,8 +73,24 @@ class EmbeddedEngineGrantTest {
                 EngineSettings.defaults()), stores, stores, stores);
 
         // When, then
-        assertThatThrownBy(() -> EmbeddedEngineGrants.open(own).claim("system:process-engine", this))
+        assertThatThrownBy(() -> own.openEmbeddedEngineGrant().claim("system:process-engine", this))
                 .isInstanceOf(SecurityException.class);
+    }
+
+    @Test
+    void TR_TEN_01_a_rule_engine_opens_one_grant_at_most() {
+        // Given the grant the starter opened
+        engines.openEmbeddedEngineGrant();
+
+        // When host code that built or reached the same RuleEngines asks for another, then it is refused
+        assertThatThrownBy(engines::openEmbeddedEngineGrant).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("already has a grant");
+    }
+
+    @Test
+    void TR_TEN_01_the_opener_is_not_public() throws Exception {
+        assertThat(java.lang.reflect.Modifier.isPublic(EmbeddedEngineGrants.class
+                .getDeclaredMethod("open", RuleEngines.class).getModifiers())).isFalse();
     }
 
     @Test
@@ -168,7 +186,7 @@ class EmbeddedEngineGrantTest {
         caller.become("bank-a", "teller-01", Set.of("rules:evaluate"));
 
         // When
-        assertThatThrownBy(() -> EmbeddedEngineGrants.open(engines).claim("system:process-engine", new HostController())
+        assertThatThrownBy(() -> engines.openEmbeddedEngineGrant().claim("system:process-engine", new HostController())
                 .evaluate("bank-b", DecisionRequest.of("card-fee",
                         DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5))))).isInstanceOf(SecurityException.class);
 

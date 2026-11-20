@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.DecisionLogQuery;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
+import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionLog;
 import io.github.dhluong90.bpm.rules.internal.store.EventOutbox;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
@@ -60,5 +61,16 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
                         context.transactions(), context.clock()),
                 new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, keys, querySettings),
                 cache);
+    }
+
+    /**
+     * Opens the grant of the tenant-scoped entry point over this Rule Engine, once (ADR-0027, #336). The Rule Engine
+     * starter calls it; {@link #create} never does. The grant is useful only to the process starter's decision port.
+     *
+     * @return the grant
+     * @throws IllegalStateException when this Rule Engine already has a grant, or is not the default engine
+     */
+    public EmbeddedEngineGrant openEmbeddedEngineGrant() {
+        return EmbeddedEngineGrants.open(this);
     }
 }

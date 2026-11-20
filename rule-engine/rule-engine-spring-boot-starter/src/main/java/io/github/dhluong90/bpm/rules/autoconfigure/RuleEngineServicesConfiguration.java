@@ -23,6 +23,7 @@ import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
 import java.time.Clock;
+import java.util.Optional;
 import java.util.Set;
 import javax.sql.DataSource;
 import org.apache.commons.logging.Log;
@@ -32,10 +33,15 @@ import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
+import org.springframework.boot.autoconfigure.condition.ConditionOutcome;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.boot.autoconfigure.condition.SpringBootCondition;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
+import org.springframework.context.annotation.ConditionContext;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+import org.springframework.core.type.AnnotatedTypeMetadata;
 
 /**
  * The engine's entry points ({@link RuleEngine}, {@link VersionService}), the security SPIs and the
@@ -162,17 +168,19 @@ class RuleEngineServicesConfiguration {
 
     /**
      * The one-time hand-off of the tenant-scoped entry point to the Process Engine (ADR-0027, #336). Registered only
-     * when the process starter's decision port, its one registered claimant, is on the class path. The Process Engine
-     * claims it while its beans are created; when start-up finishes, any identity still unclaimed is closed for good,
-     * so a grant nobody claimed never stays open for the rest of the run. A host that injects it is refused.
+     * when the process starter's decision port, its one registered claimant, resolves to a class in a sealed package of a
+     * jar with this Rule Engine's {@code Implementation-Version} ({@link EmbeddedEngineClaimantCondition}). Otherwise
+     * there is no grant, and the host keeps running without it. The Process Engine claims it while its beans are
+     * created; when start-up finishes, any identity still unclaimed is closed for good. A host that injects it is
+     * refused.
      */
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnClass(name = EMBEDDED_ENGINE_CLAIMANT)
+    @Conditional(EmbeddedEngineClaimantCondition.class)
     static class EmbeddedEngineGrantConfiguration {
 
         @Bean
         EmbeddedEngineGrant ruleEngineEmbeddedEngineGrant(RuleEngineInternals internals) {
-            return EmbeddedEngineGrants.open(internals.engines());
+            return internals.engines().openEmbeddedEngineGrant();
         }
 
         /** Runs after every singleton, the Process Engine's included, has been created. */
@@ -182,9 +190,31 @@ class RuleEngineServicesConfiguration {
         }
     }
 
-    /** The registered claimant of {@code system:process-engine}; see {@link EmbeddedEngineGrant#REGISTERED_CLAIMANTS}. */
-    static final String EMBEDDED_ENGINE_CLAIMANT =
-            "io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort";
+    /**
+     * Matches when the registered claimant of {@code system:process-engine} would be accepted. A claimant class that is
+     * present but refused (unsealed package, class directory, another version) is logged, and no grant is registered.
+     */
+    static final class EmbeddedEngineClaimantCondition extends SpringBootCondition {
+
+        @Override
+        public ConditionOutcome getMatchOutcome(ConditionContext context, AnnotatedTypeMetadata metadata) {
+            Optional<String> refusal = EmbeddedEngineGrants.registeredClaimantRefusal(EMBEDDED_ENGINE_ID);
+            if (refusal.isEmpty()) {
+                return ConditionOutcome.match("the decision port is sealed and carries the Rule Engine's version");
+            }
+            if (!refusal.get().endsWith("is not on the class path")) {
+                LOG.warn("No tenant-scoped entry point is granted to the Process Engine: " + refusal.get()
+                        + ". Decision steps of processes fail closed (#336).");
+            }
+            return ConditionOutcome.noMatch(refusal.get());
+        }
+    }
+
+    /**
+     * The engine identity whose registered claimant is the process starter's decision port; see
+     * {@link EmbeddedEngineGrant#REGISTERED_CLAIMANTS}.
+     */
+    static final String EMBEDDED_ENGINE_ID = "system:process-engine";
 
     @Bean
     @ConditionalOnMissingBean

@@ -6,7 +6,6 @@ import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
-import io.github.dhluong90.bpm.process.autoconfigure.StarterDecisionPorts;
 import io.github.dhluong90.bpm.process.test.TestClock;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import java.time.Duration;
@@ -27,7 +26,7 @@ import org.junit.jupiter.api.Test;
  * card fee: three days later the reminder fee is priced by the bank's own {@code card-reminder-fee} rule set
  * (20,000 VND at one bank, 35,000 VND at the other) and the collections team gets a task.
  */
-class DecisionAfterTimerTest {
+class DecisionAfterTimerIT {
 
     private static final Instant OVERDUE = Instant.parse("2027-03-01T02:00:00Z");
     private static final Instant DUE = OVERDUE.plus(Duration.ofDays(3));

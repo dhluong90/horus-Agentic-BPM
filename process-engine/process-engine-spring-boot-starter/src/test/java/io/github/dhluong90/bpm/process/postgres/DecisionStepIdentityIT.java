@@ -6,7 +6,6 @@ import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
-import io.github.dhluong90.bpm.process.autoconfigure.StarterDecisionPorts;
 import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
 import io.github.dhluong90.bpm.process.internal.service.DecisionKeys;
 import io.github.dhluong90.bpm.process.internal.service.DecisionOutcome;
@@ -25,7 +24,7 @@ import org.junit.jupiter.api.Test;
  * at 20,000 VND and bank-h at 35,000 VND; the instances run in bank-g. The tenants are this test's own, because the
  * Rule Engine tables are shared by every test of the module.
  */
-class DecisionStepIdentityTest {
+class DecisionStepIdentityIT {
 
     private static final Instant REQUESTED = Instant.parse("2027-03-01T02:00:00Z");
     private static final String[] PIPELINE = {"processes:deploy", "processes:start", "processes:read",

@@ -135,7 +135,7 @@ class EmbeddedEntryPointIsolationIT {
                 context.getBean(io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions.class),
                 () -> "bank-b", context.getBean(io.github.dhluong90.bpm.rules.spi.CallerResolver.class),
                 java.time.Clock.systemUTC(), io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults());
-        EmbeddedEngineGrant grant = io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants.open(own);
+        EmbeddedEngineGrant grant = own.openEmbeddedEngineGrant();
 
         // When the host claims it, then it is refused: only the process starter's sealed, package-private port can
         assertThatThrownBy(() -> grant.claim("system:process-engine", new HostController()))

@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 
@@ -76,6 +77,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     private final DecisionLog log;
     private final Map<String, CompiledRuleSet> compiled = new ConcurrentHashMap<>();
     private final CompiledCache cache;
+    private final AtomicBoolean grantOpened = new AtomicBoolean();
 
     /**
      * Creates the engine with a selection cache of its own.
@@ -93,6 +95,11 @@ public final class DefaultRuleEngine implements RuleEngine {
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.log = Objects.requireNonNull(log, "log must not be null");
         this.cache = Objects.requireNonNull(cache, "cache must not be null");
+    }
+
+    /** @return true the first time only: at most one grant of the tenant-scoped entry point per engine (#336) */
+    boolean markGrantOpened() {
+        return grantOpened.compareAndSet(false, true);
     }
 
     @Override

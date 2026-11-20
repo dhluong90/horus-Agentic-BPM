@@ -158,6 +158,18 @@
       </resource>
     </resources>
     <plugins>
+      <!--
+        The decision tests on PostgreSQL run after the package phase, against the starter jar: the Rule Engine grants
+        its entry point only to a decision port from a sealed jar of its own version (#336).
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <!-- This module's own jar, not target/classes (the parent's default): sealing and the version are in it. -->
+          <classesDirectory>${project.build.directory}/${project.build.finalName}.jar</classesDirectory>
+        </configuration>
+      </plugin>
       <plugin>
         <!--
           #336: sealed package. The decision port is the registered claimant of the Rule Engine's tenant-scoped entry
@@ -168,6 +180,10 @@
         <artifactId>maven-jar-plugin</artifactId>
         <configuration>
           <archive>
+            <!-- The Rule Engine grants its entry point only to a claimant whose jar carries its own version (#336). -->
+            <manifest>
+              <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+            </manifest>
             <manifestSections>
               <manifestSection>
                 <name>io/github/dhluong90/bpm/process/autoconfigure/</name>
