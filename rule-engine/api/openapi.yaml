@@ -516,17 +516,21 @@ paths:
         turned on) is `422 VALIDATION_FAILED` naming the input, and stays `PENDING_APPROVAL`
         (`RLE-050`).
 
-        Acknowledged warnings (PD-104, `RLE-053`, DESIGN 3.3.5): after the permission, four-eyes,
-        strict-mode and lock checks, the engine computes the version's warnings again with the tenant's
-        settings in force. Every warning whose code is in `lifecycle.acknowledge-warnings` (default
-        `[UNMASKED_PERSONAL_DATA]`) must be named in `acknowledgedWarnings`, else
-        `409 WARNINGS_NOT_ACKNOWLEDGED` with `warnings` (`{ code, input, matchedName }`) and `setting`
-        in the problem body; nothing is written. A warning on an input that the tenant's
-        `decision-log.mask-default` masks needs no acknowledgement. A code given that no warning carries
-        is ignored and not recorded. The `APPROVED` history entry and `rules.version.published.v1`
-        carry `acknowledgedWarnings` (`{ code, input }`, empty when nothing needed it); the history
-        entry also lists `maskedByDefaultInputs`. A client shows the warnings again and lets the
-        approver resend with the codes; it never retries on its own.
+        Acknowledged warnings (PD-104, `RLE-053`, DESIGN 3.3.5). Checks run in this order: permission,
+        `If-Match` present, status, four eyes, lock version, strict mode, acknowledgement. The engine
+        recomputes the `{ code, input }` pairs that need an acknowledgement: the version's warnings whose
+        code is in `lifecycle.acknowledge-warnings` (default `[UNMASKED_PERSONAL_DATA]`), under the
+        tenant's personal-data names and masking default in force, leaving out inputs that the tenant's
+        `decision-log.mask-default` masks. The approval is accepted only when `acknowledgedWarnings`
+        equals that set, compared as sets (order and duplicates ignored). A missing or an extra pair is
+        `409 WARNINGS_NOT_ACKNOWLEDGED`, whose `warnings` carry the full current set
+        (`{ code, input, matchedName }`, empty when nothing is needed now) and whose `setting` carries
+        the required codes; nothing is written. An unknown code, an input name that is empty or longer
+        than 100 characters, or more than 100 pairs is `400 INPUT_INVALID`. Exactly the set is recorded:
+        the `APPROVED` history entry and `rules.version.published.v1` carry `acknowledgedWarnings` and
+        `maskedByDefaultInputs`, each empty when nothing applies. The sorted pairs are part of the
+        idempotency request hash. A client shows the current set and lets the approver accept it; it
+        never retries on its own.
 
         `If-Match` is required and must be the `lockVersion` of the version the approver reviewed:
         without it the answer is `428 PRECONDITION_REQUIRED`, and a stale value is
@@ -553,14 +557,14 @@ paths:
                   description: Optional; stored in the history. Longer than `lifecycle.reason-max-length` (default 2,000 characters) is `400 INPUT_INVALID`
                 acknowledgedWarnings:
                   type: array
-                  maxItems: 20
-                  description: Warning codes the approver accepts on the record (`RLE-053`). Each 1 to 64 upper-case letters, digits or `_`, else `400 INPUT_INVALID`. Part of the idempotency request hash
+                  maxItems: 100
+                  description: The exact pairs the approver was shown and accepts (`RLE-053`); must equal the set the engine recomputes
                   items:
-                    type: string
-                    pattern: '^[A-Z][A-Z0-9_]{0,63}$'
+                    $ref: '#/components/schemas/AcknowledgedWarning'
             example:
               comment: Fees checked against the tariff
-              acknowledgedWarnings: [UNMASKED_PERSONAL_DATA]
+              acknowledgedWarnings:
+                - { code: UNMASKED_PERSONAL_DATA, input: nationalId }
       responses:
         '200':
           $ref: '#/components/responses/Version'
@@ -1091,10 +1095,18 @@ components:
           items: { type: string }
     AcknowledgedWarning:
       type: object
+      description: One warning accepted on the record at approval (PD-104, `RLE-053`)
       required: [code, input]
+      additionalProperties: false
       properties:
-        code: { type: string, example: UNMASKED_PERSONAL_DATA }
-        input: { type: string, example: nationalId }
+        code:
+          type: string
+          enum: [UNMASKED_PERSONAL_DATA]
+        input:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: nationalId
     VersionHistory:
       type: object
       required: [data]

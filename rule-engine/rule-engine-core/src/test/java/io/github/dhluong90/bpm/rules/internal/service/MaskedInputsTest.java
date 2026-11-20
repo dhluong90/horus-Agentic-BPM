@@ -132,7 +132,13 @@ class MaskedInputsTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml.getBytes(StandardCharsets.UTF_8)));
         engines.versionService().requestPublish(name, 1, WriteOptions.none());
         caller.become(tenant, "bob");
-        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null, List.of("UNMASKED_PERSONAL_DATA")));
+        try {
+            engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
+        } catch (io.github.dhluong90.bpm.rules.api.WarningsNotAcknowledgedException shown) {
+            // As a client does (RLE-053): show the current set, and approve accepting exactly it.
+            engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null, shown.warnings().stream()
+                    .map(w -> new io.github.dhluong90.bpm.rules.api.AcknowledgedWarning(w.code(), w.input())).toList()));
+        }
     }
 
     DecisionResult evaluate(RuleEngines engines, String tenant, String ruleSet, Map<String, Object> inputs) {

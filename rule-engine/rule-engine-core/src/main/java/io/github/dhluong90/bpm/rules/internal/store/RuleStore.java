@@ -182,4 +182,15 @@ public interface RuleStore {
      * @param at the start-up time
      */
     void recordSettingSeen(String tenantId, String setting, String value, Instant at);
+
+    /**
+     * Lists a tenant's {@code PUBLISHED} versions whose latest {@code APPROVED} history row has a non-empty
+     * {@code masked_by_default_inputs} (PD-104). One read-only query, at start-up only, when the tenant's masking
+     * default has been turned off.
+     *
+     * @param tenantId the tenant
+     * @param limit the most versions to return
+     * @return the first versions by rule set name and version number, and how many match in all
+     */
+    MaskedByDefaultVersions publishedMaskedByDefault(String tenantId, int limit);
 }

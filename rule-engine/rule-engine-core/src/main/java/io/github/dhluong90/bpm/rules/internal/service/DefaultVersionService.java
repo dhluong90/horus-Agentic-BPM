@@ -280,10 +280,9 @@ public final class DefaultVersionService implements VersionService {
         String actor = context.callerWith(PERMISSION_APPROVE);
         requireLockVersion(opts, ":approve");
         requireCommentLength(opts.comment());
-        List<String> acknowledged = acknowledgedCodes(opts.acknowledgedWarnings());
+        java.util.Set<AcknowledgedWarning> acknowledged = acknowledgedPairs(opts.acknowledgedWarnings());
         String requestHash = Hashes.sha256Parts("approve", actor, ruleSet, Integer.toString(version),
-                String.valueOf(opts.expectedLockVersion()), opts.comment(),
-                String.join(",", new java.util.TreeSet<>(acknowledged)));
+                String.valueOf(opts.expectedLockVersion()), opts.comment(), sortedPairs(acknowledged));
         return context.idempotent(tenant, "approve", opts.idempotencyKey(), requestHash, 200, () -> {
             StoredVersion current = load(tenant, ruleSet, version);
             if (current.status() != VersionStatus.PENDING_APPROVAL) {
@@ -293,11 +292,11 @@ public final class DefaultVersionService implements VersionService {
             if (actor.equals(current.requestedBy()) || actor.equals(current.createdBy())) {
                 throw new SelfApprovalForbiddenException(ruleSet, version);
             }
+            // DESIGN 3.3.5 order: permission, If-Match present, status, four eyes, lock, strict mode, acknowledgement.
+            checkLock(current, opts);
             // A version requested before strict mode was turned on is checked again, so it never reaches the
             // append-only decision log with an undeclared input (security review of #308).
             requireMaskDeclarations(tenant, current.canonicalJson());
-            checkLock(current, opts);
-            // After the permission, four-eyes, strict-mode and lock checks, before any write (DESIGN 3.3.5).
             Acknowledgement acknowledgement = requireAcknowledgement(current, acknowledged);
             Instant now = context.clock().instant();
             StoredVersion updated = current.approved(actor, now, opts.comment());
@@ -314,6 +313,7 @@ public final class DefaultVersionService implements VersionService {
                 payload.put("approvedBy", actor);
                 var accepted = payload.putArray("acknowledgedWarnings");
                 acknowledgement.accepted().forEach(w -> accepted.addObject().put("code", w.code()).put("input", w.input()));
+                acknowledgement.maskedByDefault().forEach(payload.putArray("maskedByDefaultInputs")::add);
             });
             return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
@@ -504,43 +504,68 @@ public final class DefaultVersionService implements VersionService {
     }
 
     /**
-     * Refuses an approval that leaves a warning unacknowledged whose code the host lists in
-     * {@code lifecycle.acknowledge-warnings} (RLE-053, PD-104). The warnings are computed again, from the stored
-     * definition and the tenant's settings in force now, as the approver reads them. A warning on an input that the
-     * tenant's {@code decision-log.mask-default} masks needs no acknowledgement: its values never reach the log in
-     * plain text. A code given that no warning carries is ignored and not recorded, so the record never claims more
-     * than the approver accepted.
+     * Accepts an approval only when the pairs it acknowledged equal the pairs that need an acknowledgement now (RLE-053,
+     * PD-104, security review of #316). The needed pairs are recomputed from the stored definition and the tenant's
+     * personal-data names and masking default in force, and filtered to the codes the host lists in
+     * {@code lifecycle.acknowledge-warnings}. A warning on an input that the tenant's default masks needs none, because
+     * its values never reach the log in plain text. Sets are compared, so order and duplicates do not matter; a missing
+     * or an extra pair is refused with the full current set. Exactly that set is recorded.
      */
-    private Acknowledgement requireAcknowledgement(StoredVersion version, List<String> acknowledged) {
+    private Acknowledgement requireAcknowledgement(StoredVersion version, java.util.Set<AcknowledgedWarning> sent) {
         String tenant = version.tenantId();
         boolean maskByDefault = context.masking().maskByDefault(tenant);
         List<String> maskedByDefault = MaskDeclarations.statuses(version.canonicalJson(), maskByDefault).stream()
                 .filter(s -> s.masking() == io.github.dhluong90.bpm.rules.api.VersionDiff.Masking.MASKED_BY_DEFAULT)
                 .map(MaskDeclarations.Status::input)
+                .sorted()
                 .toList();
         List<String> listed = context.settings().acknowledgeWarnings();
         List<VersionWarning> needing = warnings(version).stream()
                 .filter(w -> listed.contains(w.code()))
                 .filter(w -> !maskedByDefault.contains(w.input()))
                 .toList();
-        List<WarningsNotAcknowledgedException.Unacknowledged> missing = needing.stream()
-                .filter(w -> !acknowledged.contains(w.code()))
-                .map(w -> new WarningsNotAcknowledgedException.Unacknowledged(w.code(), w.input(), w.matchedName()))
-                .toList();
-        if (!missing.isEmpty()) {
-            throw new WarningsNotAcknowledgedException(version.ruleSet(), version.version(), missing, listed);
+        List<AcknowledgedWarning> needed = needing.stream()
+                .map(w -> new AcknowledgedWarning(w.code(), w.input())).distinct().toList();
+        if (!java.util.Set.copyOf(needed).equals(sent)) {
+            throw new WarningsNotAcknowledgedException(version.ruleSet(), version.version(), needing.stream()
+                    .map(w -> new WarningsNotAcknowledgedException.Unacknowledged(w.code(), w.input(), w.matchedName()))
+                    .toList(), listed);
         }
-        return new Acknowledgement(needing.stream().map(w -> new AcknowledgedWarning(w.code(), w.input())).toList(),
-                maskedByDefault);
+        return new Acknowledgement(needed, maskedByDefault);
     }
 
-    /** Validates the acknowledged codes of an approval: at most 20, each a warning code. */
-    private static List<String> acknowledgedCodes(List<String> codes) {
-        try {
-            return EngineSettings.warningCodes(codes, "acknowledgedWarnings");
-        } catch (IllegalArgumentException e) {
-            throw new InputInvalidException(e.getMessage());
+    /** Most pairs an approval may acknowledge. */
+    static final int ACKNOWLEDGED_MAX = 100;
+
+    /** Longest input name an acknowledged pair may carry. */
+    static final int ACKNOWLEDGED_INPUT_MAX = 100;
+
+    /**
+     * Validates the acknowledged pairs of an approval: at most {@value #ACKNOWLEDGED_MAX}, each a known warning code
+     * and an input name of 1 to {@value #ACKNOWLEDGED_INPUT_MAX} characters, else {@code 400 INPUT_INVALID}.
+     */
+    private static java.util.Set<AcknowledgedWarning> acknowledgedPairs(List<AcknowledgedWarning> pairs) {
+        if (pairs.size() > ACKNOWLEDGED_MAX) {
+            throw new InputInvalidException("acknowledgedWarnings holds at most " + ACKNOWLEDGED_MAX + " entries, was "
+                    + pairs.size());
         }
+        for (AcknowledgedWarning pair : pairs) {
+            if (!VersionWarning.CODES.contains(pair.code())) {
+                throw new InputInvalidException("acknowledgedWarnings: " + pair.code() + " is not a warning code; known: "
+                        + new java.util.TreeSet<>(VersionWarning.CODES));
+            }
+            if (pair.input().isEmpty() || pair.input().length() > ACKNOWLEDGED_INPUT_MAX) {
+                throw new InputInvalidException("acknowledgedWarnings: an input name is 1 to " + ACKNOWLEDGED_INPUT_MAX
+                        + " characters");
+            }
+        }
+        return java.util.Set.copyOf(pairs);
+    }
+
+    /** The pairs sorted, for the idempotency request hash. */
+    private static String sortedPairs(java.util.Set<AcknowledgedWarning> pairs) {
+        return pairs.stream().map(p -> p.code() + ":" + p.input().length() + ":" + p.input()).sorted()
+                .collect(java.util.stream.Collectors.joining(","));
     }
 
     private List<VersionWarning> warnings(StoredVersion version) {

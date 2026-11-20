@@ -102,7 +102,8 @@ class UnmaskedPersonalDataHostIT {
                     .path("status").asString()).isEqualTo("PENDING_APPROVAL");
             // With the code it is published, and the history shows the acknowledgement with the approval
             Reply approved = sendJson(port, bob, approve,
-                    "{\"comment\": \"ok\", \"acknowledgedWarnings\": [\"UNMASKED_PERSONAL_DATA\"]}", "ack-2");
+                    "{\"comment\": \"ok\", \"acknowledgedWarnings\": [{\"code\": \"UNMASKED_PERSONAL_DATA\","
+                            + " \"input\": \"nationalId\"}]}", "ack-2");
             assertThat(approved.status()).isEqualTo(200);
             assertThat(approved.json().path("status").asString()).isEqualTo("PUBLISHED");
             JsonNode history = send(port, bob, "GET", "/api/bpm/rules/v1/rule-sets/kyc-routing/versions/1/history",
@@ -116,6 +117,9 @@ class UnmaskedPersonalDataHostIT {
             assertThat(approval).isNotNull();
             assertThat(approval.path("acknowledgedWarnings").get(0).path("input").asString()).isEqualTo("nationalId");
             assertThat(approval.path("maskedByDefaultInputs")).isEmpty();
+            // A list of codes, the earlier shape, is 400 INPUT_INVALID
+            assertThat(sendJson(port, bob, approve, "{\"acknowledgedWarnings\": [\"UNMASKED_PERSONAL_DATA\"]}", "ack-3")
+                    .status()).isEqualTo(400);
 
             // RLE-050: bank-b runs in strict mode, so the same import is 422 naming nationalId, and nothing is stored
             Reply refused = send(port, binh, "POST", "/api/bpm/rules/v1/rule-sets", KYC_ROUTING);

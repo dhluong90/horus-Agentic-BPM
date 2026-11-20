@@ -8,11 +8,12 @@ import java.util.List;
  * @param idempotencyKey optional key; a replay returns the original result
  * @param expectedLockVersion optional optimistic lock ({@code If-Match}); a stale value is {@code VERSION_CONFLICT}
  * @param comment the comment stored with an approval (optional), or the reason of a reject (required)
- * @param acknowledgedWarnings on {@code approve} only: the warning codes the approver accepts, for example
- *     {@code UNMASKED_PERSONAL_DATA} (RLE-053, PD-104); empty when none, never null
+ * @param acknowledgedWarnings on {@code approve} only: the warnings the approver was shown and accepts, as
+ *     {@code { code, input }} pairs, for example {@code UNMASKED_PERSONAL_DATA} on {@code nationalId} (RLE-053, PD-104);
+ *     empty when none, never null. The approval is accepted only when this set equals the set the engine recomputes
  */
 public record WriteOptions(String idempotencyKey, Long expectedLockVersion, String comment,
-        List<String> acknowledgedWarnings) {
+        List<AcknowledgedWarning> acknowledgedWarnings) {
 
     private static final WriteOptions NONE = new WriteOptions(null, null, null);
 
@@ -51,12 +52,12 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
     }
 
     /**
-     * Returns a copy that acknowledges these warning codes.
+     * Returns a copy that acknowledges these warnings.
      *
-     * @param codes the codes, for example {@code UNMASKED_PERSONAL_DATA}
+     * @param warnings the pairs the approver was shown
      * @return the options
      */
-    public WriteOptions acknowledging(List<String> codes) {
-        return new WriteOptions(idempotencyKey, expectedLockVersion, comment, codes);
+    public WriteOptions acknowledging(List<AcknowledgedWarning> warnings) {
+        return new WriteOptions(idempotencyKey, expectedLockVersion, comment, warnings);
     }
 }

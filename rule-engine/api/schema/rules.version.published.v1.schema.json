@@ -14,7 +14,9 @@
     "canonicalHash",
     "effectiveFrom",
     "requestedBy",
-    "approvedBy"
+    "approvedBy",
+    "acknowledgedWarnings",
+    "maskedByDefaultInputs"
   ],
   "additionalProperties": true,
   "properties": {
@@ -63,8 +65,9 @@
       "type": "string"
     },
     "acknowledgedWarnings": {
-      "description": "The warnings the approver accepted on the record (PD-104, RLE-053): every warning listed in lifecycle.acknowledge-warnings that applied at approval, empty when none needed an acknowledgement. Additive within v1; absent on events written before it.",
+      "description": "The { code, input } pairs the approver accepted on the record (PD-104, RLE-053): exactly the pairs that needed an acknowledgement at approval, empty when none did.",
       "type": "array",
+      "maxItems": 100,
       "items": {
         "type": "object",
         "required": [
@@ -74,13 +77,23 @@
         "additionalProperties": false,
         "properties": {
           "code": {
-            "type": "string",
-            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+            "enum": [
+              "UNMASKED_PERSONAL_DATA"
+            ]
           },
           "input": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
           }
         }
+      }
+    },
+    "maskedByDefaultInputs": {
+      "description": "Inputs that declare no mask and were masked only by the tenant's decision-log.mask-default at approval, sorted; empty when none. They needed no acknowledgement, and would reach the decision log in plain text if the default were later turned off (PD-104).",
+      "type": "array",
+      "items": {
+        "type": "string"
       }
     }
   },
@@ -101,7 +114,8 @@
           "code": "UNMASKED_PERSONAL_DATA",
           "input": "nationalId"
         }
-      ]
+      ],
+      "maskedByDefaultInputs": []
     }
   ]
 }

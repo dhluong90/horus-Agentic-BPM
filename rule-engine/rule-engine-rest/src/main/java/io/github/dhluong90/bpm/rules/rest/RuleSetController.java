@@ -203,7 +203,8 @@ public class RuleSetController {
 
     /**
      * {@code POST /rule-sets/{name}/versions/{v}:approve}, optional body
-     * {@code {"comment": "...", "acknowledgedWarnings": ["UNMASKED_PERSONAL_DATA"]}} (RLE-053).
+     * {@code {"comment": "...", "acknowledgedWarnings": [{"code": "UNMASKED_PERSONAL_DATA", "input": "nationalId"}]}}
+     * (RLE-053).
      */
     @PostMapping("/{name}/versions/{version:\\d+}:approve")
     public ResponseEntity<byte[]> approve(
@@ -217,7 +218,7 @@ public class RuleSetController {
         long lock = RestSupport.requiredIfMatch(ifMatch, ":approve");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         String comment = null;
-        java.util.List<String> acknowledged = new java.util.ArrayList<>();
+        java.util.List<io.github.dhluong90.bpm.rules.api.AcknowledgedWarning> acknowledged = new java.util.ArrayList<>();
         if (body.length > 0) {
             JsonNode node = EngineValues.readRequest(body);
             JsonNode value = node.get("comment");
@@ -227,16 +228,21 @@ public class RuleSetController {
                 }
                 comment = value.stringValue();
             }
-            JsonNode codes = node.get("acknowledgedWarnings");
-            if (codes != null && !codes.isNull()) {
-                if (!codes.isArray()) {
-                    throw new InputInvalidException("acknowledgedWarnings must be a list of warning codes");
+            JsonNode pairs = node.get("acknowledgedWarnings");
+            if (pairs != null && !pairs.isNull()) {
+                String shape = "acknowledgedWarnings must be a list of { \"code\", \"input\" } objects";
+                if (!pairs.isArray()) {
+                    throw new InputInvalidException(shape);
                 }
-                for (JsonNode code : codes) {
-                    if (!code.isString()) {
-                        throw new InputInvalidException("acknowledgedWarnings must be a list of warning codes");
+                for (JsonNode pair : pairs) {
+                    JsonNode code = pair.get("code");
+                    JsonNode input = pair.get("input");
+                    if (!pair.isObject() || code == null || !code.isString() || input == null || !input.isString()
+                            || pair.size() != 2) {
+                        throw new InputInvalidException(shape);
                     }
-                    acknowledged.add(code.stringValue());
+                    acknowledged.add(new io.github.dhluong90.bpm.rules.api.AcknowledgedWarning(code.stringValue(),
+                            input.stringValue()));
                 }
             }
         }

@@ -390,6 +390,33 @@ public final class JdbcRuleStore implements RuleStore {
                 .param("at", Timestamp.from(at)).update();
     }
 
+    @Override
+    public io.github.dhluong90.bpm.rules.internal.store.MaskedByDefaultVersions publishedMaskedByDefault(
+            String tenantId, int limit) {
+        int[] total = {0};
+        List<io.github.dhluong90.bpm.rules.internal.store.MaskedByDefaultVersions.Version> versions = jdbc.sql("""
+                SELECT s.name, v.version_num, a.masked_by_default_inputs::text AS inputs, count(*) OVER () AS total
+                FROM rle_version v
+                JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
+                JOIN LATERAL (
+                  SELECT h.masked_by_default_inputs FROM rle_version_history h
+                  WHERE h.tenant_id = v.tenant_id AND h.version_id = v.id AND h.action = 'APPROVED'
+                  ORDER BY h.occurred_at DESC, h.id DESC LIMIT 1) a ON true
+                WHERE v.tenant_id = :tenant AND v.status = 'PUBLISHED'
+                  AND a.masked_by_default_inputs IS NOT NULL AND jsonb_array_length(a.masked_by_default_inputs) > 0
+                ORDER BY s.name, v.version_num
+                LIMIT :limit
+                """)
+                .param("tenant", tenantId).param("limit", limit)
+                .query((rs, row) -> {
+                    total[0] = rs.getInt("total");
+                    return new io.github.dhluong90.bpm.rules.internal.store.MaskedByDefaultVersions.Version(
+                            rs.getString("name"), rs.getInt("version_num"), strings(rs.getString("inputs")));
+                })
+                .list();
+        return new io.github.dhluong90.bpm.rules.internal.store.MaskedByDefaultVersions(versions, total[0]);
+    }
+
     private static RuleSetSummary summary(ResultSet rs, int row) throws SQLException {
         int published = rs.getInt("published_version");
         Integer publishedVersion = rs.wasNull() ? null : published;

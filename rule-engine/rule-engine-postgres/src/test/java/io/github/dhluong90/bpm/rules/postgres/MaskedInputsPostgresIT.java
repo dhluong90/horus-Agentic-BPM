@@ -226,7 +226,8 @@ class MaskedInputsPostgresIT {
         assertThatThrownBy(() -> engines.versionService().approve("kyc-routing", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(io.github.dhluong90.bpm.rules.api.WarningsNotAcknowledgedException.class);
         engines.versionService().approve("kyc-routing", 1,
-                new WriteOptions(null, 1L, "ok", List.of("UNMASKED_PERSONAL_DATA")));
+                new WriteOptions(null, 1L, "ok", List.of(new io.github.dhluong90.bpm.rules.api.AcknowledgedWarning(
+                        "UNMASKED_PERSONAL_DATA", "nationalId"))));
 
         // Then exactly one APPROVED row stores the acknowledgement and an empty masked-by-default list
         JdbcClient jdbc = JdbcClient.create(db);
@@ -242,10 +243,11 @@ class MaskedInputsPostgresIT {
                 .findFirst().orElseThrow().acknowledgedWarnings())
                 .containsExactly(new io.github.dhluong90.bpm.rules.api.AcknowledgedWarning("UNMASKED_PERSONAL_DATA",
                         "nationalId"));
-        // And the published event carries it
-        assertThat(jdbc.sql("SELECT payload -> 'acknowledgedWarnings' ->> 0 FROM rle_decision_outbox"
-                + " WHERE payload ->> 'eventType' = 'rules.version.published.v1'").query(String.class).single())
-                .contains("UNMASKED_PERSONAL_DATA").contains("nationalId");
+        // And the published event carries it, and an empty maskedByDefaultInputs
+        assertThat(jdbc.sql("SELECT (payload -> 'acknowledgedWarnings')::text || ' ' || (payload -> 'maskedByDefaultInputs')::text"
+                + " FROM rle_decision_outbox WHERE payload ->> 'eventType' = 'rules.version.published.v1'")
+                .query(String.class).single())
+                .isEqualTo("[{\"code\": \"UNMASKED_PERSONAL_DATA\", \"input\": \"nationalId\"}] []");
 
         // And the database refuses an acknowledgement on another action, and a value that is not an array
         String versionId = jdbc.sql("SELECT version_id FROM rle_version_history WHERE action = 'APPROVED'")
@@ -260,6 +262,42 @@ class MaskedInputsPostgresIT {
                         "'PENDING_APPROVAL', 'PUBLISHED'")).param("id", "01JX0000000000000000000002")
                 .param("v", versionId).param("action", "APPROVED").param("ack", "{\"code\": \"X\"}").update())
                 .hasMessageContaining("rle_version_history_ack_arrays");
+    }
+
+    @Test
+    void RLE_053_turning_the_default_off_names_the_published_versions_whose_approval_relied_on_it() {
+        // Given bank-a masks undeclared inputs by default, and kyc-routing (nationalId undeclared) is approved there
+        String kyc = """
+                schemaVersion: 1
+                ruleSet: kyc-routing
+                hitPolicy: first
+                inputs:
+                  - { name: nationalId, type: string }
+                  - { name: age, type: integer, mask: false }
+                outputs:
+                  - { name: route, type: string }
+                rules:
+                  - { id: R1, when: {}, then: { route: "'AUTO'" } }
+                """;
+        RuleEngines masking = engines(maskByDefault("bank-a"));
+        caller.as("bank-a", "alice");
+        masking.versionService().importRuleSet(ImportRequest.yaml(kyc.getBytes(StandardCharsets.UTF_8)));
+        masking.versionService().requestPublish("kyc-routing", 1, WriteOptions.none());
+        caller.as("bank-a", "bob");
+        masking.versionService().approve("kyc-routing", 1, new WriteOptions(null, 1L, null));
+        assertThat(JdbcClient.create(db).sql("SELECT masked_by_default_inputs::text FROM rle_version_history"
+                + " WHERE action = 'APPROVED'").query(String.class).single()).isEqualTo("[\"nationalId\"]");
+        masking.maskingCheck().recordMaskDefaults(Set.of(), NOW);
+
+        // When the host restarts with the default off for bank-a
+        List<String> lines = engines(maskByDefault("nobody")).maskingCheck().recordMaskDefaults(Set.of(),
+                NOW.plusSeconds(3_600));
+
+        // Then the change line is followed by the WARN naming kyc-routing v1 and nationalId
+        assertThat(lines).containsExactly(
+                "decision-log.mask-default for tenant bank-a changed from true to false since the last start-up",
+                "Tenant bank-a no longer masks undeclared inputs; these published versions now log in plain text"
+                        + " inputs that only the default masked: kyc-routing v1 [nationalId]");
     }
 
     RuleEngines engines(MaskingPolicy policy) {
