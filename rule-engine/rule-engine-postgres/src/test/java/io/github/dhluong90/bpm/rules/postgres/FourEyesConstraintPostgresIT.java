@@ -30,7 +30,7 @@ class FourEyesConstraintPostgresIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     static final String FORMER_EXEMPT_ID = "system:dev-auto-publish";
     static final String MIGRATION = "io/github/dhluong90/bpm/rules/postgres/migration/"
