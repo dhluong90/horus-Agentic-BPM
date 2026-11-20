@@ -15,7 +15,6 @@ import io.github.dhluong90.bpm.process.api.InstanceQuery;
 import io.github.dhluong90.bpm.process.api.InstanceSummary;
 import io.github.dhluong90.bpm.process.api.Page;
 import io.github.dhluong90.bpm.process.api.PageRequest;
-import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.QueryInvalidException;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.IdempotencyKeyReuseException;
@@ -94,7 +93,7 @@ import java.util.function.Function;
  * store state and history. {@code SYNC_LOCAL} invocations run in the transaction; {@code ASYNC} is not in this
  * release. Thread-safe.
  */
-public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService, ProcessQueryService {
+public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService {
 
     /**
      * The result of a start: the instance, and whether this request created it ({@code false} when an instance with
@@ -265,9 +264,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 .orElseThrow(() -> new DefinitionNotFoundException("No definition " + key + " v" + version)));
     }
 
-    // ---- ProcessQueryService ------------------------------------------------------------------------------
+    // ---- Lists, served as ProcessQueryService through ProcessQueries ---------------------------------------
 
-    @Override
+    /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#definitions(PageRequest)}. */
     public Page<DefinitionSummary> definitions(PageRequest page) {
         String tenant = tenant();
         callerWith(PERMISSION_READ);
@@ -286,7 +285,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return new Page<>(items, cursors().sign(tenant, "", "definitions", items.get(limit - 1).key()));
     }
 
-    @Override
+    /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#instances(InstanceQuery)}. */
     public Page<InstanceSummary> instances(InstanceQuery query) {
         String tenant = tenant();
         callerWith(PERMISSION_READ);

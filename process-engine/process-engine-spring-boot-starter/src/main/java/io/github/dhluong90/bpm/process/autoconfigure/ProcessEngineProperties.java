@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.process.autoconfigure;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
+import io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +23,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param jobs timer and job settings
  * @param query read limits of the list endpoints
  * @param lifecycle instance lifecycle settings
+ * @param stats live count settings
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -33,7 +35,8 @@ public record ProcessEngineProperties(
         @DefaultValue Handlers handlers,
         @DefaultValue Jobs jobs,
         @DefaultValue Query query,
-        @DefaultValue Lifecycle lifecycle) {
+        @DefaultValue Lifecycle lifecycle,
+        @DefaultValue Stats stats) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -159,6 +162,32 @@ public record ProcessEngineProperties(
                 throw new IllegalArgumentException("horus.bpm.processes.lifecycle.reason-max-length must be 1 to "
                         + EngineDefaults.MAX_REASON_LENGTH + " (it may be lowered, never raised)");
             }
+        }
+    }
+
+    /**
+     * @param liveCacheTtl how long a replica answers live counts per node from its cache
+     * @param liveCacheTtlLarge the cache time when the last count exceeded {@code live-cache-large-threshold}
+     * @param liveCacheLargeThreshold live tokens of one definition version above which {@code live-cache-ttl-large}
+     *     applies
+     */
+    public record Stats(
+            @DefaultValue("PT5S") Duration liveCacheTtl,
+            @DefaultValue("PT15S") Duration liveCacheTtlLarge,
+            @DefaultValue("100000") long liveCacheLargeThreshold) {
+
+        public Stats {
+            if (liveCacheTtl.isNegative() || liveCacheTtlLarge.isNegative()) {
+                throw new IllegalArgumentException("horus.bpm.processes.stats.live-cache-ttl and live-cache-ttl-large "
+                        + "must not be negative");
+            }
+            if (liveCacheLargeThreshold < 1) {
+                throw new IllegalArgumentException("horus.bpm.processes.stats.live-cache-large-threshold must be positive");
+            }
+        }
+
+        LiveStatsSettings toSettings() {
+            return new LiveStatsSettings(liveCacheTtl, liveCacheTtlLarge, liveCacheLargeThreshold);
         }
     }
 

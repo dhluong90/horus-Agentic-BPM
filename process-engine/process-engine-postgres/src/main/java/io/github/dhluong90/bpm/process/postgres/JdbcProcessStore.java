@@ -7,6 +7,7 @@ import io.github.dhluong90.bpm.process.internal.exec.TokenKind;
 import io.github.dhluong90.bpm.process.internal.exec.TokenStatus;
 import io.github.dhluong90.bpm.process.internal.json.Ulid;
 import io.github.dhluong90.bpm.process.internal.json.Values;
+import io.github.dhluong90.bpm.process.internal.store.ProcessQueryStore;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -25,13 +26,39 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * {@link ProcessStore} on the host's PostgreSQL through {@link JdbcClient}. Every statement filters by
  * {@code tenant_id} first. Uses the host's {@link DataSource}, so statements join the caller's transaction.
  */
-public final class JdbcProcessStore implements ProcessStore {
+public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     private final JdbcClient jdbc;
 
     /** @param dataSource the host's data source */
     public JdbcProcessStore(DataSource dataSource) {
         this.jdbc = JdbcClient.create(Objects.requireNonNull(dataSource, "dataSource must not be null"));
+    }
+
+    // ---- queries (PRE-028) ---------------------------------------------------------------------------------
+
+    /**
+     * The live statuses, written exactly as in the predicate of {@code idx_pre_token_live} (V1), so the planner can
+     * answer the count with an index-only scan of that partial index and never touches {@code pre_history}.
+     */
+    static final String LIVE_STATUSES = "('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT')";
+
+    static final String LIVE_COUNTS_SQL = "SELECT current_node_id, status, count(*) AS live FROM pre_token "
+            + "WHERE tenant_id = ? AND definition_id = ? AND status IN " + LIVE_STATUSES + " "
+            + "GROUP BY current_node_id, status";
+
+    @Override
+    public Optional<String> definitionId(String tenant, String key, int version) {
+        return jdbc.sql("SELECT id FROM pre_definition WHERE tenant_id = ? AND key_name = ? AND version_num = ?")
+                .params(tenant, key, version).query(String.class).optional();
+    }
+
+    @Override
+    public List<LiveCount> liveTokenCounts(String tenant, String definitionId) {
+        return jdbc.sql(LIVE_COUNTS_SQL).params(tenant, definitionId)
+                .query((rs, row) -> new LiveCount(rs.getString("current_node_id"), rs.getString("status"),
+                        rs.getLong("live")))
+                .list();
     }
 
     // ---- definitions --------------------------------------------------------------------------------------

@@ -13,7 +13,9 @@ import io.github.dhluong90.bpm.process.api.InputInvalidException;
 import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
 import io.github.dhluong90.bpm.process.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
+import io.github.dhluong90.bpm.process.api.NodeCounts;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
+import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
 import io.github.dhluong90.bpm.process.api.TaskService;
@@ -44,6 +46,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Process Engine REST endpoints under {@code /api/bpm/processes/v1}. Bodies are read and written with the
@@ -67,7 +70,7 @@ public class ProcessController {
      * @param definitions definition service
      * @param engine process engine
      * @param tasks task service
-     * @param queries list queries
+     * @param queries list and count queries
      * @param maxDefinitionBytes largest BPMN document accepted ({@code definitions.max-bytes})
      */
     public ProcessController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
@@ -247,6 +250,39 @@ public class ProcessController {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot " + action + " twice");
         }
+    }
+
+    /**
+     * Live tokens per node of one definition version, from the live token index ({@code processes:read}, PRE-028).
+     * Only {@code mode=live} in this release; the window mode follows with the hourly rollup.
+     */
+    @GetMapping("/definitions/{key}/versions/{version}/node-stats")
+    public ResponseEntity<byte[]> nodeStats(@PathVariable("key") String key, @PathVariable("version") String version,
+            @RequestParam(value = "mode", defaultValue = "live") String mode) {
+        if (!"live".equals(mode)) {
+            throw new InputInvalidException("mode must be live in this release");
+        }
+        int number;
+        try {
+            number = Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException("version must be a positive integer");
+        }
+        if (number < 1) {
+            throw new InputInvalidException("version must be a positive integer");
+        }
+        NodeCounts counts = queries.liveNodeCounts(key, number);
+        ObjectNode body = EngineJson.NODES.objectNode();
+        body.put("definitionKey", counts.definitionKey());
+        body.put("version", counts.version());
+        body.put("mode", "live");
+        body.put("asOf", counts.asOf().toString());
+        ObjectNode nodes = body.putObject("nodes");
+        counts.nodes().forEach((node, byStatus) -> {
+            ObjectNode statuses = nodes.putObject(node);
+            byStatus.forEach(statuses::put);
+        });
+        return json(HttpStatus.OK, body, counts.asOf().toEpochMilli(), null);
     }
 
     /**

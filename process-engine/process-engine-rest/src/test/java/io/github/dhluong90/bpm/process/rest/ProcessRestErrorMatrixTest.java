@@ -16,6 +16,7 @@ import io.github.dhluong90.bpm.process.api.PageRequest;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessException;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
+import io.github.dhluong90.bpm.process.api.NodeCounts;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
@@ -352,6 +353,12 @@ class ProcessRestErrorMatrixTest {
                     + query.page().limit() + " " + query.page().cursor());
             return new Page<>(List.of(new InstanceSummary(INSTANCE, "card-fee-review", 1, "APP-1001", "RUNNING", 1, "tuan",
                     STARTED, null)), "next");
+        }
+
+        @Override
+        public NodeCounts liveNodeCounts(String definitionKey, int version) {
+            maybeFail();
+            return new NodeCounts(definitionKey, version, STARTED, Map.of());
         }
     }
 }

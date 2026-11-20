@@ -16,6 +16,8 @@ import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
+import io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService;
+import io.github.dhluong90.bpm.process.internal.service.ProcessQueries;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
@@ -237,6 +239,15 @@ public class ProcessEngineAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean
+    LiveNodeCountService processEngineLiveNodeCounts(ObjectProvider<TenantResolver> tenants,
+            ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
+            JdbcProcessStore store, ProcessEngineProperties properties) {
+        return new LiveNodeCountService(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
+                clock.getIfUnique(Clock::systemUTC), transactions, store, properties.stats().toSettings());
+    }
+
+    @Bean
     @ConditionalOnMissingBean(TaskService.class)
     TaskService processTaskService(ProcessServices services) {
         return services;
@@ -244,8 +255,8 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(ProcessQueryService.class)
-    ProcessQueryService processQueryService(ProcessServices services) {
-        return services;
+    ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts) {
+        return new ProcessQueries(services, liveCounts);
     }
 
     @Bean
