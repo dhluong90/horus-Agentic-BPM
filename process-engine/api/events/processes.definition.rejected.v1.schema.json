@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:event:processes.definition.rejected.v1",
+  "title": "processes.definition.rejected.v1",
+  "description": "A version was rejected and returned to draft. Handed to the host publisher in the transaction of the state change it reports. Additive changes only within v1 (DESIGN section 6.4).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "occurredAt",
+    "tenantId",
+    "correlationId",
+    "causationId",
+    "producer",
+    "schemaVersion",
+    "payload"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Stable id of this event, 26 characters; consumers de-duplicate by it",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "eventType": {
+      "const": "processes.definition.rejected.v1"
+    },
+    "occurredAt": {
+      "type": "string",
+      "description": "The engine clock time of the change, ISO 8601 UTC",
+      "format": "date-time"
+    },
+    "tenantId": {
+      "type": "string",
+      "description": "The tenant, from the authenticated context; consumers must filter by it"
+    },
+    "correlationId": {
+      "type": "string",
+      "description": "The request's X-Correlation-Id; for work a job starts, the id the job carries; otherwise the event id",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "causationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The id of the command (Idempotency-Key) or job that caused the change, or null"
+    },
+    "producer": {
+      "const": "horus-process-engine"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "definitionKey",
+        "version",
+        "rejectedBy"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "definitionKey": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "definitionHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "rejectedBy": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

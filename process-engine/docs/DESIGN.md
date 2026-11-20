@@ -579,6 +579,12 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `processes.incident.raised.v1`, `processes.incident.resolved.v1` | `incidentId`, `instanceId`, `nodeId`, `errorCode`; `businessCode` when the code is `UNHANDLED_BUSINESS_ERROR` (#55) |
 | `processes.compensation.started.v1` | `instanceId`, `scopeId`, stack depth |
 
+**Envelope (#86, `PRE-085`).** Every event is handed to the publisher as `ProcessEventPublisher.Event` and serialised by `Event.envelope()` into nine members: `eventId` (26 characters, stable for the transition), `eventType`, `occurredAt` (engine clock), `tenantId`, `correlationId`, `causationId`, `producer` (`horus-process-engine`), `schemaVersion` (`1`) and `payload`. `correlationId` is the `X-Correlation-Id` of the request, set by `EventScopeFilter` for the REST API or by a host through `EventScope.open(...)`; work a job starts uses the request's id when the job was handed to the engine inside one, and otherwise the job id; with no scope it is the `eventId`, so the event starts its own chain. `causationId` is the request's `Idempotency-Key`, or the job id for work a job starts, or null. A correlation stored with a parked job would need a column on `pre_timer`; that is not part of this slice. The Rule Engine puts the event's own fields next to the envelope members; the Process Engine nests them under `payload`, and both carry the same eight envelope members. Each type has a JSON Schema in `process-engine/api/events/` (`additionalProperties: true`), and `EventSchemaCompatibilityTest` compares the files with the baseline copy of the previous release: nothing removed, retyped or newly required.
+
+`processes.step.completed.v1` is published once per node a transition completes, inside the step's transaction, with `durationMs` from the token's entry at the node (the entry in the same transition, or `pre_token.entered_at` for a step that waited). `processes.incident.resolved.v1`, `processes.instance.failed.v1` and `processes.compensation.started.v1` have schemas and are emitted when the engine has a resolve operation, a path to `FAILED` and compensation.
+
+**Metrics (#86, `PRE-084`).** The starter binds `horus.pre.*` meters to the host's `MeterRegistry` when Micrometer is present. The core calls the `ProcessMetrics` SPI only after the transaction commits (`TransactionRunner.afterCommit`), so a rolled-back start or step is never counted; a failed step is the one exception, reported at once. Tag values are checked against fixed sets (`stepKind`: `START`, `COMPLETE_TASK`, `JOB_DUE`, `ASYNC_RESULT`, `CANCEL`; `outcome`; job `kind`; the engine error codes) and anything else is `OTHER`. Gauges (`instances.active`, `incidents.open`, `jobs.due.oldest.age{kind}`) are read by one bounded query set per `metrics.gauge-refresh` on each replica, never per scrape: the counts are index-only scans of the partial indexes `idx_pre_instance_running` (V28) and `idx_pre_incident_open`, and the oldest due job is the first entry of `idx_pre_timer_poll_kind` per kind. They count every tenant together, so a shared registry leaks no tenant's volume.
+
 `processes.definition.deployed.v1` from the earlier baseline is removed: deploy now creates a draft, and no release has shipped.
 
 ### 6.5 Configuration (`horus.bpm.processes.*`)
@@ -617,6 +623,13 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `migration.batch-size` | `100` | Instances per migration batch, one instance lock at a time (section 4.3); may be lowered only |
 | `tokens.cleanup-after`, `tokens.cleanup-batch` | unset (keep), `10000` | When set, the scheduler deletes `pre_token` rows of instances ended longer ago, in batches; history keeps every transition (open question 11.3) |
 | `stats.live-cache-large-threshold` | `100000` | Token count above which `stats.live-cache-ttl-large` applies |
+| `stats.rollup-enabled` | `true` | This replica runs the hourly node statistics rollup (`PRE-029`); at least one replica must. Several may: one writer takes each slice |
+| `stats.rollup-interval`, `stats.rollup-lag` | `PT5M`, `PT5M` | Time between runs, and how far behind now the rollup stays so slow step transactions have committed; the statistics are at most lag plus interval behind (10 minutes) |
+| `stats.rollup-max-slice`, `stats.rollup-max-run` | `PT1M`, `PT60S` | History one slice transaction reads (1 second to 10 minutes), and how long a run takes slices before the next run continues from the watermark (1 second to 10 minutes) |
+| `stats.rollup-initial-backfill` | `PT1H` | How far back the first run starts on a database with no watermark (0 to 31 days) |
+| `metrics.enabled` | `true` | Bind the `horus.pre.*` meters when Micrometer is present |
+| `metrics.gauge-refresh` | `PT30S` | How often each replica reads the gauges; 1 second to 1 hour |
+| `metrics.definition-key-tag` | `false` | Tag the instance counters with `definitionKey`; off because the number of keys is the host's |
 | `query.max-range` | `P31D` | Longest time range of a list query (ADR-0015); may be lowered only |
 | `idempotency.retention` | `PT24H` | How long an idempotency record answers replays |
 | `lifecycle.reason-max-length` | `2000` | Longest reason a cancellation accepts (PD-103); may be lowered, never raised |
@@ -907,9 +920,9 @@ CREATE TABLE pre_history_default PARTITION OF pre_history DEFAULT;
 CREATE TABLE pre_history_2027_01 PARTITION OF pre_history
   FOR VALUES FROM ('2027-01-01 00:00:00+00') TO ('2027-02-01 00:00:00+00');   -- created by the scheduler 7 days ahead
 CREATE INDEX idx_pre_history_instance ON pre_history (tenant_id, instance_id, occurred_at, id);
-CREATE INDEX idx_pre_history_time_brin ON pre_history USING brin (occurred_at);   -- rollup slices
+CREATE INDEX idx_pre_history_time_brin ON pre_history USING brin (occurred_at);   -- rollup slices (#110, V27: built CONCURRENTLY per partition, parent ON ONLY)
 
-CREATE TABLE pre_node_stats_hourly (
+CREATE TABLE pre_node_stats_hourly (                                              -- #110, V26
   tenant_id         TEXT        NOT NULL,
   definition_id     VARCHAR(26) NOT NULL,
   bucket_start      TIMESTAMPTZ NOT NULL,        -- hour, UTC
@@ -927,7 +940,7 @@ CREATE TABLE pre_node_stats_hourly (
 ) PARTITION BY RANGE (bucket_start);
 CREATE TABLE pre_node_stats_hourly_default PARTITION OF pre_node_stats_hourly DEFAULT;
 
-CREATE TABLE pre_engine_watermark (            -- engine-internal, one row per sweep job, no tenant data
+CREATE TABLE pre_engine_watermark (            -- #110, V26: engine-internal, one row per sweep job, no tenant data
   job_name        TEXT        PRIMARY KEY,       -- 'node-stats'
   watermark       TIMESTAMPTZ NOT NULL,
   updated_by      TEXT        NOT NULL,
@@ -1010,6 +1023,7 @@ Targets, not measurements, on the reference shape of the architecture overview s
 | Pages | Keyset cursor, default 50, at most 200; `limit` above 200 is `400 QUERY_INVALID`; no `OFFSET`; no exact totals, a count is shown as "200+" | REST tests |
 | Time per read | Read-only transaction with `SET LOCAL statement_timeout = '2s'` | Fault test with a slowed database |
 | History | `pre_history` is read only for one instance, bounded by its lifetime, or by the rollup job in one-minute slices. Never `GROUP BY` over history on a request path | ArchUnit rule on the query registry; query-plan check |
+| Registered queries | Every bounded read is declared in `ProcessListQueries` with its bound (index and range); stores run only registered statements, and a statement constant that is not registered fails the build | `ProcessListQueriesPlanIT`: `EXPLAIN` of each registered query on a seeded database shows no sequential scan, and the rollup slice shows the BRIN index (`PRE-036`) |
 | Counters | No counter is updated inside a step transaction | Code review rule; SQL capture test of a transition shows no `UPDATE` of a statistics table |
 
 ![Bounded cockpit reads](images/cockpit-reads.svg)

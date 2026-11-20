@@ -62,6 +62,18 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 .list();
     }
 
+    @Override
+    public java.util.Map<String, java.time.Instant> tokenEnteredAt(String tenant, String instanceId) {
+        java.util.Map<String, java.time.Instant> entered = new java.util.HashMap<>();
+        jdbc.sql("SELECT id, entered_at FROM pre_token WHERE tenant_id = ? AND instance_id = ?")
+                .params(tenant, instanceId)
+                .query((rs, row) -> {
+                    entered.put(rs.getString("id"), rs.getTimestamp("entered_at").toInstant());
+                    return null;
+                }).list();
+        return entered;
+    }
+
     // ---- definitions --------------------------------------------------------------------------------------
 
     private static final String DEFINITION_COLUMNS = "tenant_id, id, key_name, version_num, status, name, "

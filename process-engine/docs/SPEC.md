@@ -881,3 +881,51 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - C: refused at import. Memory reads only the recorded results of steps in the same instance, in the instance's tenant. Two loans of the same definition each receive their own facts, and a result recorded under another tenant with the same ids is never read.
 - **Example:** `idNumber without includeMasked -> 422; with it -> sent, hashed in history, visible in the approval diff`.
 - **Test ID:** `PRE_102_a_masked_field_without_include_masked_is_refused_at_import`, `PRE_102_a_masked_field_without_include_masked_is_refused_by_the_import_check`, `PRE_102_include_masked_sends_the_plain_value_and_the_audit_copy_keeps_only_the_fingerprint`, `PRE_102_include_masked_sends_the_plain_value_hashes_it_in_history_and_shows_in_the_canonical_form`, `PRE_102_memory_is_in_the_canonical_form_and_the_export_reads_back_to_the_same_hash`, `PRE_102_memory_reads_only_the_results_of_its_own_instance_and_tenant`, `PRE_102_memory_that_reads_a_variable_or_another_instance_is_refused_at_import`
+
+## Metrics, Events and Throughput (#86)
+
+### PRE-084 Metrics count only committed work, carry bounded tags and never a tenant or a business value
+- **Traces to:** `TR-OBS-02`
+- **Milestone:** M2
+- **Given:** A host with a `SimpleMeterRegistry`. Six starts of `loan-disbursement` are attempted and one rolls back because its local handler throws. Of the five that start, three complete, one waits at its user task, and one is running with an open incident whose code is the host's business code `LIMIT_EXCEEDED`. A timer fires 4 s after its due time.
+- **When:** The registry is read after `metrics.gauge-refresh` (default `PT30S`).
+- **Then:**
+  - Counters: `horus.pre.instances.started` = 5, because the rolled-back start is not counted (counters move after commit only); `horus.pre.instances.completed` = 3; `horus.pre.instances.failed` counts an instance that ends `FAILED`; `horus.pre.incidents.raised{errorCode}` = 1 under `UNHANDLED_BUSINESS_ERROR`.
+  - Gauges, refreshed by one bounded query set per `metrics.gauge-refresh` on each replica and never per scrape: `horus.pre.instances.active` = 2, `horus.pre.incidents.open` = 1, `horus.pre.jobs.due.oldest.age{kind}` in seconds.
+  - Timers and counters: `horus.pre.timer.lag` records 4 s; `horus.pre.step.duration{stepKind,outcome}` with the engine command kinds `START`, `COMPLETE_TASK`, `JOB_DUE`, `ASYNC_RESULT`, `CANCEL` and outcomes `OK` and `FAILED`; `horus.pre.async.attempts{kind,outcome}` with outcomes `ACCEPTED`, `REFUSED`, `FAILED`, `DISCARDED` and `DUPLICATE`.
+  - Tags take only engine values from fixed sets; a value outside a set, a host business code included, is `OTHER`. No tag holds a tenant, business key, instance id, user or variable.
+  - `definitionKey` is a tag of the instance counters only when `metrics.definition-key-tag: true` (default `false`).
+- **Example:** `6 attempted, 1 rolled back -> started = 5, active = 2; tags contain no tenant`.
+- **Test ID:** `PRE_084_metrics_count_only_committed_work_and_carry_only_engine_values`
+
+### PRE-085 Every state change hands one enveloped event to the host inside its transaction
+- **Traces to:** `TR-OBS-04`, `TR-OBS-06`
+- **Milestone:** M2
+- **Given:** An instance that starts, completes a step and completes; a second instance cancelled under a request with `X-Correlation-Id: REQ-7781` and `Idempotency-Key: cancel-DISB-0002`; a third at an incident; a fourth whose start rolls back.
+- **When:** A recording publisher collects the events of committed transactions.
+- **Then:**
+  - It receives `processes.instance.started.v1`, `processes.step.completed.v1`, `processes.incident.raised.v1`, `processes.instance.completed.v1` and `processes.instance.cancelled.v1`, with the task events; `processes.incident.resolved.v1` and `processes.instance.failed.v1` have schemas and are emitted when the engine has a resolve operation and a path to `FAILED`.
+  - Each event is handed over in the transaction of its change; the rolled-back start hands over events that never commit.
+  - Each event has the envelope `eventId` (26 characters), `eventType`, `occurredAt` (engine clock), `tenantId`, `correlationId`, `causationId`, `producer` (`horus-process-engine`), `schemaVersion` (1) and `payload`.
+  - `correlationId` is the request's, or for work a job starts the request's when there is one and otherwise the job id; with no scope it is the `eventId`. `causationId` is the command's `Idempotency-Key` or the job id, or null.
+  - Each type validates against its JSON Schema under `process-engine/api/events/`, and a compatibility test against the baseline schemas allows additive changes only. An idempotent replay publishes nothing.
+- **Example:** `cancel -> processes.instance.cancelled.v1 with causationId = cancel-DISB-0002`.
+- **Test ID:** `PRE_085_every_state_change_hands_one_enveloped_event_to_the_host_inside_its_transaction`
+
+### PRE-086 Event payloads carry ids and codes, never variables or masked values
+- **Traces to:** `TR-SEC-05`
+- **Milestone:** M2
+- **Given:** An instance with variable `nationalId` and business key `DISB-ACC-0001`.
+- **When:** Every event of `PRE-085` is serialised.
+- **Then:** No payload contains a variable value, task result, step output, masked value or handler message. Payloads hold the ids, keys, versions, codes and actors listed in section 6.4 of `process-engine/docs/DESIGN.md`; the business key appears only in the events that list it there.
+- **Example:** `instance.started.v1 payload = { instanceId, definitionKey, version, businessKey }, no nationalId`.
+- **Test ID:** `PRE_086_event_payloads_carry_ids_and_codes_never_variables_or_masked_values`
+
+### PRE-087 CI reports step throughput against 1,000 transitions per second, without gating
+- **Traces to:** `TR-PERF-04`
+- **Milestone:** M2
+- **Given:** The load test in `process-engine/process-engine-postgres` on Testcontainers PostgreSQL with history on, one replica, a 10-transition definition (exclusive gateway, local service steps, a one-second timer, the shortest the engine accepts, fired as the injected clock moves, a parallel fork and join, end), a warm-up and a measured period.
+- **When:** The CI job `throughput-report` runs on `main` with a 1-minute warm-up and a 5-minute measurement.
+- **Then:** It publishes `throughput-report.json` and `.md` with the sustained transitions per second, the p50, p95 and p99 time of one engine call, the most pool connections in use, the runner's vCPU count and memory, and the PostgreSQL version. A result below 1,000 per second, or more than 20 % below the previous `main` report, is a warning in the report and the job summary. It never fails the build (PD-026).
+- **Example:** `1,180 transitions/s, p95 7 ms, 4 vCPU runner -> report published, no gate`.
+- **Test ID:** `PRE_087_throughput_report_is_written_and_never_gates`

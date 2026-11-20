@@ -77,6 +77,12 @@
       <artifactId>spring-boot-health</artifactId>
       <optional>true</optional>
     </dependency>
+    <!-- Metrics (PRE-084): bound only when the host has Micrometer; the engine core has no Micrometer dependency. -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-actuator</artifactId>

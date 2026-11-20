@@ -25,7 +25,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param makerChecker four eyes on definition approval
  * @param query read limits of the list endpoints
  * @param lifecycle definition and instance lifecycle settings
- * @param stats live count settings
+ * @param stats live count and hourly rollup settings
+ * @param metrics operational metrics settings
  * @param adapters remote step settings (Async Wait-State, ADR-0008)
  * @param runners per async job kind, the settings of its runner (#363); unset values fall back to {@code adapters.*}
  *     and {@code jobs.*}
@@ -45,6 +46,7 @@ public record ProcessEngineProperties(
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle,
         @DefaultValue Stats stats,
+        @DefaultValue Metrics metrics,
         @DefaultValue Adapters adapters,
         @DefaultValue Runners runners,
         @DefaultValue Agents agents,
@@ -370,11 +372,23 @@ public record ProcessEngineProperties(
      * @param liveCacheTtlLarge the cache time when the last count exceeded {@code live-cache-large-threshold}
      * @param liveCacheLargeThreshold live tokens of one definition version above which {@code live-cache-ttl-large}
      *     applies
+     * @param rollupEnabled whether this replica runs the hourly node statistics rollup (PRE-029)
+     * @param rollupInterval time between rollup runs
+     * @param rollupLag how far behind now the rollup stays, so slow step transactions have committed
+     * @param rollupMaxSlice longest stretch of history one slice transaction reads
+     * @param rollupMaxRun longest a run keeps taking slices before the next run continues from the watermark
+     * @param rollupInitialBackfill how far back the first run starts on a database with no watermark
      */
     public record Stats(
             @DefaultValue("PT5S") Duration liveCacheTtl,
             @DefaultValue("PT15S") Duration liveCacheTtlLarge,
-            @DefaultValue("100000") long liveCacheLargeThreshold) {
+            @DefaultValue("100000") long liveCacheLargeThreshold,
+            @DefaultValue("true") boolean rollupEnabled,
+            @DefaultValue("PT5M") Duration rollupInterval,
+            @DefaultValue("PT5M") Duration rollupLag,
+            @DefaultValue("PT1M") Duration rollupMaxSlice,
+            @DefaultValue("PT60S") Duration rollupMaxRun,
+            @DefaultValue("PT1H") Duration rollupInitialBackfill) {
 
         public Stats {
             if (liveCacheTtl.isNegative() || liveCacheTtlLarge.isNegative()) {
@@ -384,10 +398,49 @@ public record ProcessEngineProperties(
             if (liveCacheLargeThreshold < 1) {
                 throw new IllegalArgumentException("horus.bpm.processes.stats.live-cache-large-threshold must be positive");
             }
+            try {
+                toRollupSettings(rollupEnabled, rollupInterval, rollupLag, rollupMaxSlice, rollupMaxRun,
+                        rollupInitialBackfill);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("horus.bpm.processes." + e.getMessage(), e);
+            }
+        }
+
+        private static io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings toRollupSettings(boolean enabled,
+                Duration interval, Duration lag, Duration maxSlice, Duration maxRun, Duration backfill) {
+            return new io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings(enabled, interval, lag,
+                    maxSlice, maxRun, backfill);
         }
 
         LiveStatsSettings toSettings() {
             return new LiveStatsSettings(liveCacheTtl, liveCacheTtlLarge, liveCacheLargeThreshold);
+        }
+
+        io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings toRollup() {
+            return toRollupSettings(rollupEnabled, rollupInterval, rollupLag, rollupMaxSlice, rollupMaxRun,
+                    rollupInitialBackfill);
+        }
+    }
+
+    /**
+     * Operational metrics on the host's {@code MeterRegistry} (PRE-084). Tags are engine values only; no tag ever
+     * holds a tenant, an instance id, a business key, a user or a variable.
+     *
+     * @param enabled whether the metrics are bound when Micrometer is present
+     * @param gaugeRefresh how often each replica reads the gauges ({@code instances.active}, {@code incidents.open},
+     *     {@code jobs.due.oldest.age}) with one bounded query set; never per scrape; 1 second to 1 hour
+     * @param definitionKeyTag whether the counters of instances carry the {@code definitionKey} tag; off by default
+     *     because the number of keys is the host's and is not bounded by the engine
+     */
+    public record Metrics(
+            @DefaultValue("true") boolean enabled,
+            @DefaultValue("PT30S") Duration gaugeRefresh,
+            @DefaultValue("false") boolean definitionKeyTag) {
+
+        public Metrics {
+            if (gaugeRefresh.compareTo(Duration.ofSeconds(1)) < 0 || gaugeRefresh.compareTo(Duration.ofHours(1)) > 0) {
+                throw new IllegalArgumentException("horus.bpm.processes.metrics.gauge-refresh must be 1 second to 1 hour");
+            }
         }
     }
 

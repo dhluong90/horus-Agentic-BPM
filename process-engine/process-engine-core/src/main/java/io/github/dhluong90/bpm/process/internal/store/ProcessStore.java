@@ -209,6 +209,16 @@ public interface ProcessStore {
 
     List<Token> tokens(String tenant, String instanceId);
 
+    /**
+     * When each token of the instance entered its current node, read through the instance's token index. Used for
+     * the duration of a step that waited in an earlier transaction ({@code processes.step.completed.v1}).
+     *
+     * @return token id to entry time; empty when the store keeps no entry times
+     */
+    default java.util.Map<String, java.time.Instant> tokenEnteredAt(String tenant, String instanceId) {
+        return java.util.Map.of();
+    }
+
     /** Inserts new tokens and updates changed ones. */
     void saveTokens(String tenant, String instanceId, String definitionId, List<Token> tokens, Instant now);
 

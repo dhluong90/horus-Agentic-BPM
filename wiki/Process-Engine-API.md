@@ -21,6 +21,7 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `GET /definitions/{key}/versions/{v}/history` | `history(ref)` | `processes:read` | Every transition with actor and comment, oldest first. 0.2.0 |
 | `POST /instances` | `ProcessEngine.start(StartRequest)` | `processes:start` | Needs a `businessKey` or an `Idempotency-Key` (`428` without either). `201` for a new instance, `200` when one exists for the business key |
 | `GET /instances/{id}` | `ProcessEngine.instance(id)` | `processes:read` | Execution tree (root scope token and flow tokens) and tasks; variables unmasked in 0.1.0 |
+| `GET /definitions/{key}/versions/{version}/node-stats?mode=window&from=&to=` | `ProcessQueryService.nodeWindowStats(key, version, from, to)` | `processes:read` | Counts and typical durations per step over whole hours, from the hourly rollup of the caller's tenant: entered, completed, failed, incidents, mean, median and 95th percentile (each within 19 percent). The range is at most `query.max-range` (31 days, `400 QUERY_INVALID`); the answer names the rollup watermark (`asOf`) and its lag, at most about 10 minutes. Never reads history. Since 0.2.0 |
 | `GET /definitions/{key}/versions/{version}/node-stats?mode=live` | `ProcessQueryService.liveNodeCounts(key, version)` | `processes:read` | Live tokens per step and status, with `asOf` and an `ETag`; read from the live token index, never from history. Each replica caches an answer for `stats.live-cache-ttl` (5 s), or `stats.live-cache-ttl-large` (15 s) above `stats.live-cache-large-threshold` (100,000 live tokens). Only `mode=live` (`400` otherwise); a version not in the caller's tenant is `404 DEFINITION_NOT_FOUND`. Open incidents per step follow with incidents. Since 0.2.0 |
 | `GET /instances` | `ProcessQueryService.instances(InstanceQuery)` | `processes:read` | `status` (comma separated, `RUNNING` when absent), `definitionKey`, `startedFrom` (inclusive) and `startedTo` (exclusive), at most 31 days apart; with one bound the other is 31 days away. Newest first. Items carry no variables, tokens or tasks. Since 0.2.0 |
 | `POST /instances/{id}:cancel` | `ProcessEngine.cancel(id, lockVersion, reason, idempotencyKey)` | `processes:cancel` | Its own permission: `processes:start` does not grant it (PD-103), and `/api/bpm/me` lists it so a client shows Cancel only to its holders. `If-Match` (the instance `ETag`) and `Idempotency-Key` are required (`428`). Body `{"reason": "..."}`, required, at most `lifecycle.reason-max-length` (2,000) characters; the reason and the actor are on the `INSTANCE_ENDED` history entry and on `processes.instance.cancelled.v1`. Cancels every live token and open task; `409 INVALID_STATE` when the instance is not running. Cancel makes no adapter call and runs no compensation in 0.2.0; compensation on cancel is planned for 1.2. Since 0.2.0 |
@@ -120,6 +121,21 @@ GET /api/bpm/processes/v1/definitions/card-fee-review/versions/1/node-stats?mode
      "nodes":{"officer-review":{"WAITING_USER":3}}}
 ```
 
+## Hourly figures per step
+
+Example: the same version over one hour, from the rollup.
+
+```
+GET /api/bpm/processes/v1/definitions/card-fee-review/versions/1/node-stats?mode=window&from=2026-11-20T10:00:00Z&to=2026-11-20T11:00:00Z
+
+200 {"definitionKey":"card-fee-review","version":1,"mode":"window","from":"2026-11-20T10:00:00Z","to":"2026-11-20T11:00:00Z",
+     "asOf":"2026-11-20T10:50:00Z","lagSeconds":600,
+     "nodes":{"officer-review":{"entered":1200,"completed":1200,"failed":0,"incidents":0,"slaBreaches":0,
+                                "meanMs":5400000,"p50Ms":4800000,"p95Ms":9900000}}}
+```
+
+The rollup runs on every replica that has `stats.rollup-enabled` (the default). Replicas take turns: one writer takes each slice of history, so two replicas never count the same stretch twice.
+
 ## Export a definition as BPMN
 
 The export writes a stored version as BPMN 2.0 XML that standard modellers open, and that imports back to the same definition:
@@ -148,7 +164,13 @@ A start or a completion runs every synchronous step, up to the next user task or
 
 ## Events and the listener contract
 
-Every state change hands an event (`processes.instance.started.v1`, `processes.task.created.v1`, `processes.task.completed.v1`, `processes.instance.completed.v1`, `processes.instance.cancelled.v1`, `processes.task.claimed.v1`, `processes.task.unclaimed.v1`, `processes.definition.publish-requested.v1`, `processes.definition.approved.v1`, `processes.definition.rejected.v1`, `processes.definition.retired.v1`) to the host's `ProcessEventPublisher` **inside the transaction of the state change**. The default implementation is the Spring `ApplicationEventPublisher`. So the event and the state change commit or roll back together.
+Every state change hands an event (`processes.instance.started.v1`, `processes.step.completed.v1`, `processes.incident.raised.v1`, `processes.task.created.v1`, `processes.task.completed.v1`, `processes.instance.completed.v1`, `processes.instance.cancelled.v1`, `processes.task.claimed.v1`, `processes.task.unclaimed.v1`, `processes.definition.publish-requested.v1`, `processes.definition.approved.v1`, `processes.definition.rejected.v1`, `processes.definition.retired.v1`) to the host's `ProcessEventPublisher` **inside the transaction of the state change**. The default implementation is the Spring `ApplicationEventPublisher`. So the event and the state change commit or roll back together.
+
+Each event is in the standard envelope: `eventId`, `eventType`, `occurredAt`, `tenantId`, `correlationId` (the request's `X-Correlation-Id`), `causationId` (its `Idempotency-Key`, or the job id), `producer`, `schemaVersion` and `payload`. The payload holds ids, keys, versions and codes, never a variable. The JSON Schema of each type is in `process-engine/api/events/`, and a change within `.v1` only adds. `Event.envelope()` gives the map to write into a host outbox row.
+
+## Metrics
+
+With Micrometer on the classpath, the starter registers `horus.pre.instances.started|completed|failed`, `horus.pre.incidents.raised{errorCode}`, `horus.pre.instances.active`, `horus.pre.incidents.open`, `horus.pre.timer.lag`, `horus.pre.step.duration{stepKind,outcome}`, `horus.pre.async.attempts{kind,outcome}` and `horus.pre.jobs.due.oldest.age{kind}`. Counters move after commit only. Tags take engine values only, never a tenant, business key, instance id or variable; `definitionKey` is a tag only with `horus.bpm.processes.metrics.definition-key-tag=true`. Gauges are read once per `metrics.gauge-refresh` (30 s) on each replica, not per scrape. CI publishes a throughput report against the target of 1,000 transitions per second; it is reported, never a gate.
 
 ```mermaid
 sequenceDiagram

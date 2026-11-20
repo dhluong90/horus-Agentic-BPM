@@ -39,4 +39,20 @@ public interface ProcessQueryService {
      * @throws DefinitionNotFoundException when the version does not exist in the caller's tenant
      */
     NodeCounts liveNodeCounts(String definitionKey, int version);
+
+    /**
+     * Reads the hourly rollup of one definition version in the caller's tenant: counts and typical durations per node
+     * over whole hours, with the rollup watermark and its lag. Needs {@code processes:read}. The range is widened to
+     * whole hours and may be at most {@code query.max-range}. Never reads history.
+     *
+     * @param definitionKey the process key
+     * @param version the version number
+     * @param from start of the window, or null for 24 hours before {@code to}
+     * @param to end of the window, or null for now
+     * @return the figures
+     * @throws DefinitionNotFoundException when the version does not exist in the caller's tenant
+     * @throws QueryInvalidException when {@code from} is not before {@code to}, or the range is longer than
+     *     {@code query.max-range}
+     */
+    NodeWindowStats nodeWindowStats(String definitionKey, int version, java.time.Instant from, java.time.Instant to);
 }
