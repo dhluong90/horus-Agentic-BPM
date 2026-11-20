@@ -188,7 +188,7 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 - `REGEX_TOO_DEEP`: the pattern's backtracking ran out of thread stack, typically an alternation under `*` or `+` such as `(a|b)*c` on a long text. Simplify the pattern or lower `evaluation.regex-max-input-length`.
 
 ### BATCH_TOO_LARGE
-`422`. `:evaluate-batch` with more than 1,000 items. Split the batch.
+`422`. `:evaluate-batch` with more than `evaluation.max-batch` items (1,000 at most). Split the batch; nothing was evaluated or written.
 
 ## Process Engine
 

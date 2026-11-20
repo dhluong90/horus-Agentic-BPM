@@ -87,6 +87,28 @@ Every search writes one audit entry, the event `rules.decision-log.masked-input-
 
 Two banks on one host always store different tokens for the same id: a tenant with its own key uses it as it is, and every other tenant uses its own subkey derived from the host key (see [Masking keys](Rule-Engine-Configuration#masking-keys)), never the host key itself. Neither bank finds the other's decisions. To mask every input that declares nothing, set `decision-log.mask-default: true` for the host or `masking.tenants.<tenant>.mask-default: true` for one tenant; `mask: false` keeps an input in plain text.
 
+## Find decisions by case reference or by a plain input
+
+Complaints arrive with a case number, not a decision id. Send your own reference as `X-Correlation-Id` (or the `correlationId` of a batch item) when you evaluate, and an auditor holding `rules:log:read` finds every decision of that case across all rule sets of the tenant:
+
+```bash
+curl -s "$HOST/api/bpm/rules/v1/decisions?correlationId=LA-2027-000123&from=2027-01-01T00:00:00Z&to=2027-02-01T00:00:00Z" \
+  -H "Authorization: Bearer $AUDITOR_TOKEN"
+```
+
+Add `ruleSet=card-fee` to narrow it. The period is at most 31 days, newest first, 200 a page. A reference is 1 to 128 characters of `A-Z a-z 0-9 . _ : -`. A call without `X-Correlation-Id` gets a generated id, so a host that wants case search must send its reference. A correlation id may appear in a URL and in access logs: never use a national id as one.
+
+To find decisions by the exact value of an input that is stored in plain text, post the value, which never sits in a URL:
+
+```bash
+curl -s -X POST "$HOST/api/bpm/rules/v1/decisions:find-by-input" \
+  -H "Authorization: Bearer $AUDITOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"ruleSet": "loan-pricing", "input": "productCode", "value": "HOME-30Y",
+       "from": "2027-01-01T00:00:00Z", "to": "2027-02-01T00:00:00Z"}'
+```
+
+Values compare by canonical form: money by currency and minor units, a number by exact value (`30000` equals `30000.00`), a string by code point, with no case folding or trimming. An input that is masked, by `mask: true` or by `decision-log.mask-default`, is refused with `400 QUERY_INVALID` and a pointer to the masked search above, never answered with no rows, so this search cannot be used to test a masked value. Neither search writes to the decision log.
+
 ## Choose transactional or async logging
 
 ![Decision log modes](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/decision-log-modes.svg)

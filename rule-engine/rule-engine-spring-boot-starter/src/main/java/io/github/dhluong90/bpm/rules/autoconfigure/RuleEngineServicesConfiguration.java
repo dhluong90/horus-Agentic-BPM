@@ -288,8 +288,9 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions, CallerResolver callers) {
-            return new DecisionLogController(decisions, callers);
+        DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions,
+                io.github.dhluong90.bpm.rules.api.DecisionLogQuery log, CallerResolver callers) {
+            return new DecisionLogController(decisions, log, callers);
         }
 
         @Bean

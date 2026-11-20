@@ -7,8 +7,9 @@ info:
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
     export, replace a draft, diff two versions, request publication, approve, reject, withdraw, retire, history,
     simulate a version over sample inputs, evaluate (at the host clock, at a chosen clock, or pinned to a version),
-    replay of a logged decision, and decision-log reads (one decision, one rule set's decisions in a period, and the
-    search by a masked input's plain value).
+    batch evaluation of up to 1,000 items, replay of a logged decision, and decision-log reads (one decision, one rule
+    set's decisions in a period, the decisions of one case reference, and the searches by a plain or a masked input's
+    value).
     The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
@@ -660,8 +661,16 @@ paths:
     get:
       tags: [decisions]
       operationId: searchDecisions
-      summary: List one rule set's logged decisions in a period of at most 31 days, newest first
+      summary: List logged decisions of a rule set or a case reference in a period of at most 31 days
       description: |
+        Two searches, both newest first and both needing `rules:log:read`. With `ruleSet` alone it lists one rule
+        set's decisions; with `correlationId` it finds the decisions of the host's case reference, such as a loan
+        application number, across every rule set of the caller's tenant, or in one rule set when `ruleSet` is
+        added. A REST call without `X-Correlation-Id` gets a generated id, so a host that wants case search sends its
+        own reference. A correlation id is a business reference and may appear in a URL; a host must not use a
+        national id as one. One of `ruleSet` and `correlationId` is required, otherwise `400 QUERY_INVALID`. The
+        search is led by tenant and correlation id and reads at most two monthly partitions.
+
         Permission `rules:log:read`. The decisions of the caller's tenant for `ruleSet` with
         `from <= loggedAt < to`, newest first, keyset-paged by log time and decision id; follow
         `nextCursor` until it is null. The cursor is signed for the tenant, the rule set and the period:
@@ -674,11 +683,20 @@ paths:
       parameters:
         - name: ruleSet
           in: query
-          required: true
-          description: The rule set name. Missing is `400 QUERY_INVALID`.
+          required: false
+          description: The rule set name. Required unless `correlationId` is given; then it narrows the search to that rule set.
           schema:
             type: string
             pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+        - name: correlationId
+          in: query
+          required: false
+          description: |
+            The host's case reference, 1 to 128 characters of `A-Z a-z 0-9 . _ : -`; empty or any other
+            character is `400 QUERY_INVALID`. The cursor is bound to it.
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9._:-]{1,128}$'
         - name: from
           in: query
           required: true
@@ -972,6 +990,90 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /decisions/{ruleSet}:evaluate-batch:
+    post:
+      tags: [decisions]
+      operationId: evaluateBatch
+      summary: Evaluate up to 1,000 items of one rule set and log one decision per item
+      description: |
+        Permission `rules:evaluate`; a request that sets `clock` also needs `rules:simulate`, otherwise
+        `403 CLOCK_NOT_ALLOWED`. One version is selected for the whole batch, at the request clock. The items are
+        evaluated in order and every evaluated item is a logged decision with its own `decisionId`; an item that
+        fails does not stop the others. The rows commit together in the request's transaction: all or none. The
+        answer is `200` whenever the batch was accepted, with one entry per item in order: a `decision`, or a
+        `problem` for an item that failed (`INPUT_INVALID`, `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`). An item
+        whose input fails validation is not a decision and writes no row, as on `:evaluate`. Results never echo
+        inputs.
+
+        Bounds: at least 1 and at most `evaluation.max-batch` items (default and ceiling 1,000), otherwise
+        `400 INPUT_INVALID` for none and `422 BATCH_TOO_LARGE` for too many; a body over 4,194,304 bytes is
+        `413 PAYLOAD_TOO_LARGE`, refused before it is read when `Content-Length` declares it. The step budget is per
+        item. The regular expression budget `evaluation.regex-max-reads-per-request` is shared by the batch: the item
+        that spends it fails with `REGEX_TIMEOUT`, and every later item is reported failed and not evaluated, with
+        no row. A `tenantId` in the body is ignored. With `Idempotency-Key`, a repeat returns the same body, decision
+        ids included, and writes nothing; the same key with a changed item is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+        The correlation id of an item is part of neither the idempotent request nor the response.
+      parameters:
+        - name: ruleSet
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+            example:
+              items:
+                - { inputs: { tier: GOLD, txCount: 5 }, correlationId: eod-2027-01-31-0000 }
+                - { inputs: { tier: SILVER, txCount: four }, correlationId: eod-2027-01-31-0001 }
+      responses:
+        '200':
+          description: One entry per item, in the order sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+              example:
+                ruleSet: card-fee
+                version: 1
+                evalClock: '2027-01-31T22:00:00Z'
+                succeeded: 1
+                failed: 1
+                results:
+                  - index: 0
+                    decision:
+                      decisionId: 01KF8ZQ3M5T7V9X1B3D5F7H9K2
+                      ruleSet: card-fee
+                      version: 1
+                      evalClock: '2027-01-31T22:00:00Z'
+                      evaluatedAt: '2027-01-31T22:00:00Z'
+                      clockChosen: false
+                      pinned: false
+                      outcome: MATCHED
+                      matchedRuleIds: [R1]
+                      outputs:
+                        fee: { currency: VND, amount: 0 }
+                  - index: 1
+                    problem:
+                      type: https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#input_invalid
+                      title: Bad Request
+                      status: 400
+                      code: INPUT_INVALID
+                      detail: Input txCount must be an integer
+                      correlationId: 01KF8ZQ3M5T7V9X1B3D5F7H9K3
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}/versions/{version}:evaluate:
     post:
       tags: [decisions]
@@ -1176,6 +1278,47 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '429': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /decisions:find-by-input:
+    post:
+      tags: [decisions]
+      operationId: findDecisionsByInput
+      summary: Find the decisions whose plain input had an exact value
+      description: |
+        Permission `rules:log:read`. Returns the decisions of `ruleSet` between `from` (inclusive) and `to`
+        (exclusive) whose input `input`, stored in plain text, held exactly `value`, newest first, keyset-paged as
+        `GET /decisions`. The value travels in the body, never in a URL. Values compare by canonical form: money by
+        currency and minor units, a number by exact value (`30000` equals `30000.00`), a string by code point, with
+        no case folding or trimming. The input must be declared by a version of the rule set and `value` must have
+        its type, otherwise `400 QUERY_INVALID` naming `input` or `value`.
+
+        An input that is masked, by `mask: true` or by the tenant's `decision-log.mask-default`, is refused with
+        `400 QUERY_INVALID` pointing to `POST /decisions:find-by-masked-input` (permission `rules:masked:search`),
+        never answered with no rows, so this search cannot be used to test a masked value. The period is at most
+        31 days. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`. Writes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InputSearch'
+            example:
+              ruleSet: loan-pricing
+              input: productCode
+              value: HOME-30Y
+              from: '2027-01-01T00:00:00Z'
+              to: '2027-02-01T00:00:00Z'
+      responses:
+        '200':
+          description: One page of decisions, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionLogPage'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
@@ -1463,7 +1606,7 @@ components:
             $ref: '#/components/schemas/DecisionLogEntry'
         nextCursor:
           type: [string, 'null']
-          description: Pass as `cursor`, with the same `ruleSet`, `from` and `to`, for the next page; null on the last page
+          description: Pass as `cursor`, with the same search and period, for the next page; null on the last page
         hasNext:
           type: boolean
           description: True when `nextCursor` is set
@@ -2042,6 +2185,67 @@ components:
             True when the caller named the version (`rules:pin`) instead of the engine selecting the
             version in force. Set by the engine on the decision row; never read from a request.
         durationMicros: { type: integer, format: int64 }
+    BatchRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          description: 1 to `evaluation.max-batch` items (default and ceiling 1,000)
+          items:
+            type: object
+            required: [inputs]
+            properties:
+              inputs:
+                type: object
+                description: Input values by name; money as `Money`
+                additionalProperties: true
+              correlationId:
+                type: string
+                pattern: '^[A-Za-z0-9._:-]{1,128}$'
+                description: The host's case reference, written to this item's decision row; another form is a failed item
+        clock:
+          type: string
+          format: date-time
+          description: As on `:evaluate`; needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`)
+    BatchResponse:
+      type: object
+      required: [ruleSet, version, evalClock, succeeded, failed, results]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, description: The one version every item was evaluated with }
+        evalClock: { type: string, format: date-time, description: The one clock every decision reasoned about }
+        succeeded: { type: integer, description: Items that produced a decision that is not a failure }
+        failed: { type: integer, description: Items that failed, including items not evaluated }
+        results:
+          type: array
+          description: One entry per item, in the order sent
+          items:
+            type: object
+            required: [index]
+            properties:
+              index: { type: integer, minimum: 0 }
+              decision: { $ref: '#/components/schemas/DecisionResult' }
+              problem:
+                $ref: '#/components/schemas/Problem'
+            oneOf:
+              - required: [decision]
+              - required: [problem]
+    InputSearch:
+      type: object
+      additionalProperties: false
+      required: [ruleSet, input, value, from, to]
+      properties:
+        ruleSet: { type: string }
+        input: { type: string, description: The input's name; declared by a version of the rule set and not masked }
+        value:
+          description: The exact value, of the type the input declares; a string, number, boolean or `Money`. A date is `YYYY-MM-DD` and a datetime ISO 8601
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        limit: { type: integer, minimum: 1, maximum: 200, default: 200 }
+        cursor: { type: string, description: The `nextCursor` of the previous page, with the same search }
     MaskedInputSearch:
       type: object
       additionalProperties: false
@@ -2080,7 +2284,7 @@ components:
             IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
-            WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN]
+            WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN, BATCH_TOO_LARGE]
         detail: { type: string }
         correlationId: { type: string }
         violations:
