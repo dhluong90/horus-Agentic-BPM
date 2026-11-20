@@ -22,7 +22,7 @@ import org.springframework.web.context.request.WebRequest;
 import tools.jackson.databind.node.ObjectNode;
 
 /** RFC 9457 problem details for Process Engine endpoints, with the engine error code in {@code code}. */
-@RestControllerAdvice(assignableTypes = ProcessController.class)
+@RestControllerAdvice(assignableTypes = {ProcessController.class, AgentReplayController.class})
 public class ProcessProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProcessProblemDetails.class.getName());
@@ -47,6 +47,9 @@ public class ProcessProblemDetails {
             Map.entry("INSTANCE_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("ASYNC_STEP_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("TASK_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("REPLAY_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("RULE_SET_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("REPLAY_TOO_LARGE", UNPROCESSABLE),
             Map.entry("VERSION_SUPERSEDED", HttpStatus.CONFLICT),
             Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
@@ -92,6 +95,8 @@ public class ProcessProblemDetails {
             case io.github.dhluong90.bpm.process.api.GuardrailContractInvalidException g ->
                     body.set("problems", Views.problems(g.problems()));
             case StepFailedException s -> body.put("nodeId", s.nodeId()).put("reason", s.reason());
+            case io.github.dhluong90.bpm.process.api.ReplayTooLargeException r ->
+                    body.put("cases", r.cases()).put("limit", r.limit());
             case io.github.dhluong90.bpm.process.api.FormValidationException f -> {
                 tools.jackson.databind.node.ArrayNode violations = body.putArray("violations");
                 f.violations().forEach(violations::add);

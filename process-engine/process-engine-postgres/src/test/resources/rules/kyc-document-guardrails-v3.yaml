@@ -1,0 +1,30 @@
+# Guardrails on the KYC document assessor's answer (#98). An expired document or a low-confidence reading goes to a
+# KYC reviewer. Version 3 refuses a confidence below 0.85 (R5).
+schemaVersion: 1
+ruleSet: kyc-document-guardrails
+description: Guardrails on the KYC document assessment
+hitPolicy: first
+
+inputs:
+  - { name: documentType, type: string }
+  - { name: confidence,   type: decimal }
+  - { name: expiryDate,   type: date }
+  - { name: summary,      type: string }
+
+outputs:
+  - { name: allow,   type: boolean }
+  - { name: reasons, type: string }
+
+rules:
+  - id: R1                  # the assessor could not read the document
+    when: { documentType: "== 'UNKNOWN'" }
+    then: { allow: "false", reasons: "'DOCUMENT_UNREADABLE'" }
+  - id: R2                  # expired on the day of the check
+    when: { expiryDate: "< today()" }
+    then: { allow: "false", reasons: "'DOCUMENT_EXPIRED'" }
+  - id: R5
+    when: { confidence: "< 0.85" }
+    then: { allow: "false", reasons: "'LOW_CONFIDENCE'" }
+  - id: R9
+    when: {}
+    then: { allow: "true", reasons: "''" }

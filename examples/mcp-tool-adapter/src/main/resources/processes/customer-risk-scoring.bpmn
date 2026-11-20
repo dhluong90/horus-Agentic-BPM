@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Customer risk scoring (#99): an agent step asks the bank's risk service, exposed as an MCP tool, for a customer's
+     risk band. The process names the adapter and the one tool it may call; the host's configuration says where the
+     server is. The answer must meet the output schema, and the guardrail sends band D to a risk reviewer. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_customer-risk-scoring"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="customer-risk-scoring" name="Customer risk scoring" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:serviceTask id="score-customer" name="Score the customer" horus:type="agentTask"
+                      horus:agent="mcp-risk" horus:timeout="PT1S" horus:resultVariable="risk">
+      <bpmn:extensionElements>
+        <horus:input name="tool" value="lookup_customer_risk"/>
+        <horus:input name="customerId" value="${instance.customerId}"/>
+        <horus:outputSchema>{
+          "type": "object",
+          "required": ["riskBand", "score"],
+          "additionalProperties": false,
+          "properties": {
+            "riskBand": {"type": "string", "enum": ["A", "B", "C", "D"]},
+            "score": {"type": "integer", "minimum": 0, "maximum": 100}
+          }
+        }</horus:outputSchema>
+        <horus:guardrail decision="customer-risk-guardrails" onViolation="route-to-human" reviewer="role:RISK_REVIEWER"/>
+        <horus:retry max="2" backoff="PT1S"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="decide" name="Decide the application" horus:assignee="role:CREDIT_OFFICER" horus:resultVariable="decision"/>
+    <bpmn:endEvent id="end" name="Decided"/>
+    <bpmn:sequenceFlow id="start__score" sourceRef="start" targetRef="score-customer"/>
+    <bpmn:sequenceFlow id="score__decide" sourceRef="score-customer" targetRef="decide"/>
+    <bpmn:sequenceFlow id="decide__end" sourceRef="decide" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -82,4 +82,44 @@ public interface TenantScopedRuleEngine {
      * @throws NoEffectiveVersionException when no published version is effective ({@code NO_EFFECTIVE_VERSION})
      */
     RuleSetSignature signature(String tenantId, String ruleSet, java.time.Instant at);
+
+    /**
+     * Describes a stored version of a rule set by number, in any status (normally a draft or a version pending
+     * approval): its hit policy and declared inputs and outputs, never its rules. Reads only. Used by the calling
+     * engine to check that a candidate guardrail meets its contract before it replays recorded work against it.
+     *
+     * @param tenantId the tenant, resolved by the calling engine from the authenticated context; not blank
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @return the signature of that version
+     * @throws IllegalArgumentException when the tenant is blank
+     * @throws io.github.dhluong90.bpm.rules.api.VersionNotFoundException when the tenant has no such version
+     *     ({@code VERSION_NOT_FOUND}), the same answer whether or not the rule set exists in another tenant
+     * @throws UnsupportedOperationException from an implementation written before this method existed
+     */
+    default RuleSetSignature signature(String tenantId, String ruleSet, int version) {
+        throw new UnsupportedOperationException("signature of a stored version is not supported by "
+                + getClass().getName());
+    }
+
+    /**
+     * Runs a stored version of a rule set, in any status, over recorded cases, each at its own evaluation time, in the
+     * given tenant (the simulation path, RLE-015). Writes nothing: no decision row, idempotency record or event. A case
+     * the version cannot evaluate (a wrong input type, an undeclared input the engine refuses, a regular expression
+     * over its budget) is a {@link DecisionResult.Failed} outcome at its position; the other cases still run.
+     *
+     * @param tenantId the tenant, resolved by the calling engine from the authenticated context; not blank
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param cases the cases, at most {@code simulation.max-inputs}
+     * @return one outcome per case, in order
+     * @throws IllegalArgumentException when the tenant is blank, or there are no cases or too many
+     * @throws io.github.dhluong90.bpm.rules.api.VersionNotFoundException when the tenant has no such version
+     * @throws io.github.dhluong90.bpm.rules.api.ValidationFailedException when the stored version does not compile
+     * @throws UnsupportedOperationException from an implementation written before this method existed
+     */
+    default java.util.List<DecisionResult.Outcome> simulate(String tenantId, String ruleSet, int version,
+            java.util.List<TimedInput> cases) {
+        throw new UnsupportedOperationException("simulate is not supported by " + getClass().getName());
+    }
 }

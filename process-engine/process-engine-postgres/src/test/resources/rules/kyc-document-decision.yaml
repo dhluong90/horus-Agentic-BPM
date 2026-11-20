@@ -1,0 +1,19 @@
+# A candidate that breaks the guardrail contract (#98, PRE-094 c): it answers a decision string and has no allow.
+schemaVersion: 1
+ruleSet: kyc-document-decision
+description: Decision on the KYC document assessment
+hitPolicy: first
+
+inputs:
+  - { name: confidence, type: decimal }
+
+outputs:
+  - { name: decision, type: string }
+
+rules:
+  - id: D1
+    when: { confidence: "< 0.85" }
+    then: { decision: "'REFER'" }
+  - id: D2
+    when: {}
+    then: { decision: "'ACCEPT'" }

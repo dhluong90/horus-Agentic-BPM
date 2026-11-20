@@ -1296,6 +1296,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     // ---- jobs ---------------------------------------------------------------------------------------------
 
     /**
+     * The decision port this engine evaluates through, for the offline replay of agent answers (#98), which must use
+     * the same port: the starter's port claims the Rule Engine's tenant-scoped entry point once.
+     *
+     * @return the decision port, empty without a Rule Engine
+     */
+    public java.util.Optional<DecisionPort> decisionPort() {
+        return invoker.decisionPort();
+    }
+
+    /**
      * The job handlers of this engine, by job kind, for the {@link JobExecutor} of each replica.
      *
      * @return the handlers

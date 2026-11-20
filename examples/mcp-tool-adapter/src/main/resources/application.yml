@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: mcp-tool-adapter
+  datasource:
+    # Credentials come from the environment only; see README.md.
+    url: ${HORUS_DB_URL:jdbc:postgresql://localhost:5432/horus}
+    username: ${HORUS_DB_USERNAME:horus}
+    password: ${HORUS_DB_PASSWORD:}
+
+# The MCP server behind the agent adapter mcp-risk. The address and the token are host configuration: a process
+# definition names the adapter and the tool, never where the server is or how to sign in to it.
+example:
+  mcp:
+    name: mcp-risk
+    url: ${MCP_SERVER_URL:http://localhost:8931/mcp}
+    bearer-token: ${MCP_BEARER_TOKEN:}
+    allowed-tools: [lookup_customer_risk]
+    tenant-header: X-Tenant-Id
+
+horus:
+  bpm:
+    host-id: mcp-tool-adapter
+    processes:
+      security:
+        role-permissions:
+          ROLE_PROCESS_DEPLOYER: [processes:deploy, processes:read]
+          ROLE_PROCESS_APPROVER: [processes:approve, processes:read]
+          ROLE_RELATIONSHIP_MANAGER: [processes:start, processes:read]
+          ROLE_RISK_REVIEWER: [processes:read, processes:task:work]

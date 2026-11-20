@@ -18,6 +18,7 @@ import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
 import io.github.dhluong90.bpm.process.internal.service.DecisionPort;
 import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
+import io.github.dhluong90.bpm.process.internal.service.AgentReplays;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
 import io.github.dhluong90.bpm.process.internal.service.AsyncSettings;
 import io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor;
@@ -34,10 +35,12 @@ import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
 import io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService;
 import io.github.dhluong90.bpm.process.internal.service.ProcessQueries;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
+import io.github.dhluong90.bpm.process.postgres.JdbcAgentReplayStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineSchemaMigrator;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineTransactions;
+import io.github.dhluong90.bpm.process.rest.AgentReplayController;
 import io.github.dhluong90.bpm.process.rest.ProcessController;
 import io.github.dhluong90.bpm.process.rest.ProcessProblemDetails;
 import io.github.dhluong90.bpm.process.spi.CallerResolver;
@@ -93,7 +96,7 @@ public class ProcessEngineAutoConfiguration {
     static final String DEV_PROFILE = "dev";
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
             "processes:approve", "processes:start", "processes:cancel", "processes:task:work",
-            "processes:step:complete");
+            "processes:step:complete", "processes:agent:replay");
     /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
     static final String REMOVED_AUTO_APPROVE = "horus.bpm.processes.definitions-auto-approve";
     private static final Log LOG = LogFactory.getLog(ProcessEngineAutoConfiguration.class);
@@ -236,10 +239,12 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnMissingBean
     @ConditionalOnProperty(prefix = "horus.bpm.processes.jobs", name = "enabled", havingValue = "true",
             matchIfMissing = true)
-    ProcessJobPoller processEngineJobPoller(JobExecutor executor, AsyncStepExecutor async,
+    ProcessJobPoller processEngineJobPoller(JobExecutor executor, AsyncStepExecutor async, AgentReplays replays,
             ProcessEngineProperties properties) {
-        // One poll runs the timers and starts the async attempts there are free adapter slots for.
-        return new ProcessJobPoller(() -> executor.pollOnce() + async.pollOnce(), executor.replicaId(),
+        // One poll runs the timers, starts the async attempts there are free adapter slots for, and replays one page
+        // of an offline agent replay (#98).
+        return new ProcessJobPoller(() -> executor.pollOnce() + async.pollOnce() + replays.pollOnce(),
+                executor.replicaId(),
                 properties.jobs().pollInterval(), Clock.systemUTC());
     }
 
@@ -404,6 +409,28 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    JdbcAgentReplayStore processEngineAgentReplayStore(DataSource dataSource) {
+        return new JdbcAgentReplayStore(dataSource);
+    }
+
+    /**
+     * Offline replay of recorded agent answers against a candidate guardrail or output schema (#98): through the
+     * engine's own decision port, whose simulation writes nothing, and the result check's schema validator. Calls no
+     * adapter.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    AgentReplays processEngineAgentReplays(ObjectProvider<TenantResolver> tenants,
+            ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
+            JdbcAgentReplayStore store, ProcessServices services, OutputSchemaValidator outputSchemas,
+            ProcessEngineProperties properties) {
+        return new AgentReplays(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
+                clock.getIfUnique(Clock::systemUTC), transactions, store, services.decisionPort(), outputSchemas,
+                properties.replay().toSettings(), properties.query().maxRange());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     LiveNodeCountService processEngineLiveNodeCounts(ObjectProvider<TenantResolver> tenants,
             ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
             JdbcProcessStore store, ProcessEngineProperties properties) {
@@ -467,6 +494,12 @@ public class ProcessEngineAutoConfiguration {
         ProcessController processEngineController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
                 ProcessQueryService queries, ProcessEngineProperties properties) {
             return new ProcessController(definitions, engine, tasks, queries, properties.definitions().maxBytes());
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        AgentReplayController processEngineAgentReplayController(AgentReplays replays) {
+            return new AgentReplayController(replays);
         }
 
         @Bean
