@@ -256,6 +256,7 @@ public final class EngineValues {
         node.set("approvedAt", value(version.approvedAt()));
         node.set("createdBy", value(version.createdBy()));
         node.put("createdAt", version.createdAt().toString());
+        node.set("retiredAt", value(version.retiredAt()));
         node.set("definition", read(version.canonicalDocument()));
         return node;
     }
@@ -285,7 +286,8 @@ public final class EngineValues {
                 text(node.get("approvedBy")),
                 instant(node.get("approvedAt")),
                 text(node.get("createdBy")),
-                Instant.parse(node.get("createdAt").stringValue()));
+                Instant.parse(node.get("createdAt").stringValue()),
+                instant(node.get("retiredAt")));
     }
 
     /**

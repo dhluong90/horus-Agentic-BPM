@@ -54,6 +54,8 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  4       | V4__rle_version_history_append_only.sql
 #  5       | V5__rle_engine_key.sql
 #  6       | V6__rle_version_history_draft_updated.sql
+#  10      | V10__rle_decision_pinned.sql
+#  11      | V11__rle_version_retired_at.sql
 ```
 
 ### The cursor key
@@ -362,6 +364,80 @@ By hand, a second request with the same `Idempotency-Key` that arrives while the
 ```
 
 Wait one second and send the same request again: once the first has finished, the answer is its `201` and body, and only one version exists.
+
+## Demo: retire a version by hand and by supersession
+
+[`rules/tet-fee-waiver.yaml`](src/main/resources/rules/tet-fee-waiver.yaml) waives the card fee during the Tet promotion. Minh, who holds `rules:approve`, ends the promotion by retiring the version with a reason. From that instant no replica serves it. Start the host on the `dev` profile as in the demo above, then:
+
+1. Hoa imports and requests the waiver, and Minh approves it. Tuan's card transaction is waived, and the version offers `retire` to Minh:
+
+   ```bash
+   curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
+     --data-binary @examples/rule-engine-only/src/main/resources/rules/tet-fee-waiver.yaml
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:request-publish
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:approve -H 'If-Match: "1"'
+   # 200 {"version":1,"status":"PUBLISHED","lockVersion":2,...}
+   curl -s -u tuan:demo-only -X POST $H/decisions/tet-fee-waiver:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"channel":"CARD"}}'
+   # 200 {...,"version":1,"matchedRuleIds":["R1"],"outputs":{"waiveFee":true}}
+   curl -s -u minh:demo-only $H/rule-sets/tet-fee-waiver/versions/1
+   # ETag: "2"   {"status":"PUBLISHED","allowedActions":["retire"],...}
+   ```
+
+2. Minh retires it. `If-Match` and `Idempotency-Key` are required, and so is a reason:
+
+   ```bash
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -d '{"reason":"Tet promotion ended"}'
+   # 428 {"code":"PRECONDITION_REQUIRED",...}
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -H 'If-Match: "2"' -d '{"reason":"Tet promotion ended"}'
+   # 409 {"code":"LAST_VERSION_IN_EFFECT","ruleSet":"tet-fee-waiver","version":1,"setting":"confirm","nextEffectiveFrom":null,
+   #      "detail":"tet-fee-waiver v1 is the last version in effect of rule set tet-fee-waiver; ...",...}
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:retire -H 'Content-Type: application/json' \
+     -H 'Idempotency-Key: demo-retire-1' -H 'If-Match: "2"' -d '{"reason":"Tet promotion ended","confirmNoVersionInEffect":true}'
+   # 200 {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T19:31:55.928264Z",...}
+   ```
+
+   The waiver is the only version in effect, so retiring it leaves none: the first call is refused until Minh confirms it (PD-101).
+
+   An empty reason is `400 INPUT_INVALID`. A caller with `rules:author` only is `403 PERMISSION_DENIED`, before the headers are read. A stale `If-Match` is `409 VERSION_CONFLICT`.
+
+3. It stops serving at once, and the history and the event record the actor, the reason and the mode:
+
+   ```bash
+   curl -s -u tuan:demo-only -X POST $H/decisions/tet-fee-waiver:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"channel":"CARD"}}'
+   # 404 {"code":"NO_EFFECTIVE_VERSION",...}
+   curl -s -u minh:demo-only $H/rule-sets/tet-fee-waiver/versions/1/history
+   # {"data":[...,{"action":"RETIRED","fromStatus":"PUBLISHED","toStatus":"RETIRED","actor":"minh",
+   #   "reason":"Tet promotion ended","supersededBy":null,"approvalMode":"single","noVersionInEffect":true,"lockVersion":3,...}]}
+   docker exec horus-pg psql -U horus -d horus -tAc "SELECT payload->>'retiredBy', payload->>'reason', \
+     payload->>'approvalMode', payload->>'noVersionInEffect' FROM rle_decision_outbox \
+     WHERE payload->>'eventType' = 'rules.version.retired.v1'"
+   # minh|Tet promotion ended|single|true
+   ```
+
+4. A newer version in effect at its approval retires the older one in the same transaction. Import [`rules/card-fee.yaml`](src/main/resources/rules/card-fee.yaml) twice, as v1 and v2, and approve both:
+
+   ```bash
+   curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1
+   # {"version":1,"status":"RETIRED","retiredAt":"2026-11-19T19:32:01.858780Z",...}
+   curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1/history
+   # {"data":[...,{"action":"RETIRED","actor":"system:supersession","reason":"SUPERSEDED","supersededBy":2,"approvalMode":"system",...}]}
+   ```
+
+   A version scheduled for a later date retires its predecessor when the date comes, through the lifecycle sweep (`horus.bpm.rules.lifecycle.sweep-interval`, one minute by default). Evaluation switches at the date itself, without waiting for the sweep.
+
+5. The host shows the retirement mode in force:
+
+   ```bash
+   curl -s -u minh:demo-only localhost:8080/api/bpm/meta
+   # {...,"modules":[{"module":"rules",...,"settings":{"authoring.cockpit-drafts":true,"lifecycle.retire-approval":"single",
+   #   "lifecycle.retire-last-version":"confirm"}}],...}
+   ```
+
+The same steps run as `RetireVersionIT` against a Testcontainers database on every build.
 
 ## Demo: import a DMN decision table
 

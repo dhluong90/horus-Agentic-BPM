@@ -278,14 +278,15 @@ class EffectiveDatesAndReplayIT {
                   - { id: R1, when: { txDate: "== today()" }, then: { sameDay: true } }
                 """;
         clock.set(Instant.parse("2027-01-10T00:00:00Z"));
-        publish(t, "same-day-cutoff", cutoff.formatted("timeZone: Asia/Ho_Chi_Minh").getBytes(StandardCharsets.UTF_8),
-                1, Instant.parse("2027-01-10T00:00:00Z"));
-        publish(t, "same-day-cutoff", cutoff.formatted("").getBytes(StandardCharsets.UTF_8),
-                2, Instant.parse("2027-01-10T00:00:01Z"));
         byte[] request = body("{\"inputs\":{\"txDate\":\"2027-01-16\"},\"clock\":\"2027-01-15T18:30:00Z\"}");
 
-        // When both are evaluated with txDate 2027-01-16 at 01:30 on 16 January in Ho Chi Minh City
+        // When each is evaluated with txDate 2027-01-16 at 01:30 on 16 January in Ho Chi Minh City, while it is the
+        // version in force (v2's approval retires v1, and a retired version is not pinned by default)
+        publish(t, "same-day-cutoff", cutoff.formatted("timeZone: Asia/Ho_Chi_Minh").getBytes(StandardCharsets.UTF_8),
+                1, Instant.parse("2027-01-10T00:00:00Z"));
         Reply v1 = send(t, "pricing", "/decisions/same-day-cutoff/versions/1:evaluate", request, "application/json");
+        publish(t, "same-day-cutoff", cutoff.formatted("").getBytes(StandardCharsets.UTF_8),
+                2, Instant.parse("2027-01-10T00:00:01Z"));
         Reply v2 = send(t, "pricing", "/decisions/same-day-cutoff/versions/2:evaluate", request, "application/json");
 
         // Then v1 matches R1 and v2 does not; replaying either gives the same

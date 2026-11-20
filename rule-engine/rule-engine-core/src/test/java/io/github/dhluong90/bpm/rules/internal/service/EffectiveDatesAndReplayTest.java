@@ -430,15 +430,17 @@ class EffectiveDatesAndReplayTest {
 
     @Test
     void RLE_022_today_uses_rule_set_time_zone() {
-        // Given same-day-cutoff v1 in Asia/Ho_Chi_Minh and v2 without a time zone (UTC)
-        publish("same-day-cutoff", sameDayCutoff("Asia/Ho_Chi_Minh"), Instant.parse("2027-01-10T00:00:00Z"));
-        publish("same-day-cutoff", sameDayCutoff(null), Instant.parse("2027-01-10T00:00:01Z"));
-        caller.become("bank-a", "pricing", PRICING);
+        // Given same-day-cutoff v1 in Asia/Ho_Chi_Minh and v2 without a time zone (UTC), each evaluated while it is
+        // the version in force (v2's approval retires v1, and a retired version is not pinned by default)
         Instant clockAt = Instant.parse("2027-01-15T18:30:00Z"); // 01:30 on 16 January in Ho Chi Minh City
         DecisionInput tx = DecisionInput.of(Map.of("txDate", LocalDate.of(2027, 1, 16)));
 
         // When both are evaluated with txDate 2027-01-16 at that clock
+        publish("same-day-cutoff", sameDayCutoff("Asia/Ho_Chi_Minh"), Instant.parse("2027-01-10T00:00:00Z"));
+        caller.become("bank-a", "pricing", PRICING);
         DecisionResult v1 = engine.evaluate(DecisionRequest.of("same-day-cutoff", tx).withVersion(1).withClock(clockAt));
+        publish("same-day-cutoff", sameDayCutoff(null), Instant.parse("2027-01-10T00:00:01Z"));
+        caller.become("bank-a", "pricing", PRICING);
         DecisionResult v2 = engine.evaluate(DecisionRequest.of("same-day-cutoff", tx).withVersion(2).withClock(clockAt));
 
         // Then v1 matches R1 (today() is 16 January there) and v2 does not (15 January in UTC)

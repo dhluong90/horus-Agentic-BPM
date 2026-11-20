@@ -66,6 +66,39 @@ class RuleEngineModuleDescriptorTest {
     }
 
     @Test
+    void RLE_026_the_shared_last_version_setting_is_published_and_four_eyes_is_refused_until_it_ships() {
+        // PD-101: one host property for both engines, shown in the rules settings
+        runner.withPropertyValues("horus.bpm.lifecycle.retire-last-version=refuse")
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                        .containsEntry("lifecycle.retire-last-version", "refuse"));
+        runner.withPropertyValues("horus.bpm.lifecycle.retire-last-version=four-eyes")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.lifecycle.retire-last-version")
+                        .hasMessageContaining("four-eyes is not built in this release"));
+        runner.withPropertyValues("horus.bpm.lifecycle.retire-last-version=sometimes")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.lifecycle.retire-last-version")
+                        .hasMessageContaining("must be confirm (default)"));
+    }
+
+    @Test
+    void RLE_026_the_retirement_mode_is_published_and_four_eyes_is_refused_until_it_ships() {
+        // PD-080: the mode in force is always in /api/bpm/meta, after the draft-editing setting
+        runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                .containsExactly(Map.entry("authoring.cockpit-drafts", false),
+                        Map.entry("lifecycle.approver-must-differ-from", "makers"),
+                        Map.entry("lifecycle.retire-approval", "single"),
+                        Map.entry("lifecycle.retire-last-version", "confirm")));
+        runner.withPropertyValues("horus.bpm.lifecycle.retire-approval=single")
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                        .containsEntry("lifecycle.retire-approval", "single"));
+        runner.withPropertyValues("horus.bpm.lifecycle.retire-approval=four-eyes")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.lifecycle.retire-approval")
+                        .hasMessageContaining("four-eyes arrives in M3"));
+    }
+
+    @Test
     void RLE_019_role_mapping_property_keeps_host_role_names_as_written() {
         runner.withPropertyValues(
                         "horus.bpm.rules.security.role-permissions.ROLE_PRICING_APPROVER=rules:approve",
@@ -113,7 +146,7 @@ class RuleEngineModuleDescriptorTest {
     static class HostDescriptor {
         @Bean
         ModuleDescriptor ruleEngineModuleDescriptor() {
-            return RuleEngineModule.descriptor(Map.of(), false);
+            return RuleEngineModule.descriptor(Map.of(), false, "single", "confirm");
         }
     }
 
