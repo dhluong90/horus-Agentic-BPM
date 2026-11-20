@@ -5,9 +5,9 @@ info:
   description: |
     REST API of the Process Engine, served by the host application under `/api/bpm/processes/v1`.
     Preview in 0.1.0: this file covers the endpoints of the walking skeleton (import a BPMN document, start an
-    instance, read it, complete a user task). Outside the `dev` profile an imported definition stays `DRAFT` and
-    nothing in this release can activate it; the approval flow and the remaining endpoints of
-    process-engine/docs/DESIGN.md section 6.2 follow with the features that implement them.
+    instance, read it, complete a user task) and the live token counts per node. Outside the `dev` profile an
+    imported definition stays `DRAFT` and nothing in this release can activate it; the approval flow and the
+    remaining endpoints of process-engine/docs/DESIGN.md section 6.2 follow with the features that implement them.
 
     The tenant is never part of a request: it comes from the host's authenticated context (`EngineAccess`). Money is
     `{currency, amount}` with the amount in minor units. Errors are RFC 9457 `application/problem+json`; clients
@@ -66,6 +66,57 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}/node-stats:
+    get:
+      tags: [definitions]
+      operationId: getNodeStats
+      summary: Live tokens per node of one definition version
+      description: |
+        Counts the live tokens (`ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER`, `WAITING_EVENT`) at each
+        node of the version, in the caller's tenant only, from the live token index and never from history
+        (PRE-028). A node without live tokens is absent. Each replica caches an answer for `stats.live-cache-ttl`
+        (5 seconds), or `stats.live-cache-ttl-large` (15 seconds) when the version had more than
+        `stats.live-cache-large-threshold` (100,000) live tokens; a cached answer keeps its `asOf`. A version that
+        does not exist in the caller's tenant is `404 DEFINITION_NOT_FOUND`, also when it exists in another tenant.
+        Only `mode=live` in this release; the window mode follows with the hourly rollup. Open incidents per node
+        follow with the incident table. Permission `processes:read`.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: mode
+          in: query
+          required: false
+          description: Any other value is `400 INPUT_INVALID`
+          schema: { type: string, enum: [live], default: live }
+      responses:
+        '200':
+          description: The live counts
+          headers:
+            ETag:
+              description: The `asOf` time in epoch milliseconds, quoted; unchanged while the answer is cached
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeCounts' }
+              example:
+                definitionKey: kyc-onboarding
+                version: 2
+                mode: live
+                asOf: '2026-11-20T09:30:00Z'
+                nodes:
+                  approve: { WAITING_USER: 40 }
+                  assess-documents: { WAITING_ASYNC: 7 }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /instances:
     post:
@@ -207,7 +258,8 @@ components:
         RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `401 UNAUTHENTICATED`
         carries a `WWW-Authenticate` challenge. `403` is `PERMISSION_DENIED` (missing engine permission),
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
-        the caller's, or a decision step whose caller tenant is not the instance tenant). `409` is
+        the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
+        `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND` or `TASK_NOT_FOUND`. `409` is
         `VERSION_CONFLICT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
         `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH` or `STEP_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
@@ -303,6 +355,20 @@ components:
         startedBy: { type: [string, 'null'] }
         startedAt: { type: string, format: date-time }
         endedAt: { type: [string, 'null'], format: date-time }
+    NodeCounts:
+      type: object
+      required: [definitionKey, version, mode, asOf, nodes]
+      properties:
+        definitionKey: { type: string }
+        version: { type: integer, minimum: 1 }
+        mode: { type: string, enum: [live] }
+        asOf: { type: string, format: date-time, description: When the counts were read }
+        nodes:
+          type: object
+          description: Node id to token status to count
+          additionalProperties:
+            type: object
+            additionalProperties: { type: integer, minimum: 1 }
     DefinitionProblemItem:
       type: object
       required: [code, message]
@@ -322,7 +388,7 @@ components:
         code:
           type: string
           enum: [INPUT_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED, SELF_APPROVAL_FORBIDDEN,
-            TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, INSTANCE_NOT_FOUND, TASK_NOT_FOUND, INVALID_STATE,
+            TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND, TASK_NOT_FOUND, INVALID_STATE,
             VERSION_CONFLICT, IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
             BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, PRECONDITION_REQUIRED,
             DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]

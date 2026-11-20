@@ -17,6 +17,8 @@ import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineSchemaMigrator;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineTransactions;
+import io.github.dhluong90.bpm.process.api.ProcessQueryService;
+import io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService;
 import io.github.dhluong90.bpm.process.rest.ProcessController;
 import io.github.dhluong90.bpm.process.rest.ProcessProblemDetails;
 import io.github.dhluong90.bpm.process.spi.CallerResolver;
@@ -159,6 +161,15 @@ public class ProcessEngineAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(ProcessQueryService.class)
+    ProcessQueryService processQueryService(ObjectProvider<TenantResolver> tenants,
+            ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
+            JdbcProcessStore store, ProcessEngineProperties properties) {
+        return new LiveNodeCountService(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
+                clock.getIfUnique(Clock::systemUTC), transactions, store, properties.stats().toSettings());
+    }
+
+    @Bean
     @ConditionalOnMissingBean(TaskService.class)
     TaskService processTaskService(ProcessServices services) {
         return services;
@@ -203,8 +214,8 @@ public class ProcessEngineAutoConfiguration {
         @Bean
         @ConditionalOnMissingBean
         ProcessController processEngineController(DefinitionService definitions, ProcessEngine engine, TaskService tasks,
-                ProcessEngineProperties properties) {
-            return new ProcessController(definitions, engine, tasks, properties.definitions().maxBytes());
+                ProcessQueryService queries, ProcessEngineProperties properties) {
+            return new ProcessController(definitions, engine, tasks, queries, properties.definitions().maxBytes());
         }
 
         @Bean
