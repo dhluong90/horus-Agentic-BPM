@@ -135,14 +135,14 @@ Definition documents carry `schemaVersion`; old schema versions import forever. 
 
 ## Idempotency-Key semantics
 
-The engine stores `(tenant_id, operation, idempotency_key, request_hash, status, body)` in `rle_idempotency` for 24 hours (`idempotency.retention`).
+Every endpoint that writes accepts `Idempotency-Key`: both imports, `:request-publish`, `:approve`, `:reject` and `:evaluate`. The engine stores `(tenant_id, operation, idempotency_key, request_hash, status, body)` in `rle_idempotency` for 24 hours (`idempotency.retention`). Keys are scoped to the tenant and the operation.
 
 | Situation | Response |
 |---|---|
 | New key | Request executes; status and body stored |
 | Same key, same request hash, finished | The original status and body, for example `201`; no second effect |
 | Same key, different request hash | `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` |
-| Same key, first request still in flight | `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` |
+| Same key, first request still in flight | `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`, at once and without waiting for the first; nothing is done. Retried after the first finishes, the same request gets the first one's status and body |
 | Key older than the retention window | Treated as new |
 
 On `:evaluate` the key is optional. Evaluation is pure, so a retry without a key is safe; it only logs a second decision. With a key, the stored decision is returned and no second row is written (`RLE-014`).
@@ -195,7 +195,8 @@ Every draft response carries `version` in the body and `ETag: "<version>"`. `PUT
 | 422 | `BATCH_TOO_LARGE` | More than 1 000 items | `:evaluate-batch` |
 | 428 | `PRECONDITION_REQUIRED` | A command that must be conditional was sent without `If-Match` | `PUT`, `:approve`, `:reject`, `:withdraw` |
 | 429 | `RATE_LIMITED` | Host rate limiter, if configured; `Retry-After` | all |
-| 500 | `INTERNAL_ERROR` | Unexpected failure; no details beyond `correlationId` | all |
+| 500 | `INTERNAL_ERROR` | Unexpected failure, or an engine code outside this matrix (for example one a host extension raised); no details beyond `correlationId`, which is also in the server log | all |
+| 503 | `SCHEMA_NOT_READY` | `migrate-on-start` is `false` and the schema is not current | lists |
 
 Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ERROR`, so errors are auditable too. Process Engine codes are listed on [[Common Error Codes]].
 
