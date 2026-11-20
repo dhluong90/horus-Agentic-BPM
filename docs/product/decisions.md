@@ -121,6 +121,10 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-098](#pd-098-reference-feel-engine-as-a-test-only-oracle) | Reference FEEL engine as a test-only oracle | Decided (product manager, delegated, PD-073) |
 | [PD-099](#pd-099-inputs-are-not-masked-unless-declared-or-set-by-the-host) | Inputs are not masked unless declared or set by the host | Decided (product manager, delegated, PD-073) |
 | [PD-100](#pd-100-container-images-are-not-on-the-licence-allow-list) | Container images are not on the licence allow-list | Decided (product manager, delegated, PD-073) |
+| [PD-101](#pd-101-retiring-the-last-version-in-effect-needs-an-explicit-confirmation) | Retiring the last version in effect needs an explicit confirmation | Decided (product manager, delegated, PD-073) |
+| [PD-102](#pd-102-process-definitions-follow-the-rule-engines-retirement-rules) | Process definitions follow the Rule Engine's retirement rules | Decided (product manager, delegated, PD-073) |
+| [PD-103](#pd-103-cancelling-a-process-instance-needs-its-own-permission) | Cancelling a process instance needs its own permission | Decided (product manager, delegated, PD-073) |
+| [PD-104](#pd-104-approving-a-version-with-personal-data-warnings-needs-an-acknowledgement) | Approving a version with personal-data warnings needs an acknowledgement | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -3001,3 +3005,121 @@ The versions are the ones resolved in the build, recorded in the build's allow-l
 **Status, 2026-11-20.** Not every test image is pinned yet. On `main` the PostgreSQL test containers use a tag, and so does PgBouncer in #265. The Playwright image of CI and the PostgreSQL image of the Compose file are already pinned by digest. #288 pins the rest.
 
 **Follow-ups.** Documentation: the release notes name the PostgreSQL image of the Compose file and its licence. Maintainers (engineering): pin every test image by digest (#288), and keep new ones pinned.
+
+### PD-101 Retiring the last version in effect needs an explicit confirmation
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | In the default `single` retirement mode (PD-080), may one approver retire the last version in effect and leave a rule set with no version to decide with? |
+| Raised by | Security review of pull request #269 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 3, with a host setting |
+
+**Context.** One approver may retire a live version because the usual reason is to stop a harmful rule quickly (PD-080). When the version is the last one in effect, every evaluation of that rule set fails until a new version is approved. That is a fail-closed outage for the host, not a silent wrong decision.
+
+**"Last version in effect", defined.** A retirement leaves no version in effect when no other approved version is in effect at the instant of the retirement. A version approved with a future effective date does not close the gap. If v1 is in effect and v2 takes effect on 1 December, retiring v1 today leaves no version in effect until then, so the rule applies. The refusal detail names when the next version takes effect, if one is scheduled.
+
+**Options considered**
+
+1. Refuse to retire the last version. Consequence: no outage by mistake, but a harmful rule cannot be stopped until a replacement is approved, which is exactly the emergency single mode exists for.
+2. Require four-eyes in that case only. Consequence: safer, but a second approver must be on call at the moment the rule must stop.
+3. Allow it in `single` mode only with an explicit confirmation (chosen). The request carries `confirmNoVersionInEffect: true` and a reason. Without the confirmation the request is refused with `409 LAST_VERSION_IN_EFFECT`, and the detail names the rule set and what will stop working. The cockpit shows, before the click: "No version of card-fee will be in effect. Evaluations will fail until a new version is approved." The retirement event and the history row record that no version remains in effect.
+
+**Configuration (PD-074).** Setting `lifecycle.retire-last-version`, shared by both engines:
+- `confirm` (the default): option 3.
+- `four-eyes`: option 2.
+- `refuse`: option 1.
+
+The value in force is shown in `/api/bpm/meta`. In the `four-eyes` retirement mode of PD-080, a second approver is needed anyway.
+
+**Until four-eyes retirement ships.** Four-eyes retirement is RE-F-49 (M3, last on the M3 cut list, to 1.1 if cut). Until it ships, a host that sets `four-eyes` in `lifecycle.retire-last-version` or in `lifecycle.retire-approval` fails at start-up with a message that names the setting. A bank cannot set a control that does nothing.
+
+**Recommendation and decision.** Option 3 by default. It keeps the emergency stop, which is the purpose of single mode. It makes the outage a deliberate, recorded choice, not an accident. A bank that prefers to never stop a rule set without a replacement sets `refuse` or `four-eyes`.
+
+**Follow-ups.** Architect: `RLE-026` (a last-version case with and without the confirmation), DESIGN 3.3, the error code and the `/meta` setting. Maintainers (engineering): #269. Cockpit: the warning in the retire dialog.
+
+### PD-102 Process definitions follow the Rule Engine's retirement rules
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | Retiring an active process definition is a one-person action in #264. Should it need four-eyes, or follow the Rule Engine's `single` mode? |
+| Raised by | Security review of pull request #264 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. Follow the Rule Engine: the shared setting `lifecycle.retire-approval` (PD-080), `single` by default and `four-eyes` by setting, together with PD-101 for the last active version (chosen). Consequence: one governance model across both engines. Retiring a definition stops new starts and never stops running instances, which stay on their version. So one person can stop a bad flow quickly without breaking work in progress.
+2. Always four-eyes for process definitions. Consequence: stronger, but different from rule sets, and a second approver is needed exactly when a flawed process must stop taking new cases.
+
+**Rules.**
+- A retirement needs `processes:approve` and a mandatory reason.
+- It writes a history row and an event, both recording the approval mode in force.
+- The `four-eyes` mode works as in the Rule Engine: the requester can never confirm their own retirement, and the version keeps serving until a second approver confirms. Until four-eyes retirement ships for process definitions, setting it fails at start-up, as in PD-101. RE-F-49 is extended to cover both engines.
+- Retiring the last active version of a definition key follows PD-101: in the default `confirm` mode it needs an explicit confirmation, because new starts of that key will fail until a new version is approved.
+
+**Follow-ups.** Architect: process DESIGN 3.2 and a `PRE` statement for retirement, including the last-version case and running instances that stay on their version. Maintainers (engineering): #264.
+
+### PD-103 Cancelling a process instance needs its own permission
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | In #253 cancelling a running process instance needs only `processes:start`. Should cancel have its own permission? |
+| Raised by | Security review of pull request #253 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Options considered**
+
+1. A separate permission, `processes:cancel` (chosen). Consequence: starting a case and stopping someone else's case in flight are different duties. Being able to submit a loan application does not mean being able to cancel any running application. Hosts map the new permission to the roles that may cancel, as they do for every `<module>:<action>` permission (PD-003, X-F-06).
+2. Keep cancel under `processes:start`. Consequence: simpler, but every user who can start a case can stop every case in their tenant.
+
+**Rules.**
+- Cancel needs `processes:cancel` and a mandatory reason, at most 2,000 characters.
+- It writes a history row and an event with the actor and the reason. Open tasks, jobs and timers are cancelled as ADR-0020 says. Whether a cancel also runs compensation is not decided here (PE-F-65, 1.2).
+- `/api/bpm/me` lists the permission, so the cockpit shows Cancel only to users who hold it.
+- `processes:start` no longer grants cancel. Nothing has shipped with the old rule, so there is no migration.
+
+**Configuration.** Through role mapping only. Whether a second person must confirm a cancellation is not decided here. It returns as a decision if a pilot bank asks for it.
+
+**Follow-ups.** Architect: the permission catalogue, the process DESIGN REST row and a `PRE` statement for cancel. Maintainers (engineering): #253, and the `processes:cancel` entry in the module's permission catalogue and in the examples' role mapping.
+
+### PD-104 Approving a version with personal-data warnings needs an acknowledgement
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-20 |
+| Question | A version can carry `UNMASKED_PERSONAL_DATA` warnings (PD-099, mitigation 1): an input looks like personal data and is not masked. The approval screen shows the warning (#312), but the approval record does not say the approver saw and accepted it. Should approval require an explicit acknowledgement? |
+| Raised by | Review of pull request #312 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-20, option 1 |
+
+**Context.** The decision log is append-only. An approval that lets an unmasked personal-data input go live is the moment a bank accepts that risk, and an auditor must be able to see that someone accepted it knowingly.
+
+**Options considered**
+
+1. Require an explicit acknowledgement, recorded with the approval (chosen).
+   - The approve request carries the warning codes the approver accepts, for example `acknowledgedWarnings: ["UNMASKED_PERSONAL_DATA"]`.
+   - An approval of a version with an unacknowledged listed warning is refused with `409 WARNINGS_NOT_ACKNOWLEDGED`. The refusal names the warnings and the inputs.
+   - The approval history row and the published event record the acknowledged codes and the input names.
+   - In the cockpit the approver ticks a box worded "I accept that these inputs are logged without masking: nationalId", and Approve stays unavailable until it is ticked.
+
+   Consequence: the record shows who accepted the risk and for which inputs. One extra click, and only on versions that carry the warning.
+2. Show the warning only, as today. Consequence: no friction, but nothing proves the approver read it.
+
+**Configuration (PD-074).** Setting `lifecycle.acknowledge-warnings`, a list of warning codes that need an acknowledgement before approval. The default is `[UNMASKED_PERSONAL_DATA]`.
+- A host may add codes as new warnings appear.
+- Removing `UNMASKED_PERSONAL_DATA` relaxes a control. It is allowed, logged at WARN at start-up, and shown in `/api/bpm/meta`.
+- Strict mode (`decision-log.require-explicit-mask`, PD-099) turns the same case into a publish error, so no acknowledgement is ever needed there.
+
+**Recommendation and decision.** Option 1, in 0.2.0, with the other PD-099 mitigations, before the first pilot on real data. It completes mitigation 1: the warning is not only shown, it is accepted on the record.
+
+**Inputs masked by the tenant default (confirmed with the architect, 2026-11-20).** An undeclared input that the tenant's `decision-log.mask-default: true` masks still raises `UNMASKED_PERSONAL_DATA` (`RLE-049`), because its declaration is missing. Its values are never logged in clear, though, so "logged without masking" would be false for it.
+- Such an input needs no acknowledgement. If no input needs one, the approval records an empty list.
+- The approval history row records that the input is masked by the tenant default, not by its declaration.
+- If the tenant later turns the default off, that change is the moment the risk is accepted. It is logged with the old and new value and shown in `/api/bpm/meta` (PD-099, mitigation 4). That later change does not need a new approval of each version.
+
+The acknowledgement therefore covers exactly the inputs that will be logged in clear under the tenant's masking in force at the approval.
+
+**Amended 2026-11-20 (security finding, architect's ruling).** The approve request carries the exact `{code, input}` pairs the approver was shown, not codes alone. A mismatch with the set the engine recomputes at approval is refused with `409 WARNINGS_NOT_ACKNOWLEDGED`, so a changed pattern list can never let one code cover inputs the approver never saw.
+
+**Follow-ups.** Architect: a statement in the rule engine SPEC for the approve request, the error code and the history and event fields, and the setting in DESIGN 4.4. Maintainers (engineering): the implementation issue (engine and cockpit). Documentation: the approval how-to.
