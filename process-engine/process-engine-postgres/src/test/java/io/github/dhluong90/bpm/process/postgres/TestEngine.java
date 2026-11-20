@@ -9,7 +9,6 @@ import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobExecutor;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
-import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.spi.CallerResolver;
@@ -135,12 +134,9 @@ final class TestEngine {
         } else {
             this.rules = null;
         }
-        // As the starter wires it: the tenant-scoped entry point comes from RuleEngines, bound to the engine identity,
-        // and only with the real Rule Engine; a host stand-in has none, so its decision steps fail closed.
-        this.decisions = b.ruleEngine != null
-                ? Optional.of(new TestDecisionPort(Optional.empty()))
-                : Optional.ofNullable(rules).map(r -> new TestDecisionPort(
-                        Optional.of(r.forEmbeddedEngine(DecisionCaller.ENGINE_IDENTITY))));
+        // The decision port is the process starter's, supplied by its tests: only that class may claim the Rule
+        // Engine's tenant-scoped entry point (ADR-0027, #336). Without one, a business rule task is not executable.
+        this.decisions = b.decisionPort == null ? Optional.empty() : Optional.of(b.decisionPort.apply(rules));
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, new JdbcProcessStore(ds),
                 Map.of(SourceFormat.BPMN_XML, reader::read),
                 new LocalServiceInvoker(b.handlers.stream().collect(Collectors.toMap(ServiceTaskHandler::name, h -> h)),
@@ -166,7 +162,8 @@ final class TestEngine {
         private List<ServiceTaskHandler> handlers = List.of();
         private ProcessEventPublisher publisher;
         private boolean withRuleEngine;
-        private io.github.dhluong90.bpm.rules.api.RuleEngine ruleEngine;
+        private java.util.function.Function<io.github.dhluong90.bpm.rules.internal.service.RuleEngines,
+                io.github.dhluong90.bpm.process.internal.service.DecisionPort> decisionPort;
 
         private Builder(String replicaId, TestClock clock) {
             this.replicaId = replicaId;
@@ -224,9 +221,13 @@ final class TestEngine {
             return this;
         }
 
-        /** Uses a host-provided Rule Engine instead of the real one. */
-        Builder ruleEngine(io.github.dhluong90.bpm.rules.api.RuleEngine value) {
-            ruleEngine = value;
+        /**
+         * The decision port of this replica, built over the real Rule Engine (null without {@link #withRuleEngine()}).
+         * The process starter's tests pass its own port, the one class allowed to claim the tenant-scoped entry point.
+         */
+        Builder decisionPort(java.util.function.Function<io.github.dhluong90.bpm.rules.internal.service.RuleEngines,
+                io.github.dhluong90.bpm.process.internal.service.DecisionPort> value) {
+            decisionPort = value;
             return this;
         }
 

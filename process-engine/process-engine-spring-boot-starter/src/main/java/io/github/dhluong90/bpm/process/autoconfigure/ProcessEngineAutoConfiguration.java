@@ -53,6 +53,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
@@ -187,7 +188,14 @@ public class ProcessEngineAutoConfiguration {
         return publisher::publishEvent;
     }
 
+    /**
+     * The engine's services. Never lazy: the decision port inside claims the Rule Engine's tenant-scoped entry point
+     * while beans are created, before the Rule Engine starter closes unclaimed identities (#336). The claim and the
+     * start-up check that it happened are in {@link RuleEngineDecisions}, the only class here that names Rule Engine
+     * types.
+     */
     @Bean
+    @Lazy(false)
     @ConditionalOnMissingBean
     ProcessServices processEngineServices(ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,

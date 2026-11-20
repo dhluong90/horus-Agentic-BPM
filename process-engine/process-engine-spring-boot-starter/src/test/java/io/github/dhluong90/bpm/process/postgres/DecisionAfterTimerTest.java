@@ -6,18 +6,14 @@ import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
+import io.github.dhluong90.bpm.process.autoconfigure.StarterDecisionPorts;
 import io.github.dhluong90.bpm.process.test.TestClock;
-import io.github.dhluong90.bpm.rules.api.DecisionInput;
-import io.github.dhluong90.bpm.rules.api.DecisionRequest;
-import io.github.dhluong90.bpm.rules.api.DecisionResult;
-import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
@@ -110,7 +106,8 @@ class DecisionAfterTimerTest {
     @Test
     void PRE_055_decision_after_a_timer_runs_in_the_instance_tenant_as_the_engine() {
         // Given card-reminder-fee in bank-a (20,000 VND) and bank-b (35,000 VND), and one overdue card in each bank
-        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine().build();
+        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine().decisionPort(StarterDecisionPorts::over)
+                .build();
         publishReminderFee(pod, "bank-a", "/rules/card-reminder-fee-bank-a.yaml");
         publishReminderFee(pod, "bank-b", "/rules/card-reminder-fee-bank-b.yaml");
         ProcessInstance inBankA = overdue(pod, "bank-a", "CARD-A-4111");
@@ -150,7 +147,8 @@ class DecisionAfterTimerTest {
     @Test
     void PRE_056_decision_after_a_timer_never_reads_another_tenants_rule_set() {
         // Given card-reminder-fee exists only in bank-d, and an overdue card in bank-c
-        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine().retryBackoff(Duration.ofSeconds(30)).build();
+        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine().decisionPort(StarterDecisionPorts::over)
+                .retryBackoff(Duration.ofSeconds(30)).build();
         publishReminderFee(pod, "bank-d", "/rules/card-reminder-fee-bank-b.yaml");
         ProcessInstance inBankC = overdue(pod, "bank-c", "CARD-C-4111");
 
@@ -176,21 +174,9 @@ class DecisionAfterTimerTest {
 
     @Test
     void PRE_056_a_rule_engine_without_an_explicit_tenant_cannot_run_a_decision_after_a_timer() {
-        // Given a host Rule Engine that can only resolve its tenant from the thread, and an overdue card in bank-e
-        AtomicInteger evaluations = new AtomicInteger();
-        RuleEngine threadBound = new RuleEngine() {
-            @Override
-            public DecisionResult evaluate(String ruleSet, DecisionInput input) {
-                return evaluate(DecisionRequest.of(ruleSet, input));
-            }
-
-            @Override
-            public DecisionResult evaluate(DecisionRequest request) {
-                evaluations.incrementAndGet();
-                throw new IllegalStateException("must not be called for engine-owned work");
-            }
-        };
-        TestEngine pod = TestEngine.replica("pod-1", clock).ruleEngine(threadBound).build();
+        // Given a Rule Engine that offers no tenant-scoped entry point, and an overdue card in bank-e
+        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine()
+                .decisionPort(rules -> StarterDecisionPorts.withoutEntryPoint()).build();
         ProcessInstance inBankE = overdue(pod, "bank-e", "CARD-E-4111");
 
         // When the timer fires
@@ -199,10 +185,10 @@ class DecisionAfterTimerTest {
         int[] fired = new int[1];
         List<String> reasons = failureReasons(() -> fired[0] = pod.jobs.pollOnce());
 
-        // Then the step failed closed for want of an explicit tenant, without calling the Rule Engine, and nothing moved
+        // Then the step failed closed for want of an explicit tenant, wrote no decision, and nothing moved
         assertThat(fired[0]).isZero();
         assertThat(reasons).containsExactly("TENANT_NOT_ALLOWED");
-        assertThat(evaluations).hasValue(0);
+        assertThat(count("SELECT count(*) FROM rle_decision WHERE tenant_id = 'bank-e'")).isZero();
         assertThat(count("SELECT count(*) FROM pre_task WHERE instance_id = ?", inBankE.id())).isZero();
         assertThat(text("SELECT status || ' ' || attempt FROM pre_timer WHERE instance_id = ?", inBankE.id()))
                 .isEqualTo("DUE 1");
@@ -211,7 +197,8 @@ class DecisionAfterTimerTest {
     @Test
     void PRE_056_a_decision_row_written_before_the_step_fails_rolls_back_with_the_firing() {
         // Given card-reminder-fee in bank-f prices Gold cards only, and an overdue Classic card in bank-f
-        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine().retryBackoff(Duration.ofSeconds(30)).build();
+        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine().decisionPort(StarterDecisionPorts::over)
+                .retryBackoff(Duration.ofSeconds(30)).build();
         publishReminderFee(pod, "bank-f", "/rules/card-reminder-fee-gold-only.yaml");
         ProcessInstance inBankF = overdue(pod, "bank-f", "CARD-F-4111");
 
@@ -231,5 +218,41 @@ class DecisionAfterTimerTest {
                 + "('TIMER_FIRED', 'DECISION_EVALUATED')", inBankF.id())).isZero();
         assertThat(text("SELECT status || ' ' || attempt FROM pre_timer WHERE instance_id = ?", inBankF.id()))
                 .isEqualTo("DUE 1");
+    }
+
+    @Test
+    void PRE_046_a_step_retried_after_a_failed_decision_evaluates_again_and_never_replays_the_failure() {
+        // Given card-reminder-fee in bank-k requested for publication but not approved yet: no effective version
+        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine().decisionPort(StarterDecisionPorts::over)
+                .retryBackoff(Duration.ofSeconds(30)).build();
+        pod.ruleIdentity.as("bank-k", "lan");
+        pod.rules.versionService().importRuleSet(io.github.dhluong90.bpm.rules.api.ImportRequest.yaml(
+                TestEngine.resource("/rules/card-reminder-fee-bank-a.yaml")));
+        long requested = pod.rules.versionService().requestPublish("card-reminder-fee", 1, WriteOptions.none())
+                .lockVersion();
+        ProcessInstance inBankK = overdue(pod, "bank-k", "CARD-K-4111");
+
+        // When the timer fires, the step fails on NO_EFFECTIVE_VERSION
+        clock.set(DUE);
+        pollerThreadContext(pod);
+        int[] fired = new int[1];
+        assertThat(failureReasons(() -> fired[0] = pod.jobs.pollOnce())).containsExactly("NO_EFFECTIVE_VERSION");
+
+        // Then nothing of the failed decision is kept: no decision row and no idempotency record for the step's key
+        assertThat(fired[0]).isZero();
+        assertThat(count("SELECT count(*) FROM rle_decision WHERE tenant_id = 'bank-k'")).isZero();
+        assertThat(count("SELECT count(*) FROM rle_idempotency WHERE tenant_id = 'bank-k' AND idempotency_key LIKE ?",
+                "pe:" + inBankK.id() + ":%")).isZero();
+
+        // When the version is approved and the job is retried with the same attempt, after its backoff
+        pod.ruleIdentity.as("bank-k", "minh");
+        pod.rules.versionService().approve("card-reminder-fee", 1, new WriteOptions(null, requested, null));
+        clock.set(DUE.plusSeconds(31));
+        pollerThreadContext(pod);
+
+        // Then the step evaluates again, instead of replaying the failure, and one decision is logged
+        assertThat(pod.jobs.pollOnce()).isEqualTo(1);
+        assertThat(text("SELECT caller_id || ' ' || (outputs->'fee'->>'amount') FROM rle_decision "
+                + "WHERE correlation_id = ?", inBankK.id())).isEqualTo("system:process-engine 20000");
     }
 }

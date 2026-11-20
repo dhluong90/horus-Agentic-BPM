@@ -141,6 +141,33 @@
           </execution>
         </executions>
       </plugin>
+      <plugin>
+        <!--
+          #336: sealed packages. On a class path the JVM refuses a class in these packages from any other jar or
+          directory ("sealing violation"), so host code cannot reach their package-private members through a
+          split package. Spring Boot's launcher keeps the check for nested jars.
+        -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifestSections>
+              <manifestSection>
+                <name>io/github/dhluong90/bpm/rules/internal/service/</name>
+                <manifestEntries>
+                  <Sealed>true</Sealed>
+                </manifestEntries>
+              </manifestSection>
+              <manifestSection>
+                <name>io/github/dhluong90/bpm/rules/embedded/</name>
+                <manifestEntries>
+                  <Sealed>true</Sealed>
+                </manifestEntries>
+              </manifestSection>
+            </manifestSections>
+          </archive>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 </project>

@@ -59,4 +59,21 @@ class KernelContractArchitectureTest {
                         + "(ADR-0027)")
                 .check(CORE);
     }
+
+    @Test
+    void TR_TEN_01_only_the_engines_own_timer_path_asks_for_engine_work() {
+        noClasses().that().doNotHaveFullyQualifiedName(
+                        "io.github.dhluong90.bpm.process.internal.service.ProcessServices")
+                .should().callConstructorWhere(com.tngtech.archunit.core.domain.JavaCall.Predicates.target(
+                        com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner(
+                                com.tngtech.archunit.core.domain.properties.HasName.Predicates.name(
+                                        "io.github.dhluong90.bpm.process.internal.service.DecisionCaller$Engine"))))
+                .because("engine work is built from a locked row in the fire transaction, never by a host (#336)")
+                .check(CORE);
+        com.tngtech.archunit.lang.syntax.ArchRuleDefinition.constructors()
+                .that().areDeclaredIn("io.github.dhluong90.bpm.process.internal.service.DecisionCaller$Engine")
+                .should().notBePublic().andShould().notBeProtected()
+                .because("host code holding a ServiceInvoker cannot ask for engine work (#336)")
+                .check(CORE);
+    }
 }

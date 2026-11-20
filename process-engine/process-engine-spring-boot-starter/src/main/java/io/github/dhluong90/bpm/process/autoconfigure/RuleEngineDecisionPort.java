@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.HorusBpmException;
+import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
 import java.time.Instant;
 import java.util.Map;
@@ -19,6 +20,12 @@ import org.apache.commons.logging.LogFactory;
 /**
  * The {@link DecisionPort} over the embedded Rule Engine (ADR-0027). Built by the process starter only when the Rule
  * Engine is on the class path and the host has a {@code RuleEngine}; never registered as a bean.
+ *
+ * <p>This class is the registered claimant of {@code system:process-engine} in
+ * {@link EmbeddedEngineGrant#REGISTERED_CLAIMANTS} (#336). Its constructor claims the tenant-scoped entry point from the
+ * Rule Engine's one-time grant and keeps it to itself; nothing else in the engines can claim it. The class and its
+ * constructor are package-private, and its package is sealed in the starter jar, so host code can neither create an
+ * instance nor define a class beside it.
  * <ul>
  *   <li>Every decision step is evaluated through the Rule Engine's tenant-scoped entry point, in the instance's
  *       tenant, as {@link DecisionCaller#ENGINE_IDENTITY}, on behalf of the user who triggered the step (null after a
@@ -39,12 +46,14 @@ final class RuleEngineDecisionPort implements DecisionPort {
     private final Optional<TenantScopedRuleEngine> engineWork;
 
     /**
-     * @param engineWork the tenant-scoped entry point bound to {@link DecisionCaller#ENGINE_IDENTITY}, or empty when
-     *     the Rule Engine has none
+     * @param grant the Rule Engine's one-time grant of the tenant-scoped entry point, or empty when the Rule Engine has
+     *     none; claimed here, once, as {@link DecisionCaller#ENGINE_IDENTITY}
+     * @throws IllegalStateException when the grant was already claimed or closed
      * @throws IllegalArgumentException when the entry point is bound to another identity
      */
-    RuleEngineDecisionPort(Optional<TenantScopedRuleEngine> engineWork) {
-        this.engineWork = Objects.requireNonNull(engineWork, "engineWork must not be null");
+    RuleEngineDecisionPort(Optional<EmbeddedEngineGrant> grant) {
+        this.engineWork = Objects.requireNonNull(grant, "grant must not be null")
+                .map(g -> g.claim(DecisionCaller.ENGINE_IDENTITY, this));
         engineWork.ifPresent(scoped -> {
             if (!DecisionCaller.ENGINE_IDENTITY.equals(scoped.engineId())) {
                 throw new IllegalArgumentException("The tenant-scoped entry point is bound to " + scoped.engineId()

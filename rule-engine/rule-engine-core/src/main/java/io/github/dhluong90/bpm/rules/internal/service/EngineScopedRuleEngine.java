@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /**
  * The tenant-scoped entry point for one registered engine identity, over the default engine. Built only by
- * {@link RuleEngines#forEmbeddedEngine(String)}, which has already checked the identity.
+ * {@link OneTimeEmbeddedEngineGrant#claim(String, Object)}, which has already checked the identity and the claimant.
  */
 final class EngineScopedRuleEngine implements TenantScopedRuleEngine {
 

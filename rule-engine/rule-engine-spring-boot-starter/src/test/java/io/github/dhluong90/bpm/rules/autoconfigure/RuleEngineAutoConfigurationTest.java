@@ -106,6 +106,59 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    void TR_TEN_01_no_bean_a_host_can_inject_leads_to_the_tenant_scoped_entry_point() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
+            assertThat(context).hasNotFailed();
+            // RuleEngines is not a bean; the internals sit in a bean of a type host code cannot name
+            assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.internal.service.RuleEngines.class);
+            assertThat(java.lang.reflect.Modifier.isPublic(RuleEngineInternals.class.getModifiers())).isFalse();
+            for (String name : context.getBeanFactory().getSingletonNames()) {
+                Object bean = context.getBeanFactory().getSingleton(name);
+                if (bean == null) {
+                    continue;
+                }
+                assertThat(bean).as(name)
+                        .isNotInstanceOf(io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine.class)
+                        .isNotInstanceOf(io.github.dhluong90.bpm.rules.internal.service.RuleEngines.class);
+            }
+            // The grant is a bean while the Process Engine's claimant is on the class path, and a host that injects
+            // it is refused
+            var grant = context.getBean(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class);
+            Object hostController = new Object();
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> grant.claim("system:process-engine", hostController))
+                    .isInstanceOf(SecurityException.class);
+        });
+    }
+
+    @Test
+    void TR_TEN_01_a_grant_nobody_claimed_during_start_up_is_closed_when_start_up_finishes() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
+            assertThat(context).hasNotFailed();
+            var grant = context.getBean(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class);
+
+            // Then no identity can be claimed for the rest of the run, not even by the registered claimant's class
+            assertThat(grant.isClaimed("system:process-engine")).isFalse();
+            assertThat(grant.isOpen("system:process-engine")).isFalse();
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> grant.claim("system:process-engine",
+                            new io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort()))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+        });
+    }
+
+    @Test
+    void TR_TEN_01_without_the_process_engine_there_is_no_grant() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withClassLoader(new org.springframework.boot.test.context.FilteredClassLoader(
+                        io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort.class))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class);
+                    assertThat(context).hasSingleBean(io.github.dhluong90.bpm.rules.api.RuleEngine.class);
+                });
+    }
+
+    @Test
     void TR_EXT_03_an_out_of_range_setting_stops_start_up() {
         runner.withUserConfiguration(HostWithEngineStandIns.class)
                 .withPropertyValues("horus.bpm.rules.cache.max-entries=0")

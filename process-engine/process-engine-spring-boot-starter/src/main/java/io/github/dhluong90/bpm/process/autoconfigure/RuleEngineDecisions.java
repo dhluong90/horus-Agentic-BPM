@@ -3,15 +3,15 @@ package io.github.dhluong90.bpm.process.autoconfigure;
 import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
 import io.github.dhluong90.bpm.process.internal.service.DecisionPort;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
-import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
-import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
+import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import java.util.Optional;
 import org.springframework.beans.factory.BeanFactory;
 
 /**
  * Builds the {@link RuleEngineDecisionPort} when the host has a {@link RuleEngine} (ADR-0027). The only class of the
  * starter that names Rule Engine types besides the adapter; it is loaded only after the auto-configuration has found
- * the Rule Engine on the class path, so a host with the Process Engine alone never loads a Rule Engine class.
+ * the Rule Engine on the class path, so a host with the Process Engine alone never loads a Rule Engine class. The
+ * entry point comes only from the Rule Engine's {@link EmbeddedEngineGrant}, claimed by the adapter (#336).
  */
 final class RuleEngineDecisions {
 
@@ -22,23 +22,32 @@ final class RuleEngineDecisions {
     }
 
     /**
+     * Builds the decision port, which claims the Rule Engine's grant of the tenant-scoped entry point, and fails
+     * start-up when a grant is offered and was not claimed (#336).
+     *
      * @param beans the host's beans
      * @return the decision port, or empty when the host has no {@code RuleEngine}
+     * @throws IllegalStateException when the Rule Engine offers a grant that the decision port did not claim
      */
     static Optional<DecisionPort> from(BeanFactory beans) {
-        if (beans.getBeanProvider(RuleEngine.class).getIfUnique() == null) {
-            return Optional.empty();
-        }
-        return Optional.of(new RuleEngineDecisionPort(engineWork(beans)));
+        EmbeddedEngineGrant grant = beans.getBeanProvider(EmbeddedEngineGrant.class).getIfUnique();
+        Optional<DecisionPort> port = beans.getBeanProvider(RuleEngine.class).getIfUnique() == null
+                ? Optional.empty()
+                : Optional.of(new RuleEngineDecisionPort(Optional.ofNullable(grant)));
+        requireEngineWorkClaimed(grant);
+        return port;
     }
 
     /**
-     * The Rule Engine's tenant-scoped entry point for this engine's own work, bound to {@code system:process-engine}
-     * (ADR-0027). Built here and handed only to the decision port; never registered as a bean, so no host code can
-     * inject it.
+     * With the Rule Engine's grant present, the decision port must have claimed the tenant-scoped entry point. If it
+     * did not, because no {@code RuleEngine} bean exists or another party claimed first, start-up fails (#336).
+     *
+     * @param grant the Rule Engine's grant, or null without one
      */
-    private static Optional<TenantScopedRuleEngine> engineWork(BeanFactory beans) {
-        return Optional.ofNullable(beans.getBeanProvider(RuleEngines.class).getIfUnique())
-                .map(engines -> engines.forEmbeddedEngine(DecisionCaller.ENGINE_IDENTITY));
+    static void requireEngineWorkClaimed(EmbeddedEngineGrant grant) {
+        if (grant != null && !grant.isClaimed(DecisionCaller.ENGINE_IDENTITY)) {
+            throw new IllegalStateException("The Rule Engine offers the tenant-scoped entry point, but the Process "
+                    + "Engine did not claim it; decision steps could not run (#336). Is a RuleEngine bean defined?");
+        }
     }
 }

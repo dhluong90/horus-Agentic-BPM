@@ -6,6 +6,7 @@ import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
+import io.github.dhluong90.bpm.process.autoconfigure.StarterDecisionPorts;
 import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
 import io.github.dhluong90.bpm.process.internal.service.DecisionKeys;
 import io.github.dhluong90.bpm.process.internal.service.DecisionOutcome;
@@ -20,7 +21,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * A decision step evaluates in the instance's tenant, as the engine on behalf of the user who triggered it, on
- * PostgreSQL with the real Rule Engine (ADR-0027, PRE-046). Two banks share the database: bank-g prices the card fee
+ * PostgreSQL with the real Rule Engine and the starter's decision port (ADR-0027, PRE-046). Two banks share the database: bank-g prices the card fee
  * at 20,000 VND and bank-h at 35,000 VND; the instances run in bank-g. The tenants are this test's own, because the
  * Rule Engine tables are shared by every test of the module.
  */
@@ -69,7 +70,7 @@ class DecisionStepIdentityTest {
     @Test
     void PRE_046_decision_step_uses_the_instance_tenant_and_the_engine_identity() {
         // Given card-reminder-fee in bank-g (20,000 VND) and bank-h (35,000 VND)
-        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine().build();
+        TestEngine pod = TestEngine.replica("pod-1", clock).withRuleEngine().decisionPort(StarterDecisionPorts::over).build();
         publishFee(pod, "bank-g", "/rules/card-reminder-fee-bank-a.yaml");
         publishFee(pod, "bank-h", "/rules/card-reminder-fee-bank-b.yaml");
 

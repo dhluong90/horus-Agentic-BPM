@@ -4,7 +4,6 @@ import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.DecisionLogQuery;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
-import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionLog;
 import io.github.dhluong90.bpm.rules.internal.store.EventOutbox;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
@@ -61,25 +60,5 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
                         context.transactions(), context.clock()),
                 new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, keys, querySettings),
                 cache);
-    }
-
-    /**
-     * Builds the tenant-scoped entry point for a registered embedded engine (ADR-0027). The identity is fixed here:
-     * every decision it evaluates is logged with {@code engineId} as the caller. Not a bean: the calling engine's
-     * wiring builds it and keeps it to itself.
-     *
-     * @param engineId the calling engine's identity, one of {@link TenantScopedRuleEngine#REGISTERED_ENGINE_IDS}
-     * @return the entry point for that engine
-     * @throws IllegalArgumentException when the identity is not a registered engine identity
-     * @throws IllegalStateException when {@link #ruleEngine()} is not the default engine
-     */
-    public TenantScopedRuleEngine forEmbeddedEngine(String engineId) {
-        if (engineId == null || !TenantScopedRuleEngine.REGISTERED_ENGINE_IDS.contains(engineId)) {
-            throw new IllegalArgumentException("Not a registered engine identity: " + engineId);
-        }
-        if (!(ruleEngine instanceof DefaultRuleEngine engine)) {
-            throw new IllegalStateException("The tenant-scoped entry point needs the default Rule Engine");
-        }
-        return new EngineScopedRuleEngine(engine, engineId);
     }
 }

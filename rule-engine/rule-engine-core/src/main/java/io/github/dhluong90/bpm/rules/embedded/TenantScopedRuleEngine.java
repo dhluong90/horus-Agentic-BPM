@@ -13,7 +13,8 @@ import java.util.Set;
  * context, and the caller written to the decision log is the engine identity this object was built for.
  *
  * <p>Not for hosts. The Rule Engine never registers this type as a bean and its {@code RuleEngine} does not implement
- * it. Only the wiring of a registered engine gets one, for its own identity from {@link #REGISTERED_ENGINE_IDS}. That
+ * it. Only the registered claimant of an engine gets one, once, through {@link EmbeddedEngineGrant}, for its own identity
+ * from {@link #REGISTERED_ENGINE_IDS}. That
  * engine passes the tenant it read from its own stored aggregate under that aggregate's lock; never a tenant taken
  * from a request, a variable or an input. There is no REST endpoint for it. No permission is checked: the calling
  * engine authorises its own step. The evaluation is otherwise the same as
@@ -26,7 +27,7 @@ public interface TenantScopedRuleEngine {
      * The engine identities that may hold this entry point. A closed list: any other {@code system:} id, such as
      * {@code system:timer} or {@code system:dev-auto-approve}, is refused when the object is built.
      */
-    Set<String> REGISTERED_ENGINE_IDS = Set.of("system:process-engine");
+    Set<String> REGISTERED_ENGINE_IDS = EmbeddedEngineGrant.REGISTERED_CLAIMANTS.keySet();
 
     /** @return the engine identity written as the caller of every decision, one of {@link #REGISTERED_ENGINE_IDS} */
     String engineId();

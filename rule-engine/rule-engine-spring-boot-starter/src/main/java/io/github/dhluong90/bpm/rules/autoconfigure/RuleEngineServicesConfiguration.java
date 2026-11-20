@@ -7,6 +7,8 @@ import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.VersionWarning;
+import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
+import io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.rules.postgres.CacheCoherence;
@@ -26,6 +28,7 @@ import javax.sql.DataSource;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
@@ -66,16 +69,20 @@ class RuleEngineServicesConfiguration {
                 environment.getProperty(PropertyMaskingPolicy.SHARED_KEY_ID_PROPERTY));
     }
 
+    /**
+     * The internals, as a bean of a package-private type: not {@link RuleEngines}, so host code has no bean from which
+     * to reach the tenant-scoped entry point (#336).
+     */
     @Bean
     @ConditionalOnMissingBean
-    RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
+    RuleEngineInternals ruleEngineInternals(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
             MaskingPolicy masking, Environment environment) {
         EngineSettings settings = properties.toSettings(environment);
         warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
-        return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
+        return new RuleEngineInternals(PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
                 RuleEngineAutoConfiguration.engineClock(clock), settings, masking,
-                properties.toQuerySettings());
+                properties.toQuerySettings()));
     }
 
     /**
@@ -97,9 +104,10 @@ class RuleEngineServicesConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngines engines, MaskingPolicy masking,
+    RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngineInternals internals, MaskingPolicy masking,
             ObjectProvider<Clock> clock) {
-        return RuleEngineMaskingCheck.of(engines.maskingCheck(), masking, RuleEngineAutoConfiguration.engineClock(clock));
+        return RuleEngineMaskingCheck.of(internals.engines().maskingCheck(), masking,
+                RuleEngineAutoConfiguration.engineClock(clock));
     }
 
     /**
@@ -114,28 +122,29 @@ class RuleEngineServicesConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    DecisionLogService ruleEngineDecisionLogService(RuleEngines engines) {
-        return engines.decisionLog();
+    DecisionLogService ruleEngineDecisionLogService(RuleEngineInternals internals) {
+        return internals.engines().decisionLog();
     }
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngines engines) {
-        return new RuleEngineCursorKeyInitializer(engines.cursorKeys());
+    RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngineInternals internals) {
+        return new RuleEngineCursorKeyInitializer(internals.engines().cursorKeys());
     }
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineLifecycleSweeper ruleEngineLifecycleSweeper(RuleEngines engines, RuleEngineProperties properties) {
-        return new RuleEngineLifecycleSweeper(engines.lifecycleSweep()::run,
+    RuleEngineLifecycleSweeper ruleEngineLifecycleSweeper(RuleEngineInternals internals,
+            RuleEngineProperties properties) {
+        return new RuleEngineLifecycleSweeper(internals.engines().lifecycleSweep()::run,
                 properties.lifecycle().sweepIntervalOrDefault());
     }
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineCacheCoherence ruleEngineCacheCoherence(DataSource dataSource, RuleEngines engines,
+    RuleEngineCacheCoherence ruleEngineCacheCoherence(DataSource dataSource, RuleEngineInternals internals,
             RuleEngineProperties properties) {
-        return new RuleEngineCacheCoherence(new CacheCoherence(dataSource, engines.cache(),
+        return new RuleEngineCacheCoherence(new CacheCoherence(dataSource, internals.engines().cache(),
                 properties.cache().epochCheckIntervalOrDefault(), properties.cache().listenNotifyOrDefault()));
     }
 
@@ -146,27 +155,53 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean(name = "ruleEngineCacheMetrics")
-        RuleEngineCacheMetrics ruleEngineCacheMetrics(RuleEngines engines) {
-            return new RuleEngineCacheMetrics(engines.cache());
+        RuleEngineCacheMetrics ruleEngineCacheMetrics(RuleEngineInternals internals) {
+            return new RuleEngineCacheMetrics(internals.engines().cache());
         }
     }
 
+    /**
+     * The one-time hand-off of the tenant-scoped entry point to the Process Engine (ADR-0027, #336). Registered only
+     * when the process starter's decision port, its one registered claimant, is on the class path. The Process Engine
+     * claims it while its beans are created; when start-up finishes, any identity still unclaimed is closed for good,
+     * so a grant nobody claimed never stays open for the rest of the run. A host that injects it is refused.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = EMBEDDED_ENGINE_CLAIMANT)
+    static class EmbeddedEngineGrantConfiguration {
+
+        @Bean
+        EmbeddedEngineGrant ruleEngineEmbeddedEngineGrant(RuleEngineInternals internals) {
+            return EmbeddedEngineGrants.open(internals.engines());
+        }
+
+        /** Runs after every singleton, the Process Engine's included, has been created. */
+        @Bean
+        SmartInitializingSingleton ruleEngineEmbeddedEngineGrantCloser(EmbeddedEngineGrant grant) {
+            return grant::closeUnclaimed;
+        }
+    }
+
+    /** The registered claimant of {@code system:process-engine}; see {@link EmbeddedEngineGrant#REGISTERED_CLAIMANTS}. */
+    static final String EMBEDDED_ENGINE_CLAIMANT =
+            "io.github.dhluong90.bpm.process.autoconfigure.RuleEngineDecisionPort";
+
     @Bean
     @ConditionalOnMissingBean
-    RuleEngine ruleEngine(RuleEngines engines) {
-        return engines.ruleEngine();
+    RuleEngine ruleEngine(RuleEngineInternals internals) {
+        return internals.engines().ruleEngine();
     }
 
     @Bean
     @ConditionalOnMissingBean
-    VersionService ruleEngineVersionService(RuleEngines engines) {
-        return engines.versionService();
+    VersionService ruleEngineVersionService(RuleEngineInternals internals) {
+        return internals.engines().versionService();
     }
 
     @Bean
     @ConditionalOnMissingBean
-    DecisionLogQuery ruleEngineDecisionLogQuery(RuleEngines engines) {
-        return engines.decisionLogQuery();
+    DecisionLogQuery ruleEngineDecisionLogQuery(RuleEngineInternals internals) {
+        return internals.engines().decisionLogQuery();
     }
 
     @Configuration(proxyBeanMethods = false)

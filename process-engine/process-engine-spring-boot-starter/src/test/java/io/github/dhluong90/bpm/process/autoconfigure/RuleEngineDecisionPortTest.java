@@ -11,6 +11,7 @@ import io.github.dhluong90.bpm.process.internal.service.DecisionOutcome;
 import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
+import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -24,14 +25,15 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
 /**
- * The process starter's adapter from the decision port to the Rule Engine (ADR-0027). The example is the card fee
- * review of bank-a: tuan completes the review, and the {@code price} step evaluates {@code card-fee}.
+ * The process starter's adapter from the decision port to the Rule Engine (ADR-0027, #336). The example is the card
+ * fee review of bank-a: tuan completes the review, and the {@code price} step evaluates {@code card-fee}.
  */
 @ExtendWith(OutputCaptureExtension.class)
 class RuleEngineDecisionPortTest {
 
     private static final Instant STEP_CLOCK = Instant.parse("2027-03-01T02:00:00Z");
-    private static final String KEY = "pe:01JD0000000000000000000000:price:01JD0000000000000000000001";
+    private static final String INSTANCE = "01JD0000000000000000000000";
+    private static final String KEY = "pe:" + INSTANCE + ":price:01JD0000000000000000000001";
 
     /** The entry point, recording what the adapter hands it. */
     private static class RecordingEntryPoint implements TenantScopedRuleEngine {
@@ -59,15 +61,63 @@ class RuleEngineDecisionPortTest {
         }
     }
 
+    /** A grant that hands out one entry point and remembers who claimed it. */
+    private static final class OneGrant implements EmbeddedEngineGrant {
+        final TenantScopedRuleEngine entryPoint;
+        final List<Object> claimants = new ArrayList<>();
+
+        OneGrant(TenantScopedRuleEngine entryPoint) {
+            this.entryPoint = entryPoint;
+        }
+
+        @Override
+        public TenantScopedRuleEngine claim(String engineId, Object claimant) {
+            if (!claimants.isEmpty()) {
+                throw new IllegalStateException("already claimed");
+            }
+            claimants.add(claimant);
+            return entryPoint;
+        }
+
+        @Override
+        public boolean isOpen(String engineId) {
+            return claimants.isEmpty();
+        }
+
+        @Override
+        public void closeUnclaimed() {
+        }
+
+        @Override
+        public boolean isClaimed(String engineId) {
+            return !claimants.isEmpty();
+        }
+    }
+
+    private static RuleEngineDecisionPort port(TenantScopedRuleEngine entryPoint) {
+        return new RuleEngineDecisionPort(Optional.of(new OneGrant(entryPoint)));
+    }
+
+    @Test
+    void TR_TEN_01_the_port_claims_the_entry_point_itself_once_as_the_process_engine() {
+        OneGrant grant = new OneGrant(new RecordingEntryPoint());
+
+        RuleEngineDecisionPort port = new RuleEngineDecisionPort(Optional.of(grant));
+
+        assertThat(grant.claimants).containsExactly(port);
+        assertThatThrownBy(() -> new RuleEngineDecisionPort(Optional.of(grant)))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
     @Test
     void PRE_047_decision_port_refuses_a_request_tenant_other_than_the_instance_tenant(CapturedOutput output) {
         // Given an instance of bank-a, and a request of bank-b that reached the step past the task tenant check
         RecordingEntryPoint entryPoint = new RecordingEntryPoint();
-        RuleEngineDecisionPort port = new RuleEngineDecisionPort(Optional.of(entryPoint));
+        RuleEngineDecisionPort port = port(entryPoint);
 
         // When the adapter is called for the step; Then it refuses with 403 TENANT_NOT_ALLOWED
         assertThatThrownBy(() -> port.evaluate("bank-a", new DecisionCaller.Request("bank-b", "tuan"), "card-fee",
-                Map.of("tier", "GOLD"), STEP_CLOCK, KEY, "01JD0000000000000000000000"))
+                Map.of("tier", "GOLD"), STEP_CLOCK, KEY, INSTANCE))
                 .isInstanceOf(TenantNotAllowedException.class)
                 .satisfies(e -> assertThat(((ProcessException) e).code()).isEqualTo("TENANT_NOT_ALLOWED"));
 
@@ -81,45 +131,41 @@ class RuleEngineDecisionPortTest {
     @Test
     void PRE_046_the_adapter_evaluates_as_the_engine_on_behalf_of_the_user_with_the_step_key_and_clock() {
         RecordingEntryPoint entryPoint = new RecordingEntryPoint();
-        RuleEngineDecisionPort port = new RuleEngineDecisionPort(Optional.of(entryPoint));
+        RuleEngineDecisionPort port = port(entryPoint);
 
-        // (a) inside tuan's request; (b) after a timer, with no one signed in
-        DecisionOutcome inRequest = port.evaluate("bank-a", new DecisionCaller.Request("bank-a", "tuan"), "card-fee",
-                Map.of("tier", "CLASSIC"), STEP_CLOCK, KEY, "01JD0000000000000000000000");
-        DecisionOutcome afterTimer = port.evaluate("bank-a", new DecisionCaller.Engine("system:timer"), "card-fee",
-                Map.of("tier", "CLASSIC"), STEP_CLOCK, KEY, "01JD0000000000000000000000");
+        // Inside tuan's request
+        DecisionOutcome outcome = port.evaluate("bank-a", new DecisionCaller.Request("bank-a", "tuan"), "card-fee",
+                Map.of("tier", "CLASSIC"), STEP_CLOCK, KEY, INSTANCE);
 
-        assertThat(inRequest).isEqualTo(afterTimer).isInstanceOfSatisfying(DecisionOutcome.Matched.class, m -> {
+        assertThat(outcome).isInstanceOfSatisfying(DecisionOutcome.Matched.class, m -> {
             assertThat(m.decisionId()).isEqualTo("01JDDECISION00000000000000");
             assertThat(m.outputs()).containsEntry("fee", Money.ofMinor("VND", 20_000));
         });
-        assertThat(entryPoint.calls).hasSize(2);
-        assertThat(entryPoint.calls.get(0)[1]).isEqualTo("tuan");
-        assertThat(entryPoint.calls.get(1)[1]).isNull();
-        for (Object[] call : entryPoint.calls) {
+        assertThat(entryPoint.calls).singleElement().satisfies(call -> {
             DecisionRequest request = (DecisionRequest) call[3];
             assertThat(call[0]).isEqualTo("bank-a");
+            assertThat(call[1]).isEqualTo("tuan");
             assertThat(call[2]).isEqualTo(STEP_CLOCK);
             assertThat(request.idempotencyKey()).isEqualTo(KEY);
-            assertThat(request.correlationId()).isEqualTo("01JD0000000000000000000000");
+            assertThat(request.correlationId()).isEqualTo(INSTANCE);
             assertThat(request.clock()).as("the engine clock goes as the evaluation time, never as a chosen clock")
                     .isNull();
             assertThat(request.version()).isNull();
-        }
+        });
     }
 
     @Test
     void a_refusal_of_the_rule_engine_fails_the_step_closed() {
-        RuleEngineDecisionPort port = new RuleEngineDecisionPort(Optional.of(new RecordingEntryPoint()));
+        RuleEngineDecisionPort port = port(new RecordingEntryPoint());
 
-        assertThat(port.evaluate("bank-c", new DecisionCaller.Engine("system:timer"), "card-fee", Map.of(),
+        assertThat(port.evaluate("bank-c", new DecisionCaller.Request("bank-c", "tuan"), "card-fee", Map.of(),
                 STEP_CLOCK, KEY, null))
                 .isInstanceOfSatisfying(DecisionOutcome.Failed.class,
                         f -> assertThat(f.code()).isEqualTo("RULE_SET_NOT_FOUND"));
     }
 
     @Test
-    void without_the_entry_point_a_decision_step_fails_closed_with_TENANT_NOT_ALLOWED() {
+    void without_a_grant_a_decision_step_fails_closed_with_TENANT_NOT_ALLOWED() {
         RuleEngineDecisionPort port = new RuleEngineDecisionPort(Optional.empty());
 
         assertThat(port.evaluate("bank-a", new DecisionCaller.Request("bank-a", "tuan"), "card-fee", Map.of(),
@@ -130,19 +176,27 @@ class RuleEngineDecisionPortTest {
 
     @Test
     void an_entry_point_bound_to_another_identity_is_refused() {
-        TenantScopedRuleEngine other = new RecordingEntryPoint() {
+        RecordingEntryPoint other = new RecordingEntryPoint() {
             @Override
             public String engineId() {
                 return "system:timer";
             }
         };
 
-        assertThatThrownBy(() -> new RuleEngineDecisionPort(Optional.of(other)))
-                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> port(other)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void a_host_without_a_rule_engine_bean_gets_no_decision_port() {
         assertThat(RuleEngineDecisions.from(new DefaultListableBeanFactory())).isEmpty();
+    }
+
+    @Test
+    void TR_TEN_01_a_grant_offered_but_not_claimed_fails_start_up() {
+        OneGrant unclaimed = new OneGrant(new RecordingEntryPoint());
+
+        assertThatThrownBy(() -> RuleEngineDecisions.requireEngineWorkClaimed(unclaimed))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("did not claim");
+        RuleEngineDecisions.requireEngineWorkClaimed(null);
     }
 }
