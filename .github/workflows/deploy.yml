@@ -40,13 +40,26 @@ concurrency:
 
 jobs:
   compose-smoke:
-    name: Image build, compose smoke test and image gates
-    runs-on: ubuntu-latest
+    # One leg per architecture, each built natively on its own runner. The x64 leg keeps the job's name.
+    name: Image build, compose smoke test and image gates${{ matrix.arch == 'arm64' && ' (arm64)' || '' }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            # SHA-256 of grype_0.122.1_linux_amd64.tar.gz, from the signed checksum file of that release.
+            grype-sha256: "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538"
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            # SHA-256 of grype_0.122.1_linux_arm64.tar.gz, from the signed checksum file of that release.
+            grype-sha256: "819e5be3d9516432fedb7b6b56df7306c3a16607606dfc05826eefbb00e471da"
     env:
       GRYPE_VERSION: "0.122.1"
-      # SHA-256 of grype_0.122.1_linux_amd64.tar.gz, from the signed checksum file of that release.
-      GRYPE_SHA256: "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538"
+      GRYPE_SHA256: ${{ matrix.grype-sha256 }}
+      ARCH: ${{ matrix.arch }}
       IMAGE: horus-bpm/rule-engine-only:local # pin-exempt: built in this job from deploy/docker/Dockerfile
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -71,15 +84,15 @@ jobs:
         with:
           context: .
           file: deploy/docker/Dockerfile
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           build-args: EXAMPLE=rule-engine-only
           tags: ${{ env.IMAGE }}
           load: true
           push: false
           provenance: false
           no-cache: ${{ inputs.no-cache == true }}
-          cache-from: type=gha,scope=deploy-rule-engine-only
-          cache-to: type=gha,scope=deploy-rule-engine-only,mode=max
+          cache-from: type=gha,scope=deploy-rule-engine-only-${{ matrix.arch }}
+          cache-to: type=gha,scope=deploy-rule-engine-only-${{ matrix.arch }},mode=max
 
       # The engine jars in BOOT-INF/lib carry their build time in zip entry timestamps, so their bytes
       # differ between any two builds. The digest covers what they contain: the name and SHA-256 of every
@@ -105,6 +118,15 @@ jobs:
           PY
           echo "Built with no-cache: ${{ inputs.no-cache == true }}. $(wc -l < "$RUNNER_TEMP/app-content.txt") files and jar entries, content digest $(sha256sum < "$RUNNER_TEMP/app-content.txt" | cut -d' ' -f1)" \
             | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Native image for this runner, with the patched JRE
+        run: |
+          set -euo pipefail
+          arch="$(docker image inspect "$IMAGE" --format '{{.Architecture}}')"
+          echo "image architecture: $arch (runner: $ARCH, $(uname -m))"
+          test "$arch" = "$ARCH"
+          docker run --rm --entrypoint cat "$IMAGE" /opt/java/openjdk/release | tee "$RUNNER_TEMP/release"
+          grep -qx 'IMPLEMENTOR_VERSION="Temurin-21.0.13.1+2"' "$RUNNER_TEMP/release"
 
       - name: Start PostgreSQL and the host, wait for healthy
         run: docker compose up --wait --wait-timeout 180
@@ -147,7 +169,7 @@ jobs:
           set -euo pipefail
           cd "$RUNNER_TEMP"
           base="https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}"
-          tarball="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          tarball="grype_${GRYPE_VERSION}_linux_${ARCH}.tar.gz"
           sums="grype_${GRYPE_VERSION}_checksums.txt"
           curl -sSfL -O "$base/$tarball" -O "$base/$sums" -O "$base/$sums.sigstore.json"
           cosign verify-blob "$sums" --bundle "$sums.sigstore.json" \
@@ -186,7 +208,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: image-scan
+          name: image-scan-${{ matrix.arch }}
           path: target/grype-image-*.json
           if-no-files-found: ignore
           retention-days: 30
