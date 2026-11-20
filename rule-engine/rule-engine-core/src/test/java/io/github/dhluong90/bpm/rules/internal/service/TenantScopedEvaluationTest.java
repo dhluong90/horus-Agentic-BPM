@@ -31,7 +31,10 @@ class TenantScopedEvaluationTest {
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
                     stores, stores, EngineSettings.defaults()),
             stores, stores, stores);
-    final TenantScopedRuleEngine scoped = engines.forEmbeddedEngine("system:process-engine");
+    /** Claimed as the starter's claimant would, through a grant that registers this test as the claimant. */
+    final TenantScopedRuleEngine scoped = new OneTimeEmbeddedEngineGrant((DefaultRuleEngine) engines.ruleEngine(),
+            Map.of("system:process-engine", TenantScopedEvaluationTest.class.getName()))
+            .claim("system:process-engine", this);
     final DecisionRequest gold = DecisionRequest.of("card-fee", DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5)))
             .withCorrelationId("01JD2X5K9T1Q4N8V2M7B3C6D0E");
 
@@ -95,10 +98,11 @@ class TenantScopedEvaluationTest {
         // When a host picks another identity, reserved or invented, then it is refused
         for (String forged : new String[] {"system:timer", "system:dev-auto-approve", "system:effective-date",
                 "system:anything", "system:", "tuan", " "}) {
-            assertThatThrownBy(() -> engines.forEmbeddedEngine(forged))
+            assertThatThrownBy(() -> engines.embeddedEngines().claim(forged, this))
                     .as(forged).isInstanceOf(IllegalArgumentException.class);
         }
-        assertThatThrownBy(() -> engines.forEmbeddedEngine(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> engines.embeddedEngines().claim(null, this))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

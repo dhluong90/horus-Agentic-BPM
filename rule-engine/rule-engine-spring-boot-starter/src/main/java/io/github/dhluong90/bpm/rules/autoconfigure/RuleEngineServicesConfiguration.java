@@ -7,6 +7,7 @@ import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.VersionWarning;
+import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.rules.postgres.CacheCoherence;
@@ -66,16 +67,20 @@ class RuleEngineServicesConfiguration {
                 environment.getProperty(PropertyMaskingPolicy.SHARED_KEY_ID_PROPERTY));
     }
 
+    /**
+     * The internals, as a bean of a package-private type: not {@link RuleEngines}, so host code has no bean from which
+     * to reach the tenant-scoped entry point (#336).
+     */
     @Bean
     @ConditionalOnMissingBean
-    RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
+    RuleEngineInternals ruleEngineInternals(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
             MaskingPolicy masking, Environment environment) {
         EngineSettings settings = properties.toSettings(environment);
         warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
-        return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
+        return new RuleEngineInternals(PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
                 RuleEngineAutoConfiguration.engineClock(clock), settings, masking,
-                properties.toQuerySettings());
+                properties.toQuerySettings()));
     }
 
     /**
@@ -97,9 +102,10 @@ class RuleEngineServicesConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngines engines, MaskingPolicy masking,
+    RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngineInternals internals, MaskingPolicy masking,
             ObjectProvider<Clock> clock) {
-        return RuleEngineMaskingCheck.of(engines.maskingCheck(), masking, RuleEngineAutoConfiguration.engineClock(clock));
+        return RuleEngineMaskingCheck.of(internals.engines().maskingCheck(), masking,
+                RuleEngineAutoConfiguration.engineClock(clock));
     }
 
     /**
@@ -114,28 +120,29 @@ class RuleEngineServicesConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    DecisionLogService ruleEngineDecisionLogService(RuleEngines engines) {
-        return engines.decisionLog();
+    DecisionLogService ruleEngineDecisionLogService(RuleEngineInternals internals) {
+        return internals.engines().decisionLog();
     }
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngines engines) {
-        return new RuleEngineCursorKeyInitializer(engines.cursorKeys());
+    RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngineInternals internals) {
+        return new RuleEngineCursorKeyInitializer(internals.engines().cursorKeys());
     }
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineLifecycleSweeper ruleEngineLifecycleSweeper(RuleEngines engines, RuleEngineProperties properties) {
-        return new RuleEngineLifecycleSweeper(engines.lifecycleSweep()::run,
+    RuleEngineLifecycleSweeper ruleEngineLifecycleSweeper(RuleEngineInternals internals,
+            RuleEngineProperties properties) {
+        return new RuleEngineLifecycleSweeper(internals.engines().lifecycleSweep()::run,
                 properties.lifecycle().sweepIntervalOrDefault());
     }
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineCacheCoherence ruleEngineCacheCoherence(DataSource dataSource, RuleEngines engines,
+    RuleEngineCacheCoherence ruleEngineCacheCoherence(DataSource dataSource, RuleEngineInternals internals,
             RuleEngineProperties properties) {
-        return new RuleEngineCacheCoherence(new CacheCoherence(dataSource, engines.cache(),
+        return new RuleEngineCacheCoherence(new CacheCoherence(dataSource, internals.engines().cache(),
                 properties.cache().epochCheckIntervalOrDefault(), properties.cache().listenNotifyOrDefault()));
     }
 
@@ -146,27 +153,36 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean(name = "ruleEngineCacheMetrics")
-        RuleEngineCacheMetrics ruleEngineCacheMetrics(RuleEngines engines) {
-            return new RuleEngineCacheMetrics(engines.cache());
+        RuleEngineCacheMetrics ruleEngineCacheMetrics(RuleEngineInternals internals) {
+            return new RuleEngineCacheMetrics(internals.engines().cache());
         }
     }
 
+    /**
+     * The one-time hand-off of the tenant-scoped entry point to the Process Engine (ADR-0027, #336). Only the Process
+     * Engine's decision port can claim it, once; a host that injects it is refused.
+     */
     @Bean
-    @ConditionalOnMissingBean
-    RuleEngine ruleEngine(RuleEngines engines) {
-        return engines.ruleEngine();
+    EmbeddedEngineGrant ruleEngineEmbeddedEngineGrant(RuleEngineInternals internals) {
+        return internals.engines().embeddedEngines();
     }
 
     @Bean
     @ConditionalOnMissingBean
-    VersionService ruleEngineVersionService(RuleEngines engines) {
-        return engines.versionService();
+    RuleEngine ruleEngine(RuleEngineInternals internals) {
+        return internals.engines().ruleEngine();
     }
 
     @Bean
     @ConditionalOnMissingBean
-    DecisionLogQuery ruleEngineDecisionLogQuery(RuleEngines engines) {
-        return engines.decisionLogQuery();
+    VersionService ruleEngineVersionService(RuleEngineInternals internals) {
+        return internals.engines().versionService();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    DecisionLogQuery ruleEngineDecisionLogQuery(RuleEngineInternals internals) {
+        return internals.engines().decisionLogQuery();
     }
 
     @Configuration(proxyBeanMethods = false)

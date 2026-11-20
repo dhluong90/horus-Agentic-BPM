@@ -42,8 +42,21 @@ public interface TenantScopedRuleEngine {
   String engineId();                                                 // system:process-engine, fixed when built
   DecisionResult evaluate(String tenantId, DecisionRequest request);
 }
+public interface EmbeddedEngineGrant {                               // a bean, but it refuses hosts
+  TenantScopedRuleEngine claim(String engineId, Object claimant);    // once, by the registered claimant only
+  boolean isClaimed(String engineId);
+}
 ```
-`TenantScopedRuleEngine` is for an embedded engine acting on its own stored work with no caller signed in, for example the Process Engine pricing a step after a timer. Host code cannot reach it: the `RuleEngine` bean does not implement it and it is not a bean. The Process Engine's starter builds it with `RuleEngines.forEmbeddedEngine("system:process-engine")`, which accepts only a registered engine identity, so the caller written to the decision log is fixed and cannot be chosen per call. The tenant is the one the engine read from its own stored row; a blank tenant is refused. There is no REST endpoint for it.
+`TenantScopedRuleEngine` is for an embedded engine acting on its own stored work with no caller signed in, for example the Process Engine pricing a step after a timer. The tenant is the one the engine read from its own stored row; a blank tenant is refused. The caller written to the decision log is the engine identity, fixed when the object is built. There is no REST endpoint for it.
+
+**Hosts have no way to reach this entry point.**
+- It is never a bean, and the `RuleEngine` bean does not implement it. `RuleEngines`, the engine's internals, is not a bean either.
+- The only route to it is `EmbeddedEngineGrant.claim`. That method hands the entry point out once per engine identity, and only to the claimant registered for it. For `system:process-engine`, that is the Process Engine's decision port. The port is a package-private class, so host code cannot create one.
+- Host code that injects the grant and claims is refused with a `SecurityException`. In a running application the Process Engine has already claimed the entry point at start-up, so a second claim fails too. A host that claims first makes start-up fail.
+- A host that builds its own `RuleEngines` gets a grant that refuses it in the same way.
+- The Process Engine uses the entry point only for an engine caller (`DecisionCaller.Engine`). Only the engine's own timer path can create one.
+
+ArchUnit rules and context tests check all of this (`TR-TEN-01`). The checks are Java access rules on a plain classpath, so they do not stop code that uses reflection or defines a class with the same name as an engine class. Such code is out of scope, because it could equally read any private field of the engine.
 ```java
 DecisionResult r = rules.evaluate("card-fee", DecisionInput.of("tier", "GOLD", "balance", Money.ofMinor("VND", 60_000_000), "txCount", 3));
 r.ruleSet();            // "card-fee"

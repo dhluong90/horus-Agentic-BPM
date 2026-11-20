@@ -152,7 +152,30 @@ class CoreArchitectureTest {
                 .that().resideOutsideOfPackages("io.github.dhluong90.bpm.rules.embedded..",
                         "io.github.dhluong90.bpm.rules.internal.service..")
                 .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.rules.embedded..")
-                .because("only RuleEngines builds the tenant-scoped entry point (ADR-0027)")
+                .because("only the one-time grant builds the tenant-scoped entry point (ADR-0027)")
+                .check(core);
+    }
+
+    @Test
+    void TR_TEN_01_only_the_one_time_grant_builds_the_tenant_scoped_entry_point() {
+        noClasses()
+                .that().doNotHaveFullyQualifiedName(
+                        "io.github.dhluong90.bpm.rules.internal.service.OneTimeEmbeddedEngineGrant")
+                .should().callConstructorWhere(target(owner(name(
+                        "io.github.dhluong90.bpm.rules.internal.service.EngineScopedRuleEngine"))))
+                .because("the entry point is handed out once, to the registered claimant (#336)")
+                .check(core);
+        classes()
+                .that().implement("io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine")
+                .or().implement("io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant")
+                .should().notBePublic()
+                .because("host code cannot build the entry point or a grant of its own (#336)")
+                .check(core);
+        noClasses()
+                .that().resideInAPackage("io.github.dhluong90.bpm.rules.internal.service..")
+                .should().callMethod(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class, "claim",
+                        String.class, Object.class)
+                .because("the Rule Engine hands the entry point out and never claims it itself (#336)")
                 .check(core);
     }
 
