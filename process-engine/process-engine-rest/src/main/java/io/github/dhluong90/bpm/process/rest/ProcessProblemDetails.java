@@ -52,6 +52,7 @@ public class ProcessProblemDetails {
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("VERSION_CONFLICT", HttpStatus.CONFLICT),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
+            Map.entry("FORM_VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("BPMN_UNSUPPORTED_ELEMENT", UNPROCESSABLE),
             Map.entry("BPMN_UNSAFE_XML", UNPROCESSABLE),
             Map.entry("DEFINITION_TOO_LARGE", UNPROCESSABLE),
@@ -77,6 +78,10 @@ public class ProcessProblemDetails {
             case BpmnUnsupportedElementException u -> body.set("problems", Views.problems(u.problems()));
             case ValidationFailedException v -> body.set("problems", Views.problems(v.problems()));
             case StepFailedException s -> body.put("nodeId", s.nodeId()).put("reason", s.reason());
+            case io.github.dhluong90.bpm.process.api.FormValidationException f -> {
+                tools.jackson.databind.node.ArrayNode violations = body.putArray("violations");
+                f.violations().forEach(violations::add);
+            }
             case io.github.dhluong90.bpm.process.api.LastVersionInEffectException l -> {
                 body.put("definitionKey", l.definitionKey()).put("version", l.version()).put("setting", l.setting());
                 if (l.nextEffectiveFrom() == null) {

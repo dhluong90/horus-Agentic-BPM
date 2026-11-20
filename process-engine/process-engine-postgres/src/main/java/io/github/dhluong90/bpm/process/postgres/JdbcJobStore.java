@@ -46,12 +46,22 @@ public final class JdbcJobStore implements JobStore {
 
     @Override
     public List<JobRow> claimDue(String replicaId, Instant now, int limit) {
-        return claim("NOT IN", replicaId, now, limit);
+        return claim("job_kind NOT IN ('" + ASYNC_SERVICE + "','" + ASYNC_AGENT + "')", null, replicaId, now, limit);
     }
 
     @Override
     public List<JobRow> claimDueAsync(String replicaId, Instant now, int limit) {
-        return limit < 1 ? List.of() : claim("IN", replicaId, now, limit);
+        return limit < 1 ? List.of()
+                : claim("job_kind IN ('" + ASYNC_SERVICE + "','" + ASYNC_AGENT + "')", null, replicaId, now, limit);
+    }
+
+    @Override
+    public List<JobRow> claimDueAsync(String replicaId, Instant now, String jobKind, int limit) {
+        if (!JobStore.isAsync(jobKind)) {
+            throw new IllegalArgumentException("Not an async job kind: " + jobKind);
+        }
+        // One kind per statement, on idx_pre_timer_poll_kind (V9): a backlog of another kind is never scanned.
+        return limit < 1 ? List.of() : claim("job_kind = ?", jobKind, replicaId, now, limit);
     }
 
     @Override
@@ -60,13 +70,21 @@ public final class JdbcJobStore implements JobStore {
                 .params(tenant, id).query(JdbcJobStore::job).optional();
     }
 
-    /** One claim statement; {@code kinds} is {@code IN} or {@code NOT IN} the async kinds, never caller text. */
-    private List<JobRow> claim(String kinds, String replicaId, Instant now, int limit) {
+    /**
+     * One claim statement. {@code kindFilter} is a constant of this class, never caller text; {@code kind} is its one
+     * bind parameter, or null when it has none.
+     */
+    private List<JobRow> claim(String kindFilter, String kind, String replicaId, Instant now, int limit) {
+        List<Object> params = new java.util.ArrayList<>(List.of(ts(now), ts(now)));
+        if (kind != null) {
+            params.add(kind);
+        }
+        params.addAll(List.of(limit, replicaId, ts(now)));
         return jdbc.sql("WITH due AS ("
                         + "SELECT tenant_id, id FROM pre_timer "
                         + "WHERE status IN ('DUE','CLAIMED') AND next_fire_at <= ? "
                         + "AND (status = 'DUE' OR locked_until <= ?) "
-                        + "AND job_kind " + kinds + " ('" + ASYNC_SERVICE + "','" + ASYNC_AGENT + "') "
+                        + "AND " + kindFilter + " "
                         + "ORDER BY next_fire_at, id LIMIT ? FOR UPDATE SKIP LOCKED) "
                         + "UPDATE pre_timer t SET status = 'CLAIMED', locked_by = ?, "
                         + "locked_until = ?::timestamptz + t.lease_duration, attempt = t.attempt + 1 "
@@ -74,7 +92,7 @@ public final class JdbcJobStore implements JobStore {
                         + "RETURNING t.tenant_id, t.id, t.instance_id, t.definition_id, t.token_id, t.job_kind, t.node_id, "
                         + "t.status, t.next_fire_at, (EXTRACT(EPOCH FROM t.lease_duration) * 1000)::bigint AS lease_ms, "
                         + "t.locked_by, t.locked_until, t.attempt, t.max_attempts, t.payload::text AS payload")
-                .params(ts(now), ts(now), limit, replicaId, ts(now))
+                .params(params)
                 .query(JdbcJobStore::job).list()
                 .stream().sorted((a, b) -> {
                     int byDue = a.nextFireAt().compareTo(b.nextFireAt());
@@ -103,6 +121,16 @@ public final class JdbcJobStore implements JobStore {
                         + "completed_at = ? WHERE tenant_id = ? AND id = ? AND status = 'CLAIMED' AND locked_by = ? "
                         + "AND attempt = ?")
                 .params(failed ? "FAILED" : "DUE", ts(retryAt), failed ? ts(now) : null, tenant, id, replicaId, attempt)
+                .update() == 1;
+    }
+
+    @Override
+    public boolean retrySchema(String tenant, String id, String replicaId, int attempt, Instant retryAt) {
+        return jdbc.sql("UPDATE pre_timer SET status = 'DUE', next_fire_at = ?, locked_by = NULL, locked_until = NULL, "
+                        + "max_attempts = max_attempts + 1, payload = jsonb_set(payload, '{" + SCHEMA_RETRIES + "}', "
+                        + "to_jsonb(COALESCE((payload ->> '" + SCHEMA_RETRIES + "')::int, 0) + 1)) "
+                        + "WHERE tenant_id = ? AND id = ? AND status = 'CLAIMED' AND locked_by = ? AND attempt = ?")
+                .params(ts(retryAt), tenant, id, replicaId, attempt)
                 .update() == 1;
     }
 

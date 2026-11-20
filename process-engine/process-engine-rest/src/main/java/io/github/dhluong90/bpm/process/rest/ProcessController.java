@@ -359,7 +359,8 @@ public class ProcessController {
      * ({@code adapters.completer-roles}). Body: {@code attemptId}, {@code completionToken}, {@code status}
      * ({@code COMPLETED}, {@code FAILED} or {@code BUSINESS_ERROR}), and {@code output} for a completed attempt or
      * {@code errorCode} (and {@code retryable} for a failure). A repeat answers {@code DUPLICATE} and writes nothing;
-     * a result after the lease ended answers {@code DISCARDED} (ADR-0008).
+     * a result after the lease ended answers {@code DISCARDED} (ADR-0008); a result its output-schema or guardrail
+     * check refuses answers {@code REFUSED} (#363).
      */
     @PostMapping(value = "/async-steps/{jobId}:complete", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<byte[]> completeAsyncStep(@PathVariable("jobId") String jobId, HttpServletRequest http)

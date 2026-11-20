@@ -27,6 +27,14 @@ public record StepCompletion(String jobId, String attemptId, Outcome outcome) {
          * The attempt is no longer current: its lease ended, another attempt took the step over, or the instance was
          * cancelled. Nothing changed in the process; a cancelled step records {@code LATE_RESULT_DISCARDED}.
          */
-        DISCARDED
+        DISCARDED,
+        /**
+         * The result was checked and refused (#363), and the refusal is final: it broke the step's output schema
+         * after its schema retries were used up, its guardrail said no, or the guardrail could not be evaluated.
+         * Nothing of the result was accepted; the refusal is recorded, and the step goes to a four-eyes review task
+         * or its job fails. A malformed result that still has a schema retry is {@link #ACCEPTED}: the attempt was
+         * recorded as failed and the step gets a fresh one.
+         */
+        REFUSED
     }
 }

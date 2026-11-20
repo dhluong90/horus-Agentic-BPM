@@ -583,6 +583,16 @@ class ProcessServicesQaTest {
         }
 
         @Override
+        public java.util.Set<String> historyActors(String tenant, String instanceId, String eventType) {
+            return java.util.Set.of();
+        }
+
+        @Override
+        public Optional<String> reviewedJob(String tenant, String instanceId, String taskId) {
+            return Optional.empty();
+        }
+
+        @Override
         public Optional<IdempotencyRecord> idempotency(String tenant, String operation, String key, Instant now) {
             return Optional.ofNullable(idempotency.get(operation + "/" + key));
         }
