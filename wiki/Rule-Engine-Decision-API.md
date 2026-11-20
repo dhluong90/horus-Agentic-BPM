@@ -109,7 +109,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `GET /decisions/{id}` | One decision as logged, with `evalClock`, `clockChosen` and `pinned`; masked inputs are `hmac:<keyId>:<hex>`. Another tenant's decision is `404 DECISION_NOT_FOUND` | `rules:log:read` | |
 | `POST /decisions:find-by-masked-input` | Decisions of one rule set, in at most 31 days, whose masked input had a plain value. Body `{ "ruleSet", "input", "value", "from", "to", "limit" }`; the engine fingerprints `value` with your tenant's key, so the value is never stored or put in a URL. Answers `{ "data": [...], "truncated": false }`, newest first | `rules:masked:search` | `limit` 1 to 200, default 50; at most `masking.search.max-per-minute` (30) per caller per minute, then `429` with `Retry-After` |
 | `GET /decisions/{id}/explain` | Plain-language explanation | `rules:log:read` | |
-| `GET /decisions?ruleSet=&from=&to=&outcome=&matchedRuleId=&cursor=&limit=` | Decision log, newest first. `ruleSet`, `from` and `to` are required; the range is at most 31 days | `rules:log:read` | cursor pagination |
+| `GET /decisions?ruleSet=&from=&to=&cursor=&limit=` | Decision log of one rule set, newest first, `from` inclusive and `to` exclusive. `ruleSet`, `from` and `to` are required; the range is at most 31 days (`query.max-range`); a page holds up to 200 decisions (`query.max-page-size`, also the default). Masked inputs stay hashed. Built in 0.2; the `outcome` and `matchedRuleId` filters come later | `rules:log:read` | cursor pagination; the cursor is bound to the rule set and period |
 
 Permission strings match [[Rule Engine Configuration]].
 
