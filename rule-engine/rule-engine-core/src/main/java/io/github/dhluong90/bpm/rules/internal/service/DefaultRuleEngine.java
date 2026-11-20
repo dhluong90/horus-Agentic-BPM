@@ -46,9 +46,13 @@ import tools.jackson.databind.node.ArrayNode;
  * Evaluates the version in force at the decision's clock, or a pinned approved version, and logs one decision row in
  * the caller's transaction (RLE-013); replays a logged decision without writing; simulates a stored version over
  * sample inputs without logging anything (RLE-016). Compiled versions are cached by version id and canonical hash, so
- * a cached entry is never served for other content and the cache needs no invalidation. Selection is not cached: every
- * evaluation selects in the database, so a newly effective or retired version is seen by every replica at once. The
- * cache size is bounded by {@code cache.max-entries}; a full cache is cleared. Thread-safe.
+ * a cached entry is never served for other content and that map needs no invalidation; its size is bounded by
+ * {@code cache.max-entries} and a full map is cleared. The selection of the version in force is served from the
+ * {@link CompiledCache} while the evaluation instant lies inside the entry's window and its epoch holds, so a cached
+ * evaluation reads nothing and writes one row; a miss reads the version, its epoch and its window in one statement
+ * (ADR-0009). Approve and retire move the epoch, so a newly effective or retired version reaches every replica
+ * through the notification or, at the latest, the epoch check. A pinned evaluation, a replay and a simulation never
+ * use the selection cache. Thread-safe.
  */
 public final class DefaultRuleEngine implements RuleEngine {
 
@@ -71,18 +75,24 @@ public final class DefaultRuleEngine implements RuleEngine {
     private final RuleStore store;
     private final DecisionLog log;
     private final Map<String, CompiledRuleSet> compiled = new ConcurrentHashMap<>();
+    private final CompiledCache cache;
 
     /**
-     * Creates the engine.
+     * Creates the engine with a selection cache of its own.
      *
      * @param context shared engine context
      * @param store rule set storage
      * @param log decision log
      */
     public DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log) {
+        this(context, store, log, new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions()));
+    }
+
+    DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.log = Objects.requireNonNull(log, "log must not be null");
+        this.cache = Objects.requireNonNull(cache, "cache must not be null");
     }
 
     @Override
@@ -283,15 +293,29 @@ public final class DefaultRuleEngine implements RuleEngine {
             // Not a possible name (a NUL byte, upper case): not found, without a query the driver would refuse.
             throw new RuleSetNotFoundException("(invalid name)");
         }
-        StoredVersion version = request.version() == null ? effective(tenant, request.ruleSet(), at)
-                : pinned(tenant, request.ruleSet(), request.version());
+        StoredVersion version;
         CompiledRuleSet rules;
-        try {
-            rules = compiled(version);
-        } catch (IntegrityFailure failure) {
-            System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
-                    "ALERT rule set integrity: tenant " + tenant + ", " + failure.getMessage());
-            return refuse(tenant, caller, request, version, now, at, "EVALUATION_ERROR", failure.getMessage());
+        if (request.version() == null) {
+            CompiledCache.Entry entry = cache.get(tenant, request.ruleSet(), at);
+            if (entry == null) {
+                RuleStore.EffectiveVersion effective = effective(tenant, request.ruleSet(), at);
+                try {
+                    entry = new CompiledCache.Entry(effective.version(), compiled(effective.version()),
+                            effective.cacheEpoch(), effective.validFrom(), effective.nextEffectiveFrom());
+                } catch (IntegrityFailure failure) {
+                    return refuseTampered(tenant, caller, request, effective.version(), now, at, failure);
+                }
+                cache.put(entry);
+            }
+            version = entry.version();
+            rules = entry.compiled();
+        } else {
+            version = pinned(tenant, request.ruleSet(), request.version());
+            try {
+                rules = compiled(version);
+            } catch (IntegrityFailure failure) {
+                return refuseTampered(tenant, caller, request, version, now, at, failure);
+            }
         }
         if (context.settings().rejectUndeclaredInputs()) {
             rules.requireOnlyDeclared(request.input());
@@ -337,9 +361,20 @@ public final class DefaultRuleEngine implements RuleEngine {
         return result;
     }
 
-    /** The version in force at an instant (DESIGN 3.3.1); not found or no effective version otherwise. */
-    private StoredVersion effective(String tenant, String ruleSet, Instant at) {
-        return store.findEffective(tenant, ruleSet, at).orElseThrow(() ->
+    /** Logs a decision on a version whose stored hash no longer matches its content, and raises the alert. */
+    private DecisionResult refuseTampered(String tenant, String caller, DecisionRequest request, StoredVersion version,
+            Instant now, Instant at, IntegrityFailure failure) {
+        System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
+                "ALERT rule set integrity: tenant " + tenant + ", " + failure.getMessage());
+        return refuse(tenant, caller, request, version, now, at, "EVALUATION_ERROR", failure.getMessage());
+    }
+
+    /**
+     * The version in force at an instant (DESIGN 3.3.1), with the window around the instant over which that selection
+     * holds and the rule set's epoch; not found or no effective version otherwise.
+     */
+    private RuleStore.EffectiveVersion effective(String tenant, String ruleSet, Instant at) {
+        return store.findEffectiveForCache(tenant, ruleSet, at).orElseThrow(() ->
                 store.findRuleSetId(tenant, ruleSet).isPresent()
                         ? new NoEffectiveVersionException(ruleSet)
                         : new RuleSetNotFoundException(ruleSet));

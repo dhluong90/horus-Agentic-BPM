@@ -350,6 +350,44 @@ curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml
 
 `RuleLifecycleFailurePathsIT` runs both, and `RLE_005_money_currency_mismatch_is_rejected` the run-time case (`422 EVALUATION_ERROR`, no outputs, logged).
 
+## Demo: two copies of the host, one approval
+
+Banks run several copies of a service. Each copy keeps compiled rule versions in memory, and an approval on one copy reaches the others through the database. Start two copies on the same database, on ports 8080 and 8081, after steps 1 to 4 of the walkthrough above:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar --server.port=8081 &
+B=localhost:8081/api/bpm/rules/v1
+curl -s -u tuan:demo-only -X POST $B/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
+  -d '{"inputs":{"tier":"SILVER","txCount":1}}'
+# {"version":1,...,"outputs":{"fee":{"currency":"VND","amount":50000}}}
+```
+
+1. Hoa imports v2 with a higher default fee on copy A and Minh approves it there:
+
+   ```bash
+   sed 's/"50000 VND"/"60000 VND"/' examples/rule-engine-only/src/main/resources/rules/card-fee.yaml > /tmp/card-fee-v2.yaml
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' --data-binary @/tmp/card-fee-v2.yaml
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/2:request-publish
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:approve -H 'If-Match: "1"'
+   ```
+
+2. Copy B answers with v2 within a second, without a restart:
+
+   ```bash
+   curl -s -u tuan:demo-only -X POST $B/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
+     -d '{"inputs":{"tier":"SILVER","txCount":1}}'
+   # {"version":2,...,"outputs":{"fee":{"currency":"VND","amount":60000}}}
+   ```
+
+Behind a transaction-mode connection pooler such as PgBouncer, start both copies with `--horus.bpm.rules.cache.listen-notify=false` and `prepareThreshold=0` on the JDBC URL: copy B then answers with v2 within the 5 s epoch check. Both runs are recorded for the sprint review from the tests:
+
+```bash
+mvn -B -pl examples/rule-engine-only -am verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test=MultiReplicaCacheIT
+# [INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0 -- in ...MultiReplicaCacheIT
+```
+
 ## Demo: the decision log by month
 
 The decision log keeps one table section per calendar month, created ahead of the clock while the host runs. An auditor reads one rule set's decisions for a period of at most 31 days, 200 at a time. The demo users hold no audit permission by default, so start the host as in the walkthrough above with one more argument that gives Minh `rules:log:read`, then run steps 1 to 5 there so `card-fee` has decisions:
@@ -715,6 +753,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `SignInPageTest` | The page in English and Vietnamese, the error and signed-out states, the escaped CSRF field, demo users only on `dev` with a password, no inline script or style, and the same message keys in both languages |
 | `CockpitEmbeddedIT.CKP_001_*` | On the `dev` profile: form sign-in, the cockpit page and its one-host registry, then `200` from `/api/bpm/meta` and `/api/bpm/me` with the session, valid against the cockpit schemas; a call that changes data needs `X-XSRF-TOKEN` from the cookie |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
+| `MultiReplicaCacheIT.RLE_010_*`, `MultiReplicaCacheIT.TR_ASY_04_*` | Two copies of this host on one database: copy B serves `card-fee` v2 within 1 s of copy A's approval on a direct connection, and within the 5 s epoch check through PgBouncer in transaction mode (`edoburu/pgbouncer`, override with `-Dbpm.test.pgbouncer.image`) with `cache.listen-notify=false`, where no session runs `LISTEN` |
 | `DecisionLogSearchIT.RLE_029_*`, `DecisionLogSearchIT.RLE_017_*` | The decision log demo above over HTTP: 250 card-fee decisions of January 2027 in pages of 200 and 50, a 32-day range and a missing rule set refused, another tenant's own rows only, `403` without `rules:log:read`, masked inputs still hashed; the default-section gauge from 1 to 0 when the job creates March without a restart |
 | `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*`, `RLE_002_*`, `RLE_003_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
 

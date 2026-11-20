@@ -204,6 +204,67 @@ public final class JdbcRuleStore implements RuleStore {
         }
     }
 
+    /** Channel of the cache notifications (ADR-0009); one per database, shared by every tenant. */
+    static final String CACHE_CHANNEL = "horus_rle_cache";
+
+    @Override
+    public Optional<EffectiveVersion> findEffectiveForCache(String tenantId, String ruleSet, Instant at) {
+        // The same selection as findEffective, with the epoch and the window read in the same statement. The window
+        // is bounded by the nearest start or retirement of any approved version on each side of :at, so the
+        // selection cannot change inside it. GREATEST and LEAST ignore a null argument.
+        return jdbc.sql("SELECT " + VERSION_COLUMNS + """
+                , s.cache_epoch,
+                  (SELECT max(GREATEST(CASE WHEN n.effective_from <= :at THEN n.effective_from END,
+                                       CASE WHEN n.retired_at <= :at THEN n.retired_at END))
+                     FROM rle_version n
+                    WHERE n.tenant_id = v.tenant_id AND n.rule_set_id = v.rule_set_id
+                      AND n.approved_at IS NOT NULL) AS valid_from,
+                  (SELECT min(LEAST(CASE WHEN n.effective_from > :at THEN n.effective_from END,
+                                    CASE WHEN n.retired_at > :at THEN n.retired_at END))
+                     FROM rle_version n
+                    WHERE n.tenant_id = v.tenant_id AND n.rule_set_id = v.rule_set_id
+                      AND n.approved_at IS NOT NULL) AS next_effective_from
+                FROM rle_version v
+                JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
+                WHERE v.tenant_id = :tenant AND s.name = :name
+                  AND v.approved_at IS NOT NULL AND v.effective_from <= :at
+                  AND (v.retired_at IS NULL OR v.retired_at > :at)
+                ORDER BY v.version_num DESC
+                LIMIT 1
+                """)
+                .param("tenant", tenantId).param("name", ruleSet).param("at", Timestamp.from(at))
+                .query((rs, row) -> new EffectiveVersion(version(rs, row), rs.getLong("cache_epoch"),
+                        instant(rs, "valid_from"), instant(rs, "next_effective_from")))
+                .optional();
+    }
+
+    @Override
+    public long advanceCacheEpoch(String tenantId, String ruleSetId, String ruleSet) {
+        long epoch = jdbc.sql("""
+                UPDATE rle_rule_set SET cache_epoch = cache_epoch + 1
+                WHERE tenant_id = :tenant AND id = :id
+                RETURNING cache_epoch
+                """).param("tenant", tenantId).param("id", ruleSetId).query(Long.class).single();
+        // Delivered by PostgreSQL after commit, to every session listening on the channel; dropped on rollback.
+        String payload = EngineValues.write(tools.jackson.databind.node.JsonNodeFactory.instance.objectNode()
+                .put("tenantId", tenantId).put("ruleSet", ruleSet).put("epoch", epoch));
+        jdbc.sql("SELECT pg_notify(:channel, :payload)").param("channel", CACHE_CHANNEL).param("payload", payload)
+                .query((rs, row) -> row).list();
+        return epoch;
+    }
+
+    @Override
+    public java.util.Map<String, Long> cacheEpochs(String tenantId, java.util.Collection<String> ruleSets) {
+        java.util.Map<String, Long> epochs = new java.util.HashMap<>();
+        if (ruleSets.isEmpty()) {
+            return epochs;
+        }
+        jdbc.sql("SELECT name, cache_epoch FROM rle_rule_set WHERE tenant_id = :tenant AND name IN (:names)")
+                .param("tenant", tenantId).param("names", List.copyOf(ruleSets))
+                .query((rs, row) -> epochs.put(rs.getString("name"), rs.getLong("cache_epoch"))).list();
+        return epochs;
+    }
+
     @Override
     public Optional<StoredVersion> findEffective(String tenantId, String ruleSet, Instant at) {
         return jdbc.sql("SELECT " + VERSION_COLUMNS + """
