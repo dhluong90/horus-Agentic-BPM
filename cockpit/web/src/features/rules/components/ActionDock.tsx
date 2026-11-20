@@ -176,14 +176,15 @@ function Step({ title, when }: { title: string; when: string | undefined }) {
 }
 
 /** Who drafted, requested and approved the version, since when it applies, and its content hash. */
-export function DetailsPanel({ version }: { version: RuleSetVersion }) {
+/** `importedFrom` is the file this version was imported from in this session, when the user imported it here. */
+export function DetailsPanel({ version, importedFrom }: { version: RuleSetVersion; importedFrom?: string | undefined }) {
   const { t, locale } = useI18n();
   const policy = version.hitPolicy.toUpperCase();
   const policyKey = policy === 'UNIQUE' ? 'policy.UNIQUE' : policy === 'COLLECT' ? 'policy.COLLECT' : 'policy.FIRST';
   return (
     <div className="details">
       <ol className="timeline">
-        {version.createdBy ? <Step title={t('details.drafted', { who: version.createdBy })} when={formatDateTime(version.createdAt, locale)} /> : null}
+        {version.createdBy ? <Step title={importedFrom !== undefined ? t('details.imported', { who: version.createdBy, file: importedFrom }) : t('details.drafted', { who: version.createdBy })} when={formatDateTime(version.createdAt, locale)} /> : null}
         {version.requestedBy ? <Step title={t('details.requested', { who: version.requestedBy })} when={formatDateTime(version.requestedAt, locale)} /> : null}
         {version.approvedBy ? <Step title={t('details.approved', { who: version.approvedBy })} when={formatDateTime(version.approvedAt, locale)} /> : null}
         {version.effectiveFrom ? <Step title={t('details.inEffect')} when={t('details.from', { when: formatDateTime(version.effectiveFrom, locale) ?? '' })} /> : null}

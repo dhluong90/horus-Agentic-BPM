@@ -50,6 +50,15 @@ export const meLan: BpmMeV1 = {
   roles: ['PRICING_AUTHOR'],
 };
 
+/** A reader: may open rule sets and export them, and may not author or approve. */
+export const meDan: BpmMeV1 = {
+  schemaVersion: 1,
+  user: { id: 'dan', displayName: 'Đỗ Văn Dân' },
+  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  permissions: ['rules:read'],
+  roles: ['PRICING_READER'],
+};
+
 export const meMinh: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'minh', displayName: 'Trần Văn Minh' },
@@ -96,7 +105,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -134,6 +143,8 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
         meta: json({ ...metaRulesOnly, modules: [{ ...metaRulesOnly.modules[0], settings: { 'authoring.cockpit-drafts': false } }] }),
         me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }),
       };
+    case 'rules-reader':
+      return { ...ok, me: json(meDan) };
     case 'rules-author-approver':
       return { ...ok, me: json({ ...meLan, permissions: ['rules:read', 'rules:author', 'rules:approve', 'rules:evaluate'] }) };
     case 'me-forbidden':
@@ -201,6 +212,7 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
 
 /** The signed-in user of a scenario, for the mock Rule Engine's four-eyes check. */
 export function scenarioUser(scenario: Scenario): string {
+  if (scenario === 'rules-reader') return meDan.user.id;
   return scenario === 'ready-approver' || scenario === 'rules-approver' ? meMinh.user.id : meLan.user.id;
 }
 

@@ -175,8 +175,7 @@ test('QA_CKP_030_import_next_version_of_existing_rule_set_from_its_page', async 
   const posts: string[] = [];
   page.on('response', (r) => { if (r.request().method() === 'POST') posts.push(`${new URL(r.url()).pathname} -> ${String(r.status())}`); });
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'More' }).click();
-  await page.getByRole('menuitem', { name: 'Import new version' }).click();
+  await page.getByRole('button', { name: 'Import new version' }).click();
   const document = { schemaVersion: 1, ruleSet: 'card-fee', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }],
     rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] };
   await (await chooser).setFiles({ name: 'card-fee-v3.yaml', mimeType: 'application/yaml', buffer: Buffer.from(JSON.stringify(document)) });

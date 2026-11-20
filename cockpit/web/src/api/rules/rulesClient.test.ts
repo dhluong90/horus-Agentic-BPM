@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { HostCallError } from '../hostError';
-import { csrfToken } from '../hostCall';
+import { attachmentName, csrfToken } from '../hostCall';
 import { allVersions } from './catalogue';
 import { everyRuleSet } from '../../features/overview/useRuleOverview';
 import type { RulesClient } from './rulesClient';
 import { createRulesClient } from './rulesClient';
 import { versionDiff } from './schemas';
-import { createFakeEngine, demoSeed } from '../../mocks/ruleEngine';
+import { canonicalJson, createFakeEngine, demoSeed } from '../../mocks/ruleEngine';
 
 interface Sent { url: string; method: string; headers: Record<string, string>; body: string | undefined }
 
@@ -172,5 +172,56 @@ describe('rules client', () => {
     for (const path of ['/rule-sets:', '/rule-sets/{name}/versions:', '/rule-sets/{name}/versions/{version}:', '/rule-sets/{name}/versions/{version}/history:', '/rule-sets/{name}/versions/{version}/diff:', '/rule-sets/{name}/versions/{version}:request-publish:', '/rule-sets/{name}/versions/{version}:approve:', '/rule-sets/{name}/versions/{version}:reject:', '/decisions/{ruleSet}:evaluate:']) {
       expect(contract, path).toContain(`  ${path}\n`);
     }
+  });
+});
+
+describe('export (CKP-030, RLE-032)', () => {
+  it('CKP_030_export_returns_the_engine_bytes_unchanged_under_its_file_name', async () => {
+    const { sent, fetchImpl } = engineFetch('minh');
+    const client = createRulesClient('', fetchImpl);
+    const exported = await client.exportVersion('card-fee', 1, 'json');
+    expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=json']);
+    expect(sent[0]?.headers['idempotency-key']).toBeUndefined();
+    expect(exported.fileName).toBe('card-fee-v1.json');
+    const definition = demoSeed().find((v) => v.ruleSet === 'card-fee' && v.version === 1)?.definition;
+    expect(await exported.file.text()).toBe(canonicalJson(definition as never));
+  });
+
+  it('CKP_030_export_as_dmn_is_an_xml_file', async () => {
+    const { fetchImpl } = engineFetch('minh');
+    const exported = await createRulesClient('', fetchImpl).exportVersion('kyc-risk', 1, 'dmn');
+    expect(exported.fileName).toBe('kyc-risk-v1.dmn');
+    expect(await exported.file.text()).toContain('<decisionTable hitPolicy="FIRST">');
+  });
+
+  it('CKP_030_export_without_a_file_name_falls_back_to_name_version_format', async () => {
+    const { fetchImpl } = recordingFetch(() => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const exported = await createRulesClient('', fetchImpl).exportVersion('card-fee', 2, 'json');
+    expect(exported.fileName).toBe('card-fee-v2.json');
+  });
+
+  it('CKP_030_an_export_refusal_is_a_typed_problem_with_violations', async () => {
+    const { fetchImpl } = recordingFetch(() => new Response(JSON.stringify({ status: 422, code: 'VALIDATION_FAILED', detail: 'no table form', violations: [{ ruleId: 'R2', column: 'fee', message: 'calculated cell' }] }), { status: 422, headers: { 'Content-Type': 'application/problem+json' } }));
+    const failure = await createRulesClient('', fetchImpl).exportVersion('card-fee', 1, 'dmn').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(HostCallError);
+    expect((failure as HostCallError).hostError).toMatchObject({ kind: 'problem', code: 'VALIDATION_FAILED', violations: [{ ruleId: 'R2', column: 'fee' }] });
+  });
+
+  it('CKP_030_file_name_is_read_from_content_disposition', () => {
+    expect(attachmentName('attachment; filename="card-fee-v1.json"')).toBe('card-fee-v1.json');
+    expect(attachmentName('attachment; filename=card-fee-v1.dmn')).toBe('card-fee-v1.dmn');
+    expect(attachmentName("attachment; filename=\"x.json\"; filename*=UTF-8''ph%C3%AD-v1.json")).toBe('phí-v1.json');
+    expect(attachmentName('attachment')).toBeUndefined();
+    expect(attachmentName(null)).toBeUndefined();
+  });
+
+  it('TR_IDEM_01_the_same_import_key_creates_one_version', async () => {
+    const { fetchImpl } = engineFetch('lan');
+    const client = createRulesClient('', fetchImpl);
+    const text = JSON.stringify({ schemaVersion: 1, ruleSet: 'card-fee', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }], rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] });
+    const first = await client.importVersion('card-fee', { contentType: 'application/yaml', text }, 'key-1');
+    const again = await client.importVersion('card-fee', { contentType: 'application/yaml', text }, 'key-1');
+    expect(again.version).toBe(first.version);
+    expect((await client.listVersions('card-fee')).data.map((v) => v.version)).toEqual([3, 2, 1]);
   });
 });

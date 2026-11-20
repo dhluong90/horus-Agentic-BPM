@@ -295,12 +295,10 @@ describe('four eyes', () => {
   });
 
   it('PD_094_without_the_setting_draft_editing_is_off_and_import_stays', async () => {
-    const user = userEvent.setup();
     open('#/rules/card-fee/1', 'rules-author-drafts-default');
     expect(await screen.findByText('Changes to this environment arrive through your release pipeline.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'More' }));
-    expect(screen.getByRole('menuitem', { name: 'Import new version' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Import new version' })).toBeEnabled();
     window.location.hash = '#/rules';
     expect(await screen.findByRole('button', { name: 'Import rule set' })).toBeInTheDocument();
   });
@@ -371,8 +369,9 @@ describe('import of the next version (CKP-030)', () => {
     open('#/rules/card-fee/1');
     await screen.findByRole('button', { name: 'More' });
     await upload(v3, 'card-fee-bad.yaml');
-    expect(await screen.findByText('Row R4, column balance')).toBeInTheDocument();
-    expect(screen.getByText(': compares a money with a number')).toBeInTheDocument();
+    expect(await screen.findByText('Import refused. Nothing was saved.')).toBeInTheDocument();
+    expect(screen.getByText('card-fee-bad.yaml, row R4, column Balance')).toBeInTheDocument();
+    expect(screen.getByText('compares a money amount with a plain number')).toBeInTheDocument();
     expect(screen.queryByText(/Draft version 3 created/)).not.toBeInTheDocument();
     expect(await versionLine(1)).toBeInTheDocument();
   });
@@ -383,15 +382,13 @@ describe('import of the next version (CKP-030)', () => {
     await upload(v3.replace('>= 50000000', '>= 50000000 VND'), 'card-fee-v3.yaml');
     expect(await screen.findByText('Draft version 3 created')).toBeInTheDocument();
     await upload(v3, 'card-fee-bad.yaml');
-    expect(await screen.findByText('Row R4, column balance')).toBeInTheDocument();
+    expect(await screen.findByText('card-fee-bad.yaml, row R4, column Balance')).toBeInTheDocument();
     expect(screen.queryByText('Draft version 3 created')).not.toBeInTheDocument();
   });
 
   it('PD_075_import_stays_available_when_cockpit_drafts_are_off', async () => {
-    const user = userEvent.setup();
     open('#/rules/card-fee/1', 'rules-author-drafts-off');
-    await user.click(await screen.findByRole('button', { name: 'More' }));
-    expect(screen.getByRole('menuitem', { name: 'Import new version' })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: 'Import new version' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
   });
 });
@@ -408,7 +405,8 @@ describe('payload limits (413)', () => {
     const input = document.body.querySelector<HTMLInputElement>('.rs-head input[type=file]');
     if (!input) throw new Error('file input missing');
     await userEvent.setup().upload(input, new File(['#'.repeat(1_048_577)], 'huge.yaml', { type: 'application/yaml' }));
-    expect(await screen.findByText('The text is too long for the service.')).toBeInTheDocument();
+    expect(await screen.findByText('Import refused. Nothing was saved.')).toBeInTheDocument();
+    expect(screen.getByText('huge.yaml').parentElement).toHaveTextContent('huge.yaml: The text is too long for the service.');
     expect(screen.getByTestId('problem-code')).toHaveTextContent('PAYLOAD_TOO_LARGE');
   });
 

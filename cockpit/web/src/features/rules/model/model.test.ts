@@ -6,6 +6,7 @@ import { placeError } from './engineErrors';
 import { nonAsciiCharacters } from './nonAscii';
 import { formatDecimalText, formatMoney, groupWhileTyping, toMinorUnits } from './money';
 import { columnLabel, readCondition, readOutput, readResult } from './reading';
+import { valueLabel } from './cells';
 import { nextRowId, sameRows, toDocument, toRows } from './table';
 
 const definition: RuleSetDefinition = {
@@ -65,6 +66,8 @@ describe('cell readings', () => {
     expect(readOutput("'REVIEW'", 'en')).toEqual({ kind: 'value', value: { kind: 'text', text: 'Review' } });
     expect(readResult({ currency: 'VND', amount: 10000 }, 'en')).toEqual({ kind: 'text', text: '10,000 VND' });
     expect(columnLabel('txCount', undefined)).toBe('Tx count');
+    expect(valueLabel('PLATINUM')).toBe('Platinum');
+    expect(valueLabel('VN')).toBe('VN');
     expect(columnLabel('fee', 'Annual fee')).toBe('Annual fee');
   });
 });
