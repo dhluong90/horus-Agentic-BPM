@@ -48,7 +48,8 @@ public record ProcessEngineProperties(
         @DefaultValue Adapters adapters,
         @DefaultValue Runners runners,
         @DefaultValue Agents agents,
-        @DefaultValue Replay replay) {
+        @DefaultValue Replay replay,
+        @DefaultValue Calendar calendar) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -95,6 +96,24 @@ public record ProcessEngineProperties(
                 throw new IllegalArgumentException("horus.bpm.processes.handlers.slow-call-warning must be positive");
             }
         }
+    }
+
+    /**
+     * Business calendars (#72; PD-118 as amended by PD-131).
+     *
+     * @param approval {@code four-eyes} (the default): a calendar is created or changed only when a second holder of
+     *     {@code processes:calendar:manage} approves the proposal; {@code single}: the proposer applies it alone,
+     *     accepted only when the {@code dev} profile is active on its own, and refused at start-up otherwise
+     */
+    public record Calendar(@DefaultValue("four-eyes") CalendarApproval approval) {
+    }
+
+    /** Who applies a calendar change: a second person, or, in the {@code dev} profile only, the proposer. */
+    public enum CalendarApproval {
+        /** A second holder of {@code processes:calendar:manage} approves; the default. */
+        FOUR_EYES,
+        /** The proposer applies it alone; {@code dev} profile only. */
+        SINGLE
     }
 
     /**

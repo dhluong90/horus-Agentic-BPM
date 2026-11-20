@@ -23,6 +23,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
+import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
@@ -138,6 +139,9 @@ public final class SubsetBpmnWriter {
                 tag = "bpmn:userTask";
                 t.extensions().first(TaskAssignment.class).ifPresent(a -> attributes.append(optional("horus:assignee",
                         a.assignee())).append(a.fourEyes() ? " horus:fourEyes=\"true\"" : ""));
+                t.extensions().first(SlaSpec.class).ifPresent(sla -> attributes
+                        .append(optional("horus:sla", sla.duration().toString()))
+                        .append(optional("horus:calendar", sla.calendar())));
             }
             case ExclusiveGateway g -> {
                 tag = "bpmn:exclusiveGateway";

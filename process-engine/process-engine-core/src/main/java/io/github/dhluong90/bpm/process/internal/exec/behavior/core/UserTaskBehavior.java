@@ -9,6 +9,7 @@ import io.github.dhluong90.bpm.process.internal.exec.NotExecutableException;
 import io.github.dhluong90.bpm.process.internal.exec.Token;
 import io.github.dhluong90.bpm.process.internal.exec.TokenStatus;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.util.Map;
 
@@ -28,7 +29,7 @@ final class UserTaskBehavior implements FlowNodeBehavior<UserTask> {
         ctx.update(new Token(token.id(), token.kind(), TokenStatus.WAITING_USER, token.scopeTokenId(), token.nodeId(),
                 taskId, token.locals()));
         ctx.effect(new Effect.CreateUserTask(taskId, token.id(), node.id(), node.name(), assignment.assignee(),
-                assignment.fourEyes(), Map.of()));
+                assignment.fourEyes(), Map.of(), node.extensions().first(SlaSpec.class).orElse(null)));
         ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.task.created.v1", Map.of("taskId", taskId, "nodeId", node.id(),
                 "assignee", assignment.assignee())));
     }

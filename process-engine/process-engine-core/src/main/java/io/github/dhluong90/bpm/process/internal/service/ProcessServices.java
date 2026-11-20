@@ -88,6 +88,7 @@ import io.github.dhluong90.bpm.process.internal.store.ProcessStore.InstanceRow;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore.StoredDefinition;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore.TaskRow;
 import io.github.dhluong90.bpm.process.internal.store.TransactionRunner;
+import io.github.dhluong90.bpm.process.spi.BusinessCalendar;
 import io.github.dhluong90.bpm.process.spi.CallerResolver;
 import io.github.dhluong90.bpm.process.spi.ProcessEventPublisher;
 import io.github.dhluong90.bpm.process.spi.TenantResolver;
@@ -192,6 +193,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final AgentLabelLimits labelLimits;
     /** Bounds of the memory agent steps receive from earlier steps (#101). */
     private final AgentMemoryLimits memoryLimits;
+    private final BusinessCalendar calendar;
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
 
@@ -476,6 +478,48 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas,
             io.github.dhluong90.bpm.process.spi.InputMasker inputMasker, AgentLabelLimits labelLimits,
             AgentMemoryLimits memoryLimits) {
+        this(tenants, callers, clock, transactions, store, readers, writers, invoker, publisher, settings, behaviors,
+                expressions, jobs, jobSettings, async, adapters, agents, outputSchemas, inputMasker, labelLimits,
+                memoryLimits, BusinessCalendar.ELAPSED);
+    }
+
+    /**
+     * The full form with the business calendar that sets task due times (PRE-008); see the other constructors for
+     * the parameters they share.
+     *
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store storage
+     * @param readers definition readers by source format
+     * @param writers definition writers by export format (PRE-034)
+     * @param invoker local handlers and decisions
+     * @param publisher event publisher
+     * @param settings validated settings
+     * @param behaviors registered behaviours
+     * @param expressions expression evaluator
+     * @param jobs job storage ({@code pre_timer})
+     * @param jobSettings lease and attempts of the jobs this engine schedules
+     * @param async lease margin, default timeout and runner settings of async steps (ADR-0008, #363)
+     * @param adapters names of the host's {@code ServiceAdapter}s
+     * @param agents names of the host's {@code AgentAdapter}s
+     * @param outputSchemas checks async results and agent steps' schemas
+     * @param inputMasker makes the audit copy of masked agent inputs and memory (#59, #101)
+     * @param labelLimits bounds of agent answer labels ({@code agents.labels.*}, #59)
+     * @param memoryLimits bounds of agent step memory ({@code agents.memory.*}, #101)
+     * @param calendar working time of the tenants' calendars, called once per task with an SLA
+     */
+    public ProcessServices(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers,
+            Map<SourceFormat, Function<Process, byte[]>> writers, LocalServiceInvoker invoker,
+            ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
+            ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings, AsyncSettings async,
+            java.util.Set<String> adapters, java.util.Set<String> agents,
+            io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas,
+            io.github.dhluong90.bpm.process.spi.InputMasker inputMasker, AgentLabelLimits labelLimits,
+            AgentMemoryLimits memoryLimits, BusinessCalendar calendar) {
+        this.calendar = Objects.requireNonNull(calendar, "calendar must not be null");
         this.memoryLimits = Objects.requireNonNull(memoryLimits, "memoryLimits must not be null");
         this.inputMasker = Objects.requireNonNull(inputMasker, "inputMasker must not be null");
         this.labelLimits = Objects.requireNonNull(labelLimits, "labelLimits must not be null");
@@ -1097,6 +1141,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     + "pre_engine_key; run the engine migrations, and give the database user SELECT and INSERT on it", e);
         }
         cursors = new Cursors(key);
+    }
+
+    /**
+     * The task list over a query store, sharing this engine's resolvers, clock, transactions, page limit and cursor
+     * key (PRE-030).
+     */
+    TaskQueries taskQueries(io.github.dhluong90.bpm.process.internal.store.ProcessQueryStore queryStore) {
+        return new TaskQueries(tenants, callers, clock, transactions, queryStore, this::cursors, settings.maxPageSize());
     }
 
     private Cursors cursors() {
@@ -2179,7 +2231,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return new TaskView(t.id(), t.instanceId(), row.definitionKey(), row.definitionVersion(), row.businessKey(),
                 t.nodeId(), t.name(), t.assignee(), t.fourEyes(), t.status(), t.lockVersion(), t.claimedBy(),
                 t.claimedAt(), t.createdAt(), t.completedBy(), t.completedAt(), java.util.Set.of(),
-                t.reviewJson() == null ? null : Values.readMap(t.reviewJson()));
+                t.reviewJson() == null ? null : Values.readMap(t.reviewJson()), t.dueAt());
     }
 
     /** What this caller may do now; computed per caller, never stored with an idempotent answer. */
@@ -2379,10 +2431,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 history.addAll(t.history());
                 for (Effect effect : t.effects()) {
                     switch (effect) {
-                        case Effect.CreateUserTask task -> newTasks.add(new TaskRow(state.tenantId(), task.taskId(),
-                                state.instanceId(), task.tokenId(), definition.id(), task.nodeId(), task.name(),
-                                task.assignee(), task.fourEyes(), "OPEN", 0, null, null, null, clock.instant(), null,
-                                task.context().isEmpty() ? null : Values.write(task.context())));
+                        case Effect.CreateUserTask task -> {
+                            Instant created = clock.instant();
+                            newTasks.add(new TaskRow(state.tenantId(), task.taskId(), state.instanceId(),
+                                    task.tokenId(), definition.id(), task.nodeId(), task.name(), task.assignee(),
+                                    task.fourEyes(), "OPEN", 0, null, null, null, created, null,
+                                    task.context().isEmpty() ? null : Values.write(task.context()),
+                                    dueAt(state.tenantId(), task, created)));
+                        }
                         case Effect.CancelUserTask cancel -> cancelledTasks.add(cancel.taskId());
                         case Effect.ScheduleJob job -> newJobs.add(JobRow.due(state.tenantId(), job.jobId(),
                                 state.instanceId(), definition.id(), job.tokenId(), job.jobKind(), job.nodeId(),
@@ -2582,6 +2638,26 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         recorded.values().forEach(store::recordStepResult);
         store.appendHistory(tenant, state.instanceId(), definition.id(), history);
         newIncidents.forEach(site -> raiseIncident(site, now));
+    }
+
+    /**
+     * The due time of a new task (PRE-008): its SLA in working time of its calendar, from its creation on the engine
+     * clock, computed once and stored; a later calendar change never moves it. The calendar is read for the tenant of
+     * the instance row. An unknown calendar, or one without working time ahead, fails the step and nothing is written.
+     */
+    private Instant dueAt(String tenant, Effect.CreateUserTask task, Instant created) {
+        if (task.sla() == null) {
+            return null;
+        }
+        try {
+            return calendar.add(tenant, task.sla().calendar(), created, task.sla().duration());
+        } catch (io.github.dhluong90.bpm.process.api.CalendarNotFoundException e) {
+            throw new StepFailedException(task.nodeId(), e.code(), "the task's calendar " + task.sla().calendar()
+                    + " does not exist in this tenant");
+        } catch (IllegalStateException e) {
+            throw new StepFailedException(task.nodeId(), "CALENDAR_NO_WORKING_TIME", "the task's calendar "
+                    + task.sla().calendar() + " has no working time ahead");
+        }
     }
 
     /**

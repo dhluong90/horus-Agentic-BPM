@@ -38,6 +38,10 @@ import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.postgres.JdbcAgentReplayStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
+import io.github.dhluong90.bpm.process.postgres.JdbcCalendarStore;
+import io.github.dhluong90.bpm.process.internal.service.Calendars;
+import io.github.dhluong90.bpm.process.api.CalendarService;
+import io.github.dhluong90.bpm.process.spi.BusinessCalendar;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineSchemaMigrator;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineTransactions;
 import io.github.dhluong90.bpm.process.rest.AgentReplayController;
@@ -96,7 +100,7 @@ public class ProcessEngineAutoConfiguration {
     static final String DEV_PROFILE = "dev";
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
             "processes:approve", "processes:start", "processes:cancel", "processes:task:work",
-            "processes:step:complete", "processes:agent:replay");
+            "processes:step:complete", "processes:agent:replay", "processes:task:manage", "processes:calendar:manage");
     /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
     static final String REMOVED_AUTO_APPROVE = "horus.bpm.processes.definitions-auto-approve";
     private static final Log LOG = LogFactory.getLog(ProcessEngineAutoConfiguration.class);
@@ -301,7 +305,7 @@ public class ProcessEngineAutoConfiguration {
             JdbcJobStore jobs, JobSettings jobSettings, AsyncSettings async, ObjectProvider<ServiceAdapter> adapters,
             ObjectProvider<AgentAdapter> agents, ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
-            OutputSchemaValidator outputSchemas, InputMasker inputMasker) {
+            OutputSchemaValidator outputSchemas, InputMasker inputMasker, BusinessCalendar calendar) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -325,7 +329,48 @@ public class ProcessEngineAutoConfiguration {
                 BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings, async,
                 adaptersByName(adapters).keySet(), agentsByName(agents).keySet(), outputSchemas, inputMasker,
-                properties.agents().labels().toLimits(), properties.agents().memory().toLimits());
+                properties.agents().labels().toLimits(), properties.agents().memory().toLimits(), calendar);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    JdbcCalendarStore processEngineCalendarStore(DataSource dataSource) {
+        return new JdbcCalendarStore(dataSource);
+    }
+
+    /**
+     * The stored business calendars and their four-eyes changes (#72, PD-131). The {@code single} approval is
+     * refused here, before the bean exists, unless the dev profile is active on its own.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    Calendars processEngineCalendars(ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
+            ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcCalendarStore store,
+            ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment) {
+        if (properties.calendar().approval() == ProcessEngineProperties.CalendarApproval.SINGLE) {
+            requireDevProfileOnly(environment, "horus.bpm.processes.calendar.approval=single");
+            LOG.warn("Business calendar changes apply without a second person (horus.bpm.processes.calendar.approval"
+                    + "=single, dev profile). Every change records this.");
+        }
+        return new Calendars(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
+                clock.getIfUnique(Clock::systemUTC), transactions, store, publisher,
+                Calendars.Approval.valueOf(properties.calendar().approval().name()));
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(CalendarService.class)
+    CalendarService processCalendarService(Calendars calendars) {
+        return calendars;
+    }
+
+    /**
+     * Working time for task due times (PRE-008): the stored calendars, unless the host supplies its own
+     * {@link BusinessCalendar}.
+     */
+    @Bean
+    @ConditionalOnMissingBean(BusinessCalendar.class)
+    BusinessCalendar processEngineBusinessCalendar(Calendars calendars) {
+        return calendars.businessCalendar();
     }
 
     /**
@@ -357,6 +402,10 @@ public class ProcessEngineAutoConfiguration {
         if (ApproverMustDifferFrom.from(environment) == ApproverMustDifferFrom.REQUESTER) {
             LOG.warn(ApproverMustDifferFrom.PROPERTY + "=requester relaxes four eyes for process definitions: the "
                     + "importer of a version may approve it (PD-096). Every approval records this.");
+        }
+        if (properties.calendar().approval() == ProcessEngineProperties.CalendarApproval.SINGLE) {
+            // PD-131: one person may change a business calendar only in the dev profile.
+            requireDevProfileOnly(environment, "horus.bpm.processes.calendar.approval=single");
         }
         if (!properties.makerChecker().enabled()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.maker-checker.enabled=false");
@@ -446,8 +495,9 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(ProcessQueryService.class)
-    ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts) {
-        return new ProcessQueries(services, liveCounts);
+    ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts,
+            JdbcProcessStore store) {
+        return new ProcessQueries(services, liveCounts, store);
     }
 
     @Bean

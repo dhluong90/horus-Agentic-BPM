@@ -21,6 +21,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
+import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.util.List;
 import tools.jackson.databind.node.ArrayNode;
@@ -140,6 +141,13 @@ public final class CanonicalProcessWriter {
                         step.putObject("assignee").put(a.assignee().substring(0, colon), a.assignee().substring(colon + 1));
                         if (a.fourEyes()) {
                             step.put("fourEyes", true);
+                        }
+                    });
+                    // Only when declared, so the hash of a definition without an SLA is unchanged (PRE-008).
+                    t.extensions().first(SlaSpec.class).ifPresent(sla -> {
+                        ObjectNode spec = step.putObject("sla").put("duration", sla.duration().toString());
+                        if (sla.calendar() != null) {
+                            spec.put("calendar", sla.calendar());
                         }
                     });
                 }
