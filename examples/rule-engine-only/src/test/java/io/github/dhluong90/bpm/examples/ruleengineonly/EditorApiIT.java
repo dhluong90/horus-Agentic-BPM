@@ -300,9 +300,10 @@ class EditorApiIT {
         assertThat(actions(t, "dan", 2)).isEqualTo("[]");
         assertThat(actions(t, "lan", 3)).isEqualTo("[\"request-publish\"]");
         assertThat(actions(t, "minh", 3)).isEqualTo("[]");
-        for (String user : new String[] {"lan", "minh", "dan"}) {
-            assertThat(actions(t, user, 1)).isEqualTo("[]");
-        }
+        // v1 published: the approvers may retire it (#28), the reader nothing
+        assertThat(actions(t, "lan", 1)).isEqualTo("[\"retire\"]");
+        assertThat(actions(t, "minh", 1)).isEqualTo("[\"retire\"]");
+        assertThat(actions(t, "dan", 1)).isEqualTo("[]");
         // the hint does not replace the check
         assertProblem(send(t, "lan", "POST", "/rule-sets/card-fee/versions/2:approve", null, null, null, null),
                 403, "SELF_APPROVAL_FORBIDDEN");

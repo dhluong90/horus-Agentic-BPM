@@ -266,6 +266,12 @@ class EffectiveDatesAndReplayPostgresIT {
                 rules:
                   - { id: R1, when: { txDate: "== today()" }, then: { sameDay: true } }
                 """;
+        Instant at = Instant.parse("2027-01-15T18:30:00Z");
+        DecisionInput tx = DecisionInput.of(Map.of("txDate", LocalDate.of(2027, 1, 16)));
+        List<DecisionResult> results = new ArrayList<>();
+
+        // When each is evaluated with txDate 2027-01-16 at 2027-01-15T18:30Z while it is the version in force (v2's
+        // approval retires v1, and a retired version is not pinned by default)
         for (String zone : new String[] {"timeZone: Asia/Ho_Chi_Minh", ""}) {
             caller.as("bank-a", "lan", AUTHOR);
             byte[] document = cutoff.formatted(zone).getBytes(StandardCharsets.UTF_8);
@@ -276,14 +282,12 @@ class EffectiveDatesAndReplayPostgresIT {
                     .lockVersion();
             caller.as("bank-a", "minh", APPROVER);
             podA.versionService().approve("same-day-cutoff", number, new WriteOptions(null, lock, null));
+            caller.as("bank-a", "pricing", PRICING);
+            results.add(podA.ruleEngine().evaluate(DecisionRequest.of("same-day-cutoff", tx).withVersion(number)
+                    .withClock(at)));
         }
-        caller.as("bank-a", "pricing", PRICING);
-        Instant at = Instant.parse("2027-01-15T18:30:00Z");
-        DecisionInput tx = DecisionInput.of(Map.of("txDate", LocalDate.of(2027, 1, 16)));
-
-        // When both are evaluated with txDate 2027-01-16 at 2027-01-15T18:30Z
-        DecisionResult v1 = podA.ruleEngine().evaluate(DecisionRequest.of("same-day-cutoff", tx).withVersion(1).withClock(at));
-        DecisionResult v2 = podA.ruleEngine().evaluate(DecisionRequest.of("same-day-cutoff", tx).withVersion(2).withClock(at));
+        DecisionResult v1 = results.get(0);
+        DecisionResult v2 = results.get(1);
 
         // Then v1 matches and v2 does not; replaying either on pod B gives the same
         assertThat(v1.matchedRuleIds()).containsExactly("R1");

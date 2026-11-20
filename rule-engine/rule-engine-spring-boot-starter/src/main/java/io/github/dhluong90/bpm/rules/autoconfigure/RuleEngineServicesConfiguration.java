@@ -64,9 +64,9 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
-            MaskingPolicy masking) {
+            MaskingPolicy masking, Environment environment) {
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(), masking);
+                RuleEngineAutoConfiguration.engineClock(clock), properties.toSettings(environment), masking);
     }
 
     @Bean
@@ -85,6 +85,13 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngines engines) {
         return new RuleEngineCursorKeyInitializer(engines.cursorKeys());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    RuleEngineLifecycleSweeper ruleEngineLifecycleSweeper(RuleEngines engines, RuleEngineProperties properties) {
+        return new RuleEngineLifecycleSweeper(engines.lifecycleSweep()::run,
+                properties.lifecycle().sweepIntervalOrDefault());
     }
 
     @Bean

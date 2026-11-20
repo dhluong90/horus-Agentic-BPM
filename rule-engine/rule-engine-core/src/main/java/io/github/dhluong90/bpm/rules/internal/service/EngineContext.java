@@ -89,6 +89,11 @@ public record EngineContext(
         if (caller == null || caller.isBlank()) {
             throw new UnauthenticatedException("No caller in the security context");
         }
+        // system: ids belong to the engine's own actors (lifecycle.system-actor); a host user with such an id could
+        // otherwise act, and be recorded, under the supersession actor's name. Refused for every operation.
+        if (caller.startsWith(EngineDefaults.RESERVED_ACTOR_PREFIX)) {
+            throw io.github.dhluong90.bpm.rules.api.PermissionDeniedException.reservedCallerId();
+        }
         return caller;
     }
 

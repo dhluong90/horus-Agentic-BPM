@@ -827,9 +827,13 @@ class EditorApiTest {
         assertThat(VersionActions.allowed(VersionStatus.DRAFT, "lan", null, "lan", AUTHOR_APPROVER))
                 .containsExactly("request-publish");
         assertThat(VersionActions.allowed(VersionStatus.DRAFT, "lan", null, "minh", APPROVER)).isEmpty();
-        // v1 published, and retired versions
+        // v1 published: an approver may retire it (#28), anyone else nothing; a retired version allows nothing
+        assertThat(VersionActions.allowed(VersionStatus.PUBLISHED, "lan", "lan", "lan", AUTHOR_APPROVER))
+                .containsExactly("retire");
+        assertThat(VersionActions.allowed(VersionStatus.PUBLISHED, "lan", "lan", "minh", APPROVER))
+                .containsExactly("retire");
+        assertThat(VersionActions.allowed(VersionStatus.PUBLISHED, "lan", "lan", "dan", READER)).isEmpty();
         for (String user : new String[] {"lan", "minh", "dan"}) {
-            assertThat(VersionActions.allowed(VersionStatus.PUBLISHED, "lan", "lan", user, AUTHOR_APPROVER)).isEmpty();
             assertThat(VersionActions.allowed(VersionStatus.RETIRED, "lan", "lan", user, AUTHOR_APPROVER)).isEmpty();
         }
     }

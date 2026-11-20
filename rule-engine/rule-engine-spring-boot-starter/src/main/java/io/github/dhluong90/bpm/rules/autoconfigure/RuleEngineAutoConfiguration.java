@@ -84,9 +84,10 @@ public class RuleEngineAutoConfiguration {
             RuleEngineProperties properties,
             ObjectProvider<Clock> clock,
             ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys,
-            ObjectProvider<RuleEngineMaskingCheck> maskingCheck) {
+            ObjectProvider<RuleEngineMaskingCheck> maskingCheck,
+            ObjectProvider<RuleEngineLifecycleSweeper> sweeper) {
         return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
-                cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable());
+                cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable(), sweeper.getIfAvailable());
     }
 
     /**
@@ -95,8 +96,11 @@ public class RuleEngineAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(name = "ruleEngineModuleDescriptor")
-    ModuleDescriptor ruleEngineModuleDescriptor(RuleEngineProperties properties) {
-        return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts());
+    ModuleDescriptor ruleEngineModuleDescriptor(RuleEngineProperties properties,
+            org.springframework.core.env.Environment environment) {
+        return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts(),
+                properties.toSettings(environment).retireApproval(),
+                properties.toSettings(environment).retireLastVersion());
     }
 
     /**

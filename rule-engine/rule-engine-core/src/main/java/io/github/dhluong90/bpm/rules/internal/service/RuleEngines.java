@@ -16,9 +16,10 @@ import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
  * @param cursorKeys the cursor key in memory; {@link CursorKeys#load()} runs at start-up
  * @param decisionLog reads of the decision log
  * @param maskingCheck the start-up check of the masking key (RLE-035), run after the migrations
+ * @param lifecycleSweep retires superseded versions; the starter runs it every {@code lifecycle.sweep-interval}
  */
 public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, CursorKeys cursorKeys,
-        DecisionLogService decisionLog, MaskingStartupCheck maskingCheck) {
+        DecisionLogService decisionLog, MaskingStartupCheck maskingCheck, LifecycleSweep lifecycleSweep) {
 
     /**
      * Builds the entry points.
@@ -32,9 +33,11 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
      */
     public static RuleEngines create(EngineContext context, RuleStore store, DecisionLog log, EventOutbox outbox) {
         CursorKeys keys = new CursorKeys(store, context.transactions(), context.clock());
+        Supersession supersession = new Supersession(store, outbox, context.settings());
         return new RuleEngines(new DefaultRuleEngine(context, store, log),
-                new DefaultVersionService(context, store, outbox, keys), keys,
-                new DefaultDecisionLogService(context, log, outbox), new MaskingStartupCheck(store, context.masking()));
+                new DefaultVersionService(context, store, outbox, keys, supersession), keys,
+                new DefaultDecisionLogService(context, log, outbox), new MaskingStartupCheck(store, context.masking()),
+                new LifecycleSweep(context, supersession));
     }
 
     /**

@@ -171,6 +171,15 @@ class ErrorMatrixWebMvcTest {
                 new Case("RULE_SET_EXISTS", 409,
                         post("/api/bpm/rules/v1/rule-sets").contentType("application/yaml").content(yaml),
                         s -> s.thrown = new RuleSetExistsException("card-fee")),
+                new Case("LAST_VERSION_IN_EFFECT", 409,
+                        post("/api/bpm/rules/v1/rule-sets/tet-fee-waiver/versions/1:retire")
+                                .contentType("application/json").header("If-Match", "\"2\"")
+                                .header("Idempotency-Key", "k-102").content("{\"reason\":\"Tet promotion ended\"}"),
+                        s -> {
+                            s.permissions = APPROVER;
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.LastVersionInEffectException(
+                                    "tet-fee-waiver", 1, "confirm", null, null);
+                        }),
                 new Case("PAYLOAD_TOO_LARGE", 413,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve").contentType("application/json")
                                 .header("If-Match", "\"1\"").content(new byte[16_385]),

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:event:rules.version.retired.v1",
+  "title": "rules.version.retired.v1",
+  "description": "Written to the Rule Engine outbox in the transaction where a published version is retired: by hand (POST .../versions/{v}:retire, RLE-026), or as superseded once a newer approved version is in effect, at approval or by the lifecycle sweep (RLE-027). Written exactly once per retirement across replicas (ADR-0025 decision 2). The outbox row id is the event id. Additive changes only within v1 (DESIGN section 3.3).",
+  "type": "object",
+  "required": [
+    "eventType",
+    "ruleSet",
+    "version",
+    "tenantId",
+    "actor",
+    "occurredAt",
+    "retiredBy",
+    "reason",
+    "supersededBy",
+    "retiredAt",
+    "approvalMode",
+    "requestedBy",
+    "noVersionInEffect"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "eventType": {
+      "const": "rules.version.retired.v1"
+    },
+    "ruleSet": {
+      "description": "Rule set name, kebab-case.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "version": {
+      "description": "Version number of the retired version, not the lock version.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "tenantId": {
+      "description": "The tenant, from the authenticated context; never from a request body.",
+      "type": "string"
+    },
+    "actor": {
+      "description": "Who retired it; always equal to retiredBy.",
+      "type": "string"
+    },
+    "occurredAt": {
+      "description": "When the retirement committed, ISO 8601 UTC; equal to retiredAt.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "retiredBy": {
+      "description": "The identity that retired the version by hand, or lifecycle.system-actor (default system:supersession; the system: namespace is refused for callers) when it was superseded.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "The reason given by hand, or SUPERSEDED. At most lifecycle.reason-max-length characters.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "supersededBy": {
+      "description": "The version number that took over when superseded; null for a retirement by hand.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "retiredAt": {
+      "description": "From this instant evaluation no longer selects the version; a clock before it still does.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "approvalMode": {
+      "description": "single for a retirement by one rules:approve holder (lifecycle.retire-approval, PD-080), four-eyes when a second holder confirmed it (from M3), system when superseded.",
+      "enum": [
+        "single",
+        "four-eyes",
+        "system"
+      ]
+    },
+    "requestedBy": {
+      "description": "The requester in four-eyes mode; null otherwise.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "noVersionInEffect": {
+      "description": "True when the retirement left the rule set with no version in effect, so evaluations fail until a new version is approved (PD-101); false when another version remains in effect or the version was superseded.",
+      "type": "boolean"
+    }
+  },
+  "examples": [
+    {
+      "eventType": "rules.version.retired.v1",
+      "ruleSet": "tet-fee-waiver",
+      "version": 1,
+      "tenantId": "bank-a",
+      "actor": "bob",
+      "occurredAt": "2027-02-17T08:00:00Z",
+      "retiredBy": "bob",
+      "reason": "Tet promotion ended",
+      "supersededBy": null,
+      "retiredAt": "2027-02-17T08:00:00Z",
+      "approvalMode": "single",
+      "requestedBy": null,
+      "noVersionInEffect": true
+    },
+    {
+      "eventType": "rules.version.retired.v1",
+      "ruleSet": "card-fee",
+      "version": 1,
+      "tenantId": "bank-a",
+      "actor": "system:supersession",
+      "occurredAt": "2026-12-01T00:00:01Z",
+      "retiredBy": "system:supersession",
+      "reason": "SUPERSEDED",
+      "supersededBy": 2,
+      "retiredAt": "2026-12-01T00:00:01Z",
+      "approvalMode": "system",
+      "requestedBy": null,
+      "noVersionInEffect": false
+    }
+  ]
+}
