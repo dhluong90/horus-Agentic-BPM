@@ -23,7 +23,7 @@ tags:
     description: Import and the publication lifecycle
   - name: decisions
     description: Evaluation and the decision log
-paths:
+pathz:
   /rule-sets:
     get:
       tags: [rule-sets]
