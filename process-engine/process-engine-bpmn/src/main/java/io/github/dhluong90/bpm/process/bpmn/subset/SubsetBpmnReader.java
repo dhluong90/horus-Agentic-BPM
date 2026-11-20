@@ -43,6 +43,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
+import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.io.StringReader;
 import java.util.ArrayList;
@@ -582,10 +583,14 @@ public final class SubsetBpmnReader {
             }
             String schema = parts.schema(id, line);
             GuardrailSpec guardrail = parts.guardrail(id, line);
+            RetryPolicy retry = parts.retry(id);
             List<HorusExtension> ext = new ArrayList<>();
             ext.add(new AgentTaskSpec(agent, schema, timeout));
             if (guardrail != null) {
                 ext.add(guardrail);
+            }
+            if (retry != null) {
+                ext.add(retry);
             }
             if (result != null) {
                 ext.add(new ResultVariable(result));
@@ -606,6 +611,54 @@ public final class SubsetBpmnReader {
             void schemaText(String text) {
                 schemaCount++;
                 schemaText = text;
+            }
+
+            private String retryMax;
+            private String retryBackoff;
+            private int retryCount;
+            private int retryLine;
+
+            void retry(String max, String backoff, int at) {
+                retryCount++;
+                retryMax = max;
+                retryBackoff = backoff;
+                retryLine = at;
+            }
+
+            /**
+             * {@code <horus:retry max="2" backoff="PT1S"/>} (#58): retries after the first attempt, 0 to 20, and the
+             * delay before each retry, a positive ISO-8601 duration; optional.
+             *
+             * @return the policy, or null when the step declares none or it is invalid
+             */
+            RetryPolicy retry(String id) {
+                if (retryCount == 0) {
+                    return null;
+                }
+                int at = retryLine;
+                if (retryCount > 1) {
+                    retryProblem("An agentTask has one <horus:retry>", id, at);
+                    return null;
+                }
+                Integer max = null;
+                if (retryMax != null && retryMax.strip().matches("^[0-9]{1,2}$")) {
+                    max = Integer.parseInt(retryMax.strip());
+                }
+                if (max == null || max > RetryPolicy.MAX_RETRIES) {
+                    retryProblem("horus:retry needs max, the retries after the first attempt, 0 to "
+                            + RetryPolicy.MAX_RETRIES, id, at);
+                    return null;
+                }
+                java.time.Duration backoff = retryBackoff == null ? null : positiveDuration(retryBackoff);
+                if (retryBackoff != null && backoff == null) {
+                    retryProblem("horus:retry backoff must be a positive ISO-8601 duration, for example PT1S", id, at);
+                    return null;
+                }
+                return new RetryPolicy(max, backoff);
+            }
+
+            private void retryProblem(String message, String id, int at) {
+                invalid.add(new DefinitionProblem("RETRY_INVALID", message, "serviceTask", safe(id), at));
             }
 
             void guardrail(Map<String, String> attributes, int at) {
@@ -821,9 +874,20 @@ public final class SubsetBpmnReader {
                     skip();
                     continue;
                 }
+                if (agent != null && HORUS.equals(ns) && "retry".equals(xml.getLocalName())) {
+                    agent.retry(attr("max"), attr("backoff"), line());
+                    skip();
+                    continue;
+                }
                 if (HORUS.equals(ns) && "input".equals(xml.getLocalName()) && inputs) {
                     String inputName = attr("name");
                     String value = xml.getAttributeValue(null, "value");
+                    String mask = attr("mask");
+                    if (mask != null && (agent == null || !("true".equals(mask) || "false".equals(mask)))) {
+                        invalid.add(new DefinitionProblem("INPUT_INVALID", agent == null
+                                ? "horus:input mask applies to an agentTask only"
+                                : "horus:input mask is true or false", element, safe(id), line()));
+                    }
                     if (inputName == null || value == null || !inputName.matches("^[A-Za-z_][A-Za-z0-9_]{0,63}$")) {
                         invalid.add(new DefinitionProblem("INPUT_INVALID",
                                 "horus:input needs a name (identifier) and a value", element, safe(id), line()));
@@ -831,7 +895,7 @@ public final class SubsetBpmnReader {
                         invalid.add(new DefinitionProblem("INPUT_DUPLICATE", "Duplicate horus:input " + inputName,
                                 element, safe(id), line()));
                     } else {
-                        horus.add(new InputMapping(inputName, value));
+                        horus.add(new InputMapping(inputName, value, "true".equals(mask)));
                     }
                     skip();
                 } else if (HORUS.equals(ns)) {

@@ -153,7 +153,7 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `RULE_SET_MISSING` | Add `horus:ruleSet` to the `businessRuleTask` |
 | `ASSIGNEE_INVALID` | Set `horus:assignee` to `user:<id>`, `role:<role>` or `group:<group>` |
 | `RESULT_VARIABLE_REQUIRED` | Add `horus:resultVariable` to the `userTask`, so a completion never overwrites other variables |
-| `INPUT_INVALID`, `INPUT_DUPLICATE` | Give each `horus:input` a unique `name` (letters, digits, `_`) and a `value` |
+| `INPUT_INVALID`, `INPUT_DUPLICATE` | Give each `horus:input` a unique `name` (letters, digits, `_`) and a `value`; `mask` is allowed on an agent step's input only, as `true` or `false` |
 | `FLOW_REF_INVALID` | Give the `sequenceFlow` both `sourceRef` and `targetRef` |
 | `ASSOCIATION_DIRECTION_INVALID` | Set `associationDirection` on the `association` to `None`, `One` or `Both`, or leave it out |
 | `NOT_BPMN` | The root element must be `definitions` in `http://www.omg.org/spec/BPMN/20100524/MODEL` |
@@ -163,6 +163,7 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `AGENT_TASK_INVALID` | Remove `horus:handler` and `horus:mode` from the agent step; it names its adapter with `horus:agent` |
 | `AGENT_NOT_REGISTERED` | Register an `AgentAdapter` bean under the name in `horus:agent` |
 | `GUARD_SPEC_INVALID` | Fix the agent step's guard spec as the message says: one `<horus:outputSchema>` holding a JSON object in the supported subset, and one `<horus:guardrail>` with a kebab-case `decision`, `onViolation` `route-to-human` (with a `reviewer`) or `fail`, and no `fourEyes` other than `true` |
+| `RETRY_INVALID` | Give the agent step at most one `<horus:retry>`, with `max` from 0 to 20 (the retries after the first attempt) and, optionally, `backoff` as a positive ISO-8601 duration such as `PT1S` |
 
 ### An unsafe or oversized file
 

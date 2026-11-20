@@ -2,7 +2,7 @@
 
 An `agentTask` is a process step performed by an AI agent. The agent's output cannot move the process forward until it has passed two deterministic checks: a JSON Schema and a rule set that you own. When a rule fires, the step goes to a human approver or fails.
 
-Status: the agent step with its output schema, guardrail rule set and four-eyes review imports and runs since 0.2.0, with a stub adapter for tests and demos ([In BPMN today](#in-bpmn-today)). Per-step retry and incidents, input masking, labels and human overrides, and the deploy-time guardrail contract check follow in M2 (target 26 March 2027); milestone M3 (1.0, target 21 May 2027) adds adapters and planning depth. See [What ships when](#what-ships-when) and [[Feature status|Feature-Status]].
+Status: the agent step with its output schema, guardrail rule set and four-eyes review imports and runs since 0.2.0, with a stub adapter for tests and demos ([In BPMN today](#in-bpmn-today)), and so do per-step retry with incidents, input masking, labels and human overrides ([Retry and incidents](#retry-and-incidents), [History and overrides](#history-and-overrides)). The deploy-time guardrail contract check follows in M2 (target 26 March 2027); milestone M3 (1.0, target 21 May 2027) adds adapters and planning depth. See [What ships when](#what-ships-when) and [[Feature status|Feature-Status]].
 
 ## In BPMN today
 
@@ -14,11 +14,13 @@ An agent step is a `serviceTask` with `horus:type="agentTask"`. The schema and t
   <bpmn:extensionElements>
     <horus:input name="applicationId" value="${instance.applicationId}"/>
     <horus:input name="requestedAmount" value="${instance.amount}"/>
+    <horus:input name="nationalId" value="${instance.nationalId}" mask="true"/>
     <horus:outputSchema>{"type": "object", "required": ["riskScore", "recommendation"], "additionalProperties": false,
       "properties": {"riskScore": {"type": "integer", "minimum": 0, "maximum": 100},
                      "recommendation": {"type": "string", "enum": ["APPROVE", "REFER", "DECLINE"]},
                      "summary": {"type": "string", "maxLength": 500, "mask": true}}}</horus:outputSchema>
     <horus:guardrail decision="agent-output-guardrails" onViolation="route-to-human" reviewer="role:COMPLIANCE_REVIEWER"/>
+    <horus:retry max="2" backoff="PT1S"/>
   </bpmn:extensionElements>
 </bpmn:serviceTask>
 ```
@@ -28,6 +30,8 @@ An agent step is a `serviceTask` with `horus:type="agentTask"`. The schema and t
 | `horus:agent` | The name of an `AgentAdapter` bean in the host; an unknown name is refused at import (`AGENT_NOT_REGISTERED`) |
 | `<horus:outputSchema>` | A JSON object in the engine's JSON Schema subset (`type`, `properties`, `required`, `additionalProperties` true or false, `enum`, `const`, numeric bounds, `minLength`, `maxLength`, `items`, `minItems`, `maxItems`); `mask: true` keeps a field's value out of the history. Any other keyword is refused at import (`GUARD_SPEC_INVALID`) |
 | `<horus:guardrail>` | `decision` names the guardrail rule set. `onViolation` is `route-to-human` (the default; needs a `reviewer` as `role:`, `user:` or `group:`) or `fail`. A review is always four-eyes: `fourEyes` other than `true` is refused |
+| `<horus:retry>` | Optional. `max` is the retries after the first attempt (0 to 20, so `max="2"` is three attempts); `backoff` is the delay before each retry. Without it the agent runner's `runners.async-agent.max-attempts` and `retry-backoff` apply. Refused at import with `RETRY_INVALID` |
+| `mask="true"` on `<horus:input>` | The agent receives the value; history and the review task keep only its keyed fingerprint |
 | Host | Needs the Rule Engine; without it the import is refused with `BPMN_NOT_EXECUTABLE` |
 
 At run time the step parks an agent job, the engine calls your adapter with no transaction open, and the answer is checked in the result transaction:
@@ -38,6 +42,35 @@ At run time the step parks an agent job, the engine calls your adapter with no t
 | Breaks the schema the first time | Asked again once (`runners.async-agent.schema-retries`, default 1) as a new attempt |
 | Breaks the schema again | Refused with `AGENT_SCHEMA_INVALID`, then `onViolation` |
 | Guardrail says `allow: false` | Refused with `GUARDRAIL_VIOLATION`: a four-eyes review task for the reviewer, carrying the reasons, the rule ids, the inputs and the masked answer. The starter of the instance and whoever reported the refused answer cannot take it. The reviewer's answer, checked against the schema, completes the step |
+
+### Retry and incidents
+
+```mermaid
+flowchart LR
+    A[Attempt] -->|answer allowed| D[Step completes]
+    A -->|timeout AGENT_TIMEOUT or failed attempt| R{Retry left?}
+    R -->|yes, after backoff| A
+    R -->|no| I[Incident OPEN, token waits on the step]
+    A -->|schema broken twice, onViolation fail| I
+```
+
+An attempt with no answer within `horus:timeout` fails with `AGENT_TIMEOUT` and is tried again after `backoff`. When no retry is left, the job fails and an incident opens in the same transaction: `error_code` (`AGENT_TIMEOUT`, `AGENT_SCHEMA_INVALID`, `GUARDRAIL_VIOLATION` with `onViolation="fail"`, or the adapter's code), `retry_count`, the attempts after the first, and a cause built from codes only. History records `INCIDENT_RAISED` and the event `processes.incident.raised.v1` is published. The token waits on the step. Read open incidents with `IncidentService.openIncidents(instanceId)`; retrying and resolving them by API follows with incident management.
+
+A schema failure has its own retry, `runners.async-agent.schema-retries` (default 1), so `max` is kept for timeouts and other failures.
+
+### History and overrides
+
+Each answer leaves one history row, `ASYNC_RESULT_ACCEPTED` or `ASYNC_RESULT_REFUSED`, with:
+
+| Field | What it holds |
+|---|---|
+| `inputs` | The inputs the agent received; a `mask="true"` input as `hmac:<keyId>:<hex>` under the tenant's Rule Engine masking key, the same token the decision log keeps, or `***` without a key |
+| `output`, `outputFields` | The answer, masked by the schema's `mask: true` fields; undeclared fields are `***` |
+| `guardrailDecisionId`, `ruleIds` | The guardrail decision in the Rule Engine log and the rules that matched |
+| `latencyMs` | From the claim to the result |
+| `labels` | What the agent reported about its answer, such as `model` and `promptVersion`, as reported; the engine never acts on them. At most `agents.labels.max-count` (16) labels, keys up to 64 and values up to 256 characters; above that the attempt fails with `AGENT_LABELS_INVALID` and is retried |
+
+When a reviewer completes the review task of a refused answer, history records `HUMAN_OVERRIDE`: the reviewer, who reported the refused answer and which attempt, the refusal code, the guardrail decision id, the reason (`reason` in the completion body), the reviewer's answer masked the same way, and `changes` with `from` and `to` for each field the reviewer changed. The reviewer's answer must meet the output schema, and the review is always four-eyes.
 
 Your adapter receives an `AgentInvocation`. Key the model call by `modelCallKey()` (the attempt id), so the retry after a malformed answer is a fresh generation. Key side effects outside the model by `idempotencyKey()` (the job id), which stays the same on every attempt. `StubAgentAdapter` in `process-engine-test` answers with canned outputs for tests and demos; `examples/rule-and-process` runs this step end to end (`GuardedAgentTaskIT`).
 
@@ -69,13 +102,13 @@ Your adapter receives an `AgentInvocation`. Key the model call by `modelCallKey(
 
 | Stage | Where it runs | Outcome |
 |---|---|---|
-| 1. Resolve the bounded inputs; mask fields flagged `mask: true` | Transaction 1 | Only the declared inputs reach the agent. Masked inputs are stored hashed in history |
+| 1. Resolve the bounded inputs; mask inputs flagged `mask="true"` | Transaction 1 | Only the declared inputs reach the agent. Masked inputs are stored in history as keyed fingerprints |
 | 2. Claim the step with a lease, commit | Transaction 1 | The step waits; no lock and no connection is kept |
 | 3. Call the adapter under `timeout` | Outside any transaction | Raw output and latency, or a timeout |
 | 4. Validate the output against `outputSchema` | Transaction 2 | Invalid output counts as a failed attempt (`AGENT_SCHEMA_INVALID`) |
 | 5. Evaluate the guardrail rule set on the output | Transaction 2, in process | `allow: true`: the process continues. Violation with `route-to-human`: an approval task carrying the inputs, the output and the matched rule ids. Violation with `fail`: an incident or compensation |
 | 6. Retries exhausted | Transaction 2 | An incident with `AGENT_TIMEOUT` or `AGENT_SCHEMA_INVALID` and the retry count |
-| 7. A human edits or rejects the output on the approval task | Task completion | The difference between agent output and human decision is recorded in history (`human_override`) |
+| 7. A human edits or rejects the output on the approval task | Task completion | The difference between agent output and human decision is recorded in history (`HUMAN_OVERRIDE`), with both identities and the reason |
 
 Rules the engine enforces:
 

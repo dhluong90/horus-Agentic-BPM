@@ -19,6 +19,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
+import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.util.List;
 import tools.jackson.databind.node.ArrayNode;
@@ -81,6 +82,20 @@ public final class CanonicalProcessWriter {
                     });
                     if (agent.timeout() != null) {
                         step.put("timeout", agent.timeout().toString());
+                    }
+                    t.extensions().first(RetryPolicy.class).ifPresent(r -> {
+                        // #58: the retry policy is part of the hash, like the rest of the step.
+                        ObjectNode retry = step.putObject("retry");
+                        retry.put("max", r.max());
+                        if (r.backoff() != null) {
+                            retry.put("backoff", r.backoff().toString());
+                        }
+                    });
+                    List<String> masked = t.extensions().all(InputMapping.class).stream().filter(InputMapping::mask)
+                            .map(InputMapping::name).toList();
+                    if (!masked.isEmpty()) {
+                        // #59: which inputs history keeps only as keyed fingerprints is part of the hash too.
+                        masked.forEach(step.putArray("maskedInputs")::add);
                     }
                 }
                 case ServiceTask t -> {

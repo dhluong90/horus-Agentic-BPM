@@ -50,6 +50,8 @@ public final class AsyncStepExecutor implements AutoCloseable {
     private static final System.Logger LOG = System.getLogger(AsyncStepExecutor.class.getName());
     /** Error code of an attempt the engine abandoned at the step timeout. */
     public static final String TIMEOUT = "ADAPTER_TIMEOUT";
+    /** Error code of an agent step's attempt the engine abandoned at the step timeout (#58, PRE-011). */
+    public static final String AGENT_TIMEOUT = "AGENT_TIMEOUT";
 
     private final JobStore jobs;
     private final TransactionRunner transactions;
@@ -325,7 +327,8 @@ public final class AsyncStepExecutor implements AutoCloseable {
                     done.run();
                 }
                 try {
-                    record(job, new StepResult.Failed(TIMEOUT, "No answer within " + timeout, true));
+                    record(job, new StepResult.Failed(JobStore.ASYNC_AGENT.equals(job.jobKind()) ? AGENT_TIMEOUT
+                            : TIMEOUT, "No answer within " + timeout, true));
                 } finally {
                     done.run();
                 }
@@ -400,7 +403,7 @@ public final class AsyncStepExecutor implements AutoCloseable {
 
     private static StepResult toStep(AdapterResult result) {
         return switch (result) {
-            case AdapterResult.Completed c -> new StepResult.Completed(c.output());
+            case AdapterResult.Completed c -> AnswerLabels.step(c);
             case AdapterResult.BusinessError e -> new StepResult.BusinessError(e.code(), e.message());
             case AdapterResult.Failed f -> new StepResult.Failed(f.errorCode(), f.detail(), f.retryable());
             case AdapterResult.Accepted a -> throw new IllegalArgumentException("Accepted carries no result");

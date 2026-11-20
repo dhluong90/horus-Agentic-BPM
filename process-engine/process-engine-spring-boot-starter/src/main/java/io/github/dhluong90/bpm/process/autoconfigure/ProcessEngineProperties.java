@@ -28,6 +28,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param adapters remote step settings (Async Wait-State, ADR-0008)
  * @param runners per async job kind, the settings of its runner (#363); unset values fall back to {@code adapters.*}
  *     and {@code jobs.*}
+ * @param agents agent step settings (#59)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -43,7 +44,8 @@ public record ProcessEngineProperties(
         @DefaultValue Lifecycle lifecycle,
         @DefaultValue Stats stats,
         @DefaultValue Adapters adapters,
-        @DefaultValue Runners runners) {
+        @DefaultValue Runners runners,
+        @DefaultValue Agents agents) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -216,6 +218,43 @@ public record ProcessEngineProperties(
                 runners.asyncAgent().toOverrides());
         return new io.github.dhluong90.bpm.process.internal.service.AsyncSettings(jobs.leaseMargin(),
                 adapters.defaultTimeout(), adapters.executorThreads(), roles, kinds);
+    }
+
+    /**
+     * Agent step settings (#59, DESIGN section 4.1).
+     *
+     * @param labels bounds of the labels an agent reports with its answer
+     */
+    public record Agents(@DefaultValue Labels labels) {
+    }
+
+    /**
+     * Bounds of the labels an agent reports with its answer (PD-014), such as {@code model} and
+     * {@code promptVersion}. History records them as they are and the engine never acts on one; an answer above the
+     * bounds is a failed attempt with {@code AGENT_LABELS_INVALID}. They may be lowered, never raised.
+     *
+     * @param maxCount labels per answer, 0 to 16
+     * @param maxKeyLength characters of a label key, 1 to 64
+     * @param maxValueLength characters of a label value, 1 to 256
+     */
+    public record Labels(@DefaultValue("16") int maxCount, @DefaultValue("64") int maxKeyLength,
+            @DefaultValue("256") int maxValueLength) {
+
+        public Labels {
+            try {
+                new io.github.dhluong90.bpm.process.internal.service.AgentLabelLimits(maxCount, maxKeyLength,
+                        maxValueLength);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("horus.bpm.processes." + e.getMessage()
+                        + " (it may be lowered, never raised)", e);
+            }
+        }
+
+        /** @return the validated bounds */
+        io.github.dhluong90.bpm.process.internal.service.AgentLabelLimits toLimits() {
+            return new io.github.dhluong90.bpm.process.internal.service.AgentLabelLimits(maxCount, maxKeyLength,
+                    maxValueLength);
+        }
     }
 
     /**

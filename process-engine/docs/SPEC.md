@@ -111,20 +111,20 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-011 `agentTask` invalid JSON output or timeout retries with backoff then raises incident
 - **Traces to:** `TR-AGT-01`, `TR-AGT-03`, `TR-OPS-03`
 - **Milestone:** M2
-- **Given:** `agentTask` with `timeout: PT1S`, `retry: { max: 2, backoff: PT1S }`. Adapter exceeds timeout or returns malformed JSON failing `outputSchema`.
+- **Given:** `agentTask` with `timeout: PT1S`, `retry: { max: 2, backoff: PT1S }` (BPMN `<horus:retry max="2" backoff="PT1S"/>`). Adapter exceeds timeout, or returns an answer failing `outputSchema` with `onViolation: fail` and `runners.async-agent.schema-retries` set to 2 (default 1: a schema failure is retried apart from `retry.max`).
 - **When:** Initial attempt and 2 retries fail.
-- **Then:** Engine retries twice and on the 3rd failure opens a `pre_incident` with `error_code = AGENT_SCHEMA_INVALID` or `AGENT_TIMEOUT`, `retry_count = 2`, pausing the token for ops retry/resolve.
+- **Then:** Engine retries twice, one `backoff` apart, and on the 3rd failure fails the job and, in the same transaction, opens a `pre_incident` with `error_code = AGENT_TIMEOUT` or `AGENT_SCHEMA_INVALID`, `retry_count = 2` (attempts after the first) and a cause built from codes only, records `INCIDENT_RAISED` and emits `processes.incident.raised.v1`, pausing the token on the step (`WAITING_ASYNC`) for ops retry/resolve (#68). Every async job that fails for good opens one, with its own code (`UNHANDLED_BUSINESS_ERROR` for a business error, `MAX_ATTEMPTS_REACHED` for a job claimed too often). Another tenant can neither complete the step nor read the incident, and nothing is written.
 - **Example:** `3 failed attempts -> 1 OPEN pre_incident with cause & retry_count=2`.
-- **Test ID:** `PRE_011_agent_task_exhausted_retries_raises_incident`
+- **Test ID:** `PRE_011_agent_task_exhausted_retries_raises_incident`, `PRE_011_agent_task_exhausted_schema_retries_raises_incident`, `PRE_011_another_tenant_can_neither_complete_the_step_nor_read_its_incidents`
 
 ### PRE-012 `agentTask` logs masked inputs, output, guardrail decision ID, and human override
 - **Traces to:** `TR-AGT-02`, `TR-OBS-01`
 - **Milestone:** M2
-- **Given:** `agentTask` with `nationalId` marked `mask: true` routes to human `userTask`; the adapter returns labels `{ "model": "scoring-2026-10", "promptVersion": "p7", "vendor": "in-house" }`; reviewer changes `recommendation` from `"APPROVE"` to `"REJECT"`. Second case: an adapter result with 17 labels while `agents.labels.max-count` is 16.
+- **Given:** `agentTask` with input `nationalId` marked `mask="true"` (canonical `maskedInputs`) routes to human `userTask`; the adapter returns labels `{ "model": "scoring-2026-10", "promptVersion": "p7", "vendor": "in-house" }`; reviewer changes `recommendation` from `"APPROVE"` to `"REJECT"` with a reason. Second case: an adapter result with 17 labels while `agents.labels.max-count` is 16.
 - **When:** Reviewer completes the `userTask`.
-- **Then:** `pre_history` records hashed `nationalId` (no plaintext), raw agent output, `guardrailDecisionId`, adapter latency, the three labels unchanged, and `human_override` diff for Eval replay; the engine takes no decision from a label. In the second case the attempt fails with `AGENT_LABELS_INVALID` and is retried like an invalid output (`PRE-011`).
+- **Then:** `pre_history` `ASYNC_RESULT_REFUSED` (and `ASYNC_RESULT_ACCEPTED` for an allowed answer) records `inputs` with `nationalId` as its keyed fingerprint (`hmac:<keyId>:<hex>` under the tenant's masking key, `***` without one; no plaintext, neither in history nor in the review task), the agent output masked by the schema policy, `guardrailDecisionId`, `latencyMs` (claim to result), and the three labels unchanged; `HUMAN_OVERRIDE` records the reviewer as actor and `reviewedBy`, `refusedReportedBy` and `refusedAttemptId`, the refusal `code`, `guardrailDecisionId`, `reason`, the reviewer's masked answer and `changes` (per field `from` and `to`) for Eval replay; the engine takes no decision from a label. The review stays four-eyes: the starter and the reporter of the refused answer cannot complete it. In the second case the attempt fails with `AGENT_LABELS_INVALID` and is retried like any failed attempt (`PRE-011`). Another tenant can neither read nor complete the review, and nothing is written.
 - **Example:** `Override APPROVE -> REJECT logged in pre_history with guardrailDecisionId`.
-- **Test ID:** `PRE_012_agent_task_audits_masked_io_and_human_override`
+- **Test ID:** `PRE_012_agent_task_audits_masked_io_and_human_override`, `PRE_012_labels_above_the_bound_fail_the_attempt_and_it_is_retried`, `PRE_012_another_tenant_cannot_read_or_complete_the_review_and_nothing_is_written`
 
 ---
 

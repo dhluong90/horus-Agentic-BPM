@@ -713,7 +713,14 @@ paths:
                 result:
                   type: object
                   additionalProperties: true
-            example: { result: { approved: true } }
+                reason:
+                  type: string
+                  maxLength: 2000
+                  description: >-
+                    Why the reviewer answered as they did. On the review task of a refused agent answer it is
+                    recorded with the reviewer's answer in the `HUMAN_OVERRIDE` history entry; ignored on other
+                    tasks. Longer than `lifecycle.reason-max-length` is `400 INPUT_INVALID`.
+            example: { result: { riskScore: 85, recommendation: REJECT }, reason: Salary slips do not match the declared income }
       responses:
         '200':
           $ref: '#/components/responses/Instance'
@@ -953,9 +960,11 @@ components:
         reasons: { type: array, items: { type: string } }
         ruleIds: { type: array, items: { type: string }, description: The matched guardrail rules }
         guardrailDecisionId: { type: string, description: 'The guardrail decision in the Rule Engine log, when one was logged' }
-        inputs: { type: object, additionalProperties: true, description: The bounded inputs the agent received }
+        inputs: { type: object, additionalProperties: true, description: 'The bounded inputs the agent received; an input the step marks mask="true" is its keyed fingerprint (hmac:<keyId>:<hex>) or ***, never the plain value' }
         output: { type: object, additionalProperties: true, description: The refused answer, masked }
         outputFields: { type: integer, description: Number of top-level fields in the answer }
+        attemptId: { type: string, description: The refused attempt }
+        reportedBy: { type: string, description: 'Who reported the refused answer: the engine replica, or the caller of the completion API. Never the reviewer (four eyes)' }
     DefinitionSummary:
       type: object
       required: [key, latestVersion, latestStatus, lastChangedAt]

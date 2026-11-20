@@ -583,6 +583,15 @@ class ProcessServicesQaTest {
         }
 
         @Override
+        public void insertIncident(ProcessStore.IncidentRow incident) {
+        }
+
+        @Override
+        public List<ProcessStore.IncidentRow> openIncidents(String tenant, String instanceId) {
+            return List.of();
+        }
+
+        @Override
         public java.util.Set<String> historyActors(String tenant, String instanceId, String eventType) {
             return java.util.Set.of();
         }
