@@ -24,6 +24,4 @@ RLE-032 M1
 RLE-033 M1
 RLE-034 M1
 RLE-035 M1
-# RLE-036: the 500 INTERNAL_ERROR half is tested (#147, UnexpectedErrorProblemTest); every code of the matrix is not.
-RLE-036 M1
 RLE-038 M3

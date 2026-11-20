@@ -107,6 +107,11 @@
     <maven-clean-plugin.version>3.5.0</maven-clean-plugin.version>
     <license-maven-plugin.version>2.9.0</license-maven-plugin.version>
     <cyclonedx-maven-plugin.version>2.9.3</cyclonedx-maven-plugin.version>
+    <!-- Run from the command line, not bound to a phase (deploy/docker/Dockerfile, CI, release scripts). -->
+    <maven-dependency-plugin.version>3.11.0</maven-dependency-plugin.version>
+    <maven-help-plugin.version>3.6.0</maven-help-plugin.version>
+    <!-- Bound by Maven to pom-packaged modules; pinned at the version Maven 3.9 already uses. -->
+    <maven-site-plugin.version>3.12.1</maven-site-plugin.version>
 
     <!-- Root of the reactor, for files every jar carries (LICENSE, COMMERCIAL-LICENSE.md). -->
     <bpm.root>${maven.multiModuleProjectDirectory}</bpm.root>
@@ -292,6 +297,25 @@
           <artifactId>cyclonedx-maven-plugin</artifactId>
           <version>${cyclonedx-maven-plugin.version}</version>
         </plugin>
+        <!--
+          Pinned so that a goal called by prefix (mvn help:evaluate, mvn dependency:get, as the image build
+          does) resolves the same plugin code every time; requirePluginVersions below checks both.
+        -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-dependency-plugin</artifactId>
+          <version>${maven-dependency-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-help-plugin</artifactId>
+          <version>${maven-help-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-site-plugin</artifactId>
+          <version>${maven-site-plugin.version}</version>
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -414,6 +438,19 @@
                 </requireProperty>
                 <dependencyConvergence/>
                 <banDuplicatePomDependencyVersions/>
+                <!--
+                  Every plugin of the build lifecycle up to deploy, and the two goals the image build calls
+                  by prefix, must have a version from this POM: an unpinned plugin would let a cached and an
+                  uncached build run different code. The site lifecycle itself is not used, so it is not checked.
+                -->
+                <requirePluginVersions>
+                  <phases>clean,deploy</phases>
+                  <additionalPlugins>
+                    <additionalPlugin>org.apache.maven.plugins:maven-dependency-plugin</additionalPlugin>
+                    <additionalPlugin>org.apache.maven.plugins:maven-help-plugin</additionalPlugin>
+                  </additionalPlugins>
+                  <message>Pin every Maven plugin in pluginManagement of the parent POM (reproducible builds, deploy/docker/Dockerfile).</message>
+                </requirePluginVersions>
                 <!-- TR-LIC-01: a system-scope jar would bypass the licence gate and the SBOM. -->
                 <bannedDependencies>
                   <searchTransitive>true</searchTransitive>

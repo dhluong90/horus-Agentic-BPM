@@ -28,22 +28,51 @@ RUN set -eu; \
       cd cockpit/web && npm ci --ignore-scripts --no-audit --no-fund && npm run build && cp -R dist/. /out/dist/; \
     fi
 
+# Stage 2a: the POMs only, each in its place. The dependency layer of stage 2 copies them, so that
+# layer is keyed on the POMs' content alone and a commit that changes no POM reuses it (BuildKit
+# compares content, not timestamps).
+FROM --platform=$BUILDPLATFORM maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS poms
+WORKDIR /src
+COPY . .
+RUN set -eu; \
+    mkdir -p /poms; \
+    find . -name pom.xml -not -path '*/node_modules/*' -not -path '*/target/*' | tar -cf - -T - | tar -xf - -C /poms
+
 # Stage 2: build the example host and the engine modules it needs.
 # Maven 3.9.16 (the line CI uses), Eclipse Temurin JDK 21.
 FROM --platform=$BUILDPLATFORM maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS build
 ARG EXAMPLE
 WORKDIR /src
+# Dependency layer: the real package lifecycle of the example host and the modules it needs, run on the
+# POMs alone, puts every dependency and plugin the build uses into /root/.m2/repository in this layer.
+# With no sources the compiler skips its annotation processor, so that one is fetched by name. The help
+# and dependency plugins used here are pinned in the parent POM, and the enforcer checks they stay pinned.
+# The layer changes only when a POM, .mvn/ or the licence files (checked by the enforcer) change.
+COPY --from=poms /poms/ ./
+COPY .mvn/ .mvn/
+COPY LICENSE COMMERCIAL-LICENSE.md ./
+RUN set -eu; \
+    test -f "examples/${EXAMPLE}/pom.xml" || { echo "examples/${EXAMPLE} is not an example host" >&2; exit 1; }; \
+    mvn -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests \
+      -Dcockpit.bundle.skip=true -Dspring-boot.repackage.skip=true; \
+    boot="$(mvn -B -ntp -q -N help:evaluate -Dexpression=spring-boot.version -DforceStdout)"; \
+    mvn -B -ntp -q -N dependency:get -Dartifact="org.springframework.boot:spring-boot-configuration-processor:${boot}"; \
+    find . -name target -type d -prune -exec rm -rf {} +
 COPY . .
 COPY --from=cockpit /out/dist/ /tmp/cockpit-dist/
-RUN --mount=type=cache,id=horus-bpm-m2,target=/root/.m2/repository \
-    set -eu; \
-    test -f "examples/${EXAMPLE}/pom.xml" || { echo "examples/${EXAMPLE} is not an example host" >&2; exit 1; }; \
+# Online, as before, so every plugin runs exactly as in CI (CycloneDX skips itself offline); with the
+# dependency layer in place Maven fetches only what that layer lacks. The last line counts those downloads.
+RUN set -eu; \
     skip_cockpit=true; \
     if [ -f /tmp/cockpit-dist/index.html ]; then \
       rm -rf cockpit/web/dist && mkdir -p cockpit/web/dist && cp -R /tmp/cockpit-dist/. cockpit/web/dist/; \
       skip_cockpit=false; \
     fi; \
-    mvn -B -ntp -pl "examples/${EXAMPLE}" -am package -DskipTests -Dcockpit.bundle.skip="${skip_cockpit}"; \
+    mvn -B -pl "examples/${EXAMPLE}" -am package -DskipTests -Dcockpit.bundle.skip="${skip_cockpit}" \
+      > /tmp/build.log 2>&1 || { grep -v '^\[INFO\] Download' /tmp/build.log; exit 1; }; \
+    grep -v '^\[INFO\] Download' /tmp/build.log; \
+    echo "Maven downloads in this step, beyond the dependency layer: $(grep -c '^\[INFO\] Downloaded from' /tmp/build.log || true)"; \
+    grep '^\[INFO\] Downloaded from' /tmp/build.log | sed 's/^/  /' || true; \
     jar="$(find "examples/${EXAMPLE}/target" -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' | head -n 1)"; \
     test -n "$jar"; \
     mkdir -p /layers; \
