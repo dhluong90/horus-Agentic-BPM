@@ -102,7 +102,8 @@ class ErrorsAndDuplicatesIT {
         matrix.add(new Triggered("TENANT_NOT_ALLOWED", 403,
                 send("alice", "GET", "/rule-sets/fee-matrix", null, null, null, Map.of("X-Tenant-Id", "tenant-b"))));
         matrix.add(new Triggered("SELF_APPROVAL_FORBIDDEN", 403,
-                send("alice", "POST", "/rule-sets/fee-matrix-pending/versions/1:approve", null, null, null, Map.of())));
+                send("alice", "POST", "/rule-sets/fee-matrix-pending/versions/1:approve", null, null, null,
+                        Map.of("If-Match", "\"1\""))));
         matrix.add(new Triggered("RULE_SET_NOT_FOUND", 404, send("alice", "GET", "/rule-sets/no-such-fee", null, null, null, Map.of())));
         matrix.add(new Triggered("VERSION_NOT_FOUND", 404,
                 send("alice", "GET", "/rule-sets/fee-matrix/versions/9", null, null, null, Map.of())));
@@ -111,11 +112,13 @@ class ErrorsAndDuplicatesIT {
         matrix.add(new Triggered("VERSION_CONFLICT", 409, send("alice", "POST",
                 "/rule-sets/fee-matrix-draft/versions/1:request-publish", null, null, null, Map.of("If-Match", "\"7\""))));
         matrix.add(new Triggered("INVALID_STATE", 409,
-                send("bob", "POST", "/rule-sets/fee-matrix-draft/versions/1:approve", null, null, null, Map.of())));
+                send("bob", "POST", "/rule-sets/fee-matrix-draft/versions/1:approve", null, null, null,
+                        Map.of("If-Match", "\"0\""))));
         matrix.add(new Triggered("RULE_SET_EXISTS", 409,
                 send("alice", "POST", "/rule-sets", renamed("fee-matrix"), "application/yaml", null, Map.of())));
         matrix.add(new Triggered("PAYLOAD_TOO_LARGE", 413, send("bob", "POST",
-                "/rule-sets/fee-matrix-pending/versions/1:approve", new byte[16_385], "application/json", null, Map.of())));
+                "/rule-sets/fee-matrix-pending/versions/1:approve", new byte[16_385], "application/json", null,
+                Map.of("If-Match", "\"1\""))));
         matrix.add(new Triggered("VALIDATION_FAILED", 422,
                 send("alice", "POST", "/rule-sets", invalid, "application/yaml", null, Map.of())));
         matrix.add(new Triggered("IDEMPOTENCY_KEY_REUSE_MISMATCH", 422,
@@ -206,9 +209,9 @@ class ErrorsAndDuplicatesIT {
         Reply approveAgain = send("bob", "POST", "/rule-sets/card-fee-replay/versions/1:approve", null, null, "k-302",
                 Map.of("If-Match", "\"1\""));
         Reply reject = send("bob", "POST", "/rule-sets/card-fee-sent-back/versions/1:reject", reason, "application/json",
-                "k-303", Map.of());
+                "k-303", Map.of("If-Match", "\"1\""));
         Reply rejectAgain = send("bob", "POST", "/rule-sets/card-fee-sent-back/versions/1:reject", reason,
-                "application/json", "k-303", Map.of());
+                "application/json", "k-303", Map.of("If-Match", "\"1\""));
 
         // Then each replay is the original answer, and each command left one history row and one event
         for (Reply[] pair : new Reply[][] {{request, requestAgain}, {approve, approveAgain}, {reject, rejectAgain}}) {
@@ -258,7 +261,8 @@ class ErrorsAndDuplicatesIT {
         importDraft(name);
         assertThat(send("alice", "POST", "/rule-sets/" + name + "/versions/1:request-publish", null, null, null, Map.of())
                 .status()).isEqualTo(200);
-        assertThat(send("bob", "POST", "/rule-sets/" + name + "/versions/1:approve", null, null, null, Map.of()).status())
+        assertThat(send("bob", "POST", "/rule-sets/" + name + "/versions/1:approve", null, null, null,
+                Map.of("If-Match", "\"1\"")).status())
                 .isEqualTo(200);
     }
 
@@ -267,7 +271,8 @@ class ErrorsAndDuplicatesIT {
                 Map.of()).status()).isEqualTo(201);
         assertThat(send("alice", "POST", "/rule-sets/" + name + "/versions/1:request-publish", null, null, null, Map.of())
                 .status()).isEqualTo(200);
-        assertThat(send("bob", "POST", "/rule-sets/" + name + "/versions/1:approve", null, null, null, Map.of()).status())
+        assertThat(send("bob", "POST", "/rule-sets/" + name + "/versions/1:approve", null, null, null,
+                Map.of("If-Match", "\"1\"")).status())
                 .isEqualTo(200);
     }
 
