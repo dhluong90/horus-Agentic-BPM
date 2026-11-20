@@ -86,8 +86,25 @@ public interface VersionService {
      * @param options idempotency key and optimistic lock
      * @return the updated version
      * @throws InvalidStateException when the version is not a draft
+     * @throws ValidationFailedException when the draft no longer passes the checks of import (RLE-004); it stays a draft
      */
     RuleSetVersion requestPublish(String ruleSet, int version, WriteOptions options);
+
+    /**
+     * Checks a stored version with the same reading, parsing and type checking as import and
+     * {@link #requestPublish}, without changing it (RLE-004). Every problem is listed with its rule, column, code
+     * (for example {@code UNKNOWN_INPUT}, {@code TYPE_MISMATCH} or {@code FORBIDDEN_CONSTRUCT}) and character
+     * position. Needs {@code rules:read}.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @throws ValidationFailedException when the version does not pass, listing every problem
+     * @throws VersionNotFoundException when the version does not exist
+     * @throws RuleSetNotFoundException when the rule set does not exist
+     */
+    default void validate(String ruleSet, int version) {
+        throw new UnsupportedOperationException("validate is not supported by " + getClass().getName());
+    }
 
     /**
      * Approves a pending version as a second person; it becomes {@code PUBLISHED}.

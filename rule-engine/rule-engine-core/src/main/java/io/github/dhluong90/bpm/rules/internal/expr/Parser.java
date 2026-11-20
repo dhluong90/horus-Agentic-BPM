@@ -6,7 +6,10 @@ import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.ToIntFunction;
 
 /**
@@ -43,6 +46,13 @@ public final class Parser {
     /** Deepest nesting accepted. */
     public static final int MAX_DEPTH = 64;
 
+    /**
+     * Words that mean code in a host language. Used as a name they are {@link ExpressionError#FORBIDDEN_CONSTRUCT}
+     * instead of an unknown input, unless an input has that name.
+     */
+    private static final Set<String> RESERVED = Set.of("new", "class", "import", "function", "return", "this",
+            "super", "var", "eval", "java", "javax", "System", "Runtime", "Class", "Thread");
+
     /** Largest scale of {@code round}, either way: the 34 digits of {@code DECIMAL128}. */
     public static final int MAX_SCALE = 34;
 
@@ -50,6 +60,8 @@ public final class Parser {
     private final ToIntFunction<String> slots;
     private final String column;
     private final List<Token> tokens;
+    /** Where each node starts; identity keys, because equal subtrees at two places are two nodes. */
+    private final Map<Expr, Integer> positions = new IdentityHashMap<>();
     private int index;
     private int depth;
 
@@ -83,8 +95,23 @@ public final class Parser {
      * @throws ExpressionException when the text is not a valid expression
      */
     public static Expr parse(String source, ToIntFunction<String> slots, String column) {
+        return parseLocated(source, slots, column).expr();
+    }
+
+    /**
+     * Parses the expression of a cell and keeps where each node starts, so a type check can name the operator at
+     * fault (RLE-004). The tree is the one {@link #parse(String, ToIntFunction, String)} returns.
+     *
+     * @param source the expression text
+     * @param slots maps an input name to its slot index, or -1 when there is no such input
+     * @param column the input the cell is keyed by, or null outside a condition cell
+     * @return the tree and the positions of its nodes
+     * @throws ExpressionException when the text is not a valid expression
+     */
+    public static Located parseLocated(String source, ToIntFunction<String> slots, String column) {
         if (source.length() > MAX_LENGTH) {
-            throw new ExpressionException("Expression longer than " + MAX_LENGTH + " characters", MAX_LENGTH);
+            throw new ExpressionException(ExpressionError.EXPRESSION_TOO_LONG,
+                    "Expression longer than " + MAX_LENGTH + " characters", MAX_LENGTH);
         }
         Parser parser = new Parser(source, slots, column);
         Expr expr = parser.or();
@@ -92,14 +119,45 @@ public final class Parser {
         if (rest.kind() != Kind.EOF) {
             throw new ExpressionException("Unexpected '" + rest.text() + "'", rest.position());
         }
-        return expr;
+        return new Located(expr, parser.positions);
+    }
+
+    /**
+     * A parsed tree with the character position of each node: the operator of a binary or unary operation, the
+     * keyword of {@code in}, {@code between} and {@code is null}, the name of a call, the first character otherwise.
+     *
+     * @param expr the tree
+     * @param positions the position of each node, keyed by identity
+     */
+    public record Located(Expr expr, Map<Expr, Integer> positions) {
+
+        public Located {
+            positions = java.util.Collections.unmodifiableMap(positions);
+        }
+
+        /**
+         * Returns where a node of this tree starts.
+         *
+         * @param node a node of {@link #expr()}
+         * @return its zero-based position, or -1 for a node this parse did not make
+         */
+        public int position(Expr node) {
+            return positions.getOrDefault(node, -1);
+        }
+    }
+
+    private <T extends Expr> T at(T node, int position) {
+        positions.putIfAbsent(node, position);
+        return node;
     }
 
     private Expr or() {
         enter();
         Expr left = and();
+        int at = peek().position();
         while (acceptWord("or")) {
-            left = new Expr.Binary(Expr.BinaryOp.OR, left, and());
+            left = at(new Expr.Binary(Expr.BinaryOp.OR, left, and()), at);
+            at = peek().position();
         }
         leave();
         return left;
@@ -107,19 +165,21 @@ public final class Parser {
 
     private Expr and() {
         Expr left = not();
+        int at = peek().position();
         while (acceptWord("and")) {
-            left = new Expr.Binary(Expr.BinaryOp.AND, left, not());
+            left = at(new Expr.Binary(Expr.BinaryOp.AND, left, not()), at);
+            at = peek().position();
         }
         return left;
     }
 
     private Expr not() {
         if (peekWord("not") && !peekWordAt(1, "in")) {
-            next();
+            int at = next().position();
             enter();
             Expr operand = not();
             leave();
-            return new Expr.Unary(Expr.UnaryOp.NOT, operand);
+            return at(new Expr.Unary(Expr.UnaryOp.NOT, operand), at);
         }
         return comparison();
     }
@@ -139,26 +199,26 @@ public final class Parser {
             };
             if (op != null) {
                 next();
-                return new Expr.Binary(op, left, additive());
+                return at(new Expr.Binary(op, left, additive()), token.position());
             }
         }
         if (peekWord("not") && peekWordAt(1, "in")) {
             next();
             next();
-            return new Expr.InList(left, list(), true);
+            return at(new Expr.InList(left, list(), true), token.position());
         }
         if (acceptWord("in")) {
-            return new Expr.InList(left, list(), false);
+            return at(new Expr.InList(left, list(), false), token.position());
         }
         if (acceptWord("is")) {
             boolean negated = acceptWord("not");
             expectWord("null");
-            return new Expr.IsNull(left, negated);
+            return at(new Expr.IsNull(left, negated), token.position());
         }
         if (acceptWord("between")) {
             Expr low = additive();
             expectWord("and");
-            return new Expr.Between(left, low, additive());
+            return at(new Expr.Between(left, low, additive()), token.position());
         }
         return left;
     }
@@ -166,10 +226,11 @@ public final class Parser {
     private Expr additive() {
         Expr left = multiplicative();
         while (true) {
+            int at = peek().position();
             if (acceptOp("+")) {
-                left = new Expr.Binary(Expr.BinaryOp.ADD, left, multiplicative());
+                left = at(new Expr.Binary(Expr.BinaryOp.ADD, left, multiplicative()), at);
             } else if (acceptOp("-")) {
-                left = new Expr.Binary(Expr.BinaryOp.SUB, left, multiplicative());
+                left = at(new Expr.Binary(Expr.BinaryOp.SUB, left, multiplicative()), at);
             } else {
                 return left;
             }
@@ -179,10 +240,11 @@ public final class Parser {
     private Expr multiplicative() {
         Expr left = unary();
         while (true) {
+            int at = peek().position();
             if (acceptOp("*")) {
-                left = new Expr.Binary(Expr.BinaryOp.MUL, left, unary());
+                left = at(new Expr.Binary(Expr.BinaryOp.MUL, left, unary()), at);
             } else if (acceptOp("/")) {
-                left = new Expr.Binary(Expr.BinaryOp.DIV, left, unary());
+                left = at(new Expr.Binary(Expr.BinaryOp.DIV, left, unary()), at);
             } else {
                 return left;
             }
@@ -190,17 +252,18 @@ public final class Parser {
     }
 
     private Expr unary() {
+        int at = peek().position();
         if (acceptOp("-")) {
             enter();
             Expr operand = unary();
             leave();
             if (operand instanceof Expr.Literal literal && literal.value() instanceof BigDecimal number) {
-                return new Expr.Literal(number.negate());
+                return at(new Expr.Literal(number.negate()), at);
             }
             if (operand instanceof Expr.Literal literal && literal.value() instanceof Money money) {
-                return new Expr.Literal(Money.ofMinor(money.currency(), Math.negateExact(money.minorUnits())));
+                return at(new Expr.Literal(Money.ofMinor(money.currency(), Math.negateExact(money.minorUnits()))), at);
             }
-            return new Expr.Unary(Expr.UnaryOp.NEGATE, operand);
+            return at(new Expr.Unary(Expr.UnaryOp.NEGATE, operand), at);
         }
         return primary();
     }
@@ -214,26 +277,27 @@ public final class Parser {
                 if (after.kind() == Kind.IDENT && after.text().matches("[A-Z]{3}") && slots.applyAsInt(after.text()) < 0) {
                     next();
                     try {
-                        return new Expr.Literal(Money.ofMajor(after.text(), number.toPlainString()));
+                        return at(new Expr.Literal(Money.ofMajor(after.text(), number.toPlainString())), token.position());
                     } catch (IllegalArgumentException | ArithmeticException e) {
-                        throw new ExpressionException("Invalid money literal: " + e.getMessage(), token.position());
+                        throw new ExpressionException(ExpressionError.INVALID_LITERAL, "Invalid money literal: " + e.getMessage(),
+                                token.position());
                     }
                 }
-                return new Expr.Literal(number);
+                return at(new Expr.Literal(number), token.position());
             }
             case STRING -> {
-                return new Expr.Literal(token.text());
+                return at(new Expr.Literal(token.text()), token.position());
             }
             case IDENT -> {
                 switch (token.text()) {
                     case "true" -> {
-                        return new Expr.Literal(Boolean.TRUE);
+                        return at(new Expr.Literal(Boolean.TRUE), token.position());
                     }
                     case "false" -> {
-                        return new Expr.Literal(Boolean.FALSE);
+                        return at(new Expr.Literal(Boolean.FALSE), token.position());
                     }
                     case "null" -> {
-                        return new Expr.Literal(null);
+                        return at(new Expr.Literal(null), token.position());
                     }
                     default -> {
                         if (peek().kind() == Kind.LPAREN && (token.text().equals("date") || token.text().equals("datetime"))) {
@@ -249,10 +313,16 @@ public final class Parser {
                             return call(token);
                         }
                         int slot = slots.applyAsInt(token.text());
-                        if (slot < 0) {
-                            throw new ExpressionException("Unknown input '" + token.text() + "'", token.position());
+                        if (slot < 0 && RESERVED.contains(token.text())) {
+                            throw new ExpressionException(ExpressionError.FORBIDDEN_CONSTRUCT, "'" + token.text()
+                                    + "' is not part of the expression language: it creates no objects and runs no code",
+                                    token.position());
                         }
-                        return new Expr.Var(slot, token.text());
+                        if (slot < 0) {
+                            throw new ExpressionException(ExpressionError.UNKNOWN_INPUT,
+                                    "Unknown input '" + token.text() + "'", token.position());
+                        }
+                        return at(new Expr.Var(slot, token.text()), token.position());
                     }
                 }
             }
@@ -281,12 +351,12 @@ public final class Parser {
         }
         expect(Kind.RPAREN, ")");
         try {
-            return new Expr.Literal(function.text().equals("date")
+            return at(new Expr.Literal(function.text().equals("date")
                     ? LocalDate.parse(argument.text())
-                    : OffsetDateTime.parse(argument.text()).toInstant());
+                    : OffsetDateTime.parse(argument.text()).toInstant()), function.position());
         } catch (DateTimeException e) {
-            throw new ExpressionException("Invalid " + function.text() + " literal '" + argument.text() + "'",
-                    argument.position());
+            throw new ExpressionException(ExpressionError.INVALID_LITERAL,
+                    "Invalid " + function.text() + " literal '" + argument.text() + "'", argument.position());
         }
     }
 
@@ -299,7 +369,10 @@ public final class Parser {
             }
         }
         if (function == null) {
-            throw new ExpressionException("Unknown function '" + name.text() + "'", name.position());
+            // Refused before its arguments are read: nothing inside T(java.lang.Runtime) is bound or evaluated (TR-SEC-01).
+            throw new ExpressionException(ExpressionError.FORBIDDEN_CONSTRUCT, "Unknown function '" + name.text()
+                    + "': only the functions of the expression language can be called, never a method or a class",
+                    name.position());
         }
         expect(Kind.LPAREN, "(");
         List<Expr> args = new ArrayList<>();
@@ -314,10 +387,10 @@ public final class Parser {
         }
         if (function == Expr.Function.ROUND && args.get(1) instanceof Expr.Literal literal
                 && literal.value() instanceof BigDecimal scale && !isScale(scale)) {
-            throw new ExpressionException("round: the scale must be a whole number from -" + MAX_SCALE + " to "
+            throw new ExpressionException(ExpressionError.INVALID_LITERAL, "round: the scale must be a whole number from -" + MAX_SCALE + " to "
                     + MAX_SCALE + ", found " + scale.toPlainString(), name.position());
         }
-        return new Expr.Call(function, args);
+        return at(new Expr.Call(function, args), name.position());
     }
 
     /**
@@ -340,7 +413,7 @@ public final class Parser {
         }
         next();
         Expr.ClockFunction which = function.text().equals("today") ? Expr.ClockFunction.TODAY : Expr.ClockFunction.NOW;
-        return new Expr.Clock(which, slots.applyAsInt(which.slotName()));
+        return at(new Expr.Clock(which, slots.applyAsInt(which.slotName())), function.position());
     }
 
     /**
@@ -371,14 +444,16 @@ public final class Parser {
             }
             int slot = slots.applyAsInt(column);
             if (slot < 0) {
-                throw new ExpressionException("Unknown input '" + column + "'", function.position());
+                throw new ExpressionException(ExpressionError.UNKNOWN_INPUT, "Unknown input '" + column + "'",
+                        function.position());
             }
-            text = new Expr.Var(slot, column);
+            text = at(new Expr.Var(slot, column), function.position());
             pattern = new Token(Kind.STRING, (String) ((Expr.Literal) first).value(), function.position());
         }
         expect(Kind.RPAREN, ")");
         leave();
-        return new Expr.Matches(text, pattern.text(), BoundedRegex.compile(pattern.text(), pattern.position()));
+        return at(new Expr.Matches(text, pattern.text(), BoundedRegex.compile(pattern.text(), pattern.position())),
+                function.position());
     }
 
     private List<Expr> list() {
@@ -395,7 +470,8 @@ public final class Parser {
 
     private void enter() {
         if (++depth > MAX_DEPTH) {
-            throw new ExpressionException("Expression nested deeper than " + MAX_DEPTH, peek().position());
+            throw new ExpressionException(ExpressionError.EXPRESSION_TOO_DEEP, "Expression nested deeper than " + MAX_DEPTH,
+                    peek().position());
         }
     }
 
@@ -485,6 +561,36 @@ public final class Parser {
         return c >= '0' && c <= '9';
     }
 
+    /**
+     * The problem of a character outside the language. Member access and statement characters are how code is
+     * written in a host language, so they are {@link ExpressionError#FORBIDDEN_CONSTRUCT} (TR-SEC-01); the rest is a
+     * syntax error, with a hint for the two common slips.
+     */
+    private static ExpressionException unexpectedCharacter(String source, int at) {
+        char c = source.charAt(at);
+        if (c == '.' && at + 1 < source.length() && isAsciiDigit(source.charAt(at + 1))) {
+            return new ExpressionException("A number starts with a digit, for example 0.5", at);
+        }
+        if (FORBIDDEN_CHARACTERS.indexOf(c) >= 0) {
+            return new ExpressionException(ExpressionError.FORBIDDEN_CONSTRUCT, "'" + c
+                    + "' is not part of the expression language: there is no member access, method call, class"
+                    + " reference or statement", at);
+        }
+        if (c == '"') {
+            return new ExpressionException("Strings are written in single quotes, for example 'GOLD'", at);
+        }
+        if (c == '=') {
+            return new ExpressionException("Equality is written ==", at);
+        }
+        if (c == '&' || c == '|' || c == '!') {
+            return new ExpressionException("Logic is written with the words and, or and not", at);
+        }
+        return new ExpressionException("Unexpected character '" + c + "'", at);
+    }
+
+    /** Characters that write member access or statements in a host language: {@code a.b}, {@code x; y}, {@code {}}. */
+    private static final String FORBIDDEN_CHARACTERS = ".;{}#@$`\\";
+
     private static List<Token> lex(String source) {
         List<Token> tokens = new ArrayList<>();
         int i = 0;
@@ -566,7 +672,7 @@ public final class Parser {
                     case '[' -> Kind.LBRACK;
                     case ']' -> Kind.RBRACK;
                     case ',' -> Kind.COMMA;
-                    default -> throw new ExpressionException("Unexpected character '" + c + "'", start);
+                    default -> throw unexpectedCharacter(source, start);
                 };
                 tokens.add(new Token(kind, String.valueOf(c), start));
                 i++;

@@ -8,10 +8,10 @@ Design preview: describes the 0.1 target.
 
 | Property | Statement |
 |---|---|
-| No code execution | No method calls, reflection, class loading, file or network access (TR-SEC-01) |
-| Termination | No loops, no recursion, no unbounded allocation; regular expressions are bounded in length and time (TR-SEC-02) |
+| No code execution | No method calls, member access, reflection, class loading, file or network access (TR-SEC-01). A call of a function the language does not have, such as `T(java.lang.Runtime)`, a `.` or a statement character is refused at import as `FORBIDDEN_CONSTRUCT`, before anything inside it is read |
+| Termination | No loops, no recursion, no unbounded allocation. An expression is at most 4,096 characters and 64 levels deep; one decision visits at most 100,000 nodes of its expressions (step budget), with a 1,000 ms backstop, or fails with `EVALUATION_BUDGET_EXCEEDED`; regular expressions are bounded in length and time (TR-SEC-02) |
 | Determinism | Same inputs and clock give the same result (TR-DET-01); `today()` and `now()` read the decision's clock, which the decision log records |
-| Static typing | Unknown identifiers and type errors are rejected at publication time (TR-DET-02) |
+| Static typing | Unknown identifiers and type errors are rejected at import and again at publication request (TR-DET-02), with the rule, column, `code` and character position: `balance + 100 > 0` with money `balance` is `TYPE_MISMATCH` at the `+`. Operands are checked under every operator, in conditions and in outputs computed from inputs; an operand that is the literal `null` passes and gives `null` at evaluation |
 
 ## Literals
 

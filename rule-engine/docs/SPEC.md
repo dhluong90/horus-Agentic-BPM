@@ -50,10 +50,10 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Traces to:** `TR-DET-02`, `TR-SEC-01`
 - **Milestone:** M1
 - **Given:** Draft rule set referencing unknown input `creditScoreX`, mismatched arithmetic `balance + 100` (`money + integer`), or forbidden method call `T(java.lang.Runtime).getRuntime()`.
-- **When:** Call `validate` or `requestPublish`.
-- **Then:** Validation fails with row ID (`R1`) and error detail; status remains `DRAFT`; version cannot transition to `PENDING_APPROVAL` or `PUBLISHED`.
-- **Example:** `when: { balance: "+ 100 > 0" } -> 422 VALIDATION_FAILED at row R1`.
-- **Test ID:** `RLE_004_publish_rejects_unparsable_or_ill_typed_expressions`
+- **When:** Import it, or call `validate` or `requestPublish` on a stored draft.
+- **Then:** Validation fails with row ID (`R1`), column, a stable `code` (`UNKNOWN_INPUT`, `TYPE_MISMATCH`, `FORBIDDEN_CONSTRUCT`) and the character position in the cell as written; status remains `DRAFT`; version cannot transition to `PENDING_APPROVAL` or `PUBLISHED`. A forbidden construct is refused before anything inside it is bound or evaluated. Operands are checked under every operator, in conditions and in output cells computed from inputs.
+- **Example:** `when: { balance: "balance + 100 > 0" } -> 422 VALIDATION_FAILED, R1, column balance, TYPE_MISMATCH at position 8 ("+ is not defined for money and number: write the number with a currency, for example 100 VND")`.
+- **Test ID:** `RLE_004_publish_rejects_unparsable_or_ill_typed_expressions` (`RLE_004_*` in `ExpressionValidationTest`, `ExpressionTypeCheckPropertiesTest`)
 
 ### RLE-005 Money currency mismatch is rejected deterministically
 - **Traces to:** `TR-DET-03`

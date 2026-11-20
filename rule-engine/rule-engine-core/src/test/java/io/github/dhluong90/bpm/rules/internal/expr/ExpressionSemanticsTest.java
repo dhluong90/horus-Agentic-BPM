@@ -96,7 +96,7 @@ class ExpressionSemanticsTest {
     @ParameterizedTest
     @CsvSource(delimiter = '|', value = {
         "creditScoreX > 1          | Unknown input 'creditScoreX'",
-        "T(java.lang.Runtime)      | Unexpected character '.'",
+        "T(java.lang.Runtime)      | is not part of the expression language",
         "exec(1)                   | Unknown function 'exec'",
         "tier == 'GOLD             | Unterminated string",
         "tier ==                   | Unexpected end of expression",

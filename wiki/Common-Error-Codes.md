@@ -117,7 +117,22 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 ### VALIDATION_FAILED
 `422`. A rule set or process definition does not parse or type-check; `violations` lists each problem with its location. Fix the document and save again.
 
-For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is the rule (row), `column` the input or output name, and either is `null` when the problem is outside them; `message` carries no location prefix. Every cell problem of the document is listed at once, in document order, up to 100 entries (`violationsTruncated: true` when there were more), so an editor can mark each cell; a structural problem (an unknown property, a missing key) stops reading and is the only entry. Example: `[{ "ruleId": "R3", "column": "fee", "message": "output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code" }]`.
+For rule sets every entry is `{ "ruleId", "column", "message", "code", "position" }`: `ruleId` is the rule (row), `column` the input or output name, and either is `null` when the problem is outside them; `message` carries no location prefix; `code` is stable and `position` is the zero-based character in the cell text as written, both `null` when they do not apply. Every cell problem of the document is listed at once, in document order, up to 100 entries (`violationsTruncated: true` when there were more), so an editor can mark each cell; a structural problem (an unknown property, a missing key) stops reading and is the only entry. Example: `[{ "ruleId": "R3", "column": "fee", "message": "output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code", "code": "TYPE_MISMATCH", "position": null }]`.
+
+Codes of expression problems, in `when` and `then` cells. Each is refused at import, at draft replacement, by `VersionService.validate` and at `:request-publish`, which checks a stored draft again so a draft stored before a check existed stays a draft:
+
+| `code` | Meaning | Example |
+|---|---|---|
+| `UNKNOWN_INPUT` | A name that is not a declared input | `creditScoreX > 600`: `Unknown input 'creditScoreX' at position 0` |
+| `TYPE_MISMATCH` | Operands an operator does not take, a condition that is not true or false, or a cell of the wrong type for its output | `balance + 100 > 0` with money `balance`: `+ is not defined for money and number: write the number with a currency, for example 100 VND at position 8` |
+| `FORBIDDEN_CONSTRUCT` | A call of a function the language does not have, member access (`.`), a statement character (`;`, `{`, `}`, `#`, `@`, `$`), or a word such as `new` or `class`. Refused before anything inside it is read, bound or evaluated | `T(java.lang.Runtime).getRuntime()`: `'.' is not part of the expression language ... at position 6` |
+| `SYNTAX_ERROR` | Not an expression: an unterminated string, a missing parenthesis, `=` for `==`, `&&` for `and` | `tier == 'GOLD`: `Unterminated string at position 8` |
+| `INVALID_LITERAL` | A malformed date, datetime, money amount or `round` scale | `10.5 VND` (VND has no minor unit) |
+| `INVALID_PATTERN` | A `matches()` pattern outside the dialect or not a regular expression | `matches(ref, '(?i)ft')` |
+| `EXPRESSION_TOO_LONG`, `EXPRESSION_TOO_DEEP` | More than 4,096 characters, or nested deeper than 64 | |
+| `UNKNOWN_OUTPUT`, `MASKED_INPUT_IN_OUTPUT` | A `then` key that is not a declared output; an output cell that reads a masked input | |
+
+New codes may be added; a client should show `message` for a code it does not know.
 
 Under strict mode (`decision-log.require-explicit-mask: true`) an input that declares no `mask` is one entry with `ruleId: null` and `column` the input name, at import, draft replacement, publication request and approval: `[{ "ruleId": null, "column": "nationalId", "message": "declares no mask, and decision-log.require-explicit-mask requires every input to declare mask: true or mask: false" }]`. Add `mask: true`, or `mask: false` if the input holds no personal data.
 
@@ -160,10 +175,11 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `422`. `POST /decisions/{id}:replay` for a decision that used a masked input (`mask: true`) with a value. The decision log keeps such a value only as `masked`, so the decision cannot be evaluated again. `detail` names the inputs, never their values. Explain the decision from its log entry instead. Nothing is written.
 
 ### EVALUATION_ERROR
-`422`. Evaluation failed: `detail` names `CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT` or `FUNCTION_ERROR`. The decision is logged with this outcome. When the rule set masks an input and the tenant has no masking key, the decision is refused without being evaluated: the row has `error_code = MASKING_KEY_MISSING` and no inputs, and `detail` names `horus.bpm.rules.masking.hmac-key`. When an output reads an input that the tenant's masking default masks, the decision is refused the same way with `error_code = MASKED_INPUT_IN_OUTPUT`; an output that reads an input declared `mask: true` is refused at import instead.
+`422`. Evaluation failed: `detail` names `CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT`, `EVALUATION_BUDGET_EXCEEDED` or `FUNCTION_ERROR`. The decision is logged with this outcome. When the rule set masks an input and the tenant has no masking key, the decision is refused without being evaluated: the row has `error_code = MASKING_KEY_MISSING` and no inputs, and `detail` names `horus.bpm.rules.masking.hmac-key`. When an output reads an input that the tenant's masking default masks, the decision is refused the same way with `error_code = MASKED_INPUT_IN_OUTPUT`; an output that reads an input declared `mask: true` is refused at import instead.
 
 - `REGEX_TIMEOUT`: a `matches()` read more than `evaluation.regex-max-reads` characters (default 1,000,000), the `matches()` calls of one decision together read more than `evaluation.regex-max-reads-per-decision` (default 5,000,000; `detail` names that setting), or a `matches()` ran longer than `evaluation.regex-timeout-ms` (default 50 ms), and was stopped. `detail` starts with `REGEX_TIMEOUT:` and the decision row has `error_code = REGEX_TIMEOUT`. Retrying the same input fails the same way; simplify the pattern (avoid nested quantifiers such as `(a+?)+?`).
 - `REGEX_INPUT_TOO_LONG`: the text given to `matches()` is longer than `evaluation.regex-max-input-length` (default 4,096); the match was not run. `detail` starts with `REGEX_INPUT_TOO_LONG:` and so does the row's `error_code`.
+- `EVALUATION_BUDGET_EXCEEDED`: the decision visited more than 100,000 nodes of its expressions (the step budget), or ran longer than the 1,000 ms backstop. Steps are counted, not timed, so the same input fails the same way on every machine. `detail` starts with `EVALUATION_BUDGET_EXCEEDED:` and so does the row's `error_code`. Split a very large `collect` table or simplify its cells.
 - `REGEX_TOO_DEEP`: the pattern's backtracking ran out of thread stack, typically an alternation under `*` or `+` such as `(a|b)*c` on a long text. Simplify the pattern or lower `evaluation.regex-max-input-length`.
 
 ### BATCH_TOO_LARGE
