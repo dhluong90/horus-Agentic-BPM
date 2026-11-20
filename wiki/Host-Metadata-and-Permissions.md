@@ -44,7 +44,9 @@ sequenceDiagram
         M-->>C: 200 meta, Cache-Control private, max-age=60, ETag
     end
     C->>M: GET /api/bpm/me
-    alt no tenant for the caller
+    alt caller id starts with system:
+        M-->>C: 403 problem, code PERMISSION_DENIED, security log entry, tenant not resolved
+    else no tenant for the caller
         M-->>C: 401 problem, WWW-Authenticate Bearer error="invalid_token"
     else X-Tenant-Id names another tenant than the principal's
         M-->>C: 403 problem, code TENANT_NOT_ALLOWED, security log entry
@@ -66,7 +68,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
   "schemaVersion": 1,
   "hostId": "rule-engine-only",
   "modules": [
-    { "module": "rules", "engineVersion": "0.1.0-SNAPSHOT", "apiVersion": "v1", "features": [] }
+    { "module": "rules", "engineVersion": "0.1.0", "apiVersion": "v1", "features": [] }
   ],
   "tenancy": { "switching": false },
   "limits": { "maxPageSize": 200 }
@@ -123,7 +125,7 @@ horus.bpm.rules.security.role-permissions:
   ROLE_PRICING_APPROVER: [rules:read, rules:approve]
 ```
 
-Only the permissions of the engines installed in the host are ever listed: `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read` and `rules:pin` for the Rule Engine, and the `processes:*` permissions of [[Process Engine Overview]], `processes:cancel` included, for the Process Engine. A misspelt authority (`rules:delete`), a process permission on a host without the Process Engine, or an OAuth2 scope never appears. A role mapping that grants an unknown permission, such as `rules:aprove`, stops the host at start-up with a message naming it.
+Only the permissions of the engines installed in the host are ever listed: `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read`, `rules:pin` and `rules:masked:search` for the Rule Engine, and the `processes:*` permissions of [[Process Engine Overview]], `processes:cancel` included, for the Process Engine. A misspelt authority (`rules:delete`), a process permission on a host without the Process Engine, or an OAuth2 scope never appears. A role mapping that grants an unknown permission, such as `rules:aprove`, stops the host at start-up with a message naming it.
 
 `/me` and the engine endpoints apply the mapping in one place, described next.
 
@@ -143,11 +145,11 @@ flowchart LR
 
 | Method | Answers |
 |---|---|
-| `currentCaller()` | The caller of the current request: user id, display name, tenant, authorities and groups. The tenant checks below run here; a refusal is `EngineAccessDeniedException` with `UNAUTHENTICATED` or `TENANT_NOT_ALLOWED` |
+| `currentCaller()` | The caller of the current request: user id, display name, tenant, authorities and groups. The reserved-id check and the tenant checks below run here; a refusal is `EngineAccessDeniedException` with `UNAUTHENTICATED`, `TENANT_NOT_ALLOWED` or `PERMISSION_DENIED` |
 | `hasPermission(caller, "rules:approve")` | Yes when the caller holds the permission as an authority or through the engine's role mapping. A permission no installed engine declares is a programming error and throws `IllegalArgumentException` |
 | `requirePermission("rules:approve")` | The caller, or `EngineAccessDeniedException` with `PERMISSION_DENIED` |
 
-When an engine endpoint lets the refusal through, the module answers with the same problem body `/me` sends. Within one request the caller is resolved once, so an operation that asks several times writes at most one `tenant.switch.refused` or `tenant.unresolved` entry. A refused permission writes one entry too:
+When an engine endpoint lets the refusal through, the module answers with the same problem body `/me` sends. Within one request the caller is resolved once, so an operation that asks several times writes at most one `caller.reserved.refused`, `tenant.switch.refused` or `tenant.unresolved` entry. A refused permission writes one entry too:
 
 ```text
 permission.denied permission=rules:approve user=lan tenant=bank-a correlationId=01M7S1RASFFAP0S0R1G9GDDZW3 clientCorrelationId=-
@@ -155,7 +157,24 @@ permission.denied permission=rules:approve user=lan tenant=bank-a correlationId=
 
 The engines resolve no tenant and read no role mapping themselves; an architecture test fails the build if engine code does.
 
-A host may replace the check with its own `EngineAccess` bean, for example to ask an entitlement service that is kept in memory. `/me` then reports from the host's bean too. The bean must be thread-safe and must not call the network on each request.
+A host may replace the check with its own `EngineAccess` bean, for example to ask an entitlement service that is kept in memory. `/me` then reports from the host's bean too. The bean must be thread-safe, must not call the network on each request, and must refuse reserved ids as described next.
+
+### Reserved ids
+
+The engines record their own actions under ids that start with `system:`: a definition imported at start-up, a timer that fired, a rule version superseded by a newer one. A person signed in with such an id could have their actions credited to the engine in the audit trail, so the default `EngineAccess` refuses that caller before anything else, on `/me`, in the cockpit and on every engine endpoint.
+
+| Caller id | Answer |
+|---|---|
+| Starts with `system:`, for example `system:supersession` or `system:timer` | `403 PERMISSION_DENIED`; no tenant is resolved and no engine work starts |
+| `systems-admin`, `system`, `System:ops` | Served as usual: the prefix is matched exactly and case-sensitively |
+
+The problem body names neither the id nor the rule. The refusal writes one entry on the logger `io.github.dhluong90.bpm.security`, with the user value encoded and cut as in the tenant refusal below:
+
+```text
+caller.reserved.refused user=system%3Asupersession correlationId=01M7S1RASFFAP0S0R1G9GDDZW4 clientCorrelationId=-
+```
+
+The engines refuse such ids again on their own, so a host that replaces `EngineAccess`, or calls an engine service without the REST layer, is still covered. Rename a real user whose identity provider id starts with `system:`.
 
 ## Tenant
 
@@ -212,7 +231,7 @@ Every other response under `/api/bpm/**` gets `Cache-Control: no-store` from the
 |---|---|---|
 | `401` | [UNAUTHENTICATED](Common-Error-Codes#unauthenticated) | No principal, a rejected token (another audience, a bad signature), or no tenant for the caller |
 | `403` | [TENANT_NOT_ALLOWED](Common-Error-Codes#tenant_not_allowed) | `X-Tenant-Id` names another tenant than the principal's, or the tenant is outside the allowed format |
-| `403` | [PERMISSION_DENIED](Common-Error-Codes#permission_denied) | The host's chain refuses the request, for example a session call without its CSRF token (`BpmProblemAccessDeniedHandler`) |
+| `403` | [PERMISSION_DENIED](Common-Error-Codes#permission_denied) | The caller's id starts with the reserved `system:` prefix, or the host's chain refuses the request, for example a session call without its CSRF token (`BpmProblemAccessDeniedHandler`) |
 
 A client must not repeat the sign-in more than once on `UNAUTHENTICATED` with `error="invalid_token"`: the same account gets the same token and the same answer. The cockpit treats a `401` on `/me` as "no access to this service" and does not sign in again.
 

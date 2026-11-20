@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
+import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import java.time.Duration;
@@ -23,6 +24,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
  * @param authoring how rule changes may be made on this host
+ * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
+ * @param decisionLog what the decision log records
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -34,14 +37,83 @@ public record RuleEngineProperties(
         @DefaultValue Query query,
         @DefaultValue Lifecycle lifecycle,
         @DefaultValue Security security,
-        @DefaultValue Authoring authoring) {
+        @DefaultValue Authoring authoring,
+        @DefaultValue Masking masking,
+        @DefaultValue DecisionLog decisionLog) {
+
+    /**
+     * Keys of the keyed fingerprints (HMAC-SHA256) of masked inputs (RLE-012, RLE-035). Supply every key from an
+     * environment variable or a secret store, never from a file in the repository. A host that needs a key per
+     * tenant from a vault declares its own {@code MaskingPolicy} bean instead.
+     *
+     * @param hmacKey Base64 key of at least 32 bytes after decoding, for every tenant without its own key. When
+     *     unset, the shared {@code horus.bpm.masking.hmac-key} is used. Start-up fails when a rule set masks an input
+     *     and its tenant has no valid key
+     * @param hmacKeyId the id stored in every fingerprint of {@code hmacKey} ({@code hmac:<keyId>:<hex>}), 1 to 32
+     *     letters, digits, {@code _} or {@code -}; default {@code k1}. Not secret. Change it together with the key
+     * @param tenants per-tenant settings, by tenant id; a tenant listed here with a key never uses the host key
+     * @param search limits of the masked-input search
+     */
+    public record Masking(String hmacKey, String hmacKeyId, Map<String, TenantMasking> tenants,
+            @DefaultValue Search search) {
+
+        /** Copies the tenants; unset is empty. */
+        public Masking {
+            tenants = tenants == null ? Map.of() : Map.copyOf(tenants);
+        }
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "Masking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", hmacKeyId=" + hmacKeyId + ", tenants="
+                    + tenants.keySet() + "]";
+        }
+    }
+
+    /**
+     * Limits of the masked-input search ({@code POST /decisions:find-by-masked-input}).
+     *
+     * @param maxPerMinute searches one caller may run per minute on one replica, at least 1; default 30. It cannot be
+     *     switched off. Past it the search is refused with {@code 429 RATE_LIMITED} and the refusal is audited
+     */
+    public record Search(Integer maxPerMinute) {
+    }
+
+    /**
+     * Masking settings of one tenant.
+     *
+     * @param hmacKey the tenant's Base64 key of at least 32 bytes after decoding; unset uses the host key
+     * @param hmacKeyId the id stored in every fingerprint of the tenant's key; default {@code k1}
+     * @param maskDefault whether this tenant's inputs that declare no {@code mask} are masked; unset uses
+     *     {@code decision-log.mask-default}
+     * @param search the tenant's own search limit; unset uses {@code masking.search}
+     */
+    public record TenantMasking(String hmacKey, String hmacKeyId, Boolean maskDefault, Search search) {
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "TenantMasking[hmacKey=" + (hmacKey == null ? "unset" : "set") + ", hmacKeyId=" + hmacKeyId
+                    + ", maskDefault=" + maskDefault + "]";
+        }
+    }
+
+    /**
+     * What the decision log records.
+     *
+     * @param maskDefault whether inputs that declare no {@code mask} are masked, for every tenant without its own
+     *     setting; default false. An input with {@code mask: false} is never masked by this default
+     */
+    public record DecisionLog(Boolean maskDefault) {
+    }
 
     /**
      * How rule changes may be made on this host (PD-075, PD-094).
      *
-     * @param cockpitDrafts whether the cockpit may create and edit drafts; default false (PD-094). Published to
-     *     clients as the rules setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta}. Import from a
-     *     file is not affected
+     * @param cockpitDrafts whether drafts may be created and edited from the cockpit; default false (PD-094). Published
+     *     to clients as the rules setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta}, and enforced by
+     *     the engine: when false, replacing a draft ({@code PUT .../versions/{v}}) is refused with
+     *     {@code 403 DRAFT_AUTHORING_DISABLED}. Import from a file is not affected
      */
     public record Authoring(Boolean cockpitDrafts) {
     }
@@ -72,9 +144,22 @@ public record RuleEngineProperties(
      * @param maxOutputBytes estimated JSON size of one decision's outputs, 1 to 1048576; default 1048576. Lower only
      * @param maxStringLength longest string input or string built by {@code +}, 1 to 65536; default 65536. Lower only
      * @param maxRows most rules a version may contain, checked at import, 1 to 5000; default 5000. Lower only
+     * @param regexTimeoutMs longest time one {@code matches()} may run, in milliseconds, 1 to 1000; default 50. A
+     *     match past it fails the decision with {@code EVALUATION_ERROR}, reason {@code REGEX_TIMEOUT}
+     * @param regexMaxInputLength longest text {@code matches()} looks at, 1 to {@code max-string-length}; default
+     *     4096. A longer text fails the decision without running the match, reason {@code REGEX_INPUT_TOO_LONG}
+     * @param regexMaxReads characters one {@code matches()} may read, 1 to 1000000; default 1000000. The deterministic
+     *     primary bound, the same on every machine; past it the decision fails with {@code REGEX_TIMEOUT}. Lower only
+     * @param regexMaxReadsPerDecision characters all the {@code matches()} of one decision may read together, 1 to
+     *     5000000; default 5000000. Counted the same deterministic way as {@code regex-max-reads}, so a rule set of
+     *     many {@code matches()} rows stops at this total; past it the decision fails with {@code REGEX_TIMEOUT}.
+     *     Lower only
+     * @param pinRetired whether a pinned evaluation ({@code rules:pin}) may name a {@code RETIRED} version; default
+     *     false. Replay of a logged decision is not affected
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
-            Integer maxStringLength, Integer maxRows) {
+            Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
+            Integer regexMaxReads, Integer regexMaxReadsPerDecision, Boolean pinRetired) {
     }
 
     /**
@@ -121,11 +206,6 @@ public record RuleEngineProperties(
     }
 
     /**
-     * Returns the validated settings; an out-of-range value fails start-up naming the property.
-     *
-     * @return the engine settings
-     */
-    /**
      * Returns the validated settings, with the retirement settings shared by both engines read from the host
      * (PD-101, PD-102: {@code horus.bpm.lifecycle.retire-approval} and {@code horus.bpm.lifecycle.retire-last-version},
      * through bpm-host-metadata); an out-of-range value fails start-up naming the property.
@@ -157,7 +237,19 @@ public record RuleEngineProperties(
                 lifecycle.reasonMaxLength() == null ? EngineDefaults.REASON_MAX_LENGTH : lifecycle.reasonMaxLength(),
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
-                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows())
+                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows(),
+                new RegexLimits(
+                        evaluation.regexTimeoutMs() == null ? RegexLimits.TIMEOUT_MILLIS : evaluation.regexTimeoutMs(),
+                        evaluation.regexMaxInputLength() != null ? evaluation.regexMaxInputLength()
+                                // A host that lowers max-string-length lowers the default regex length with it;
+                                // an invalid max-string-length is reported by the settings, naming that property.
+                                : Math.max(1, Math.min(RegexLimits.MAX_INPUT_LENGTH, evaluation.maxStringLength() == null
+                                        ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength())),
+                        evaluation.regexMaxReads() == null ? RegexLimits.MAX_READS : evaluation.regexMaxReads(),
+                        evaluation.regexMaxReadsPerDecision() == null
+                                ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision()))
+                .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()))
+                .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired())
                 .withLifecycle(
                         lifecycle.systemActor() == null ? EngineDefaults.SYSTEM_ACTOR : lifecycle.systemActor(),
                         EngineDefaults.RETIRE_APPROVAL);

@@ -79,7 +79,7 @@ class RetireVersionIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @org.springframework.test.context.DynamicPropertySource
     static void database(org.springframework.test.context.DynamicPropertyRegistry registry) {
@@ -120,10 +120,13 @@ class RetireVersionIT {
     Reply publish(String tenant, byte[] document, int version) throws Exception {
         String path = version == 1 ? "/rule-sets" : "/rule-sets/tet-fee-waiver/versions";
         assertThat(send(tenant, "lan", "POST", path, document, "application/yaml", null, null).status()).isEqualTo(201);
-        assertThat(send(tenant, "lan", "POST", "/rule-sets/tet-fee-waiver/versions/" + version + ":request-publish",
-                null, null, null, null).status()).isEqualTo(200);
-        Reply approved = send(tenant, "bob", "POST", "/rule-sets/tet-fee-waiver/versions/" + version + ":approve",
+        Reply requested = send(tenant, "lan", "POST", "/rule-sets/tet-fee-waiver/versions/" + version + ":request-publish",
                 null, null, null, null);
+        assertThat(requested.status()).isEqualTo(200);
+        // The approver names the lock version he reviewed, as every approval must.
+        long reviewed = JSON.readTree(requested.body()).path("lockVersion").asLong();
+        Reply approved = send(tenant, "bob", "POST", "/rule-sets/tet-fee-waiver/versions/" + version + ":approve",
+                null, null, null, "\"" + reviewed + "\"");
         assertThat(approved.status()).as(approved.body()).isEqualTo(200);
         return approved;
     }

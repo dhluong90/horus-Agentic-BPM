@@ -55,7 +55,7 @@ class RuleLifecycleFailurePathsIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     // Plain properties, not @ServiceConnection: the same test runs on both Spring Boot lines (TR-EMB-02).
     @org.springframework.test.context.DynamicPropertySource
@@ -382,6 +382,11 @@ class RuleLifecycleFailurePathsIT {
             request.header("Idempotency-Key", idempotencyKey);
         }
         headers.forEach(request::header);
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        if (path.matches(".*:(approve|reject)$") && headers.keySet().stream().noneMatch("If-Match"::equalsIgnoreCase)) {
+            request.header("If-Match", "\"1\"");
+        }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""),
                 response.headers().firstValue("ETag").orElse(null), response.body());

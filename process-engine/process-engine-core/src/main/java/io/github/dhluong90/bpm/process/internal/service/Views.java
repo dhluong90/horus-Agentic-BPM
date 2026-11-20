@@ -1,9 +1,13 @@
 package io.github.dhluong90.bpm.process.internal.service;
 
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
+import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
+import io.github.dhluong90.bpm.process.api.InstanceSummary;
+import io.github.dhluong90.bpm.process.api.Page;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
+import io.github.dhluong90.bpm.process.api.TaskView;
 import io.github.dhluong90.bpm.process.internal.json.EngineJson;
 import io.github.dhluong90.bpm.process.internal.json.Values;
 import java.time.Instant;
@@ -31,6 +35,8 @@ public final class Views {
         o.put("definitionHash", v.definitionHash()).put("sourceFormat", v.sourceFormat().name())
                 .put("sourceHash", v.sourceHash()).put("nodeCount", v.nodeCount());
         putNullable(o, "approvedBy", v.approvedBy());
+        putNullable(o, "approvedAt", v.approvedAt() == null ? null : v.approvedAt().toString());
+        putNullable(o, "effectiveFrom", v.effectiveFrom() == null ? null : v.effectiveFrom().toString());
         o.put("createdBy", v.createdBy()).put("createdAt", v.createdAt().toString());
         return o;
     }
@@ -44,8 +50,8 @@ public final class Views {
         return new DefinitionVersion(n.get("id").stringValue(), n.get("key").stringValue(), n.get("version").intValue(),
                 n.get("status").stringValue(), text(n, "name"), n.get("definitionHash").stringValue(),
                 SourceFormat.valueOf(n.get("sourceFormat").stringValue()), n.get("sourceHash").stringValue(),
-                n.get("nodeCount").intValue(), text(n, "approvedBy"), n.get("createdBy").stringValue(),
-                Instant.parse(n.get("createdAt").stringValue()));
+                n.get("nodeCount").intValue(), text(n, "approvedBy"), instant(n, "approvedAt"), instant(n, "effectiveFrom"),
+                n.get("createdBy").stringValue(), Instant.parse(n.get("createdAt").stringValue()));
     }
 
     /** @param i instance @return JSON tree */
@@ -66,6 +72,8 @@ public final class Views {
             ObjectNode tn = tasks.addObject().put("id", t.id()).put("nodeId", t.nodeId());
             putNullable(tn, "name", t.name());
             tn.put("assignee", t.assignee()).put("status", t.status()).put("lockVersion", t.lockVersion());
+            putNullable(tn, "claimedBy", t.claimedBy());
+            putNullable(tn, "claimedAt", t.claimedAt() == null ? null : t.claimedAt().toString());
             putNullable(tn, "completedBy", t.completedBy());
         }
         o.put("lockVersion", i.lockVersion());
@@ -88,7 +96,8 @@ public final class Views {
         List<ProcessInstance.Task> tasks = new ArrayList<>();
         n.get("tasks").forEach(t -> tasks.add(new ProcessInstance.Task(t.get("id").stringValue(),
                 t.get("nodeId").stringValue(), text(t, "name"), t.get("assignee").stringValue(),
-                t.get("status").stringValue(), t.get("lockVersion").longValue(), text(t, "completedBy"))));
+                t.get("status").stringValue(), t.get("lockVersion").longValue(), text(t, "claimedBy"),
+                instant(t, "claimedAt"), text(t, "completedBy"))));
         @SuppressWarnings("unchecked")
         Map<String, Object> variables = (Map<String, Object>) Values.fromJson(n.get("variables"));
         String ended = text(n, "endedAt");
@@ -144,6 +153,93 @@ public final class Views {
         } else {
             o.put(name, value);
         }
+    }
+
+    /** @param t task @return JSON tree, with {@code allowedActions} */
+    public static ObjectNode task(TaskView t) {
+        ObjectNode o = EngineJson.NODES.objectNode();
+        o.put("id", t.id()).put("instanceId", t.instanceId()).put("definitionKey", t.definitionKey())
+                .put("definitionVersion", t.definitionVersion());
+        putNullable(o, "businessKey", t.businessKey());
+        o.put("nodeId", t.nodeId());
+        putNullable(o, "name", t.name());
+        o.put("assignee", t.assignee()).put("fourEyes", t.fourEyes()).put("status", t.status())
+                .put("lockVersion", t.lockVersion());
+        putNullable(o, "claimedBy", t.claimedBy());
+        putNullable(o, "claimedAt", t.claimedAt() == null ? null : t.claimedAt().toString());
+        o.put("createdAt", t.createdAt().toString());
+        putNullable(o, "completedBy", t.completedBy());
+        putNullable(o, "completedAt", t.completedAt() == null ? null : t.completedAt().toString());
+        ArrayNode actions = o.putArray("allowedActions");
+        for (String action : List.of("claim", "unclaim", "complete")) {
+            if (t.allowedActions().contains(action)) {
+                actions.add(action);
+            }
+        }
+        return o;
+    }
+
+    /** The stored answer of a claim or unclaim: the task without the caller's actions. */
+    static String taskToJson(TaskView t) {
+        ObjectNode o = task(t);
+        o.remove("allowedActions");
+        return EngineJson.JSON.writeValueAsString(o);
+    }
+
+    static TaskView taskFromJson(String json) {
+        JsonNode n = EngineJson.JSON.readTree(json);
+        return new TaskView(n.get("id").stringValue(), n.get("instanceId").stringValue(),
+                n.get("definitionKey").stringValue(), n.get("definitionVersion").intValue(), text(n, "businessKey"),
+                n.get("nodeId").stringValue(), text(n, "name"), n.get("assignee").stringValue(),
+                n.get("fourEyes").booleanValue(), n.get("status").stringValue(), n.get("lockVersion").longValue(),
+                text(n, "claimedBy"), instant(n, "claimedAt"), Instant.parse(n.get("createdAt").stringValue()),
+                text(n, "completedBy"), instant(n, "completedAt"), java.util.Set.of());
+    }
+
+    /** @param d summary @return JSON tree */
+    public static ObjectNode definitionSummary(DefinitionSummary d) {
+        ObjectNode o = EngineJson.NODES.objectNode().put("key", d.key());
+        putNullable(o, "name", d.name());
+        o.put("latestVersion", d.latestVersion()).put("latestStatus", d.latestStatus());
+        if (d.effectiveVersion() == null) {
+            o.putNull("effectiveVersion");
+        } else {
+            o.put("effectiveVersion", d.effectiveVersion());
+        }
+        o.put("lastChangedAt", d.lastChangedAt().toString());
+        return o;
+    }
+
+    /** @param i summary @return JSON tree */
+    public static ObjectNode instanceSummary(InstanceSummary i) {
+        ObjectNode o = EngineJson.NODES.objectNode();
+        o.put("id", i.id()).put("definitionKey", i.definitionKey()).put("definitionVersion", i.definitionVersion());
+        putNullable(o, "businessKey", i.businessKey());
+        o.put("status", i.status()).put("lockVersion", i.lockVersion());
+        putNullable(o, "startedBy", i.startedBy());
+        o.put("startedAt", i.startedAt().toString());
+        putNullable(o, "endedAt", i.endedAt() == null ? null : i.endedAt().toString());
+        return o;
+    }
+
+    /**
+     * @param page a page
+     * @param item item writer
+     * @param <T> item type
+     * @return {@code {data, nextCursor, hasNext}}
+     */
+    public static <T> ObjectNode page(Page<T> page, java.util.function.Function<T, ObjectNode> item) {
+        ObjectNode o = EngineJson.NODES.objectNode();
+        ArrayNode data = o.putArray("data");
+        page.items().forEach(t -> data.add(item.apply(t)));
+        putNullable(o, "nextCursor", page.nextCursor());
+        o.put("hasNext", page.hasNext());
+        return o;
+    }
+
+    private static Instant instant(JsonNode n, String name) {
+        String value = text(n, name);
+        return value == null ? null : Instant.parse(value);
     }
 
     private static String text(JsonNode n, String name) {

@@ -19,7 +19,7 @@
 #   tools/rename-packages.sh && git commit -am "chore: apply package rename"
 #
 # Environment: MAVEN_REPO_LOCAL (optional, passed as -Dmaven.repo.local to flyway-check builds),
-#              POSTGRES_IMAGE (optional, default postgres:16-alpine).
+#              POSTGRES_IMAGE (optional, default postgres:16-alpine pinned by digest, as bpm.test.postgres.image).
 set -euo pipefail
 
 # The old name is kept in segments so that the leftover search does not find this script.
@@ -241,7 +241,7 @@ cmd_flyway_check() {
   build_classpath "$ROOT" "$work/cp-new.txt"
 
   FC_CONTAINER=$(docker run -d -e POSTGRES_PASSWORD=rename -e POSTGRES_DB=host -p 127.0.0.1::5432 \
-    "${POSTGRES_IMAGE:-postgres:16-alpine}")
+    "${POSTGRES_IMAGE:-postgres@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857}")
   port=$(docker port "$FC_CONTAINER" 5432/tcp | head -1 | sed 's/.*://')
   for _ in $(seq 1 60); do docker exec "$FC_CONTAINER" pg_isready -U postgres -d host >/dev/null 2>&1 && break; sleep 1; done
   url="jdbc:postgresql://127.0.0.1:$port/host"

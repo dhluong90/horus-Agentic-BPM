@@ -46,7 +46,7 @@ class RetireVersionPostgresIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     static final Set<String> AUTHOR = Set.of("rules:read", "rules:author");
     static final Set<String> APPROVER = Set.of("rules:read", "rules:approve");
@@ -106,10 +106,10 @@ class RetireVersionPostgresIT {
         int number = podA.versionService().findRuleSet(ruleSet).isPresent()
                 ? podA.versionService().importVersion(ruleSet, ImportRequest.yaml(document)).version()
                 : podA.versionService().importRuleSet(ImportRequest.yaml(document)).version();
-        podA.versionService().requestPublish(ruleSet, number, WriteOptions.none());
+        long reviewed = podA.versionService().requestPublish(ruleSet, number, WriteOptions.none()).lockVersion();
         clock.set(approvedAt);
         caller.as(tenant, "minh", APPROVER);
-        return podA.versionService().approve(ruleSet, number, WriteOptions.none());
+        return podA.versionService().approve(ruleSet, number, new WriteOptions(null, reviewed, null));
     }
 
     int evaluate(RuleEngines pod, String ruleSet) {

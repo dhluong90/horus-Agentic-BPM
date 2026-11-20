@@ -81,9 +81,10 @@ public class RuleEngineAutoConfiguration {
             RuleEngineProperties properties,
             ObjectProvider<Clock> clock,
             ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys,
+            ObjectProvider<RuleEngineMaskingCheck> maskingCheck,
             ObjectProvider<RuleEngineLifecycleSweeper> sweeper) {
         return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
-                cursorKeys.getIfAvailable(), sweeper.getIfAvailable());
+                cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable(), sweeper.getIfAvailable());
     }
 
     /**

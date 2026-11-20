@@ -93,10 +93,10 @@ class RetireVersionTest {
         int number = versions.findRuleSet(ruleSet).isPresent()
                 ? versions.importVersion(ruleSet, ImportRequest.yaml(document)).version()
                 : versions.importRuleSet(ImportRequest.yaml(document)).version();
-        versions.requestPublish(ruleSet, number, WriteOptions.none());
+        long reviewed = versions.requestPublish(ruleSet, number, WriteOptions.none()).lockVersion();
         clock.set(approvedAt);
         caller.become(tenant, "minh", APPROVER);
-        return versions.approve(ruleSet, number, WriteOptions.none());
+        return versions.approve(ruleSet, number, new WriteOptions(null, reviewed, null));
     }
 
     DecisionResult evaluate(RuleEngines pod, String ruleSet, Map<String, Object> inputs) {
