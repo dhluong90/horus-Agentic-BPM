@@ -79,7 +79,10 @@ public interface RuleStore {
     void replaceDraft(StoredVersion updated, long expectedLockVersion);
 
     /**
-     * Finds the published version effective at an instant: the latest {@code effectiveFrom} at or before it.
+     * Finds the version in force at an instant (ADR-0025 decision 3, DESIGN section 3.3.1): the highest version number
+     * among the approved versions ({@code approvedAt} set) whose {@code effectiveFrom} is at or before it. The status
+     * is not read, so a newer version takes over at its effective date whether or not the older one's status has
+     * been changed yet.
      *
      * @param tenantId the tenant
      * @param ruleSet the rule set name

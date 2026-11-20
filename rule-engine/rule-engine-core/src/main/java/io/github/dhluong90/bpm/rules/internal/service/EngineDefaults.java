@@ -94,6 +94,12 @@ public final class EngineDefaults {
      */
     public static final java.time.Duration CURSOR_KEY_REFRESH = java.time.Duration.ofMinutes(5);
 
+    /**
+     * Default of {@code horus.bpm.rules.evaluation.pin-retired}: a pinned evaluation of a retired version is refused,
+     * so a rule taken out of service cannot produce new decisions through the pin.
+     */
+    public static final boolean PIN_RETIRED = false;
+
     /** Longest accepted {@code X-Correlation-Id}; a longer or malformed one is replaced by a generated id. */
     public static final int CORRELATION_ID_MAX_LENGTH = 128;
 

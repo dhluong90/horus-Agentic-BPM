@@ -141,6 +141,10 @@ class ErrorMatrixWebMvcTest {
                         put("/api/bpm/rules/v1/rule-sets/card-fee/versions/2").contentType("application/yaml")
                                 .header("Idempotency-Key", "k-102").header("If-Match", "\"1\"").content(yaml),
                         s -> s.thrown = new DraftAuthoringDisabledException("card-fee", 2)),
+                new Case("CLOCK_NOT_ALLOWED", 403,
+                        post("/api/bpm/rules/v1/decisions/card-fee:evaluate").contentType("application/json")
+                                .content("{\"inputs\":{\"tier\":\"GOLD\",\"txCount\":5},\"clock\":\"2026-11-20T10:00:00Z\"}"),
+                        s -> s.thrown = new io.github.dhluong90.bpm.rules.api.ClockNotAllowedException()),
                 new Case("RULE_SET_NOT_FOUND", 404, get("/api/bpm/rules/v1/rule-sets/card-fee"), s -> { }),
                 new Case("VERSION_NOT_FOUND", 404, get("/api/bpm/rules/v1/rule-sets/card-fee/versions/9"), s -> { }),
                 new Case("DECISION_NOT_FOUND", 404, get("/api/bpm/rules/v1/decisions/01KDG7Z0RQ6V2Y8M1C4N5P7T9W"),
@@ -190,6 +194,12 @@ class ErrorMatrixWebMvcTest {
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:request-publish")
                                 .header("Idempotency-Key", "k-101"),
                         s -> s.thrown = new IdempotencyKeyReuseException()),
+                new Case("REPLAY_NOT_POSSIBLE", 422, post("/api/bpm/rules/v1/decisions/01KDG7Z0RQ6V2Y8M1C4N5P7T9W:replay"),
+                        s -> {
+                            s.permissions = Set.of("rules:log:read");
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.ReplayNotPossibleException(
+                                    "01KDG7Z0RQ6V2Y8M1C4N5P7T9W", List.of("nationalId"));
+                        }),
                 new Case("EVALUATION_ERROR", 422,
                         post("/api/bpm/rules/v1/decisions/card-fee:evaluate").contentType("application/json").content(gold),
                         s -> s.outcome = new DecisionResult.Failed("EVALUATION_ERROR", "Division by zero in output fee")),

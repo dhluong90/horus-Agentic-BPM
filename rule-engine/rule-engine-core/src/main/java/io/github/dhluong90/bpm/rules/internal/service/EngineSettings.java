@@ -25,10 +25,12 @@ import java.time.Duration;
  * @param draftAuthoring {@code horus.bpm.rules.authoring.cockpit-drafts}: whether drafts may be replaced in place
  *     through {@code VersionService.replaceDraft}; false (the 0.1.0 default, PD-094) refuses it with
  *     {@code DRAFT_AUTHORING_DISABLED}
+ * @param pinRetired {@code horus.bpm.rules.evaluation.pin-retired}: whether a pinned evaluation may name a
+ *     {@code RETIRED} version; default false, so a retired rule never produces a new logged decision
  */
 public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
         boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
-        int maxStringLength, int maxRows, RegexLimits regexLimits, boolean draftAuthoring) {
+        int maxStringLength, int maxRows, RegexLimits regexLimits, boolean draftAuthoring, boolean pinRetired) {
 
     public EngineSettings {
         if (regexLimits == null) {
@@ -103,6 +105,29 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
                 reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, false);
     }
 
+    /**
+     * Creates settings that refuse pinning a retired version.
+     *
+     * @param cacheMaxEntries see the record
+     * @param idempotencyRetention see the record
+     * @param maxInputScale see the record
+     * @param rejectUndeclaredInputs see the record
+     * @param queryMaxPageSize see the record
+     * @param reasonMaxLength see the record
+     * @param maxOutputBytes see the record
+     * @param maxStringLength see the record
+     * @param maxRows see the record
+     * @param regexLimits see the record
+     * @param draftAuthoring see the record
+     */
+    public EngineSettings(int cacheMaxEntries, Duration idempotencyRetention, int maxInputScale,
+            boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
+            int maxStringLength, int maxRows, RegexLimits regexLimits, boolean draftAuthoring) {
+        this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
+                EngineDefaults.PIN_RETIRED);
+    }
+
     private static void requireLowerOnly(String property, int value, int ceiling) {
         if (value < 1 || value > ceiling) {
             throw new IllegalArgumentException(property + " must be 1 to " + ceiling
@@ -160,7 +185,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withRejectUndeclaredInputs(boolean reject) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, reject, queryMaxPageSize,
-                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring);
+                reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring, pinRetired);
     }
 
     /**
@@ -177,7 +202,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
                 regexLimits.maxInputLength() <= stringLength ? regexLimits
                         : new RegexLimits(regexLimits.timeoutMillis(), stringLength, regexLimits.maxReads(),
                                 regexLimits.maxReadsPerDecision()),
-                draftAuthoring);
+                draftAuthoring, pinRetired);
     }
 
     /**
@@ -200,7 +225,8 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withRegexLimits(RegexLimits limits) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, limits, draftAuthoring);
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, limits, draftAuthoring,
+                pinRetired);
     }
 
     /**
@@ -211,6 +237,19 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withDraftAuthoring(boolean enabled) {
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
-                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, enabled);
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, enabled,
+                pinRetired);
+    }
+
+    /**
+     * Returns a copy with {@code evaluation.pin-retired} set.
+     *
+     * @param allowed whether a pinned evaluation may name a retired version
+     * @return the settings
+     */
+    public EngineSettings withPinRetired(boolean allowed) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits,
+                draftAuthoring, allowed);
     }
 }

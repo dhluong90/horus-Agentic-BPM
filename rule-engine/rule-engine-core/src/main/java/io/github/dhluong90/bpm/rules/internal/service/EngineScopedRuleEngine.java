@@ -30,6 +30,10 @@ final class EngineScopedRuleEngine implements TenantScopedRuleEngine {
         if (tenantId == null || tenantId.isBlank()) {
             throw new IllegalArgumentException("tenantId must not be blank");
         }
+        if (request.version() != null || request.clock() != null) {
+            throw new IllegalArgumentException("Engine work evaluates the selected version at the host clock; a pinned "
+                    + "version or a chosen clock needs a caller with rules:pin or rules:simulate");
+        }
         return engine.evaluateAs(tenantId, engineId, request);
     }
 }

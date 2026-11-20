@@ -121,4 +121,18 @@ class TenantScopedEvaluationTest {
         assertThat(hostFacing).isNotInstanceOf(TenantScopedRuleEngine.class);
         assertThat(scoped).isNotInstanceOf(RuleEngine.class);
     }
+
+    @Test
+    void TR_TEN_01_engine_work_refuses_a_pinned_version_or_a_chosen_clock() {
+        // Given card-fee in bank-a, and a thread whose security context is empty
+        publishCardFee("bank-a");
+        caller.become(null, null, Set.of());
+
+        // When engine work pins a version or chooses a clock, then it is refused: those need a caller's rules:pin or
+        // rules:simulate
+        assertThatThrownBy(() -> scoped.evaluate("bank-a", gold.withVersion(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scoped.evaluate("bank-a", gold.withClock(Instant.parse("2026-12-15T02:00:00Z"))))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

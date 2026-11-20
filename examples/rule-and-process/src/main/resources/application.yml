@@ -31,6 +31,8 @@ horus:
           # Starting a process and completing a task run its businessRuleTask steps as the caller.
           ROLE_TELLER: [rules:evaluate]
           ROLE_CARD_OFFICER: [rules:evaluate]
+          # rules:pin is granted to no role: no process step pins a version yet, and a pin bypasses the version in
+          # force. Grant it to the account process steps run under once a step needs it.
     processes:
       definitions:
         # Imported at start-up for each start-up tenant, through the normal import path.
