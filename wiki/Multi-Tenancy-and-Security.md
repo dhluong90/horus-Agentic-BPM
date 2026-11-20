@@ -40,7 +40,7 @@ The REST layer checks one permission string per endpoint with `@PreAuthorize`; t
 | Distinct permissions | Request needs `rules:author`; approval needs `rules:approve`. A user may hold both |
 | Distinct identities | `VersionService.approve` rejects `approverId.equals(requestedBy)` with `SELF_APPROVAL_FORBIDDEN` before any state change. The check lives in the service, so the Java API and REST behave the same (`TR-SEC-04`, `RLE-009`) |
 | No replay | Approval runs `UPDATE rle_version SET status='PUBLISHED' ... WHERE status='PENDING_APPROVAL' AND lock_version=:v`; zero rows gives `409 VERSION_CONFLICT` or `409 INVALID_STATE` |
-| Four-eyes on tasks | `pre_task.forbidden_users` lists identities that acted earlier in the instance or triggered the `agentTask`; `TaskService` rejects them with `403 SELF_APPROVAL_FORBIDDEN` (`PRE-007`) |
+| Four-eyes on tasks | A user task with `horus:fourEyes="true"` refuses the identity that started the instance and every identity that completed an earlier task of it; `TaskService` checks this at claim and again at completion, under the instance lock, and answers `403 SELF_APPROVAL_FORBIDDEN` with nothing written (`PRE-007`) |
 | Cockpit | Disables the button for the requester, and still relies on the API refusal |
 | Switch-off | `maker-checker.enabled=false` is refused outside the `dev` profile |
 
