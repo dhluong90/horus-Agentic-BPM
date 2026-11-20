@@ -95,14 +95,17 @@ public final class DefaultRuleEngine implements RuleEngine {
             rules.requireOnlyDeclared(request.input());
         }
         long started = System.nanoTime();
-        DecisionResult.Outcome outcome = rules.evaluate(request.input());
+        CompiledRuleSet.Evaluation evaluation = rules.evaluateWithReason(request.input());
+        DecisionResult.Outcome outcome = evaluation.outcome();
         long micros = (System.nanoTime() - started) / 1_000;
         DecisionResult result = new DecisionResult(Ulid.next(now), version.ruleSet(), version.version(), now, outcome);
         ArrayNode matched = EngineJson.NODES.arrayNode();
         result.matchedRuleIds().forEach(matched::add);
         String errorCode = outcome instanceof DecisionResult.Failed failed ? failed.code() : null;
+        // The row's error_code is the precise reason when there is one, for example REGEX_TIMEOUT (RLE-007).
+        String reason = evaluation.reason() != null ? evaluation.reason() : errorCode;
         log.append(new DecisionRecord(tenant, result.decisionId(), now, version.ruleSet(), version.version(),
-                version.hitPolicy(), errorCode == null ? "OK" : errorCode, errorCode,
+                version.hitPolicy(), errorCode == null ? "OK" : errorCode, reason,
                 EngineValues.write(EngineValues.loggedInputs(request.input(), rules.inputs())),
                 errorCode == null ? EngineValues.write(EngineValues.decision(result).get("outputs")) : null,
                 EngineValues.write(matched), caller, request.correlationId(), now, micros));
@@ -125,7 +128,8 @@ public final class DefaultRuleEngine implements RuleEngine {
                     + " v" + version.version() + " does not match its canonical_hash; the version is not served");
         }
         CompiledRuleSet fresh = CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()),
-                context.settings().maxOutputBytes(), context.settings().maxStringLength());
+                context.settings().maxOutputBytes(), context.settings().maxStringLength(),
+                context.settings().regexLimits());
         compiled.put(key, fresh);
         return fresh;
     }

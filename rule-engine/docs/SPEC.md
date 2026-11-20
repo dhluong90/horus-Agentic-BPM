@@ -73,13 +73,13 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `income = null, tier = null -> matched R2, R3, R5, R7; R1, R4, R6, R8 not matched`.
 - **Test ID:** `RLE_006_null_follows_feel_three_valued_logic`
 
-### RLE-007 Regex execution is bounded by length and timeout
+### RLE-007 Regex execution is bounded by reads, length and time
 - **Traces to:** `TR-SEC-02`
 - **Milestone:** M1
-- **Given:** Rule using `matches('(a+)+$')` evaluated against adversarial input `"aaaaaaaaaaaaaaaaaaaaaaaaaaaa!"` with `regex-timeout-ms = 50`.
+- **Given:** Rule using `matches('^(a+?)+?$')` evaluated against adversarial input `"aaaaaaaaaaaaaaaaaaaaaaaaaaaa!"` with the defaults `regex-max-reads = 1000000` and `regex-timeout-ms = 50`.
 - **When:** Evaluate the rule set.
-- **Then:** Either publish-time static check rejects nested quantifiers OR runtime aborts within `<= 50 ms` returning `EVALUATION_ERROR` (`REGEX_TIMEOUT`) without hanging the thread.
-- **Example:** `28 'a' + '!' -> abort <= 50ms with EVALUATION_ERROR`.
+- **Then:** The match stops when it has read 1,000,000 characters, a deterministic budget that gives the same outcome on every machine and on replay, or at the latest after `50 ms` (the backstop on a slow machine), returning `EVALUATION_ERROR` with `REGEX_TIMEOUT` on the decision row, without hanging the thread. A text longer than `regex-max-input-length` (default 4,096) fails with `REGEX_INPUT_TOO_LONG` without running the match; a pattern whose backtracking runs out of thread stack fails with `REGEX_TOO_DEEP`. Back-references, look-around, inline flags, possessive quantifiers, character class nesting and intersection, Unicode block names and Java-only escapes are refused at import. Regex engines differ between JVM versions; the example is one the supported JVMs run in exponential time, and the bounds apply to any pattern.
+- **Example:** `28 'a' + '!' against ^(a+?)+?$ -> stopped after 1,000,000 reads, within 50 ms, EVALUATION_ERROR / REGEX_TIMEOUT`.
 - **Test ID:** `RLE_007_regex_timeout_aborts_adversarial_input`
 
 ---

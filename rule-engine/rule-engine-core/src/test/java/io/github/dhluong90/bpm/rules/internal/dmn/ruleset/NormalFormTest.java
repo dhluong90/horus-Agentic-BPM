@@ -221,7 +221,12 @@ class NormalFormTest {
         assertThat(sha).isEqualTo(GOLDEN_V1_SHA256);
     }
 
-    static final String GOLDEN_V1_SHA256 = "dc44beae55cd278fe820d7c9e22def959b854655946bbfa4711387ca6f7eb40f";
+    /**
+     * The pin of the schema version 1 golden file. Changed in 0.2.0 (#20) only by appending the three rows of
+     * {@code matches}, a production the 0.1.0 parser refused, so no stored 0.1.0 rule set contains one: appending rows
+     * for a new production is allowed within schema version 1 (architect ruling on #252, ADR-0026 decision 3).
+     */
+    static final String GOLDEN_V1_SHA256 = "ba6c05f2dd2ab459709727745e4a0e917dc64c7746c115708ae2bf6d1b6f9deb";
 
     // ------------------------------------------------------------------ helpers
 
