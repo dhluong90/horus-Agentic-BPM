@@ -70,9 +70,6 @@ function TakesEffect({ effectiveFrom }: { effectiveFrom: string | null | undefin
 /** What Approve sends: the comment, and the exact { code, input } pairs the approver accepted (PD-104, RLE-053). */
 export interface ApproveArgs { comment: string; acknowledgedWarnings: AcknowledgedWarning[] }
 
-/** Warning codes that need no acceptance when the tenant masks undeclared inputs by default (RLE-053). */
-const SETTLED_BY_MASK_DEFAULT: ReadonlySet<string> = new Set(['UNMASKED_PERSONAL_DATA']);
-
 /**
  * The set the engine needs accepted, from a 409 WARNINGS_NOT_ACKNOWLEDGED (its `warnings`, possibly empty);
  * undefined when the error is not that refusal.
@@ -88,18 +85,18 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
   version: RuleSetVersion; approve: Action<ApproveArgs>; reject: Action<string>; onReload: () => void; docked?: boolean; review?: Review; onReviewAgain?: () => void;
 }) {
   const { t } = useI18n();
-  const { userId, acknowledgeWarnings, maskDefault } = useRulesSession();
+  const { userId } = useRulesSession();
   const [text, setText] = useState('');
   // The tick remembers the refusal on screen when it was given: a new refusal clears it, so the approver reads the
   // warnings again (the version is read again with them) and ticks again.
   const [tick, setTick] = useState<{ on: boolean; refusal: unknown }>({ on: false, refusal: undefined });
   const acceptId = useId();
-  // What needs accepting: after a refusal, exactly the set the engine returned; otherwise the warnings whose code the
-  // host lists (lifecycle.acknowledge-warnings), except an undeclared input the tenant's default masks (RLE-053).
+  // What needs accepting: after a refusal, exactly the set the engine returned; otherwise the warnings the engine
+  // marks requiresAcknowledgement (RLE-053). The cockpit reads the engine's answer and never works it out itself.
   const refusal = refusedSet(approve.error);
   const refused = refusal !== undefined;
   const toAccept: AcknowledgedWarning[] = refusal ?? version.warnings
-    .filter((w) => acknowledgeWarnings.includes(w.code) && !(maskDefault && SETTLED_BY_MASK_DEFAULT.has(w.code)))
+    .filter((w) => w.requiresAcknowledgement)
     .map(({ code, input }) => ({ code, input }));
   const shown = refusal !== undefined && refusal.length > 0 ? refusal : version.warnings;
   const accepted = tick.on && (!refused || tick.refusal === approve.error);

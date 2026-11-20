@@ -80,6 +80,18 @@ public final class Evaluator {
     }
 
     /**
+     * Returns an evaluator for one decision of a request of many decisions: every {@code matches} it runs reads from
+     * one budget of {@code evaluation.regex-max-reads-per-decision} characters and also from the request's budget of
+     * {@code evaluation.regex-max-reads-per-request} (RLE-007). Use it on one thread, for one decision.
+     *
+     * @param request the request's read budget, or null for a decision on its own
+     * @return an evaluator scoped to a fresh decision budget that charges the request
+     */
+    public Evaluator forDecision(RequestReads request) {
+        return new Evaluator(this, regexLimits.newDecision(request));
+    }
+
+    /**
      * Evaluates an expression.
      *
      * @param expr the tree

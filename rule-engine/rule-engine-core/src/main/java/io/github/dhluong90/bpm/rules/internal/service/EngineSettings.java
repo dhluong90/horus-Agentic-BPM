@@ -21,7 +21,7 @@ import java.util.List;
  * @param maxStringLength {@code horus.bpm.rules.evaluation.max-string-length}, 1 to {@value EngineDefaults#STRING_MAX_LENGTH}
  * @param maxRows {@code horus.bpm.rules.evaluation.max-rows}, 1 to {@value EngineDefaults#RULES_MAX}
  * @param regexLimits {@code horus.bpm.rules.evaluation.regex-timeout-ms}, {@code regex-max-input-length},
- *     {@code regex-max-reads} and {@code regex-max-reads-per-decision} (TR-SEC-02); the length is at most
+ *     {@code regex-max-reads}, {@code regex-max-reads-per-decision} and {@code regex-max-reads-per-request} (TR-SEC-02); the length is at most
  *     {@code max-string-length}
  * @param draftAuthoring {@code horus.bpm.rules.authoring.cockpit-drafts}: whether drafts may be replaced in place
  *     through {@code VersionService.replaceDraft}; false (the 0.1.0 default, PD-094) refuses it with
@@ -373,7 +373,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
                 queryMaxPageSize, reasonMaxLength, outputBytes, stringLength, rows,
                 regexLimits.maxInputLength() <= stringLength ? regexLimits
                         : new RegexLimits(regexLimits.timeoutMillis(), stringLength, regexLimits.maxReads(),
-                                regexLimits.maxReadsPerDecision()),
+                                regexLimits.maxReadsPerDecision(), regexLimits.maxReadsPerRequest()),
                 draftAuthoring, pinRetired, systemActor, retireApproval, retireLastVersion, simulationMaxInputs, acknowledgeWarnings);
     }
 
@@ -386,7 +386,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
      */
     public EngineSettings withRegexLimits(int timeoutMillis, int maxInputLength) {
         return withRegexLimits(new RegexLimits(timeoutMillis, maxInputLength, regexLimits.maxReads(),
-                regexLimits.maxReadsPerDecision()));
+                regexLimits.maxReadsPerDecision(), regexLimits.maxReadsPerRequest()));
     }
 
     /**

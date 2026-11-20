@@ -9,11 +9,11 @@ import { personalDataDemo } from '../../mocks/demoCatalogue';
 import { metaRulesOnly, type Scenario } from '../../mocks/fixtures';
 import { resetRuleEngine } from '../../mocks/handlers';
 import { mockHost, setScenario } from '../../mocks/node';
-import type { StoredVersion } from '../../mocks/ruleEngine';
+import type { AcknowledgementSettings, StoredVersion } from '../../mocks/ruleEngine';
 import { PersonalDataWarnings } from './components/PersonalDataWarnings';
 
-function open(hash: string, scenario: Scenario = 'rules-approver', locale?: 'vi', seed: StoredVersion[] = personalDataDemo()) {
-  resetRuleEngine(seed);
+function open(hash: string, scenario: Scenario = 'rules-approver', locale?: 'vi', seed: StoredVersion[] = personalDataDemo(), acknowledgement: AcknowledgementSettings = {}) {
+  resetRuleEngine(seed, acknowledgement);
   setScenario(scenario);
   window.location.hash = hash;
   render(<App {...(locale ? { initialLocale: locale } : {})} />);
@@ -87,14 +87,34 @@ describe('personal data on the approval screen (PD-099, PD-104)', () => {
   });
 
   it('CKP_037_a_tenant_that_masks_undeclared_inputs_by_default_needs_no_acceptance', async () => {
-    mockHost.use(http.get('*/api/bpm/meta', () => HttpResponse.json({
-      ...metaRulesOnly, modules: [{ ...metaRulesOnly.modules[0], settings: { 'decision-log.mask-default': true } }],
-    })));
-    open('#/rules/customer-screening/2');
+    // The engine marks no warning for a tenant whose default masks undeclared inputs; /meta is not read for it.
+    open('#/rules/customer-screening/2', 'rules-approver', undefined, personalDataDemo(), { maskDefault: true });
     const card = await dock();
     expect(within(card).getByRole('group', { name: 'Personal data without a masking rule' })).toBeInTheDocument();
     expect(within(card).queryByRole('checkbox')).not.toBeInTheDocument();
     await waitFor(() => { expect(within(card).getByRole('button', { name: 'Approve and publish' })).toBeEnabled(); });
+  });
+
+  it('CKP_037_the_checkbox_covers_exactly_the_warnings_the_engine_marks_and_ignores_the_meta_settings', async () => {
+    const user = userEvent.setup();
+    const bodies = approveBodies();
+    // /meta says nothing needs accepting; the engine marks National ID only. The engine's answer wins.
+    mockHost.use(http.get('*/api/bpm/meta', () => HttpResponse.json({
+      ...metaRulesOnly, modules: [{ ...metaRulesOnly.modules[0], settings: { 'lifecycle.acknowledge-warnings': '', 'decision-log.mask-default': true } }],
+    })));
+    open('#/rules/customer-screening/2', 'rules-approver', undefined, personalDataDemo(), { requiresAcknowledgement: ({ input }) => input === 'nationalId' });
+    const card = await dock();
+    const warning = within(card).getByRole('group', { name: 'Personal data without a masking rule' });
+    expect(within(warning).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['National ID: no masking rule', 'Email: no masking rule']);
+    expect(within(card).getAllByRole('checkbox')).toHaveLength(1);
+    const accept = within(card).getByRole('checkbox', { name: 'I accept that this input is logged without masking: National ID' });
+    const approve = within(card).getByRole('button', { name: 'Approve and publish' });
+    await waitFor(() => { expect(approve).toBeDisabled(); });
+    await user.click(accept);
+    await waitFor(() => { expect(approve).toBeEnabled(); });
+    await user.click(approve);
+    expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
+    expect(bodies.map((body) => JSON.parse(body) as unknown)).toEqual([{ acknowledgedWarnings: [{ code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId' }] }]);
   });
 
   it('CKP_037_masking_changes_read_as_sentences_above_the_table_with_a_marker_on_the_header', async () => {
@@ -131,10 +151,7 @@ describe('personal data on the approval screen (PD-099, PD-104)', () => {
   });
 
   it('CKP_037_a_host_that_needs_no_acceptance_shows_the_warning_without_the_box', async () => {
-    mockHost.use(http.get('*/api/bpm/meta', () => HttpResponse.json({
-      ...metaRulesOnly, modules: [{ ...metaRulesOnly.modules[0], settings: { 'lifecycle.acknowledge-warnings': '' } }],
-    })));
-    open('#/rules/customer-screening/2');
+    open('#/rules/customer-screening/2', 'rules-approver', undefined, personalDataDemo(), { acknowledgeWarnings: [] });
     const card = await dock();
     expect(within(card).getByRole('group', { name: 'Personal data without a masking rule' })).toBeInTheDocument();
     expect(within(card).queryByRole('checkbox')).not.toBeInTheDocument();
@@ -183,7 +200,7 @@ describe('personal data on the approval screen (PD-099, PD-104)', () => {
 
 describe('the warning text follows the number of inputs', () => {
   const definition: RuleSetDefinition = { schemaVersion: 1, ruleSet: 'x', hitPolicy: 'first', inputs: [{ name: 'nationalId', type: 'string', description: 'National ID' }], outputs: [], rules: [] };
-  const one: VersionWarning[] = [{ code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId', matchedName: 'national id', message: 'm' }];
+  const one: VersionWarning[] = [{ code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId', matchedName: 'national id', message: 'm', requiresAcknowledgement: true }];
 
   it.each([
     ['en', 'Its values will be kept unmasked in the decision log, which cannot be changed later.', 'I accept that this input is logged without masking: National ID'],
