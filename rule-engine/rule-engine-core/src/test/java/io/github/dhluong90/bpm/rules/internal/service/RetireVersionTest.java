@@ -153,8 +153,10 @@ class RetireVersionTest {
             LifecycleEventPayloadTest.conformsTo("rules.version.retired.v1.schema.json", event);
         });
 
-        // and 5 s later both replicas answer 404 NO_EFFECTIVE_VERSION
+        // and 5 s later, once pod B's epoch check has run (ADR-0009; in production the notification usually comes
+        // first), both replicas answer 404 NO_EFFECTIVE_VERSION
         clock.set(Instant.parse("2027-02-17T08:00:05Z"));
+        podB.cache().checkEpochs();
         for (RuleEngines pod : List.of(podA, podB)) {
             assertThatThrownBy(() -> evaluate(pod, "tet-fee-waiver", Map.of("channel", "CARD")))
                     .isInstanceOf(NoEffectiveVersionException.class);
