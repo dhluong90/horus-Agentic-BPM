@@ -543,12 +543,20 @@ paths:
         turned on) is `422 VALIDATION_FAILED` naming the input, and stays `PENDING_APPROVAL`
         (`RLE-050`).
 
+        A version with no recorded author (written before the author was recorded, schema V2) cannot
+        be approved by anyone: `409 AUTHOR_UNKNOWN`, and it stays `PENDING_APPROVAL` with nothing
+        written (PD-105, `RLE-054`). No author is ever assigned. It can still be rejected or withdrawn;
+        importing the change again records its author, and that version can be approved. Its
+        `allowedActions` never contain `approve`.
+
         Acknowledged warnings (PD-104, `RLE-053`, DESIGN 3.3.5). Checks run in this order: permission,
-        `If-Match` present, status, four eyes, lock version, strict mode, acknowledgement. The engine
+        `If-Match` present, status, four eyes (then a recorded author), lock version, strict mode,
+        acknowledgement. The engine
         recomputes the `{ code, input }` pairs that need an acknowledgement: the version's warnings whose
         code is in `lifecycle.acknowledge-warnings` (default `[UNMASKED_PERSONAL_DATA]`), under the
         tenant's personal-data names and masking default in force, leaving out inputs that the tenant's
-        `decision-log.mask-default` masks. The approval is accepted only when `acknowledgedWarnings`
+        `decision-log.mask-default` masks. These are exactly the warnings the version response marks
+        `requiresAcknowledgement: true`. The approval is accepted only when `acknowledgedWarnings`
         equals that set, compared as sets (order and duplicates ignored). A missing or an extra pair is
         `409 WARNINGS_NOT_ACKNOWLEDGED`, whose `warnings` carry the full current set
         (`{ code, input, matchedName }`, empty when nothing is needed now) and whose `setting` carries
@@ -1386,7 +1394,7 @@ components:
             $ref: '#/components/schemas/VersionWarning'
     VersionWarning:
       type: object
-      required: [code, input, matchedName, message]
+      required: [code, input, matchedName, message, requiresAcknowledgement]
       properties:
         code:
           type: string
@@ -1397,11 +1405,21 @@ components:
           type: [string, 'null']
           description: The configured personal-data name the input matched, for example `national id`
         message: { type: string }
+        requiresAcknowledgement:
+          type: boolean
+          description: |
+            Whether `:approve` must list this `{ code, input }` pair in `acknowledgedWarnings`
+            (RLE-053, PD-104): the code is in `lifecycle.acknowledge-warnings` and the input is not
+            masked only by the tenant's `decision-log.mask-default`. Computed with the tenant's
+            settings at the time of the read, by the same rule the approve check applies; a client
+            shows a checkbox for exactly these warnings. A replayed response recorded before this
+            field existed reads it as `false`.
       example:
         code: UNMASKED_PERSONAL_DATA
         input: nationalId
         matchedName: national id
         message: 'Input nationalId looks like personal data (it matches "national id") but declares no mask. Its values will be stored in plain text in the decision log, which can never be changed. Declare mask: true, or mask: false if it holds no personal data.'
+        requiresAcknowledgement: true
     AllowedActions:
       type: array
       description: |
@@ -2062,7 +2080,7 @@ components:
             IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
-            WARNINGS_NOT_ACKNOWLEDGED]
+            WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN]
         detail: { type: string }
         correlationId: { type: string }
         violations:

@@ -47,6 +47,10 @@ public interface EmbeddedEngineGrant {                               // a bean, 
   TenantScopedRuleEngine claim(String engineId, Object claimant);    // once, by the registered claimant only
   boolean isClaimed(String engineId);
 }
+public interface EmbeddedEngineGrant {                               // a bean, but it refuses hosts
+  TenantScopedRuleEngine claim(String engineId, Object claimant);    // once, by the registered claimant only
+  boolean isClaimed(String engineId);
+}
 ```
 `TenantScopedRuleEngine` is for an embedded engine acting on its own stored work: the Process Engine evaluates every business rule task through it, after a timer or inside a user's request. The tenant is the one the engine read from its own stored row; a blank tenant is refused. The caller written to the decision log is the engine identity, fixed when the object is built, and `onBehalfOf` names the user the step ran for (null after a timer). The evaluation time is the engine's clock at the step; a retried step with the same idempotency key replays its decision. There is no REST endpoint for it.
 

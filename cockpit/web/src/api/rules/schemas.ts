@@ -127,8 +127,12 @@ export const versionHistory = z.object({ data: z.array(historyEntry) }).loose();
 export const WARNING_CODES = ['UNMASKED_PERSONAL_DATA'] as const;
 export type WarningCode = (typeof WARNING_CODES)[number];
 
-const anyWarning = z.object({ code: z.string(), input: z.string(), matchedName: z.string().nullable().optional(), message: z.string() }).loose();
-export interface VersionWarning { code: WarningCode; input: string; matchedName: string | null; message: string }
+const anyWarning = z.object({ code: z.string(), input: z.string(), matchedName: z.string().nullable().optional(), message: z.string(), requiresAcknowledgement: z.boolean().optional() }).loose();
+/**
+ * `requiresAcknowledgement` is the engine's answer to whether Approve must accept this pair (PD-104, RLE-053); the
+ * cockpit never works it out itself. An engine that does not send it marks none, and its 409 still names the set.
+ */
+export interface VersionWarning { code: WarningCode; input: string; matchedName: string | null; message: string; requiresAcknowledgement: boolean }
 
 /** One warning the approver accepts, as the exact pair shown on screen (PD-104, RLE-053). */
 export interface AcknowledgedWarning { code: WarningCode; input: string }
@@ -157,7 +161,7 @@ const versionWarnings = z
   .transform((items) => items.flatMap((item): VersionWarning[] => {
     const parsed = anyWarning.safeParse(item);
     if (!parsed.success || !(WARNING_CODES as readonly string[]).includes(parsed.data.code)) return [];
-    return [{ code: parsed.data.code as WarningCode, input: parsed.data.input, matchedName: parsed.data.matchedName ?? null, message: parsed.data.message }];
+    return [{ code: parsed.data.code as WarningCode, input: parsed.data.input, matchedName: parsed.data.matchedName ?? null, message: parsed.data.message, requiresAcknowledgement: parsed.data.requiresAcknowledgement ?? false }];
   }));
 
 export const ruleSetVersion = z

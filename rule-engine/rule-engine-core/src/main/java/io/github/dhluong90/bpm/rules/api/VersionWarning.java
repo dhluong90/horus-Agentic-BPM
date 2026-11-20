@@ -11,8 +11,13 @@ import java.util.Objects;
  * @param input the input the warning is about
  * @param matchedName the configured personal-data name the input matched, for example {@code national id}
  * @param message the warning in English
+ * @param requiresAcknowledgement whether an approval must acknowledge this {@code {code, input}} pair (RLE-053,
+ *     PD-104): its code is listed in {@code lifecycle.acknowledge-warnings} and its input is not masked only by the
+ *     tenant's {@code decision-log.mask-default}. Computed by the same rule the approve check applies, so a client
+ *     shows a checkbox for exactly these warnings
  */
-public record VersionWarning(String code, String input, String matchedName, String message) {
+public record VersionWarning(String code, String input, String matchedName, String message,
+        boolean requiresAcknowledgement) {
 
     /** An input that declares no {@code mask} has a name that looks like personal data (PD-099). */
     public static final String UNMASKED_PERSONAL_DATA = "UNMASKED_PERSONAL_DATA";
@@ -24,6 +29,28 @@ public record VersionWarning(String code, String input, String matchedName, Stri
         Objects.requireNonNull(code, "code must not be null");
         Objects.requireNonNull(input, "input must not be null");
         Objects.requireNonNull(message, "message must not be null");
+    }
+
+    /**
+     * Creates a warning that needs no acknowledgement.
+     *
+     * @param code see the record
+     * @param input see the record
+     * @param matchedName see the record
+     * @param message see the record
+     */
+    public VersionWarning(String code, String input, String matchedName, String message) {
+        this(code, input, matchedName, message, false);
+    }
+
+    /**
+     * Returns a copy that says whether an approval must acknowledge it.
+     *
+     * @param required see {@link #requiresAcknowledgement()}
+     * @return the warning
+     */
+    public VersionWarning withRequiresAcknowledgement(boolean required) {
+        return new VersionWarning(code, input, matchedName, message, required);
     }
 
     /**

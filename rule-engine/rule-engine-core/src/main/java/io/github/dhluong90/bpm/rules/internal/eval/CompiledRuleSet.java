@@ -14,6 +14,7 @@ import io.github.dhluong90.bpm.expr.internal.ExpressionError;
 import io.github.dhluong90.bpm.expr.internal.ExpressionException;
 import io.github.dhluong90.bpm.expr.internal.RegexLimits;
 import io.github.dhluong90.bpm.expr.internal.Parser;
+import io.github.dhluong90.bpm.expr.internal.RequestReads;
 import io.github.dhluong90.bpm.rules.internal.model.Cell;
 import io.github.dhluong90.bpm.rules.internal.model.DecisionTable;
 import io.github.dhluong90.bpm.rules.internal.model.Definitions;
@@ -342,9 +343,26 @@ public final class CompiledRuleSet {
      * @throws InputInvalidException when an input does not match its declared type
      */
     public Evaluation evaluateWithReason(DecisionInput input, Instant clock) {
+        return evaluateWithReason(input, clock, null);
+    }
+
+    /**
+     * Evaluates the table at a clock as one decision of a request of many decisions, charging its regular expression
+     * reads to the request's budget too ({@code evaluation.regex-max-reads-per-request}, RLE-007). When the request's
+     * budget stops a match, {@link RequestReads#spent()} turns true and the caller evaluates no further item.
+     *
+     * @param input the inputs
+     * @param clock the instant the decision reasons about, or null for none
+     * @param request the request's read budget, from {@code RegexLimits.newRequest()}, or null for a decision on its
+     *     own
+     * @return the outcome, and the reason of an {@code EVALUATION_ERROR} that has one, else null
+     * @throws InputInvalidException when an input does not match its declared type
+     */
+    public Evaluation evaluateWithReason(DecisionInput input, Instant clock, RequestReads request) {
         Object[] slots = bind(input, clock);
-        // One read budget for every matches() of this decision (evaluation.regex-max-reads-per-decision, RLE-007).
-        Evaluator decision = shared.forDecision();
+        // One read budget for every matches() of this decision (evaluation.regex-max-reads-per-decision, RLE-007),
+        // charged to the request's budget too when there is one (evaluation.regex-max-reads-per-request).
+        Evaluator decision = shared.forDecision(request);
         try {
             return new Evaluation(switch (hitPolicy) {
                 case FIRST -> first(decision, slots);

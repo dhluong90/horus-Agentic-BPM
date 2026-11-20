@@ -78,8 +78,8 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Rule using `matches('^(a+?)+?$')` evaluated against adversarial input `"aaaaaaaaaaaaaaaaaaaaaaaaaaaa!"` with the defaults `regex-max-reads = 1000000` and `regex-timeout-ms = 50`.
 - **When:** Evaluate the rule set.
-- **Then:** The match stops when it has read 1,000,000 characters, a deterministic budget that gives the same outcome on every machine and on replay, or at the latest after `50 ms` (the backstop on a slow machine), returning `EVALUATION_ERROR` with `REGEX_TIMEOUT` on the decision row, without hanging the thread. A text longer than `regex-max-input-length` (default 4,096) fails with `REGEX_INPUT_TOO_LONG` without running the match; a pattern whose backtracking runs out of thread stack fails with `REGEX_TOO_DEEP`. Every character any `matches` reads in one evaluation also counts against `regex-max-reads-per-decision` (default 5,000,000, lower only), the same deterministic count, so a rule set of many `matches` rows stops at that total: `EVALUATION_ERROR` with `REGEX_TIMEOUT`, no partial outputs, the reason on the decision row, and the `detail` naming `evaluation.regex-max-reads-per-decision`. Back-references, look-around, inline flags, possessive quantifiers, character class nesting and intersection, Unicode block names and Java-only escapes are refused at import. Regex engines differ between JVM versions; the example is one the supported JVMs run in exponential time, and the bounds apply to any pattern.
-- **Example:** `28 'a' + '!' against ^(a+?)+?$ -> stopped after 1,000,000 reads, within 50 ms, EVALUATION_ERROR / REGEX_TIMEOUT`; a screening table of 200 rows `matches('[0-9]*K<n>')` on a 500-digit remittance reference, about 125,000 reads per row -> stopped at 5,000,000 reads for the decision, the same detail on every run, EVALUATION_ERROR / REGEX_TIMEOUT.
+- **Then:** The match stops when it has read 1,000,000 characters, a deterministic budget that gives the same outcome on every machine and on replay, or at the latest after `50 ms` (the backstop on a slow machine), returning `EVALUATION_ERROR` with `REGEX_TIMEOUT` on the decision row, without hanging the thread. A text longer than `regex-max-input-length` (default 4,096) fails with `REGEX_INPUT_TOO_LONG` without running the match; a pattern whose backtracking runs out of thread stack fails with `REGEX_TOO_DEEP`. Every character any `matches` reads in one evaluation also counts against `regex-max-reads-per-decision` (default 5,000,000, lower only), the same deterministic count, so a rule set of many `matches` rows stops at that total: `EVALUATION_ERROR` with `REGEX_TIMEOUT`, no partial outputs, the reason on the decision row, and the `detail` naming `evaluation.regex-max-reads-per-decision`. A request that evaluates many decisions (`:simulate` today, `:evaluate-batch` when it is built) also counts every character its decisions read against `regex-max-reads-per-request` (default 50,000,000, 1 to 5,000,000,000): the item whose match passes it fails with `EVALUATION_ERROR` / `REGEX_TIMEOUT` and a `detail` naming `evaluation.regex-max-reads-per-request`, items before it keep their results, no item after it is evaluated (each is reported failed with the same code and a `detail` saying it was not evaluated), and the same request stops at the same item on every replay. Back-references, look-around, inline flags, possessive quantifiers, character class nesting and intersection, Unicode block names and Java-only escapes are refused at import. Regex engines differ between JVM versions; the example is one the supported JVMs run in exponential time, and the bounds apply to any pattern.
+- **Example:** `28 'a' + '!' against ^(a+?)+?$ -> stopped after 1,000,000 reads, within 50 ms, EVALUATION_ERROR / REGEX_TIMEOUT`; a screening table of 200 rows `matches('[0-9]*K<n>')` on a 500-digit remittance reference, about 125,000 reads per row -> stopped at 5,000,000 reads for the decision, the same detail on every run, EVALUATION_ERROR / REGEX_TIMEOUT. A simulation of the 2-row table over 5 references (long, long, long, short, long) with a request budget of 5 rows of reads -> the first two match `CLEAR`, the third stops with REGEX_TIMEOUT naming `evaluation.regex-max-reads-per-request`, the short fourth and the fifth are not evaluated; the same on every replay (`RLE_007_a_request_stops_at_the_first_item_over_its_budget_and_runs_no_item_after_it`).
 - **Test ID:** `RLE_007_regex_timeout_aborts_adversarial_input`
 
 ---
@@ -455,9 +455,31 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
     - `rules.version.published.v1` carries `acknowledgedWarnings` with the same two entries and `maskedByDefaultInputs: []`.
   - **Step 3** returns the same answer and writes nothing.
   - **Failure cases:** the extra pair gets `409 WARNINGS_NOT_ACKNOWLEDGED` with the current set; the unknown code gets `400 INPUT_INVALID`. Neither writes anything.
+  - **Marked in the version.** Every warning in the version response carries `requiresAcknowledgement`, computed by the same rule as the approve check: at `bank-a` the warnings on `nationalId` and `contactNote` are `true`; at `bank-c`, whose default masks them, `false`; with an empty `lifecycle.acknowledge-warnings`, `false`. Approving with exactly the marked pairs succeeds, and without them is `409 WARNINGS_NOT_ACKNOWLEDGED` (`RLE_053_each_warning_says_whether_the_approval_must_acknowledge_it_and_the_approve_check_agrees`). A client shows a checkbox for exactly the marked warnings and never derives the set from `/meta`.
   - **Step 4** returns `200`, because both undeclared inputs are masked by `bank-c`'s default. The history row and the event carry `acknowledgedWarnings: []` and `maskedByDefaultInputs: [contactNote, nationalId]`, so an auditor sees why no acknowledgement was asked.
 - **Example:** `approve with a nationalId warning -> 409 WARNINGS_NOT_ACKNOWLEDGED, nothing written; only the nationalId pair after contact note was added -> 409 listing both; both pairs -> PUBLISHED, acknowledgement on the history row and the event; masked by default -> no acknowledgement needed`.
 - **Test ID:** `RLE_053_approval_with_an_unmasked_personal_data_warning_needs_an_acknowledgement`
+
+---
+
+### RLE-054 A pending version with no recorded author cannot be approved
+- **Traces to:** `TR-SEC-04`, PD-105, PD-096
+- **Milestone:** M1
+- **Given:**
+  - Tenant `bank-a`. `card-fee` v1 is `PENDING_APPROVAL`, requested by `lan`, and has no recorded author: it was written before schema V2 added `created_by`, and the upgrade assigned none.
+  - `bob` and `carol` hold `rules:approve`; neither requested v1.
+- **When:**
+  1. `bob` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve` with `Idempotency-Key` and `If-Match` set to v1's lock version; then `carol` does the same.
+  2. `bob` reads v1.
+  3. `bob` rejects v1 with a reason (or `lan` withdraws it). `lan` imports the same document as v2 and requests publication; `bob` approves v2.
+  - **Order case:** `lan`, the requester, also holds `rules:approve` and approves v1.
+- **Then:**
+  - **Step 1** returns `409 AUTHOR_UNKNOWN` to both, with a detail naming `card-fee v1` and saying the change must be imported again. v1 stays `PENDING_APPROVAL` at the same lock version, `created_by` and `approved_by` stay null, and no history row or event is written. No author is ever assigned, by the upgrade or by the refusal.
+  - **Step 2:** `allowedActions` for `bob` is `[reject]`; `approve` is never offered for a version with no author.
+  - **Step 3:** the rejection (or withdrawal) succeeds and v1 is `DRAFT`. v2 records `lan` as author, and `bob`'s approval publishes it.
+  - **Order case:** `403 SELF_APPROVAL_FORBIDDEN`: four eyes is checked first, then the recorded author, then the lock version.
+- **Example:** `pending v1 without author -> bob approves -> 409 AUTHOR_UNKNOWN, nothing written; reject v1, lan imports v2 -> bob approves v2 -> PUBLISHED`.
+- **Test ID:** `RLE_054_a_pending_version_with_no_recorded_author_cannot_be_approved`
 
 ## Platform Requirements Made Testable (RE-F-10, RE-F-13, X-F-05)
 

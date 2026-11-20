@@ -95,4 +95,38 @@ class KernelContractArchitectureTest {
                 .because("host code holding a ServiceInvoker cannot ask for engine work (#336)")
                 .check(CORE);
     }
+
+    @Test
+    void TR_TEN_01_only_the_decision_port_claims_and_holds_the_tenant_scoped_entry_point() {
+        noClasses().that().doNotHaveFullyQualifiedName(DECISION_PORT)
+                .should().callMethod(io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant.class, "claim",
+                        String.class, Object.class)
+                .orShould().dependOnClassesThat().haveFullyQualifiedName(
+                        "io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine")
+                .because("the Rule Engine hands the entry point to the decision port only, once (#336)")
+                .check(CORE);
+        com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes()
+                .that().haveFullyQualifiedName(DECISION_PORT).should().notBePublic()
+                .because("host code cannot create the registered claimant (#336)")
+                .check(CORE);
+    }
+
+    @Test
+    void TR_TEN_01_only_the_engines_own_timer_path_asks_for_engine_work() {
+        noClasses().that().doNotHaveFullyQualifiedName(
+                        "io.github.dhluong90.bpm.process.internal.service.ProcessServices")
+                .should().callConstructorWhere(com.tngtech.archunit.core.domain.JavaCall.Predicates.target(
+                        com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner(
+                                com.tngtech.archunit.core.domain.properties.HasName.Predicates.name(
+                                        "io.github.dhluong90.bpm.process.internal.service.DecisionCaller$Engine"))))
+                .because("engine work is built from a locked row in the fire transaction, never by a host (#336)")
+                .check(CORE);
+        com.tngtech.archunit.lang.syntax.ArchRuleDefinition.constructors()
+                .that().areDeclaredIn("io.github.dhluong90.bpm.process.internal.service.DecisionCaller$Engine")
+                .should().notBePublic().andShould().notBeProtected()
+                .because("host code holding a ServiceInvoker cannot ask for engine work (#336)")
+                .check(CORE);
+    }
+
+    private static final String DECISION_PORT = "io.github.dhluong90.bpm.process.internal.service.RuleEngineDecisionPort";
 }

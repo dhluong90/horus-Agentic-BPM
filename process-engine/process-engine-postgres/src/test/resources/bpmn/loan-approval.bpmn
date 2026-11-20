@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Loan approval (PRE-007): a loan officer submits the application, then a credit approval with four eyes and a
+     document check run in parallel. Whoever started the instance or completed an earlier task of it may not approve. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-approval"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-approval" name="Loan approval" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:userTask id="submit-application" name="Submit application" horus:assignee="role:LOAN_OFFICER" horus:resultVariable="application"/>
+    <bpmn:parallelGateway id="fork" name="Approve and check documents"/>
+    <bpmn:userTask id="approve-credit" name="Approve credit" horus:assignee="role:LOAN_OFFICER" horus:fourEyes="true" horus:resultVariable="approval"/>
+    <bpmn:userTask id="check-documents" name="Check documents" horus:assignee="role:LOAN_OFFICER" horus:resultVariable="documents"/>
+    <bpmn:parallelGateway id="join" name="Both done"/>
+    <bpmn:endEvent id="end" name="Decided"/>
+
+    <bpmn:sequenceFlow id="start__submit" sourceRef="start" targetRef="submit-application"/>
+    <bpmn:sequenceFlow id="submit__fork" sourceRef="submit-application" targetRef="fork"/>
+    <bpmn:sequenceFlow id="fork__approve" sourceRef="fork" targetRef="approve-credit"/>
+    <bpmn:sequenceFlow id="fork__check" sourceRef="fork" targetRef="check-documents"/>
+    <bpmn:sequenceFlow id="approve__join" sourceRef="approve-credit" targetRef="join"/>
+    <bpmn:sequenceFlow id="check__join" sourceRef="check-documents" targetRef="join"/>
+    <bpmn:sequenceFlow id="join__end" sourceRef="join" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -67,7 +67,16 @@ describe('reading warnings and the diff tolerantly', () => {
       { code: 'SOMETHING_NEWER', input: 'x', matchedName: null, message: 'm' },
       { code: 'UNMASKED_PERSONAL_DATA' },
     ] });
-    expect(parsed.warnings).toEqual([{ code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId', matchedName: 'national id', message: 'm' }]);
+    // An engine that does not mark warnings marks none; its 409 WARNINGS_NOT_ACKNOWLEDGED still names the set.
+    expect(parsed.warnings).toEqual([{ code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId', matchedName: 'national id', message: 'm', requiresAcknowledgement: false }]);
+  });
+
+  it('CKP_037_requires_acknowledgement_is_read_from_the_engine_per_warning', () => {
+    const parsed = ruleSetVersion.parse({ ...version, warnings: [
+      { code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId', matchedName: 'national id', message: 'm', requiresAcknowledgement: true },
+      { code: 'UNMASKED_PERSONAL_DATA', input: 'email', matchedName: 'email', message: 'm', requiresAcknowledgement: false },
+    ] });
+    expect(parsed.warnings.map((w) => [w.input, w.requiresAcknowledgement])).toEqual([['nationalId', true], ['email', false]]);
   });
 
   it('CKP_037_a_masking_entry_with_an_unknown_status_is_dropped_and_the_others_kept', () => {

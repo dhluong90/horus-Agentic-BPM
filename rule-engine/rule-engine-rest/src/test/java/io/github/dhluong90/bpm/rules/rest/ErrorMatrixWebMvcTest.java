@@ -180,6 +180,13 @@ class ErrorMatrixWebMvcTest {
                             s.thrown = new io.github.dhluong90.bpm.rules.api.LastVersionInEffectException(
                                     "tet-fee-waiver", 1, "confirm", null, null);
                         }),
+                new Case("AUTHOR_UNKNOWN", 409,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve").header("If-Match", "\"1\"")
+                                .header("Idempotency-Key", "k-104"),
+                        s -> {
+                            s.permissions = APPROVER;
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.AuthorUnknownException("card-fee", 1);
+                        }),
                 new Case("WARNINGS_NOT_ACKNOWLEDGED", 409,
                         post("/api/bpm/rules/v1/rule-sets/kyc-routing/versions/1:approve")
                                 .contentType("application/json").header("If-Match", "\"2\"")

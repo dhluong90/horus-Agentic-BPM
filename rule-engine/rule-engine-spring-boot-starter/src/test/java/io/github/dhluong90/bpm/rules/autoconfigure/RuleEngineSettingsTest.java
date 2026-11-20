@@ -173,6 +173,24 @@ class RuleEngineSettingsTest {
     }
 
     @Test
+    void RLE_007_the_request_read_budget_defaults_to_fifty_million_and_may_be_raised_up_to_its_ceiling() {
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits().maxReadsPerRequest())
+                .isEqualTo(50_000_000L));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-max-reads-per-request=200000000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits())
+                        .isEqualTo(new RegexLimits(50, 4096, 1_000_000, 5_000_000, 200_000_000L)));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-max-reads-per-request=1000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits().maxReadsPerRequest())
+                        .isEqualTo(1000L));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-max-reads-per-request=5000000001")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.evaluation.regex-max-reads-per-request"));
+        runner.withPropertyValues("horus.bpm.rules.evaluation.regex-max-reads-per-request=0")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.evaluation.regex-max-reads-per-request"));
+    }
+
+    @Test
     void TR_SEC_02_regex_bounds_default_to_a_million_reads_50_ms_and_4096_characters_and_may_be_tightened() {
         runner.run(context -> assertThat(context.getBean(EngineSettings.class).regexLimits())
                 .isEqualTo(new RegexLimits(50, 4096, 1_000_000)));

@@ -556,10 +556,18 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             }
             requireLock(current, expectedLockVersion);
             Instant now = clock.instant();
+            StoredDefinition selected = selected(locked.all(), now);
+            // PD-102, as the Rule Engine (RLE-026): a version a newer one in effect already supersedes no longer takes
+            // new starts and its effective-date job retires it; refused before anything is written, so a caller and a
+            // reason are never recorded on that transition.
+            if (active && selected != null && selected.version() > current.version()) {
+                throw new InvalidStateException("retire is not allowed on " + ref.key() + " v" + ref.version() + ": v"
+                        + selected.version() + " is in effect and supersedes it, so it no longer takes new starts and"
+                        + " retires on its own");
+            }
             // PD-101: a key left with no version in effect makes every new start fail until a new version is approved.
             // "In effect" is the selected version (DESIGN 3.2): retiring it leaves the key with none; older versions
             // it supersedes do not count.
-            StoredDefinition selected = selected(locked.all(), now);
             boolean last = active && selected != null && selected.id().equals(current.id());
             if (last) {
                 Instant next = locked.all().stream().filter(d -> !d.id().equals(current.id())
