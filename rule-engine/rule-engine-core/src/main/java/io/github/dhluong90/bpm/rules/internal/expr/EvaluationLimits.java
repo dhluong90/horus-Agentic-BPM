@@ -22,11 +22,15 @@ public record EvaluationLimits(int stepBudget, int timeoutMillis) {
     /** Ceiling of the step budget. */
     public static final int STEP_BUDGET_MAX = 1_000_000;
 
-    /** Default time backstop. */
-    public static final int TIMEOUT_MILLIS = 1000;
+    /**
+     * Default time backstop. Generous on purpose: steps do not weigh the length of the strings {@code +} builds, so a
+     * legitimate large {@code collect} table on a slow machine must stay well inside it; the step budget is the bound
+     * that decides, the same on every machine.
+     */
+    public static final int TIMEOUT_MILLIS = 10_000;
 
-    /** Ceiling of the time backstop: one decision never holds a thread longer than ten seconds. */
-    public static final int TIMEOUT_MILLIS_MAX = 10_000;
+    /** Ceiling of the time backstop: one decision never holds a thread longer than thirty seconds. */
+    public static final int TIMEOUT_MILLIS_MAX = 30_000;
 
     public EvaluationLimits {
         if (stepBudget < 1 || stepBudget > STEP_BUDGET_MAX) {
@@ -40,7 +44,7 @@ public record EvaluationLimits(int stepBudget, int timeoutMillis) {
     }
 
     /**
-     * Returns the defaults: 100,000 steps and 1,000 ms.
+     * Returns the defaults: 100,000 steps and 10,000 ms.
      *
      * @return the limits
      */
